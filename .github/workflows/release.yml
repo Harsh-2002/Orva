@@ -261,11 +261,25 @@ jobs:
           tag_name: ${{ steps.v.outputs.tag }}
           files: scripts/install.sh
 
-  # ── 5. Multi-arch Docker image push to ghcr.io ────────────────────────
+  # ── 5. Per-arch Docker image, native runners (no QEMU) ────────────────
+  # Splits the multi-arch build into two native jobs so the arm64 leg
+  # doesn't timeout under emulation (npm registry consistently fails at
+  # ~5 min over QEMU). Uses Dockerfile.release which copies the
+  # pre-built static binaries from the matrix artifacts above instead
+  # of rebuilding UI + Go + nsjail inside buildx.
   docker-image:
-    name: docker image (ghcr.io)
+    name: docker image (${{ matrix.goarch }})
     needs: [build-orva, build-nsjail, build-rootfs]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -278,7 +292,21 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-${{ matrix.goarch }}"
+          path: artifacts
+          merge-multiple: true
+
+      - name: stage artifacts for Dockerfile.release
+        run: |
+          set -e
+          mkdir -p dist
+          mv artifacts/orva-linux-${{ matrix.goarch }}    dist/orva-${{ matrix.goarch }}
+          mv artifacts/nsjail-linux-${{ matrix.goarch }}  dist/nsjail-${{ matrix.goarch }}
+          chmod +x dist/orva-${{ matrix.goarch }} dist/nsjail-${{ matrix.goarch }}
+          ls -lh dist/
+
       - uses: docker/setup-buildx-action@v3
 
       - name: login to ghcr.io
@@ -288,28 +316,62 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ steps.v.outputs.tag }}
-            type=raw,value=latest,enable=${{ !contains(steps.v.outputs.tag, '-rc') && !contains(steps.v.outputs.tag, '-beta') }}
-          labels: |
-            org.opencontainers.image.title=Orva
-            org.opencontainers.image.source=https://github.com/Harsh-2002/Orva
-            org.opencontainers.image.licenses=MIT
-
-      - name: build + push multi-arch image
+      - name: build + push (${{ matrix.goarch }})
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.release
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: ${{ matrix.platform }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}-${{ matrix.goarch }}
+            ${{ env.IMAGE_NAME }}:latest-${{ matrix.goarch }}
+          labels: |
+            org.opencontainers.image.title=Orva
+            org.opencontainers.image.source=https://github.com/Harsh-2002/Orva
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.version=${{ steps.v.outputs.tag }}
           build-args: |
             VERSION=${{ steps.v.outputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.goarch }}
+          cache-to: type=gha,scope=${{ matrix.goarch }},mode=max
+
+  # ── 6. Combine the two arch images under one multi-arch tag ───────────
+  docker-manifest:
+    name: docker multi-arch manifest
+    needs: [docker-image]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: stitch manifest list
+        run: |
+          set -e
+          for tag in "${{ steps.v.outputs.tag }}" "latest"; do
+            # Skip the `latest` tag for pre-release builds.
+            if [ "$tag" = "latest" ]; then
+              case "${{ steps.v.outputs.tag }}" in
+                *-rc*|*-beta*) echo "skipping :latest for pre-release"; continue ;;
+              esac
+            fi
+            docker buildx imagetools create \
+              -t "${{ env.IMAGE_NAME }}:$tag" \
+              "${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}-amd64" \
+              "${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}-arm64"
+          done
