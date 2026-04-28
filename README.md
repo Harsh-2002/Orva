@@ -28,7 +28,7 @@ One-line installer — POSIX sh, multi-distro
 (Ubuntu, Debian, Alpine, RHEL/Rocky/AlmaLinux, Fedora, Arch, openSUSE):
 
 ```bash
-curl -fsSL https://github.com/Harsh-2002/orva/releases/latest/download/install.sh | sudo sh
+curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sudo sh
 ```
 
 Pin a specific release:

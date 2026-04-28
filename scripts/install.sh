@@ -3,7 +3,7 @@
 # RHEL/Rocky/AlmaLinux, Fedora, Arch, openSUSE.
 #
 # Usage:
-#   curl -fsSL https://github.com/Harsh-2002/orva/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh
 #   ORVA_VERSION=v2026.04.28 sh install.sh        # pin version
 #   ORVA_INSTALL_DRYRUN=1 sh install.sh           # parse + detect only
 #   ORVA_NO_PKG=1 sh install.sh                   # skip system pkg install
@@ -15,7 +15,7 @@ set -eu
 PREFIX="${ORVA_PREFIX:-/opt/orva}"
 DATA_DIR="${ORVA_DATA_DIR:-/var/lib/orva}"
 SERVICE_USER="orva"
-REPO="${ORVA_REPO:-Harsh-2002/orva}"
+REPO="${ORVA_REPO:-Harsh-2002/Orva}"
 DRYRUN="${ORVA_INSTALL_DRYRUN:-0}"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
