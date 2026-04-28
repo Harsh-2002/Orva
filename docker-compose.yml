@@ -1,0 +1,46 @@
+services:
+  orva:
+    image: ghcr.io/harsh-2002/orva:latest
+    build:
+      context: .
+      args:
+        VERSION: 0.1.0
+    container_name: orva
+    restart: unless-stopped
+
+    ports:
+      - "8443:8443"
+
+    volumes:
+      - orva-data:/var/lib/orva
+
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8443/api/v1/system/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 512M
+
+volumes:
+  orva-data:
+    driver: local

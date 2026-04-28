@@ -1,0 +1,290 @@
+package sandbox
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Language identifies a supported runtime.
+type Language string
+
+const (
+	// Supported runtimes: latest two stable majors for each language.
+	// node20 / python312 are dropped (Node 20 EOL 2026-04-30). Existing
+	// functions on those are auto-migrated at startup — see migrations.go.
+	Node22    Language = "node22"
+	Node24    Language = "node24"
+	Python313 Language = "python313"
+	Python314 Language = "python314"
+)
+
+// IsNode reports whether a language is a Node runtime.
+func (l Language) IsNode() bool { return l == Node22 || l == Node24 }
+
+// IsPython reports whether a language is a Python runtime.
+func (l Language) IsPython() bool { return l == Python313 || l == Python314 }
+
+// ExecConfig holds everything needed to run user code in nsjail.
+type ExecConfig struct {
+	Language  Language
+	CodeDir   string // Directory containing user code
+	Stdin     []byte // Request JSON piped to stdin
+	Timeout   time.Duration
+	MemoryMB  int
+	MaxPids   int
+	MaxCPUs   int // 0 = no cpu cap; positive = number of CPUs allowed
+
+	// Env holds environment variables injected into the sandbox. Includes
+	// both function config env_vars and decrypted secrets at invoke time.
+	Env map[string]string
+
+	// Seccomp policy (Kafel string). Empty means no seccomp filter.
+	SeccompPolicy string
+
+	// Paths (populated from config at startup).
+	NsjailBin string
+	RootfsDir string // e.g. ~/.orva/rootfs
+}
+
+// ExecResult holds the outcome of a sandboxed execution.
+type ExecResult struct {
+	Stdout   []byte
+	Stderr   []byte
+	ExitCode int
+	Duration time.Duration
+	TimedOut bool
+	Error    error
+}
+
+// Execute runs user code inside an nsjail sandbox. Each call spawns a
+// fresh process — no daemon, no pool.
+func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
+	start := time.Now()
+
+	if cfg.Timeout == 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+	if cfg.MemoryMB == 0 {
+		cfg.MemoryMB = 128
+	}
+	if cfg.MaxPids == 0 {
+		cfg.MaxPids = 32
+	}
+
+	rootfs, entrypoint, err := resolveRuntime(cfg)
+	if err != nil {
+		return &ExecResult{Error: err, Duration: time.Since(start)}
+	}
+
+	args := buildArgs(cfg, rootfs, entrypoint)
+
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout+5*time.Second)
+	defer cancel()
+
+	// nsjail itself carries the required capabilities via setcap (installed
+	// by `orva setup` or baked into the Docker image). No sudo wrapper.
+	cmd := exec.CommandContext(ctx, cfg.NsjailBin, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if len(cfg.Stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(cfg.Stdin)
+	}
+
+	err = cmd.Run()
+
+	result := &ExecResult{
+		Stdout:   stdout.Bytes(),
+		Stderr:   stderr.Bytes(),
+		Duration: time.Since(start),
+	}
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+		} else {
+			result.Error = err
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			result.TimedOut = true
+		}
+	}
+
+	return result
+}
+
+func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
+	switch cfg.Language {
+	case Python313, Python314:
+		rootfs = filepath.Join(cfg.RootfsDir, string(cfg.Language))
+		entrypoint = "/usr/local/bin/python3"
+	case Node22, Node24:
+		rootfs = filepath.Join(cfg.RootfsDir, string(cfg.Language))
+		entrypoint = "/usr/local/bin/node"
+	default:
+		return "", "", fmt.Errorf("unsupported language: %s", cfg.Language)
+	}
+
+	if _, err := os.Stat(rootfs); err != nil {
+		return "", "", fmt.Errorf("rootfs not found at %s: %w", rootfs, err)
+	}
+	return rootfs, entrypoint, nil
+}
+
+func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
+	// Rely on user namespaces instead of setcap to grant nsjail the caps it
+	// needs for mount/chroot. This works both on bare Linux hosts with
+	// unprivileged_userns_clone=1 AND inside Docker with --cap-add SYS_ADMIN
+	// (where file capabilities don't transfer across fork/exec from a
+	// non-root parent). If you need to force the old setcap-based model
+	// (e.g., kernel has no user namespaces), set ORVA_DISABLE_USERNS=1.
+	//
+	// NOTE: --time_limit intentionally dropped; Go-side context.WithTimeout
+	// + Worker.Kill() handles timeouts with millisecond resolution and
+	// avoids the skew from nsjail's whole-second limit.
+	args := []string{
+		"-Mo",
+		"--chroot", rootfs,
+		"-R", cfg.CodeDir + ":/code",
+		"-T", "/tmp",
+		"--rlimit_as", "max",
+		"-Q",
+	}
+	if os.Getenv("ORVA_DISABLE_USERNS") == "1" {
+		args = append(args, "--disable_clone_newuser")
+	}
+
+	// Cgroup v2 resource limits — only enabled if we have a writable cgroup
+	// delegate (systemd user slice on most modern hosts; bind-mounted in the
+	// Docker image). Without delegation nsjail can't create the NSJAIL.<pid>
+	// cgroup, so rather than crashing we silently drop the memory/pid caps.
+	// The process-level rlimit_as flag above still bounds address-space.
+	if mount := cgroupv2Delegate(); mount != "" {
+		// cgroup v2 memory.max at 1.5× the declared memory. This gives the
+		// kernel headroom to reclaim via PSI pressure before OOM-killing,
+		// and matches the 1.5× per-worker budget the autoscaler uses for
+		// admission control.
+		memMaxBytes := int64(cfg.MemoryMB) * 1024 * 1024 * 3 / 2
+		args = append(args,
+			"--use_cgroupv2",
+			"--cgroupv2_mount", mount,
+			"--cgroup_mem_max", fmt.Sprintf("%d", memMaxBytes),
+			"--cgroup_pids_max", fmt.Sprintf("%d", cfg.MaxPids),
+		)
+		// Use cgroup CPU bandwidth (cpu.max) instead of --max_cpus. The
+		// --max_cpus flag is an affinity mask that pins the process to a
+		// subset of cores — actively harmful under concurrency because the
+		// kernel can't load-balance across the full CPU set. Bandwidth
+		// limits (microseconds per period) are what fractional CPU means.
+		if cfg.MaxCPUs > 0 {
+			// period = 100 ms (nsjail default), quota = N * period.
+			// nsjail supports --cgroup_cpu_ms_per_sec (ms of CPU per 1000ms).
+			args = append(args,
+				"--cgroup_cpu_ms_per_sec",
+				fmt.Sprintf("%d", cfg.MaxCPUs*1000),
+			)
+		}
+	}
+
+	if cfg.SeccompPolicy != "" {
+		args = append(args, "--seccomp_string", cfg.SeccompPolicy)
+	}
+
+	// Inject env vars + secrets. nsjail takes --env KEY=VAL; an --env with
+	// no '=' passes the host-side value through, which we never want for
+	// security. Always format as KEY=VAL explicitly.
+	for k, v := range cfg.Env {
+		if k == "" {
+			continue
+		}
+		args = append(args, "--env", k+"="+v)
+	}
+	// Also tell the Python/Node adapter about Orva context via env.
+	args = append(args,
+		"--env", "ORVA_FUNCTION_ID="+getenvOr(cfg.Env, "ORVA_FUNCTION_ID", ""),
+		"--env", "ORVA_EXECUTION_ID="+getenvOr(cfg.Env, "ORVA_EXECUTION_ID", ""),
+	)
+
+	args = append(args, "--", entrypoint)
+
+	switch {
+	case cfg.Language.IsPython():
+		args = append(args, "/opt/orva/adapter.py")
+	case cfg.Language.IsNode():
+		args = append(args, "/opt/orva/adapter.js")
+	}
+
+	return args
+}
+
+var (
+	cgroupOnce   sync.Once
+	cgroupMount  string
+)
+
+// cgroupv2Delegate returns a cgroup v2 path this process can create children
+// under, or "" if no suitable delegate exists. Detects the cgroup from
+// /proc/self/cgroup and walks up until it finds a writable directory.
+// An explicit override via ORVA_CGROUPV2_MOUNT takes precedence.
+func cgroupv2Delegate() string {
+	cgroupOnce.Do(func() {
+		if v := os.Getenv("ORVA_CGROUPV2_MOUNT"); v != "" {
+			if _, err := os.Stat(v); err == nil {
+				cgroupMount = v
+			}
+			return
+		}
+
+		data, err := os.ReadFile("/proc/self/cgroup")
+		if err != nil {
+			return
+		}
+		// cgroup v2 line: "0::/user.slice/...".
+		var rel string
+		for _, line := range strings.Split(string(data), "\n") {
+			parts := strings.SplitN(line, ":", 3)
+			if len(parts) == 3 && parts[0] == "0" && parts[1] == "" {
+				rel = parts[2]
+				break
+			}
+		}
+		if rel == "" {
+			return
+		}
+		// Walk up from the current cgroup until we find a writable dir.
+		p := filepath.Join("/sys/fs/cgroup", rel)
+		for p != "/sys/fs/cgroup" && p != "/" {
+			if isWritableDir(p) {
+				cgroupMount = p
+				return
+			}
+			p = filepath.Dir(p)
+		}
+	})
+	return cgroupMount
+}
+
+func getenvOr(m map[string]string, k, def string) string {
+	if v, ok := m[k]; ok {
+		return v
+	}
+	return def
+}
+
+func isWritableDir(p string) bool {
+	f, err := os.OpenFile(filepath.Join(p, ".orva-probe"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(filepath.Join(p, ".orva-probe"))
+	return true
+}

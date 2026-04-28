@@ -1,0 +1,56 @@
+# Build outputs
+/orva
+/orvad
+/dist/
+/out/
+/build/
+
+# Local agent / claude session files
+.claude/
+*.session-transcript.txt
+[0-9][0-9][0-9][0-9]-*-request-interrupted-by-user.txt
+
+# Go
+*.test
+*.out
+*.prof
+vendor/
+
+# Frontend
+ui/node_modules/
+ui/dist/
+ui/.vite/
+ui/coverage/
+
+# Embedded UI bundle (rebuilt by Dockerfile / `make ui`)
+internal/server/ui_dist/
+
+# Local data + secrets — should never be checked in
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.admin-key
+data/
+/var/lib/orva/
+
+# Test artifacts
+test/*.tsv
+test/*.log
+test/*-results.tsv
+.playwright-mcp/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Local env
+.env
+.env.local
+.env.*.local

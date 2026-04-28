@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Custom Palette - Deep Purple/Space Theme */
+  --color-background: #12111C;
+  --color-surface: #1A1929; /* Slightly lighter than bg */
+  --color-surface-hover: #252438;
+  --color-border: #2D2B42;
+  
+  --color-foreground: #FFFFFF;
+  --color-foreground-muted: #A3A3B3; /* Cool gray/purple tint */
+  
+  --color-primary: #553F83;
+  --color-primary-foreground: #FFFFFF;
+  --color-primary-hover: #684D9E;
+  
+  --color-secondary: #2D2B42;
+  --color-secondary-foreground: #FFFFFF;
+  --color-secondary-hover: #3E3B5A;
+
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+/* Scrollbar Styling for Minimalism */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-secondary-hover);
+}
+
+input, textarea, select {
+  font-family: inherit;
+}

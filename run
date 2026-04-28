@@ -1,0 +1,40 @@
+#!/bin/bash
+set -e
+
+cd "$(dirname "$0")"
+
+HOST="${ORVA_HOST:-0.0.0.0}"
+PORT="${ORVA_PORT:-8443}"
+
+echo "╔══════════════════════════════════════╗"
+echo "║           ORVA SERVERLESS            ║"
+echo "╚══════════════════════════════════════╝"
+echo ""
+
+# Build frontend
+echo "[1/3] Building frontend..."
+cd ui
+npm install --silent 2>/dev/null
+npm run build 2>&1 | grep -E "✓|error" | tail -1
+cd ..
+
+# Embed + build backend
+echo "[2/3] Building backend..."
+rm -rf internal/server/ui_dist
+cp -r ui/dist internal/server/ui_dist
+mkdir -p build
+go build -ldflags="-s -w -X main.Version=0.1.0" -o build/orva ./cmd/orva
+echo "    Binary: $(ls -lh build/orva | awk '{print $5}')"
+
+# Kill existing process on the port
+fuser -k "${PORT}/tcp" 2>/dev/null && sleep 1
+
+# Start
+echo "[3/3] Starting..."
+echo ""
+echo "    http://${HOST}:${PORT}"
+echo ""
+
+export ORVA_HOST="$HOST"
+export ORVA_PORT="$PORT"
+exec ./build/orva serve

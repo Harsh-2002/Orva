@@ -1,0 +1,315 @@
+name: Release
+
+# Triggers on `v*` tag pushes. Produces:
+#   - orva-linux-{amd64,arm64}       (Go binary, static)
+#   - nsjail-linux-{amd64,arm64}     (built from source, stripped)
+#   - rootfs-{node22,node24,python313,python314}-{amd64,arm64}.tar.zst
+#                                    (extracted from official Docker slim
+#                                    images + adapter pre-installed)
+#   - checksums.txt                  (sha256 of every asset)
+#   - ghcr.io/harsh-2002/orva:<tag>, :latest  (multi-arch OCI image)
+#
+# All release assets are attached to the GitHub Release and linked from
+# install.sh via https://github.com/Harsh-2002/Orva/releases/latest/download/...
+#
+# Manual trigger (workflow_dispatch) is allowed for rc builds — they get
+# published to the Release draft but the Docker image uses the tag name.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag (e.g. v0.3.0) — required for workflow_dispatch"
+        required: true
+
+permissions:
+  contents: write   # create releases, upload assets
+  packages: write   # push to ghcr.io
+
+env:
+  IMAGE_NAME: ghcr.io/harsh-2002/orva
+
+jobs:
+  # ── 1. Go binary: matrix amd64 + arm64 ───────────────────────────────
+  build-orva:
+    name: build orva (${{ matrix.goarch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: build ui
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: embed ui + adapters
+        run: |
+          rm -rf internal/server/ui_dist
+          cp -r ui/dist internal/server/ui_dist
+          make adapters-embed
+
+      - name: resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: go build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${{ steps.v.outputs.tag }}" \
+            -o dist/orva-linux-${{ matrix.goarch }} \
+            ./cmd/orva
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orva-${{ matrix.goarch }}
+          path: dist/orva-linux-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── 2. nsjail: static build per arch ──────────────────────────────────
+  build-nsjail:
+    name: build nsjail (${{ matrix.goarch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            runner: ubuntu-24.04
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates git make gcc g++ autoconf bison flex libtool pkg-config \
+            libprotobuf-dev libnl-route-3-dev protobuf-compiler
+
+      - name: build nsjail from source
+        run: |
+          git clone --depth 1 https://github.com/google/nsjail.git /tmp/nsjail
+          cd /tmp/nsjail
+          make -j"$(nproc)"
+          strip nsjail
+          cp nsjail "$GITHUB_WORKSPACE/nsjail-linux-${{ matrix.goarch }}"
+          file "$GITHUB_WORKSPACE/nsjail-linux-${{ matrix.goarch }}"
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsjail-${{ matrix.goarch }}
+          path: nsjail-linux-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── 3. Language rootfs tarballs ───────────────────────────────────────
+  build-rootfs:
+    name: rootfs ${{ matrix.runtime }} (${{ matrix.goarch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [node22, node24, python313, python314]
+        include:
+          - goarch: amd64
+            runner: ubuntu-24.04
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install zstd
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
+
+      - name: extract rootfs via docker export
+        run: |
+          set -euo pipefail
+          bash scripts/build-rootfs.sh "$GITHUB_WORKSPACE/rootfs" "${{ matrix.runtime }}"
+
+          # Pre-install the adapter so install.sh doesn't need the source tree.
+          mkdir -p "$GITHUB_WORKSPACE/rootfs/opt/orva"
+          if [ -f "runtimes/${{ matrix.runtime }}/adapter.js" ]; then
+            cp "runtimes/${{ matrix.runtime }}/adapter.js" "$GITHUB_WORKSPACE/rootfs/opt/orva/adapter.js"
+          fi
+          if [ -f "runtimes/${{ matrix.runtime }}/adapter.py" ]; then
+            cp "runtimes/${{ matrix.runtime }}/adapter.py" "$GITHUB_WORKSPACE/rootfs/opt/orva/adapter.py"
+          fi
+
+      - name: tar + zstd compress
+        run: |
+          cd "$GITHUB_WORKSPACE/rootfs"
+          tar -cf - . | zstd -19 -T0 -o "$GITHUB_WORKSPACE/rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}.tar.zst"
+          ls -lh "$GITHUB_WORKSPACE/rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}.tar.zst"
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}
+          path: rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}.tar.zst
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── 4. Collate + compute checksums + publish GitHub Release ───────────
+  release:
+    name: publish github release
+    needs: [build-orva, build-nsjail, build-rootfs]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: flatten + chmod
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f -exec cp -v {} dist/ \;
+          chmod +x dist/orva-linux-* dist/nsjail-linux-*
+          ls -lh dist/
+
+      - name: sha256 checksums
+        working-directory: dist
+        run: |
+          sha256sum * | tee checksums.txt
+
+      - name: create / update github release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: Orva ${{ steps.v.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(steps.v.outputs.tag, '-rc') || contains(steps.v.outputs.tag, '-beta') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*
+          body: |
+            ## Orva ${{ steps.v.outputs.tag }}
+
+            ### Install
+
+            **Docker:**
+            ```
+            docker run -p 8443:8443 --cap-add SYS_ADMIN \
+              --security-opt seccomp=unconfined \
+              -v orva-data:/var/lib/orva \
+              ghcr.io/harsh-2002/orva:${{ steps.v.outputs.tag }}
+            ```
+
+            **Bare Linux (POSIX installer works on Debian/Ubuntu/Fedora/Alpine/Arch/openSUSE):**
+            ```
+            curl -fsSL https://github.com/Harsh-2002/Orva/releases/download/${{ steps.v.outputs.tag }}/install.sh | sh
+            # or always-latest:
+            # curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/scripts/install.sh | sh
+            ```
+
+            ### Release assets
+
+            | asset | description |
+            |---|---|
+            | `orva-linux-amd64`, `orva-linux-arm64` | Static Go binary |
+            | `nsjail-linux-amd64`, `nsjail-linux-arm64` | Pre-built nsjail (downloaded by install.sh) |
+            | `rootfs-{node22,node24,python313,python314}-{amd64,arm64}.tar.zst` | Language rootfs; extracted by `orva setup --rootfs-url` |
+            | `checksums.txt` | sha256 of every asset above |
+
+      # Upload install.sh alongside the release so the versioned URL works.
+      - name: attach install.sh
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          files: scripts/install.sh
+
+  # ── 5. Multi-arch Docker image push to ghcr.io ────────────────────────
+  docker-image:
+    name: docker image (ghcr.io)
+    needs: [build-orva, build-nsjail, build-rootfs]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.v.outputs.tag }}
+            type=raw,value=latest,enable=${{ !contains(steps.v.outputs.tag, '-rc') && !contains(steps.v.outputs.tag, '-beta') }}
+          labels: |
+            org.opencontainers.image.title=Orva
+            org.opencontainers.image.source=https://github.com/Harsh-2002/Orva
+            org.opencontainers.image.licenses=MIT
+
+      - name: build + push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.v.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

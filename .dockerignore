@@ -1,0 +1,11 @@
+# Keep the build context small.
+ui/node_modules
+ui/dist
+internal/server/ui_dist
+build/
+.git/
+*.log
+2026-*-*.txt
+test/
+.vscode/
+.claude/
