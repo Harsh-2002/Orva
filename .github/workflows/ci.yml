@@ -23,6 +23,9 @@ jobs:
   go:
     name: go ${{ matrix.go }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: backend
     strategy:
       fail-fast: false
       matrix:
@@ -35,26 +38,26 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
+          cache-dependency-path: backend/go.sum
 
       - name: seed embedded adapters
         run: make adapters-embed
+        working-directory: ${{ github.workspace }}
 
       - name: go vet
         run: go vet ./...
 
       - name: go test
-        # Run with -race so the autoscaler / pool code gets a proper
-        # concurrency audit on every PR.
         run: go test -count=1 -race ./...
 
       - name: go build (binary)
         run: |
-          mkdir -p build
+          mkdir -p ../build
           CGO_ENABLED=0 go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=ci-${GITHUB_SHA::7}" \
-            -o build/orva ./cmd/orva
-          ./build/orva --help >/dev/null
+            -o ../build/orva ./cmd/orva
+          ../build/orva --help >/dev/null
 
   # ── Shell: POSIX compliance + shellcheck ──────────────────────────────
   shell:
@@ -93,14 +96,14 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: npm ci
-        working-directory: ui
+        working-directory: frontend
         run: npm ci --no-audit --no-fund
 
       - name: vite build
-        working-directory: ui
+        working-directory: frontend
         run: npm run build
 
   # ── Docker smoke build (no push) ──────────────────────────────────────

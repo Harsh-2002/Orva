@@ -4,49 +4,42 @@ BUILD   = build
 
 .PHONY: build test lint clean ui embed build-all dev adapters-embed
 
-# ── Backend ──────────────────────────────────────────────
-
-# Copy adapter sources into cmd/orva/adapters/ so //go:embed has them at
-# build time. Keeps runtimes/ as the source-of-truth directory (shared
-# with Dockerfile COPY paths) without needing Go's embed to cross
-# package boundaries.
+# Copy adapter sources into backend/cmd/orva/adapters/ so //go:embed has
+# them at build time. Keeps backend/runtimes/ as the source-of-truth
+# directory (shared with Dockerfile COPY paths).
 adapters-embed:
-	@rm -rf cmd/orva/adapters
-	@mkdir -p cmd/orva/adapters/node22 cmd/orva/adapters/node24 \
-	          cmd/orva/adapters/python313 cmd/orva/adapters/python314
-	@cp runtimes/node22/adapter.js    cmd/orva/adapters/node22/adapter.js
-	@cp runtimes/node24/adapter.js    cmd/orva/adapters/node24/adapter.js
-	@cp runtimes/python313/adapter.py cmd/orva/adapters/python313/adapter.py
-	@cp runtimes/python314/adapter.py cmd/orva/adapters/python314/adapter.py
+	@rm -rf backend/cmd/orva/adapters
+	@mkdir -p backend/cmd/orva/adapters/node22 backend/cmd/orva/adapters/node24 \
+	          backend/cmd/orva/adapters/python313 backend/cmd/orva/adapters/python314
+	@cp backend/runtimes/node22/adapter.js    backend/cmd/orva/adapters/node22/adapter.js
+	@cp backend/runtimes/node24/adapter.js    backend/cmd/orva/adapters/node24/adapter.js
+	@cp backend/runtimes/python313/adapter.py backend/cmd/orva/adapters/python313/adapter.py
+	@cp backend/runtimes/python314/adapter.py backend/cmd/orva/adapters/python314/adapter.py
 
 build: adapters-embed
 	@mkdir -p $(BUILD)
-	go build -ldflags="-s -w -X main.Version=$(VERSION)" -o $(BUILD)/$(BINARY) ./cmd/orva
+	cd backend && go build -ldflags="-s -w -X main.Version=$(VERSION)" -o ../$(BUILD)/$(BINARY) ./cmd/orva
 
 test:
-	go test -count=1 ./...
+	cd backend && go test -count=1 ./...
 
 lint:
-	go vet ./...
-
-# ── Frontend ─────────────────────────────────────────────
+	cd backend && go vet ./...
 
 ui:
-	cd ui && npm install && npm run build
+	cd frontend && npm install && npm run build
 
 embed: ui
-	rm -rf internal/server/ui_dist
-	cp -r ui/dist internal/server/ui_dist
-
-# ── All ──────────────────────────────────────────────────
+	rm -rf backend/internal/server/ui_dist
+	cp -r frontend/dist backend/internal/server/ui_dist
 
 build-all: embed build
 
 dev:
-	cd ui && npm run dev &
-	go run ./cmd/orva serve
+	cd frontend && npm run dev &
+	cd backend && go run ./cmd/orva serve
 
 clean:
 	rm -rf $(BUILD)
-	rm -rf internal/server/ui_dist
-	rm -rf ui/dist
+	rm -rf backend/internal/server/ui_dist
+	rm -rf frontend/dist

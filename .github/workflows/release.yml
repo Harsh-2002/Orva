@@ -46,23 +46,24 @@ jobs:
         with:
           go-version: "1.25.x"
           cache: true
+          cache-dependency-path: backend/go.sum
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: build ui
-        working-directory: ui
+        working-directory: frontend
         run: |
           npm ci --no-audit --no-fund
           npm run build
 
       - name: embed ui + adapters
         run: |
-          rm -rf internal/server/ui_dist
-          cp -r ui/dist internal/server/ui_dist
+          rm -rf backend/internal/server/ui_dist
+          cp -r frontend/dist backend/internal/server/ui_dist
           make adapters-embed
 
       - name: resolve version
@@ -75,16 +76,17 @@ jobs:
           fi
 
       - name: go build
+        working-directory: backend
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          mkdir -p dist
+          mkdir -p ../dist
           go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=${{ steps.v.outputs.tag }}" \
-            -o dist/orva-linux-${{ matrix.goarch }} \
+            -o ../dist/orva-linux-${{ matrix.goarch }} \
             ./cmd/orva
 
       - name: upload artifact

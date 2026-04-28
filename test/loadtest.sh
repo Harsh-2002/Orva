@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 HEY=~/go/bin/hey
-ORVA=./orva
+orva=./orva
 API_KEY=""
 EP=""
 
@@ -67,7 +67,7 @@ echo ""
 
 # Start server
 echo "Starting server (max_concurrent=500)..."
-ORVA_MAX_CONCURRENT=500 $ORVA serve > /tmp/orva-loadtest.log 2>&1 &
+ORVA_MAX_CONCURRENT=500 $orva serve > /tmp/orva-loadtest.log 2>&1 &
 SERVER_PID=$!
 sleep 3
 
@@ -87,7 +87,7 @@ FUNCTIONS=(
 
 for fn_spec in "${FUNCTIONS[@]}"; do
   IFS=: read -r name runtime dir <<< "$fn_spec"
-  $ORVA deploy "$dir" --name "$name" --runtime "$runtime" $EP 2>&1 | grep -q "deployed" && echo "  ✓ $name ($runtime)" || echo "  ✗ $name FAILED"
+  $orva deploy "$dir" --name "$name" --runtime "$runtime" $EP 2>&1 | grep -q "deployed" && echo "  ✓ $name ($runtime)" || echo "  ✗ $name FAILED"
 done
 
 # Verify each function
@@ -95,7 +95,7 @@ echo ""
 echo "Verifying functions..."
 for fn_spec in "${FUNCTIONS[@]}"; do
   IFS=: read -r name runtime dir <<< "$fn_spec"
-  STATUS=$($ORVA invoke "$name" $EP 2>&1 | head -1 | awk '{print $2}')
+  STATUS=$($orva invoke "$name" $EP 2>&1 | head -1 | awk '{print $2}')
   echo "  $name: $STATUS"
 done
 
@@ -297,7 +297,7 @@ ORVA_TEMPS=$(ls /tmp/orva-exec* 2>/dev/null | wc -l || echo 0)
 
 echo "  Memory: ${MEM_BASELINE}MB (before) → ${MEM_AFTER}MB (after) | delta: $((MEM_AFTER - MEM_BASELINE))MB"
 echo "  Orphaned nsjail processes: $NSJAIL_PROCS"
-echo "  Orphaned temp dirs: $ORVA_TEMPS"
+echo "  Orphaned temp dirs: $orva_TEMPS"
 
 HEALTH=$(curl -s http://localhost:8443/api/v1/system/health)
 STATUS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null)

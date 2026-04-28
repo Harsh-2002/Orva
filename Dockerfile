@@ -3,16 +3,16 @@ ARG VERSION=0.1.0
 
 FROM node:22-alpine AS ui
 WORKDIR /ui
-COPY ui/package.json ui/package-lock.json ./
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY ui/ ./
+COPY frontend/ ./
 RUN npm run build
 
 FROM golang:1.25-bookworm AS go
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
-COPY . .
+COPY backend/ ./
 COPY --from=ui /ui/dist ./internal/server/ui_dist
 ARG VERSION
 RUN CGO_ENABLED=0 go build \
@@ -32,13 +32,13 @@ FROM node:22-slim AS rootfs-node22
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /opt/orva /code
-COPY runtimes/node22/adapter.js /opt/orva/adapter.js
+COPY backend/runtimes/node22/adapter.js /opt/orva/adapter.js
 
 FROM node:24-slim AS rootfs-node24
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /opt/orva /code
-COPY runtimes/node24/adapter.js /opt/orva/adapter.js
+COPY backend/runtimes/node24/adapter.js /opt/orva/adapter.js
 
 FROM python:3.13-slim AS rootfs-python313
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && find /usr/local/lib/python3.13 -depth -type d -name __pycache__ -exec rm -rf {} + \
     && find /usr/local/lib/python3.13 -depth -type d -name tests -exec rm -rf {} + \
     && mkdir -p /opt/orva /code
-COPY runtimes/python313/adapter.py /opt/orva/adapter.py
+COPY backend/runtimes/python313/adapter.py /opt/orva/adapter.py
 
 FROM python:3.14-slim AS rootfs-python314
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && find /usr/local/lib/python3.14 -depth -type d -name __pycache__ -exec rm -rf {} + \
     && find /usr/local/lib/python3.14 -depth -type d -name tests -exec rm -rf {} + \
     && mkdir -p /opt/orva /code
-COPY runtimes/python314/adapter.py /opt/orva/adapter.py
+COPY backend/runtimes/python314/adapter.py /opt/orva/adapter.py
 
 FROM debian:bookworm-slim
 ARG VERSION

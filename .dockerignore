@@ -1,11 +1,13 @@
 # Keep the build context small.
-ui/node_modules
-ui/dist
-internal/server/ui_dist
+frontend/node_modules
+frontend/dist
+backend/internal/server/ui_dist
 build/
 .git/
 *.log
-2026-*-*.txt
 test/
+docs/
 .vscode/
 .claude/
+.github/
+.playwright-mcp/
