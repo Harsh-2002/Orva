@@ -1,0 +1,40 @@
+[Unit]
+Description=Orva self-hosted serverless platform
+Documentation=https://github.com/Harsh-2002/orva
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orva
+Group=orva
+ExecStart=/opt/orva/bin/orva serve --data-dir /var/lib/orva
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# nsjail constructs user/mount/cgroup namespaces; needs CAP_SYS_ADMIN.
+# Everything else is dropped — orvad does not need root for any other op.
+AmbientCapabilities=CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_SYS_ADMIN
+NoNewPrivileges=false
+
+# Filesystem hardening — orvad only needs to write the data dir.
+ReadWritePaths=/var/lib/orva
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=false
+
+LimitNOFILE=65536
+LimitNPROC=8192
+
+Environment=ORVA_DATA_DIR=/var/lib/orva
+Environment=ORVA_ROOTFS_DIR=/var/lib/orva/rootfs
+
+[Install]
+WantedBy=multi-user.target

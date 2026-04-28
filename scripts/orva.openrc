@@ -1,0 +1,31 @@
+#!/sbin/openrc-run
+# OpenRC service for Orva (Alpine Linux + other OpenRC-based distros).
+
+description="Orva self-hosted serverless platform"
+description_check="Verify Orva configuration"
+
+command="/opt/orva/bin/orva"
+command_args="serve --data-dir /var/lib/orva"
+command_user="orva:orva"
+command_background="yes"
+pidfile="/run/orva.pid"
+
+# nsjail needs CAP_SYS_ADMIN to construct sandboxes; everything else
+# is dropped to user 'orva'. OpenRC's start-stop-daemon doesn't expose
+# capabilities directly — the orva binary is started as the orva user
+# and nsjail (setcap'd at install time, or run with the right caps)
+# does the privileged work per spawn.
+output_log="/var/log/orva.log"
+error_log="/var/log/orva.log"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o orva:orva /var/lib/orva
+    checkpath -d -m 0755 -o orva:orva /var/lib/orva/functions
+    checkpath -d -m 0755 -o orva:orva /var/lib/orva/rootfs
+    checkpath -f -m 0644 -o orva:orva /var/log/orva.log
+}

@@ -7,6 +7,8 @@ deploys with one-click rollback, server-sent events for live UI.
 
 ## Quick start
 
+### Docker
+
 ```bash
 docker run -d --name orva -p 8443:8443 \
   --cap-add SYS_ADMIN \
@@ -16,9 +18,30 @@ docker run -d --name orva -p 8443:8443 \
   -v orva-data:/var/lib/orva \
   ghcr.io/harsh-2002/orva:latest
 
-# Or with docker-compose
+# or
 docker compose up -d
 ```
+
+### Bare metal
+
+One-line installer — POSIX sh, multi-distro
+(Ubuntu, Debian, Alpine, RHEL/Rocky/AlmaLinux, Fedora, Arch, openSUSE):
+
+```bash
+curl -fsSL https://github.com/Harsh-2002/orva/releases/latest/download/install.sh | sudo sh
+```
+
+Pin a specific release:
+```bash
+ORVA_VERSION=v2026.04.28 sh install.sh
+```
+
+The installer downloads a fully-static tarball (no glibc/libstdc++
+deps, musl-linked nsjail), drops binaries at `/opt/orva/bin/{orva,nsjail}`,
+creates a system user, registers a `systemd` (or `OpenRC` on Alpine)
+unit, and prints the bootstrap admin key location. Re-run is safe.
+
+Uninstall: `sudo /opt/orva/share/orva/scripts/uninstall.sh [--purge]`
 
 The container prints a one-time bootstrap admin API key on first boot
 (also persisted at `/var/lib/orva/.admin-key` inside the volume). Open
