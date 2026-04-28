@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -11,8 +12,14 @@ func TestDefaults(t *testing.T) {
 	if cfg.Server.Port != 8443 {
 		t.Errorf("expected default port 8443, got %d", cfg.Server.Port)
 	}
-	if cfg.Sandbox.MaxConcurrent != 200 {
-		t.Errorf("expected max concurrent 200, got %d", cfg.Sandbox.MaxConcurrent)
+	// MaxConcurrent scales by CPU count (NumCPU * 64, floored at 200)
+	// so the expected value depends on the test host.
+	wantConc := runtime.NumCPU() * 64
+	if wantConc < 200 {
+		wantConc = 200
+	}
+	if cfg.Sandbox.MaxConcurrent != wantConc {
+		t.Errorf("expected max concurrent %d (NumCPU=%d), got %d", wantConc, runtime.NumCPU(), cfg.Sandbox.MaxConcurrent)
 	}
 	if cfg.Logging.Level != "info" {
 		t.Errorf("expected log level info, got %s", cfg.Logging.Level)
