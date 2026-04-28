@@ -1,11 +1,5 @@
 name: CI
 
-# Runs on every push + PR. Validates the tree without publishing anything.
-#
-# Split into fast lanes (go vet, shellcheck, POSIX sh parse, UI lint) and a
-# longer test lane that spins up SQLite via the stdlib driver. Docker build
-# is a smoke check — the full release image is built only from tag pushes.
-
 on:
   push:
     branches: [main]
@@ -19,7 +13,6 @@ permissions:
   contents: read
 
 jobs:
-  # ── Go: vet + test + build ────────────────────────────────────────────
   go:
     name: go ${{ matrix.go }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -34,14 +27,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
-          cache: true
-          cache-dependency-path: backend/go.sum
 
-      - name: seed embedded adapters
-        run: make adapters-embed
+      - name: build ui + embed adapters
+        # //go:embed all:ui_dist needs the directory populated before
+        # vet/test/build. `make embed` does the npm ci + vite build +
+        # cp into backend/internal/server/ui_dist.
+        run: |
+          make embed
+          make adapters-embed
         working-directory: ${{ github.workspace }}
 
       - name: go vet
@@ -59,33 +59,24 @@ jobs:
             -o ../build/orva ./cmd/orva
           ../build/orva --help >/dev/null
 
-  # ── Shell: POSIX compliance + shellcheck ──────────────────────────────
   shell:
     name: shell lint
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: install dash + shellcheck
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dash shellcheck
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dash shellcheck
 
-      - name: dash -n parse (install.sh)
-        # POSIX reference parser. Catches bash-isms that /bin/sh on Alpine
-        # or busybox would reject.
-        run: dash -n scripts/install.sh
+      - run: dash -n scripts/install.sh
 
-      - name: shellcheck install.sh
-        run: shellcheck -s sh -S warning scripts/install.sh
+      - run: shellcheck -s sh -S warning scripts/install.sh
 
-      - name: bash scripts (entrypoint, build-rootfs)
-        # These two can stay bash since they ship inside the Docker image
-        # where bash is present. Just verify no syntax errors.
+      - name: bash scripts
         run: |
           bash -n scripts/entrypoint.sh
           bash -n scripts/build-rootfs.sh
           shellcheck -s bash -S warning scripts/entrypoint.sh scripts/build-rootfs.sh || true
 
-  # ── UI: vue/vite build + lint ─────────────────────────────────────────
   ui:
     name: ui build
     runs-on: ubuntu-24.04
@@ -95,8 +86,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: npm ci
         working-directory: frontend
@@ -106,7 +95,6 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-  # ── Docker smoke build (no push) ──────────────────────────────────────
   docker:
     name: docker image smoke
     runs-on: ubuntu-24.04
@@ -115,15 +103,11 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: build image (cache only, no load)
+      - name: build image (no push, no cache)
         uses: docker/build-push-action@v6
         with:
           context: .
           push: false
           load: false
-          # Only build for the host arch on CI smoke — the release job
-          # builds the full amd64+arm64 matrix.
           platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           tags: orva:ci

@@ -45,14 +45,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
-          cache: true
-          cache-dependency-path: backend/go.sum
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: build ui
         working-directory: frontend
@@ -336,8 +332,6 @@ jobs:
             org.opencontainers.image.version=${{ steps.v.outputs.tag }}
           build-args: |
             VERSION=${{ steps.v.outputs.tag }}
-          cache-from: type=gha,scope=${{ matrix.goarch }}
-          cache-to: type=gha,scope=${{ matrix.goarch }},mode=max
 
   # ── 6. Combine the two arch images under one multi-arch tag ───────────
   docker-manifest:
