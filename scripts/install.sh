@@ -62,7 +62,7 @@ install_prereqs() {
         log "skipping package install (ORVA_NO_PKG=1)"
         return
     fi
-    pkgs="ca-certificates curl tar"
+    pkgs="ca-certificates curl tar zstd"
     log "installing prerequisites: $pkgs"
     if [ "$DRYRUN" = "1" ]; then
         log "(dryrun) skipping package install"
@@ -107,8 +107,7 @@ check_kernel_features() {
     missing=""
 
     # Unprivileged user namespaces — required for nsjail to construct
-    # isolated namespaces without giving the orvad process CAP_SYS_ADMIN
-    # on the host. Most distros enable this; RHEL <9 disables it.
+    # isolated namespaces without giving orvad CAP_SYS_ADMIN on the host.
     if [ -r /proc/sys/kernel/unprivileged_userns_clone ]; then
         if [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" != "1" ]; then
             warn "unprivileged user namespaces are DISABLED"
@@ -118,7 +117,6 @@ check_kernel_features() {
         fi
     fi
 
-    # cgroup v2 — needed for memory.max + cpu.max enforcement.
     if ! grep -q "cgroup2" /proc/mounts 2>/dev/null; then
         warn "cgroup v2 not detected — per-function resource limits will be best-effort"
         warn "  RHEL/Rocky 8: grubby --update-kernel=ALL --args=systemd.unified_cgroup_hierarchy=1 + reboot"
@@ -146,28 +144,169 @@ resolve_version() {
     log "version: $VERSION"
 }
 
-download_and_verify() {
+download_and_install_binaries() {
     if [ "$DRYRUN" = "1" ]; then
-        log "(dryrun) skipping tarball download + extract"
+        log "(dryrun) skipping binary download"
         return
     fi
     base="https://github.com/${REPO}/releases/download/${VERSION}"
-    tar_name="orva-${VERSION}-linux-${ARCH}.tar.gz"
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT INT TERM
 
-    log "downloading $tar_name"
-    curl -fsSL -o "$tmp/$tar_name" "$base/$tar_name"
-    curl -fsSL -o "$tmp/SHA256SUMS"  "$base/SHA256SUMS"
+    log "downloading orva + nsjail (linux-${ARCH})"
+    curl -fsSL -o "$tmp/orva"   "$base/orva-linux-${ARCH}"
+    curl -fsSL -o "$tmp/nsjail" "$base/nsjail-linux-${ARCH}"
+    curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
 
     log "verifying SHA-256"
-    ( cd "$tmp" && grep " $tar_name\$" SHA256SUMS | sha256sum -c - ) \
-        || die "checksum mismatch for $tar_name"
+    ( cd "$tmp" && \
+      grep " orva-linux-${ARCH}\$"   checksums.txt | sed "s/orva-linux-${ARCH}/orva/"     | sha256sum -c - && \
+      grep " nsjail-linux-${ARCH}\$" checksums.txt | sed "s/nsjail-linux-${ARCH}/nsjail/" | sha256sum -c - \
+    ) || die "checksum verification failed"
 
-    log "extracting to $PREFIX"
-    mkdir -p "$PREFIX"
-    tar -C "$PREFIX" -xzf "$tmp/$tar_name" --strip-components=1
-    chmod +x "$PREFIX/bin/"*
+    log "installing binaries to $PREFIX/bin"
+    install -d -m 0755 "$PREFIX/bin" "$PREFIX/share/orva/scripts" "$PREFIX/share/orva/runtimes"
+    install -m 0755 "$tmp/orva"   "$PREFIX/bin/orva"
+    install -m 0755 "$tmp/nsjail" "$PREFIX/bin/nsjail"
+}
+
+download_rootfs() {
+    if [ "$DRYRUN" = "1" ]; then
+        log "(dryrun) skipping rootfs download"
+        return
+    fi
+    base="https://github.com/${REPO}/releases/download/${VERSION}"
+    install -d -m 0755 "$DATA_DIR/rootfs"
+
+    for rt in node22 node24 python313 python314; do
+        target="$DATA_DIR/rootfs/$rt"
+        if [ -f "$target/.orva-rootfs-version" ] && \
+           [ "$(cat "$target/.orva-rootfs-version" 2>/dev/null)" = "$VERSION" ]; then
+            log "rootfs/$rt already at $VERSION (skipping)"
+            continue
+        fi
+        log "downloading rootfs/$rt for $ARCH"
+        tar_name="rootfs-${rt}-${ARCH}.tar.zst"
+        if ! curl -fsSL -o "$tmp/$tar_name" "$base/$tar_name"; then
+            warn "rootfs $rt for $ARCH not present in this release — runtime $rt will be unavailable"
+            continue
+        fi
+        rm -rf "$target"
+        install -d -m 0755 "$target"
+        zstd -dc "$tmp/$tar_name" | tar -C "$target" -xf -
+        printf '%s\n' "$VERSION" > "$target/.orva-rootfs-version"
+    done
+}
+
+install_runtime_assets() {
+    if [ "$DRYRUN" = "1" ]; then
+        log "(dryrun) skipping runtime asset install"
+        return
+    fi
+    # The systemd unit + uninstall script ship in the release tarball
+    # alongside the binary. They're tiny — embed inline so install.sh
+    # has no extra files to download.
+    cat > "$PREFIX/share/orva/scripts/orva.service" <<'EOF'
+[Unit]
+Description=Orva self-hosted serverless platform
+Documentation=https://github.com/Harsh-2002/Orva
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orva
+Group=orva
+ExecStart=/opt/orva/bin/orva serve --data-dir /var/lib/orva
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+AmbientCapabilities=CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_SYS_ADMIN
+NoNewPrivileges=false
+ReadWritePaths=/var/lib/orva
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LimitNOFILE=65536
+LimitNPROC=8192
+Environment=ORVA_DATA_DIR=/var/lib/orva
+Environment=ORVA_ROOTFS_DIR=/var/lib/orva/rootfs
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat > "$PREFIX/share/orva/scripts/orva.openrc" <<'EOF'
+#!/sbin/openrc-run
+description="Orva self-hosted serverless platform"
+command="/opt/orva/bin/orva"
+command_args="serve --data-dir /var/lib/orva"
+command_user="orva:orva"
+command_background="yes"
+pidfile="/run/orva.pid"
+output_log="/var/log/orva.log"
+error_log="/var/log/orva.log"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o orva:orva /var/lib/orva
+    checkpath -d -m 0755 -o orva:orva /var/lib/orva/functions
+    checkpath -d -m 0755 -o orva:orva /var/lib/orva/rootfs
+    checkpath -f -m 0644 -o orva:orva /var/log/orva.log
+}
+EOF
+    chmod 0755 "$PREFIX/share/orva/scripts/orva.openrc"
+
+    cat > "$PREFIX/share/orva/scripts/uninstall.sh" <<'EOF'
+#!/bin/sh
+set -eu
+PREFIX="${ORVA_PREFIX:-/opt/orva}"
+DATA_DIR="${ORVA_DATA_DIR:-/var/lib/orva}"
+SERVICE_USER="orva"
+PURGE=0
+for a in "$@"; do
+    case "$a" in --purge) PURGE=1 ;; esac
+done
+have() { command -v "$1" >/dev/null 2>&1; }
+
+if [ "$(id -u)" -ne 0 ]; then
+    if have sudo; then exec sudo sh "$0" "$@"
+    else echo "must run as root" >&2; exit 1; fi
+fi
+
+if have systemctl && [ -f /etc/systemd/system/orva.service ]; then
+    systemctl stop orva 2>/dev/null || true
+    systemctl disable orva 2>/dev/null || true
+    rm -f /etc/systemd/system/orva.service
+    systemctl daemon-reload 2>/dev/null || true
+fi
+if [ -f /etc/init.d/orva ]; then
+    /etc/init.d/orva stop 2>/dev/null || true
+    have rc-update && rc-update del orva default 2>/dev/null || true
+    rm -f /etc/init.d/orva
+fi
+
+rm -rf "$PREFIX"
+
+if [ "$PURGE" = "1" ]; then
+    rm -rf "$DATA_DIR"
+    if id -u "$SERVICE_USER" >/dev/null 2>&1; then
+        userdel "$SERVICE_USER" 2>/dev/null || deluser "$SERVICE_USER" 2>/dev/null || true
+    fi
+    echo "uninstalled (data + user purged)"
+else
+    echo "uninstalled (preserved $DATA_DIR; re-run with --purge to remove)"
+fi
+EOF
+    chmod 0755 "$PREFIX/share/orva/scripts/uninstall.sh"
 }
 
 create_user() {
@@ -183,7 +322,6 @@ create_user() {
             useradd --system --no-create-home --shell /sbin/nologin "$SERVICE_USER" 2>/dev/null || \
               useradd -r -s /bin/false "$SERVICE_USER"
         elif have adduser; then
-            # Alpine busybox adduser
             adduser -S -D -H -s /sbin/nologin "$SERVICE_USER"
         else
             warn "no useradd/adduser found — create user '$SERVICE_USER' manually"
@@ -198,11 +336,15 @@ install_service() {
         log "(dryrun) would install service unit"
         return
     fi
-    if [ -d /run/systemd/system ] || have systemctl; then
+    if [ -d /run/systemd/system ] || (have systemctl && [ -d /etc/systemd/system ]); then
         log "installing systemd unit"
         install -m 0644 "$PREFIX/share/orva/scripts/orva.service" /etc/systemd/system/orva.service
-        systemctl daemon-reload
-        log "  enable + start with: systemctl enable --now orva"
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload
+            log "  enable + start with: systemctl enable --now orva"
+        else
+            log "  installed unit file (this container has no systemd PID 1; enable on the real host)"
+        fi
     elif [ -d /etc/init.d ] && have rc-update; then
         log "installing OpenRC unit"
         install -m 0755 "$PREFIX/share/orva/scripts/orva.openrc" /etc/init.d/orva
@@ -254,8 +396,10 @@ main() {
     install_prereqs
     check_kernel_features
     resolve_version
-    download_and_verify
+    download_and_install_binaries
+    install_runtime_assets
     create_user
+    download_rootfs
     install_service
     print_followup
 }

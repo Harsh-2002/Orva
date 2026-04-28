@@ -141,6 +141,7 @@ jobs:
       fail-fast: false
       matrix:
         runtime: [node22, node24, python313, python314]
+        goarch: [amd64, arm64]
         include:
           - goarch: amd64
             runner: ubuntu-24.04
