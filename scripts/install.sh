@@ -77,10 +77,12 @@ install_prereqs() {
             apk add --no-cache $pkgs
             ;;
         fedora|rhel|centos|rocky|almalinux|amzn)
+            # RHEL 9 / Rocky 9 ship `curl-minimal` which conflicts with the
+            # full `curl` package. --allowerasing lets dnf swap them.
             if have dnf; then
-                dnf install -y --setopt=install_weak_deps=False $pkgs
+                dnf install -y --allowerasing --setopt=install_weak_deps=False $pkgs
             else
-                yum install -y $pkgs
+                yum install -y --allowerasing $pkgs
             fi
             ;;
         arch|manjaro|endeavouros)
@@ -137,7 +139,8 @@ resolve_version() {
         VERSION="v0.0.0-dryrun"
     else
         log "fetching latest release tag from GitHub"
-        VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+        VERSION=$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            "https://api.github.com/repos/${REPO}/releases/latest" \
             | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
         [ -n "$VERSION" ] || die "could not resolve latest tag (set ORVA_VERSION explicitly)"
     fi
@@ -154,9 +157,9 @@ download_and_install_binaries() {
     trap 'rm -rf "$tmp"' EXIT INT TERM
 
     log "downloading orva + nsjail (linux-${ARCH})"
-    curl -fsSL -o "$tmp/orva"   "$base/orva-linux-${ARCH}"
-    curl -fsSL -o "$tmp/nsjail" "$base/nsjail-linux-${ARCH}"
-    curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$tmp/orva"   "$base/orva-linux-${ARCH}"
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$tmp/nsjail" "$base/nsjail-linux-${ARCH}"
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$tmp/checksums.txt" "$base/checksums.txt"
 
     log "verifying SHA-256"
     ( cd "$tmp" && \
@@ -319,15 +322,26 @@ create_user() {
     else
         log "creating system user $SERVICE_USER"
         if have useradd; then
+            # On Linux distros that have `useradd`, the matching group is
+            # auto-created by default (unless USERGROUPS_ENAB=no in
+            # /etc/login.defs).
             useradd --system --no-create-home --shell /sbin/nologin "$SERVICE_USER" 2>/dev/null || \
               useradd -r -s /bin/false "$SERVICE_USER"
         elif have adduser; then
-            adduser -S -D -H -s /sbin/nologin "$SERVICE_USER"
+            # Alpine / BusyBox: `adduser -S` doesn't create a same-named
+            # group — it puts the user in `nogroup`. Create the group
+            # first so `install -g orva` works downstream.
+            have addgroup && addgroup -S "$SERVICE_USER" 2>/dev/null || true
+            adduser -S -D -H -s /sbin/nologin -G "$SERVICE_USER" "$SERVICE_USER"
         else
             warn "no useradd/adduser found — create user '$SERVICE_USER' manually"
         fi
     fi
-    install -d -o "$SERVICE_USER" -g "$SERVICE_USER" \
+
+    # Determine the real primary group (handles distros where `useradd`
+    # doesn't create a same-named group).
+    primary_group=$(id -gn "$SERVICE_USER" 2>/dev/null || echo "$SERVICE_USER")
+    install -d -o "$SERVICE_USER" -g "$primary_group" \
         "$DATA_DIR" "$DATA_DIR/functions" "$DATA_DIR/rootfs"
 }
 
