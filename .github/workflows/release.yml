@@ -261,11 +261,9 @@ jobs:
           files: scripts/install.sh
 
   # ── 5. Per-arch Docker image, native runners (no QEMU) ────────────────
-  # Splits the multi-arch build into two native jobs so the arm64 leg
-  # doesn't timeout under emulation (npm registry consistently fails at
-  # ~5 min over QEMU). Uses Dockerfile.release which copies the
-  # pre-built static binaries from the matrix artifacts above instead
-  # of rebuilding UI + Go + nsjail inside buildx.
+  # Each arch builds on its native runner and pushes by digest only —
+  # NO named tags. The manifest job below combines the two digests into
+  # the single `:latest` tag, which is the only tag we publish.
   docker-image:
     name: docker image (${{ matrix.goarch }})
     needs: [build-orva, build-nsjail, build-rootfs]
@@ -279,6 +277,9 @@ jobs:
           - goarch: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
+    outputs:
+      digest_amd64: ${{ steps.digest_out.outputs.amd64 }}
+      digest_arm64: ${{ steps.digest_out.outputs.arm64 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -304,7 +305,6 @@ jobs:
           mv artifacts/orva-linux-${{ matrix.goarch }}    dist/orva-${{ matrix.goarch }}
           mv artifacts/nsjail-linux-${{ matrix.goarch }}  dist/nsjail-${{ matrix.goarch }}
           chmod +x dist/orva-${{ matrix.goarch }} dist/nsjail-${{ matrix.goarch }}
-          ls -lh dist/
 
       - uses: docker/setup-buildx-action@v3
 
@@ -315,16 +315,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: build + push (${{ matrix.goarch }})
+      # Push by digest only — no tag is created. The manifest job below
+      # references the per-arch digests directly when stitching them
+      # into the multi-arch :latest tag.
+      - name: build + push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.release
-          push: true
           platforms: ${{ matrix.platform }}
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}-${{ matrix.goarch }}
-            ${{ env.IMAGE_NAME }}:latest-${{ matrix.goarch }}
           labels: |
             org.opencontainers.image.title=Orva
             org.opencontainers.image.source=https://github.com/Harsh-2002/Orva
@@ -332,21 +332,40 @@ jobs:
             org.opencontainers.image.version=${{ steps.v.outputs.tag }}
           build-args: |
             VERSION=${{ steps.v.outputs.tag }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
-  # ── 6. Combine the two arch images under one multi-arch tag ───────────
+      - name: export digest for manifest job
+        id: digest_out
+        run: |
+          digest="${{ steps.build.outputs.digest }}"
+          echo "${{ matrix.goarch }}=${digest}" >> "$GITHUB_OUTPUT"
+          echo "digest_${{ matrix.goarch }}=${digest}" >> "$GITHUB_OUTPUT"
+          echo "::notice::pushed ${{ matrix.goarch }} → ${digest}"
+
+      - name: write digest to artifact
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.goarch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── 6. Stitch the two per-arch digests into a single `:latest` tag ───
   docker-manifest:
     name: docker multi-arch manifest
     needs: [docker-image]
     runs-on: ubuntu-24.04
     steps:
-      - name: resolve version
-        id: v
-        run: |
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
 
       - uses: docker/setup-buildx-action@v3
 
@@ -357,18 +376,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: stitch manifest list
+      - name: create + push manifest list as :latest
         run: |
-          set -e
-          for tag in "${{ steps.v.outputs.tag }}" "latest"; do
-            # Skip the `latest` tag for pre-release builds.
-            if [ "$tag" = "latest" ]; then
-              case "${{ steps.v.outputs.tag }}" in
-                *-rc*|*-beta*) echo "skipping :latest for pre-release"; continue ;;
-              esac
-            fi
-            docker buildx imagetools create \
-              -t "${{ env.IMAGE_NAME }}:$tag" \
-              "${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}-amd64" \
-              "${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}-arm64"
-          done
+          cd /tmp/digests
+          docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:latest \
+            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: inspect
+        run: docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
