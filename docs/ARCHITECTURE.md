@@ -8,47 +8,59 @@ the whole thing.
 
 ## Component map
 
+What runs on the host:
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ host kernel  (Linux ≥ 5.10, cgroup v2, unprivileged userns)        │
-│                                                                     │
-│  ┌───────────────────────────────────────────────────────────────┐ │
-│  │ orvad  (Go binary, single process)                            │ │
-│  │                                                               │ │
-│  │  ┌──────────────────┐  ┌──────────────────┐                  │ │
-│  │  │ HTTP server      │  │ Builder queue    │                  │ │
-│  │  │ /api, /ui, /auth │──▶ extract+install  │                  │ │
-│  │  │ /events (SSE)    │  │ npm/pip          │                  │ │
-│  │  └────────┬─────────┘  └─────────┬────────┘                  │ │
-│  │           │                      │                           │ │
-│  │  ┌────────▼─────────┐  ┌─────────▼────────┐  ┌─────────────┐│ │
-│  │  │ Pool manager     │  │ Versions FS      │  │ SQLite      ││ │
-│  │  │ (per-fn warm     │  │ functions/<id>/  │  │ orva.db     ││ │
-│  │  │  workers + KPA   │  │   versions/<sha> │  │             ││ │
-│  │  │  autoscaler)     │  │   current →      │  │ executions  ││ │
-│  │  │                  │  │     versions/... │  │ deployments ││ │
-│  │  │                  │  │                  │  │ secrets     ││ │
-│  │  │  spawnFn ────────────▶ Spawn nsjail()  │  │ functions   ││ │
-│  │  └──────────────────┘  └──────────────────┘  │ users       ││ │
-│  │                                              │ sessions    ││ │
-│  │  ┌──────────────────┐                        │ pool_config ││ │
-│  │  │ Event hub        │                        │ system_cfg  ││ │
-│  │  │ metrics+exec+dep │                        └─────────────┘│ │
-│  │  │ → SSE subscribers│                                       │ │
-│  │  └──────────────────┘                                       │ │
-│  └───────────────────────────────────────────────────────────────┘ │
-│                                                                     │
-│  ┌──────────────────────┐  ┌──────────────────────┐                │
-│  │ nsjail (per spawn)   │  │ nsjail (per spawn)   │  ...           │
-│  │ ├ user namespace     │  │ ├ user namespace     │                │
-│  │ ├ chroot to rootfs   │  │ ├ chroot to rootfs   │                │
-│  │ ├ /code (read-only)  │  │ ├ /code (read-only)  │                │
-│  │ ├ tmpfs /tmp         │  │ ├ tmpfs /tmp         │                │
-│  │ ├ cgroup v2 limits   │  │ ├ cgroup v2 limits   │                │
-│  │ ├ seccomp filter     │  │ ├ seccomp filter     │                │
-│  │ └ adapter+user code  │  │ └ adapter+user code  │                │
-│  └──────────────────────┘  └──────────────────────┘                │
-└─────────────────────────────────────────────────────────────────────┘
+host kernel  (Linux ≥ 5.10, cgroup v2, unprivileged userns)
+  │
+  └─ orvad   (single Go process, listens on :8443)
+       │
+       ├─ HTTP server     /api  /ui  /auth  /events (SSE)
+       ├─ Pool manager    per-function warm workers + KPA autoscaler
+       ├─ Build queue     extract → install deps → atomic publish
+       ├─ Event hub       SSE pub/sub for metrics + exec + deploy
+       ├─ GC goroutine    prunes archived versions per system_config
+       └─ SQLite          orva.db (WAL mode), single file
+                          │
+       spawns ▼ (one per cold-start invocation)
+                          │
+       ┌──────────────────┴───────────────────┐
+       │                                      │
+  nsjail worker                          nsjail worker     ...
+  ┌────────────────────┐                 ┌────────────────────┐
+  │ user namespace     │                 │ user namespace     │
+  │ chroot → rootfs    │                 │ chroot → rootfs    │
+  │ /code (read-only)  │                 │ /code (read-only)  │
+  │ tmpfs /tmp         │                 │ tmpfs /tmp         │
+  │ cgroup v2 limits   │                 │ cgroup v2 limits   │
+  │ seccomp filter     │                 │ seccomp filter     │
+  │ user code          │                 │ user code          │
+  └────────────────────┘                 └────────────────────┘
+```
+
+What's connected to what (data flow inside orvad):
+
+```
+HTTP request  ──▶  HTTP server  ──▶  Pool manager  ──▶  nsjail worker
+                                          │                  │
+                                          │              user code
+                                          │                  │
+                                          ▼              response
+                                     Idle/Busy
+                                     channel pool
+
+POST /functions/.../deploy-inline  ──▶  Build queue  ──▶  versions/<hash>/
+                                                          + current symlink
+
+Async writer  ◀──  invocation finished  ──▶  Event hub  ──▶  /events SSE
+     │                                            │
+     ▼                                            ▼
+  SQLite                                    Browser EventSource
+  (executions table)                        (Dashboard live tiles)
+
+All subsystems read/write a single SQLite file (orva.db):
+  users, sessions, api_keys, functions, deployments, executions,
+  execution_logs, build_logs, secrets, routes, pool_config, system_config
 ```
 
 ## Process model
