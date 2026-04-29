@@ -257,13 +257,161 @@
       </details>
     </section>
 
-    <!-- ── 4. MCP ─────────────────────────────────────────────────── -->
+    <!-- ── 4. Schedules (cron triggers) ───────────────────────────── -->
+    <section
+      id="schedules"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">04</span>
+        <div>
+          <h2 class="doc-section-title">
+            Schedules
+          </h2>
+          <p class="doc-lede">
+            Fire any function on a cron expression. The scheduler runs as
+            part of the orvad process — no external service. Manage from
+            the
+            <router-link
+              to="/cron"
+              class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
+            >Schedules page</router-link>
+            or via the API. Standard 5-field cron with the usual shorthands
+            (<code class="doc-chip">@daily</code>,
+            <code class="doc-chip">@hourly</code>,
+            <code class="doc-chip">*/5 * * * *</code>).
+          </p>
+        </div>
+      </div>
+
+      <TabbedCode
+        :tabs="cronTabs"
+        storage-key="docs.cron"
+      />
+
+      <Callout
+        :icon="CalendarClock"
+        title="Cron-fired headers"
+      >
+        Every cron-triggered invocation arrives at the function with
+        <code class="doc-chip">x-orva-trigger: cron</code>
+        and
+        <code class="doc-chip">x-orva-cron-id: cron_…</code>
+        on the event headers, so user code can branch on origin.
+      </Callout>
+    </section>
+
+    <!-- ── 5. SDK (KV, invoke, jobs) ──────────────────────────────── -->
+    <section
+      id="sdk"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">05</span>
+        <div>
+          <h2 class="doc-section-title">
+            SDK from inside a function
+          </h2>
+          <p class="doc-lede">
+            The bundled
+            <code class="doc-chip">orva</code>
+            module exposes three primitives every function can use without
+            extra dependencies: a per-function key/value store, in-process
+            calls to other Orva functions, and a fire-and-forget background
+            job queue. Routes through the per-process internal token
+            injected at worker spawn time.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="doc-card">
+          <div class="doc-microlabel">
+            <code class="doc-chip">orva.kv</code>
+          </div>
+          <div class="doc-card-body">
+            <code class="doc-chip">put / get / delete / list</code>
+            <p class="mt-1.5 text-foreground-muted">
+              Per-function namespace on SQLite, optional TTL.
+            </p>
+          </div>
+        </div>
+        <div class="doc-card">
+          <div class="doc-microlabel">
+            <code class="doc-chip">orva.invoke</code>
+          </div>
+          <div class="doc-card-body">
+            <code class="doc-chip">invoke(name, payload)</code>
+            <p class="mt-1.5 text-foreground-muted">
+              In-process call to another function. 8-deep call cap.
+            </p>
+          </div>
+        </div>
+        <div class="doc-card">
+          <div class="doc-microlabel">
+            <code class="doc-chip">orva.jobs</code>
+          </div>
+          <div class="doc-card-body">
+            <code class="doc-chip">jobs.enqueue(name, payload)</code>
+            <p class="mt-1.5 text-foreground-muted">
+              Fire-and-forget; persisted; retried with exp backoff.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">
+          KV — get/put with TTL
+        </div>
+        <TabbedCode
+          :tabs="sdkKvTabs"
+          storage-key="docs.sdk.kv"
+        />
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">
+          Function-to-function — invoke()
+        </div>
+        <TabbedCode
+          :tabs="sdkInvokeTabs"
+          storage-key="docs.sdk.invoke"
+        />
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">
+          Background jobs — jobs.enqueue()
+        </div>
+        <TabbedCode
+          :tabs="sdkJobsTabs"
+          storage-key="docs.sdk.jobs"
+        />
+      </div>
+
+      <Callout
+        :icon="Globe"
+        title="Network mode"
+      >
+        The SDK reaches orvad over loopback through the host gateway, so
+        the function needs
+        <code class="doc-chip">network_mode: "egress"</code>.
+        On the default
+        <code class="doc-chip">"none"</code>
+        the SDK throws
+        <code class="doc-chip">OrvaUnavailableError</code>
+        with a clear hint.
+      </Callout>
+    </section>
+
+    <!-- ── 6. MCP ─────────────────────────────────────────────────── -->
     <section
       id="mcp"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">04</span>
+        <span class="doc-section-num">06</span>
         <div>
           <h2 class="doc-section-title">
             MCP — Model Context Protocol
@@ -361,13 +509,13 @@
       </details>
     </section>
 
-    <!-- ── 5. Error envelope ──────────────────────────────────────── -->
+    <!-- ── 7. Error envelope ──────────────────────────────────────── -->
     <section
       id="errors"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">05</span>
+        <span class="doc-section-num">07</span>
         <div>
           <h2 class="doc-section-title">
             Errors &amp; recovery
@@ -425,6 +573,7 @@ import {
   Lock,
   Gauge,
   ChevronRight,
+  CalendarClock,
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
 import apiClient from '@/api/client'
@@ -596,6 +745,160 @@ curl -X POST ${origin.value}/fn/<function_id> \\
   -H "X-Orva-Signature: sha256=$SIG" \\
   -H 'Content-Type: application/json' \\
   -d "$BODY"`)
+
+// ── Schedules / cron tabs ───────────────────────────────────────────
+const cronTabs = computed(() => [
+  {
+    label: 'curl',
+    lang: 'bash',
+    note: 'Create a daily-9am schedule for an existing function. payload is delivered as the invoke body.',
+    code: `curl -X POST ${origin.value}/api/v1/functions/<function_id>/cron \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>' \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "cron_expr": "0 9 * * *",
+    "enabled":   true,
+    "payload":   {"task": "daily-summary"}
+  }'`,
+  },
+  {
+    label: 'Toggle / edit',
+    lang: 'bash',
+    note: 'PUT accepts any subset of {cron_expr, enabled, payload}; omitted fields keep their previous value. next_run_at is recomputed on expr changes.',
+    code: `# pause
+curl -X PUT ${origin.value}/api/v1/functions/<function_id>/cron/<cron_id> \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"enabled": false}'
+
+# change schedule
+curl -X PUT ${origin.value}/api/v1/functions/<function_id>/cron/<cron_id> \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"cron_expr": "*/15 * * * *"}'`,
+  },
+  {
+    label: 'List & delete',
+    lang: 'bash',
+    note: 'GET /api/v1/cron lists every schedule across functions (with function_name JOIN); per-function uses the nested route.',
+    code: `# all schedules
+curl ${origin.value}/api/v1/cron \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>'
+
+# delete one
+curl -X DELETE ${origin.value}/api/v1/functions/<function_id>/cron/<cron_id> \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>'`,
+  },
+])
+
+// ── SDK tabs (KV / invoke / jobs) ───────────────────────────────────
+const sdkKvTabs = [
+  {
+    label: 'Python',
+    lang: 'python',
+    code: `from orva import kv
+
+def handler(event):
+    # Store with optional TTL (seconds). 0 = no expiry.
+    kv.put("user:42", {"name": "Ada", "tier": "pro"}, ttl_seconds=3600)
+
+    # Read; default returned if missing or expired.
+    user = kv.get("user:42", default=None)
+
+    # List by prefix.
+    pages = kv.list(prefix="page:", limit=50)
+
+    # Delete is idempotent.
+    kv.delete("user:42")
+
+    return {"statusCode": 200, "body": str(user)}`,
+  },
+  {
+    label: 'Node.js',
+    lang: 'js',
+    code: `const { kv } = require('orva')
+
+exports.handler = async (event) => {
+  await kv.put('user:42', { name: 'Ada', tier: 'pro' }, { ttlSeconds: 3600 })
+
+  const user = await kv.get('user:42', null)
+
+  const pages = await kv.list({ prefix: 'page:', limit: 50 })
+
+  await kv.delete('user:42')
+
+  return { statusCode: 200, body: JSON.stringify(user) }
+}`,
+  },
+]
+
+const sdkInvokeTabs = [
+  {
+    label: 'Python',
+    lang: 'python',
+    code: `from orva import invoke, OrvaError
+
+def handler(event):
+    try:
+        # invoke() returns the downstream {statusCode, headers, body}.
+        # body is JSON-decoded when possible.
+        result = invoke("resize-image", {"url": event["body"]["url"]})
+        return {"statusCode": 200, "body": result["body"]}
+    except OrvaError as e:
+        # 404 = function not found, 507 = call depth exceeded.
+        return {"statusCode": e.status or 502, "body": str(e)}`,
+  },
+  {
+    label: 'Node.js',
+    lang: 'js',
+    code: `const { invoke, OrvaError } = require('orva')
+
+exports.handler = async (event) => {
+  try {
+    const result = await invoke('resize-image', { url: event.body.url })
+    return { statusCode: 200, body: result.body }
+  } catch (e) {
+    if (e instanceof OrvaError) {
+      return { statusCode: e.status || 502, body: e.message }
+    }
+    throw e
+  }
+}`,
+  },
+]
+
+const sdkJobsTabs = [
+  {
+    label: 'Python',
+    lang: 'python',
+    code: `from orva import jobs
+
+def handler(event):
+    # Fire-and-forget. Returns the job id immediately; the function
+    # body runs later via the scheduler. max_attempts retries with
+    # exponential backoff on 5xx / exception.
+    job_id = jobs.enqueue(
+        "send-welcome-email",
+        {"to": event["body"]["email"]},
+        max_attempts=3,
+    )
+    return {"statusCode": 202, "body": job_id}`,
+  },
+  {
+    label: 'Node.js',
+    lang: 'js',
+    code: `const { jobs } = require('orva')
+
+exports.handler = async (event) => {
+  const jobId = await jobs.enqueue(
+    'send-welcome-email',
+    { to: event.body.email },
+    { maxAttempts: 3 }
+  )
+  return { statusCode: 202, body: jobId }
+}`,
+  },
+]
 
 const errEnvelope = `{
   "error": {
