@@ -47,6 +47,13 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// MCP transport owns its own bearer-only auth gate. Don't gate it
+		// here or session-cookie callers (browsers) would bypass MCP's
+		// permission filter.
+		if r.URL.Path == "/api/v1/mcp" || strings.HasPrefix(r.URL.Path, "/api/v1/mcp/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		// Try session cookie first (browser UI).
 		if cookie, err := r.Cookie("session_token"); err == nil {

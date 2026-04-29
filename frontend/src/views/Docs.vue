@@ -131,10 +131,91 @@
       />
     </Section>
 
+    <!-- Connect from your AI agent (MCP) -->
+    <Section
+      id="mcp"
+      eyebrow="03"
+      title="Connect from your AI agent (MCP)"
+      kicker="Wire Orva up as an MCP server so Claude Desktop, Cursor, ChatGPT (Apps & Connectors), or any Anthropic / OpenAI SDK pipeline can manage it directly — list functions, deploy, invoke, watch logs."
+    >
+      <div class="kv-grid">
+        <div class="kv">
+          <div class="kv-label">
+            Endpoint
+          </div>
+          <div class="kv-value">
+            <code>{{ origin }}/api/v1/mcp</code>
+          </div>
+        </div>
+        <div class="kv">
+          <div class="kv-label">
+            Auth
+          </div>
+          <div class="kv-value">
+            <code>Authorization: Bearer &lt;orva_…&gt;</code> (mint on
+            <router-link
+              to="/api-keys"
+              class="link"
+            >
+              Access Keys
+            </router-link>)
+          </div>
+        </div>
+        <div class="kv">
+          <div class="kv-label">
+            Transport
+          </div>
+          <div class="kv-value">
+            Streamable HTTP, MCP <code>2025-11-25</code> spec
+          </div>
+        </div>
+      </div>
+
+      <TabbedCode
+        :tabs="mcpConfigTabs"
+        storage-key="docs.mcp"
+      />
+
+      <Callout
+        :icon="ShieldCheck"
+        tone="info"
+        title="The agent has the same surface a human does"
+      >
+        37 tools cover everything the UI does: function CRUD, deploy /
+        rollback, invoke, secrets, routes, API keys, firewall + DNS,
+        autoscaler config. Tools are scoped by the API key's
+        permissions — a <code>read</code>-only key sees only the
+        <code>list_*</code> and <code>get_*</code> tools, period.
+        Destructive tools (<code>delete_*</code>, <code>rollback_*</code>)
+        require an explicit <code>confirm: true</code> argument.
+      </Callout>
+
+      <Callout
+        :icon="KeyRound"
+        tone="warn"
+        title="Secrets stay encrypted, even from the agent"
+      >
+        Agents can <code>set_secret</code> and <code>delete_secret</code>,
+        and <code>list_secrets</code> shows names — but there is
+        <em>no</em> tool to read a stored secret value. Values are
+        AES-256-GCM encrypted at rest and decrypted only into the
+        sandbox process at invocation time. Same for API keys: minted
+        plaintext is shown once in <code>create_api_key</code>'s
+        response, then SHA256-hashed forever.
+      </Callout>
+
+      <p class="hint">
+        The MCP server publishes
+        <code>/.well-known/oauth-protected-resource</code> per RFC 9728
+        for clients that probe for it. No OAuth flow is required — the
+        static bearer token <em>is</em> the auth mechanism.
+      </p>
+    </Section>
+
     <!-- Handler shape with language tabs -->
     <Section
       id="handler"
-      eyebrow="03"
+      eyebrow="04"
       title="The handler"
       kicker="Export one function. Return an HTTP-shaped object. That's the contract."
     >
@@ -174,7 +255,7 @@
     <!-- Runtimes -->
     <Section
       id="runtimes"
-      eyebrow="04"
+      eyebrow="05"
       title="Runtimes"
       kicker="Latest two majors per language. Older minor versions auto-migrate."
     >
@@ -209,7 +290,7 @@
     <!-- Invoking -->
     <Section
       id="invoke"
-      eyebrow="05"
+      eyebrow="06"
       title="Invoking a function"
       kicker="Each function gets a stable URL. Send a body, return whatever the handler returns."
     >
@@ -228,7 +309,7 @@
     <!-- Deploy via API -->
     <Section
       id="deploy"
-      eyebrow="06"
+      eyebrow="07"
       title="Deploying via API"
       kicker="Two-step from CI: create the function row, upload a tarball."
     >
@@ -272,7 +353,7 @@
     <!-- Secrets & env -->
     <Section
       id="secrets"
-      eyebrow="07"
+      eyebrow="08"
       title="Secrets & environment"
       kicker="Plaintext for config, encrypted for credentials. Both reach your handler the same way."
     >
@@ -312,7 +393,7 @@
     <!-- Network access -->
     <Section
       id="network"
-      eyebrow="08"
+      eyebrow="09"
       title="Network access"
       kicker="Off by default. Opt-in per function — most handlers are pure compute and don't need it."
     >
@@ -364,7 +445,7 @@
     <!-- Securing your function -->
     <Section
       id="securing"
-      eyebrow="09"
+      eyebrow="10"
       title="Securing your function"
       kicker="Functions are public by default — same posture as Cloudflare Workers, Vercel Functions, and Lambda Function URLs. Auth is your function's job; the platform gives you opt-in guardrails."
     >
@@ -483,7 +564,7 @@
     <!-- Versions -->
     <Section
       id="versions"
-      eyebrow="10"
+      eyebrow="11"
       title="Versions & rollback"
       kicker="Every deploy is content-addressed and kept on disk. Rollback is a symlink retarget — no rebuild."
     >
@@ -522,7 +603,7 @@
     <!-- Errors -->
     <Section
       id="errors"
-      eyebrow="11"
+      eyebrow="12"
       title="Error envelope"
       kicker="Every error has a stable code, a human message, and a request id. Surface the message; switch on the code."
     >
@@ -890,6 +971,90 @@ r = httpx.post(
     json={"name": "Orva"},
 )
 print(r.json())`,
+  },
+])
+
+const mcpConfigTabs = computed(() => [
+  {
+    label: 'Claude Desktop',
+    lang: 'json',
+    code: `// ~/Library/Application Support/Claude/claude_desktop_config.json
+//   (macOS)
+// %APPDATA%\\Claude\\claude_desktop_config.json
+//   (Windows)
+{
+  "mcpServers": {
+    "orva": {
+      "url": "${origin.value}/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer orva_..."
+      }
+    }
+  }
+}`,
+  },
+  {
+    label: 'Cursor',
+    lang: 'json',
+    code: `// .cursor/mcp.json (project-local)
+//   or ~/.cursor/mcp.json (global)
+{
+  "mcpServers": {
+    "orva": {
+      "url": "${origin.value}/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer orva_..."
+      }
+    }
+  }
+}`,
+  },
+  {
+    label: 'VS Code',
+    lang: 'json',
+    code: `// .vscode/mcp.json
+{
+  "servers": {
+    "orva": {
+      "type": "http",
+      "url": "${origin.value}/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer orva_..."
+      }
+    }
+  }
+}`,
+  },
+  {
+    label: 'ChatGPT',
+    lang: 'text',
+    code: `Settings → Apps & Connectors → Create new connector
+
+  URL:           ${origin.value}/api/v1/mcp
+  Auth method:   API key (Bearer)
+  Token:         orva_...
+
+ChatGPT renders the tool catalog in the connector UI and asks
+for confirmation before destructive calls (the destructiveHint
+annotation we set on every delete_* / rollback_* tool).`,
+  },
+  {
+    label: 'curl',
+    lang: 'bash',
+    code: `# initialize
+curl -sX POST ${origin.value}/api/v1/mcp \\
+  -H 'Authorization: Bearer orva_...' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Accept: application/json, text/event-stream' \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+
+# list tools (use the Mcp-Session-Id from the initialize response)
+curl -sX POST ${origin.value}/api/v1/mcp \\
+  -H 'Authorization: Bearer orva_...' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Accept: application/json, text/event-stream' \\
+  -H 'Mcp-Session-Id: <from-initialize>' \\
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'`,
   },
 ])
 

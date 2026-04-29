@@ -9,6 +9,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/config"
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/firewall"
+	orvampc "github.com/Harsh-2002/Orva/internal/mcp"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/proxy"
@@ -229,6 +230,29 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/firewall/resolve", fwHandler.Resolve)
 	r.mux.HandleFunc("GET /api/v1/firewall/dns", fwHandler.GetDNS)
 	r.mux.HandleFunc("PUT /api/v1/firewall/dns", fwHandler.PutDNS)
+
+	// MCP server — Streamable HTTP transport at /api/v1/mcp. Speaks the
+	// 2025-11-25 protocol; auth via Authorization: Bearer <orva_xxx>
+	// (or X-Orva-API-Key for parity with REST callers). The handler
+	// owns its own auth gate, so we exclude /api/v1/mcp from the
+	// session-cookie path in middleware_auth.go below.
+	mcpHandler := orvampc.NewHandler(orvampc.Deps{
+		DB:         r.db,
+		Registry:   r.registry,
+		Builder:    r.builder,
+		BuildQueue: r.buildQueue,
+		PoolMgr:    r.poolMgr,
+		Secrets:    r.secrets,
+		Proxy:      r.proxy,
+		Firewall:   r.firewall,
+		Metrics:    r.metrics,
+		EventHub:   r.eventHub,
+		DataDir:    r.cfg.Data.Dir,
+		Version:    "0.1.0",
+	})
+	r.mux.Handle("/api/v1/mcp", mcpHandler)
+	r.mux.Handle("/api/v1/mcp/", mcpHandler)
+	r.mux.HandleFunc("GET /.well-known/oauth-protected-resource", orvampc.PRMHandler)
 
 	// UI routes — serve the Vue SPA at /web/. No credentials are injected;
 	// the UI uses /auth/onboard + /auth/login to establish a session.
