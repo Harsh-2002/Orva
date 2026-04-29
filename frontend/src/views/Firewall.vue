@@ -101,7 +101,7 @@
           <div class="dns-form">
             <input
               v-model="dnsAddInput"
-              placeholder="Add resolver IP (1.1.1.1)…"
+              placeholder="1.1.1.1"
               class="dns-input"
               @keydown.enter="addServer"
             >
@@ -111,11 +111,11 @@
               :disabled="!dnsAddInput.trim()"
               @click="addServer"
             >
-              <Plus class="w-3.5 h-3.5" /> Add
+              <Plus class="w-3.5 h-3.5" /> Add resolver
             </Button>
             <input
               v-model="dns.search"
-              placeholder="search domain (optional)"
+              placeholder="search domain"
               class="dns-input narrow"
             >
           </div>
@@ -157,15 +157,15 @@
           <div class="dns-form">
             <input
               v-model="recordHostInput"
-              placeholder="hostname (api.internal)"
-              class="dns-input"
+              placeholder="api.internal"
+              class="dns-input host"
               @keydown.enter="addRecord"
             >
             <span class="text-foreground-muted text-xs">→</span>
             <input
               v-model="recordIPInput"
-              placeholder="IP (10.0.5.10)"
-              class="dns-input narrow"
+              placeholder="10.0.5.10"
+              class="dns-input"
               @keydown.enter="addRecord"
             >
             <Button
@@ -1078,6 +1078,11 @@ const RuleCard = defineComponent({
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+/* DNS inputs are sized to the values they accept rather than stretching
+   to fill the row. IPv4 maxes at 15 chars, IPv6 at 39 (rare); hostnames
+   typical 12–24. Using ch + a flex: 0 0 auto basis keeps the width
+   honest at any container size, and the row wraps when the viewport
+   shrinks. */
 .dns-input {
   background: var(--color-background);
   border: 1px solid var(--color-border);
@@ -1086,12 +1091,14 @@ const RuleCard = defineComponent({
   font-size: 12px;
   font-family: var(--font-mono);
   color: var(--color-foreground);
-  min-width: 220px;
-  flex: 1;
+  flex: 0 0 auto;
+  width: 18ch;        /* default: IP-sized */
+}
+.dns-input.host {
+  width: 26ch;        /* hostname slot — slightly wider */
 }
 .dns-input.narrow {
-  flex: 0 0 auto;
-  min-width: 160px;
+  width: 14ch;        /* search domain etc. */
 }
 .dns-input::placeholder {
   color: var(--color-foreground-muted);
