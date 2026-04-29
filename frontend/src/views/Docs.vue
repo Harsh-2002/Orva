@@ -56,10 +56,85 @@
       </div>
     </Section>
 
+    <!-- Generate with AI -->
+    <Section
+      id="generate"
+      eyebrow="02"
+      title="Generate with AI"
+      kicker="Skip the boilerplate. Have ChatGPT or Claude write your handler — pre-loaded with everything Orva supports."
+    >
+      <div class="ai-cta-row">
+        <button
+          class="ai-btn ai-btn-chatgpt"
+          @click="onOpenChatGPT"
+        >
+          <span class="ai-btn-glyph">
+            <Sparkles class="w-4 h-4" />
+          </span>
+          <span class="ai-btn-text">
+            <span class="ai-btn-title">Open in ChatGPT</span>
+            <span class="ai-btn-sub">Prefilled — press Enter to send</span>
+          </span>
+        </button>
+        <button
+          class="ai-btn ai-btn-claude"
+          @click="onOpenClaude"
+        >
+          <span class="ai-btn-glyph">
+            <Sparkles class="w-4 h-4" />
+          </span>
+          <span class="ai-btn-text">
+            <span class="ai-btn-title">Open in Claude</span>
+            <span class="ai-btn-sub">Prompt copied — paste in the new tab</span>
+          </span>
+        </button>
+      </div>
+
+      <Callout
+        :icon="Wand2"
+        tone="info"
+        title="What we send"
+      >
+        A system prompt that teaches the model Orva's runtimes, handler
+        contract, sandbox limits, and built-in auth modes. The full text is
+        below — copy it for any other AI tool (Gemini, le Chat, your
+        self-hosted model). Free to tweak before you send.
+      </Callout>
+
+      <div class="ai-prompt-actions">
+        <button
+          class="ai-copy-btn"
+          :class="{ copied: promptCopied }"
+          @click="onCopyPrompt"
+        >
+          <Check
+            v-if="promptCopied"
+            class="w-3.5 h-3.5"
+          />
+          <Copy
+            v-else
+            class="w-3.5 h-3.5"
+          />
+          {{ promptCopied ? 'Copied' : 'Copy system prompt' }}
+        </button>
+        <span
+          v-if="claudeNote"
+          class="ai-claude-note"
+        >
+          claude.ai removed direct prompt links in 2025 — we put the prompt on your clipboard, paste it in the chat that just opened.
+        </span>
+      </div>
+
+      <CodeBlock
+        :code="aiPromptText"
+        lang="text"
+      />
+    </Section>
+
     <!-- Handler shape with language tabs -->
     <Section
       id="handler"
-      eyebrow="02"
+      eyebrow="03"
       title="The handler"
       kicker="Export one function. Return an HTTP-shaped object. That's the contract."
     >
@@ -99,7 +174,7 @@
     <!-- Runtimes -->
     <Section
       id="runtimes"
-      eyebrow="03"
+      eyebrow="04"
       title="Runtimes"
       kicker="Latest two majors per language. Older minor versions auto-migrate."
     >
@@ -134,7 +209,7 @@
     <!-- Invoking -->
     <Section
       id="invoke"
-      eyebrow="04"
+      eyebrow="05"
       title="Invoking a function"
       kicker="Each function gets a stable URL. Send a body, return whatever the handler returns."
     >
@@ -153,7 +228,7 @@
     <!-- Deploy via API -->
     <Section
       id="deploy"
-      eyebrow="05"
+      eyebrow="06"
       title="Deploying via API"
       kicker="Two-step from CI: create the function row, upload a tarball."
     >
@@ -197,7 +272,7 @@
     <!-- Secrets & env -->
     <Section
       id="secrets"
-      eyebrow="06"
+      eyebrow="07"
       title="Secrets & environment"
       kicker="Plaintext for config, encrypted for credentials. Both reach your handler the same way."
     >
@@ -237,7 +312,7 @@
     <!-- Network access -->
     <Section
       id="network"
-      eyebrow="07"
+      eyebrow="08"
       title="Network access"
       kicker="Off by default. Opt-in per function — most handlers are pure compute and don't need it."
     >
@@ -289,7 +364,7 @@
     <!-- Securing your function -->
     <Section
       id="securing"
-      eyebrow="08"
+      eyebrow="09"
       title="Securing your function"
       kicker="Functions are public by default — same posture as Cloudflare Workers, Vercel Functions, and Lambda Function URLs. Auth is your function's job; the platform gives you opt-in guardrails."
     >
@@ -408,7 +483,7 @@
     <!-- Versions -->
     <Section
       id="versions"
-      eyebrow="09"
+      eyebrow="10"
       title="Versions & rollback"
       kicker="Every deploy is content-addressed and kept on disk. Rollback is a symlink retarget — no rebuild."
     >
@@ -447,7 +522,7 @@
     <!-- Errors -->
     <Section
       id="errors"
-      eyebrow="10"
+      eyebrow="11"
       title="Error envelope"
       kicker="Every error has a stable code, a human message, and a request id. Surface the message; switch on the code."
     >
@@ -487,8 +562,16 @@ import {
   ShieldCheck,
   Lock,
   Gauge,
+  Sparkles,
+  Wand2,
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
+import {
+  buildPromptText,
+  openInChatGPT,
+  openInClaude,
+  copyPromptToClipboard,
+} from '@/utils/aiPrompts'
 
 // Syntax highlighting — highlight.js core + only the grammars we use.
 // Importing the lite core (vs. the auto-bundle) keeps the Docs chunk small;
@@ -520,6 +603,32 @@ const quickSteps = [
   { title: 'Invoke', body: 'Curl the URL printed under the editor, or wire it up to a custom route or cron schedule.' },
   { title: 'Secure it', body: 'Verify a JWT in your handler, or flip Invoke gate to platform_key / signed for server-to-server.' },
 ]
+
+// ── "Generate with AI" state ────────────────────────────────────────
+// aiPromptText is computed once (the spec rarely changes) and rendered
+// inline in section 02 as a plain CodeBlock — full transparency.
+const aiPromptText = buildPromptText()
+const promptCopied = ref(false)
+const claudeNote = ref(false)
+let promptCopiedTimer = null
+let claudeNoteTimer = null
+
+const onOpenChatGPT = () => openInChatGPT()
+
+const onOpenClaude = async () => {
+  await openInClaude()
+  claudeNote.value = true
+  clearTimeout(claudeNoteTimer)
+  claudeNoteTimer = setTimeout(() => { claudeNote.value = false }, 8000)
+}
+
+const onCopyPrompt = async () => {
+  const ok = await copyPromptToClipboard()
+  if (!ok) return
+  promptCopied.value = true
+  clearTimeout(promptCopiedTimer)
+  promptCopiedTimer = setTimeout(() => { promptCopied.value = false }, 1500)
+}
 
 // ── Section component ─────────────────────────────────────────────────
 // Lightweight wrapper so each section's frame (eyebrow / heading / kicker)
@@ -1536,5 +1645,119 @@ const Callout = defineComponent({
 .tone-warn { background: rgba(234, 179, 8, 0.06); border-color: rgba(234, 179, 8, 0.3); }
 .tone-warn .callout-head { color: #facc15; }
 .tone-info .callout-head { color: var(--color-foreground-muted); }
+
+/* "Generate with AI" — section 02 */
+.ai-cta-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+.ai-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.95rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: white;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+  position: relative;
+  overflow: hidden;
+}
+.ai-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--ai-glow, transparent);
+  opacity: 0.08;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.ai-btn:hover {
+  transform: translateY(-1px);
+}
+.ai-btn:hover::before {
+  opacity: 0.16;
+}
+.ai-btn-glyph {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  color: var(--ai-accent, white);
+}
+.ai-btn-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ai-btn-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1.2;
+}
+.ai-btn-sub {
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+  margin-top: 0.2rem;
+}
+.ai-btn-chatgpt {
+  --ai-accent: #10a37f;
+  --ai-glow: linear-gradient(120deg, #10a37f 0%, #0d8a6a 100%);
+}
+.ai-btn-chatgpt:hover {
+  border-color: rgba(16, 163, 127, 0.55);
+}
+.ai-btn-claude {
+  --ai-accent: #d97757;
+  --ai-glow: linear-gradient(120deg, #d97757 0%, #b35e3f 100%);
+}
+.ai-btn-claude:hover {
+  border-color: rgba(217, 119, 87, 0.55);
+}
+
+.ai-prompt-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.ai-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-foreground-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.ai-copy-btn:hover {
+  color: white;
+  border-color: var(--color-foreground-muted);
+}
+.ai-copy-btn.copied {
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.4);
+}
+.ai-claude-note {
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+  line-height: 1.5;
+  flex: 1 1 220px;
+}
+.fade-enter-active, .fade-leave-active { transition: opacity 220ms ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 </style>

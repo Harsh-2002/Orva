@@ -127,8 +127,18 @@
             class="text-foreground-muted"
           >· template: {{ templateId }}</span>
         </div>
-        <div class="text-[10px] text-foreground-muted font-mono">
-          {{ code.length }} chars
+        <div class="flex items-center gap-3">
+          <button
+            v-if="!isEditing"
+            class="ai-gen-link"
+            title="Open ChatGPT pre-loaded with everything Orva supports"
+            @click="onGenerateWithAI"
+          >
+            <Sparkles class="w-3 h-3" /> Generate with AI
+          </button>
+          <div class="text-[10px] text-foreground-muted font-mono">
+            {{ code.length }} chars
+          </div>
         </div>
       </div>
       <CodeEditor
@@ -764,7 +774,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Sparkles } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
@@ -772,6 +782,7 @@ import Modal from '@/components/common/Modal.vue'
 import apiClient from '@/api/client'
 import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
+import { openInChatGPT } from '@/utils/aiPrompts'
 import { rollbackFunction } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 
@@ -868,6 +879,11 @@ const pendingSecrets = ref([])
 const totalSecretsCount = computed(() => secrets.value.length + pendingSecrets.value.length)
 
 const isEditing = computed(() => !!route.params.name)
+
+// "Generate with AI" — opens ChatGPT in a new tab pre-loaded with the
+// shared Orva system prompt. Only shown when creating a new function
+// (the link is hidden once the user is editing an existing one).
+const onGenerateWithAI = () => openInChatGPT()
 // canTest: function has deployed code AND there's no active build in
 // flight. While `deploying` is true, the warm pool may be holding stale
 // code (or none, on a first deploy) so test invocations should wait.
@@ -1631,5 +1647,28 @@ const resetForm = async () => {
 .panel-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* "Generate with AI" entry point in the editor file header — only
+   shown when creating a new function. Subtle by default; sparkle
+   icon and hover accent surface it without competing with Deploy. */
+.ai-gen-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-foreground-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+}
+.ai-gen-link:hover {
+  color: white;
+  border-color: rgba(16, 163, 127, 0.45);
+  background: rgba(16, 163, 127, 0.08);
 }
 </style>
