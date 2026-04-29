@@ -91,6 +91,10 @@ type poolBlock struct {
 	LatencyEWMAms float64 `json:"latency_ewma_ms"`
 	DynamicMax    int64   `json:"dynamic_max"`
 	Target        int     `json:"target"`
+	MemUsedAvgMB  float64 `json:"mem_used_avg_mb"`  // EWMA of memory.current at release; 0 if cgroups disabled
+	CPUFracAvg    float64 `json:"cpu_frac_avg"`     // EWMA of CPU fraction per invocation (0–1)
+	MemLimitMB    int64   `json:"mem_limit_mb"`     // configured memory_mb for this function
+	CPULimit      float64 `json:"cpu_limit"`        // configured cpus for this function (0 = uncapped)
 }
 
 // Health handles GET /api/v1/system/health.
@@ -165,6 +169,12 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "orva_pool_latency_ewma_ms{function_id=%q} %.2f\n", s.FunctionID, s.LatencyEWMAms)
 			fmt.Fprintf(w, "orva_pool_max_dynamic{function_id=%q} %d\n", s.FunctionID, s.DynamicMax)
 			fmt.Fprintf(w, "orva_pool_target_concurrency{function_id=%q} %d\n", s.FunctionID, s.Target)
+			if s.MemUsedAvgBytes > 0 {
+				fmt.Fprintf(w, "orva_pool_mem_used_avg_bytes{function_id=%q} %d\n", s.FunctionID, s.MemUsedAvgBytes)
+			}
+			if s.CPUFracAvg > 0 {
+				fmt.Fprintf(w, "orva_pool_cpu_frac_avg{function_id=%q} %.4f\n", s.FunctionID, s.CPUFracAvg)
+			}
 		}
 		tot, avail, res := h.PoolMgr.HostMemStats()
 		fmt.Fprintf(w, "orva_host_mem_total_bytes %d\n", tot)
@@ -239,9 +249,13 @@ func (h *SystemHandler) BuildMetricsSnapshot() MetricsJSONShape {
 		out.Pools = make([]poolBlock, 0, len(stats))
 		for _, s := range stats {
 			name := s.FunctionID
+			var memLimitMB int64
+			var cpuLimit float64
 			if h.Registry != nil {
 				if fn, err := h.Registry.Get(s.FunctionID); err == nil && fn != nil {
 					name = fn.Name
+					memLimitMB = fn.MemoryMB
+					cpuLimit = fn.CPUs
 				}
 			}
 			out.Pools = append(out.Pools, poolBlock{
@@ -257,6 +271,10 @@ func (h *SystemHandler) BuildMetricsSnapshot() MetricsJSONShape {
 				LatencyEWMAms: s.LatencyEWMAms,
 				DynamicMax:    s.DynamicMax,
 				Target:        s.Target,
+				MemUsedAvgMB:  float64(s.MemUsedAvgBytes) / 1024 / 1024,
+				CPUFracAvg:    s.CPUFracAvg,
+				MemLimitMB:    memLimitMB,
+				CPULimit:      cpuLimit,
 			})
 		}
 	}

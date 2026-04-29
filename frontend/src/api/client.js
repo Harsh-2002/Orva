@@ -36,6 +36,25 @@ apiClient.interceptors.response.use(
   }
 )
 
+// fnClient is used exclusively for /fn/ invocations. It lives at a
+// separate baseURL because /fn/ is not under /api/v1.
+const fnClient = axios.create({
+  baseURL: '/fn',
+  timeout: 60000,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
+fnClient.interceptors.request.use((config) => {
+  const key = getApiKey()
+  if (key) {
+    config.headers['X-Orva-API-Key'] = key
+  }
+  return config
+})
+
 export default apiClient
 
-export { getApiKey }
+export { getApiKey, fnClient }

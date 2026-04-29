@@ -327,9 +327,10 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	}
 
 	// Construct the synthetic HTTP request the proxy expects. We point
-	// it at /api/v1/invoke/<id><path> so Proxy.Forward's path-strip
-	// logic matches the same shape it does for real REST callers.
-	fullPath := "/api/v1/invoke/" + fn.ID
+	// it at /fn/<short_id><path> so Proxy.Forward's path-strip logic
+	// matches the same shape it does for real REST callers.
+	shortID := strings.TrimPrefix(fn.ID, "fn_")
+	fullPath := "/fn/" + shortID
 	if path != "" && path != "/" {
 		if !strings.HasPrefix(path, "/") {
 			path = "/" + path

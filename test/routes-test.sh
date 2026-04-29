@@ -36,7 +36,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 # 2. Register an exact route + a non-reserved prefix route. (Routes
-# starting with /api/, /auth/, /web/, /_orva/ are correctly rejected by
+# starting with /api/, /fn/, /mcp/, /web/, /_orva/ are correctly rejected by
 # the server with 400 — that's a deliberate isolation guard.)
 "${CURL[@]}" -X POST "$BASE/api/v1/routes" \
     -H "Content-Type: application/json" \
@@ -67,7 +67,7 @@ check "prefix route /customer/* → path=/orders/123" \
     "$([ "$got_pp" = "/orders/123" ] && echo ok || echo fail)" "got=$got_pp"
 
 # 5. Direct invoke still works while custom routes exist.
-direct=$(curl -sf -X POST -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/invoke/$fid/" -d '{}')
+direct=$(curl -sf -X POST -H "X-Orva-API-Key: $KEY" "$BASE/fn/${fid#fn_}/" -d '{}')
 got_direct=$(echo "$direct" | jq -r '.path')
 check "direct invoke coexists" \
     "$([ "$got_direct" = "/" ] && echo ok || echo fail)" "got=$got_direct"

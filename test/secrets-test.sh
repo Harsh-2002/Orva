@@ -56,7 +56,7 @@ done
 
 # 3. Invoke once; assert all three values.
 sleep 1
-resp=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 got_secret=$(echo "$resp" | jq -r '.STRIPE_SECRET')
 got_webhook=$(echo "$resp" | jq -r '.STRIPE_WEBHOOK')
 got_public=$(echo "$resp" | jq -r '.STRIPE_PUBLIC')
@@ -75,7 +75,7 @@ check "STRIPE_PUBLIC injected"  "$([ "$got_public"  = pk_test_pub456  ] && echo 
     -H "Content-Type: application/json" \
     -d "$(jq -n --arg c "$code" '{code:$c, filename:"handler.js"}')" > /dev/null
 sleep 3
-resp2=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp2=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 check "STRIPE_WEBHOOK deleted"   "$([ "$(echo "$resp2" | jq -r '.STRIPE_WEBHOOK')" = null  ] && echo ok || echo fail)" "still=$(echo "$resp2" | jq -r '.STRIPE_WEBHOOK')"
 check "STRIPE_SECRET preserved"  "$([ "$(echo "$resp2" | jq -r '.STRIPE_SECRET')"  = sk_test_abc123 ] && echo ok || echo fail)" "got=$(echo "$resp2" | jq -r '.STRIPE_SECRET')"
 
@@ -87,7 +87,7 @@ fi
 
 # 6. Concurrent invoke — assert all responses consistent.
 if command -v hey >/dev/null 2>&1; then
-    out=$(hey -z 15s -c 20 -m POST -H "X-Orva-API-Key: $KEY" -d '{}' "$BASE/api/v1/invoke/$fid/" 2>&1)
+    out=$(hey -z 15s -c 20 -m POST -H "X-Orva-API-Key: $KEY" -d '{}' "$BASE/fn/${fid#fn_}/" 2>&1)
     twenty_oks=$(echo "$out" | awk '/200/ {print $1; exit}')
     check "concurrent invoke (c=20, 15s)" "$([ -n "$twenty_oks" ] && echo ok || echo fail)" "no 200 reported"
 fi

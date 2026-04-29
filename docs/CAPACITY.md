@@ -100,7 +100,7 @@ Off-by-one is the sampling race between `metrics.json` snapshot and the `ps`-equ
 | Memory accounting                      | ✓      | mem_reserved tracks workers    |
 | Process leak                           | ✓      | nsjail count matches pool size |
 | Bootstrap admin key persistence        | ✓      | survives `docker rm` + `run`   |
-| `/auth/status` route guard correctness | ✓      | doesn't bounce to onboarding   |
+| `/api/v1/auth/status` route guard correctness | ✓      | doesn't bounce to onboarding   |
 | Latency unit (ns→ms fix)               | ✓      | `latency_ms` is now ms in JSON |
 | New `/system/metrics.json` endpoint    | ✓      | UI reads this directly         |
 
@@ -130,7 +130,7 @@ Plus one **architectural fix** uncovered while writing E.4 tests:
 | Secrets injection | secrets-test.sh | ✓ 8/8: STRIPE_* env injected, delete propagates via pool refresh, value_encrypted opaque, c=20 invokes consistent | `test/run-all-results.tsv` |
 | Custom routes | routes-test.sh | ✓ 7/7: exact + prefix matching, reserved-prefix rejected (400), method restriction (405/200), direct invoke coexists, c=25 load | `test/run-all-results.tsv` |
 | Heavy-dep async deploy | heavy-deploy-test.sh | ✓ 12/12: POST 202 in <500 ms, terminal status, requests==2.31.0 imported in sandbox, failure path keeps prior version active | `test/heavy-deploy-stream.log` |
-| Onboarding curl-sim | onboarding-flow.sh | ✓ 13/13: status flips, cookie 7d, /auth/me returns expires_at, /auth/refresh rotates token, logout invalidates | `test/run-all-results.tsv` |
+| Onboarding curl-sim | onboarding-flow.sh | ✓ 13/13: status flips, cookie 7d, /api/v1/auth/me returns expires_at, /api/v1/auth/refresh rotates token, logout invalidates | `test/run-all-results.tsv` |
 | Error code coverage | errors-test.sh (Round F) | ✓ 5/5: PAYLOAD_TOO_LARGE 413, WORKER_CRASHED 502, TIMEOUT 504, NOT_FOUND 404, METHOD_NOT_ALLOWED 405 (POOL_AT_CAPACITY needs sqlite3 in image — skipped gracefully) | `docs/ERRORS.md` |
 | Onboarding (browser) | manual checklist | pending — operator runs through Onboarding → Login → Dashboard → Editor flow once after deploying a release | append a dated checklist below |
 
@@ -147,5 +147,5 @@ Plus one **architectural fix** uncovered while writing E.4 tests:
 [ ] Click a deployment row → drawer opens with build log
 [ ] Wait for session to enter the last 12h (or set cookie expiry via devtools) → toast appears
 [ ] Click "Stay signed in" → toast clears, navigate, no re-prompt
-[ ] /auth/logout → bounces to /login
+[ ] /api/v1/auth/logout → bounces to /login
 ```

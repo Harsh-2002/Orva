@@ -14,7 +14,7 @@ over HTTP, and get warm-pool latency without paying anyone.
 - **Deploy** Node.js (22, 24) or Python (3.13, 3.14) functions
   inline (paste code in the dashboard) or as a tarball with
   `package.json` / `requirements.txt`.
-- **Invoke** at `POST /api/v1/invoke/<fn-id>/<path>`. The path tail
+- **Invoke** at `POST /fn/<id>/<path>` (short ID without `fn_` prefix). The path tail
   reaches your handler as `event.path`. AWS-Lambda-style and HTTP-style
   handlers both work.
 - **Roll back** to any prior content-hashed version in one click.

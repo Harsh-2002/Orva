@@ -54,7 +54,7 @@ done
 check "auth=none deploy active" "$([ "$s" = active ] && echo ok || echo fail)" "status=$s"
 
 # Hit it without ANY auth header.
-status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/invoke/$fid_none/" -d '{}')
+status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/fn/${fid_none#fn_}/" -d '{}')
 check "auth=none allows public invoke" "$([ "$status" = 200 ] && echo ok || echo fail)" "status=$status"
 
 # ---------------------------------------------------------------
@@ -75,16 +75,16 @@ for _ in $(seq 1 15); do
 done
 
 # No header → 401.
-status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/invoke/$fid_key/" -d '{}')
+status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/fn/${fid_key#fn_}/" -d '{}')
 check "auth=platform_key blocks unauthed" "$([ "$status" = 401 ] && echo ok || echo fail)" "status=$status"
 
 # Valid header → 200.
-status=$("${CURL_AUTH[@]}" -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/invoke/$fid_key/" -d '{}')
+status=$("${CURL_AUTH[@]}" -o /dev/null -w '%{http_code}' -X POST "$BASE/fn/${fid_key#fn_}/" -d '{}')
 check "auth=platform_key allows valid key" "$([ "$status" = 200 ] && echo ok || echo fail)" "status=$status"
 
 # Bogus header → 401.
 status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'X-Orva-API-Key: not-a-real-key' \
-    -X POST "$BASE/api/v1/invoke/$fid_key/" -d '{}')
+    -X POST "$BASE/fn/${fid_key#fn_}/" -d '{}')
 check "auth=platform_key rejects bad key" "$([ "$status" = 401 ] && echo ok || echo fail)" "status=$status"
 
 # ---------------------------------------------------------------
@@ -112,7 +112,7 @@ for _ in $(seq 1 15); do
 done
 
 # 3a. No headers → 401.
-status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/invoke/$fid_sig/" -d '{}')
+status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/fn/${fid_sig#fn_}/" -d '{}')
 check "auth=signed blocks no-headers" "$([ "$status" = 401 ] && echo ok || echo fail)" "status=$status"
 
 # 3b. Valid HMAC → 200.
@@ -123,7 +123,7 @@ status=$(curl -sS -o /dev/null -w '%{http_code}' \
     -H "X-Orva-Timestamp: $TS" \
     -H "X-Orva-Signature: sha256=$SIG" \
     -H 'Content-Type: application/json' \
-    -X POST "$BASE/api/v1/invoke/$fid_sig/" -d "$BODY")
+    -X POST "$BASE/fn/${fid_sig#fn_}/" -d "$BODY")
 check "auth=signed allows valid HMAC" "$([ "$status" = 200 ] && echo ok || echo fail)" "status=$status"
 
 # 3c. Tampered body → 401 (sig over old body, send new body).
@@ -131,7 +131,7 @@ status=$(curl -sS -o /dev/null -w '%{http_code}' \
     -H "X-Orva-Timestamp: $TS" \
     -H "X-Orva-Signature: sha256=$SIG" \
     -H 'Content-Type: application/json' \
-    -X POST "$BASE/api/v1/invoke/$fid_sig/" -d '{"hello":"tampered"}')
+    -X POST "$BASE/fn/${fid_sig#fn_}/" -d '{"hello":"tampered"}')
 check "auth=signed rejects tampered body" "$([ "$status" = 401 ] && echo ok || echo fail)" "status=$status"
 
 # 3d. Stale timestamp (>5 min ago) → 401.
@@ -141,7 +141,7 @@ status=$(curl -sS -o /dev/null -w '%{http_code}' \
     -H "X-Orva-Timestamp: $OLD_TS" \
     -H "X-Orva-Signature: sha256=$OLD_SIG" \
     -H 'Content-Type: application/json' \
-    -X POST "$BASE/api/v1/invoke/$fid_sig/" -d "$BODY")
+    -X POST "$BASE/fn/${fid_sig#fn_}/" -d "$BODY")
 check "auth=signed rejects stale timestamp" "$([ "$status" = 401 ] && echo ok || echo fail)" "status=$status"
 
 # ---------------------------------------------------------------
@@ -162,7 +162,7 @@ done
 
 throttled=0
 for i in $(seq 1 7); do
-    code_=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/invoke/$fid_rl/" -d '{}')
+    code_=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/fn/${fid_rl#fn_}/" -d '{}')
     if [ "$code_" = "429" ]; then throttled=$((throttled+1)); fi
 done
 check "rate_limit returns 429 on burst" "$([ "$throttled" -ge 1 ] && echo ok || echo fail)" "throttled=$throttled/7"

@@ -46,7 +46,7 @@ func Defaults() *Config {
 		},
 		Functions: FunctionsConfig{
 			DefaultTimeoutMS: 30000,
-			DefaultMemoryMB:  128,
+			DefaultMemoryMB:  64,
 			DefaultCPUs:      0.5,
 			MaxCodeSize:      50 * 1024 * 1024, // 50MB
 		},
@@ -57,6 +57,7 @@ func Defaults() *Config {
 		},
 		Security: SecurityConfig{
 			CORSOrigins: []string{"*"},
+			SessionDays: 7,
 		},
 		Data: DataConfig{
 			Dir: dataDir,

@@ -155,7 +155,7 @@ for name in "${LOAD_FNS[@]}"; do
     fid=${FN_ID[$name]}
     (
         hey -z 30s -c 25 -m POST -H "X-Orva-API-Key: $KEY" \
-            -d '{}' "$BASE/api/v1/invoke/$fid/" \
+            -d '{}' "$BASE/fn/$fid/" \
             > "$TMPDIR/$name.hey" 2>&1
     ) &
     PIDS+=($!)

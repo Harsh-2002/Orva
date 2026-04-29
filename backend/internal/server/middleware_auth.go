@@ -34,23 +34,16 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// /fn/ (invoke) and /mcp do not start with /api/ — they bypass this
+		// middleware entirely. Custom routes also don't start with /api/ so
+		// they are naturally unauthenticated here; per-function auth_mode is
+		// enforced inside InvokeHandler.
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// Function invocations are public by default. Per-function auth_mode
-		// (none|platform_key|signed) is enforced inside InvokeHandler. This
-		// matches Cloudflare Workers / Vercel Functions / Lambda Function URLs
-		// and keeps direct-invoke parity with custom routes (which always
-		// bypass middleware because they don't start with /api/).
-		if strings.HasPrefix(r.URL.Path, "/api/v1/invoke/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// MCP transport owns its own bearer-only auth gate. Don't gate it
-		// here or session-cookie callers (browsers) would bypass MCP's
-		// permission filter.
-		if r.URL.Path == "/api/v1/mcp" || strings.HasPrefix(r.URL.Path, "/api/v1/mcp/") {
+		// Auth routes establish the session — they must not require prior auth.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -132,11 +125,6 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 
 // requiredPermission determines the required permission for a request.
 func requiredPermission(method, path string) string {
-	// Invoke paths require "invoke" permission.
-	if strings.HasPrefix(path, "/api/v1/invoke/") {
-		return "invoke"
-	}
-
 	// Key management and pool config require "admin" permission.
 	if strings.HasPrefix(path, "/api/v1/keys") {
 		return "admin"

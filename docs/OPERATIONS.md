@@ -177,7 +177,7 @@ or access via `localhost`/`127.0.0.1` from the host itself.
 ## Symptom: containers won't start (auth flicker, redirected to /onboarding)
 
 **Diagnosis.** Browser localStorage shows `orva.hasUser=false` from a
-prior failed `/auth/status` call.
+prior failed `/api/v1/auth/status` call.
 
 **Fix.** Hard refresh (Ctrl+Shift+R). If that doesn't clear it, open
 devtools → Application → localStorage → delete `orva.hasUser`.

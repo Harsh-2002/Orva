@@ -44,7 +44,7 @@ type InvokeHandler struct {
 
 // ServeHTTP is the hot path for function invocation. It accepts two path
 // shapes:
-//   - /api/v1/invoke/{fn_id}/... — internal direct invoke
+//   - /fn/{id}/... — direct invoke (id is the short form without "fn_" prefix)
 //   - any custom route previously registered via /api/v1/routes that maps
 //     a user-chosen path (e.g. /webhooks/stripe) to a function_id
 func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -52,9 +52,9 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var fnID string
 	// Prefix we should strip from the incoming request path before handing
-	// it to the sandboxed function. For /api/v1/invoke/{fn_id} this is
-	// handled inside proxy.Forward; for custom routes we compute the strip
-	// here based on whether the match was exact or a `/prefix/*` match.
+	// it to the sandboxed function. For /fn/{id} this is handled inside
+	// proxy.Forward; for custom routes we compute the strip here based on
+	// whether the match was exact or a `/prefix/*` match.
 	var stripPrefix string
 
 	// Check custom routes first. MatchRoute tries exact match, then the
@@ -84,7 +84,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			stripPrefix = matched // full path → function sees "/"
 		}
 	} else {
-		// Fall back to /api/v1/invoke/{fn_id} extraction.
+		// Fall back to /fn/{id} extraction.
 		fnID = extractFnID(r.URL.Path)
 	}
 
@@ -295,17 +295,22 @@ func hasPriorCode(dataDir, fnID string) bool {
 	return err == nil && st.IsDir()
 }
 
-// extractFnID pulls the function ID from paths like /api/v1/invoke/{fn_id} or
-// /api/v1/invoke/{fn_id}/sub/path.
+// extractFnID pulls the function ID from paths like /fn/{id} or /fn/{id}/sub/path.
+// The URL uses the short form without the "fn_" prefix; this function adds it back.
 func extractFnID(path string) string {
-	const prefix = "/api/v1/invoke/"
+	const prefix = "/fn/"
 	if !strings.HasPrefix(path, prefix) {
 		return ""
 	}
 	remainder := strings.TrimPrefix(path, prefix)
-	// The fn_id is everything up to the next slash (or end of string).
+	var shortID string
 	if idx := strings.Index(remainder, "/"); idx >= 0 {
-		return remainder[:idx]
+		shortID = remainder[:idx]
+	} else {
+		shortID = remainder
 	}
-	return remainder
+	if shortID == "" {
+		return ""
+	}
+	return "fn_" + shortID
 }

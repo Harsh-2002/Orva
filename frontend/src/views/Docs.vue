@@ -144,7 +144,7 @@
             Endpoint
           </div>
           <div class="kv-value">
-            <code>{{ origin }}/api/v1/mcp</code>
+            <code>{{ origin }}/mcp</code>
           </div>
         </div>
         <div class="kv">
@@ -328,8 +328,8 @@
 
       <Callout title="Custom routes">
         Want a friendly path like <code>/webhooks/stripe</code>? Attach a route via
-        <code>POST /api/v1/routes</code>. Reserved prefixes (<code>/api/</code>, <code>/auth/</code>,
-        <code>/web/</code>, <code>/_orva/</code>) are off-limits.
+        <code>POST /api/v1/routes</code>. Reserved prefixes (<code>/api/</code>, <code>/fn/</code>,
+        <code>/mcp/</code>, <code>/web/</code>, <code>/_orva/</code>) are off-limits.
       </Callout>
     </Section>
 
@@ -979,14 +979,14 @@ const invokeTabs = computed(() => [
   {
     label: 'curl',
     lang: 'bash',
-    code: `curl -X POST ${origin.value}/api/v1/invoke/<function_id> \\
+    code: `curl -X POST ${origin.value}/fn/<function_id> \\
   -H 'Content-Type: application/json' \\
   -d '{"name": "Orva"}'`,
   },
   {
     label: 'fetch',
     lang: 'js',
-    code: `const res = await fetch('${origin.value}/api/v1/invoke/<function_id>', {
+    code: `const res = await fetch('${origin.value}/fn/<function_id>', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ name: 'Orva' }),
@@ -999,7 +999,7 @@ console.log(await res.json());`,
     code: `import httpx
 
 r = httpx.post(
-    "${origin.value}/api/v1/invoke/<function_id>",
+    "${origin.value}/fn/<function_id>",
     json={"name": "Orva"},
 )
 print(r.json())`,
@@ -1055,7 +1055,7 @@ const mcpInstallTabs = computed(() => [
     label: 'Claude Code',
     lang: 'bash',
     note: 'Anthropic\'s official `claude` CLI. Restart Claude Code after running; `/mcp` will list Orva\'s 37 tools.',
-    code: `claude mcp add --transport http --scope user orva ${origin.value}/api/v1/mcp --header "Authorization: Bearer ${T.value}"`,
+    code: `claude mcp add --transport http --scope user orva ${origin.value}/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {
     label: 'Claude Desktop',
@@ -1064,7 +1064,7 @@ const mcpInstallTabs = computed(() => [
     code: `{
   "mcpServers": {
     "orva": {
-      "url": "${origin.value}/api/v1/mcp",
+      "url": "${origin.value}/mcp",
       "headers": {
         "Authorization": "Bearer ${T.value}"
       }
@@ -1082,18 +1082,18 @@ const mcpInstallTabs = computed(() => [
     label: 'VS Code',
     lang: 'bash',
     note: 'User-scoped install via the Copilot-MCP `code --add-mcp` flag. Answer "Workspace" at the prompt to write .vscode/mcp.json instead.',
-    code: `code --add-mcp '{"name":"orva","type":"http","url":"${origin.value}/api/v1/mcp","headers":{"Authorization":"Bearer ${T.value}"}}'`,
+    code: `code --add-mcp '{"name":"orva","type":"http","url":"${origin.value}/mcp","headers":{"Authorization":"Bearer ${T.value}"}}'`,
   },
   {
     label: 'Codex CLI',
     lang: 'bash',
     note: 'OpenAI\'s official `codex` CLI. Writes to ~/.codex/config.toml.',
-    code: `codex mcp add --transport streamable-http orva ${origin.value}/api/v1/mcp --header "Authorization: Bearer ${T.value}"`,
+    code: `codex mcp add --transport streamable-http orva ${origin.value}/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {
     label: 'OpenCode',
     lang: 'bash',
-    note: `Interactive add. When prompted: pick "Remote", paste the URL ${origin.value}/api/v1/mcp, then add the header Authorization: Bearer ${T.value}.`,
+    note: `Interactive add. When prompted: pick "Remote", paste the URL ${origin.value}/mcp, then add the header Authorization: Bearer ${T.value}.`,
     code: `opencode mcp add`,
   },
   {
@@ -1107,7 +1107,7 @@ const mcpInstallTabs = computed(() => [
       "command": "npx",
       "args": [
         "-y", "mcp-remote",
-        "${origin.value}/api/v1/mcp",
+        "${origin.value}/mcp",
         "--header", "Authorization:Bearer ${T.value}"
       ]
     }
@@ -1121,7 +1121,7 @@ const mcpInstallTabs = computed(() => [
     code: `{
   "mcpServers": {
     "orva": {
-      "serverUrl": "${origin.value}/api/v1/mcp",
+      "serverUrl": "${origin.value}/mcp",
       "headers": {
         "Authorization": "Bearer ${T.value}"
       }
@@ -1133,7 +1133,7 @@ const mcpInstallTabs = computed(() => [
     label: 'ChatGPT',
     lang: 'text',
     note: 'No CLI — UI-only flow. Go to Settings → Apps & Connectors → toggle Developer mode → Add new connector. ChatGPT renders the tool catalog and asks for confirmation before destructive calls.',
-    code: `URL:    ${origin.value}/api/v1/mcp
+    code: `URL:    ${origin.value}/mcp
 Auth:   API key (Bearer)
 Token:  ${T.value}`,
   },
@@ -1141,13 +1141,13 @@ Token:  ${T.value}`,
     label: 'curl',
     lang: 'bash',
     note: 'Talk to the MCP endpoint directly. Step 1 prints the response headers — copy the Mcp-Session-Id value into Step 2.',
-    code: `curl -sD - -X POST ${origin.value}/api/v1/mcp \\
+    code: `curl -sD - -X POST ${origin.value}/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
   -H 'Accept: application/json, text/event-stream' \\
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 
-curl -sX POST ${origin.value}/api/v1/mcp \\
+curl -sX POST ${origin.value}/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
   -H 'Accept: application/json, text/event-stream' \\
@@ -1160,7 +1160,7 @@ curl -sX POST ${origin.value}/api/v1/mcp \\
 // whenever the token or origin changes.
 const cursorConfigBase64 = computed(() => {
   const cfg = JSON.stringify({
-    url: origin.value + '/api/v1/mcp',
+    url: origin.value + '/mcp',
     headers: { Authorization: 'Bearer ' + T.value },
   })
   // btoa is fine for ASCII content (URL + bearer are both ASCII).
@@ -1178,7 +1178,7 @@ const mcpConfigTabs = computed(() => [
     code: `{
   "mcpServers": {
     "orva": {
-      "url": "${origin.value}/api/v1/mcp",
+      "url": "${origin.value}/mcp",
       "headers": {
         "Authorization": "Bearer ${T.value}"
       }
@@ -1193,7 +1193,7 @@ const mcpConfigTabs = computed(() => [
     code: `{
   "mcpServers": {
     "orva": {
-      "url": "${origin.value}/api/v1/mcp",
+      "url": "${origin.value}/mcp",
       "headers": {
         "Authorization": "Bearer ${T.value}"
       },
@@ -1326,7 +1326,7 @@ TS=$(date +%s)
 BODY='{"hello":"world"}'
 SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
 
-curl -X POST ${origin.value}/api/v1/invoke/<function_id> \\
+curl -X POST ${origin.value}/fn/<function_id> \\
   -H "X-Orva-Timestamp: $TS" \\
   -H "X-Orva-Signature: sha256=$SIG" \\
   -H 'Content-Type: application/json' \\

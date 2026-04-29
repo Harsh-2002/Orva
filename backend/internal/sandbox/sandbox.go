@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +40,7 @@ type ExecConfig struct {
 	Timeout   time.Duration
 	MemoryMB  int
 	MaxPids   int
-	MaxCPUs   int // 0 = no cpu cap; positive = number of CPUs allowed
+	MaxCPUs   float64 // 0 = no cpu cap; positive = fractional CPUs allowed (e.g. 0.5)
 
 	// Env holds environment variables injected into the sandbox. Includes
 	// both function config env_vars and decrypted secrets at invoke time.
@@ -92,7 +93,7 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 		cfg.Timeout = 30 * time.Second
 	}
 	if cfg.MemoryMB == 0 {
-		cfg.MemoryMB = 128
+		cfg.MemoryMB = 64
 	}
 	if cfg.MaxPids == 0 {
 		cfg.MaxPids = 32
@@ -235,12 +236,12 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
 		// subset of cores — actively harmful under concurrency because the
 		// kernel can't load-balance across the full CPU set. Bandwidth
 		// limits (microseconds per period) are what fractional CPU means.
-		if cfg.MaxCPUs > 0 {
-			// period = 100 ms (nsjail default), quota = N * period.
-			// nsjail supports --cgroup_cpu_ms_per_sec (ms of CPU per 1000ms).
+		if msPerSec := int(cfg.MaxCPUs * 1000); msPerSec > 0 {
+			// nsjail --cgroup_cpu_ms_per_sec = ms of CPU per 1000 ms window.
+			// Supports fractional CPUs: 0.5 → 500, 0.25 → 250.
 			args = append(args,
 				"--cgroup_cpu_ms_per_sec",
-				fmt.Sprintf("%d", cfg.MaxCPUs*1000),
+				fmt.Sprintf("%d", msPerSec),
 			)
 		}
 	}
@@ -331,11 +332,107 @@ func getenvOr(m map[string]string, k, def string) string {
 }
 
 func isWritableDir(p string) bool {
-	f, err := os.OpenFile(filepath.Join(p, ".orva-probe"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
+	// cgroupfs does not allow creating regular files — probe by creating a
+	// child cgroup directory and checking the kernel auto-creates cgroup.procs.
+	probe := filepath.Join(p, ".orva-cg-probe")
+	if err := os.Mkdir(probe, 0o755); err != nil {
 		return false
 	}
-	f.Close()
-	os.Remove(filepath.Join(p, ".orva-probe"))
-	return true
+	_, statErr := os.Stat(filepath.Join(probe, "cgroup.procs"))
+	os.Remove(probe)
+	return statErr == nil
+}
+
+// CgroupV2Mount returns the cgroup v2 path nsjail cgroups are created under,
+// or "" if no suitable delegate exists.
+func CgroupV2Mount() string { return cgroupv2Delegate() }
+
+// FindJailedCgroupPath locates the NSJAIL.* cgroup that nsjail created for
+// its jailed child process. nsjail names the cgroup after the CHILD's PID
+// (the Python/Node adapter process), not nsjail's own PID, so we search for
+// a NSJAIL.* cgroup whose cgroup.procs contains a process whose parent is
+// nsjailPid. Returns "" if not found within 500ms.
+func FindJailedCgroupPath(mount string, nsjailPid int) string {
+	if mount == "" || nsjailPid <= 0 {
+		return ""
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(mount)
+		if err != nil {
+			return ""
+		}
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), "NSJAIL.") {
+				continue
+			}
+			cgPath := filepath.Join(mount, e.Name())
+			data, err := os.ReadFile(filepath.Join(cgPath, "cgroup.procs"))
+			if err != nil {
+				continue
+			}
+			for _, pidStr := range strings.Fields(string(data)) {
+				pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+				if err != nil || pid <= 0 {
+					continue
+				}
+				if procPPID(pid) == nsjailPid {
+					return cgPath
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return ""
+}
+
+// procPPID returns the parent PID of the given process by reading /proc/pid/stat.
+func procPPID(pid int) int {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0
+	}
+	// Format: pid (comm) state ppid ...  — find ppid after the closing ')'
+	s := string(data)
+	if i := strings.LastIndex(s, ") "); i >= 0 {
+		fields := strings.Fields(s[i+2:])
+		if len(fields) >= 2 {
+			ppid, _ := strconv.Atoi(fields[1])
+			return ppid
+		}
+	}
+	return 0
+}
+
+// ReadCgroupMemCurrent reads memory.current from a cgroup v2 directory.
+// Returns 0 on any error (cgroup not yet created, not mounted, etc.).
+func ReadCgroupMemCurrent(cgPath string) int64 {
+	if cgPath == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(cgPath, "memory.current"))
+	if err != nil {
+		return 0
+	}
+	v, _ := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	return v
+}
+
+// ReadCgroupCPUUsec reads the cumulative usage_usec from cpu.stat in a
+// cgroup v2 directory. Returns 0 on any error.
+func ReadCgroupCPUUsec(cgPath string) int64 {
+	if cgPath == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(cgPath, "cpu.stat"))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "usage_usec ") {
+			v, _ := strconv.ParseInt(strings.TrimPrefix(line, "usage_usec "), 10, 64)
+			return v
+		}
+	}
+	return 0
 }

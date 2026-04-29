@@ -82,7 +82,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
 done
 
-resp=$(curl -s -i -X POST -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp=$(curl -s -i -X POST -H "X-Orva-API-Key: $KEY" "$BASE/fn/${fid#fn_}/" -d '{}')
 http_assert "WORKER_CRASHED 502" "502" "WORKER_CRASHED" "" "$resp"
 
 "${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$fid" >/dev/null
@@ -104,14 +104,14 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
 done
 
-resp=$(curl -s -i -X POST --max-time 30 -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp=$(curl -s -i -X POST --max-time 30 -H "X-Orva-API-Key: $KEY" "$BASE/fn/${fid#fn_}/" -d '{}')
 http_assert "TIMEOUT 504" "504" "TIMEOUT" "" "$resp"
 
 "${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$fid" >/dev/null
 
 # 4. NOT_FOUND — invoke nonexistent fn id.
 echo "# 4: NOT_FOUND"
-resp=$(curl -s -i -X POST -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/invoke/fn_definitely_not_real/" -d '{}')
+resp=$(curl -s -i -X POST -H "X-Orva-API-Key: $KEY" "$BASE/fn/definitely_not_real/" -d '{}')
 http_assert "NOT_FOUND 404" "404" "NOT_FOUND" "" "$resp"
 
 # 5. METHOD_NOT_ALLOWED — register a POST-only route, hit with GET.
@@ -170,7 +170,7 @@ if echo "$pool_resp" | jq -e '.max_warm == 1' >/dev/null 2>&1; then
     pids=()
     out_dir=$(mktemp -d)
     for i in 1 2 3 4 5; do
-        ( curl -s -i --max-time 5 -X POST -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/invoke/$fid/" -d '{}' > "$out_dir/$i.txt" ) &
+        ( curl -s -i --max-time 5 -X POST -H "X-Orva-API-Key: $KEY" "$BASE/fn/${fid#fn_}/" -d '{}' > "$out_dir/$i.txt" ) &
         pids+=($!)
     done
     wait "${pids[@]}" 2>/dev/null
@@ -203,7 +203,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 "${CURL[@]}" -X PUT "$BASE/api/v1/functions/$fid" -H "Content-Type: application/json" \
     -d '{"status":"inactive"}' >/dev/null
-resp=$(curl -s -i -X POST -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp=$(curl -s -i -X POST -H "X-Orva-API-Key: $KEY" "$BASE/fn/${fid#fn_}/" -d '{}')
 http_assert "NOT_ACTIVE 409" "409" "NOT_ACTIVE" "" "$resp"
 
 # Verify whitelist: bogus status value is rejected with 400 VALIDATION.

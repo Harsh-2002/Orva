@@ -161,7 +161,7 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.TimeoutMS = 30000
 	}
 	if req.MemoryMB <= 0 {
-		req.MemoryMB = 128
+		req.MemoryMB = 64
 	}
 	if req.CPUs <= 0 {
 		req.CPUs = 0.5

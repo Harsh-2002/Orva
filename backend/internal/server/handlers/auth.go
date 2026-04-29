@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
@@ -10,14 +11,21 @@ import (
 
 // AuthHandler handles user authentication endpoints.
 type AuthHandler struct {
-	DB *database.Database
+	DB                *database.Database
+	SecureCookies     bool // set when Orva is behind an HTTPS reverse proxy
+	SessionMaxAgeSecs int  // 0 → default 7 days
 }
 
-// sessionMaxAgeSeconds is the cookie + DB session TTL. 7 days matches
-// GitHub / Vercel / Cloud Run defaults; the previous 24h was dev-hostile
-// and forced operators to re-authenticate constantly. Sessions remain
-// revocable via /auth/logout.
-const sessionMaxAgeSeconds = 7 * 24 * 60 * 60 // 604800
+func (h *AuthHandler) sessionMaxAge() int {
+	if h.SessionMaxAgeSecs > 0 {
+		return h.SessionMaxAgeSecs
+	}
+	return 7 * 24 * 60 * 60 // 604800 — 7 days
+}
+
+func (h *AuthHandler) sessionTTL() time.Duration {
+	return time.Duration(h.sessionMaxAge()) * time.Second
+}
 
 // Status handles GET /auth/status — returns whether any users exist.
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +69,7 @@ func (h *AuthHandler) Onboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session and set cookie.
-	session, err := h.DB.CreateSession(user.ID)
+	session, err := h.DB.CreateSession(user.ID, h.sessionTTL())
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to create session", "")
 		return
@@ -72,8 +80,9 @@ func (h *AuthHandler) Onboard(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   sessionMaxAgeSeconds,
+		MaxAge:   h.sessionMaxAge(),
 	})
 
 	respond.JSON(w, http.StatusOK, map[string]any{
@@ -98,7 +107,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.DB.CreateSession(user.ID)
+	session, err := h.DB.CreateSession(user.ID, h.sessionTTL())
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to create session", "")
 		return
@@ -109,8 +118,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   sessionMaxAgeSeconds,
+		MaxAge:   h.sessionMaxAge(),
 	})
 
 	respond.JSON(w, http.StatusOK, map[string]any{
@@ -164,7 +174,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid session", "")
 		return
 	}
-	newSession, err := h.DB.CreateSession(user.ID)
+	newSession, err := h.DB.CreateSession(user.ID, h.sessionTTL())
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to create session", "")
 		return
@@ -177,8 +187,9 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		Value:    newSession.Token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   sessionMaxAgeSeconds,
+		MaxAge:   h.sessionMaxAge(),
 	})
 	respond.JSON(w, http.StatusOK, map[string]any{
 		"expires_at": newSession.ExpiresAt,

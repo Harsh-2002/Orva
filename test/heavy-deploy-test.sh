@@ -41,7 +41,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 check "baseline deploy active" "$([ "$s" = active ] && echo ok || echo fail)" "status=$s"
 
-baseline_resp=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+baseline_resp=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 check "baseline invoke ok" \
     "$([ "$(echo "$baseline_resp" | jq -r '.v')" = "baseline" ] && echo ok || echo fail)" \
     "got=$baseline_resp"
@@ -100,7 +100,7 @@ check "SSE log captured" \
 # 6. Heavy invoke works.
 if [ "$final_status" = "succeeded" ]; then
     sleep 2  # let the warm pool refresh
-    heavy_resp=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+    heavy_resp=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
     got_v=$(echo "$heavy_resp" | jq -r '.v')
     got_req_v=$(echo "$heavy_resp" | jq -r '.requests')
     check "heavy invoke returns v=heavy" \
@@ -137,7 +137,7 @@ check "function stays active after failed redeploy" \
     "$([ "$fn_status" = active ] && echo ok || echo fail)" "status=$fn_status"
 
 # 9. Previous code still serves traffic (zero-downtime).
-preserved=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+preserved=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 preserved_v=$(echo "$preserved" | jq -r '.v')
 # Either heavy (if heavy deploy succeeded) or baseline — point is that
 # something works, not a 500/503.

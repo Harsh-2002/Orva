@@ -11,7 +11,7 @@ import (
 )
 
 // RouteHandler manages user-defined custom route → function mappings. These
-// give functions pretty URLs like /webhooks/stripe instead of /api/v1/invoke/fn_xxx.
+// give functions pretty URLs like /webhooks/stripe instead of /fn/xxx.
 type RouteHandler struct {
 	DB       *database.Database
 	Registry *registry.Registry

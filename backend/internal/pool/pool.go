@@ -103,17 +103,19 @@ type AcquireResult struct {
 
 // PoolStats is a point-in-time snapshot for metrics.
 type PoolStats struct {
-	FunctionID     string
-	Idle           int
-	Busy           int64
-	Spawned        int64
-	Killed         int64
-	ScaleUps       int64
-	ScaleDowns     int64
-	RateEWMA       float64 // req/s
-	LatencyEWMAms  float64 // dispatch p-avg in ms
-	DynamicMax     int64   // current memory+cpu-derived cap
-	Target         int
+	FunctionID      string
+	Idle            int
+	Busy            int64
+	Spawned         int64
+	Killed          int64
+	ScaleUps        int64
+	ScaleDowns      int64
+	RateEWMA        float64 // req/s
+	LatencyEWMAms   float64 // dispatch p-avg in ms
+	DynamicMax      int64   // current memory+cpu-derived cap
+	Target          int
+	MemUsedAvgBytes int64   // EWMA of memory.current at release; 0 if cgroups disabled
+	CPUFracAvg      float64 // EWMA of CPU fraction per invocation (0–1); 0 if cgroups disabled
 }
 
 // SetSecretsLookup wires the secrets fetcher into the pool template after
@@ -377,18 +379,21 @@ func (m *Manager) Stats() []PoolStats {
 	m.pools.Range(func(k, v any) bool {
 		p := v.(*functionPool)
 		rate, lat := p.snapshotSignals()
+		memUsed, cpuFrac := p.snapshotResourceUsage()
 		out = append(out, PoolStats{
-			FunctionID:    k.(string),
-			Idle:          len(p.idle),
-			Busy:          p.busy.Load(),
-			Spawned:       p.spawned.Load(),
-			Killed:        p.killed.Load(),
-			ScaleUps:      p.scaleUps.Load(),
-			ScaleDowns:    p.scaleDowns.Load(),
-			RateEWMA:      rate,
-			LatencyEWMAms: lat,
-			DynamicMax:    p.dynamicMax.Load(),
-			Target:        p.target,
+			FunctionID:      k.(string),
+			Idle:            len(p.idle),
+			Busy:            p.busy.Load(),
+			Spawned:         p.spawned.Load(),
+			Killed:          p.killed.Load(),
+			ScaleUps:        p.scaleUps.Load(),
+			ScaleDowns:      p.scaleDowns.Load(),
+			RateEWMA:        rate,
+			LatencyEWMAms:   lat,
+			DynamicMax:      p.dynamicMax.Load(),
+			Target:          p.target,
+			MemUsedAvgBytes: memUsed,
+			CPUFracAvg:      cpuFrac,
 		})
 		return true
 	})
@@ -540,7 +545,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				Language:       sandbox.Language(fn.Runtime),
 				CodeDir:        codeDir,
 				MemoryMB:       int(fn.MemoryMB),
-				MaxCPUs:        cpusToMax(fn.CPUs),
+				MaxCPUs:        fn.CPUs,
 				Env:            env,
 				SeccompPolicy:  sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, nil, nil),
 				NetworkMode:    fn.NetworkMode,
@@ -600,12 +605,4 @@ func buildEnv(fn *database.Function) map[string]string {
 	env["ORVA_FUNCTION_ID"] = fn.ID
 	env["ORVA_MEMORY_MB"] = fmt.Sprintf("%d", fn.MemoryMB)
 	return env
-}
-
-func cpusToMax(cpus float64) int {
-	v := int(cpus)
-	if v < 1 {
-		v = 1
-	}
-	return v
 }

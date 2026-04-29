@@ -70,10 +70,13 @@ func (db *Database) AuthenticateUser(username, password string) (*User, error) {
 	return &user, nil
 }
 
-// CreateSession creates a session token for a user. TTL is 7 days; the
-// HTTP cookie set by handlers/auth.go uses the same value. See
-// sessionMaxAgeSeconds in handlers/auth.go for the rationale.
-func (db *Database) CreateSession(userID int64) (*Session, error) {
+// CreateSession creates a session token for a user. ttl controls expiry;
+// pass 0 to use the default of 7 days. The HTTP cookie MaxAge in
+// handlers/auth.go is derived from the same configured value.
+func (db *Database) CreateSession(userID int64, ttl time.Duration) (*Session, error) {
+	if ttl <= 0 {
+		ttl = 7 * 24 * time.Hour
+	}
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nil, err
@@ -84,7 +87,7 @@ func (db *Database) CreateSession(userID int64) (*Session, error) {
 		Token:     token,
 		UserID:    userID,
 		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		ExpiresAt: time.Now().Add(ttl),
 	}
 
 	_, err := db.write.Exec(

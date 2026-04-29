@@ -107,7 +107,7 @@ echo ""
 echo "================================================================"
 echo "  PHASE A: Node.js API Handler (node-api)"
 echo "================================================================"
-FN_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id node-api)"
+FN_URL="http://localhost:8443/fn/$(get_fn_id node-api | sed "s/^fn_//")"
 printf "%-6s %-5s %-8s %-8s %-10s %-10s %-10s %-6s %-6s %-8s\n" \
   "Conc" "N" "RPS" "P50" "P99" "OK/Total" "Rate" "Fail" "500s" "MemMB"
 echo "------ ----- -------- -------- ---------- ---------- ---------- ------ ------ --------"
@@ -139,7 +139,7 @@ echo ""
 echo "================================================================"
 echo "  PHASE B: Python Data Processing (python-data)"
 echo "================================================================"
-FN_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id python-data)"
+FN_URL="http://localhost:8443/fn/$(get_fn_id python-data | sed "s/^fn_//")"
 printf "%-6s %-5s %-8s %-8s %-10s %-10s %-10s %-6s %-6s %-8s\n" \
   "Conc" "N" "RPS" "P50" "P99" "OK/Total" "Rate" "Fail" "500s" "MemMB"
 echo "------ ----- -------- -------- ---------- ---------- ---------- ------ ------ --------"
@@ -170,8 +170,8 @@ echo ""
 echo "================================================================"
 echo "  PHASE C: Mixed Runtime (Node + Python simultaneously)"
 echo "================================================================"
-NODE_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id node-api)"
-PY_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id python-data)"
+NODE_URL="http://localhost:8443/fn/$(get_fn_id node-api | sed "s/^fn_//")"
+PY_URL="http://localhost:8443/fn/$(get_fn_id python-data | sed "s/^fn_//")"
 
 for C in 100 500 1000 2000; do
   HALF=$((C / 2))
@@ -214,8 +214,8 @@ echo ""
 echo "================================================================"
 echo "  PHASE D: CPU-Bound Functions"
 echo "================================================================"
-CPU_NODE_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id node-cpu)"
-CPU_PY_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id python-compute)"
+CPU_NODE_URL="http://localhost:8443/fn/$(get_fn_id node-cpu | sed "s/^fn_//")"
+CPU_PY_URL="http://localhost:8443/fn/$(get_fn_id python-compute | sed "s/^fn_//")"
 
 for C in 100 500 1000; do
   N=$((C * 2))
@@ -242,7 +242,7 @@ echo ""
 echo "================================================================"
 echo "  PHASE E: Slow Functions (500ms sleep)"
 echo "================================================================"
-SLOW_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id node-slow)"
+SLOW_URL="http://localhost:8443/fn/$(get_fn_id node-slow | sed "s/^fn_//")"
 printf "%-6s %-5s %-8s %-10s %-10s %-10s\n" "Conc" "N" "RPS" "P50" "OK/Total" "Rate"
 echo "------ ----- -------- ---------- ---------- ----------"
 
@@ -267,7 +267,7 @@ echo ""
 echo "================================================================"
 echo "  PHASE F: Error Resilience (20% random failures)"
 echo "================================================================"
-ERR_URL="http://localhost:8443/api/v1/invoke/$(get_fn_id python-error)"
+ERR_URL="http://localhost:8443/fn/$(get_fn_id python-error | sed "s/^fn_//")"
 
 RESULT=$(run_hey "$ERR_URL" 500 2000)
 RPS=$(echo "$RESULT" | grep "Requests/sec" | awk '{print $2}')

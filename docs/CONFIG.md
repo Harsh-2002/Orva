@@ -1,147 +1,82 @@
 # Configuration
 
-Three layers, applied in order:
+Orva is configured entirely through environment variables. There is no
+config file — every knob that needs operator input is an env var. A bare
+`docker run` with no env set works out of the box.
 
-1. **Defaults** baked into the binary (`backend/internal/config/defaults.go`)
-2. **YAML config file** at `/etc/orva/orva.yaml` or `--config <path>`
-3. **Environment variables** (`ORVA_*` prefix) — override everything
+On startup, Orva logs which of the 9 supported env vars it found set and
+how many are at their defaults.
 
-Plus runtime-tunable knobs in two SQLite tables:
+---
 
-- `system_config` — global, edited via SQL or upcoming `/api/v1/system/config`
-- `pool_config` — per-function, edited via `PUT /api/v1/pool/config`
+## Environment variables
 
-## Server (HTTP listener)
+| env | default | what |
+|-----|---------|------|
+| `ORVA_DATA_DIR` | `~/.orva` (dev) / `/var/lib/orva` (Docker) | Root for SQLite DB, function code, and rootfs trees. DB and rootfs paths are derived automatically. |
+| `ORVA_PORT` | `8443` | Listen port — plain HTTP, no TLS. Set to `8080` when a reverse proxy owns 8443. |
+| `ORVA_WRITE_TIMEOUT_SEC` | `60` | Response write timeout. Must exceed your longest function `timeout_ms` or Orva will cut the response. |
+| `ORVA_DEFAULT_TIMEOUT_MS` | `30000` | Per-invocation timeout applied to new functions that don't set one explicitly. Exceeded → `504 TIMEOUT`. |
+| `ORVA_DEFAULT_MEMORY_MB` | `64` | cgroup memory cap applied to new functions. Tune to your host's available RAM. |
+| `ORVA_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `ORVA_LOG_RETENTION_DAYS` | `7` | Execution and build log retention in days. Logs older than this are pruned on startup. |
+| `ORVA_SECURE_COOKIES` | `false` | Set to `true` when Orva is behind an HTTPS reverse proxy. Adds the `Secure` flag to session cookies. |
+| `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Single-operator instances can set this to `30`. |
 
-| key (YAML)         | env                     | default       | what |
-|--------------------|-------------------------|---------------|------|
-| `server.host`      | `ORVA_HOST`             | `0.0.0.0`     | listen address |
-| `server.port`      | `ORVA_PORT`             | `8443`        | listen port (despite the 8443, **not TLS** — terminate TLS upstream) |
-| `server.read_timeout_sec`  | `ORVA_READ_TIMEOUT_SEC`  | `30`          | request body read timeout |
-| `server.write_timeout_sec` | `ORVA_WRITE_TIMEOUT_SEC` | `90`          | response write timeout (must exceed function `timeout_ms`) |
-| `server.max_body_bytes`    | `ORVA_MAX_BODY_BYTES`    | `6291456`     | request body cap (6 MB); over → `413 PAYLOAD_TOO_LARGE` |
+---
 
-## Data
+## What's hardcoded (not configurable)
 
-| key (YAML)    | env              | default              | what |
-|---------------|------------------|----------------------|------|
-| `data.dir`    | `ORVA_DATA_DIR`  | `/var/lib/orva`      | sqlite + functions + rootfs |
-| `database.path`| `ORVA_DB_PATH`  | `${data.dir}/orva.db`| explicit override |
+These values are intentionally fixed — they are correct for every
+deployment and exposing them as knobs would only create confusion:
 
-## Sandbox
+| what | value |
+|------|-------|
+| Bind address | `0.0.0.0` |
+| HTTP read timeout | 30 s |
+| Request body cap | 6 MB |
+| nsjail binary | `/usr/local/bin/nsjail` |
+| Rootfs dir | `${ORVA_DATA_DIR}/rootfs` |
+| DB path | `${ORVA_DATA_DIR}/orva.db` |
+| CORS origins | `*` |
+| Default function CPUs | `0.5` |
+| Deploy tarball cap | 50 MB |
+| Seccomp policy | `default` |
+| Log format | `json` |
+| Max concurrent invocations | `cpu_count × 64` (min 200) |
 
-| key (YAML)               | env                       | default          | what |
-|--------------------------|---------------------------|------------------|------|
-| `sandbox.nsjail_bin`     | `ORVA_NSJAIL_BIN`         | `/usr/local/bin/nsjail` | nsjail binary path |
-| `sandbox.rootfs_dir`     | `ORVA_ROOTFS_DIR`         | `${data.dir}/rootfs`    | per-runtime rootfs trees |
-| `sandbox.seccomp_policy` | `ORVA_SECCOMP_POLICY`     | `default`        | `default` / `strict` / `permissive` / `disabled` |
-| `sandbox.max_concurrent` | `ORVA_MAX_CONCURRENT`     | `500`            | host-wide invocation cap. Excess → `429 TOO_MANY_REQUESTS` |
-| `sandbox.max_pids`       | `ORVA_MAX_PIDS`           | `64`             | per-spawn pid cgroup cap |
+---
 
-## Logging
-
-| key (YAML)         | env                | default | what |
-|--------------------|--------------------|---------|------|
-| `log.level`        | `ORVA_LOG_LEVEL`   | `info`  | `debug` / `info` / `warn` / `error` |
-| `log.format`       | `ORVA_LOG_FORMAT`  | `text`  | `text` / `json` |
-
-## `system_config` table (runtime-tunable)
-
-Read at startup or per-tick by background loops. Edit via SQL today;
-a future `/api/v1/system/config` endpoint is planned.
-
-| key                          | default   | what |
-|------------------------------|-----------|------|
-| `max_total_containers`       | 100       | unused (legacy; superseded by pool_config) |
-| `default_timeout_ms`         | 30000     | new-function default |
-| `default_memory_mb`          | 128       | new-function default |
-| `max_code_size_bytes`        | 52428800  | per-deploy tarball cap (50 MB) |
-| `max_request_body_bytes`     | 6291456   | mirror of server.max_body_bytes |
-| `log_retention_days`         | 7         | future: prune old execution_logs / build_logs |
-| `reap_interval_seconds`      | 30        | how often the per-pool reaper runs |
-| `replenish_interval_seconds` | 5         | autoscaler tick rate |
-| `versions_to_keep`           | 5         | per-function archived versions retained by GC |
-| `gc_interval_seconds`        | 300       | how often the GC scans every function |
-| `min_free_disk_mb`           | 500       | pre-flight gate; below this, deploys return `503 INSUFFICIENT_DISK` |
-
-Edit:
-```sql
-docker exec orva sqlite3 /var/lib/orva/orva.db \
-  "UPDATE system_config SET value='10' WHERE key='versions_to_keep'"
-```
-
-The active hash is **always** retained regardless of `versions_to_keep`.
-
-## `pool_config` table (per-function)
-
-| column                | default | what |
-|-----------------------|---------|------|
-| `function_id`         | —       | FK to `functions(id)` |
-| `min_warm`            | 1       | floor on idle workers — pool never shrinks below this when traffic is steady |
-| `max_warm`            | 50      | hard ceiling. The autoscaler also computes a `dynamic_max` from CPU + memory budget; the effective cap is `min(max_warm, dynamic_max)` |
-| `idle_ttl_s`          | 120     | a worker idle this long is reaped (was 600 pre-Round-G) |
-| `target_concurrency`  | 10      | Knative-KPA's "request per worker before scale-up considered" |
-| `scale_to_zero`       | 0       | if `1`, pool can shrink to 0 (cold-start on next request) |
-
-Edit via API:
-```bash
-curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
-  http://localhost:8443/api/v1/pool/config \
-  -d '{
-    "function_id": "fn_xyz",
-    "min_warm": 2,
-    "max_warm": 32,
-    "idle_ttl_seconds": 60,
-    "target_concurrency": 5
-  }'
-```
-
-Changes take effect on the next pool acquire (the running pool is
-torn down via `RefreshForDeploy`).
-
-## Function-level config
-
-These live on the `functions` table row and are set at create / update
-time:
-
-| field          | what |
-|----------------|------|
-| `timeout_ms`   | per-invocation timeout — exceeded → `504 TIMEOUT` |
-| `memory_mb`    | declared cgroup memory.max (× 1.5 actual) |
-| `cpus`         | fractional CPU bandwidth (e.g. `0.5` = 500ms / 1000ms) |
-| `env_vars`     | JSON-encoded map; merged with secrets at spawn time |
-| `network_mode` | `isolated` (loopback only) / `host` / `bridge` |
-| `status`       | `created` / `building` / `active` / `inactive` / `error` |
-
-## YAML example
+## Typical docker-compose snippet
 
 ```yaml
-# /etc/orva/orva.yaml
-server:
-  host: 0.0.0.0
-  port: 8443
-  max_body_bytes: 10485760    # 10 MB
-
-data:
-  dir: /var/lib/orva
-
-sandbox:
-  seccomp_policy: strict
-  max_concurrent: 1000
-  max_pids: 128
-
-log:
-  level: info
-  format: json
+environment:
+  ORVA_DEFAULT_MEMORY_MB: "128"   # tune to host RAM
+  ORVA_WRITE_TIMEOUT_SEC: "90"    # headroom above your longest function timeout
+  ORVA_SESSION_DAYS: "30"         # single-operator instance
+  ORVA_LOG_RETENTION_DAYS: "30"   # keep a month of logs
 ```
 
-Pass with `orva serve --config /etc/orva/orva.yaml`.
+Orva does not terminate TLS. Run a reverse proxy (nginx, Caddy, Traefik)
+in front and set `ORVA_SECURE_COOKIES=true` when you do. See
+[DEPLOYMENT.md](DEPLOYMENT.md) for proxy config examples.
 
-## What's NOT configurable yet
+---
 
-- Reverse-proxy aware logging (real client IP via `X-Forwarded-For`)
-- Per-function rate limiting (host-wide cap is the only knob today)
-- Custom adapter scripts (the bundled adapter is the only option)
-- Multiple data dirs / multi-tenant isolation
+## Runtime-tunable: pool config (per-function)
 
-These are explicit non-goals for the single-host, self-hosted target.
+Edited via `PUT /api/v1/pool/config` — no restart needed.
+
+| field | default | what |
+|-------|---------|------|
+| `min_warm` | 1 | Idle workers floor — pool never shrinks below this |
+| `max_warm` | 50 | Hard ceiling on warm pool size |
+| `idle_ttl_s` | 120 | Worker idle this long gets reaped |
+| `target_concurrency` | 10 | Requests per worker before scale-up triggers |
+| `scale_to_zero` | 0 | `1` = pool can drain to 0 (cold-start on next request) |
+
+```bash
+curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \
+  http://localhost:8443/api/v1/pool/config \
+  -d '{"function_id":"fn_xyz","min_warm":2,"max_warm":32,"idle_ttl_seconds":60}'
+```

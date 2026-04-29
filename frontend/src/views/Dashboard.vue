@@ -251,15 +251,29 @@
             </div>
           </div>
 
-          <!-- Lifetime + tail -->
+          <!-- Lifetime + resource averages -->
           <div class="border-t border-border pt-3 grid grid-cols-2 gap-3 text-[11px]">
             <div>
               <div class="text-foreground-muted">Spawned · killed</div>
               <div class="font-mono text-white">{{ p.spawned }} · {{ p.killed }}</div>
             </div>
             <div>
-              <div class="text-foreground-muted">Avg recent latency</div>
+              <div class="text-foreground-muted">Avg latency</div>
               <div class="font-mono text-white">{{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms</div>
+            </div>
+            <div>
+              <div class="text-foreground-muted">Avg memory</div>
+              <div class="font-mono text-white" title="Average memory used per invocation vs allocated limit">
+                {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : '—' }}
+                <span class="text-foreground-muted">/ {{ p.mem_limit_mb }} MB</span>
+              </div>
+            </div>
+            <div>
+              <div class="text-foreground-muted">Avg CPU</div>
+              <div class="font-mono text-white" title="Average CPU cores consumed per invocation vs allocated">
+                {{ p.cpu_frac_avg > 0 && p.cpu_limit > 0 ? (p.cpu_frac_avg * p.cpu_limit).toFixed(2) : '—' }}
+                <span v-if="p.cpu_limit > 0" class="text-foreground-muted">/ {{ p.cpu_limit }} CPU</span>
+              </div>
             </div>
           </div>
         </div>

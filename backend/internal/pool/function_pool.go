@@ -37,6 +37,8 @@ type functionPool struct {
 	sigMu            sync.Mutex
 	rateEWMA         float64 // req/s, α=0.2 on tick-sec buckets
 	latencyEWMAms    float64 // dispatch duration, α=0.2
+	memUsedEWMA      float64 // memory.current at release (bytes), α=0.2
+	cpuFracEWMA      float64 // CPU fraction per invocation (0–1), α=0.2
 	inflightSamples  []int64 // ring of recent busy counts (len = stableWindow/tick)
 	inflightHead     int
 	bucketCount      int64
@@ -173,6 +175,23 @@ func (p *functionPool) snapshotSignals() (rate, latMs float64) {
 	return p.rateEWMA, p.latencyEWMAms
 }
 
+// snapshotResourceUsage returns the per-invocation resource EWMA values.
+// memBytes is 0 and cpuFrac is 0 until at least one invocation completes
+// with cgroup v2 delegation enabled.
+func (p *functionPool) snapshotResourceUsage() (memBytes int64, cpuFrac float64) {
+	p.sigMu.Lock()
+	defer p.sigMu.Unlock()
+	return int64(p.memUsedEWMA), p.cpuFracEWMA
+}
+
+// stampAcquire records the wall time and cumulative CPU usage on the worker
+// just before it is handed to a caller. The pool reads these back at release
+// to compute per-invocation resource EWMA metrics.
+func stampAcquire(w *sandbox.Worker) {
+	w.AcquireAt = time.Now()
+	w.AcquireUsec = sandbox.ReadCgroupCPUUsec(w.GetCgroupPath())
+}
+
 // acquire returns an idle worker or spawns a new one up to max. If at max
 // it blocks on the idle channel or ctx cancellation.
 func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
@@ -184,6 +203,7 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 			// Fall through to spawn below.
 		} else {
 			p.busy.Add(1)
+			stampAcquire(w)
 			return &AcquireResult{Worker: w, ColdStart: false}, nil
 		}
 	default:
@@ -234,6 +254,7 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 		// autoscaler metric want "how often did this pool grow" — which
 		// includes both the predictive scaler and request-path expansion.
 		p.scaleUps.Add(1)
+		stampAcquire(w)
 		return &AcquireResult{Worker: w, ColdStart: true}, nil
 	}
 
@@ -251,6 +272,7 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 			return p.acquire(ctx)
 		}
 		p.busy.Add(1)
+		stampAcquire(w)
 		return &AcquireResult{Worker: w, ColdStart: false}, nil
 	case <-ctx.Done():
 		return nil, ErrPoolAtCapacity
@@ -266,6 +288,31 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 // feel sluggish for over a minute afterward.
 func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	p.busy.Add(-1)
+
+	// Sample cgroup v2 resource usage for per-function EWMA metrics.
+	cgPath := w.GetCgroupPath()
+	if cgPath != "" && !w.AcquireAt.IsZero() {
+		memCur := sandbox.ReadCgroupMemCurrent(cgPath)
+		cpuNow := sandbox.ReadCgroupCPUUsec(cgPath)
+		elapsedUsec := time.Since(w.AcquireAt).Microseconds()
+		p.sigMu.Lock()
+		if memCur > 0 {
+			if p.memUsedEWMA == 0 {
+				p.memUsedEWMA = float64(memCur)
+			} else {
+				p.memUsedEWMA = 0.2*float64(memCur) + 0.8*p.memUsedEWMA
+			}
+		}
+		if cpuNow > w.AcquireUsec && elapsedUsec > 0 {
+			frac := float64(cpuNow-w.AcquireUsec) / float64(elapsedUsec)
+			if p.cpuFracEWMA == 0 {
+				p.cpuFracEWMA = frac
+			} else {
+				p.cpuFracEWMA = 0.2*frac + 0.8*p.cpuFracEWMA
+			}
+		}
+		p.sigMu.Unlock()
+	}
 
 	if reqErr != nil || p.isUnusable(w) || p.closing.Load() {
 		p.killWorker(w)

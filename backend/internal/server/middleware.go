@@ -42,8 +42,8 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 var quietPaths = map[string]bool{
 	"/api/v1/system/health":  true,
 	"/api/v1/system/metrics": true,
-	"/auth/status":           true,
-	"/auth/me":               true,
+	"/api/v1/auth/status":    true,
+	"/api/v1/auth/me":        true,
 }
 
 func loggerMiddleware(next http.Handler) http.Handler {

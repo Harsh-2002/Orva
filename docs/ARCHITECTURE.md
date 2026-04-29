@@ -80,7 +80,7 @@ invocations skip the ~50ms spawn cost.
 ## Request lifecycle (cold path)
 
 ```
-POST /api/v1/invoke/fn_xxx/health
+POST /fn/xxx/health
      │
      ▼ middleware: auth → rate-limit → CORS
      │

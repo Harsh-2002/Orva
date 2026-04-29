@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
 
-// Auth uses /auth/* paths (not /api/v1/*), so we need a separate client.
+// Auth uses /api/v1/auth/* paths; a separate client avoids the /api/v1 baseURL prefix issues.
 const authClient = axios.create({
   baseURL: '',
   timeout: 30000,
@@ -36,7 +36,7 @@ export const useAuthStore = defineStore('auth', () => {
   const login = async (username, password) => {
     loading.value = true
     try {
-      const res = await authClient.post('/auth/login', { username, password })
+      const res = await authClient.post('/api/v1/auth/login', { username, password })
       user.value = res.data.user
       isAuthenticated.value = true
       setHasUser(true)
@@ -54,7 +54,7 @@ export const useAuthStore = defineStore('auth', () => {
   const onboard = async (username, password) => {
     loading.value = true
     try {
-      const res = await authClient.post('/auth/onboard', { username, password })
+      const res = await authClient.post('/api/v1/auth/onboard', { username, password })
       user.value = res.data.user
       isAuthenticated.value = true
       setHasUser(true)
@@ -71,7 +71,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const logout = async () => {
     try {
-      await authClient.post('/auth/logout')
+      await authClient.post('/api/v1/auth/logout')
     } catch {}
     user.value = null
     isAuthenticated.value = false
@@ -86,7 +86,7 @@ export const useAuthStore = defineStore('auth', () => {
   const fetchAuthStatus = async ({ force = false } = {}) => {
     if (!force && hasUser.value !== null) return hasUser.value
     try {
-      const res = await authClient.get('/auth/status')
+      const res = await authClient.get('/api/v1/auth/status')
       setHasUser(!!res.data.has_user)
       return hasUser.value
     } catch {
@@ -100,7 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const checkAuth = async () => {
     try {
-      const res = await authClient.get('/auth/me')
+      const res = await authClient.get('/api/v1/auth/me')
       user.value = res.data
       isAuthenticated.value = true
       setHasUser(true)
@@ -120,7 +120,7 @@ export const useAuthStore = defineStore('auth', () => {
   const refreshSession = async () => {
     refreshing.value = true
     try {
-      const res = await authClient.post('/auth/refresh')
+      const res = await authClient.post('/api/v1/auth/refresh')
       expiresAt.value = res.data.expires_at || null
       return { success: true }
     } catch (error) {

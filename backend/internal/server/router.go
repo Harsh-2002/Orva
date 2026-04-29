@@ -75,10 +75,10 @@ func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Rout
 // isReservedPath returns true for Orva's internal path prefixes so the
 // custom-route catch-all doesn't accidentally shadow them.
 func isReservedPath(path string) bool {
-	if path == "/" {
+	if path == "/" || path == "/mcp" {
 		return true
 	}
-	for _, p := range []string{"/api/", "/auth/", "/web/", "/_orva/"} {
+	for _, p := range []string{"/api/", "/fn/", "/mcp/", "/web/", "/_orva/"} {
 		if strings.HasPrefix(path, p) {
 			return true
 		}
@@ -162,7 +162,7 @@ func (r *Router) setupRoutes() {
 	if r.eventHub != nil {
 		invokeHandler.PublishEvent = r.eventHub.Publish
 	}
-	r.mux.Handle("/api/v1/invoke/", invokeHandler)
+	r.mux.Handle("/fn/", invokeHandler)
 
 	// Secret management (per-function, encrypted at rest).
 	secretHandler := &handlers.SecretHandler{
@@ -183,13 +183,17 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/v1/routes", routeHandler.Delete)
 
 	// Auth routes (no auth required — these establish auth).
-	authHandler := &handlers.AuthHandler{DB: r.db}
-	r.mux.HandleFunc("GET /auth/status", authHandler.Status)
-	r.mux.HandleFunc("POST /auth/onboard", authHandler.Onboard)
-	r.mux.HandleFunc("POST /auth/login", authHandler.Login)
-	r.mux.HandleFunc("GET /auth/me", authHandler.Me)
-	r.mux.HandleFunc("POST /auth/logout", authHandler.Logout)
-	r.mux.HandleFunc("POST /auth/refresh", authHandler.Refresh)
+	authHandler := &handlers.AuthHandler{
+		DB:                r.db,
+		SecureCookies:     r.cfg.Security.SecureCookies,
+		SessionMaxAgeSecs: r.cfg.Security.SessionDays * 24 * 60 * 60,
+	}
+	r.mux.HandleFunc("GET /api/v1/auth/status", authHandler.Status)
+	r.mux.HandleFunc("POST /api/v1/auth/onboard", authHandler.Onboard)
+	r.mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+	r.mux.HandleFunc("GET /api/v1/auth/me", authHandler.Me)
+	r.mux.HandleFunc("POST /api/v1/auth/logout", authHandler.Logout)
+	r.mux.HandleFunc("POST /api/v1/auth/refresh", authHandler.Refresh)
 
 	// Runtime routes.
 	runtimeHandler := &handlers.RuntimeHandler{}
@@ -232,11 +236,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/firewall/dns", fwHandler.GetDNS)
 	r.mux.HandleFunc("PUT /api/v1/firewall/dns", fwHandler.PutDNS)
 
-	// MCP server — Streamable HTTP transport at /api/v1/mcp. Speaks the
+	// MCP server — Streamable HTTP transport at /mcp. Speaks the
 	// 2025-11-25 protocol; auth via Authorization: Bearer <orva_xxx>
 	// (or X-Orva-API-Key for parity with REST callers). The handler
-	// owns its own auth gate, so we exclude /api/v1/mcp from the
-	// session-cookie path in middleware_auth.go below.
+	// owns its own auth gate; /mcp does not start with /api/ so it
+	// naturally bypasses middleware_auth.go.
 	mcpHandler := orvampc.NewHandler(orvampc.Deps{
 		DB:         r.db,
 		Registry:   r.registry,
@@ -251,8 +255,8 @@ func (r *Router) setupRoutes() {
 		DataDir:    r.cfg.Data.Dir,
 		Version:    "0.1.0",
 	})
-	r.mux.Handle("/api/v1/mcp", mcpHandler)
-	r.mux.Handle("/api/v1/mcp/", mcpHandler)
+	r.mux.Handle("/mcp", mcpHandler)
+	r.mux.Handle("/mcp/", mcpHandler)
 	r.mux.HandleFunc("GET /.well-known/oauth-protected-resource", orvampc.PRMHandler)
 
 	// UI routes — serve the Vue SPA at /web/. No credentials are injected;

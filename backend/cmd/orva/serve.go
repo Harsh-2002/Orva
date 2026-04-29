@@ -23,38 +23,32 @@ var serveCmd = &cobra.Command{
 }
 
 func init() {
-	serveCmd.Flags().String("host", "", "bind host (overrides config)")
-	serveCmd.Flags().Int("port", 0, "bind port (overrides config)")
-	serveCmd.Flags().String("config", "", "path to config file")
-	serveCmd.Flags().String("db-path", "", "path to database file (overrides config)")
+	serveCmd.Flags().Int("port", 0, "listen port (overrides ORVA_PORT)")
 	rootCmd.AddCommand(serveCmd)
 }
 
 func runServe(cmd *cobra.Command, args []string) {
-	// Load config from file or defaults.
-	cfgPath, _ := cmd.Flags().GetString("config")
-	if cfgPath != "" {
-		os.Setenv("ORVA_CONFIG", cfgPath)
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Apply flag overrides.
-	if host, _ := cmd.Flags().GetString("host"); host != "" {
-		cfg.Server.Host = host
-	}
 	if port, _ := cmd.Flags().GetInt("port"); port != 0 {
 		cfg.Server.Port = port
 	}
-	if dbPath, _ := cmd.Flags().GetString("db-path"); dbPath != "" {
-		cfg.Database.Path = dbPath
-	}
 
 	setupLogger(cfg.Logging)
+
+	if len(cfg.ActiveEnvVars) > 0 {
+		slog.Info("config", "active_env_vars", len(cfg.ActiveEnvVars),
+			"supported", len(config.SupportedEnvVars),
+			"vars", cfg.ActiveEnvVars)
+	} else {
+		slog.Info("config", "active_env_vars", 0,
+			"supported", len(config.SupportedEnvVars),
+			"note", "all defaults")
+	}
 
 	slog.Info("starting orva", "version", Version)
 

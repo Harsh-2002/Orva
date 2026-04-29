@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS functions (
     entrypoint    TEXT NOT NULL DEFAULT 'handler.js',
     image         TEXT,
     timeout_ms    INTEGER NOT NULL DEFAULT 30000,
-    memory_mb     INTEGER NOT NULL DEFAULT 128,
+    memory_mb     INTEGER NOT NULL DEFAULT 64,
     cpus          REAL NOT NULL DEFAULT 0.5,
     env_vars      TEXT NOT NULL DEFAULT '{}',
     network_mode  TEXT NOT NULL DEFAULT 'none',
@@ -177,7 +177,7 @@ CREATE INDEX IF NOT EXISTS idx_egress_blocklist_enabled ON egress_blocklist(enab
 INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('max_total_containers', '100'),
     ('default_timeout_ms', '30000'),
-    ('default_memory_mb', '128'),
+    ('default_memory_mb', '64'),
     ('max_code_size_bytes', '52428800'),
     ('max_request_body_bytes', '6291456'),
     ('log_retention_days', '7'),

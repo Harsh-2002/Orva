@@ -32,6 +32,15 @@ type Worker struct {
 	Spawned time.Time
 	Served  atomic.Int64
 
+	// CgroupPath is resolved asynchronously after Spawn (nsjail names the
+	// cgroup after its jailed child's PID, which isn't known until after fork).
+	// AcquireUsec and AcquireAt are stamped by the pool before handing the
+	// worker to a caller and read at release for per-function EWMA metrics.
+	cgroupPathMu sync.Mutex
+	CgroupPath   string
+	AcquireUsec  int64
+	AcquireAt    time.Time
+
 	// mu serializes Dispatch calls defensively. The pool contract is that
 	// only one goroutine holds a Worker at a time, so the lock is just a
 	// safety net — but cheap enough to keep in.
@@ -102,6 +111,23 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		stderr:  stderrPipe,
 		Spawned: time.Now(),
 		errBuf:  newRingBuffer(64 * 1024),
+	}
+
+	// Resolve the nsjail cgroup path asynchronously. nsjail names the cgroup
+	// after its jailed child's PID (not its own), so we scan for it in a
+	// background goroutine to avoid blocking Spawn. The pool reads CgroupPath
+	// at acquire time; by then (first real request) the goroutine has long
+	// finished. CgroupPath="" is safe — resource sampling is silently skipped.
+	if mount := CgroupV2Mount(); mount != "" && cmd.Process != nil {
+		nsjailPid := cmd.Process.Pid
+		go func() {
+			p := FindJailedCgroupPath(mount, nsjailPid)
+			if p != "" {
+				w.cgroupPathMu.Lock()
+				w.CgroupPath = p
+				w.cgroupPathMu.Unlock()
+			}
+		}()
 	}
 
 	// Background goroutine drains stderr into the ring buffer so the pipe
@@ -254,6 +280,13 @@ func (w *Worker) Kill() error {
 
 // IsDead reports whether the worker has been marked unusable.
 func (w *Worker) IsDead() bool { return w.dead.Load() }
+
+// GetCgroupPath returns the resolved cgroup path (thread-safe).
+func (w *Worker) GetCgroupPath() string {
+	w.cgroupPathMu.Lock()
+	defer w.cgroupPathMu.Unlock()
+	return w.CgroupPath
+}
 
 // IsExpired reports whether the worker should be retired based on age or
 // use count. Either zero disables that check.

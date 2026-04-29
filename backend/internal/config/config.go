@@ -3,116 +3,138 @@ package config
 import (
 	"os"
 	"strconv"
-	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
+// Supported env vars — printed at startup so operators can confirm their
+// environment is being picked up. Alphabetical order.
+var SupportedEnvVars = []string{
+	"ORVA_DATA_DIR",
+	"ORVA_DEFAULT_MEMORY_MB",
+	"ORVA_DEFAULT_TIMEOUT_MS",
+	"ORVA_LOG_LEVEL",
+	"ORVA_LOG_RETENTION_DAYS",
+	"ORVA_PORT",
+	"ORVA_SECURE_COOKIES",
+	"ORVA_SESSION_DAYS",
+	"ORVA_WRITE_TIMEOUT_SEC",
+}
+
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Sandbox   SandboxConfig   `yaml:"sandbox"`
-	Functions FunctionsConfig `yaml:"functions"`
-	Logging   LoggingConfig   `yaml:"logging"`
-	Security  SecurityConfig  `yaml:"security"`
-	Data      DataConfig      `yaml:"data"`
+	Server    ServerConfig
+	Database  DatabaseConfig
+	Sandbox   SandboxConfig
+	Functions FunctionsConfig
+	Logging   LoggingConfig
+	Security  SecurityConfig
+	Data      DataConfig
+
+	// Populated by Load — names of env vars that were found set.
+	ActiveEnvVars []string
 }
 
 type ServerConfig struct {
-	Host            string `yaml:"host"`
-	Port            int    `yaml:"port"`
-	ReadTimeoutSec  int    `yaml:"read_timeout_sec"`
-	WriteTimeoutSec int    `yaml:"write_timeout_sec"`
-	MaxBodyBytes    int64  `yaml:"max_body_bytes"`
+	Host            string
+	Port            int
+	ReadTimeoutSec  int
+	WriteTimeoutSec int
+	MaxBodyBytes    int64
 }
 
 type DatabaseConfig struct {
-	Path string `yaml:"path"`
+	Path string
 }
 
 type SandboxConfig struct {
-	NsjailBin     string `yaml:"nsjail_bin"`
-	RootfsDir     string `yaml:"rootfs_dir"`
-	MaxConcurrent int    `yaml:"max_concurrent"`
-	SeccompPolicy string `yaml:"seccomp_policy"` // "default", "strict", "permissive", "disabled"
+	NsjailBin     string
+	RootfsDir     string
+	MaxConcurrent int
+	SeccompPolicy string
 }
 
 type FunctionsConfig struct {
-	DefaultTimeoutMS int     `yaml:"default_timeout_ms"`
-	DefaultMemoryMB  int     `yaml:"default_memory_mb"`
-	DefaultCPUs      float64 `yaml:"default_cpus"`
-	MaxCodeSize      int64   `yaml:"max_code_size"`
+	DefaultTimeoutMS int
+	DefaultMemoryMB  int
+	DefaultCPUs      float64
+	MaxCodeSize      int64
 }
 
 type LoggingConfig struct {
-	Level         string `yaml:"level"`
-	Format        string `yaml:"format"`
-	RetentionDays int    `yaml:"retention_days"`
+	Level         string
+	Format        string
+	RetentionDays int
 }
 
 type SecurityConfig struct {
-	CORSOrigins []string `yaml:"cors_origins"`
+	CORSOrigins   []string
+	SecureCookies bool
+	SessionDays   int
 }
 
 type DataConfig struct {
-	Dir string `yaml:"dir"`
+	Dir string
 }
 
 func Load() (*Config, error) {
 	cfg := Defaults()
-
-	path := os.Getenv("ORVA_CONFIG")
-	if path == "" {
-		path = "/etc/orva/config.yaml"
-	}
-
-	data, err := os.ReadFile(path)
-	if err == nil {
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return nil, err
-		}
-	}
-
-	applyEnvOverrides(cfg)
+	cfg.ActiveEnvVars = applyEnvOverrides(cfg)
 	return cfg, nil
 }
 
-func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("ORVA_HOST"); v != "" {
-		cfg.Server.Host = v
+// applyEnvOverrides applies the 9 supported env vars and returns the names
+// of those that were found set (for startup logging).
+func applyEnvOverrides(cfg *Config) []string {
+	var active []string
+
+	if v := os.Getenv("ORVA_DATA_DIR"); v != "" {
+		active = append(active, "ORVA_DATA_DIR")
+		cfg.Data.Dir = v
+		cfg.Database.Path = v + "/orva.db"
+		cfg.Sandbox.RootfsDir = v + "/rootfs"
 	}
 	if v := os.Getenv("ORVA_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
+			active = append(active, "ORVA_PORT")
 			cfg.Server.Port = port
 		}
 	}
-	if v := os.Getenv("ORVA_DB_PATH"); v != "" {
-		cfg.Database.Path = v
-	}
-	if v := os.Getenv("ORVA_DATA_DIR"); v != "" {
-		cfg.Data.Dir = v
-		if cfg.Database.Path == Defaults().Database.Path {
-			cfg.Database.Path = v + "/orva.db"
+	if v := os.Getenv("ORVA_WRITE_TIMEOUT_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			active = append(active, "ORVA_WRITE_TIMEOUT_SEC")
+			cfg.Server.WriteTimeoutSec = n
 		}
 	}
-	if v := os.Getenv("ORVA_NSJAIL_BIN"); v != "" {
-		cfg.Sandbox.NsjailBin = v
-	}
-	if v := os.Getenv("ORVA_ROOTFS_DIR"); v != "" {
-		cfg.Sandbox.RootfsDir = v
-	}
-	if v := os.Getenv("ORVA_MAX_CONCURRENT"); v != "" {
+	if v := os.Getenv("ORVA_DEFAULT_TIMEOUT_MS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Sandbox.MaxConcurrent = n
+			active = append(active, "ORVA_DEFAULT_TIMEOUT_MS")
+			cfg.Functions.DefaultTimeoutMS = n
+		}
+	}
+	if v := os.Getenv("ORVA_DEFAULT_MEMORY_MB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			active = append(active, "ORVA_DEFAULT_MEMORY_MB")
+			cfg.Functions.DefaultMemoryMB = n
 		}
 	}
 	if v := os.Getenv("ORVA_LOG_LEVEL"); v != "" {
+		active = append(active, "ORVA_LOG_LEVEL")
 		cfg.Logging.Level = v
 	}
-	if v := os.Getenv("ORVA_LOG_FORMAT"); v != "" {
-		cfg.Logging.Format = v
+	if v := os.Getenv("ORVA_LOG_RETENTION_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			active = append(active, "ORVA_LOG_RETENTION_DAYS")
+			cfg.Logging.RetentionDays = n
+		}
 	}
-	if v := os.Getenv("ORVA_CORS_ORIGINS"); v != "" {
-		cfg.Security.CORSOrigins = strings.Split(v, ",")
+	if v := os.Getenv("ORVA_SECURE_COOKIES"); v == "true" || v == "1" {
+		active = append(active, "ORVA_SECURE_COOKIES")
+		cfg.Security.SecureCookies = true
 	}
+	if v := os.Getenv("ORVA_SESSION_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			active = append(active, "ORVA_SESSION_DAYS")
+			cfg.Security.SessionDays = n
+		}
+	}
+
+	return active
 }

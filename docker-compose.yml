@@ -16,12 +16,24 @@ services:
     ports:
       - "8443:8443"
 
+    # Share the host cgroup namespace and bind-mount the cgroupfs rw so
+    # nsjail can create NSJAIL.<pid> child cgroups with memory.max and
+    # cpu.max limits applied by the kernel. Without this, /sys/fs/cgroup
+    # is a read-only private view and resource limits fall back to rlimit_as
+    # only (address-space soft cap, no CPU throttling). The entrypoint
+    # creates /sys/fs/cgroup/orva-sandboxes and enables +memory+cpu+pids
+    # there so nsjail has a writable, properly-delegated mount point.
+    cgroup: host
+
     volumes:
       - orva-data:/var/lib/orva
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
 
     # Capabilities required by orvad's components:
     #   SYS_ADMIN  — nsjail uses this to set up user namespaces, mounts,
     #                and cgroup v2 delegations for each function spawn.
+    #                Also required to write to the cgroupfs for the
+    #                orva-sandboxes cgroup (see cgroupns: host above).
     #   NET_ADMIN  — the egress firewall manager applies nftables rules
     #                via `nft`. Without this, the firewall page shows
     #                an amber "nftables unavailable" banner and IP
@@ -47,6 +59,12 @@ services:
     # doesn't, the entrypoint falls back to mknod and continues.
     devices:
       - /dev/net/tun:/dev/net/tun
+
+    environment:
+      ORVA_DEFAULT_MEMORY_MB: "128"    # default is 64; 11.7 GB host can afford more per fn
+      ORVA_WRITE_TIMEOUT_SEC: "90"     # default is 60; headroom above 30 s function timeout
+      ORVA_SESSION_DAYS: "30"          # default is 7; single-operator instance
+      ORVA_LOG_RETENTION_DAYS: "30"    # default is 7
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8443/api/v1/system/health"]

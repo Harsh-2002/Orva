@@ -4,7 +4,7 @@ All endpoints under `/api/v1/`. Auth via either:
 
 - **API key**: `X-Orva-API-Key: orva_xxx...` header. Used by curl, CI,
   external callers.
-- **Session cookie**: set by `POST /auth/login`. Used by the dashboard.
+- **Session cookie**: set by `POST /api/v1/auth/login`. Used by the dashboard.
 
 API keys carry a permission set. The bootstrap admin key has all four:
 `invoke`, `read`, `write`, `admin`. Operator-issued keys can be
@@ -30,7 +30,7 @@ present. Full code catalog in [ERRORS.md](ERRORS.md).
 
 ## Auth
 
-### `POST /auth/onboard`
+### `POST /api/v1/auth/onboard`
 First-run only. Creates the admin user. Returns 409 if a user already
 exists.
 
@@ -41,24 +41,24 @@ exists.
 {"user": {"id": "u_xxx", "username": "admin"}, "expires_at": "..."}
 ```
 
-### `POST /auth/login`
+### `POST /api/v1/auth/login`
 Sets the session cookie.
 
 ```json
 {"username": "admin", "password": "..."}
 ```
 
-### `GET /auth/me`
+### `GET /api/v1/auth/me`
 Returns the current user (cookie-authed).
 
-### `GET /auth/status`
+### `GET /api/v1/auth/status`
 Returns `{"has_user": bool}` so the UI knows whether to route to
 `/onboarding` or `/login`.
 
-### `POST /auth/refresh`
+### `POST /api/v1/auth/refresh`
 Rotates the cookie's expiry forward by 7 days.
 
-### `POST /auth/logout`
+### `POST /api/v1/auth/logout`
 Invalidates the session.
 
 ## Functions
@@ -140,9 +140,11 @@ Deployment history for a function. Optional `?limit=N` (default 50).
 
 ## Invoke
 
-### `POST /api/v1/invoke/{id}/{path}`
-Calls the function. Method, headers, body, query, and `path` (everything
-after `/{id}`) are all passed to the handler as `event`.
+### `POST /fn/{short_id}/{path}`
+Calls the function. `short_id` is the function ID without the `fn_` prefix
+(e.g. function `fn_ttp836b9x3m1` → URL `/fn/ttp836b9x3m1`). Method,
+headers, body, query, and `path` (everything after `/{short_id}`) are all
+passed to the handler as `event`.
 
 Response is whatever the handler returns. HTTP status is 200 unless
 the handler throws or returns an AWS-shape `{statusCode, body}`.
@@ -200,7 +202,7 @@ List custom routes.
 ```
 
 `methods` accepts `*` for all methods or comma-separated (`GET,POST`).
-Reserved prefixes (`/api/`, `/web/`, `/auth/`, `/_orva/`) are rejected.
+Reserved prefixes (`/api/`, `/fn/`, `/mcp/`, `/web/`, `/_orva/`) are rejected.
 
 ### `DELETE /api/v1/routes?path=/webhooks/stripe`
 Remove a route.

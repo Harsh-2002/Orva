@@ -65,7 +65,7 @@ done
 check "deploy active" "$([ "$s" = active ] && echo ok || echo fail)" "status=$s"
 
 # 2. Invoke with network_mode=none — expect failure (no DNS, no TCP).
-resp=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 ok_off=$(echo "$resp" | jq -r '.ok')
 err_off=$(echo "$resp" | jq -r '.err')
 check "default-mode invoke is blocked" \
@@ -84,7 +84,7 @@ check "PUT network_mode=egress persists" \
 # instant; budget 3s for the kill-on-release path.
 sleep 3
 
-resp2=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp2=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 ok_on=$(echo "$resp2" | jq -r '.ok')
 body_on=$(echo "$resp2" | jq -r '.body')
 check "egress-mode invoke reaches example.com" \
@@ -96,7 +96,7 @@ check "egress-mode invoke reaches example.com" \
     -H "Content-Type: application/json" \
     -d '{"network_mode":"none"}' > /dev/null
 sleep 3
-resp3=$("${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+resp3=$("${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 ok_off2=$(echo "$resp3" | jq -r '.ok')
 check "PUT back to none re-isolates" \
     "$([ "$ok_off2" = false ] && echo ok || echo fail)" "ok=$ok_off2"
@@ -115,9 +115,9 @@ check "invalid network_mode rejected" \
     -d '{"network_mode":"egress"}' > /dev/null
 sleep 2
 # Prime the pool.
-"${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}' > /dev/null
+"${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}' > /dev/null
 t0=$(date +%s%N)
-"${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}' > /dev/null
+"${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}' > /dev/null
 t1=$(date +%s%N)
 warm_ms=$(( (t1 - t0) / 1000000 ))
 # Generous bound — example.com round-trip dominates. We're checking

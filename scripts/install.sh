@@ -292,7 +292,7 @@ Wants=network-online.target
 Type=simple
 User=orva
 Group=orva
-ExecStart=/opt/orva/bin/orva serve --data-dir /var/lib/orva
+ExecStart=/opt/orva/bin/orva serve
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
@@ -309,7 +309,6 @@ ProtectKernelModules=true
 LimitNOFILE=65536
 LimitNPROC=8192
 Environment=ORVA_DATA_DIR=/var/lib/orva
-Environment=ORVA_ROOTFS_DIR=/var/lib/orva/rootfs
 
 [Install]
 WantedBy=multi-user.target
@@ -319,7 +318,7 @@ EOF
 #!/sbin/openrc-run
 description="Orva self-hosted serverless platform"
 command="/opt/orva/bin/orva"
-command_args="serve --data-dir /var/lib/orva"
+command_args="serve"
 command_user="orva:orva"
 command_background="yes"
 pidfile="/run/orva.pid"
@@ -437,7 +436,7 @@ install_service() {
         log "  enable + start with: rc-update add orva default && service orva start"
     else
         warn "no service manager detected — start orva manually:"
-        warn "  $PREFIX/bin/orva serve --data-dir $DATA_DIR"
+        warn "  ORVA_DATA_DIR=$DATA_DIR $PREFIX/bin/orva serve"
     fi
 }
 

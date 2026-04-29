@@ -28,7 +28,7 @@ if ! command -v hey >/dev/null 2>&1; then
   exit 2
 fi
 
-URL="$BASE/api/v1/invoke/$FN/"
+URL="$BASE/fn/${FN#fn_}/"
 
 # Warmup — makes sure the pool is spawned + WAL sized.
 echo "# warmup 60s at c=5 ..." >&2

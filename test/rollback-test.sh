@@ -50,7 +50,7 @@ deploy_inline() {
 }
 
 invoke_body() {
-    "${CURL[@]}" -X POST "$BASE/api/v1/invoke/$fid" -d '{}' --max-time 5
+    "${CURL[@]}" -X POST "$BASE/fn/${fid#fn_}" -d '{}' --max-time 5
 }
 
 # 1. Deploy code A

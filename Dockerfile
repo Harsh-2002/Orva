@@ -84,13 +84,10 @@ RUN chmod +x /usr/local/bin/orva-entrypoint
 WORKDIR /var/lib/orva
 EXPOSE 8443
 
-ENV ORVA_DATA_DIR=/var/lib/orva \
-    ORVA_ROOTFS_DIR=/var/lib/orva/rootfs
+ENV ORVA_DATA_DIR=/var/lib/orva
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:8443/api/v1/system/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/orva-entrypoint"]
-CMD ["/usr/local/bin/orva", "serve", \
-     "--host", "0.0.0.0", "--port", "8443", \
-     "--db-path", "/var/lib/orva/orva.db"]
+CMD ["/usr/local/bin/orva", "serve"]

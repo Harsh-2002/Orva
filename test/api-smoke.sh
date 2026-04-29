@@ -34,8 +34,8 @@ code=$("${HCURL[@]}" "$BASE/api/v1/system/metrics.json")
 expect_code "GET  /system/metrics.json" 200 "$code"
 
 # --- auth (already onboarded) ---
-code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/auth/status")
-expect_code "GET  /auth/status" 200 "$code"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/auth/status")
+expect_code "GET  /api/v1/auth/status" 200 "$code"
 
 # --- functions: create with egress, query, update, delete ---
 fn_name="smoke-$$"
@@ -71,7 +71,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
 done
 
-code=$("${HCURL[@]}" -X POST "$BASE/api/v1/invoke/$fid/" -d '{}')
+code=$("${HCURL[@]}" -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
 expect_code "POST /invoke/{id}/" 200 "$code"
 
 code=$("${HCURL[@]}" "$BASE/api/v1/functions/$fid/source")

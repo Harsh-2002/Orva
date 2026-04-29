@@ -343,7 +343,7 @@
             v-model.number="form.memory_mb"
             label="Memory (MB)"
             type="number"
-            placeholder="128"
+            placeholder="64"
           />
           <Input
             v-model.number="form.cpus"
@@ -742,7 +742,7 @@
             v-model.number="form.memory_mb"
             label="Memory (MB)"
             type="number"
-            placeholder="128"
+            placeholder="64"
           />
           <Input
             v-model.number="form.cpus"
@@ -823,7 +823,7 @@ const code = ref('')
 const form = ref({
   name: '',
   runtime: 'python314',
-  memory_mb: 128,
+  memory_mb: 64,
   cpus: 0.5,
   network_mode: 'none',          // 'none' | 'egress'
   max_concurrency: 0,             // 0 = unlimited
@@ -852,7 +852,7 @@ const urlCopied = ref(false)
 // root, which is what most AWS/Lambda-style routers expect.
 const invokeUrl = computed(() => {
   if (!fnId.value) return ''
-  return `${window.location.origin}/api/v1/invoke/${fnId.value}`
+  return `${window.location.origin}/fn/${fnId.value.replace(/^fn_/, '')}`
 })
 const copyInvokeUrl = async () => {
   if (!invokeUrl.value) return
@@ -1408,7 +1408,7 @@ const invokeFunction = async () => {
   try {
     const payload = testPayload.value ? JSON.parse(testPayload.value) : {}
 
-    const res = await fetch(`/api/v1/invoke/${fnId.value}`, {
+    const res = await fetch(`/fn/${fnId.value.replace(/^fn_/, '')}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

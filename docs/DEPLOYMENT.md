@@ -27,6 +27,9 @@ caddy, nginx, traefik, cloudflared. The browser's clipboard API
 silently fails on plain HTTP from non-localhost — the dashboard
 becomes partially broken.
 
+Once TLS is terminated upstream, set `ORVA_SECURE_COOKIES=true` so
+session cookies are only sent over HTTPS.
+
 Caddy example:
 
 ```caddy

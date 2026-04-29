@@ -1,5 +1,4 @@
-import apiClient from './client'
-import { getApiKey } from './client'
+import apiClient, { getApiKey, fnClient } from './client'
 
 // Health check
 export const getHealth = () => apiClient.get('/system/health')
@@ -50,16 +49,16 @@ export const deployFunction = async (data) => {
 export const deployInline = (fnId, code, filename) =>
   apiClient.post(`/functions/${fnId}/deploy-inline`, { code, filename })
 
-// Invoke function by ID.
+// Invoke function by ID. URL uses short form: /fn/{id} not /fn/fn_{id}.
 export const invokeFunction = (fnId, payload) =>
-  apiClient.post(`/invoke/${fnId}`, payload, { responseType: 'text' })
+  fnClient.post(`/${fnId.replace(/^fn_/, '')}`, payload, { responseType: 'text' })
 
 // Invoke function by name (resolves to ID first).
 export const invokeFunctionByName = async (name, payload) => {
   const listResp = await apiClient.get('/functions')
   const fn = (listResp.data.functions || []).find(f => f.name === name)
   if (!fn) throw new Error(`Function "${name}" not found`)
-  return apiClient.post(`/invoke/${fn.id}`, payload, { responseType: 'text' })
+  return fnClient.post(`/${fn.id.replace(/^fn_/, '')}`, payload, { responseType: 'text' })
 }
 
 // Executions (invocations in Orva-fx terminology)

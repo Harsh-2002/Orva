@@ -120,7 +120,7 @@ type CreateFunctionInput struct {
 	Runtime           string            `json:"runtime" jsonschema:"one of node22 node24 python313 python314"`
 	Entrypoint        string            `json:"entrypoint,omitempty" jsonschema:"defaults: handler.js for Node, handler.py for Python"`
 	TimeoutMS         int64             `json:"timeout_ms,omitempty" jsonschema:"per-invocation timeout in ms, default 30000"`
-	MemoryMB          int64             `json:"memory_mb,omitempty" jsonschema:"sandbox memory in MB, default 128"`
+	MemoryMB          int64             `json:"memory_mb,omitempty" jsonschema:"sandbox memory in MB, default 64"`
 	CPUs              float64           `json:"cpus,omitempty" jsonschema:"CPU shares (fractional ok), default 0.5"`
 	EnvVars           map[string]string `json:"env_vars,omitempty" jsonschema:"plaintext env vars (use set_secret for credentials)"`
 	NetworkMode       string            `json:"network_mode,omitempty" jsonschema:"none (default, loopback only) or egress (outbound HTTPS allowed)"`
@@ -367,7 +367,7 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 		in.TimeoutMS = 30000
 	}
 	if in.MemoryMB <= 0 {
-		in.MemoryMB = 128
+		in.MemoryMB = 64
 	}
 	if in.CPUs <= 0 {
 		in.CPUs = 0.5

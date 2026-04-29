@@ -33,9 +33,8 @@ single argument:
 }
 ```
 
-- `path` is everything after `/api/v1/invoke/<fn-id>` (or the matched
-  custom route prefix). For a request to
-  `POST /api/v1/invoke/fn_xyz/health`, `event.path === "/health"`.
+- `path` is everything after `/fn/<id>` (or the matched custom route
+  prefix). For a request to `POST /fn/xyz/health`, `event.path === "/health"`.
 - `body` is the raw request body. JSON callers should `JSON.parse`
   it themselves.
 - Headers are normalized to lowercase keys.
@@ -202,7 +201,7 @@ curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
 
 # 3. Invoke
 curl -X POST -H "X-Orva-API-Key: $KEY" \
-  http://localhost:8443/api/v1/invoke/fn_xyz \
+  http://localhost:8443/fn/xyz \
   -d '{}'
 # → {"hello":"world"}
 ```

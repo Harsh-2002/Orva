@@ -55,4 +55,32 @@ fi
 
 touch /var/lib/orva/.setup-complete
 
+# Cgroup v2 delegation for nsjail per-sandbox resource limits.
+# Creates /sys/fs/cgroup/orva-sandboxes with memory+cpu+pids controllers
+# enabled so nsjail can set memory.max / cpu.max on each NSJAIL.<pid>
+# child cgroup. Requires cgroupns=host and /sys/fs/cgroup:rw in
+# docker-compose.yml. Failure is non-fatal: sandboxes still run with
+# namespace + seccomp isolation, but without kernel-level resource caps.
+setup_nsjail_cgroups() {
+  ORVA_CG=/sys/fs/cgroup/orva-sandboxes
+
+  # Create the orva-sandboxes cgroup. On cgroupfs you can't create regular
+  # files — only cgroup directories via mkdir. If mkdir succeeds AND the
+  # kernel auto-creates cgroup.procs inside it, we have a valid delegate.
+  if ! mkdir -p "$ORVA_CG" 2>/dev/null || [ ! -f "$ORVA_CG/cgroup.procs" ]; then
+    echo ">> WARN: cannot create cgroup at $ORVA_CG — nsjail CPU/memory limits disabled"
+    echo "         (requires cgroup: host and - /sys/fs/cgroup:/sys/fs/cgroup:rw)"
+    return
+  fi
+
+  if echo "+memory +cpu +pids" > "$ORVA_CG/cgroup.subtree_control" 2>/dev/null; then
+    echo ">> nsjail cgroup delegation ready: $ORVA_CG"
+    export ORVA_CGROUPV2_MOUNT="$ORVA_CG"
+  else
+    echo ">> WARN: $ORVA_CG/cgroup.subtree_control write failed — cgroup limits disabled"
+    rmdir "$ORVA_CG" 2>/dev/null || true
+  fi
+}
+setup_nsjail_cgroups || true
+
 exec "$@"

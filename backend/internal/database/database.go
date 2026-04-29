@@ -43,14 +43,27 @@ func New(path string) (*Database, error) {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	writeDB, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=10000")
+	// Per-connection pragmas via DSN. modernc.org/sqlite recognizes only the
+	// `_pragma=name(value)` form (other `_journal_mode=`/`_busy_timeout=`
+	// names are silently dropped). Listing them here ensures every newly
+	// opened pool connection runs them on connect — without this, only the
+	// one connection that hosted the post-Open Exec call gets busy_timeout
+	// and concurrent readers race writers into SQLITE_BUSY.
+	const dsnPragmas = "_pragma=busy_timeout(10000)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=cache_size(-64000)" +
+		"&_pragma=mmap_size(268435456)" +
+		"&_pragma=temp_store(MEMORY)"
+
+	writeDB, err := sql.Open("sqlite", path+"?"+dsnPragmas)
 	if err != nil {
 		return nil, fmt.Errorf("open write db: %w", err)
 	}
 	writeDB.SetMaxOpenConns(1)
 	writeDB.SetMaxIdleConns(1)
 
-	readDB, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=10000&mode=ro")
+	readDB, err := sql.Open("sqlite", path+"?"+dsnPragmas+"&mode=ro")
 	if err != nil {
 		writeDB.Close()
 		return nil, fmt.Errorf("open read db: %w", err)
@@ -58,11 +71,9 @@ func New(path string) (*Database, error) {
 	readDB.SetMaxOpenConns(runtime.NumCPU())
 	readDB.SetMaxIdleConns(runtime.NumCPU())
 
-	pragmas := []string{
-		"PRAGMA cache_size = -64000",
-		"PRAGMA mmap_size = 268435456",
-		"PRAGMA temp_store = MEMORY",
-		"PRAGMA busy_timeout = 10000",
+	// Database-level (file-scope) pragmas — set once on the writer. These
+	// persist across connections so they don't belong in the per-conn DSN.
+	dbScoped := []string{
 		// Checkpoint the WAL less aggressively so short bursts don't pause
 		// writers to compact the file. Default is 1000 pages (~4MB); 10000
 		// lets us amortize over more writes at ~40MB of WAL growth.
@@ -71,15 +82,10 @@ func New(path string) (*Database, error) {
 		// writes. The checkpoint will truncate back to this size.
 		"PRAGMA journal_size_limit = 67108864",
 	}
-	for _, p := range pragmas {
+	for _, p := range dbScoped {
 		if _, err := writeDB.Exec(p); err != nil {
 			return nil, fmt.Errorf("pragma %s: %w", p, err)
 		}
-	}
-	// Also apply busy_timeout to read connections so they wait for writers
-	// instead of immediately returning SQLITE_BUSY.
-	if _, err := readDB.Exec("PRAGMA busy_timeout = 10000"); err != nil {
-		return nil, fmt.Errorf("pragma busy_timeout (read): %w", err)
 	}
 
 	return &Database{write: writeDB, read: readDB, path: path}, nil
