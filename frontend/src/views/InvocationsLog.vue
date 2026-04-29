@@ -181,6 +181,7 @@
         <Button
           variant="danger"
           size="sm"
+          class="!rounded-full px-4"
           :loading="bulkDeleting"
           @click="bulkDelete"
         >
