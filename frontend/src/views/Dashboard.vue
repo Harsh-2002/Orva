@@ -3,6 +3,7 @@
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-xl font-semibold text-foreground tracking-tight">System Overview</h1>
+        <p class="text-xs text-foreground-muted mt-1">Live snapshot of what your platform is doing right now.</p>
       </div>
       <div
         class="flex items-center gap-2 text-xs"
@@ -23,24 +24,44 @@
       </div>
     </div>
 
-    <!-- Top-line numbers -->
+    <!-- Top-line numbers — every tile has a one-line "what does this mean" -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <Tile label="Functions"          :value="system.functionsCount" :icon="Boxes" />
-      <Tile label="Active requests"    :value="m.active_requests ?? 0" :icon="Activity" />
-      <Tile label="Total invocations"  :value="m.totals?.invocations ?? 0" :icon="TrendingUp" />
-      <Tile label="Cold-start %"       :value="formatPct(m.rates?.cold_start_pct)" :icon="Snowflake" />
+      <Tile
+        label="Functions"
+        hint="Deployed in this workspace"
+        :value="system.functionsCount"
+        :icon="Boxes"
+      />
+      <Tile
+        label="In flight"
+        hint="Requests being handled right now"
+        :value="m.active_requests ?? 0"
+        :icon="Activity"
+      />
+      <Tile
+        label="Invocations"
+        hint="Total calls served since the platform started"
+        :value="formatBig(m.totals?.invocations ?? 0)"
+        :icon="TrendingUp"
+      />
+      <Tile
+        label="Cold starts"
+        hint="Calls that had to spawn a fresh sandbox"
+        :value="formatPct(m.rates?.cold_start_pct)"
+        :icon="Snowflake"
+      />
     </div>
 
     <!-- Latency + host -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- Latency -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-1">
-        <div class="flex items-center justify-between mb-3">
+        <div class="mb-3">
           <div class="text-xs font-bold text-white uppercase tracking-wider">
-            Latency
+            Response time
           </div>
-          <div class="text-[10px] text-foreground-muted font-mono">
-            ~last 8k calls
+          <div class="text-[11px] text-foreground-muted mt-1">
+            How long calls take to come back. p99 is the worst-case 1-in-100.
           </div>
         </div>
         <LatencyBars
@@ -50,70 +71,138 @@
         />
       </div>
 
-      <!-- Host resources -->
-      <div class="bg-background border border-border rounded-lg p-5 lg:col-span-2 space-y-4">
-        <div class="text-xs font-bold text-white uppercase tracking-wider">Host</div>
-        <div class="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">CPU</div>
-            <div class="text-lg font-mono text-white">{{ m.host?.num_cpu ?? '?' }}</div>
-            <div class="text-[10px] text-foreground-muted">cores</div>
+      <!-- Host resources — single stacked memory bar tells the whole story -->
+      <div class="bg-background border border-border rounded-lg p-5 lg:col-span-2 space-y-5">
+        <div>
+          <div class="text-xs font-bold text-white uppercase tracking-wider">
+            Host machine
           </div>
-          <div>
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">Goroutines</div>
-            <div class="text-lg font-mono text-white">{{ m.host?.num_goroutines ?? '?' }}</div>
-            <div class="text-[10px] text-foreground-muted">live</div>
+          <div class="text-[11px] text-foreground-muted mt-1">
+            The server Orva is running on, and how much of its RAM your warm sandboxes are holding.
           </div>
         </div>
 
-        <!-- Memory bars -->
-        <div class="space-y-3 pt-1">
-          <Bar
-            label="Available"
-            :value="m.host?.mem_available_mb ?? 0"
-            :total="m.host?.mem_total_mb ?? 0"
-            unit="MB"
-            color="bg-green-500/70"
+        <div class="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">CPU cores</div>
+            <div class="text-lg font-mono text-white mt-0.5">{{ m.host?.num_cpu ?? '?' }}</div>
+            <div class="text-[11px] text-foreground-muted mt-0.5">
+              available to functions on this host
+            </div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">Memory in use</div>
+            <div class="text-lg font-mono text-white mt-0.5">
+              {{ formatMB(memReserved) }} <span class="text-foreground-muted text-sm">/ {{ formatMB(memTotal) }}</span>
+            </div>
+            <div class="text-[11px] text-foreground-muted mt-0.5">
+              {{ memUsedPct.toFixed(1) }}% reserved by warm sandbox pools
+            </div>
+          </div>
+        </div>
+
+        <!-- Stacked bar: total = reserved + free. Shows the whole picture in one row. -->
+        <div class="space-y-2">
+          <StackedBar
+            :total="memTotal"
+            :segments="[
+              { label: 'Reserved by warm pools', value: memReserved, color: 'bg-blue-500/70' },
+              { label: 'Free',                   value: memFree,     color: 'bg-emerald-500/40' },
+            ]"
           />
-          <Bar
-            label="Reserved by pools"
-            :value="m.host?.mem_reserved_mb ?? 0"
-            :total="m.host?.mem_total_mb ?? 0"
-            unit="MB"
-            color="bg-blue-500/70"
-          />
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-muted">
+            <span class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-blue-500/70" />
+              {{ formatMB(memReserved) }} held by warm sandboxes ready to serve
+            </span>
+            <span class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500/40" />
+              {{ formatMB(memFree) }} free for new pools or other workloads
+            </span>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Build pipeline + sandbox stats -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Build pipeline -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
-        <div class="text-xs font-bold text-white uppercase tracking-wider">Build pipeline</div>
-        <div class="grid grid-cols-3 gap-3 text-sm">
-          <Stat label="Pending"   :value="m.build_queue?.pending ?? 0" />
-          <Stat label="Workers"   :value="m.build_queue?.workers ?? 0" />
-          <Stat label="Total"     :value="m.totals?.builds ?? 0" />
+        <div>
+          <div class="text-xs font-bold text-white uppercase tracking-wider">
+            Builds
+          </div>
+          <div class="text-[11px] text-foreground-muted mt-1">
+            Where deploys go: extracted, dependencies installed, then activated.
+          </div>
         </div>
-        <div v-if="(m.totals?.build_errors ?? 0) > 0" class="text-xs text-red-400">
-          {{ m.totals.build_errors }} build error(s) lifetime
+        <div class="grid grid-cols-3 gap-3">
+          <Stat
+            label="In queue"
+            :value="m.build_queue?.pending ?? 0"
+            hint="waiting to start"
+          />
+          <Stat
+            label="Build workers"
+            :value="m.build_queue?.workers ?? 0"
+            hint="parallel slots"
+          />
+          <Stat
+            label="Built so far"
+            :value="formatBig(m.totals?.builds ?? 0)"
+            hint="lifetime total"
+          />
+        </div>
+        <div
+          v-if="(m.totals?.build_errors ?? 0) > 0"
+          class="text-xs text-red-400 flex items-center gap-1.5 pt-1"
+        >
+          <span class="w-1.5 h-1.5 rounded-full bg-red-400" />
+          {{ m.totals.build_errors }} build{{ m.totals.build_errors === 1 ? ' has' : 's have' }} failed since start
         </div>
       </div>
 
+      <!-- Sandbox -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
-        <div class="text-xs font-bold text-white uppercase tracking-wider">Sandbox</div>
-        <div class="grid grid-cols-3 gap-3 text-sm">
-          <Stat label="Active"     :value="m.sandbox?.active ?? 0" />
-          <Stat label="Lifetime"   :value="m.sandbox?.total ?? 0" />
-          <Stat label="Cold/Warm"  :value="(m.totals?.cold_starts ?? 0) + ' / ' + (m.totals?.warm_hits ?? 0)" />
+        <div>
+          <div class="text-xs font-bold text-white uppercase tracking-wider">
+            Sandbox activity
+          </div>
+          <div class="text-[11px] text-foreground-muted mt-1">
+            Each invocation runs inside an isolated nsjail sandbox process.
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <Stat
+            label="Running now"
+            :value="m.sandbox?.active ?? 0"
+            hint="serving a request"
+          />
+          <Stat
+            label="Reused"
+            :value="formatBig(m.totals?.warm_hits ?? 0)"
+            hint="warm-pool hits"
+          />
+          <Stat
+            label="Spawned fresh"
+            :value="formatBig(m.totals?.cold_starts ?? 0)"
+            hint="cold starts"
+          />
         </div>
       </div>
     </div>
 
-    <!-- Per-function pool cards -->
+    <!-- Per-function pool cards — each card explains what it is. -->
     <div v-if="(m.pools || []).length">
-      <div class="text-xs font-bold text-white uppercase tracking-wider mb-3">
-        Warm pools ({{ m.pools.length }})
+      <div class="flex items-baseline justify-between mb-3">
+        <div>
+          <div class="text-xs font-bold text-white uppercase tracking-wider">
+            Warm pools ({{ m.pools.length }})
+          </div>
+          <div class="text-[11px] text-foreground-muted mt-1">
+            One pool per active function. Sandboxes stay ready so the next call doesn't pay a cold start.
+          </div>
+        </div>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         <div
@@ -121,38 +210,69 @@
           :key="p.function_id"
           class="bg-background border border-border rounded-lg p-4 space-y-3"
         >
+          <!-- Header -->
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
               <div class="text-sm font-medium text-white truncate">{{ p.function_name || p.function_id }}</div>
               <div class="text-[10px] text-foreground-muted font-mono truncate">{{ p.function_id }}</div>
             </div>
-            <div class="text-right">
-              <div class="text-xs text-foreground-muted">target {{ p.target }}</div>
-              <div class="text-[10px] text-foreground-muted">cap {{ p.dynamic_max }}</div>
+            <div class="text-right shrink-0">
+              <div class="text-[10px] text-foreground-muted">Target / cap</div>
+              <div class="text-xs font-mono text-white">
+                {{ p.target }} <span class="text-foreground-muted">/</span> {{ p.dynamic_max }}
+              </div>
             </div>
           </div>
 
-          <div class="grid grid-cols-3 gap-2 text-xs">
-            <Mini label="idle" :value="p.idle" />
-            <Mini label="busy" :value="p.busy" />
-            <Mini label="rate" :value="formatRate(p.rate_ewma)" suffix="rps" />
+          <!-- Right-now snapshot -->
+          <div class="grid grid-cols-3 gap-2">
+            <PoolStat
+              label="Ready"
+              :value="p.idle"
+              hint="idle workers"
+            />
+            <PoolStat
+              label="Busy"
+              :value="p.busy"
+              hint="serving now"
+            />
+            <PoolStat
+              label="Calls / sec"
+              :value="formatRate(p.rate_ewma)"
+              hint="recent rate"
+            />
           </div>
 
-          <Sparkline :points="poolHistoryFor(p.function_id)" />
+          <!-- Sparkline of incoming rate -->
+          <div>
+            <Sparkline :points="poolHistoryFor(p.function_id)" />
+            <div class="text-[10px] text-foreground-muted mt-1">
+              Recent calls per second (last 5 min)
+            </div>
+          </div>
 
-          <div class="flex items-center justify-between text-[10px] text-foreground-muted">
-            <span>↑{{ p.scale_ups }} · ↓{{ p.scale_downs }}</span>
-            <span>spawn {{ p.spawned }} · kill {{ p.killed }}</span>
-            <span>lat {{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }}ms</span>
+          <!-- Lifetime + tail -->
+          <div class="border-t border-border pt-3 grid grid-cols-2 gap-3 text-[11px]">
+            <div>
+              <div class="text-foreground-muted">Spawned · killed</div>
+              <div class="font-mono text-white">{{ p.spawned }} · {{ p.killed }}</div>
+            </div>
+            <div>
+              <div class="text-foreground-muted">Avg recent latency</div>
+              <div class="font-mono text-white">{{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms</div>
+            </div>
           </div>
         </div>
       </div>
     </div>
     <div
       v-else
-      class="bg-background border border-border rounded-lg p-8 text-center text-sm text-foreground-muted"
+      class="bg-background border border-border rounded-lg p-8 text-center"
     >
-      No warm pools yet — deploy a function to see live load metrics.
+      <div class="text-sm text-white">No warm pools yet</div>
+      <div class="text-xs text-foreground-muted mt-1">
+        Deploy a function to see its live worker pool here.
+      </div>
     </div>
   </div>
 </template>
@@ -171,22 +291,48 @@ const poolHistoryFor = (fnId) => system.poolHistory[fnId] || []
 const formatPct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`)
 const formatRate = (v) => (v == null ? '0' : v.toFixed(1))
 
+// Compact human-readable byte sizes. Server reports memory in MB; we show
+// GB once we cross 1 GB so the host card doesn't overflow with five-digit
+// numbers like "11961 MB".
+const formatMB = (mb) => {
+  const v = mb || 0
+  if (v >= 1024) return `${(v / 1024).toFixed(1)} GB`
+  return `${Math.round(v)} MB`
+}
+// Compact integers — 12345 → 12.3k, 1234567 → 1.2M. Used in tiles where
+// the raw count would otherwise dominate the visual weight of the card.
+const formatBig = (n) => {
+  const v = Number(n) || 0
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000)     return `${(v / 1_000).toFixed(1)}k`
+  return String(v)
+}
+
+// Memory derived state — kept here so the template stays declarative.
+const memTotal    = computed(() => m.value.host?.mem_total_mb ?? 0)
+const memReserved = computed(() => m.value.host?.mem_reserved_mb ?? 0)
+const memFree     = computed(() => Math.max(0, memTotal.value - memReserved.value))
+const memUsedPct  = computed(() => (memTotal.value > 0 ? (memReserved.value / memTotal.value) * 100 : 0))
+
 onMounted(() => system.connect())
 onUnmounted(() => system.disconnect())
 
-// ── Tiny inline render-fn components ───────────────────────────────────
+// ── Tile: top-line metric card with icon + label + big number + hint ──
+// `h-full` so siblings in a grid row stretch to the tallest. The number
+// owns the visual weight; the hint underneath says what the number means.
 const Tile = {
-  props: { label: String, value: [String, Number], icon: Object },
+  props: { label: String, value: [String, Number], icon: Object, hint: String },
   setup(p) {
     return () =>
       h('div', {
-        class: 'bg-background border border-border rounded-lg p-5 flex flex-col justify-between h-28 hover:border-primary/50 transition-colors group',
+        class: 'bg-background border border-border rounded-lg p-5 flex flex-col h-full hover:border-primary/50 transition-colors group',
       }, [
-        h('div', { class: 'flex items-center justify-between' }, [
+        h('div', { class: 'flex items-center justify-between mb-3' }, [
           h('span', { class: 'text-xs font-medium text-foreground-muted uppercase tracking-wide' }, p.label),
           p.icon ? h(p.icon, { class: 'w-4 h-4 text-foreground-muted group-hover:text-primary' }) : null,
         ]),
-        h('div', { class: 'text-2xl font-mono text-foreground' }, String(p.value)),
+        h('div', { class: 'text-2xl font-mono text-foreground leading-none' }, String(p.value)),
+        p.hint ? h('div', { class: 'text-[11px] text-foreground-muted mt-auto pt-3 leading-snug' }, p.hint) : null,
       ])
   },
 }
@@ -231,45 +377,60 @@ const LatencyBars = {
   },
 }
 
+// Stat: bigger label, value, and a one-line hint. Used in the Builds and
+// Sandbox cards where each metric deserves a sentence of context. Same
+// height across siblings so the row reads as a unit.
 const Stat = {
-  props: { label: String, value: [String, Number] },
+  props: { label: String, value: [String, Number], hint: String },
   setup(p) {
     return () =>
-      h('div', { class: 'bg-surface border border-border rounded p-3' }, [
+      h('div', { class: 'bg-surface border border-border rounded p-3 flex flex-col h-full' }, [
         h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted' }, p.label),
-        h('div', { class: 'text-base font-mono text-white' }, String(p.value ?? 0)),
+        h('div', { class: 'text-lg font-mono text-white mt-0.5' }, String(p.value ?? 0)),
+        p.hint ? h('div', { class: 'text-[10px] text-foreground-muted mt-auto pt-1.5 leading-snug' }, p.hint) : null,
       ])
   },
 }
 
-const Mini = {
-  props: { label: String, value: [String, Number], suffix: String },
+// PoolStat: compact version for the per-function cards. Slightly smaller
+// number, hint underneath, fixed-height so the three columns in a pool
+// card always line up vertically.
+const PoolStat = {
+  props: { label: String, value: [String, Number], hint: String },
   setup(p) {
     return () =>
-      h('div', { class: 'bg-surface border border-border rounded p-2 text-center' }, [
-        h('div', { class: 'text-[9px] uppercase text-foreground-muted' }, p.label),
-        h('div', { class: 'text-sm font-mono text-white' }, [
-          String(p.value ?? 0),
-          p.suffix ? h('span', { class: 'text-[9px] text-foreground-muted ml-1' }, p.suffix) : null,
-        ]),
+      h('div', { class: 'bg-surface border border-border rounded p-2.5 flex flex-col h-full' }, [
+        h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted' }, p.label),
+        h('div', { class: 'text-base font-mono text-white mt-0.5 leading-none' }, String(p.value ?? 0)),
+        p.hint ? h('div', { class: 'text-[10px] text-foreground-muted mt-auto pt-1.5' }, p.hint) : null,
       ])
   },
 }
 
-const Bar = {
-  props: { label: String, value: Number, total: Number, unit: String, color: String },
+// StackedBar: one row, multiple coloured segments adding up to total.
+// Used by the host memory panel so a single bar conveys "of total RAM,
+// X is held by warm pools, Y is free" without two separate gauges.
+const StackedBar = {
+  props: {
+    total:    { type: Number, required: true },
+    segments: { type: Array,  required: true }, // [{ label, value, color }]
+  },
   setup(p) {
     return () => {
-      const pct = p.total > 0 ? (p.value / p.total) * 100 : 0
-      return h('div', null, [
-        h('div', { class: 'flex items-center justify-between text-xs mb-1' }, [
-          h('span', { class: 'text-foreground-muted' }, p.label),
-          h('span', { class: 'font-mono text-white' }, `${p.value} / ${p.total} ${p.unit}`),
-        ]),
-        h('div', { class: 'h-2 bg-surface rounded overflow-hidden' }, [
-          h('div', { class: `h-full ${p.color || 'bg-primary'}`, style: { width: `${pct.toFixed(1)}%` } }),
-        ]),
-      ])
+      const total = p.total > 0 ? p.total : 1
+      return h('div', {
+        class: 'h-2.5 bg-surface rounded overflow-hidden flex',
+        role: 'img',
+        'aria-label': p.segments.map((s) => `${s.label}: ${s.value} of ${p.total}`).join('; '),
+      },
+        p.segments.map((seg) =>
+          h('div', {
+            class: `h-full ${seg.color}`,
+            style: { width: `${((seg.value / total) * 100).toFixed(2)}%` },
+            title: `${seg.label}: ${seg.value}`,
+          })
+        )
+      )
     }
   },
 }
