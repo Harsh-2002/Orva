@@ -69,7 +69,7 @@
           @click="onOpenChatGPT"
         >
           <span class="ai-btn-glyph">
-            <Sparkles class="w-4 h-4" />
+            <OpenAIGlyph />
           </span>
           <span class="ai-btn-text">
             <span class="ai-btn-title">Open in ChatGPT</span>
@@ -81,7 +81,7 @@
           @click="onOpenClaude"
         >
           <span class="ai-btn-glyph">
-            <Sparkles class="w-4 h-4" />
+            <ClaudeGlyph />
           </span>
           <span class="ai-btn-text">
             <span class="ai-btn-title">Open in Claude</span>
@@ -562,7 +562,6 @@ import {
   ShieldCheck,
   Lock,
   Gauge,
-  Sparkles,
   Wand2,
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
@@ -774,6 +773,37 @@ const PythonGlyph = defineComponent({
         h('path', {
           fill: 'url(#pygradYellow)',
           d: 'M129.1 244c58.3 0 54.7-25.3 54.7-25.3l-.1-26.2H128v-8h77.5s38.5 4.4 38.5-54.5c0-58.9-33.6-56.8-33.6-56.8h-19.4v27.4s1 33.6-33.1 33.6H102s-32-.5-32 30.9v51.5S64.3 244 129.1 244zm31.2-17.9a10 10 0 0 1 0-20 10 10 0 0 1 0 20z',
+        }),
+      ])
+  },
+})
+
+// Official OpenAI mark — the "knot" / "blossom" logo from the public
+// brand kit. Single monochrome path; uses currentColor so the button's
+// --ai-accent flows through.
+const OpenAIGlyph = defineComponent({
+  setup() {
+    return () =>
+      h('svg', { viewBox: '0 0 24 24', width: '16', height: '16', xmlns: 'http://www.w3.org/2000/svg' }, [
+        h('path', {
+          fill: 'currentColor',
+          d: 'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.073zM13.2599 22.4222a4.4866 4.4866 0 0 1-2.8814-1.0408l.1419-.0804 4.7783-2.7582a.7762.7762 0 0 0 .3927-.6814v-6.7361l2.02 1.1685a.071.071 0 0 1 .038.052v5.5826a4.5046 4.5046 0 0 1-4.4914 4.4938zM3.6029 18.3543a4.4866 4.4866 0 0 1-.5364-3.0218l.1418.0851 4.7783 2.7582a.7704.7704 0 0 0 .7805 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4939 4.4939 0 0 1-6.1372-1.5959zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7762.7762 0 0 0 .3879.6813l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z',
+        }),
+      ])
+  },
+})
+
+// Official Anthropic/Claude wordmark "A" — sourced from the public
+// Anthropic brand asset (simpleicons.org slug "anthropic"). Single
+// monochrome path; --ai-accent on the parent supplies the brand
+// terracotta.
+const ClaudeGlyph = defineComponent({
+  setup() {
+    return () =>
+      h('svg', { viewBox: '0 0 24 24', width: '16', height: '16', xmlns: 'http://www.w3.org/2000/svg' }, [
+        h('path', {
+          fill: 'currentColor',
+          d: 'M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5527h3.7442L10.5363 3.541Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z',
         }),
       ])
   },
