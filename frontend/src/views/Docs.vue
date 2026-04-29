@@ -851,8 +851,12 @@ const Callout = defineComponent({
    names are doc-prefixed (.docs-*, .sec-*, .codeblock, .tabbed, etc.)
    so there's no leak risk. */
 .docs-root {
-  max-width: 56rem;
-  margin: 0 auto;
+  /* Full-width to match Functions / Logs / Access Keys. The page no
+     longer centers itself; readable line-length is enforced inside
+     individual prose elements (.kicker, .lede, paragraphs) via ch-based
+     max-widths so long lines don't get unreadable while the layout
+     itself fills the available space. */
+  width: 100%;
   padding-bottom: 4rem;
   color: var(--color-foreground);
 }
