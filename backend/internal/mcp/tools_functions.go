@@ -318,6 +318,9 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				if err := deps.Registry.Delete(fn.ID); err != nil {
 					return nil, DeletedOutput{}, err
 				}
+				if deps.PoolMgr != nil {
+					deps.PoolMgr.DrainAndRemove(fn.ID)
+				}
 				return nil, DeletedOutput{DeletedID: fn.ID}, nil
 			},
 		)

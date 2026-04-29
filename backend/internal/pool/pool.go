@@ -282,6 +282,32 @@ func (m *Manager) RefreshForDeploy(fnID string) {
 	}
 }
 
+// DrainAndRemove kills all idle workers for a function and removes the pool
+// entry entirely. Used when a function is deleted so that Stats() no longer
+// includes it and memory reservations are freed immediately.
+//
+// Busy workers (mid-request) are handled lazily: once the pool entry is gone
+// from the map, their next Release call finds !ok and kills them there.
+func (m *Manager) DrainAndRemove(fnID string) {
+	v, loaded := m.pools.LoadAndDelete(fnID)
+	if !loaded {
+		return
+	}
+	p := v.(*functionPool)
+	for {
+		select {
+		case w := <-p.idle:
+			_ = w.Quit(200 * time.Millisecond)
+			p.killed.Add(1)
+			if m.hostMem != nil && p.memoryBytes > 0 {
+				m.hostMem.release(p.memoryBytes)
+			}
+		default:
+			return
+		}
+	}
+}
+
 // Release returns a worker to the pool. If err is non-nil or the worker
 // died mid-request, the worker is killed instead of re-queued.
 func (m *Manager) Release(fnID string, w *sandbox.Worker, reqErr error) {

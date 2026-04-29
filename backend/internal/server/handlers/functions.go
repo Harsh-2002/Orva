@@ -40,6 +40,9 @@ type FunctionHandler struct {
 	// PoolRefresh is called by the deploy path after a successful build so
 	// the warm pool drops stale workers. Nil = no-op (dev / tests).
 	PoolRefresh func(fnID string)
+	// PoolDrain is called on delete to kill workers and remove the pool entry
+	// so the function no longer appears in metrics. Nil = no-op (dev / tests).
+	PoolDrain func(fnID string)
 	// FnLock returns a per-function mutex shared with the build queue, so
 	// Rollback serializes against any in-flight deploy of the same fn.
 	// Wired in server.New from pool.Manager.FunctionLock.
@@ -413,7 +416,9 @@ func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to delete function", reqID)
 		return
 	}
-
+	if h.PoolDrain != nil {
+		h.PoolDrain(fnID)
+	}
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": fnID})
 }
 
