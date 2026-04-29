@@ -35,6 +35,24 @@ for rt in python313 python314; do
 done
 
 mkdir -p /var/lib/orva/functions
+
+# /dev/net/tun is required by nsjail's --user_net (nstun backend) which
+# powers the per-function egress toggle. Containers don't get it by
+# default; mknod it here so functions with network_mode=egress can spin
+# up their userspace TCP/UDP stack. Failure is non-fatal — only egress
+# functions need it, and operators may have already provided the device
+# via `docker run --device /dev/net/tun`.
+if [ ! -e /dev/net/tun ]; then
+  mkdir -p /dev/net 2>/dev/null || true
+  if mknod /dev/net/tun c 10 200 2>/dev/null; then
+    chmod 0666 /dev/net/tun
+    echo ">> created /dev/net/tun for egress sandboxes"
+  else
+    echo ">> WARN: could not create /dev/net/tun — egress functions will fail to spawn"
+    echo "         (re-run docker with --device /dev/net/tun if you need egress)"
+  fi
+fi
+
 touch /var/lib/orva/.setup-complete
 
 exec "$@"

@@ -213,6 +213,9 @@ import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import { listDeployments, getDeployment, getDeploymentLogs, listFunctions, rollbackFunction } from '@/api/endpoints'
+import { useConfirmStore } from '@/stores/confirm'
+
+const confirmStore = useConfirmStore()
 
 const route = useRoute()
 const fnName = computed(() => route.params.name)
@@ -239,7 +242,12 @@ const canRollback = (d) =>
 const rollbackTo = async (d) => {
   if (!fnId.value || !d?.id || rollingBack.value) return
   const shortHash = (d.code_hash || '').slice(0, 12)
-  if (!confirm(`Restore v${d.version} (${shortHash})? Current ${activeFn.value ? 'v' + activeFn.value.version : 'version'} stays in history.`)) return
+  const ok = await confirmStore.ask({
+    title: `Restore v${d.version}?`,
+    message: `Code hash ${shortHash}. Current ${activeFn.value ? 'v' + activeFn.value.version : 'version'} stays in history.`,
+    confirmLabel: 'Rollback',
+  })
+  if (!ok) return
   rollingBack.value = true
   try {
     await rollbackFunction(fnId.value, { deployment_id: d.id })
@@ -248,9 +256,9 @@ const rollbackTo = async (d) => {
     const code = err.response?.data?.error?.code || ''
     const msg = err.response?.data?.error?.message || err.message || 'Rollback failed'
     if (code === 'VERSION_GCD') {
-      alert(`This version has been garbage-collected and can no longer be restored.\n\n${msg}`)
+      confirmStore.notify({ title: 'Version unavailable', message: `This version has been garbage-collected and can no longer be restored.\n\n${msg}`, danger: true })
     } else {
-      alert('Rollback failed: ' + msg)
+      confirmStore.notify({ title: 'Rollback failed', message: msg, danger: true })
     }
   } finally {
     rollingBack.value = false

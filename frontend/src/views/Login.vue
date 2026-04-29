@@ -32,7 +32,7 @@
               v-model="form.username"
               type="text"
               required
-              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
               placeholder="Enter your username"
               :disabled="loading"
             >
@@ -46,7 +46,7 @@
               v-model="form.password"
               type="password"
               required
-              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
               placeholder="Enter your password"
               :disabled="loading"
             >

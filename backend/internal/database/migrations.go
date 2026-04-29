@@ -151,6 +151,28 @@ CREATE TABLE IF NOT EXISTS system_config (
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Global egress blocklist. Applies to every function with
+-- network_mode='egress' regardless of who created the function. Three
+-- categories: 'default' rules ship enabled (cloud metadata, link-local),
+-- 'suggested' ship disabled (RFC1918 ranges — operator opts in), and
+-- 'custom' are operator-entered. UNIQUE(kind, value) protects toggle
+-- state across reboots: re-seeds always use INSERT OR IGNORE so the
+-- operator's enabled/disabled choices survive.
+CREATE TABLE IF NOT EXISTS egress_blocklist (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,        -- 'default' | 'suggested' | 'custom'
+    rule_type   TEXT NOT NULL,        -- 'cidr' | 'hostname' | 'wildcard'
+    value       TEXT NOT NULL,
+    label       TEXT,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(kind, value)
+);
+
+CREATE INDEX IF NOT EXISTS idx_egress_blocklist_kind ON egress_blocklist(kind);
+CREATE INDEX IF NOT EXISTS idx_egress_blocklist_enabled ON egress_blocklist(enabled);
+
 -- Seed system config (ignore if already exists)
 INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('max_total_containers', '100'),
@@ -163,7 +185,29 @@ INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('replenish_interval_seconds', '5'),
     ('versions_to_keep', '5'),
     ('gc_interval_seconds', '300'),
-    ('min_free_disk_mb', '500');
+    ('min_free_disk_mb', '500'),
+    -- Global DNS for sandboxed functions with network_mode=egress.
+    -- Comma-separated list of resolver IPs (v4 or v6). Empty = use the
+    -- host's /etc/resolv.conf. Operator-editable from the Firewall page.
+    ('dns_servers', '1.1.1.1,8.8.8.8'),
+    ('dns_search', '');
+
+-- Seed default rules (shipped enabled). Kept deliberately minimal:
+-- only entries that are universally dangerous to expose to user code
+-- AND that no legitimate function will ever need to reach. Operators
+-- who want stricter posture (loopback, link-local, RFC1918) can add
+-- those as custom rules. UNIQUE(kind, value) means subsequent boots
+-- leave the operator's toggles alone.
+INSERT OR IGNORE INTO egress_blocklist (kind, rule_type, value, label, enabled) VALUES
+    ('default', 'cidr', '169.254.0.0/16',     'Cloud metadata (AWS/Azure/GCP IPv4)', 1),
+    ('default', 'cidr', 'fd00:ec2::254/128',  'Cloud metadata (GCP IPv6)', 1);
+
+-- Seed suggested rules (shipped disabled — operator opts each in).
+INSERT OR IGNORE INTO egress_blocklist (kind, rule_type, value, label, enabled) VALUES
+    ('suggested', 'cidr', '10.0.0.0/8',     'Private network (RFC1918)', 0),
+    ('suggested', 'cidr', '172.16.0.0/12',  'Private network (RFC1918)', 0),
+    ('suggested', 'cidr', '192.168.0.0/16', 'Private network (RFC1918)', 0),
+    ('suggested', 'cidr', '100.64.0.0/10',  'CGNAT / Tailscale', 0);
 
 PRAGMA foreign_keys = ON;
 `
@@ -180,12 +224,45 @@ PRAGMA foreign_keys = ON;
 		"ALTER TABLE deployments ADD COLUMN code_hash TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE deployments ADD COLUMN source TEXT NOT NULL DEFAULT 'deploy'",
 		"ALTER TABLE deployments ADD COLUMN parent_deployment_id TEXT",
+		// Per-function egress: "none" (default) blocks outbound network;
+		// "egress" enables nsjail --user_net for external API calls.
+		"ALTER TABLE functions ADD COLUMN network_mode TEXT NOT NULL DEFAULT 'none'",
+		// Per-function concurrency cap. 0 = unlimited (default).
+		// Policy controls behaviour when the cap is reached: "queue"
+		// (block until a slot frees) or "reject" (return 429 BUSY).
+		"ALTER TABLE functions ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE functions ADD COLUMN concurrency_policy TEXT NOT NULL DEFAULT 'queue'",
+		// Per-function invoke auth gate. Default 'none' = public, matching
+		// Cloudflare Workers / Vercel Functions / Lambda Function URLs.
+		// Other values: 'platform_key' (require Orva API key) and 'signed'
+		// (HMAC via X-Orva-Signature). Function code remains free to layer
+		// JWT/session/etc. on top regardless of this setting.
+		"ALTER TABLE functions ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'none'",
+		// Per-function rate limit (requests/minute, per client IP). 0 =
+		// unlimited. Token-bucket implementation lives in handlers/ratelimit.go.
+		"ALTER TABLE functions ADD COLUMN rate_limit_per_min INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// "duplicate column name" is expected on boot after the first.
 			if !strings.Contains(err.Error(), "duplicate column") {
 				slog.Warn("schema alter failed", "stmt", stmt, "err", err)
 			}
+		}
+	}
+
+	// Slim the default firewall rules down to the universally-dangerous
+	// minimum (cloud metadata only). Earlier builds seeded loopback and
+	// IPv6 link-local as defaults; both could break legitimate flows
+	// (Docker's resolver at 127.0.0.11; IPv6 SLAAC) and most operators
+	// don't need them blocked. We delete only kind='default' rows that
+	// match exact retired values — operator-edited custom rules are
+	// untouched.
+	for _, retired := range []string{"127.0.0.0/8", "fe80::/10"} {
+		if _, err := db.write.Exec(
+			"DELETE FROM egress_blocklist WHERE kind = 'default' AND value = ?",
+			retired,
+		); err != nil {
+			slog.Warn("firewall default-rules cleanup failed", "value", retired, "err", err)
 		}
 	}
 

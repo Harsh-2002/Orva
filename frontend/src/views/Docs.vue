@@ -1,174 +1,1445 @@
 <template>
-  <div class="h-full flex flex-col bg-background">
-    <!-- Header -->
-    <header class="sticky top-0 z-20 flex items-center justify-between px-6 py-5 border-b border-border bg-surface/95 backdrop-blur-sm">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight text-white mb-1">
-          API Documentation
-        </h1>
-        <p class="text-sm text-foreground-muted">
-          Official REST API reference for Orva Platform
-        </p>
+  <div class="docs-root">
+    <!-- Hero -->
+    <header class="hero">
+      <div class="hero-eyebrow">
+        Orva · Documentation
+      </div>
+      <h1 class="hero-title">
+        Build serverless functions <span class="hero-accent">in minutes.</span>
+      </h1>
+      <p class="hero-lede">
+        A practical guide for this Orva instance. Every code example below
+        runs against <code class="origin-pill">{{ origin }}</code> — what you copy is what works.
+      </p>
+      <div class="hero-cta">
+        <router-link
+          to="/deploy"
+          class="cta-primary"
+        >
+          <RocketIcon class="w-4 h-4" /> Create your first function
+        </router-link>
+        <a
+          :href="`${origin}/api/v1/system/health`"
+          target="_blank"
+          rel="noopener"
+          class="cta-secondary"
+        >
+          <Activity class="w-4 h-4" /> Check API health
+        </a>
       </div>
     </header>
 
-    <!-- Content -->
-    <div class="flex-1 overflow-y-auto">
-      <div
-        v-if="loading"
-        class="flex justify-center py-20"
-      >
-        <div class="animate-spin rounded-full h-10 w-10 border-2 border-primary border-t-transparent" />
+    <!-- Quick start (numbered cards) -->
+    <Section
+      id="quickstart"
+      eyebrow="01"
+      title="Quick start"
+      kicker="From empty editor to first invocation in under a minute."
+    >
+      <div class="step-grid">
+        <div
+          v-for="(step, i) in quickSteps"
+          :key="step.title"
+          class="step-card"
+        >
+          <div class="step-num">
+            {{ String(i + 1).padStart(2, '0') }}
+          </div>
+          <div class="step-title">
+            {{ step.title }}
+          </div>
+          <p class="step-body">
+            {{ step.body }}
+          </p>
+        </div>
       </div>
-      
-      <div
-        v-else
-        class="max-w-5xl mx-auto px-6 md:px-10 py-10"
-      >
-        <!-- Rich API Documentation -->
-        <article class="docs-content space-y-8">
-          <div v-html="content" />
-        </article>
+    </Section>
+
+    <!-- Handler shape with language tabs -->
+    <Section
+      id="handler"
+      eyebrow="02"
+      title="The handler"
+      kicker="Export one function. Return an HTTP-shaped object. That's the contract."
+    >
+      <TabbedCode
+        :tabs="handlerTabs"
+        storage-key="docs.handler"
+      />
+
+      <div class="kv-grid">
+        <div class="kv">
+          <div class="kv-label">
+            Input
+          </div>
+          <div class="kv-value">
+            <code>event.method</code>, <code>event.path</code>, <code>event.headers</code>, <code>event.query</code>, <code>event.body</code>
+          </div>
+        </div>
+        <div class="kv">
+          <div class="kv-label">
+            Output
+          </div>
+          <div class="kv-value">
+            <code>{ statusCode, headers, body }</code> — body can be a string or any JSON-serialisable value.
+          </div>
+        </div>
+        <div class="kv">
+          <div class="kv-label">
+            Injected
+          </div>
+          <div class="kv-value">
+            Env vars and decrypted secrets are exposed via <code>process.env</code> / <code>os.environ</code> at spawn time.
+          </div>
+        </div>
       </div>
-    </div>
+    </Section>
+
+    <!-- Runtimes -->
+    <Section
+      id="runtimes"
+      eyebrow="03"
+      title="Runtimes"
+      kicker="Latest two majors per language. Older minor versions auto-migrate."
+    >
+      <div class="runtime-grid">
+        <div
+          v-for="rt in runtimes"
+          :key="rt.id"
+          class="runtime-card"
+          :class="rt.flavor"
+        >
+          <div class="runtime-icon">
+            <component :is="rt.icon" />
+          </div>
+          <div class="runtime-id">
+            {{ rt.id }}
+          </div>
+          <div class="runtime-name">
+            {{ rt.name }}
+          </div>
+          <ul class="runtime-meta">
+            <li>
+              <span>Entry</span><code>{{ rt.entry }}</code>
+            </li>
+            <li>
+              <span>Deps</span><code>{{ rt.deps }}</code>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </Section>
+
+    <!-- Invoking -->
+    <Section
+      id="invoke"
+      eyebrow="04"
+      title="Invoking a function"
+      kicker="Each function gets a stable URL. Send a body, return whatever the handler returns."
+    >
+      <TabbedCode
+        :tabs="invokeTabs"
+        storage-key="docs.invoke"
+      />
+
+      <Callout title="Custom routes">
+        Want a friendly path like <code>/webhooks/stripe</code>? Attach a route via
+        <code>POST /api/v1/routes</code>. Reserved prefixes (<code>/api/</code>, <code>/auth/</code>,
+        <code>/web/</code>, <code>/_orva/</code>) are off-limits.
+      </Callout>
+    </Section>
+
+    <!-- Deploy via API -->
+    <Section
+      id="deploy"
+      eyebrow="05"
+      title="Deploying via API"
+      kicker="Two-step from CI: create the function row, upload a tarball."
+    >
+      <div class="deploy-flow">
+        <div class="flow-step">
+          <div class="flow-step-head">
+            <span class="flow-num">1</span>
+            <span class="flow-title">Create the function</span>
+          </div>
+          <CodeBlock
+            :code="curlCreate"
+            lang="bash"
+          />
+        </div>
+        <div class="flow-arrow">
+          <ArrowDown class="w-4 h-4" />
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-head">
+            <span class="flow-num">2</span>
+            <span class="flow-title">Upload code</span>
+          </div>
+          <CodeBlock
+            :code="curlDeploy"
+            lang="bash"
+          />
+        </div>
+      </div>
+      <p class="hint">
+        Mint a key on the
+        <router-link
+          to="/api-keys"
+          class="link"
+        >
+          Access Keys
+        </router-link>
+        page. Builds run async — poll <code>/api/v1/deployments/&lt;id&gt;</code> or watch the SSE stream until <code>phase: succeeded</code>.
+      </p>
+    </Section>
+
+    <!-- Secrets & env -->
+    <Section
+      id="secrets"
+      eyebrow="06"
+      title="Secrets & environment"
+      kicker="Plaintext for config, encrypted for credentials. Both reach your handler the same way."
+    >
+      <div class="dual-card">
+        <div class="dual-pane">
+          <div class="dual-icon env">
+            <Variable class="w-4 h-4" />
+          </div>
+          <div class="dual-title">
+            Environment variables
+          </div>
+          <p class="dual-body">
+            Plaintext, set on the function record. Use for <em>build flags</em>, <em>feature toggles</em>, anything safe to read from the DB.
+          </p>
+        </div>
+        <div class="dual-pane">
+          <div class="dual-icon secret">
+            <KeyRound class="w-4 h-4" />
+          </div>
+          <div class="dual-title">
+            Secrets
+          </div>
+          <p class="dual-body">
+            AES-256-GCM at rest, decrypted only into the sandbox process. Use for <em>API keys</em>, <em>DB URLs</em>, anything that shouldn't appear in the API.
+          </p>
+        </div>
+      </div>
+      <CodeBlock
+        :code="curlSecret"
+        lang="bash"
+      />
+      <p class="hint">
+        Adding or removing a secret triggers a warm-pool refresh, so the next invocation sees the new value within seconds.
+      </p>
+    </Section>
+
+    <!-- Network access -->
+    <Section
+      id="network"
+      eyebrow="07"
+      title="Network access"
+      kicker="Off by default. Opt-in per function — most handlers are pure compute and don't need it."
+    >
+      <div class="dual-card">
+        <div class="dual-pane">
+          <div class="dual-icon env">
+            <Globe class="w-4 h-4" />
+          </div>
+          <div class="dual-title">
+            none <span class="text-foreground-muted font-normal">(default)</span>
+          </div>
+          <p class="dual-body">
+            Function runs in an isolated network namespace with only loopback.
+            <em>No DNS, no outbound TCP/UDP.</em> Best for pure-compute handlers
+            and a strong containment guarantee.
+          </p>
+        </div>
+        <div class="dual-pane">
+          <div class="dual-icon secret">
+            <Globe class="w-4 h-4" />
+          </div>
+          <div class="dual-title">
+            egress
+          </div>
+          <p class="dual-body">
+            Userspace TCP/UDP stack via nsjail's <code>--user_net</code>. The
+            function can call <em>external HTTPS APIs</em> — Stripe, OpenAI, your
+            DB. Host network interfaces are still not exposed.
+          </p>
+        </div>
+      </div>
+      <Callout
+        :icon="AlertTriangle"
+        tone="warn"
+        title="Why off by default"
+      >
+        A serverless platform is exactly where one buggy or compromised
+        function shouldn't be able to phone home. The toggle is per-function so
+        you can grant network access only where it's needed and audit it via
+        the egress badge on the Functions list.
+      </Callout>
+      <p class="hint">
+        Toggle from the editor's <span class="text-white">Settings</span> modal
+        ("Allow outbound network"). Changing the toggle drains warm workers,
+        so the next invocation respawns with the new mode within seconds.
+      </p>
+    </Section>
+
+    <!-- Securing your function -->
+    <Section
+      id="securing"
+      eyebrow="08"
+      title="Securing your function"
+      kicker="Functions are public by default — same posture as Cloudflare Workers, Vercel Functions, and Lambda Function URLs. Auth is your function's job; the platform gives you opt-in guardrails."
+    >
+      <Callout
+        :icon="ShieldCheck"
+        tone="info"
+        title="The mental model"
+      >
+        Your <span class="text-white">platform API key</span> never ships to
+        a browser — it deploys functions and manages config. The credential
+        a browser sends is the <span class="text-white">end user's</span> JWT
+        or session cookie, and your handler verifies it. This is how every
+        modern serverless platform works in production.
+      </Callout>
+
+      <h3 class="recipe-title">Recipe 1 — Verify a JWT (Auth0 / Clerk / Supabase / Firebase)</h3>
+      <p class="recipe-body">
+        Most user-facing apps ship a JWT to the browser at login. The browser
+        attaches it as <code>Authorization: Bearer &lt;jwt&gt;</code> on every
+        invoke. Your handler verifies the signature against the issuer's
+        JWKS URL — store the issuer + audience as function secrets.
+      </p>
+      <CodeBlock
+        :code="recipeJWT"
+        lang="python"
+      />
+
+      <h3 class="recipe-title">Recipe 2 — Verify a Stripe webhook signature</h3>
+      <p class="recipe-body">
+        Webhook senders can't carry an Orva session. They sign each request
+        with a shared secret instead — the canonical pattern. Store
+        <code>STRIPE_WEBHOOK_SECRET</code> in function secrets and verify the
+        <code>Stripe-Signature</code> header.
+      </p>
+      <CodeBlock
+        :code="recipeStripe"
+        lang="python"
+      />
+
+      <h3 class="recipe-title">Recipe 3 — Platform-managed gates</h3>
+      <p class="recipe-body">
+        For internal-only functions (cron jobs, server-to-server) flip
+        <span class="text-white">Invoke gate</span> in the editor's Settings
+        modal. Two modes are built in so you don't have to write the code:
+      </p>
+      <div class="dual-card">
+        <div class="dual-pane">
+          <div class="dual-icon env">
+            <Lock class="w-4 h-4" />
+          </div>
+          <div class="dual-title">
+            platform_key
+          </div>
+          <p class="dual-body">
+            Caller must send <code>X-Orva-API-Key</code> or a valid Orva
+            session cookie. Useful for "only my CI / cron / backend can hit
+            this." Returns <code>401 UNAUTHORIZED</code> otherwise.
+          </p>
+        </div>
+        <div class="dual-pane">
+          <div class="dual-icon secret">
+            <ShieldCheck class="w-4 h-4" />
+          </div>
+          <div class="dual-title">
+            signed
+          </div>
+          <p class="dual-body">
+            Caller must send <code>X-Orva-Signature: sha256=&lt;hex&gt;</code>
+            and <code>X-Orva-Timestamp: &lt;unix-secs&gt;</code> computed as
+            <code>HMAC(secret, "&lt;ts&gt;.&lt;body&gt;")</code>. Secret lives
+            in the function's secret store under
+            <code>ORVA_SIGNING_SECRET</code>. ±5 min skew window.
+          </p>
+        </div>
+      </div>
+      <CodeBlock
+        :code="recipeSigned"
+        lang="bash"
+      />
+
+      <Callout
+        :icon="Gauge"
+        tone="info"
+        title="Rate limit (always available)"
+      >
+        Public functions can still be abuse magnets. Set
+        <span class="text-white">Rate limit</span> in the editor to a
+        per-IP-per-minute cap. Bursts up to the cap are allowed, then refill
+        at <em>cap</em>/60 per second. Returns <code>429 RATE_LIMITED</code>
+        with <code>Retry-After: 60</code>.
+      </Callout>
+
+      <h3 class="recipe-title">Recipe 4 — CORS for browser callers</h3>
+      <p class="recipe-body">
+        The platform stays out of the response — your handler controls
+        every header. That means CORS lives in your code, where it can
+        change per-route or per-user without a config rebuild. Three rules:
+        answer <code>OPTIONS</code> preflights without auth, set CORS headers
+        on every response (including <code>401</code> / <code>500</code> —
+        otherwise the browser hides the real error), and allowlist origins
+        rather than wildcarding when credentials are involved.
+      </p>
+      <CodeBlock
+        :code="recipeCORS"
+        lang="python"
+      />
+
+      <p class="hint">
+        Anti-pattern: do not put your platform API key in browser JavaScript.
+        It would be visible in DevTools within minutes. CORS is not auth — it
+        only restricts <em>other websites</em> from reading your response in
+        a user's browser, never blocks direct curl/Postman calls.
+      </p>
+    </Section>
+
+    <!-- Versions -->
+    <Section
+      id="versions"
+      eyebrow="09"
+      title="Versions & rollback"
+      kicker="Every deploy is content-addressed and kept on disk. Rollback is a symlink retarget — no rebuild."
+    >
+      <div class="timeline">
+        <div
+          v-for="(v, i) in versionTimeline"
+          :key="v.label"
+          class="timeline-item"
+          :class="{ active: v.active }"
+        >
+          <div class="timeline-dot">
+            <span>{{ versionTimeline.length - i }}</span>
+          </div>
+          <div class="timeline-body">
+            <div class="timeline-title">
+              {{ v.label }}<span
+                v-if="v.active"
+                class="timeline-pill"
+              >active</span>
+            </div>
+            <div class="timeline-meta">
+              {{ v.meta }}
+            </div>
+          </div>
+        </div>
+      </div>
+      <Callout
+        :icon="AlertTriangle"
+        tone="warn"
+        title="GC retention"
+      >
+        Default retention is the last <strong>5</strong> versions per function. Older ones get pruned. A rollback to a GC'd hash returns <code>VERSION_GCD</code> (HTTP 410) — re-deploy that code if you need it back.
+      </Callout>
+    </Section>
+
+    <!-- Errors -->
+    <Section
+      id="errors"
+      eyebrow="10"
+      title="Error envelope"
+      kicker="Every error has a stable code, a human message, and a request id. Surface the message; switch on the code."
+    >
+      <CodeBlock
+        :code="errEnvelope"
+        lang="json"
+      />
+      <div class="errors-grid">
+        <div
+          v-for="e in errorCodes"
+          :key="e.code"
+          class="error-card"
+        >
+          <code class="error-code">{{ e.code }}</code>
+          <div class="error-when">
+            {{ e.when }}
+          </div>
+        </div>
+      </div>
+    </Section>
+
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { marked } from 'marked'
+import { computed, h, ref, defineComponent } from 'vue'
+import {
+  RocketIcon,
+  Activity,
+  Variable,
+  KeyRound,
+  ArrowDown,
+  AlertTriangle,
+  Globe,
+  Copy,
+  Check,
+  ShieldCheck,
+  Lock,
+  Gauge,
+} from 'lucide-vue-next'
+import { copyText } from '@/utils/clipboard'
 
-const content = ref('')
-const loading = ref(true)
+const origin = computed(() => window.location.origin)
 
-// Configure marked for better rendering
-marked.setOptions({
-  highlight: function(code, lang) {
-    return `<pre class="language-${lang}"><code>${code}</code></pre>`
+const quickSteps = [
+  { title: 'Pick a runtime', body: 'Node 22 / 24 or Python 3.13 / 3.14. Auto-detected from the code you paste.' },
+  { title: 'Write the handler', body: 'A single function that accepts an event and returns { statusCode, headers, body }.' },
+  { title: 'Deploy', body: 'One click. Code is content-addressed, the prior version stays available for rollback.' },
+  { title: 'Invoke', body: 'Curl the URL printed under the editor, or wire it up to a custom route or cron schedule.' },
+]
+
+// ── Section component ─────────────────────────────────────────────────
+// Lightweight wrapper so each section's frame (eyebrow / heading / kicker)
+// stays consistent without a separate file.
+const Section = defineComponent({
+  name: 'DocSection',
+  props: {
+    id: { type: String, required: true },
+    eyebrow: { type: String, default: '' },
+    title: { type: String, required: true },
+    kicker: { type: String, default: '' },
   },
-  breaks: true,
-  gfm: true
+  setup(props, { slots }) {
+    return () =>
+      h('section', { id: props.id, class: 'doc-section' }, [
+        h('div', { class: 'sec-head' }, [
+          props.eyebrow ? h('div', { class: 'sec-eyebrow' }, props.eyebrow) : null,
+          h('h2', { class: 'sec-title' }, props.title),
+          props.kicker ? h('p', { class: 'sec-kicker' }, props.kicker) : null,
+        ]),
+        h('div', { class: 'sec-body' }, slots.default?.()),
+      ])
+  },
 })
 
-onMounted(async () => {
-  try {
-    const response = await fetch('/API.md')
-    if (!response.ok) throw new Error('Failed to fetch docs')
-    const text = await response.text()
-    content.value = await marked.parse(text)
-  } catch (error) {
-    console.error('Failed to load docs:', error)
-    content.value = `
-      <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-6 text-center">
-        <p class="text-red-400 font-medium">Failed to load documentation</p>
-        <p class="text-sm text-red-300/70 mt-2">Please ensure API.md is available in the public directory</p>
-      </div>
-    `
-  } finally {
-    loading.value = false
+// ── Code block with copy button ──────────────────────────────────────
+const CodeBlock = defineComponent({
+  name: 'CodeBlock',
+  props: {
+    code: { type: String, required: true },
+    lang: { type: String, default: '' },
+  },
+  setup(props) {
+    const copied = ref(false)
+    const onCopy = async () => {
+      const ok = await copyText(props.code)
+      if (ok) {
+        copied.value = true
+        setTimeout(() => { copied.value = false }, 1200)
+      }
+    }
+    return () =>
+      h('div', { class: 'codeblock' }, [
+        h('div', { class: 'codeblock-bar' }, [
+          h('span', { class: 'codeblock-lang' }, props.lang),
+          h('button', { class: 'codeblock-copy', onClick: onCopy, title: 'Copy code' }, [
+            copied.value ? h(Check, { class: 'w-3 h-3' }) : h(Copy, { class: 'w-3 h-3' }),
+            copied.value ? 'Copied' : 'Copy',
+          ]),
+        ]),
+        h('pre', { class: 'codeblock-pre' }, h('code', null, props.code)),
+      ])
+  },
+})
+
+// ── Tabbed code block ────────────────────────────────────────────────
+const TabbedCode = defineComponent({
+  name: 'TabbedCode',
+  props: {
+    tabs: { type: Array, required: true },
+    storageKey: { type: String, default: '' },
+  },
+  setup(props) {
+    const initial = (() => {
+      try {
+        if (props.storageKey) {
+          const v = localStorage.getItem(props.storageKey)
+          if (v && props.tabs.some((t) => t.label === v)) return v
+        }
+      } catch {}
+      return props.tabs[0]?.label
+    })()
+    const active = ref(initial)
+    const select = (label) => {
+      active.value = label
+      try {
+        if (props.storageKey) localStorage.setItem(props.storageKey, label)
+      } catch {}
+    }
+    return () => {
+      const tab = props.tabs.find((t) => t.label === active.value) || props.tabs[0]
+      return h('div', { class: 'tabbed' }, [
+        h('div', { class: 'tabbed-tabs' },
+          props.tabs.map((t) =>
+            h('button', {
+              key: t.label,
+              class: ['tabbed-tab', { active: t.label === active.value }],
+              onClick: () => select(t.label),
+            }, t.label)
+          )
+        ),
+        h(CodeBlock, { code: tab.code, lang: tab.lang }),
+      ])
+    }
+  },
+})
+
+// ── Inline icons (light-touch SVG components for runtime cards) ──────
+const PythonGlyph = defineComponent({
+  setup() {
+    return () =>
+      h('svg', { viewBox: '0 0 32 32', width: '20', height: '20', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+        h('path', { d: 'M11 6h6a4 4 0 0 1 4 4v3H11a4 4 0 0 0-4 4v3a4 4 0 0 0 4 4h2' }),
+        h('path', { d: 'M21 26h-6a4 4 0 0 1-4-4v-3h10a4 4 0 0 0 4-4v-3a4 4 0 0 0-4-4h-2' }),
+      ])
+  },
+})
+const NodeGlyph = defineComponent({
+  setup() {
+    return () =>
+      h('svg', { viewBox: '0 0 32 32', width: '20', height: '20', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
+        h('path', { d: 'M16 3 4 10v12l12 7 12-7V10z' }),
+        h('path', { d: 'M16 3v26' }),
+      ])
+  },
+})
+
+const handlerTabs = computed(() => [
+  {
+    label: 'Python',
+    lang: 'python',
+    code: `def handler(event):
+    body = event.get("body") or {}
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": {"hello": body.get("name", "world")},
+    }`,
+  },
+  {
+    label: 'Node.js',
+    lang: 'js',
+    code: `exports.handler = async (event) => {
+  const body = event.body || {};
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { hello: body.name || 'world' },
+  };
+};`,
+  },
+])
+
+const invokeTabs = computed(() => [
+  {
+    label: 'curl',
+    lang: 'bash',
+    code: `curl -X POST ${origin.value}/api/v1/invoke/<function_id>/ \\
+  -H 'Content-Type: application/json' \\
+  -d '{"name": "Orva"}'`,
+  },
+  {
+    label: 'fetch',
+    lang: 'js',
+    code: `const res = await fetch('${origin.value}/api/v1/invoke/<function_id>/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: 'Orva' }),
+});
+console.log(await res.json());`,
+  },
+  {
+    label: 'Python',
+    lang: 'python',
+    code: `import httpx
+
+r = httpx.post(
+    "${origin.value}/api/v1/invoke/<function_id>/",
+    json={"name": "Orva"},
+)
+print(r.json())`,
+  },
+])
+
+const runtimes = [
+  { id: 'python314', name: 'Python 3.14', entry: 'handler.py', deps: 'requirements.txt', icon: PythonGlyph, flavor: 'flavor-py' },
+  { id: 'python313', name: 'Python 3.13', entry: 'handler.py', deps: 'requirements.txt', icon: PythonGlyph, flavor: 'flavor-py' },
+  { id: 'node24',    name: 'Node.js 24',  entry: 'handler.js', deps: 'package.json',     icon: NodeGlyph,   flavor: 'flavor-node' },
+  { id: 'node22',    name: 'Node.js 22',  entry: 'handler.js', deps: 'package.json',     icon: NodeGlyph,   flavor: 'flavor-node' },
+]
+
+const curlCreate = computed(() => `curl -X POST ${origin.value}/api/v1/functions \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"name":"hello","runtime":"python314","memory_mb":128,"cpus":0.5}'`)
+
+const curlDeploy = computed(() => `tar czf code.tar.gz handler.py requirements.txt
+curl -X POST ${origin.value}/api/v1/functions/<function_id>/deploy \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>' \\
+  -F code=@code.tar.gz`)
+
+const curlSecret = computed(() => `curl -X POST ${origin.value}/api/v1/functions/<function_id>/secrets \\
+  -H 'X-Orva-API-Key: <YOUR_KEY>' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"key":"DATABASE_URL","value":"postgres://…"}'`)
+
+// JWT verification recipe — works for Auth0, Clerk, Supabase, Firebase, or
+// any standard OIDC provider. Store JWT_ISSUER + JWT_AUDIENCE as function
+// secrets; PyJWT pulls the JWKS automatically.
+const recipeJWT = `import os, jwt
+from jwt import PyJWKClient
+
+JWKS = PyJWKClient(os.environ["JWT_JWKS_URL"])
+AUD  = os.environ["JWT_AUDIENCE"]
+ISS  = os.environ["JWT_ISSUER"]
+
+def handler(event):
+    auth = event["headers"].get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return {"statusCode": 401, "body": "missing bearer token"}
+    try:
+        key = JWKS.get_signing_key_from_jwt(auth[7:]).key
+        claims = jwt.decode(auth[7:], key, algorithms=["RS256"],
+                            audience=AUD, issuer=ISS)
+    except jwt.PyJWTError as e:
+        return {"statusCode": 401, "body": f"invalid token: {e}"}
+    user_id = claims["sub"]
+    return {"statusCode": 200, "body": f"hello {user_id}"}`
+
+// Stripe webhook signature verification — same shape works for GitHub,
+// Slack, Twilio. Store STRIPE_WEBHOOK_SECRET in function secrets.
+const recipeStripe = `import os, hmac, hashlib, time
+
+SECRET = os.environ["STRIPE_WEBHOOK_SECRET"].encode()
+
+def handler(event):
+    sig_header = event["headers"].get("stripe-signature", "")
+    body = event["body"].encode() if isinstance(event["body"], str) else event["body"]
+    parts = dict(p.split("=", 1) for p in sig_header.split(","))
+    ts = parts.get("t")
+    sig = parts.get("v1")
+    if not (ts and sig):
+        return {"statusCode": 400, "body": "missing signature"}
+    if abs(int(time.time()) - int(ts)) > 300:
+        return {"statusCode": 400, "body": "timestamp too old"}
+    payload = ts.encode() + b"." + body
+    expected = hmac.new(SECRET, payload, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return {"statusCode": 400, "body": "signature mismatch"}
+    # Process the event …
+    return {"statusCode": 200, "body": "ok"}`
+
+// CORS + auth in the handler. Three things to remember: answer OPTIONS
+// without auth, attach CORS headers to every response (including failures),
+// and allowlist origins rather than echoing "*" when credentials are in play.
+const recipeCORS = `import os, jwt
+from jwt import PyJWKClient
+
+ALLOWED = {"https://myapp.com", "https://staging.myapp.com"}
+JWKS = PyJWKClient(os.environ["JWT_JWKS_URL"])
+
+def cors_headers(origin):
+    allow = origin if origin in ALLOWED else "null"
+    return {
+        "Access-Control-Allow-Origin": allow,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Max-Age": "86400",
+        "Vary": "Origin",
+    }
+
+def handler(event, context):
+    origin = event["headers"].get("origin", "")
+    cors = cors_headers(origin)
+
+    # 1. Preflight: answer BEFORE any auth check.
+    if event["method"] == "OPTIONS":
+        return {"statusCode": 204, "headers": cors, "body": ""}
+
+    # 2. Auth — keep CORS headers on the failure response too,
+    #    or the browser will hide the real error from your app.
+    auth = event["headers"].get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return {"statusCode": 401, "headers": cors, "body": "missing bearer"}
+    try:
+        key = JWKS.get_signing_key_from_jwt(auth[7:]).key
+        claims = jwt.decode(auth[7:], key, algorithms=["RS256"],
+                            audience=os.environ["JWT_AUDIENCE"],
+                            issuer=os.environ["JWT_ISSUER"])
+    except jwt.PyJWTError as e:
+        return {"statusCode": 401, "headers": cors, "body": f"invalid: {e}"}
+
+    # 3. Real handler — also returns CORS headers.
+    return {"statusCode": 200,
+            "headers": {**cors, "Content-Type": "application/json"},
+            "body": '{"user": "' + claims["sub"] + '"}'}`
+
+// Caller-side recipe for Orva's built-in 'signed' mode. Run from any
+// trusted backend that already holds ORVA_SIGNING_SECRET out of band.
+const recipeSigned = computed(() => `# generate signature
+SECRET='your-shared-secret-stored-in-function-secrets'
+TS=$(date +%s)
+BODY='{"hello":"world"}'
+SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
+
+curl -X POST ${origin.value}/api/v1/invoke/<function_id>/ \\
+  -H "X-Orva-Timestamp: $TS" \\
+  -H "X-Orva-Signature: sha256=$SIG" \\
+  -H 'Content-Type: application/json' \\
+  -d "$BODY"`)
+
+const errEnvelope = `{
+  "error": {
+    "code": "VALIDATION",
+    "message": "name must be lowercase and dash-separated",
+    "request_id": "req_abc123"
   }
+}`
+
+const errorCodes = [
+  { code: 'VALIDATION',        when: 'Bad request body or path parameter.' },
+  { code: 'UNAUTHORIZED',      when: 'Missing or invalid API key / session cookie.' },
+  { code: 'NOT_FOUND',         when: 'Function, deployment, or secret doesn\'t exist.' },
+  { code: 'RATE_LIMITED',      when: 'Too many requests — check the Retry-After header.' },
+  { code: 'VERSION_GCD',       when: 'Rollback target was garbage-collected.' },
+  { code: 'INSUFFICIENT_DISK', when: 'Host is below min_free_disk_mb.' },
+]
+
+const versionTimeline = [
+  { label: 'v3 — abc123def',  meta: 'Deployed 2m ago', active: true },
+  { label: 'v2 — 4f5e6a',     meta: 'Yesterday', active: false },
+  { label: 'v1 — 9c2b1f',     meta: '2 days ago', active: false },
+]
+
+// ── Inline Callout component ─────────────────────────────────────────
+const Callout = defineComponent({
+  name: 'Callout',
+  props: {
+    title: { type: String, default: '' },
+    tone: { type: String, default: 'info' },
+    icon: { type: [Object, Function], default: null },
+  },
+  setup(props, { slots }) {
+    return () =>
+      h('div', { class: ['callout', `tone-${props.tone}`] }, [
+        h('div', { class: 'callout-head' }, [
+          props.icon ? h(props.icon, { class: 'w-4 h-4' }) : null,
+          props.title ? h('span', null, props.title) : null,
+        ]),
+        h('div', { class: 'callout-body' }, slots.default?.()),
+      ])
+  },
 })
 </script>
 
-<style scoped>
-.docs-content :deep(h1) {
-  @apply text-3xl font-bold text-white mb-4 pb-3 border-b border-border;
+<style>
+/* Docs page: not scoped because we render TabbedCode / CodeBlock /
+   Callout / Section / runtime icons as inline render-fn components in
+   the same SFC, and Vue scoped styles don't reach those. All class
+   names are doc-prefixed (.docs-*, .sec-*, .codeblock, .tabbed, etc.)
+   so there's no leak risk. */
+.docs-root {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding-bottom: 4rem;
+  color: var(--color-foreground);
 }
 
-.docs-content :deep(h2) {
-  @apply text-2xl font-semibold text-white mt-12 mb-4 pb-2 border-b border-border/50;
+/* Hero */
+.hero {
+  padding: 1rem 0 2.75rem;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 3rem;
+}
+.hero-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--color-foreground-muted);
+  text-transform: uppercase;
+  margin-bottom: 1.25rem;
+}
+.hero-title {
+  font-size: clamp(1.9rem, 3.4vw, 2.6rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: white;
+  margin: 0 0 1rem;
+  max-width: 40ch;
+}
+.hero-accent {
+  background: linear-gradient(120deg, #b591ff 0%, #6a52d5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-lede {
+  color: var(--color-foreground-muted);
+  font-size: 15px;
+  line-height: 1.7;
+  max-width: 60ch;
+  margin: 0 0 1.75rem;
+}
+.origin-pill {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 0.1em 0.45em;
+  border-radius: 4px;
+  color: white;
+}
+.hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+.cta-primary,
+.cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.cta-primary {
+  background: var(--color-primary);
+  color: white;
+  border: 1px solid transparent;
+  box-shadow: 0 6px 14px -4px rgba(85, 63, 131, 0.5);
+}
+.cta-primary:hover {
+  background: var(--color-primary-hover);
+}
+.cta-secondary {
+  background: transparent;
+  color: var(--color-foreground-muted);
+  border: 1px solid var(--color-border);
+}
+.cta-secondary:hover {
+  color: white;
+  border-color: var(--color-foreground-muted);
 }
 
-.docs-content :deep(h3) {
-  @apply text-xl font-semibold text-white mt-8 mb-3;
+/* Section frame */
+.doc-section {
+  display: grid;
+  /* CRUCIAL: minmax(0, 1fr) on the right column — without it, code
+     blocks force the column wider than the viewport and push the
+     sidebar offscreen. */
+  grid-template-columns: minmax(0, 13rem) minmax(0, 1fr);
+  gap: 2rem;
+  padding: 2.5rem 0;
+  border-top: 1px solid var(--color-border);
+}
+.doc-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+@media (max-width: 720px) {
+  .doc-section {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+.sec-head {
+  position: relative;
+}
+.sec-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--color-foreground-muted);
+  margin-bottom: 0.5rem;
+}
+.sec-title {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: white;
+  margin: 0 0 0.6rem;
+}
+.sec-kicker {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-foreground-muted);
+  max-width: 22rem;
+  margin: 0;
+}
+.sec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
 }
 
-.docs-content :deep(h4) {
-  @apply text-lg font-medium text-white mt-6 mb-2;
+/* Quick start step cards */
+.step-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+.step-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+.step-card:hover {
+  border-color: var(--color-foreground-muted);
+}
+.step-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-foreground-muted);
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
+}
+.step-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: white;
+  margin-bottom: 0.35rem;
+}
+.step-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--color-foreground-muted);
 }
 
-.docs-content :deep(p) {
-  @apply text-foreground-muted leading-relaxed mb-4;
+/* Tabbed + code blocks */
+.tabbed {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.tabbed-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background);
+}
+.tabbed-tab {
+  padding: 0.55rem 1rem;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-foreground-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.tabbed-tab:hover { color: white; }
+.tabbed-tab.active {
+  color: white;
+  border-bottom-color: var(--color-primary);
+}
+.tabbed :deep(.codeblock) {
+  border: none;
+  border-radius: 0;
+  background: var(--color-surface);
 }
 
-.docs-content :deep(a) {
-  @apply text-violet-400 hover:text-violet-300 underline decoration-violet-400/30 hover:decoration-violet-300 transition-colors;
+.codeblock {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.codeblock-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  background: rgba(255, 255, 255, 0.025);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+}
+.codeblock-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: transparent;
+  font-size: 10.5px;
+  font-family: var(--font-sans);
+  color: var(--color-foreground-muted);
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.codeblock-copy:hover {
+  color: white;
+  border-color: var(--color-foreground-muted);
+}
+.codeblock-pre {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: white;
+  white-space: pre;
 }
 
-.docs-content :deep(code) {
-  @apply bg-surface px-2 py-0.5 rounded text-sm font-mono text-pink-400 border border-border;
+/* Inline KV grid (handler section) */
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.kv {
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+.kv-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-foreground-muted);
+  margin-bottom: 0.4rem;
+}
+.kv-value {
+  font-size: 13px;
+  line-height: 1.55;
+  color: white;
+}
+.kv-value :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
 }
 
-.docs-content :deep(pre) {
-  @apply bg-[#0d0c15] border border-border rounded-lg p-4 overflow-x-auto mb-6 shadow-lg;
+/* Runtime cards */
+.runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+.runtime-card {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: 10px;
+  padding: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+.runtime-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--accent, var(--color-primary));
+}
+.flavor-py    { --accent: linear-gradient(90deg, #4584b6, #ffde57); }
+.flavor-node  { --accent: linear-gradient(90deg, #3c873a, #80bb38); }
+.runtime-icon {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  color: white;
+  margin-bottom: 0.6rem;
+}
+.runtime-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-foreground-muted);
+  letter-spacing: 0.05em;
+}
+.runtime-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: white;
+  margin: 0.15rem 0 0.6rem;
+}
+.runtime-meta {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11.5px;
+}
+.runtime-meta li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.2rem 0;
+  color: var(--color-foreground-muted);
+}
+.runtime-meta li + li { border-top: 1px dashed var(--color-border); }
+.runtime-meta code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: white;
 }
 
-.docs-content :deep(pre code) {
-  @apply bg-transparent border-0 p-0 text-foreground text-sm leading-relaxed;
+/* Deploy flow */
+.deploy-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.flow-step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.flow-num {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-primary);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+}
+.flow-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: white;
+}
+.flow-arrow {
+  display: flex;
+  justify-content: center;
+  color: var(--color-foreground-muted);
+  padding: 0.15rem 0;
+}
+.hint {
+  font-size: 12.5px;
+  color: var(--color-foreground-muted);
+  line-height: 1.55;
+  margin: 0;
+}
+.recipe-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  margin: 1.25rem 0 0.4rem;
+  letter-spacing: 0.01em;
+}
+.recipe-body {
+  font-size: 13px;
+  color: var(--color-foreground-muted);
+  line-height: 1.6;
+  margin: 0 0 0.65rem;
+}
+.recipe-body code {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+  font-size: 12px;
+}
+.link {
+  color: white;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--color-foreground-muted);
+}
+.link:hover { text-decoration-color: white; }
+
+/* Dual-card (env vs secrets) */
+.dual-card {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+.dual-pane {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: 10px;
+  padding: 1rem;
+}
+.dual-icon {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 0.6rem;
+}
+.dual-icon.env { background: rgba(85, 63, 131, 0.2); color: #b591ff; border: 1px solid rgba(181, 145, 255, 0.3); }
+.dual-icon.secret { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+.dual-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: white;
+  margin-bottom: 0.4rem;
+}
+.dual-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--color-foreground-muted);
+}
+.dual-body em {
+  color: white;
+  font-style: normal;
+  font-weight: 500;
 }
 
-.docs-content :deep(ul),
-.docs-content :deep(ol) {
-  @apply text-foreground-muted mb-4 ml-6 space-y-2;
+/* Versions timeline */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-left: 0.5rem;
+}
+.timeline-item {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  position: relative;
+}
+.timeline-item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 0.85rem;
+  top: 2.25rem;
+  bottom: -0.25rem;
+  width: 1px;
+  background: var(--color-border);
+}
+.timeline-dot {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-foreground-muted);
+  z-index: 1;
+}
+.timeline-item.active .timeline-dot {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+.timeline-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.timeline-pill {
+  font-size: 10px;
+  padding: 0.15rem 0.4rem;
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.timeline-meta {
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+  margin-top: 0.2rem;
 }
 
-.docs-content :deep(li) {
-  @apply leading-relaxed;
+/* Errors grid */
+.errors-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.5rem;
+}
+.error-card {
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  border-radius: 8px;
+  padding: 0.7rem 0.85rem;
+}
+.error-code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: white;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 0.1em 0.4em;
+}
+.error-when {
+  font-size: 12px;
+  color: var(--color-foreground-muted);
+  margin-top: 0.45rem;
+  line-height: 1.5;
 }
 
-.docs-content :deep(ul li) {
-  @apply list-disc;
+/* Callout */
+.callout {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
 }
+.callout-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-foreground-muted);
+  font-weight: 600;
+}
+.callout-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-foreground);
+}
+.callout-body :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+  color: white;
+}
+.tone-warn { background: rgba(234, 179, 8, 0.06); border-color: rgba(234, 179, 8, 0.3); }
+.tone-warn .callout-head { color: #facc15; }
+.tone-info .callout-head { color: var(--color-foreground-muted); }
 
-.docs-content :deep(ol li) {
-  @apply list-decimal;
-}
-
-.docs-content :deep(blockquote) {
-  @apply border-l-4 border-primary bg-primary/5 pl-4 py-2 my-4 italic text-foreground-muted;
-}
-
-.docs-content :deep(table) {
-  @apply w-full border-collapse border border-border rounded-lg overflow-hidden mb-6;
-}
-
-.docs-content :deep(thead) {
-  @apply bg-surface;
-}
-
-.docs-content :deep(th) {
-  @apply text-left text-sm font-semibold text-white px-4 py-3 border-b border-border;
-}
-
-.docs-content :deep(td) {
-  @apply text-sm text-foreground-muted px-4 py-3 border-b border-border/50;
-}
-
-.docs-content :deep(tr:last-child td) {
-  @apply border-b-0;
-}
-
-.docs-content :deep(tr:hover) {
-  @apply bg-surface/50;
-}
-
-.docs-content :deep(hr) {
-  @apply border-border my-8;
-}
-
-.docs-content :deep(strong) {
-  @apply text-white font-semibold;
-}
-
-.docs-content :deep(em) {
-  @apply text-foreground-muted italic;
-}
-
-/* Custom badge/tag styles for HTTP methods */
-.docs-content :deep(code:has-text("GET")),
-.docs-content :deep(code:has-text("POST")),
-.docs-content :deep(code:has-text("PUT")),
-.docs-content :deep(code:has-text("DELETE")) {
-  @apply font-bold;
-}
 </style>

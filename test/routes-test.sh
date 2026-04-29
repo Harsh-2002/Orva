@@ -36,7 +36,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 
 # 2. Register an exact route + a non-reserved prefix route. (Routes
-# starting with /api/, /auth/, /ui/, /_orva/ are correctly rejected by
+# starting with /api/, /auth/, /web/, /_orva/ are correctly rejected by
 # the server with 400 — that's a deliberate isolation guard.)
 "${CURL[@]}" -X POST "$BASE/api/v1/routes" \
     -H "Content-Type: application/json" \

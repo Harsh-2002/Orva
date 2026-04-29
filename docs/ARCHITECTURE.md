@@ -15,7 +15,7 @@ host kernel  (Linux ≥ 5.10, cgroup v2, unprivileged userns)
   │
   └─ orvad   (single Go process, listens on :8443)
        │
-       ├─ HTTP server     /api  /ui  /auth  /events (SSE)
+       ├─ HTTP server     /api  /web  /auth  /events (SSE)
        ├─ Pool manager    per-function warm workers + KPA autoscaler
        ├─ Build queue     extract → install deps → atomic publish
        ├─ Event hub       SSE pub/sub for metrics + exec + deploy
@@ -297,7 +297,7 @@ exported handler, and writes response frames back.
 
 ### `frontend/`
 
-Vue 3 + Pinia + Vite. Single-page dashboard served from `/ui/` by the
+Vue 3 + Pinia + Vite. Single-page dashboard served from `/web/` by the
 Go server (the build output is embedded at compile time via
 `//go:embed ui_dist`).
 

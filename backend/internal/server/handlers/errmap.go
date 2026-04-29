@@ -36,6 +36,24 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 			RetryAfterS: 30,
 		}
 
+	case errors.Is(err, pool.ErrFunctionBusy):
+		details := map[string]any{}
+		if fn != nil {
+			details["function_id"] = fn.ID
+			details["function_name"] = fn.Name
+			if fn.MaxConcurrency > 0 {
+				details["max_concurrency"] = fn.MaxConcurrency
+			}
+		}
+		return http.StatusTooManyRequests, respond.ErrorOpts{
+			Code: "FUNCTION_BUSY",
+			Message: fmt.Sprintf("function %s is at its concurrency cap", funcLabel(fn)),
+			RequestID: requestID,
+			Hint: "raise functions.max_concurrency or switch the policy to 'queue' to wait for a slot",
+			RetryAfterS: 1,
+			Details: details,
+		}
+
 	case errors.Is(err, pool.ErrPoolAtCapacity):
 		details := map[string]any{}
 		if fn != nil {

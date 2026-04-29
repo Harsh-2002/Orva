@@ -54,7 +54,51 @@ type functionPool struct {
 	mu      sync.Mutex
 	closing atomic.Bool
 
+	// Per-function concurrency cap. concSem is a buffered channel acting
+	// as a semaphore: capacity = max_concurrency. nil means unlimited.
+	// concPolicy is "queue" (block on the cap) or "reject" (return
+	// ErrFunctionBusy). The cap and policy come from the function row;
+	// changing them via PUT triggers RefreshForDeploy which recreates the
+	// pool with a fresh sem.
+	concSem    chan struct{}
+	concPolicy string
+
 	spawnFn func(ctx context.Context) (*sandbox.Worker, error)
+}
+
+// acquireSlot tries to occupy a concurrency slot. Returns nil on success
+// (caller must call releaseSlot when done), ErrFunctionBusy with
+// reject policy when the cap is full, or the ctx error if the queue
+// wait timed out. Cap = 0 means unlimited (no semaphore configured).
+func (p *functionPool) acquireSlot(ctx context.Context) error {
+	if p.concSem == nil {
+		return nil
+	}
+	if p.concPolicy == "reject" {
+		select {
+		case p.concSem <- struct{}{}:
+			return nil
+		default:
+			return ErrFunctionBusy
+		}
+	}
+	// "queue" policy: block until a slot frees or ctx fires.
+	select {
+	case p.concSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *functionPool) releaseSlot() {
+	if p.concSem == nil {
+		return
+	}
+	select {
+	case <-p.concSem:
+	default:
+	}
 }
 
 // recordAcquire bumps the rate EWMA. Called from Manager.Acquire on every

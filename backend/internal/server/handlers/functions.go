@@ -48,26 +48,34 @@ type FunctionHandler struct {
 
 // createFunctionRequest is the body for creating a function.
 type createFunctionRequest struct {
-	Name        string            `json:"name"`
-	Runtime     string            `json:"runtime"`
-	Entrypoint  string            `json:"entrypoint"`
-	TimeoutMS   int64             `json:"timeout_ms"`
-	MemoryMB    int64             `json:"memory_mb"`
-	CPUs        float64           `json:"cpus"`
-	EnvVars     map[string]string `json:"env_vars"`
-	NetworkMode string            `json:"network_mode"`
+	Name              string            `json:"name"`
+	Runtime           string            `json:"runtime"`
+	Entrypoint        string            `json:"entrypoint"`
+	TimeoutMS         int64             `json:"timeout_ms"`
+	MemoryMB          int64             `json:"memory_mb"`
+	CPUs              float64           `json:"cpus"`
+	EnvVars           map[string]string `json:"env_vars"`
+	NetworkMode       string            `json:"network_mode"`
+	MaxConcurrency    int               `json:"max_concurrency"`
+	ConcurrencyPolicy string            `json:"concurrency_policy"`
+	AuthMode          string            `json:"auth_mode"`
+	RateLimitPerMin   int               `json:"rate_limit_per_min"`
 }
 
 // updateFunctionRequest is the body for updating a function.
 type updateFunctionRequest struct {
-	Name        *string            `json:"name"`
-	Entrypoint  *string            `json:"entrypoint"`
-	TimeoutMS   *int64             `json:"timeout_ms"`
-	MemoryMB    *int64             `json:"memory_mb"`
-	CPUs        *float64           `json:"cpus"`
-	EnvVars     *map[string]string `json:"env_vars"`
-	NetworkMode *string            `json:"network_mode"`
-	Status      *string            `json:"status"`
+	Name              *string            `json:"name"`
+	Entrypoint        *string            `json:"entrypoint"`
+	TimeoutMS         *int64             `json:"timeout_ms"`
+	MemoryMB          *int64             `json:"memory_mb"`
+	CPUs              *float64           `json:"cpus"`
+	EnvVars           *map[string]string `json:"env_vars"`
+	NetworkMode       *string            `json:"network_mode"`
+	MaxConcurrency    *int               `json:"max_concurrency"`
+	ConcurrencyPolicy *string            `json:"concurrency_policy"`
+	AuthMode          *string            `json:"auth_mode"`
+	RateLimitPerMin   *int               `json:"rate_limit_per_min"`
+	Status            *string            `json:"status"`
 }
 
 // userSettableStatus is the whitelist of status values an operator may set
@@ -115,6 +123,27 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", fmt.Sprintf("unsupported runtime: %s", req.Runtime), reqID)
 		return
 	}
+	if !database.ValidNetworkMode(req.NetworkMode) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", fmt.Sprintf("invalid network_mode: %s (allowed: none, egress)", req.NetworkMode), reqID)
+		return
+	}
+	if !database.ValidConcurrencyPolicy(req.ConcurrencyPolicy) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", fmt.Sprintf("invalid concurrency_policy: %s (allowed: queue, reject)", req.ConcurrencyPolicy), reqID)
+		return
+	}
+	if req.MaxConcurrency < 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "max_concurrency must be >= 0 (0 = unlimited)", reqID)
+		return
+	}
+	if !database.ValidAuthMode(req.AuthMode) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			fmt.Sprintf("invalid auth_mode: %s (allowed: none, platform_key, signed)", req.AuthMode), reqID)
+		return
+	}
+	if req.RateLimitPerMin < 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "rate_limit_per_min must be >= 0 (0 = unlimited)", reqID)
+		return
+	}
 
 	// Apply defaults.
 	if req.Entrypoint == "" {
@@ -135,7 +164,16 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.CPUs = 0.5
 	}
 	if req.NetworkMode == "" {
-		req.NetworkMode = "isolated"
+		// Default = isolated net namespace, loopback only. Functions opt
+		// into outbound network access by setting "egress" via the
+		// editor's Settings modal or this API.
+		req.NetworkMode = database.NetworkModeNone
+	}
+	if req.ConcurrencyPolicy == "" {
+		req.ConcurrencyPolicy = database.ConcurrencyPolicyQueue
+	}
+	if req.AuthMode == "" {
+		req.AuthMode = database.AuthModeNone
 	}
 	if req.EnvVars == nil {
 		req.EnvVars = make(map[string]string)
@@ -150,17 +188,21 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	fnID := "fn_" + suffix
 
 	fn := &database.Function{
-		ID:          fnID,
-		Name:        req.Name,
-		Runtime:     req.Runtime,
-		Entrypoint:  req.Entrypoint,
-		TimeoutMS:   req.TimeoutMS,
-		MemoryMB:    req.MemoryMB,
-		CPUs:        req.CPUs,
-		EnvVars:     req.EnvVars,
-		NetworkMode: req.NetworkMode,
-		Status:      "created",
-		Version:     1,
+		ID:                fnID,
+		Name:              req.Name,
+		Runtime:           req.Runtime,
+		Entrypoint:        req.Entrypoint,
+		TimeoutMS:         req.TimeoutMS,
+		MemoryMB:          req.MemoryMB,
+		CPUs:              req.CPUs,
+		EnvVars:           req.EnvVars,
+		NetworkMode:       req.NetworkMode,
+		MaxConcurrency:    req.MaxConcurrency,
+		ConcurrencyPolicy: req.ConcurrencyPolicy,
+		AuthMode:          req.AuthMode,
+		RateLimitPerMin:   req.RateLimitPerMin,
+		Status:            "created",
+		Version:           1,
 	}
 
 	if err := h.Registry.Set(fn); err != nil {
@@ -244,6 +286,40 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate mutables before any mutation, so we don't half-apply.
+	if req.NetworkMode != nil && !database.ValidNetworkMode(*req.NetworkMode) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			fmt.Sprintf("invalid network_mode: %s (allowed: none, egress)", *req.NetworkMode), reqID)
+		return
+	}
+	if req.ConcurrencyPolicy != nil && !database.ValidConcurrencyPolicy(*req.ConcurrencyPolicy) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			fmt.Sprintf("invalid concurrency_policy: %s (allowed: queue, reject)", *req.ConcurrencyPolicy), reqID)
+		return
+	}
+	if req.MaxConcurrency != nil && *req.MaxConcurrency < 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "max_concurrency must be >= 0 (0 = unlimited)", reqID)
+		return
+	}
+	if req.AuthMode != nil && !database.ValidAuthMode(*req.AuthMode) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			fmt.Sprintf("invalid auth_mode: %s (allowed: none, platform_key, signed)", *req.AuthMode), reqID)
+		return
+	}
+	if req.RateLimitPerMin != nil && *req.RateLimitPerMin < 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "rate_limit_per_min must be >= 0 (0 = unlimited)", reqID)
+		return
+	}
+	if req.Status != nil && !userSettableStatus[*req.Status] {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "status must be one of: active, inactive", reqID)
+		return
+	}
+
+	// Track whether anything that affects the spawn config changed — if
+	// so, we drain the warm pool so the next invoke re-spawns with the
+	// new config (memory, CPU, env vars, and now network_mode).
+	spawnConfigChanged := false
+
 	// Apply partial updates.
 	if req.Name != nil {
 		fn.Name = *req.Name
@@ -253,24 +329,59 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TimeoutMS != nil {
 		fn.TimeoutMS = *req.TimeoutMS
+		spawnConfigChanged = true
 	}
 	if req.MemoryMB != nil {
 		fn.MemoryMB = *req.MemoryMB
+		spawnConfigChanged = true
 	}
 	if req.CPUs != nil {
 		fn.CPUs = *req.CPUs
+		spawnConfigChanged = true
 	}
 	if req.EnvVars != nil {
 		fn.EnvVars = *req.EnvVars
+		spawnConfigChanged = true
 	}
 	if req.NetworkMode != nil {
-		fn.NetworkMode = *req.NetworkMode
+		newMode := *req.NetworkMode
+		if newMode == "" {
+			newMode = database.NetworkModeNone
+		}
+		if newMode != fn.NetworkMode {
+			fn.NetworkMode = newMode
+			spawnConfigChanged = true
+		}
+	}
+	if req.MaxConcurrency != nil && *req.MaxConcurrency != fn.MaxConcurrency {
+		fn.MaxConcurrency = *req.MaxConcurrency
+		spawnConfigChanged = true
+	}
+	if req.ConcurrencyPolicy != nil {
+		newPolicy := *req.ConcurrencyPolicy
+		if newPolicy == "" {
+			newPolicy = database.ConcurrencyPolicyQueue
+		}
+		if newPolicy != fn.ConcurrencyPolicy {
+			fn.ConcurrencyPolicy = newPolicy
+			spawnConfigChanged = true
+		}
+	}
+	if req.AuthMode != nil {
+		newMode := *req.AuthMode
+		if newMode == "" {
+			newMode = database.AuthModeNone
+		}
+		// auth_mode does not affect the spawn config — it gates *requests*,
+		// not the sandbox process — so no pool drain is required when it
+		// flips. Updating the field is enough; the invoke handler reads it
+		// fresh from the registry on every call.
+		fn.AuthMode = newMode
+	}
+	if req.RateLimitPerMin != nil {
+		fn.RateLimitPerMin = *req.RateLimitPerMin
 	}
 	if req.Status != nil {
-		if !userSettableStatus[*req.Status] {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION", "status must be one of: active, inactive", reqID)
-			return
-		}
 		fn.Status = *req.Status
 	}
 	fn.Version++
@@ -278,6 +389,11 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := h.Registry.Set(fn); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to update function", reqID)
 		return
+	}
+
+	// Drain warm workers so the next invoke picks up the new spawn config.
+	if spawnConfigChanged && h.PoolRefresh != nil {
+		h.PoolRefresh(fn.ID)
 	}
 
 	respond.JSON(w, http.StatusOK, fn)
@@ -318,12 +434,17 @@ func (h *FunctionHandler) GetSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if fn.Status != "active" {
-		respond.JSON(w, http.StatusOK, map[string]string{"code": "", "dependencies": ""})
-		return
-	}
+	// Don't gate on fn.Status: a function may sit in 'error' (last build
+	// failed) or 'created' (never deployed) yet still have a working
+	// 'current' symlink from a previous successful deploy. The right
+	// signal is "is the file readable" — handled below. Gating here
+	// caused the editor to fall back to boilerplate for any function not
+	// strictly 'active', even when its source was sitting on disk.
 
-	codeDir := h.DataDir + "/functions/" + fn.ID + "/code"
+	// Mini-git layout: the live code is at functions/<id>/current/, a
+	// symlink retargeted on each successful deploy / rollback. The old
+	// flat "code/" directory was removed in Round G.
+	codeDir := h.DataDir + "/functions/" + fn.ID + "/current"
 
 	// Read handler source.
 	entrypoint := fn.Entrypoint

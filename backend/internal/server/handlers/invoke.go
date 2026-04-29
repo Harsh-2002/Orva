@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	gonanoid "github.com/matoous/go-nanoid/v2"
@@ -33,6 +34,12 @@ type InvokeHandler struct {
 	// + InvocationsLog). Best-effort; non-blocking. Wired in server.New from
 	// events.Hub.Publish.
 	PublishEvent func(eventType string, data any)
+
+	// rateLimiter is initialized lazily on first request so existing tests
+	// that build the handler with zero-value fields keep working. Keyed by
+	// (fn_id, client_ip).
+	rateLimiterOnce sync.Once
+	rateLimiter     *rateLimiter
 }
 
 // ServeHTTP is the hot path for function invocation. It accepts two path
@@ -115,6 +122,24 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Retry-After", "5")
 			}
 			respond.Error(w, status, code, msg, reqID)
+			return
+		}
+	}
+
+	// Per-function auth gate. auth_mode='none' (default) is a no-op and
+	// keeps the public-by-default contract; 'platform_key' and 'signed' are
+	// opt-in. authorizeInvoke writes the error response itself on failure.
+	if code := h.authorizeInvoke(w, r, fn); code != "" {
+		return
+	}
+
+	// Per-function rate limit. perMin == 0 short-circuits inside Allow.
+	if fn.RateLimitPerMin > 0 {
+		h.rateLimiterOnce.Do(func() { h.rateLimiter = newRateLimiter() })
+		if !h.rateLimiter.Allow(fn.ID, clientIP(r), fn.RateLimitPerMin) {
+			w.Header().Set("Retry-After", "60")
+			respond.Error(w, http.StatusTooManyRequests, "RATE_LIMITED",
+				fmt.Sprintf("rate limit exceeded (%d req/min per IP)", fn.RateLimitPerMin), reqID)
 			return
 		}
 	}

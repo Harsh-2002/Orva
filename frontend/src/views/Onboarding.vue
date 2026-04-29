@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen grid lg:grid-cols-2 bg-background">
     <!-- Left Panel: Brand & Vision -->
-    <div class="relative hidden lg:flex flex-col justify-between p-12 bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 text-white overflow-hidden">
+    <div class="relative hidden lg:flex flex-col justify-between py-12 pl-20 pr-12 xl:pl-28 bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 text-white overflow-hidden">
       <!-- Noise Texture -->
       <div class="absolute inset-0 opacity-[0.15] mix-blend-soft-light" style="background-image: url('data:image/svg+xml,%3Csvg viewBox=%270 0 400 400%27 xmlns=%27http://www.w3.org/2000/svg%27%3E%3Cfilter id=%27noiseFilter%27%3E%3CfeTurbulence type=%27fractalNoise%27 baseFrequency=%270.9%27 numOctaves=%274%27 stitchTiles=%27stitch%27/%3E%3C/filter%3E%3Crect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23noiseFilter)%27/%3E%3C/svg%3E');" />
       <!-- Abstract Background Shapes -->
@@ -104,7 +104,7 @@
                 v-model="form.username"
                 type="text"
                 required
-                class="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                class="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
                 placeholder="orva"
                 :disabled="loading"
               >
@@ -118,7 +118,7 @@
                     v-model="form.password"
                     :type="showPassword ? 'text' : 'password'"
                     required
-                    class="w-full bg-background border border-border rounded-lg px-4 py-2.5 pr-20 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                    class="w-full bg-background border border-border rounded-lg px-4 py-2.5 pr-20 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
                     placeholder="Minimum 10 characters"
                     :disabled="loading"
                   >

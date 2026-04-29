@@ -38,6 +38,15 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Function invocations are public by default. Per-function auth_mode
+		// (none|platform_key|signed) is enforced inside InvokeHandler. This
+		// matches Cloudflare Workers / Vercel Functions / Lambda Function URLs
+		// and keeps direct-invoke parity with custom routes (which always
+		// bypass middleware because they don't start with /api/).
+		if strings.HasPrefix(r.URL.Path, "/api/v1/invoke/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		// Try session cookie first (browser UI).
 		if cookie, err := r.Cookie("session_token"); err == nil {

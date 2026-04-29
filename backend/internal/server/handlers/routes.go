@@ -51,7 +51,7 @@ func (h *RouteHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Reserve internal Orva namespaces so users can't hijack the control plane.
-	for _, reserved := range []string{"/api/", "/auth/", "/ui/", "/_orva/"} {
+	for _, reserved := range []string{"/api/", "/auth/", "/web/", "/_orva/"} {
 		if strings.HasPrefix(req.Path, reserved) {
 			respond.Error(w, http.StatusBadRequest, "VALIDATION",
 				"path conflicts with reserved prefix "+reserved, reqID)

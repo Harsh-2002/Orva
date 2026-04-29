@@ -106,6 +106,9 @@ func (db *Database) GetExecution(id string) (*Execution, error) {
 type ListExecutionsParams struct {
 	FunctionID string
 	Status     string
+	Since      string // ISO8601, inclusive lower bound on started_at
+	Until      string // ISO8601, exclusive upper bound on started_at
+	Search     string // substring against error_message + container_id
 	Limit      int
 	Offset     int
 }
@@ -133,6 +136,22 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 		query += " AND status = ?"
 		countQuery += " AND status = ?"
 		args = append(args, params.Status)
+	}
+	if params.Since != "" {
+		query += " AND started_at >= ?"
+		countQuery += " AND started_at >= ?"
+		args = append(args, params.Since)
+	}
+	if params.Until != "" {
+		query += " AND started_at < ?"
+		countQuery += " AND started_at < ?"
+		args = append(args, params.Until)
+	}
+	if params.Search != "" {
+		query += " AND (error_message LIKE ? OR container_id LIKE ?)"
+		countQuery += " AND (error_message LIKE ? OR container_id LIKE ?)"
+		like := "%" + params.Search + "%"
+		args = append(args, like, like)
 	}
 
 	var total int
@@ -180,6 +199,14 @@ func (db *Database) GetExecutionLog(executionID string) (*ExecutionLog, error) {
 		return nil, err
 	}
 	return &log, nil
+}
+
+// DeleteExecution removes one execution row + its logs (FK CASCADE).
+// Used by the bulk-delete endpoint and the per-row delete in the Logs UI.
+func (db *Database) DeleteExecution(id string) error {
+	// execution_logs has ON DELETE CASCADE; orphan rows aren't a concern.
+	_, err := db.write.Exec("DELETE FROM executions WHERE id = ?", id)
+	return err
 }
 
 func (db *Database) PurgeOldExecutions(retentionDays int) error {

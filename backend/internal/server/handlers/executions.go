@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ func (h *ExecutionHandler) List(w http.ResponseWriter, r *http.Request) {
 	params := database.ListExecutionsParams{
 		FunctionID: r.URL.Query().Get("function_id"),
 		Status:     r.URL.Query().Get("status"),
+		Since:      r.URL.Query().Get("since"),
+		Until:      r.URL.Query().Get("until"),
+		Search:     r.URL.Query().Get("q"),
 	}
 
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -79,6 +83,56 @@ func (h *ExecutionHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, http.StatusOK, logs)
+}
+
+// Delete handles DELETE /api/v1/executions/{exec_id}. Removes the row
+// + its logs (FK CASCADE in schema).
+func (h *ExecutionHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	execID := extractExecID(r.URL.Path)
+	if execID == "" {
+		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing execution ID", reqID)
+		return
+	}
+	if err := h.DB.DeleteExecution(execID); err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"status": "deleted", "id": execID})
+}
+
+// BulkDelete handles POST /api/v1/executions/bulk-delete with body
+// {"ids":["exec_a","exec_b",...]}. Returns counts of deleted/failed.
+// Path-based DELETE on individual execs still works for one-off use.
+func (h *ExecutionHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+		return
+	}
+	if len(body.IDs) == 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "ids must be a non-empty array", reqID)
+		return
+	}
+	if len(body.IDs) > 1000 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "max 1000 ids per request", reqID)
+		return
+	}
+	deleted, failed := 0, 0
+	for _, id := range body.IDs {
+		if err := h.DB.DeleteExecution(id); err != nil {
+			failed++
+			continue
+		}
+		deleted++
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{
+		"deleted": deleted,
+		"failed":  failed,
+	})
 }
 
 // extractExecID extracts the execution ID from path /api/v1/executions/{exec_id}.

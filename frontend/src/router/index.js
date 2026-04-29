@@ -29,6 +29,8 @@ const router = createRouter({
         { path: 'deploy', name: 'deploy', component: () => import('@/views/Editor.vue') },
         { path: 'invocations', name: 'invocations', component: () => import('@/views/InvocationsLog.vue') },
         { path: 'api-keys', name: 'api-keys', component: () => import('@/views/ApiKeys.vue') },
+        { path: 'firewall', name: 'firewall', component: () => import('@/views/Firewall.vue') },
+        { path: 'docs', name: 'docs', component: () => import('@/views/Docs.vue') },
       ],
     },
   ],
@@ -48,6 +50,15 @@ const router = createRouter({
 // `hasUser` is fetched once and cached (auth store handles that). Network
 // errors on /auth/status leave the cached value alone instead of dumping
 // users into onboarding.
+// Short-circuit no-op navigations (e.g. clicking the link for the route
+// you're already on). Without this, vue-router still emits the full
+// resolve cycle which re-runs the auth guard's network calls and causes
+// a visible flicker on rapid clicks.
+router.beforeEach((to, from, next) => {
+  if (from.fullPath === to.fullPath && from.name) return next(false)
+  next()
+})
+
 router.beforeEach(async (to, _from, next) => {
   const auth = useAuthStore()
   const hasUser = await auth.fetchAuthStatus()

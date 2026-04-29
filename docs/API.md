@@ -75,9 +75,19 @@ Create a function record.
   "cpus": 1,
   "timeout_ms": 30000,
   "env_vars": {"NODE_ENV": "production"},
-  "network_mode": "isolated"  // isolated|host|bridge
+  "network_mode": "none"      // none (default) | egress
 }
 ```
+
+`network_mode` controls per-function network access:
+
+- `none` (default) — isolated net namespace, loopback only. DNS / TCP /
+  UDP all blocked. Best for pure-compute handlers.
+- `egress` — userspace TCP/UDP stack via nsjail `--user_net`. Function
+  can call external HTTPS APIs. Host interfaces stay isolated.
+
+Toggling on an existing function via `PUT /api/v1/functions/{id}`
+drains the warm pool so the next invocation picks up the new mode.
 
 ### `GET /api/v1/functions`
 List all functions. Optional `?status=active|inactive`, `?runtime=...`.
@@ -190,7 +200,7 @@ List custom routes.
 ```
 
 `methods` accepts `*` for all methods or comma-separated (`GET,POST`).
-Reserved prefixes (`/api/`, `/ui/`, `/auth/`, `/_orva/`) are rejected.
+Reserved prefixes (`/api/`, `/web/`, `/auth/`, `/_orva/`) are rejected.
 
 ### `DELETE /api/v1/routes?path=/webhooks/stripe`
 Remove a route.

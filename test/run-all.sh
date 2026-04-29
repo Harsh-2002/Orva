@@ -40,6 +40,8 @@ run heavy-deploy-test.sh
 run onboarding-flow.sh
 run errors-test.sh
 run rollback-test.sh
+run egress-test.sh
+run auth-test.sh
 run atscale.sh
 
 echo

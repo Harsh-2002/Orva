@@ -36,7 +36,7 @@ jobs:
         distro:
           - ubuntu:24.04
           - debian:12
-          - alpine:3.19
+          - alpine:3.21
           - rockylinux:9
           - archlinux:latest
     steps:

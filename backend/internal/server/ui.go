@@ -22,7 +22,7 @@ func uiHandler() http.Handler {
 	indexHTML, _ := fs.ReadFile(dist, "index.html")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/ui")
+		path := strings.TrimPrefix(r.URL.Path, "/web")
 		if path == "" {
 			path = "/"
 		}

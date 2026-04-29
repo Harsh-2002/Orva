@@ -18,7 +18,8 @@ ordered by importance:
 4. A function cannot **exhaust host resources** beyond its declared
    memory / CPU / pid limits
 5. A function cannot make **arbitrary network calls** when network mode
-   is `isolated` (default)
+   is `none` (default — isolated net namespace, loopback only). Functions
+   that need outbound HTTPS opt in by setting `network_mode: egress`
 
 Orva is **not** designed to defend against:
 - A malicious operator running on the same host (they own the keys)
@@ -172,20 +173,68 @@ before any nsjail process is created.
 
 ## Network isolation
 
-`network_mode: isolated` (default for new functions) sets up the
-function in a network namespace with **no interfaces other than
-loopback**. Outbound HTTP from a handler will fail with `ENETUNREACH`.
+`network_mode: none` (default for new functions) sets up the function in
+a fresh network namespace with **no interfaces other than loopback**.
+Outbound HTTP from a handler fails with `ENETUNREACH` — DNS, TCP, UDP all
+blocked. This is the safe default; flip a function to egress only if it
+genuinely needs to call out.
 
-Two other modes exist for operator opt-in:
+`network_mode: egress` — opt-in per function. Adds nsjail's
+`--user_net` flag, which gives the sandbox a userspace TCP/UDP stack
+that NATs out via the host. **Host network interfaces are still not
+exposed**; the function can dial outbound but can't see (or be seen by)
+other tenants on the same node. Use this for handlers that talk to
+Stripe, OpenAI, your DB, or any external API.
 
-- `network_mode: host` — function shares the orvad container's network
-  namespace. Use only for trusted internal helpers.
-- `network_mode: bridge` — function gets a vETH-paired interface to
-  a bridge that has outbound NAT but no inbound. Equivalent to a
-  Docker container's default network.
+Switching the toggle drains the warm pool so the next invocation
+respawns with the new mode within seconds. The Functions list in the UI
+shows an "egress" badge on rows that have it on, so operators can audit
+at a glance which functions can talk to the network.
 
-Switching modes requires a redeploy (the network namespace is opened
-once at spawn time).
+Future modes (`egress+allowlist` / `private`) would extend the same
+field without another schema migration.
+
+### Egress blocklist (firewall)
+
+When a function is in `egress` mode, a global blocklist applies on top:
+specific IPs/CIDRs/hostnames that no function can reach regardless of
+the per-function toggle. The list is managed entirely from the UI at
+`/web/firewall` (or via `POST /api/v1/firewall/rules`) — there is no
+config file. Rules live in the `egress_blocklist` SQLite table and
+orvad re-applies them via nftables on every change + every 10 s tick.
+
+**Coexisting with existing nftables rules.** orvad creates and owns
+exactly one nftables table named `inet orva_firewall`. It does **not**
+touch any other table on the host. If you already run nftables for
+your own purposes (host firewall, fail2ban, k8s CNI), our rules sit
+alongside yours — Linux's nftables evaluates every matching rule in
+the OUTPUT chain regardless of which table they're in.
+
+```bash
+sudo nft list ruleset
+# Look for:
+#   table inet orva_firewall { ... }
+# next to whatever else you're running.
+```
+
+orvad will rebuild only its own table on each refresh; your tables are
+untouched. The bare-metal install script (`scripts/install.sh`) detects
+existing nftables config at install time and prints an info line so
+you know they coexist.
+
+**When nftables is unavailable.** If `nft` isn't installed or the
+kernel can't load `nf_tables` (rare modern distros, OpenWrt, BSD), the
+install script logs a warning and the firewall feature degrades:
+
+- Per-function `network_mode: egress` still works — functions still get
+  an isolated net namespace + nstun userspace networking.
+- The Firewall page still loads; you can manage rules in the DB.
+- The page shows an amber **"nftables unavailable"** banner.
+- **No packets are filtered** — host-level iptables / cloud security
+  group / VPC firewall is your fallback.
+
+This is intentional: orva will run regardless of host firewall state,
+and the operator gets a clear yes/no signal at install time.
 
 ## What Orva itself runs as
 

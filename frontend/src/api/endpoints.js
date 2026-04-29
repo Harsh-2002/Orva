@@ -5,7 +5,7 @@ import { getApiKey } from './client'
 export const getHealth = () => apiClient.get('/system/health')
 
 // Functions
-export const listFunctions = () => apiClient.get('/functions')
+export const listFunctions = (params) => apiClient.get('/functions', { params })
 
 export const getFunction = (nameOrId) => apiClient.get(`/functions/${nameOrId}`)
 

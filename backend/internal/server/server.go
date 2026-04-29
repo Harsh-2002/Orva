@@ -17,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/builder"
 	"github.com/Harsh-2002/Orva/internal/config"
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/firewall"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/proxy"
@@ -38,6 +39,7 @@ type Server struct {
 	Metrics    *metrics.Metrics
 	BuildQueue *builder.Queue
 	EventHub   *events.Hub
+	Firewall   *firewall.Manager
 }
 
 func New(cfg *config.Config, db *database.Database) *Server {
@@ -152,6 +154,13 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// path for the dashboard.
 	go runMetricsPublisher(context.Background(), hub, db, met, limiter, poolMgr, buildQueue, reg)
 
+	// Egress firewall manager. Started immediately so the initial nft
+	// rules are in place before any function can run. If nft isn't
+	// available (no NET_ADMIN, BSD host, etc.) the manager logs a
+	// warning and the API surfaces it via /firewall/rules → status.
+	fw := firewall.NewManager(db, cfg.Data.Dir)
+	fw.Start(context.Background())
+
 	deps := RouterDeps{
 		Registry:   reg,
 		Proxy:      px,
@@ -161,6 +170,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		BuildQueue: buildQueue,
 		PoolMgr:    poolMgr,
 		EventHub:   hub,
+		Firewall:   fw,
 	}
 
 	router := NewRouter(cfg, db, deps)
@@ -180,6 +190,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		Metrics:    met,
 		BuildQueue: buildQueue,
 		EventHub:   hub,
+		Firewall:   fw,
 	}
 }
 
@@ -310,6 +321,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.PoolMgr != nil {
 		_ = s.PoolMgr.Shutdown(shutdownCtx)
+	}
+	if s.Firewall != nil {
+		_ = s.Firewall.Stop(shutdownCtx)
 	}
 	return nil
 }

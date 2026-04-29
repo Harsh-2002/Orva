@@ -480,6 +480,126 @@ func TestCreateFunction_InvalidRuntime(t *testing.T) {
 	}
 }
 
+// TestCreateFunction_RejectsInvalidNetworkMode covers the new
+// network_mode validator. Anything outside ""|"none"|"egress" must be
+// rejected with VALIDATION before we touch the database.
+func TestCreateFunction_RejectsInvalidNetworkMode(t *testing.T) {
+	tc := newTestServer(t)
+
+	body := `{"name":"bad-net","runtime":"node22","network_mode":"wat"}`
+	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	tc.setAuth(req)
+	w := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("expected 400 for invalid network_mode, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateFunction_DefaultNetworkMode confirms that omitting
+// network_mode lands at "none" — the safe default — and that explicit
+// "egress" is accepted.
+func TestCreateFunction_DefaultNetworkMode(t *testing.T) {
+	tc := newTestServer(t)
+
+	for _, tc2 := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"omitted", `{"name":"net-default","runtime":"node22"}`, "none"},
+		{"explicit-none", `{"name":"net-none","runtime":"node22","network_mode":"none"}`, "none"},
+		{"egress", `{"name":"net-egress","runtime":"node22","network_mode":"egress"}`, "egress"},
+	} {
+		t.Run(tc2.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(tc2.body))
+			req.Header.Set("Content-Type", "application/json")
+			tc.setAuth(req)
+			w := httptest.NewRecorder()
+			tc.srv.router.ServeHTTP(w, req)
+			if w.Code != 201 {
+				t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
+			}
+			var fn database.Function
+			json.NewDecoder(w.Body).Decode(&fn)
+			if fn.NetworkMode != tc2.want {
+				t.Errorf("expected network_mode=%q, got %q", tc2.want, fn.NetworkMode)
+			}
+		})
+	}
+}
+
+// TestUpdateFunction_TogglesNetworkMode toggles a function from the
+// default "none" → "egress" and back, asserting both the persisted
+// value and that the version bumps each round-trip (proxy for the
+// PoolRefresh having fired).
+func TestUpdateFunction_TogglesNetworkMode(t *testing.T) {
+	tc := newTestServer(t)
+
+	body := `{"name":"net-toggle","runtime":"node22"}`
+	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	tc.setAuth(req)
+	w := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var fn database.Function
+	json.NewDecoder(w.Body).Decode(&fn)
+	if fn.NetworkMode != "none" {
+		t.Fatalf("baseline: expected network_mode=none, got %q", fn.NetworkMode)
+	}
+
+	// Flip on.
+	put1 := httptest.NewRequest("PUT", "/api/v1/functions/"+fn.ID,
+		bytes.NewBufferString(`{"network_mode":"egress"}`))
+	put1.Header.Set("Content-Type", "application/json")
+	tc.setAuth(put1)
+	w1 := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w1, put1)
+	if w1.Code != 200 {
+		t.Fatalf("update on: %d %s", w1.Code, w1.Body.String())
+	}
+	var on database.Function
+	json.NewDecoder(w1.Body).Decode(&on)
+	if on.NetworkMode != "egress" {
+		t.Errorf("expected egress, got %q", on.NetworkMode)
+	}
+	if on.Version != fn.Version+1 {
+		t.Errorf("expected version %d, got %d", fn.Version+1, on.Version)
+	}
+
+	// Flip off.
+	put2 := httptest.NewRequest("PUT", "/api/v1/functions/"+fn.ID,
+		bytes.NewBufferString(`{"network_mode":"none"}`))
+	put2.Header.Set("Content-Type", "application/json")
+	tc.setAuth(put2)
+	w2 := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w2, put2)
+	if w2.Code != 200 {
+		t.Fatalf("update off: %d %s", w2.Code, w2.Body.String())
+	}
+	var off database.Function
+	json.NewDecoder(w2.Body).Decode(&off)
+	if off.NetworkMode != "none" {
+		t.Errorf("expected none, got %q", off.NetworkMode)
+	}
+
+	// Validation on update.
+	put3 := httptest.NewRequest("PUT", "/api/v1/functions/"+fn.ID,
+		bytes.NewBufferString(`{"network_mode":"wat"}`))
+	put3.Header.Set("Content-Type", "application/json")
+	tc.setAuth(put3)
+	w3 := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w3, put3)
+	if w3.Code != 400 {
+		t.Errorf("expected 400 for invalid network_mode on update, got %d: %s", w3.Code, w3.Body.String())
+	}
+}
+
 func TestListExecutions_Empty(t *testing.T) {
 	tc := newTestServer(t)
 
@@ -539,8 +659,8 @@ func TestUIRedirect(t *testing.T) {
 		t.Errorf("expected 302, got %d", rr.Code)
 	}
 	loc := rr.Header().Get("Location")
-	if loc != "/ui/" {
-		t.Errorf("expected redirect to /ui/, got %q", loc)
+	if loc != "/web/" {
+		t.Errorf("expected redirect to /web/, got %q", loc)
 	}
 }
 
@@ -549,7 +669,7 @@ func TestUIIndex(t *testing.T) {
 	ts := httptest.NewServer(tc.srv.router)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/ui/")
+	resp, err := http.Get(ts.URL + "/web/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +681,7 @@ func TestUIIndex(t *testing.T) {
 	var buf bytes.Buffer
 	buf.ReadFrom(resp.Body)
 	if !bytes.Contains(buf.Bytes(), []byte("<")) {
-		t.Error("expected HTML content in /ui/ response")
+		t.Error("expected HTML content in /web/ response")
 	}
 }
 
@@ -571,7 +691,7 @@ func TestUIAndAPICoexist(t *testing.T) {
 	defer ts.Close()
 
 	// UI request (follow redirects).
-	uiResp, err := http.Get(ts.URL + "/ui/")
+	uiResp, err := http.Get(ts.URL + "/web/")
 	if err != nil {
 		t.Fatal(err)
 	}

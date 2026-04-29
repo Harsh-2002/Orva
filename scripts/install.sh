@@ -62,7 +62,15 @@ install_prereqs() {
         log "skipping package install (ORVA_NO_PKG=1)"
         return
     fi
+
+    # Required packages — install must succeed for orva to run at all.
     pkgs="ca-certificates curl tar zstd"
+    # Optional — needed only by the egress firewall feature. If install
+    # fails or the host can't load nf_tables we degrade gracefully and
+    # the operator still gets a working orvad with the firewall feature
+    # disabled (UI surfaces a banner; manage-mode rules still persist).
+    optional_pkgs="nftables"
+
     log "installing prerequisites: $pkgs"
     if [ "$DRYRUN" = "1" ]; then
         log "(dryrun) skipping package install"
@@ -72,24 +80,36 @@ install_prereqs() {
         ubuntu|debian)
             DEBIAN_FRONTEND=noninteractive apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $optional_pkgs \
+                || warn "optional package install failed: $optional_pkgs (egress firewall will be disabled)"
             ;;
         alpine)
             apk add --no-cache $pkgs
+            apk add --no-cache $optional_pkgs \
+                || warn "optional package install failed: $optional_pkgs (egress firewall will be disabled)"
             ;;
         fedora|rhel|centos|rocky|almalinux|amzn)
             # RHEL 9 / Rocky 9 ship `curl-minimal` which conflicts with the
             # full `curl` package. --allowerasing lets dnf swap them.
             if have dnf; then
                 dnf install -y --allowerasing --setopt=install_weak_deps=False $pkgs
+                dnf install -y --allowerasing --setopt=install_weak_deps=False $optional_pkgs \
+                    || warn "optional package install failed: $optional_pkgs (egress firewall will be disabled)"
             else
                 yum install -y --allowerasing $pkgs
+                yum install -y --allowerasing $optional_pkgs \
+                    || warn "optional package install failed: $optional_pkgs (egress firewall will be disabled)"
             fi
             ;;
         arch|manjaro|endeavouros)
             pacman -Syu --noconfirm --needed $pkgs
+            pacman -S --noconfirm --needed $optional_pkgs \
+                || warn "optional package install failed: $optional_pkgs (egress firewall will be disabled)"
             ;;
         opensuse-leap|opensuse-tumbleweed|sles)
             zypper --non-interactive install $pkgs
+            zypper --non-interactive install $optional_pkgs \
+                || warn "optional package install failed: $optional_pkgs (egress firewall will be disabled)"
             ;;
         *)
             case "$DISTRO_LIKE" in
@@ -102,6 +122,58 @@ install_prereqs() {
             esac
             ;;
     esac
+}
+
+# Result of check_nftables(), consumed by print_followup() to render an
+# "egress firewall: enabled / disabled" line in the next-steps block.
+NFTABLES_STATUS="unknown"
+NFTABLES_HINT=""
+
+check_nftables() {
+    if [ "$DRYRUN" = "1" ]; then
+        log "(dryrun) skipping nftables probe"
+        NFTABLES_STATUS="dryrun"
+        return
+    fi
+
+    if ! have nft; then
+        NFTABLES_STATUS="disabled"
+        NFTABLES_HINT="install the 'nftables' package — egress filtering is off without it"
+        warn "nft binary not found — egress firewall will be disabled"
+        warn "  install nftables manually if you want per-function egress filtering"
+        return
+    fi
+
+    # Probe: can we actually list tables? Fails when nf_tables module
+    # isn't loaded (rare modern distros) or we lack CAP_NET_ADMIN.
+    if ! nft list tables >/dev/null 2>&1; then
+        NFTABLES_STATUS="disabled"
+        NFTABLES_HINT="nft installed but kernel cannot apply rules — try 'modprobe nf_tables' or run as root"
+        warn "nft list tables failed — kernel module missing or insufficient privileges"
+        warn "  try: sudo modprobe nf_tables"
+        warn "  egress firewall will be disabled until this is resolved"
+        return
+    fi
+
+    # Already-present orva table from a previous install: orvad rebuilds
+    # it on boot from the SQLite source of truth, so this is informational.
+    if nft list table inet orva_firewall >/dev/null 2>&1; then
+        log "found existing 'inet orva_firewall' table — orvad will rebuild on next start"
+    fi
+
+    # Detect operator-managed tables. We never touch them; we only own
+    # 'inet orva_firewall'. This is purely a friendliness signal.
+    other_count=$(nft list tables 2>/dev/null \
+        | grep -v '^table inet orva_firewall$' \
+        | grep -c '^table ' \
+        || true)
+    if [ "${other_count:-0}" -gt 0 ]; then
+        log "existing nftables config detected ($other_count other tables) — orvad will only manage 'inet orva_firewall' and leave others alone"
+        log "  inspect with:  nft list tables"
+    fi
+
+    NFTABLES_STATUS="enabled"
+    log "nftables OK — egress firewall will be enforced"
 }
 
 check_kernel_features() {
@@ -380,6 +452,7 @@ print_followup() {
   Service user:    $SERVICE_USER
   Binary:          $PREFIX/bin/orva
   nsjail:          $PREFIX/bin/nsjail (static, no glibc/libstdc++ deps)
+  Egress firewall: $NFTABLES_STATUS${NFTABLES_HINT:+ ($NFTABLES_HINT)}
 
   Next:
     1. Start the service (if installed):
@@ -397,6 +470,25 @@ print_followup() {
   Front the service with TLS (caddy / nginx / traefik) before exposing
   it publicly: the UI's clipboard buttons require HTTPS or localhost.
 
+EOF
+    if [ "$NFTABLES_STATUS" = "enabled" ]; then
+        cat <<EOF
+  Egress firewall is active. orvad manages 'inet orva_firewall' only
+  and leaves any other nftables tables alone. Manage rules from the UI
+  at /web/firewall, or curl /api/v1/firewall/rules. Inspect live state:
+    sudo nft list table inet orva_firewall
+
+EOF
+    elif [ "$NFTABLES_STATUS" = "disabled" ]; then
+        cat <<EOF
+  Egress firewall is DISABLED on this host.
+    $NFTABLES_HINT
+  Per-function 'network_mode: egress' still works (sandbox isolation
+  only). Re-run the installer once nftables is fixed to apply rules.
+
+EOF
+    fi
+    cat <<EOF
   Uninstall:
     sh $PREFIX/share/orva/scripts/uninstall.sh
 
@@ -409,6 +501,7 @@ main() {
     detect_arch
     install_prereqs
     check_kernel_features
+    check_nftables
     resolve_version
     download_and_install_binaries
     install_runtime_assets

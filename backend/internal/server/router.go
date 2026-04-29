@@ -8,6 +8,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/builder"
 	"github.com/Harsh-2002/Orva/internal/config"
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/firewall"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/proxy"
@@ -31,6 +32,7 @@ type Router struct {
 	buildQueue *builder.Queue
 	poolMgr    *pool.Manager
 	eventHub   *events.Hub
+	firewall   *firewall.Manager
 
 	startTime time.Time
 }
@@ -45,6 +47,7 @@ type RouterDeps struct {
 	BuildQueue *builder.Queue
 	PoolMgr    *pool.Manager
 	EventHub   *events.Hub
+	Firewall   *firewall.Manager
 }
 
 func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Router {
@@ -60,6 +63,7 @@ func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Rout
 		buildQueue: deps.BuildQueue,
 		poolMgr:    deps.PoolMgr,
 		eventHub:   deps.EventHub,
+		firewall:   deps.Firewall,
 		startTime:  time.Now(),
 	}
 	r.setupRoutes()
@@ -73,7 +77,7 @@ func isReservedPath(path string) bool {
 	if path == "/" {
 		return true
 	}
-	for _, p := range []string{"/api/", "/auth/", "/ui/", "/_orva/"} {
+	for _, p := range []string{"/api/", "/auth/", "/web/", "/_orva/"} {
 		if strings.HasPrefix(path, p) {
 			return true
 		}
@@ -140,6 +144,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/executions", execHandler.List)
 	r.mux.HandleFunc("GET /api/v1/executions/{exec_id}", execHandler.Get)
 	r.mux.HandleFunc("GET /api/v1/executions/{exec_id}/logs", execHandler.GetLogs)
+	r.mux.HandleFunc("DELETE /api/v1/executions/{exec_id}", execHandler.Delete)
+	r.mux.HandleFunc("POST /api/v1/executions/bulk-delete", execHandler.BulkDelete)
 
 	// Invoke route (catch-all for invoke paths AND custom user routes).
 	invokeHandler := &handlers.InvokeHandler{
@@ -213,11 +219,22 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/v1/pool/config", poolCfgHandler.Upsert)
 	r.mux.HandleFunc("POST /api/v1/pool/config", poolCfgHandler.Upsert)
 
-	// UI routes — serve the Vue SPA. No credentials are injected; the UI
-	// uses the /auth/onboard and /auth/login flows to establish a session.
-	r.mux.Handle("/ui/", uiHandler())
+	// Egress firewall — UI-driven blocklist. Every mutation calls
+	// Manager.ForceRefresh so the operator sees changes apply live.
+	fwHandler := &handlers.FirewallHandler{DB: r.db, Manager: r.firewall}
+	r.mux.HandleFunc("GET /api/v1/firewall/rules", fwHandler.List)
+	r.mux.HandleFunc("POST /api/v1/firewall/rules", fwHandler.Create)
+	r.mux.HandleFunc("PUT /api/v1/firewall/rules/{rule_id}", fwHandler.Update)
+	r.mux.HandleFunc("DELETE /api/v1/firewall/rules/{rule_id}", fwHandler.Delete)
+	r.mux.HandleFunc("POST /api/v1/firewall/resolve", fwHandler.Resolve)
+	r.mux.HandleFunc("GET /api/v1/firewall/dns", fwHandler.GetDNS)
+	r.mux.HandleFunc("PUT /api/v1/firewall/dns", fwHandler.PutDNS)
+
+	// UI routes — serve the Vue SPA at /web/. No credentials are injected;
+	// the UI uses /auth/onboard + /auth/login to establish a session.
+	r.mux.Handle("/web/", uiHandler())
 	r.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, req *http.Request) {
-		http.Redirect(w, req, "/ui/", http.StatusFound)
+		http.Redirect(w, req, "/web/", http.StatusFound)
 	})
 
 	// Catch-all for user-defined custom routes. Go's ServeMux sends any

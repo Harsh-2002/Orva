@@ -1,10 +1,15 @@
 services:
   orva:
-    image: ghcr.io/harsh-2002/orva:latest
+    # Default: local build, tagged orva:local. Override via env var:
+    #   ORVA_IMAGE=ghcr.io/harsh-2002/orva:latest docker compose up -d
+    # to skip the build and pull the remote release image instead.
+    image: ${ORVA_IMAGE:-orva:local}
     build:
       context: .
       args:
         VERSION: 0.1.0
+      tags:
+        - orva:local
     container_name: orva
     restart: unless-stopped
 
@@ -14,12 +19,34 @@ services:
     volumes:
       - orva-data:/var/lib/orva
 
+    # Capabilities required by orvad's components:
+    #   SYS_ADMIN  — nsjail uses this to set up user namespaces, mounts,
+    #                and cgroup v2 delegations for each function spawn.
+    #   NET_ADMIN  — the egress firewall manager applies nftables rules
+    #                via `nft`. Without this, the firewall page shows
+    #                an amber "nftables unavailable" banner and IP
+    #                blocking is disabled (sandbox isolation still works).
     cap_add:
       - SYS_ADMIN
+      - NET_ADMIN
+
+    # Sandbox isolation requires lifting these container-level
+    # restrictions so nsjail can build its own. Functions still run
+    # under nsjail's seccomp filter + namespaces.
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
       - systempaths=unconfined
+
+    # Per-function `network_mode: egress` uses nsjail's --user_net
+    # (bundled nstun backend), which open()s /dev/net/tun. The
+    # entrypoint mknods this if missing, but mounting the host's TUN
+    # device is the cleanest path on most distros and avoids the
+    # mknod-needs-root quirk on rootless setups. The "/dev/net/tun:rw"
+    # form works on Linux hosts where the device exists; if it
+    # doesn't, the entrypoint falls back to mknod and continues.
+    devices:
+      - /dev/net/tun:/dev/net/tun
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8443/api/v1/system/health"]
@@ -42,5 +69,10 @@ services:
           memory: 512M
 
 volumes:
+  # Use the project-unprefixed name "orva-data" so the volume survives
+  # bare-docker-run ↔ docker-compose transitions. Without `name:`,
+  # compose would create "orva_orva-data" (project prefix) and orphan
+  # any pre-existing volume an operator created via `docker run`.
   orva-data:
+    name: orva-data
     driver: local

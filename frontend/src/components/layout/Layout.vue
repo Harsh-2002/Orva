@@ -1,8 +1,23 @@
 <template>
   <div class="flex h-screen w-full bg-background overflow-hidden font-sans antialiased text-foreground">
     <Sidebar />
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-      <router-view class="flex-1 overflow-auto p-8" />
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden relative pt-14 lg:pt-0">
+      <!-- keep-alive caches mounted views across navigations. Without it,
+           clicking back to a previously-visited route re-creates the view,
+           which means another onMounted() + fetch + brief empty-state
+           flash before rows appear. With keep-alive, the view's state +
+           rows are preserved; SSE keeps them current in the background.
+
+           Editor is included so unsaved code doesn't get nuked when the
+           user nips out to /docs or /firewall and back. -->
+      <router-view v-slot="{ Component }">
+        <keep-alive :max="10">
+          <component
+            :is="Component"
+            class="flex-1 overflow-auto p-4 md:p-8"
+          />
+        </keep-alive>
+      </router-view>
     </main>
 
     <!-- Session-expiring-soon prompt. The store gates visibility on

@@ -349,6 +349,9 @@ import { ref, onMounted } from 'vue'
 import { PlusCircle, Trash2, Clock, X, Edit, Play, Pause } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import { listCronSchedules, createCronSchedule, deleteCronSchedule, listFunctions } from '@/api/endpoints'
+import { useConfirmStore } from '@/stores/confirm'
+
+const confirmStore = useConfirmStore()
 
 const jobs = ref([])
 const functions = ref([])
@@ -455,7 +458,7 @@ const saveSchedule = async () => {
     closeModal()
   } catch (e) {
     console.error('Failed to create schedule', e)
-    alert('Failed to create schedule')
+    confirmStore.notify({ title: 'Failed to create schedule', danger: true })
   }
 }
 
@@ -482,8 +485,14 @@ const toggleSchedule = async (job) => {
 }
 
 const deleteSchedule = async (functionName) => {
-  if (!confirm(`Delete schedule for ${functionName}?`)) return
-  
+  const ok = await confirmStore.ask({
+    title: 'Delete schedule?',
+    message: `Cron schedule for "${functionName}" will be removed.`,
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
+
   try {
     await deleteCronSchedule(functionName)
     await loadJobs()

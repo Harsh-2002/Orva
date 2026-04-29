@@ -1,14 +1,9 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
-          API Keys
-        </h1>
-        <p class="text-xs text-foreground-muted mt-1">
-          Used by clients calling <code class="text-foreground-muted/80">/api/v1/invoke/&lt;fn&gt;</code> with the <code class="text-foreground-muted/80">X-Orva-API-Key</code> header.
-        </p>
-      </div>
+    <div class="flex items-center justify-between gap-4">
+      <h1 class="text-xl font-semibold text-white tracking-tight">
+        API Keys
+      </h1>
       <Button @click="openCreate">
         <KeyRound class="w-4 h-4" />
         New Key
@@ -210,6 +205,9 @@ import { KeyRound, Copy, Check, X } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import { listApiKeys, createApiKey, deleteApiKey } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
+import { useConfirmStore } from '@/stores/confirm'
+
+const confirmStore = useConfirmStore()
 
 const keys = ref([])
 const createdKey = ref('')
@@ -245,7 +243,7 @@ const submitCreate = async () => {
     await loadKeys()
   } catch (e) {
     console.error(e)
-    alert(e?.response?.data?.error?.message || 'Failed to create key')
+    confirmStore.notify({ title: 'Failed to create key', message: e?.response?.data?.error?.message || 'Unknown error', danger: true })
   } finally {
     submitting.value = false
   }
@@ -257,18 +255,24 @@ const copyCreated = async () => {
     createdCopied.value = true
     setTimeout(() => { createdCopied.value = false }, 1500)
   } else {
-    alert('Could not copy to clipboard. Select the key manually:\n\n' + createdKey.value)
+    confirmStore.notify({ title: 'Copy failed', message: 'Could not copy to clipboard. Select the key manually:\n\n' + createdKey.value })
   }
 }
 
 const removeKey = async (key) => {
-  if (!confirm(`Delete API key "${key.name || key.id}"? This cannot be undone.`)) return
+  const ok = await confirmStore.ask({
+    title: 'Delete API key?',
+    message: `"${key.name || key.id}" will stop working immediately. This cannot be undone.`,
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await deleteApiKey(key.id)
     await loadKeys()
   } catch (e) {
     console.error(e)
-    alert(e?.response?.data?.error?.message || 'Failed to delete key')
+    confirmStore.notify({ title: 'Failed to delete key', message: e?.response?.data?.error?.message || 'Unknown error', danger: true })
   }
 }
 

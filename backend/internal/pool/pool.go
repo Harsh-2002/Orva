@@ -147,6 +147,10 @@ var (
 	// breach the 80% budget. Operator should deploy fewer concurrent
 	// functions or increase host RAM.
 	ErrMemoryExhausted = errors.New("host memory exhausted")
+	// ErrFunctionBusy is returned when the function's per-fn concurrency
+	// cap is reached AND its policy is "reject". With "queue" policy
+	// callers wait until a slot frees; this error is "reject" only.
+	ErrFunctionBusy = errors.New("function busy")
 )
 
 // NewManager creates a pool manager. limiter is the host-wide concurrency
@@ -218,8 +222,20 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		return nil, err
 	}
 
+	// Per-function concurrency gate. Runs *before* worker acquire so a
+	// busy function doesn't pull workers from the pool only to error
+	// out. Returns ErrFunctionBusy under "reject" policy or ctx.Err()
+	// if the queue wait timed out.
+	if err := p.acquireSlot(ctx); err != nil {
+		if m.limiter != nil {
+			m.limiter.Release()
+		}
+		return nil, err
+	}
+
 	res, err := p.acquire(ctx)
 	if err != nil {
+		p.releaseSlot()
 		if m.limiter != nil {
 			m.limiter.Release()
 		}
@@ -274,15 +290,20 @@ func (m *Manager) Release(fnID string, w *sandbox.Worker, reqErr error) {
 			m.limiter.Release()
 		}
 	}()
-	if w == nil {
-		return
-	}
 	val, ok := m.pools.Load(fnID)
 	if !ok {
-		_ = w.Kill()
+		if w != nil {
+			_ = w.Kill()
+		}
 		return
 	}
 	p := val.(*functionPool)
+	// Always free the per-fn concurrency slot, regardless of whether the
+	// worker exists (Acquire may have errored after taking the slot).
+	defer p.releaseSlot()
+	if w == nil {
+		return
+	}
 	p.release(w, reqErr)
 }
 
@@ -453,6 +474,17 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 		channelCap = 64
 	}
 
+	// Per-function concurrency cap: if set, gate every Acquire on a
+	// buffered channel of that size. 0 = unlimited (no sem).
+	var concSem chan struct{}
+	if fn.MaxConcurrency > 0 {
+		concSem = make(chan struct{}, fn.MaxConcurrency)
+	}
+	concPolicy := fn.ConcurrencyPolicy
+	if concPolicy == "" {
+		concPolicy = "queue"
+	}
+
 	p := &functionPool{
 		fnID:         fnID,
 		min:          minWarm,
@@ -464,6 +496,8 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 		scaleToZero:  scaleToZero,
 		hostMem:      m.hostMem,
 		idle:         make(chan *sandbox.Worker, channelCap),
+		concSem:      concSem,
+		concPolicy:   concPolicy,
 		spawnFn: func(ctx context.Context) (*sandbox.Worker, error) {
 			// Merge env at spawn time: function config + decrypted secrets.
 			// We read the lookup off m (not the local tmpl copy) so that
@@ -477,15 +511,20 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				}
 			}
 			return sandbox.Spawn(ctx, sandbox.ExecConfig{
-				Language:      sandbox.Language(fn.Runtime),
-				CodeDir:       codeDir,
-				MemoryMB:      int(fn.MemoryMB),
-				MaxCPUs:       cpusToMax(fn.CPUs),
-				Env:           env,
-				SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, nil, nil),
-				NsjailBin:     tmpl.NsjailBin,
-				RootfsDir:     tmpl.RootfsDir,
-				Timeout:       time.Duration(fn.TimeoutMS) * time.Millisecond,
+				Language:       sandbox.Language(fn.Runtime),
+				CodeDir:        codeDir,
+				MemoryMB:       int(fn.MemoryMB),
+				MaxCPUs:        cpusToMax(fn.CPUs),
+				Env:            env,
+				SeccompPolicy:  sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, nil, nil),
+				NetworkMode:    fn.NetworkMode,
+				// Operator-managed DNS for egress sandboxes; written by
+				// internal/firewall on every refresh tick. Bound at
+				// /etc/resolv.conf when present.
+				ResolvConfPath: dataDir + "/firewall/resolv.conf",
+				NsjailBin:      tmpl.NsjailBin,
+				RootfsDir:      tmpl.RootfsDir,
+				Timeout:        time.Duration(fn.TimeoutMS) * time.Millisecond,
 			})
 		},
 	}

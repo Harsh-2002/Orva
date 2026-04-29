@@ -3,15 +3,23 @@
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-xl font-semibold text-foreground tracking-tight">System Overview</h1>
-        <p class="text-xs text-foreground-muted mt-1">
-          Auto-refreshing every 5 seconds.
-        </p>
       </div>
-      <div class="flex items-center gap-2 text-xs"
-        :class="system.isConnected ? 'text-green-400' : 'text-red-400'">
-        <span class="w-2 h-2 rounded-full"
-          :class="system.isConnected ? 'bg-green-400' : 'bg-red-400'" />
-        {{ system.isConnected ? 'Connected' : 'Disconnected' }}
+      <div
+        class="flex items-center gap-2 text-xs"
+        :class="system.isConnected ? 'text-success' : 'text-error'"
+        :title="system.isConnected ? 'Live event stream connected' : 'Reconnecting…'"
+      >
+        <span class="relative flex h-2 w-2">
+          <span
+            v-if="system.isConnected"
+            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-60"
+          />
+          <span
+            class="relative inline-flex rounded-full h-2 w-2"
+            :class="system.isConnected ? 'bg-success' : 'bg-error'"
+          />
+        </span>
+        {{ system.isConnected ? 'Live' : 'Reconnecting…' }}
       </div>
     </div>
 

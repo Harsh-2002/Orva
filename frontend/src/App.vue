@@ -1,7 +1,9 @@
 <template>
   <router-view />
+  <!-- Global confirm dialog — single instance reachable from any view. -->
+  <ConfirmDialog />
 </template>
 
 <script setup>
-// App.vue is just a wrapper for the router
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 </script>

@@ -8,7 +8,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Compartment } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 import { python } from '@codemirror/lang-python'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -18,10 +18,12 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  // Accepts either the codemirror language id (`javascript`, `python`) or
+  // an Orva runtime id (`node22`, `python314`, ...) — the editor maps both
+  // shapes onto the same CM language extension.
   language: {
     type: String,
-    default: 'javascript',
-    validator: (value) => ['javascript', 'python', 'go', 'ruby', 'rust'].includes(value)
+    default: 'javascript'
   },
   readOnly: {
     type: Boolean,
@@ -33,17 +35,12 @@ const emit = defineEmits(['update:modelValue'])
 
 const editorRef = ref(null)
 let view = null
+const languageCompartment = new Compartment()
 
 const getLanguageExtension = (lang) => {
-  switch (lang) {
-    case 'python':
-      return python()
-    case 'javascript':
-    case 'node':
-      return javascript()
-    default:
-      return javascript()
-  }
+  if (lang?.startsWith('python')) return python()
+  if (lang?.startsWith('node') || lang === 'javascript') return javascript()
+  return javascript()
 }
 
 onMounted(() => {
@@ -51,7 +48,7 @@ onMounted(() => {
     doc: props.modelValue,
     extensions: [
       basicSetup,
-      getLanguageExtension(props.language),
+      languageCompartment.of(getLanguageExtension(props.language)),
       oneDark,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -103,37 +100,12 @@ watch(() => props.modelValue, (newValue) => {
   }
 })
 
-// Watch for language changes
+// Watch for language changes — swap only the language extension via the
+// Compartment, so theme, listeners, and read-only state are preserved.
 watch(() => props.language, (newLang) => {
   if (view) {
     view.dispatch({
-      effects: EditorState.reconfigure.of([
-        basicSetup,
-        getLanguageExtension(newLang),
-        oneDark,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            emit('update:modelValue', update.state.doc.toString())
-          }
-        }),
-        EditorView.theme({
-          '&': {
-            fontSize: '14px',
-            height: '100%',
-          },
-          '.cm-scroller': {
-            fontFamily: 'JetBrains Mono, monospace',
-            lineHeight: '1.6',
-          },
-          '.cm-content': {
-            padding: '16px 0',
-          },
-          '.cm-line': {
-            padding: '0 16px',
-          },
-        }),
-        EditorState.readOnly.of(props.readOnly),
-      ]),
+      effects: languageCompartment.reconfigure(getLanguageExtension(newLang)),
     })
   }
 })

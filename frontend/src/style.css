@@ -32,25 +32,57 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Scrollbar Styling for Minimalism */
+/* Hide all scrollbars visually but keep them functional. The dashboard
+   has nested overflow areas (main content, modals, code blocks), and
+   showing a 6px track in each makes the UI feel cluttered. Wheel /
+   touch / keyboard scrolling all still work. */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE 10+ */
+}
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-secondary-hover);
+  width: 0;
+  height: 0;
+  display: none; /* Chrome / Safari / Edge */
 }
 
 input, textarea, select {
   font-family: inherit;
+}
+
+/* Native <select> chevrons render flush to the right edge across browsers
+   and look cramped, especially in our dark cards. Replace with a custom
+   SVG arrow positioned with proper inset padding, and reserve right-side
+   text padding so long values never collide with the icon. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A3A3B3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.75rem;
+  padding-right: 2.25rem !important;
+}
+select::-ms-expand {
+  display: none;
+}
+
+/* Backdrop fade for mobile drawer + similar overlays. Kept short so rapid
+   open/close clicks don't queue up visible animations. */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 120ms ease-out;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Honour user's reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none;
+  }
 }

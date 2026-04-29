@@ -15,41 +15,23 @@ const authClient = axios.create({
 // enough for daily users to act, infrequent enough to avoid nagging.
 const expiringSoonHours = 12
 
-// hasUser is the "does any user exist on this instance" boolean. We
-// persist it to localStorage because /auth/status is consulted on every
-// page load, and during heavy load tests the backend can briefly fail
-// or time out — without the cache, a transient error on refresh would
-// bounce the user to /onboarding (which is the wrong page for a returning
-// user). Once we've ever observed `has_user: true`, we never forget it
-// without an explicit operator action (DB wipe, which is rare and
-// detectable: a fresh DB has no sessions, so /auth/me would 401 anyway
-// and the user would be sent to /login).
-const hasUserKey = 'orva.hasUser'
-const loadHasUserCache = () => {
-  const v = localStorage.getItem(hasUserKey)
-  if (v === 'true') return true
-  if (v === 'false') return false
-  return null
-}
-const saveHasUserCache = (v) => {
-  if (v === null) localStorage.removeItem(hasUserKey)
-  else localStorage.setItem(hasUserKey, v ? 'true' : 'false')
-}
+// Drop any leftover localStorage cache from older builds. We used to cache
+// hasUser there, but that broke fresh installs where the operator wiped
+// the DB while a browser still had the old "true" stuck — they'd be sent
+// to /login on an instance that has no users yet. /auth/status is cheap;
+// always ask the server.
+try { localStorage.removeItem('orva.hasUser') } catch {}
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
   const isAuthenticated = ref(false)
   const loading = ref(false)
-  const hasUser = ref(loadHasUserCache()) // null = unknown, true/false = checked (and persisted)
+  const hasUser = ref(null) // null = unknown, true/false = answered by /auth/status
   const expiresAt = ref(null) // ISO string from server, or null
   const refreshing = ref(false)
   const refreshDismissedUntil = ref(0) // epoch ms; suppress toast until this time
 
-  // Persist hasUser whenever it changes (sticky to true once seen).
-  const setHasUser = (v) => {
-    hasUser.value = v
-    saveHasUserCache(v)
-  }
+  const setHasUser = (v) => { hasUser.value = v }
 
   const login = async (username, password) => {
     loading.value = true
@@ -96,13 +78,11 @@ export const useAuthStore = defineStore('auth', () => {
     // Keep hasUser=true so the next navigation routes to /login, not /onboarding.
   }
 
-  // fetchAuthStatus asks the backend whether any user exists. The result
-  // determines onboarding-vs-login routing. We cache it for the lifetime of
-  // the page load — `has_user` only flips false→true once (the first
-  // onboard) and never the other way without an admin manually wiping the
-  // DB. Re-fetching on every navigation was the source of a bug where a
-  // transient network error would force a logged-in user into onboarding.
-  // `force: true` re-asks the backend — used after logout for safety.
+  // fetchAuthStatus asks the backend whether any user exists. Cached for
+  // the lifetime of the page load — `has_user` only flips false→true once
+  // (the first onboard) and we re-check on every full page load. The
+  // router guard calls this first; we re-fetch when force=true (e.g. after
+  // logout, where we want a fresh answer).
   const fetchAuthStatus = async ({ force = false } = {}) => {
     if (!force && hasUser.value !== null) return hasUser.value
     try {
@@ -110,11 +90,9 @@ export const useAuthStore = defineStore('auth', () => {
       setHasUser(!!res.data.has_user)
       return hasUser.value
     } catch {
-      // Network blip — keep the prior value if we have one. Default to
-      // `true` on first failure so we route to /login (which is friendlier
-      // than dumping a returning user into Onboarding). The localStorage
-      // cache means this branch only fires on first-ever load with a
-      // transient backend failure.
+      // Network blip — assume "user exists" so we route to /login rather
+      // than dumping a returning operator into Onboarding. Onboarding is
+      // a one-time flow; login is the safer default on first-touch error.
       if (hasUser.value === null) setHasUser(true)
       return hasUser.value
     }
