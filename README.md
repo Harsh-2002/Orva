@@ -17,14 +17,31 @@ over HTTP, and get warm-pool latency without paying anyone.
 - **Invoke** at `POST /fn/<id>/<path>` (short ID without `fn_` prefix). The path tail
   reaches your handler as `event.path`. AWS-Lambda-style and HTTP-style
   handlers both work.
+- **Schedule** functions on cron expressions. The Schedules dashboard
+  shows last/next run + status; pair with templates like `cron-cleanup`
+  or `email-digest` for one-click setups.
+- **Background jobs** — `orva.jobs.enqueue(name, payload)` from inside
+  a function persists a fire-and-forget run with retries and
+  exponential backoff. Visible in the Jobs dashboard with retry/delete.
+- **Function-to-function** — `orva.invoke(name, payload)` calls another
+  function in-process via the warm pool, no HTTP roundtrip. 8-deep
+  call-depth guard.
+- **KV store** — `orva.kv.put/get/delete/list` per-function namespace
+  on SQLite, optional TTL. No external service needed.
 - **Roll back** to any prior content-hashed version in one click.
   Each deploy is archived; rollback is an atomic symlink retarget.
+- **MCP server** — `/mcp` exposes the same API surface as 37 tools an
+  AI agent (Claude Code, Cursor, etc.) can call directly.
 - **Live dashboard** — every invocation, deploy, and metric streams
   over a single SSE connection. No polling.
 - **Per-function secrets**, encrypted at rest, injected as env vars
   at sandbox spawn time.
 - **Custom routes** — map `/webhooks/stripe` to a function so external
   callers don't need the function ID.
+- **Function templates** — 16 production-ready starters (Stripe,
+  GitHub, Slack, Discord, JWT, OAuth, CSV→JSON, Markdown→HTML,
+  thumbnailer, RSS summarizer, URL shortener, more). Pickable in the
+  editor's Settings panel.
 
 ## How isolation works
 
@@ -73,10 +90,45 @@ Or `docker compose up -d` from this repo.
 
 After install, open `http://localhost:8443` and complete onboarding.
 
+## SDK from inside a function
+
+Every worker is spawned with `ORVA_INTERNAL_TOKEN` + `ORVA_API_BASE`
+in its environment. The bundled `orva` module (Python and Node) routes
+through them so user code can call into Orva without setting up any
+HTTP client:
+
+```python
+# Python
+from orva import kv, invoke, jobs
+
+await kv.put("user:42", {"name": "Ada"}, ttl_seconds=3600)
+v = kv.get("user:42")
+
+result = invoke("resize-image", {"url": "..."})
+
+job_id = jobs.enqueue("send-welcome-email", {"to": "ada@example.com"})
+```
+
+```js
+// Node
+const { kv, invoke, jobs } = require('orva')
+
+await kv.put('user:42', { name: 'Ada' }, { ttlSeconds: 3600 })
+const v = await kv.get('user:42')
+
+const result = await invoke('resize-image', { url: '...' })
+
+const jobId = await jobs.enqueue('send-welcome-email', { to: 'ada@example.com' })
+```
+
+The SDK requires `network_mode=egress` on the function (the default
+`none` mode has no network namespace at all). If absent the SDK throws
+`OrvaUnavailableError` with a clear hint.
+
 ## Layout
 
 ```
-backend/    Go server, sandbox runtime, SQLite, build queue
+backend/    Go server, sandbox runtime, SQLite, build queue, scheduler
 frontend/   Vue 3 dashboard
 scripts/    install.sh, uninstall.sh, systemd unit, OpenRC
 docs/       architecture, security, API, runtimes, operations
