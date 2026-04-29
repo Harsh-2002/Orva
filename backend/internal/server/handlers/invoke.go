@@ -207,16 +207,6 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.Metrics.RecordInvocation(true)
 	}
 
-	// Persist stderr to execution_logs only when non-empty. Stdout is the
-	// response envelope — already delivered to the HTTP client; storing it
-	// here would double the write volume for no observability value.
-	if result != nil && len(result.Stderr) > 0 {
-		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
-			ExecutionID: execID,
-			Stderr:      string(result.Stderr),
-		})
-	}
-
 	if err != nil {
 		errMsg := err.Error()
 		if len(errMsg) > 1024 {
@@ -231,6 +221,12 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			&database.Execution{ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: coldStart},
 			duration.Milliseconds(), statusCode, errMsg, 0,
 		)
+		if result != nil && len(result.Stderr) > 0 {
+			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
+				ExecutionID: execID,
+				Stderr:      string(result.Stderr),
+			})
+		}
 		h.publishExecution(execID, fn, "error", statusCode, duration.Milliseconds(), 0, coldStart)
 
 		// Map the failure to an HTTP status via the central error taxonomy.
@@ -255,6 +251,13 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		&database.Execution{ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: result.ColdStart},
 		duration.Milliseconds(), result.StatusCode, "", result.ResponseSize,
 	)
+	// Persist stderr after the execution row so the FK constraint is satisfied.
+	if len(result.Stderr) > 0 {
+		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
+			ExecutionID: execID,
+			Stderr:      string(result.Stderr),
+		})
+	}
 	h.publishExecution(execID, fn, execStatus, result.StatusCode, duration.Milliseconds(), result.ResponseSize, result.ColdStart)
 }
 

@@ -377,14 +377,6 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		deps.Metrics.RecordInvocation(coldStart)
 	}
 
-	// Persist stderr if any.
-	if result != nil && len(result.Stderr) > 0 && deps.DB != nil {
-		deps.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
-			ExecutionID: execID,
-			Stderr:      string(result.Stderr),
-		})
-	}
-
 	// Build the output regardless of error — even a failed invoke is
 	// useful info for the agent (it gets to see status_code, stderr).
 	out := InvokeFunctionOutput{
@@ -401,7 +393,8 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		}
 	}
 
-	// Persist the execution row.
+	// Persist execution row first, then stderr log — FK on execution_logs
+	// requires the parent executions row to exist before the log is inserted.
 	execStatus := "success"
 	if ferr != nil || rec.Code >= 500 {
 		execStatus = "error"
@@ -419,6 +412,12 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 			&database.Execution{ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: coldStart},
 			duration.Milliseconds(), rec.Code, errMsg, len(out.Body),
 		)
+		if result != nil && len(result.Stderr) > 0 {
+			deps.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
+				ExecutionID: execID,
+				Stderr:      string(result.Stderr),
+			})
+		}
 	}
 
 	if ferr != nil && rec.Code == 0 {
