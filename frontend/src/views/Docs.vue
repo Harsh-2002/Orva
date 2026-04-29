@@ -519,7 +519,6 @@ const quickSteps = [
   { title: 'Deploy', body: 'One click. Code is content-addressed, the prior version stays available for rollback.' },
   { title: 'Invoke', body: 'Curl the URL printed under the editor, or wire it up to a custom route or cron schedule.' },
   { title: 'Secure it', body: 'Verify a JWT in your handler, or flip Invoke gate to platform_key / signed for server-to-server.' },
-  { title: 'Observe', body: 'Watch live invocations on the Logs page. Each row links to its execution detail and stderr stream.' },
 ]
 
 // ── Section component ─────────────────────────────────────────────────

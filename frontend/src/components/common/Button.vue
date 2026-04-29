@@ -63,7 +63,7 @@ const variantClasses = computed(() => {
     case 'secondary':
       return 'bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border shadow-sm'
     case 'danger':
-      return 'bg-red-900/30 text-red-400 border border-red-900/50 hover:bg-red-900/50 focus:ring-red-500'
+      return 'bg-red-600 text-white border border-red-500 hover:bg-red-500 focus:ring-red-500 shadow-md shadow-red-600/30'
     case 'ghost':
       return 'bg-transparent text-foreground-muted hover:text-foreground hover:bg-surface-hover'
     default: // primary
