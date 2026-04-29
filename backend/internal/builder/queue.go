@@ -211,6 +211,15 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	// deployment_id later.
 	_ = q.db.SetDeploymentCodeHash(job.DeploymentID, result.CodeHash)
 
+	// Snapshot the function's full mutable state at the moment this build
+	// succeeded — env vars, memory/cpu/timeout, network mode, auth mode,
+	// rate limit, concurrency. Rollback restores all of this so reverting
+	// a version reverts the entire shape of the function, not just the
+	// code. Best-effort; a write failure here does not invalidate the
+	// successful deploy (the rollback would gracefully degrade to "code
+	// only" for this row).
+	_ = q.db.SetDeploymentSnapshot(job.DeploymentID, database.SnapshotFromFunction(fn))
+
 	// Atomically retarget `current` symlink → versions/<hash>. Failure here
 	// means the new version is on disk but not active; mark the deployment
 	// failed and leave the prior `current` in place.

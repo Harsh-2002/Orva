@@ -228,6 +228,12 @@ PRAGMA foreign_keys = ON;
 		"ALTER TABLE deployments ADD COLUMN code_hash TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE deployments ADD COLUMN source TEXT NOT NULL DEFAULT 'deploy'",
 		"ALTER TABLE deployments ADD COLUMN parent_deployment_id TEXT",
+		// Snapshot of the function's mutable spawn config + env_vars at the
+		// moment this deployment succeeded. Used by Rollback to restore the
+		// full "state of the function" rather than only the code. JSON-encoded
+		// DeploymentSnapshot. Empty for legacy rows; rollback gracefully
+		// degrades to "code only" when absent.
+		"ALTER TABLE deployments ADD COLUMN snapshot TEXT NOT NULL DEFAULT ''",
 		// Per-function egress: "none" (default) blocks outbound network;
 		// "egress" enables nsjail --user_net for external API calls.
 		"ALTER TABLE functions ADD COLUMN network_mode TEXT NOT NULL DEFAULT 'none'",
@@ -252,6 +258,38 @@ PRAGMA foreign_keys = ON;
 				slog.Warn("schema alter failed", "stmt", stmt, "err", err)
 			}
 		}
+	}
+
+	// Backfill deployment snapshots for the most-recent succeeded deploy
+	// of each function. Without this, rolling back from a brand-new build
+	// to anything that landed before this migration would only swap code
+	// — not env / memory / cpu / network mode / auth mode etc. The
+	// backfill is one-shot and idempotent: subsequent boots find nothing
+	// to update because the snapshot column is non-empty for these rows.
+	if _, err := db.write.Exec(`
+		UPDATE deployments
+		SET snapshot = json_object(
+			'env_vars',           json(COALESCE(f.env_vars, '{}')),
+			'memory_mb',          f.memory_mb,
+			'cpus',               f.cpus,
+			'timeout_ms',         f.timeout_ms,
+			'network_mode',       f.network_mode,
+			'auth_mode',          COALESCE(f.auth_mode, 'none'),
+			'rate_limit_per_min', COALESCE(f.rate_limit_per_min, 0),
+			'max_concurrency',    f.max_concurrency,
+			'concurrency_policy', f.concurrency_policy
+		)
+		FROM functions f
+		WHERE deployments.function_id = f.id
+		  AND deployments.status = 'succeeded'
+		  AND COALESCE(deployments.snapshot, '') = ''
+		  AND deployments.id IN (
+			SELECT id FROM deployments d2
+			WHERE d2.function_id = f.id AND d2.status = 'succeeded'
+			ORDER BY d2.submitted_at DESC LIMIT 1
+		  )
+	`); err != nil {
+		slog.Warn("deployment snapshot backfill failed", "err", err)
 	}
 
 	// Slim the default firewall rules down to the universally-dangerous

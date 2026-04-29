@@ -1423,12 +1423,72 @@ const invokeFunction = async () => {
   }
 }
 
+// describeRollbackDiff compares the current function record against a
+// deployment snapshot and returns human lines describing what's about to
+// change. Used by the confirm dialog so the operator sees the blast
+// radius before clicking Rollback. Format prioritises legibility over
+// completeness — env vars are shown by name; numeric fields by old →
+// new; identical fields are omitted.
+const describeRollbackDiff = (fn, snap) => {
+  const lines = []
+
+  // Env vars: classify into added / removed / changed.
+  const cur = fn.env_vars || {}
+  const next = snap.env_vars || {}
+  const added = Object.keys(next).filter((k) => !(k in cur))
+  const removed = Object.keys(cur).filter((k) => !(k in next))
+  const changed = Object.keys(next).filter((k) => k in cur && cur[k] !== next[k])
+  if (added.length)   lines.push(`+ Add env: ${added.join(', ')}`)
+  if (removed.length) lines.push(`- Remove env: ${removed.join(', ')}`)
+  if (changed.length) lines.push(`~ Change env: ${changed.join(', ')}`)
+
+  // Spawn config — only mention what differs.
+  const num = (label, a, b, suffix = '') => {
+    if (a !== b) lines.push(`~ ${label}: ${a}${suffix} → ${b}${suffix}`)
+  }
+  num('Memory', fn.memory_mb, snap.memory_mb, ' MB')
+  num('CPUs', fn.cpus, snap.cpus)
+  num('Timeout', fn.timeout_ms, snap.timeout_ms, ' ms')
+  num('Network', fn.network_mode || 'none', snap.network_mode || 'none')
+  num('Auth gate', fn.auth_mode || 'none', snap.auth_mode || 'none')
+  num('Rate limit', fn.rate_limit_per_min || 0, snap.rate_limit_per_min || 0, '/min')
+  num('Max concurrency', fn.max_concurrency || 0, snap.max_concurrency || 0)
+  num('Concurrency policy', fn.concurrency_policy || 'queue', snap.concurrency_policy || 'queue')
+
+  return lines
+}
+
 const rollingBack = ref(false)
 const rollbackToVersion = async (v) => {
   if (!fnId.value || !v?.deployment_id || rollingBack.value) return
+
+  // Pull the target deployment's snapshot + the current function record
+  // so we can show the operator exactly what will change before they
+  // confirm. Best-effort: if either fetch fails, fall through to a plain
+  // confirm — the rollback itself still works.
+  let diffMessage = `Code hash ${v.short_hash}. Your current version stays in the history.`
+  try {
+    const [depRes, listRes] = await Promise.all([
+      apiClient.get(`/deployments/${v.deployment_id}`),
+      apiClient.get('/functions'),
+    ])
+    const snap = depRes.data?.snapshot
+    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
+    if (snap && fn) {
+      const lines = describeRollbackDiff(fn, snap)
+      if (lines.length) {
+        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values — they aren't part of the rollback.`
+      } else {
+        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}). Settings and env are already identical, so only the code changes.`
+      }
+    }
+  } catch (e) {
+    // fall through to default message
+  }
+
   const ok = await confirmStore.ask({
     title: `Restore v${v.version}?`,
-    message: `Code hash ${v.short_hash}. Your current version stays in the history.`,
+    message: diffMessage,
     confirmLabel: 'Rollback',
   })
   if (!ok) return

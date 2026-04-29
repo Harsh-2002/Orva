@@ -236,15 +236,60 @@ const canRollback = (d) =>
   d.code_hash &&
   !isActive(d)
 
+// describeRollbackDiff: compare current function vs target deployment
+// snapshot and return human-readable diff lines. Mirror of the helper in
+// Editor.vue so users see the same blast-radius preview from either page.
+const describeRollbackDiff = (fn, snap) => {
+  const lines = []
+  const cur = fn.env_vars || {}
+  const next = snap.env_vars || {}
+  const added = Object.keys(next).filter((k) => !(k in cur))
+  const removed = Object.keys(cur).filter((k) => !(k in next))
+  const changed = Object.keys(next).filter((k) => k in cur && cur[k] !== next[k])
+  if (added.length)   lines.push(`+ Add env: ${added.join(', ')}`)
+  if (removed.length) lines.push(`- Remove env: ${removed.join(', ')}`)
+  if (changed.length) lines.push(`~ Change env: ${changed.join(', ')}`)
+  const num = (label, a, b, suffix = '') => {
+    if (a !== b) lines.push(`~ ${label}: ${a}${suffix} → ${b}${suffix}`)
+  }
+  num('Memory', fn.memory_mb, snap.memory_mb, ' MB')
+  num('CPUs', fn.cpus, snap.cpus)
+  num('Timeout', fn.timeout_ms, snap.timeout_ms, ' ms')
+  num('Network', fn.network_mode || 'none', snap.network_mode || 'none')
+  num('Auth gate', fn.auth_mode || 'none', snap.auth_mode || 'none')
+  num('Rate limit', fn.rate_limit_per_min || 0, snap.rate_limit_per_min || 0, '/min')
+  num('Max concurrency', fn.max_concurrency || 0, snap.max_concurrency || 0)
+  num('Concurrency policy', fn.concurrency_policy || 'queue', snap.concurrency_policy || 'queue')
+  return lines
+}
+
 // rollbackTo posts to the rollback endpoint and refreshes the table on
 // success. Re-uses the deployment_id (not the hash) so the audit trail
-// records exactly which historical row was restored.
+// records exactly which historical row was restored. Pulls the target's
+// snapshot so the confirm dialog can preview env + settings changes.
 const rollbackTo = async (d) => {
   if (!fnId.value || !d?.id || rollingBack.value) return
   const shortHash = (d.code_hash || '').slice(0, 12)
+
+  let diffMessage = `Code hash ${shortHash}. Current ${activeFn.value ? 'v' + activeFn.value.version : 'version'} stays in history.`
+  try {
+    const fullDep = await getDeployment(d.id)
+    const snap = fullDep?.data?.snapshot
+    if (snap && activeFn.value) {
+      const lines = describeRollbackDiff(activeFn.value, snap)
+      if (lines.length) {
+        diffMessage = `Rolling back to v${d.version} (code ${shortHash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values — they aren't part of the rollback.`
+      } else {
+        diffMessage = `Rolling back to v${d.version} (code ${shortHash}). Settings and env are already identical, so only the code changes.`
+      }
+    }
+  } catch (e) {
+    // fall through to default message
+  }
+
   const ok = await confirmStore.ask({
     title: `Restore v${d.version}?`,
-    message: `Code hash ${shortHash}. Current ${activeFn.value ? 'v' + activeFn.value.version : 'version'} stays in history.`,
+    message: diffMessage,
     confirmLabel: 'Rollback',
   })
   if (!ok) return

@@ -674,6 +674,9 @@ func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Requ
 	fn.Status = "active"
 	fn.Version++
 	h.Registry.Set(fn)
+	// See queue.go for rationale — capture the function's full state so
+	// rollback restores env + spawn config alongside the code.
+	_ = h.DB.SetDeploymentSnapshot(deploymentID, database.SnapshotFromFunction(fn))
 	_ = h.DB.FinishDeployment(deploymentID, "succeeded", "", result.Duration.Milliseconds())
 	if h.PoolRefresh != nil {
 		h.PoolRefresh(fn.ID)
@@ -778,10 +781,14 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 
 	started := time.Now()
 
-	// Resolve target hash.
+	// Resolve target hash + the snapshot that was active when that hash
+	// last shipped. Two callsites: rollback-by-deployment-id (canonical)
+	// and rollback-by-code-hash (looks up the most recent succeeded
+	// deployment with that hash so we can still restore env + settings).
 	var (
 		targetHash       = req.CodeHash
 		parentDeployment *string
+		targetSnapshot   *database.DeploymentSnapshot
 	)
 	if req.DeploymentID != "" {
 		dep, err := h.DB.GetDeployment(req.DeploymentID)
@@ -800,10 +807,20 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		targetHash = dep.CodeHash
 		parent := dep.ID
 		parentDeployment = &parent
+		targetSnapshot = dep.Snapshot
 	}
 	if targetHash == "" {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "target deployment has no recorded code_hash", reqID)
 		return
+	}
+	// code_hash-only rollback: find the snapshot from the most recent
+	// succeeded deployment that produced this hash. Best-effort — if no
+	// deployment row carries a snapshot (e.g. legacy data), rollback
+	// degrades to the old behaviour of "code only".
+	if targetSnapshot == nil {
+		if dep, err := h.DB.FindLatestSucceededByHash(fnID, targetHash); err == nil {
+			targetSnapshot = dep.Snapshot
+		}
 	}
 
 	// Refuse rollback to the version already serving — it's a no-op the
@@ -859,10 +876,24 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update function row: bump version, swap code_hash, mark active.
+	// Update function row: bump version, swap code_hash, mark active,
+	// AND restore the snapshot (env vars + spawn config) that was active
+	// when this code last shipped. Secrets are deliberately not touched —
+	// they rotate independently and should always reflect current values.
 	fn.Version++
 	fn.CodeHash = targetHash
 	fn.Status = "active"
+	if targetSnapshot != nil {
+		fn.EnvVars = targetSnapshot.EnvVars
+		fn.MemoryMB = targetSnapshot.MemoryMB
+		fn.CPUs = targetSnapshot.CPUs
+		fn.TimeoutMS = targetSnapshot.TimeoutMS
+		fn.NetworkMode = targetSnapshot.NetworkMode
+		fn.AuthMode = targetSnapshot.AuthMode
+		fn.RateLimitPerMin = targetSnapshot.RateLimitPerMin
+		fn.MaxConcurrency = targetSnapshot.MaxConcurrency
+		fn.ConcurrencyPolicy = targetSnapshot.ConcurrencyPolicy
+	}
 	if err := h.Registry.Set(fn); err != nil {
 		// Symlink already retargeted — registry update is the only thing
 		// that didn't stick. Mark the deployment failed so the operator
@@ -876,6 +907,11 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	if h.PoolRefresh != nil {
 		h.PoolRefresh(fnID)
 	}
+
+	// Stamp the new rollback deployment with the same snapshot, so a future
+	// rollback that targets *this* row (a rollback of a rollback) restores
+	// the same env + spawn state.
+	_ = h.DB.SetDeploymentSnapshot(depID, database.SnapshotFromFunction(fn))
 
 	dur := time.Since(started).Milliseconds()
 	_ = h.DB.FinishRollbackDeployment(depID, dur)
