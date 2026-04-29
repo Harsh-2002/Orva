@@ -145,6 +145,66 @@ CREATE TABLE IF NOT EXISTS routes (
 
 CREATE INDEX IF NOT EXISTS idx_routes_fn ON routes(function_id);
 
+-- Scheduled invocations. The scheduler goroutine polls every 30s for
+-- rows where enabled=1 AND next_run_at <= NOW(), fires the function
+-- via pool.Manager.Acquire(), and updates last_run_at + next_run_at.
+-- payload is a JSON blob delivered as the invoke body.
+CREATE TABLE IF NOT EXISTS cron_schedules (
+    id            TEXT PRIMARY KEY,                      -- cron_<nanoid>
+    function_id   TEXT NOT NULL,
+    cron_expr     TEXT NOT NULL,                         -- 5-field "M H DOM MON DOW"
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    last_run_at   DATETIME,
+    next_run_at   DATETIME,                              -- precomputed; refreshed on schedule + after each run
+    last_status   TEXT,                                  -- 'ok' | 'failed' | NULL
+    last_error    TEXT,                                  -- short error string when last_status='failed'
+    payload       TEXT NOT NULL DEFAULT '{}',            -- JSON delivered as the invoke body
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_cron_due ON cron_schedules(enabled, next_run_at);
+CREATE INDEX IF NOT EXISTS idx_cron_fn  ON cron_schedules(function_id);
+
+-- Per-function key/value store. Single-host on SQLite, namespaced by
+-- function_id so two functions can't see each other's keys. The
+-- scheduler's TTL sweep deletes rows where expires_at <= NOW().
+CREATE TABLE IF NOT EXISTS kv_store (
+    function_id  TEXT NOT NULL,
+    key          TEXT NOT NULL,
+    value        BLOB NOT NULL,
+    expires_at   DATETIME,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (function_id, key),
+    FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_kv_expires ON kv_store(expires_at) WHERE expires_at IS NOT NULL;
+
+-- Background job queue (Phase 5). status transitions:
+--   pending → running → succeeded | failed (terminal)
+-- A failed run with attempts < max_attempts goes back to pending with
+-- scheduled_at advanced by exponential backoff.
+CREATE TABLE IF NOT EXISTS jobs (
+    id            TEXT PRIMARY KEY,
+    function_id   TEXT NOT NULL,
+    payload       BLOB NOT NULL,
+    status        TEXT NOT NULL,
+    scheduled_at  DATETIME NOT NULL,
+    started_at    DATETIME,
+    finished_at   DATETIME,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    max_attempts  INTEGER NOT NULL DEFAULT 3,
+    last_error    TEXT,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_due    ON jobs(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_fn     ON jobs(function_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS system_config (
     key           TEXT PRIMARY KEY,
     value         TEXT NOT NULL,

@@ -47,6 +47,21 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Internal SDK endpoints (KV / F2F invoke) authenticate via the
+		// per-process internal token, NOT API keys. Skip the API-key
+		// middleware here; the handlers themselves enforce the token.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/_kv/") ||
+			strings.HasPrefix(r.URL.Path, "/api/v1/_internal/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Worker SDK requests bearing a non-empty internal token bypass
+		// the public auth gate; the handler validates the token. This
+		// lets jobs.enqueue() / dashboard share the /api/v1/jobs route.
+		if r.Header.Get("X-Orva-Internal-Token") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		// Try session cookie first (browser UI).
 		if cookie, err := r.Cookie("session_token"); err == nil {

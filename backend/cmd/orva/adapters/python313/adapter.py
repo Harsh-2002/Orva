@@ -40,6 +40,15 @@ sys.stdout = sys.stderr
 if FUNCTION_DIR not in sys.path:
     sys.path.insert(0, FUNCTION_DIR)
 
+# Make the bundled `orva` SDK (kv / invoke / jobs) importable from user
+# code as `from orva import kv, invoke, jobs`. /opt/orva is the dir
+# adapter.py itself runs from, but Python only auto-adds it to sys.path
+# when invoked as `python /opt/orva/adapter.py` AND nothing has
+# rewritten sys.path[0]. Insert explicitly so the import works
+# regardless of how the adapter was invoked.
+if "/opt/orva" not in sys.path:
+    sys.path.insert(0, "/opt/orva")
+
 
 class _Context:
     """Minimal AWS-Lambda-like context object."""
@@ -363,6 +372,15 @@ try:
             continue
 
         event = frame.get("event") or {"method": "POST", "path": "/", "headers": {}, "body": ""}
+        # Propagate call depth into the env so orva.invoke()'s SDK can
+        # forward it on outbound nested calls. Without this each recursion
+        # level would see depth="" and the host's depth guard never trips.
+        _hdrs = (event.get("headers") or {}) if isinstance(event, dict) else {}
+        _depth = _hdrs.get("x-orva-call-depth") or _hdrs.get("X-Orva-Call-Depth") or ""
+        if _depth:
+            os.environ["ORVA_CALL_DEPTH"] = _depth
+        else:
+            os.environ.pop("ORVA_CALL_DEPTH", None)
         try:
             status, headers, body = _dispatch(event)
         except Exception:

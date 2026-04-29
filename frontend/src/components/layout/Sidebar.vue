@@ -96,16 +96,18 @@ import { useRoute, useRouter } from 'vue-router'
 import OrvaLogo from '../OrvaLogo.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
-  LayoutDashboard,
-  Zap,
-  PlusCircle,
-  Terminal,
-  Shield,
-  ShieldAlert,
+  Gauge,
+  Boxes,
+  Rocket,
+  CalendarClock,
+  ListChecks,
+  Activity,
+  Fingerprint,
+  ShieldHalf,
+  LibraryBig,
   LogOut,
   Menu,
   X,
-  BookOpen,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -120,14 +122,20 @@ const handleLogout = async () => {
   router.push('/login')
 }
 
+// Sidebar nav — single-word labels, ordered operational → admin →
+// reference. Icons chosen for distinct silhouettes (Gauge, Boxes,
+// Rocket, Activity, Fingerprint, ShieldHalf, LibraryBig) so each item
+// is recognizable at a glance instead of a row of similar shields.
 const navItems = [
-  { path: '/', label: 'Overview', icon: LayoutDashboard },
-  { path: '/functions', label: 'Functions', icon: Zap },
-  { path: '/deploy', label: 'New Function', icon: PlusCircle },
-  { path: '/invocations', label: 'Logs & Activity', icon: Terminal },
-  { path: '/api-keys', label: 'Access Keys', icon: Shield },
-  { path: '/firewall', label: 'Firewall', icon: ShieldAlert },
-  { path: '/docs', label: 'Docs', icon: BookOpen },
+  { path: '/',            label: 'Overview',  icon: Gauge },
+  { path: '/functions',   label: 'Functions', icon: Boxes },
+  { path: '/deploy',      label: 'Deploy',    icon: Rocket },
+  { path: '/cron',        label: 'Schedules', icon: CalendarClock },
+  { path: '/jobs',        label: 'Jobs',      icon: ListChecks },
+  { path: '/invocations', label: 'Activity',  icon: Activity },
+  { path: '/api-keys',    label: 'Keys',      icon: Fingerprint },
+  { path: '/firewall',    label: 'Firewall',  icon: ShieldHalf },
+  { path: '/docs',        label: 'Docs',      icon: LibraryBig },
 ]
 
 const isActive = (path) => {

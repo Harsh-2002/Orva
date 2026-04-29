@@ -4,9 +4,10 @@ BUILD   = build
 
 .PHONY: build test lint clean ui embed build-all dev adapters-embed
 
-# Copy adapter sources into backend/cmd/orva/adapters/ so //go:embed has
-# them at build time. Keeps backend/runtimes/ as the source-of-truth
-# directory (shared with Dockerfile COPY paths).
+# Copy adapter sources + bundled SDK into backend/cmd/orva/adapters/ so
+# //go:embed has them at build time. Keeps backend/runtimes/ as the
+# source-of-truth directory (shared with Dockerfile COPY paths).
+# Also copies the v0.2 orva SDK module (kv / invoke / jobs).
 adapters-embed:
 	@rm -rf backend/cmd/orva/adapters
 	@mkdir -p backend/cmd/orva/adapters/node22 backend/cmd/orva/adapters/node24 \
@@ -15,6 +16,10 @@ adapters-embed:
 	@cp backend/runtimes/node24/adapter.js    backend/cmd/orva/adapters/node24/adapter.js
 	@cp backend/runtimes/python313/adapter.py backend/cmd/orva/adapters/python313/adapter.py
 	@cp backend/runtimes/python314/adapter.py backend/cmd/orva/adapters/python314/adapter.py
+	@cp backend/runtimes/node22/orva.js       backend/cmd/orva/adapters/node22/orva.js
+	@cp backend/runtimes/node24/orva.js       backend/cmd/orva/adapters/node24/orva.js
+	@cp backend/runtimes/python313/orva.py    backend/cmd/orva/adapters/python313/orva.py
+	@cp backend/runtimes/python314/orva.py    backend/cmd/orva/adapters/python314/orva.py
 
 build: adapters-embed
 	@mkdir -p $(BUILD)

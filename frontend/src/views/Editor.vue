@@ -11,6 +11,15 @@
           :disabled="isEditing"
           class="bg-transparent border-0 text-sm font-medium text-white placeholder-foreground-muted focus:outline-none px-1 py-1 min-w-0 w-40"
         >
+        <button
+          v-if="!isEditing && !fnId"
+          type="button"
+          class="p-1 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors shrink-0"
+          title="Re-roll a fresh name"
+          @click="rerollName"
+        >
+          <Shuffle class="w-3.5 h-3.5" />
+        </button>
         <span class="text-[10px] text-foreground-muted font-mono uppercase tracking-wider">{{ runtimeShort(form.runtime) }}</span>
       </div>
 
@@ -327,16 +336,28 @@
             @change="applyTemplate"
           >
             <option value="">
-              Custom
+              Custom (blank)
             </option>
-            <option
-              v-for="tpl in (templates[form.runtime] || [])"
-              :key="tpl.id"
-              :value="tpl.id"
+            <optgroup
+              v-for="cat in groupedTemplates"
+              :key="cat.label"
+              :label="cat.label"
             >
-              {{ tpl.label }}
-            </option>
+              <option
+                v-for="tpl in cat.items"
+                :key="tpl.id"
+                :value="tpl.id"
+              >
+                {{ tpl.label }}{{ tpl.cron ? ' · scheduled' : '' }} — {{ tpl.description }}
+              </option>
+            </optgroup>
           </select>
+          <p
+            v-if="selectedTemplateDescription"
+            class="text-[11px] text-foreground-muted mt-1.5"
+          >
+            {{ selectedTemplateDescription }}
+          </p>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <Input
@@ -706,15 +727,25 @@
           <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">
             Function name
           </label>
-          <input
-            ref="firstDeployNameInput"
-            v-model="form.name"
-            placeholder="my-function"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-            @keydown.enter="confirmFirstDeploy"
-          >
+          <div class="relative">
+            <input
+              ref="firstDeployNameInput"
+              v-model="form.name"
+              placeholder="my-function"
+              class="w-full bg-background border border-border rounded-md pl-3 pr-10 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+              @keydown.enter="confirmFirstDeploy"
+            >
+            <button
+              type="button"
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors"
+              title="Re-roll a fresh name"
+              @click="rerollName"
+            >
+              <Shuffle class="w-3.5 h-3.5" />
+            </button>
+          </div>
           <p class="text-[11px] text-foreground-muted mt-1.5">
-            Lowercase, dash-separated. Used in the invoke URL.
+            Lowercase, dash-separated. Used in the invoke URL — re-roll for a different combination.
           </p>
         </div>
         <div>
@@ -774,7 +805,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Sparkles } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Sparkles, Shuffle } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
@@ -782,6 +813,8 @@ import Modal from '@/components/common/Modal.vue'
 import apiClient from '@/api/client'
 import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
+import { generateFunctionName } from '@/utils/funName'
+import { templates, defaultCode, categoryOrder } from '@/templates'
 import { openInChatGPT } from '@/utils/aiPrompts'
 import { rollbackFunction } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
@@ -923,83 +956,9 @@ const handlerHint = computed(() => {
 });`
 })
 
-// Default code + template snippets are the same across minor version
-// bumps. Keys map to every supported runtime so the indexed lookups
-// (defaultCode[fn.runtime], templates[fn.runtime]) don't return undefined.
-const pythonHelloWorld = `import json
-
-def handler(event):
-    body = event.get("body", "{}") if isinstance(event.get("body"), str) else event.get("body", {})
-    if isinstance(body, str):
-        body = json.loads(body) if body else {}
-
-    name = body.get("name", "World") if isinstance(body, dict) else "World"
-
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({
-            "message": f"Hello {name}!",
-            "language": "Python"
-        })
-    }`
-
-const nodeHelloWorld = `module.exports.handler = async function(event) {
-  const body = typeof event.body === 'string'
-    ? JSON.parse(event.body || '{}')
-    : event.body || {};
-
-  const name = body.name || 'World';
-
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message: \`Hello \${name}!\`,
-      language: 'Node.js'
-    })
-  };
-};`
-
-const pythonEcho = `import json
-
-def handler(event):
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({"echo": event, "message": "Echo from Orva"})
-    }`
-
-const nodeEcho = `module.exports.handler = async function(event) {
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ echo: event, message: 'Echo from Orva' })
-  };
-};`
-
-const defaultCode = {
-  python313: pythonHelloWorld,
-  python314: pythonHelloWorld,
-  node22:    nodeHelloWorld,
-  node24:    nodeHelloWorld,
-}
-
-const pythonTemplates = [
-  { id: 'py-basic', label: 'Hello World', code: pythonHelloWorld, deps: '' },
-  { id: 'py-echo',  label: 'JSON Echo',   code: pythonEcho,       deps: '' },
-]
-const nodeTemplates = [
-  { id: 'node-basic', label: 'Hello World', code: nodeHelloWorld, deps: '' },
-  { id: 'node-echo',  label: 'JSON Echo',   code: nodeEcho,       deps: '' },
-]
-
-const templates = {
-  python313: pythonTemplates,
-  python314: pythonTemplates,
-  node22:    nodeTemplates,
-  node24:    nodeTemplates,
-}
+// Templates and default code now live in /templates/index.js so the
+// Editor stays focused on UI/state. Each runtime's list contains 8
+// production-grade entries (HTTP / webhooks / auth / utility / scheduled).
 
 const dependencyFileName = computed(() => {
   return isPythonRuntime(form.value.runtime) ? 'requirements.txt' : 'package.json'
@@ -1090,6 +1049,31 @@ const applyTemplate = () => {
   }
 }
 
+// Templates grouped by category for the picker's <optgroup>s. Categories
+// render in `categoryOrder`; an entry with no category falls into "Other".
+const groupedTemplates = computed(() => {
+  const list = templates[form.value.runtime] || []
+  const buckets = new Map()
+  for (const tpl of list) {
+    const cat = tpl.category || 'Other'
+    if (!buckets.has(cat)) buckets.set(cat, [])
+    buckets.get(cat).push(tpl)
+  }
+  const ordered = categoryOrder
+    .filter((c) => buckets.has(c))
+    .map((c) => ({ label: c, items: buckets.get(c) }))
+  for (const [c, items] of buckets) {
+    if (!categoryOrder.includes(c)) ordered.push({ label: c, items })
+  }
+  return ordered
+})
+
+const selectedTemplateDescription = computed(() => {
+  const list = templates[form.value.runtime] || []
+  const sel = list.find((t) => t.id === templateId.value)
+  return sel?.description || ''
+})
+
 const addEnvVar = () => envVars.value.push({ key: '', value: '' })
 const removeEnvVar = (index) => envVars.value.splice(index, 1)
 
@@ -1139,10 +1123,22 @@ onMounted(async () => {
       error.value = "Failed to load function: " + (e.response?.data?.error?.message || e.message)
     }
   } else {
-    // New mode
+    // New mode — seed a friendly auto-generated name so the field
+    // isn't empty. The user can edit it, clear it, or hit the re-roll
+    // button next to it.
     setRuntime('python314')
+    if (!form.value.name) {
+      form.value.name = generateFunctionName()
+    }
   }
 })
+
+// Re-roll the auto-generated function name. No-op once the function
+// has been deployed (the name is the routing identity at that point).
+const rerollName = () => {
+  if (isEditing.value || fnId.value) return
+  form.value.name = generateFunctionName()
+}
 
 // loadVersions builds the Versions card data from the deployments table.
 // We deduplicate by code_hash (keep the most recent succeeded deployment

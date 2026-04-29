@@ -92,6 +92,13 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	go srv.Prewarm(ctx)
 
+	// Start the scheduler after the HTTP listener so health probes don't
+	// block on it. The scheduler runs cron triggers today; future phases
+	// (KV TTL sweep, queued jobs) reuse the same goroutine.
+	if srv.Scheduler != nil {
+		srv.Scheduler.Start(ctx)
+	}
+
 	<-ctx.Done()
 	slog.Info("shutting down")
 	srv.Shutdown(context.Background())

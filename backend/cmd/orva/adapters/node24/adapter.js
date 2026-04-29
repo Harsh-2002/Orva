@@ -16,10 +16,22 @@
 // response envelope, the native Orva protocol.
 
 const path = require('path');
+const Module = require('module');
 
 const FUNCTION_DIR = '/code';
 const entrypoint = process.env.ORVA_ENTRYPOINT || 'handler.js';
 const handlerPath = path.join(FUNCTION_DIR, entrypoint);
+
+// Make the bundled `orva` SDK module (kv / invoke / jobs) resolvable
+// from user code via `require('orva')`. The package lives at
+// /opt/orva/node_modules/orva/; injecting that dir at the front of
+// Module._nodeModulePaths ensures user modules can find it without
+// the user having to install it. User-installed deps still resolve
+// normally via /code/node_modules.
+const _origNodeModulePaths = Module._nodeModulePaths;
+Module._nodeModulePaths = function (from) {
+  return ['/opt/orva/node_modules', ...(_origNodeModulePaths.call(this, from) || [])];
+};
 
 // Preserve stdout for the protocol response; reroute user output to stderr.
 const originalStdoutWrite = process.stdout.write.bind(process.stdout);
@@ -293,6 +305,14 @@ async function readFrame() {
     if (frame.type !== 'request') continue;
 
     const event = frame.event || { method: 'POST', path: '/', headers: {}, body: '' };
+    // Propagate call depth into env so orva.invoke()'s SDK can forward
+    // it on outbound nested calls. Otherwise the host's depth guard
+    // never trips on recursion.
+    const _hdrs = event.headers || {};
+    const _depth = _hdrs['x-orva-call-depth'] || _hdrs['X-Orva-Call-Depth'] || '';
+    if (_depth) process.env.ORVA_CALL_DEPTH = _depth;
+    else delete process.env.ORVA_CALL_DEPTH;
+
     let out;
     try {
       const result = await dispatch(event);

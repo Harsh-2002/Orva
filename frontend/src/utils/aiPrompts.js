@@ -72,7 +72,7 @@ log secret values.
 
 # Built-in invoke gates (optional, opt-in per function)
 - "platform_key" mode: caller must send X-Orva-API-Key header or be
-  logged into the Orva session. Useful for cron / server-to-server.
+  logged into the Orva session. Useful for server-to-server functions.
 - "signed" mode: caller signs the request with HMAC-SHA256 over
   "<unix-timestamp>.<body>" using ORVA_SIGNING_SECRET (a function
   secret). Headers: X-Orva-Timestamp, X-Orva-Signature: sha256=<hex>.

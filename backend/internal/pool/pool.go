@@ -55,6 +55,19 @@ type SandboxTemplate struct {
 	// up." On secret upsert/delete, the secret handler triggers
 	// RefreshForDeploy so the next spawn picks up the new values.
 	SecretsLookup func(fnID string) map[string]string
+
+	// InternalToken is a process-lifetime token injected into every worker
+	// as ORVA_INTERNAL_TOKEN. The adapter sends it as the auth header when
+	// calling the KV / F2F / jobs endpoints (Phases 3, 4, 5). Validated by
+	// the corresponding handlers; not exposed to user code that doesn't
+	// already have access to env vars.
+	InternalToken string
+
+	// APIBaseURL is the base URL the adapter uses when making outbound
+	// calls to Orva's own internal endpoints (KV / F2F / jobs). Worker
+	// sandboxes can always reach localhost on the host port via the
+	// loopback network, even with network_mode=none.
+	APIBaseURL string
 }
 
 // Manager owns all function-scoped pools.
@@ -540,6 +553,14 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				for k, v := range lookup(fn.ID) {
 					env[k] = v
 				}
+			}
+			// Internal SDK plumbing — adapter uses these to talk to the
+			// KV / F2F / jobs endpoints. Empty when running outside the
+			// server (tests) so user code can probe presence to decide
+			// whether to fall back.
+			if m.tmpl.InternalToken != "" {
+				env["ORVA_INTERNAL_TOKEN"] = m.tmpl.InternalToken
+				env["ORVA_API_BASE"] = m.tmpl.APIBaseURL
 			}
 			return sandbox.Spawn(ctx, sandbox.ExecConfig{
 				Language:       sandbox.Language(fn.Runtime),

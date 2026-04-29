@@ -116,7 +116,90 @@ export const deleteFunctionVersion = () => Promise.resolve({ data: {} })
 export const listSecrets = () => Promise.resolve({ data: [] })
 export const upsertSecret = () => Promise.resolve({ data: {} })
 export const deleteSecret = () => Promise.resolve({ data: {} })
-export const listCronSchedules = () => Promise.resolve({ data: [] })
-export const getCronSchedule = () => Promise.resolve({ data: null })
-export const createCronSchedule = () => Promise.resolve({ data: {} })
-export const deleteCronSchedule = () => Promise.resolve({ data: {} })
+
+// ── Cron schedules (Phase 1) ────────────────────────────────────────
+//
+// The CronJobs.vue UI was built around a {function_name, cron, enabled}
+// shape; the backend uses {function_id, cron_expr, enabled, payload}.
+// These shims translate so neither side has to know about the other.
+
+// Lookup function by friendly name. Used internally by the cron shims
+// to resolve the UI's `function_name` arg into a function_id for the
+// backend route. Throws if the function doesn't exist.
+const _resolveFnId = async (functionName) => {
+  const listResp = await apiClient.get('/functions')
+  const fn = (listResp.data.functions || []).find(f => f.name === functionName)
+  if (!fn) throw new Error(`Function "${functionName}" not found`)
+  return fn.id
+}
+
+// Augment a backend cron row with the UI's expected aliases so the
+// existing template (which references cron_expression and function_name)
+// keeps rendering without changes.
+const _decorateSchedule = (row) => ({
+  ...row,
+  // UI uses cron_expression; backend uses cron_expr.
+  cron_expression: row.cron_expr,
+  // function_name is already filled in by the ListAll join; keep it as-is.
+})
+
+export const listCronSchedules = async () => {
+  const res = await apiClient.get('/cron')
+  const schedules = (res.data.schedules || []).map(_decorateSchedule)
+  return { data: { schedules } }
+}
+
+export const getCronSchedule = async (id) => {
+  // No standalone GET-by-id endpoint; pull from the list.
+  const list = await listCronSchedules()
+  const found = list.data.schedules.find(s => s.id === id)
+  return { data: found || null }
+}
+
+// createCronSchedule(functionName, {cron, enabled, payload?})
+export const createCronSchedule = async (functionName, body) => {
+  const fnId = await _resolveFnId(functionName)
+  const payload = {
+    cron_expr: body.cron,
+    enabled: body.enabled !== false,
+    payload: body.payload ?? {},
+  }
+  const res = await apiClient.post(`/functions/${fnId}/cron`, payload)
+  return { data: _decorateSchedule(res.data) }
+}
+
+// updateCronSchedule(scheduleId, {function_id, cron?, enabled?, payload?})
+// function_id is required so the route matches.
+export const updateCronSchedule = async (scheduleId, body) => {
+  const fnId = body.function_id
+  if (!fnId) throw new Error('updateCronSchedule: function_id is required')
+  const payload = {}
+  if (body.cron !== undefined)    payload.cron_expr = body.cron
+  if (body.enabled !== undefined) payload.enabled   = body.enabled
+  if (body.payload !== undefined) payload.payload   = body.payload
+  const res = await apiClient.put(`/functions/${fnId}/cron/${scheduleId}`, payload)
+  return { data: _decorateSchedule(res.data) }
+}
+
+// deleteCronSchedule(scheduleId, functionId) — both required because the
+// backend route is /functions/{fn}/cron/{id}. CronJobs.vue currently
+// passes (function_name) only; the view will be updated to pass both.
+export const deleteCronSchedule = async (scheduleId, functionId) => {
+  if (!functionId) throw new Error('deleteCronSchedule: functionId is required')
+  return apiClient.delete(`/functions/${functionId}/cron/${scheduleId}`)
+}
+
+// ── Jobs queue (Phase 5) ────────────────────────────────────────────
+
+// Lists jobs with optional filters: status ('pending'|'running'|...) and
+// function_id. Default limit=50.
+export const listJobs = (params = {}) =>
+  apiClient.get('/jobs', { params })
+
+export const getJob = (id) => apiClient.get(`/jobs/${id}`)
+
+export const enqueueJob = (body) => apiClient.post('/jobs', body)
+
+export const retryJob = (id) => apiClient.post(`/jobs/${id}/retry`)
+
+export const deleteJob = (id) => apiClient.delete(`/jobs/${id}`)

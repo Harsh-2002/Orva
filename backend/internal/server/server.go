@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/proxy"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/sandbox"
+	"github.com/Harsh-2002/Orva/internal/scheduler"
 	"github.com/Harsh-2002/Orva/internal/secrets"
 	"github.com/Harsh-2002/Orva/internal/server/events"
 	"github.com/Harsh-2002/Orva/internal/server/handlers"
@@ -40,6 +42,7 @@ type Server struct {
 	BuildQueue *builder.Queue
 	EventHub   *events.Hub
 	Firewall   *firewall.Manager
+	Scheduler  *scheduler.Scheduler
 }
 
 func New(cfg *config.Config, db *database.Database) *Server {
@@ -81,6 +84,23 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// After first run the UI authenticates via session cookies from /auth/login.
 	bootstrapAdminKey(db, cfg.Data.Dir)
 
+	// Internal token — process-lifetime random secret injected into every
+	// sandboxed worker as ORVA_INTERNAL_TOKEN. The adapter uses it to
+	// authenticate against /api/v1/_kv/, /api/v1/_internal/invoke/, and
+	// /api/v1/_jobs/. Regenerated on each restart so a leaked token from
+	// stderr can't be replayed past the next deploy.
+	internalToken := generateInternalToken()
+	// API base for the worker SDK. From inside a sandbox with
+	// network_mode=egress, 127.0.0.1 is the sandbox's own loopback —
+	// useless for reaching orvad. The right destination is whatever IP
+	// nsjail's nstun NAT routes externally; in Docker that's the
+	// container's default-gateway IP on the bridge network.
+	// detectHostIP reads /proc/net/route to find that gateway.
+	// Functions with network_mode=none have no network stack at all;
+	// the SDK surfaces OrvaUnavailableError for those.
+	apiBase := fmt.Sprintf("http://%s:%d", detectHostIP(), cfg.Server.Port)
+	slog.Info("internal SDK base configured", "api_base", apiBase)
+
 	// Wire the warm pool manager. It owns the sandbox.Limiter as a
 	// host-wide ceiling and spawns per-function worker pools lazily.
 	poolMgr := pool.NewManager(
@@ -101,6 +121,8 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			RootfsDir:      cfg.Sandbox.RootfsDir,
 			DataDir:        cfg.Data.Dir,
 			DefaultSeccomp: cfg.Sandbox.SeccompPolicy,
+			InternalToken:  internalToken,
+			APIBaseURL:     apiBase,
 		},
 		db, reg, limiter,
 	)
@@ -168,18 +190,24 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	fw.Start(context.Background())
 
 	deps := RouterDeps{
-		Registry:   reg,
-		Proxy:      px,
-		Builder:    bld,
-		Metrics:    met,
-		Secrets:    sm,
-		BuildQueue: buildQueue,
-		PoolMgr:    poolMgr,
-		EventHub:   hub,
-		Firewall:   fw,
+		Registry:      reg,
+		Proxy:         px,
+		Builder:       bld,
+		Metrics:       met,
+		Secrets:       sm,
+		BuildQueue:    buildQueue,
+		PoolMgr:       poolMgr,
+		EventHub:      hub,
+		Firewall:      fw,
+		InternalToken: internalToken,
 	}
 
 	router := NewRouter(cfg, db, deps)
+
+	// Scheduler runs cron triggers (P1) + future TTL/queue ticks. Started
+	// later in serve.go after the HTTP listener is up so health probes
+	// pass first.
+	sched := scheduler.New(db, poolMgr, cfg.Data.Dir)
 
 	return &Server{
 		httpServer: &http.Server{
@@ -197,6 +225,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		BuildQueue: buildQueue,
 		EventHub:   hub,
 		Firewall:   fw,
+		Scheduler:  sched,
 	}
 }
 
@@ -310,6 +339,55 @@ func printBootstrapKey(key, note string) {
 	fmt.Println("========================================")
 }
 
+// detectHostIP returns the IP a sandboxed worker should use to reach the
+// orva server. Reads /proc/net/route for the default-gateway entry; that
+// IP is what nsjail's nstun NAT exposes to sandboxes as the host. Falls
+// back to "127.0.0.1" if /proc isn't readable (rare; test environments).
+func detectHostIP() string {
+	const fallback = "127.0.0.1"
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return fallback
+	}
+	for _, line := range strings.Split(string(data), "\n")[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// Destination 00000000 = default route. Gateway is little-endian hex.
+		if fields[1] == "00000000" {
+			gwHex := fields[2]
+			if len(gwHex) != 8 {
+				return fallback
+			}
+			// Decode 4 bytes from little-endian hex.
+			b := make([]byte, 4)
+			for i := 0; i < 4; i++ {
+				v, err := strconv.ParseUint(gwHex[i*2:i*2+2], 16, 8)
+				if err != nil {
+					return fallback
+				}
+				b[3-i] = byte(v)
+			}
+			return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
+		}
+	}
+	return fallback
+}
+
+// generateInternalToken returns a fresh 32-byte random hex string used as
+// the per-process token injected into every worker as ORVA_INTERNAL_TOKEN.
+// Regenerated on each server start so a leaked token from a single boot
+// can't be replayed forever.
+func generateInternalToken() string {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Fall back to a time-based string. Should never happen on Linux.
+		return fmt.Sprintf("orva-internal-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
+}
+
 func (s *Server) Start(addr string) error {
 	s.httpServer.Addr = addr
 	return s.httpServer.ListenAndServe()
@@ -330,6 +408,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.Firewall != nil {
 		_ = s.Firewall.Stop(shutdownCtx)
+	}
+	if s.Scheduler != nil {
+		s.Scheduler.Stop(5 * time.Second)
 	}
 	return nil
 }

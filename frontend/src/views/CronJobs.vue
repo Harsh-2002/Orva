@@ -42,7 +42,7 @@
         <tbody class="divide-y divide-border">
           <tr
             v-for="job in jobs"
-            :key="job.function_name"
+            :key="job.id"
             class="hover:bg-surface-hover transition-colors"
           >
             <td class="px-6 py-4 font-medium text-foreground">
@@ -63,10 +63,10 @@
               </span>
             </td>
             <td class="px-6 py-4 text-foreground-muted text-xs hidden md:table-cell">
-              {{ job.last_run ? formatDate(job.last_run) : '—' }}
+              {{ job.last_run_at ? formatDate(job.last_run_at) : '—' }}
             </td>
             <td class="px-6 py-4 text-foreground-muted text-xs hidden lg:table-cell">
-              {{ job.next_run ? formatDate(job.next_run) : '—' }}
+              {{ job.next_run_at ? formatDate(job.next_run_at) : '—' }}
             </td>
             <td class="px-6 py-4 text-right flex items-center justify-end gap-2">
               <button 
@@ -86,10 +86,10 @@
               >
                 <Edit class="w-4 h-4" />
               </button>
-              <button 
+              <button
                 class="text-foreground-muted hover:text-error transition-colors p-1"
                 title="Delete"
-                @click="deleteSchedule(job.function_name)"
+                @click="deleteSchedule(job)"
               >
                 <Trash2 class="w-4 h-4" />
               </button>
@@ -348,7 +348,7 @@
 import { ref, onMounted } from 'vue'
 import { PlusCircle, Trash2, Clock, X, Edit, Play, Pause } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
-import { listCronSchedules, createCronSchedule, deleteCronSchedule, listFunctions } from '@/api/endpoints'
+import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 
 const confirmStore = useConfirmStore()
@@ -450,15 +450,24 @@ const formatDate = (date) => {
 
 const saveSchedule = async () => {
   try {
-    await createCronSchedule(form.value.function_name, {
-      cron: form.value.cron,
-      enabled: form.value.enabled
-    })
+    if (editingJob.value) {
+      // Edit existing — use the schedule id we tracked when opening the modal.
+      await updateCronSchedule(editingJob.value.id, {
+        function_id: editingJob.value.function_id,
+        cron: form.value.cron,
+        enabled: form.value.enabled,
+      })
+    } else {
+      await createCronSchedule(form.value.function_name, {
+        cron: form.value.cron,
+        enabled: form.value.enabled,
+      })
+    }
     await loadJobs()
     closeModal()
   } catch (e) {
-    console.error('Failed to create schedule', e)
-    confirmStore.notify({ title: 'Failed to create schedule', danger: true })
+    console.error('Failed to save schedule', e)
+    confirmStore.notify({ title: 'Failed to save schedule', danger: true })
   }
 }
 
@@ -474,9 +483,9 @@ const editSchedule = (job) => {
 
 const toggleSchedule = async (job) => {
   try {
-    await createCronSchedule(job.function_name, {
-      cron: job.cron_expression,
-      enabled: !job.enabled
+    await updateCronSchedule(job.id, {
+      function_id: job.function_id,
+      enabled: !job.enabled,
     })
     await loadJobs()
   } catch (e) {
@@ -484,17 +493,17 @@ const toggleSchedule = async (job) => {
   }
 }
 
-const deleteSchedule = async (functionName) => {
+const deleteSchedule = async (job) => {
   const ok = await confirmStore.ask({
     title: 'Delete schedule?',
-    message: `Cron schedule for "${functionName}" will be removed.`,
+    message: `Cron schedule for "${job.function_name}" will be removed.`,
     confirmLabel: 'Delete',
     danger: true,
   })
   if (!ok) return
 
   try {
-    await deleteCronSchedule(functionName)
+    await deleteCronSchedule(job.id, job.function_id)
     await loadJobs()
   } catch (e) {
     console.error('Failed to delete schedule', e)

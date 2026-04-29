@@ -25,30 +25,32 @@ type Router struct {
 	cfg     *config.Config
 	db      *database.Database
 
-	registry   *registry.Registry
-	proxy      *proxy.Proxy
-	builder    *builder.Builder
-	metrics    *metrics.Metrics
-	secrets    *secrets.Manager
-	buildQueue *builder.Queue
-	poolMgr    *pool.Manager
-	eventHub   *events.Hub
-	firewall   *firewall.Manager
+	registry      *registry.Registry
+	proxy         *proxy.Proxy
+	builder       *builder.Builder
+	metrics       *metrics.Metrics
+	secrets       *secrets.Manager
+	buildQueue    *builder.Queue
+	poolMgr       *pool.Manager
+	eventHub      *events.Hub
+	firewall      *firewall.Manager
+	internalToken string
 
 	startTime time.Time
 }
 
 // RouterDeps holds the dependencies for creating a Router.
 type RouterDeps struct {
-	Registry   *registry.Registry
-	Proxy      *proxy.Proxy
-	Builder    *builder.Builder
-	Metrics    *metrics.Metrics
-	Secrets    *secrets.Manager
-	BuildQueue *builder.Queue
-	PoolMgr    *pool.Manager
-	EventHub   *events.Hub
-	Firewall   *firewall.Manager
+	Registry      *registry.Registry
+	Proxy         *proxy.Proxy
+	Builder       *builder.Builder
+	Metrics       *metrics.Metrics
+	Secrets       *secrets.Manager
+	BuildQueue    *builder.Queue
+	PoolMgr       *pool.Manager
+	EventHub      *events.Hub
+	Firewall      *firewall.Manager
+	InternalToken string // Per-process token for kv/jobs/F2F SDK auth (Phase 3+).
 }
 
 func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Router {
@@ -61,11 +63,12 @@ func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Rout
 		builder:    deps.Builder,
 		metrics:    deps.Metrics,
 		secrets:    deps.Secrets,
-		buildQueue: deps.BuildQueue,
-		poolMgr:    deps.PoolMgr,
-		eventHub:   deps.EventHub,
-		firewall:   deps.Firewall,
-		startTime:  time.Now(),
+		buildQueue:    deps.BuildQueue,
+		poolMgr:       deps.PoolMgr,
+		eventHub:      deps.EventHub,
+		firewall:      deps.Firewall,
+		internalToken: deps.InternalToken,
+		startTime:     time.Now(),
 	}
 	r.setupRoutes()
 	r.buildMiddlewareChain()
@@ -175,6 +178,42 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/functions/{fn_id}/secrets", secretHandler.List)
 	r.mux.HandleFunc("POST /api/v1/functions/{fn_id}/secrets", secretHandler.Upsert)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/secrets/{key}", secretHandler.Delete)
+
+	// Cron schedules (per-function, fired by internal/scheduler).
+	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry}
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/cron",         cronHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/cron",         cronHandler.Create)
+	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/cron/{id}",    cronHandler.Update)
+	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}",    cronHandler.Delete)
+	// Dashboard "Schedules" page lists schedules across all functions.
+	r.mux.HandleFunc("GET /api/v1/cron", cronHandler.ListAll)
+
+	// Internal token used by the worker SDK (kv, jobs, F2F invoke).
+	internalToken := r.internalToken
+
+	// Per-function key/value store (Phase 3). Internal-only — auth is the
+	// per-process internal token, not API keys.
+	kvHandler := &handlers.KVHandler{DB: r.db, InternalToken: internalToken}
+	r.mux.HandleFunc("PUT    /api/v1/_kv/{fn_id}/{key}", kvHandler.Put)
+	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}/{key}", kvHandler.Get)
+	r.mux.HandleFunc("DELETE /api/v1/_kv/{fn_id}/{key}", kvHandler.Delete)
+	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}",       kvHandler.List)
+
+	// Function-to-function calls (Phase 4). Path uses the friendly name.
+	f2fHandler := &handlers.InternalInvokeHandler{
+		DB: r.db, Registry: r.registry, Pool: r.poolMgr, InternalToken: internalToken,
+	}
+	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}", f2fHandler.Invoke)
+
+	// Background job queue (Phase 5). Public + internal token both work.
+	jobsHandler := &handlers.JobsHandler{
+		DB: r.db, Registry: r.registry, InternalToken: internalToken,
+	}
+	r.mux.HandleFunc("POST   /api/v1/jobs",            jobsHandler.Enqueue)
+	r.mux.HandleFunc("GET    /api/v1/jobs",            jobsHandler.List)
+	r.mux.HandleFunc("GET    /api/v1/jobs/{id}",       jobsHandler.Get)
+	r.mux.HandleFunc("POST   /api/v1/jobs/{id}/retry", jobsHandler.Retry)
+	r.mux.HandleFunc("DELETE /api/v1/jobs/{id}",       jobsHandler.Delete)
 
 	// Custom routes: user-defined URL → function mappings.
 	routeHandler := &handlers.RouteHandler{DB: r.db, Registry: r.registry}

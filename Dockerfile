@@ -31,14 +31,18 @@ RUN git clone --depth 1 https://github.com/google/nsjail.git /nsjail \
 FROM node:22-slim AS rootfs-node22
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
-    && mkdir -p /opt/orva /code
+    && mkdir -p /opt/orva /opt/orva/node_modules/orva /code
 COPY backend/runtimes/node22/adapter.js /opt/orva/adapter.js
+COPY backend/runtimes/node22/orva.js    /opt/orva/node_modules/orva/index.js
+RUN echo '{"name":"orva","version":"0.2.0","main":"index.js"}' > /opt/orva/node_modules/orva/package.json
 
 FROM node:24-slim AS rootfs-node24
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
-    && mkdir -p /opt/orva /code
+    && mkdir -p /opt/orva /opt/orva/node_modules/orva /code
 COPY backend/runtimes/node24/adapter.js /opt/orva/adapter.js
+COPY backend/runtimes/node24/orva.js    /opt/orva/node_modules/orva/index.js
+RUN echo '{"name":"orva","version":"0.2.0","main":"index.js"}' > /opt/orva/node_modules/orva/package.json
 
 FROM python:3.13-slim AS rootfs-python313
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -47,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && find /usr/local/lib/python3.13 -depth -type d -name tests -exec rm -rf {} + \
     && mkdir -p /opt/orva /code
 COPY backend/runtimes/python313/adapter.py /opt/orva/adapter.py
+COPY backend/runtimes/python313/orva.py    /opt/orva/orva.py
 
 FROM python:3.14-slim AS rootfs-python314
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -55,6 +60,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && find /usr/local/lib/python3.14 -depth -type d -name tests -exec rm -rf {} + \
     && mkdir -p /opt/orva /code
 COPY backend/runtimes/python314/adapter.py /opt/orva/adapter.py
+COPY backend/runtimes/python314/orva.py    /opt/orva/orva.py
 
 FROM debian:bookworm-slim
 ARG VERSION

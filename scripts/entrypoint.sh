@@ -23,15 +23,23 @@ for rt in $RUNTIMES; do
   fi
 done
 
-# Always refresh the adapters so image upgrades roll out even when the
-# user has an existing volume.
+# Always refresh the adapters + bundled SDK so image upgrades roll out
+# even when the user has an existing volume. Includes the orva module
+# (kv / invoke / jobs) introduced in v0.2.
 for rt in node22 node24; do
   mkdir -p "$VOLUME_ROOTFS/$rt/opt/orva"
   cp "$IMAGE_ROOTFS/$rt/opt/orva/adapter.js" "$VOLUME_ROOTFS/$rt/opt/orva/adapter.js"
+  if [ -d "$IMAGE_ROOTFS/$rt/opt/orva/node_modules/orva" ]; then
+    mkdir -p "$VOLUME_ROOTFS/$rt/opt/orva/node_modules/orva"
+    cp -a "$IMAGE_ROOTFS/$rt/opt/orva/node_modules/orva/." "$VOLUME_ROOTFS/$rt/opt/orva/node_modules/orva/"
+  fi
 done
 for rt in python313 python314; do
   mkdir -p "$VOLUME_ROOTFS/$rt/opt/orva"
   cp "$IMAGE_ROOTFS/$rt/opt/orva/adapter.py" "$VOLUME_ROOTFS/$rt/opt/orva/adapter.py"
+  if [ -f "$IMAGE_ROOTFS/$rt/opt/orva/orva.py" ]; then
+    cp "$IMAGE_ROOTFS/$rt/opt/orva/orva.py" "$VOLUME_ROOTFS/$rt/opt/orva/orva.py"
+  fi
 done
 
 mkdir -p /var/lib/orva/functions
