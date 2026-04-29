@@ -979,14 +979,14 @@ const invokeTabs = computed(() => [
   {
     label: 'curl',
     lang: 'bash',
-    code: `curl -X POST ${origin.value}/api/v1/invoke/<function_id>/ \\
+    code: `curl -X POST ${origin.value}/api/v1/invoke/<function_id> \\
   -H 'Content-Type: application/json' \\
   -d '{"name": "Orva"}'`,
   },
   {
     label: 'fetch',
     lang: 'js',
-    code: `const res = await fetch('${origin.value}/api/v1/invoke/<function_id>/', {
+    code: `const res = await fetch('${origin.value}/api/v1/invoke/<function_id>', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ name: 'Orva' }),
@@ -999,7 +999,7 @@ console.log(await res.json());`,
     code: `import httpx
 
 r = httpx.post(
-    "${origin.value}/api/v1/invoke/<function_id>/",
+    "${origin.value}/api/v1/invoke/<function_id>",
     json={"name": "Orva"},
 )
 print(r.json())`,
@@ -1326,7 +1326,7 @@ TS=$(date +%s)
 BODY='{"hello":"world"}'
 SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
 
-curl -X POST ${origin.value}/api/v1/invoke/<function_id>/ \\
+curl -X POST ${origin.value}/api/v1/invoke/<function_id> \\
   -H "X-Orva-Timestamp: $TS" \\
   -H "X-Orva-Signature: sha256=$SIG" \\
   -H 'Content-Type: application/json' \\

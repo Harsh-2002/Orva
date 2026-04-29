@@ -852,7 +852,7 @@ const urlCopied = ref(false)
 // root, which is what most AWS/Lambda-style routers expect.
 const invokeUrl = computed(() => {
   if (!fnId.value) return ''
-  return `${window.location.origin}/api/v1/invoke/${fnId.value}/`
+  return `${window.location.origin}/api/v1/invoke/${fnId.value}`
 })
 const copyInvokeUrl = async () => {
   if (!invokeUrl.value) return
