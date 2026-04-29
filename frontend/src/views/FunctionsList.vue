@@ -212,7 +212,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, onDeactivated, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
@@ -220,6 +220,7 @@ import apiClient from '@/api/client'
 import { listFunctions } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
+import { useEventsStore } from '@/stores/events'
 
 const confirmStore = useConfirmStore()
 const router = useRouter()
@@ -361,8 +362,36 @@ const bulkDelete = async () => {
   }
 }
 
-onMounted(() => fetchPage(0))
-// Keep-alive: refresh on re-activation so the user sees newly-deployed
-// functions when they nip back from the editor.
+// Live updates via SSE — function events fire on any Set / Delete in the
+// registry, deployment events fire on build phase changes (which often
+// flip status to active). Coalesce both into a single throttled refresh
+// so a burst of events from a deploy doesn't trigger N list fetches.
+const events = useEventsStore()
+let refreshTimer = null
+const scheduleRefresh = () => {
+  if (refreshTimer) return
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    fetchPage(0)
+  }, 300)
+}
+let unsubFn = null
+let unsubDep = null
+
+onMounted(() => {
+  fetchPage(0)
+  unsubFn = events.subscribe('function', scheduleRefresh)
+  unsubDep = events.subscribe('deployment', scheduleRefresh)
+})
+onUnmounted(() => {
+  if (unsubFn) { unsubFn(); unsubFn = null }
+  if (unsubDep) { unsubDep(); unsubDep = null }
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null }
+})
+// Keep-alive: refresh on re-activation in case events fired while the
+// page was cached and not subscribed.
 onActivated(() => fetchPage(0))
+onDeactivated(() => {
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null }
+})
 </script>

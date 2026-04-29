@@ -24,6 +24,7 @@ export const useSystemStore = defineStore('system', () => {
 
   let unsubMetrics = null
   let unsubExecution = null
+  let unsubFunction = null
 
   // Apply a metrics snapshot to local state, including per-pool history
   // ring buffer maintenance. Used both by the initial GET and by every
@@ -80,11 +81,26 @@ export const useSystemStore = defineStore('system', () => {
       // the full Execution row.
       recentInvocations.value = [data, ...recentInvocations.value].slice(0, 20)
     })
+    // Function tile auto-updates: increment / decrement on create / delete,
+    // leave alone on plain updates. Cheaper than re-listing, and the
+    // metrics tick on the next ~5s tick will reconcile any drift.
+    unsubFunction = ev.subscribe('function', (data) => {
+      if (data.action === 'delete') {
+        functionsCount.value = Math.max(0, functionsCount.value - 1)
+      } else if (data.action === 'upsert' && data.function) {
+        // upsert covers both create and update — only bump the counter
+        // when the version is 1 (fresh create). Updates keep the count.
+        if (data.function.version === 1) {
+          functionsCount.value = functionsCount.value + 1
+        }
+      }
+    })
   }
 
   const disconnect = () => {
     if (unsubMetrics) { unsubMetrics(); unsubMetrics = null }
     if (unsubExecution) { unsubExecution(); unsubExecution = null }
+    if (unsubFunction) { unsubFunction(); unsubFunction = null }
     isConnected.value = false
   }
 

@@ -136,6 +136,12 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// rather than block producers.
 	hub := events.NewHub()
 
+	// Wire the registry to the SSE hub so any Set/Delete (function created,
+	// updated, deleted, or status flipped after a build) fans out to all
+	// connected clients — the FunctionsList page subscribes and re-renders
+	// without polling.
+	reg.PublishEvent = hub.Publish
+
 	// Async build queue — drains npm/pip install off the deploy HTTP path.
 	// runtime.NumCPU() workers is enough for the single-box target.
 	buildQueue := builder.NewQueue(bld, db, reg)

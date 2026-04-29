@@ -35,17 +35,19 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- Latency -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-1">
-        <div class="text-xs font-bold text-white uppercase tracking-wider mb-4">
-          Latency (server snapshot)
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-xs font-bold text-white uppercase tracking-wider">
+            Latency
+          </div>
+          <div class="text-[10px] text-foreground-muted font-mono">
+            ~last 8k calls
+          </div>
         </div>
-        <div class="grid grid-cols-3 gap-3">
-          <Lat label="p50" :ms="m.latency_ms?.p50" />
-          <Lat label="p95" :ms="m.latency_ms?.p95" />
-          <Lat label="p99" :ms="m.latency_ms?.p99" />
-        </div>
-        <div class="text-[10px] text-foreground-muted mt-3">
-          Computed by the server over a fixed-size ring buffer of the last ~8k invocations.
-        </div>
+        <LatencyBars
+          :p50="m.latency_ms?.p50"
+          :p95="m.latency_ms?.p95"
+          :p99="m.latency_ms?.p99"
+        />
       </div>
 
       <!-- Host resources -->
@@ -189,14 +191,43 @@ const Tile = {
   },
 }
 
-const Lat = {
-  props: { label: String, ms: Number },
+// Three horizontal bars normalised against the p99 (the worst case).
+// p50 sits in green, p95 amber, p99 red — a visual hint of the long-tail
+// shape without turning the panel into a chart. When all three values
+// are similar the bars look uniform; when latency tail-heavy the p99
+// extends well past p50.
+const LatencyBars = {
+  props: { p50: Number, p95: Number, p99: Number },
   setup(p) {
-    return () =>
-      h('div', { class: 'bg-surface border border-border rounded p-3 text-center' }, [
-        h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted' }, p.label),
-        h('div', { class: 'text-lg font-mono text-white mt-1' }, p.ms == null ? '—' : `${p.ms}ms`),
-      ])
+    return () => {
+      const rows = [
+        { label: 'p50', ms: p.p50, color: 'bg-emerald-500/70' },
+        { label: 'p95', ms: p.p95, color: 'bg-amber-500/70' },
+        { label: 'p99', ms: p.p99, color: 'bg-rose-500/70' },
+      ]
+      // Anchor bar widths to the worst observed value so the relative
+      // shape is obvious. If all three are ~equal the bars sit near full;
+      // if p99 is much higher, p50 and p95 collapse — exactly the read
+      // operators want from a glance at the panel.
+      const max = Math.max(p.p50 || 0, p.p95 || 0, p.p99 || 0, 1)
+      return h('div', { class: 'space-y-2.5' },
+        rows.map((r) => {
+          const pct = r.ms == null ? 0 : (r.ms / max) * 100
+          return h('div', { class: 'space-y-1' }, [
+            h('div', { class: 'flex items-baseline justify-between text-[11px]' }, [
+              h('span', { class: 'font-mono uppercase text-foreground-muted tracking-wider' }, r.label),
+              h('span', { class: 'font-mono text-white' }, r.ms == null ? '—' : `${r.ms}ms`),
+            ]),
+            h('div', { class: 'h-1.5 bg-surface rounded overflow-hidden' }, [
+              h('div', {
+                class: `h-full ${r.color} transition-[width] duration-500 ease-out`,
+                style: { width: `${pct.toFixed(1)}%` },
+              }),
+            ]),
+          ])
+        })
+      )
+    }
   },
 }
 

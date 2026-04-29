@@ -42,7 +42,7 @@ export const useEventsStore = defineStore('events', () => {
 
     // Server uses named events: `event: metrics`, `event: deployment`, ...
     // Each addEventListener registers for that specific event type.
-    const types = ['metrics', 'execution', 'deployment']
+    const types = ['metrics', 'execution', 'deployment', 'function']
     for (const t of types) {
       source.addEventListener(t, (ev) => {
         try {

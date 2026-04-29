@@ -207,6 +207,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, h } from 'vue'
+import { useEventsStore } from '@/stores/events'
 import { useRoute } from 'vue-router'
 import { RefreshCw, UploadCloud, CheckCircle2, RotateCcw } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
@@ -425,6 +426,31 @@ const closeStream = (refreshRow = false) => {
 
 watch(drawerOpen, (open) => { if (!open) closeStream() })
 
-onMounted(refresh)
-onBeforeUnmount(closeStream)
+// Live updates: deployment events fire on every phase / status change of
+// the build pipeline; function events fire on rollback retargets. Either
+// is a reason to refresh this page. Coalesce both so a build that emits
+// 4 phase events doesn't trigger 4 list fetches.
+const events = useEventsStore()
+let refreshTimer = null
+const scheduleRefresh = () => {
+  if (refreshTimer) return
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    refresh()
+  }, 300)
+}
+let unsubDep = null
+let unsubFn = null
+
+onMounted(() => {
+  refresh()
+  unsubDep = events.subscribe('deployment', scheduleRefresh)
+  unsubFn = events.subscribe('function', scheduleRefresh)
+})
+onBeforeUnmount(() => {
+  closeStream()
+  if (unsubDep) { unsubDep(); unsubDep = null }
+  if (unsubFn) { unsubFn(); unsubFn = null }
+  if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null }
+})
 </script>

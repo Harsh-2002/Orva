@@ -35,6 +35,7 @@ const (
 	TypeMetrics    = "metrics"    // periodic system snapshot, ~5s cadence
 	TypeExecution  = "execution"  // new invocation row committed to DB
 	TypeDeployment = "deployment" // build queue phase / status change
+	TypeFunction   = "function"   // function created / updated / deleted
 )
 
 // Hub is the in-process broker. Zero value is not usable — call NewHub.

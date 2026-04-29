@@ -13,6 +13,12 @@ import (
 type Registry struct {
 	db    *database.Database
 	cache sync.Map // map[string]*database.Function
+
+	// PublishEvent, if set, is fired on any mutation (Set / Delete) so
+	// SSE clients (FunctionsList page, etc.) can refresh without polling.
+	// Wired by server.New from events.Hub.Publish. Best-effort: a nil
+	// publisher is a no-op for tests / setups without the event hub.
+	PublishEvent func(eventType string, data any)
 }
 
 // New creates a new Registry with the given database backend.
@@ -75,6 +81,12 @@ func (r *Registry) Set(fn *database.Function) error {
 	// Invalidate (remove then store fresh) to ensure consistency.
 	r.cache.Delete(fn.ID)
 	r.cache.Store(fn.ID, fn)
+	if r.PublishEvent != nil {
+		r.PublishEvent("function", map[string]any{
+			"action":   "upsert",
+			"function": fn,
+		})
+	}
 	return nil
 }
 
@@ -84,6 +96,12 @@ func (r *Registry) Delete(id string) error {
 		return err
 	}
 	r.cache.Delete(id)
+	if r.PublishEvent != nil {
+		r.PublishEvent("function", map[string]any{
+			"action": "delete",
+			"id":     id,
+		})
+	}
 	return nil
 }
 
