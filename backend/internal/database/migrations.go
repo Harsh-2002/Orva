@@ -190,7 +190,11 @@ INSERT OR IGNORE INTO system_config (key, value) VALUES
     -- Comma-separated list of resolver IPs (v4 or v6). Empty = use the
     -- host's /etc/resolv.conf. Operator-editable from the Firewall page.
     ('dns_servers', '1.1.1.1,8.8.8.8'),
-    ('dns_search', '');
+    ('dns_search', ''),
+    -- Operator-managed host→IP overrides for sandboxes with
+    -- network_mode=egress. Format: one record per line, "host ip"
+    -- (matches /etc/hosts format). Empty by default.
+    ('dns_records', '');
 
 -- Seed default rules (shipped enabled). Kept deliberately minimal:
 -- only entries that are universally dangerous to expose to user code

@@ -35,8 +35,8 @@ func TestMigrate(t *testing.T) {
 	// Verify seed data
 	var count int
 	db.read.QueryRow("SELECT COUNT(*) FROM system_config").Scan(&count)
-	if count != 13 {
-		t.Errorf("expected 13 system config rows, got %d", count)
+	if count != 14 {
+		t.Errorf("expected 14 system config rows, got %d", count)
 	}
 }
 

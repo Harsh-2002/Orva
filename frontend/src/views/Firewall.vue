@@ -5,11 +5,10 @@
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 class="text-xl font-semibold text-white tracking-tight">
-            Egress firewall
+            Firewall &amp; DNS
           </h1>
           <p class="text-sm text-foreground-muted mt-1">
-            Global blocklist applied to every function with
-            <span class="text-white">network_mode: egress</span>. Toggle a rule
+            Outbound network policy for sandboxed functions. Toggle a rule
             off and the next invocation can reach the target; toggle back on,
             warm workers respawn within seconds.
           </p>
@@ -51,72 +50,143 @@
       </div>
     </header>
 
-    <!-- DNS resolver — global. Applies to every function in network_mode=egress. -->
+    <!-- DNS — resolvers + host overrides for sandboxed functions. -->
     <Section
-      title="DNS resolver"
-      :subtitle="dns.servers.length ? `Custom upstream${dns.servers.length === 1 ? '' : 's'}: ${dns.servers.length} server${dns.servers.length === 1 ? '' : 's'}.` : `Using defaults: ${(dns.defaults || []).join(', ') || '(none)'}.`"
+      title="DNS"
+      :subtitle="dnsSubtitle"
     >
       <div class="dns-card">
-        <div class="dns-current">
-          <div
-            v-if="dns.servers.length"
-            class="dns-chips"
-          >
-            <span
-              v-for="(s, idx) in dns.servers"
-              :key="s + idx"
-              class="dns-chip"
-            >
-              <Globe2 class="w-3 h-3 opacity-60" />
-              <span class="font-mono">{{ s }}</span>
-              <button
-                class="dns-chip-x"
-                title="Remove"
-                @click="removeServer(idx)"
-              >
-                ×
-              </button>
-            </span>
+        <!-- Resolvers row -->
+        <div class="dns-row">
+          <div class="dns-row-label">
+            Upstream resolvers
           </div>
-          <div
-            v-else
-            class="dns-defaults"
-          >
-            <span class="text-foreground-muted text-xs">Defaults:</span>
-            <span
-              v-for="d in dns.defaults"
-              :key="d"
-              class="dns-chip muted"
+          <div class="dns-current">
+            <div
+              v-if="dns.servers.length"
+              class="dns-chips"
             >
-              <Globe2 class="w-3 h-3 opacity-60" />
-              <span class="font-mono">{{ d }}</span>
-            </span>
+              <span
+                v-for="(s, idx) in dns.servers"
+                :key="s + idx"
+                class="dns-chip"
+              >
+                <Globe2 class="w-3 h-3 opacity-60" />
+                <span class="font-mono">{{ s }}</span>
+                <button
+                  class="dns-chip-x"
+                  title="Remove"
+                  @click="removeServer(idx)"
+                >
+                  ×
+                </button>
+              </span>
+            </div>
+            <div
+              v-else
+              class="dns-defaults"
+            >
+              <span class="text-foreground-muted text-xs">Defaults:</span>
+              <span
+                v-for="d in dns.defaults"
+                :key="d"
+                class="dns-chip muted"
+              >
+                <Globe2 class="w-3 h-3 opacity-60" />
+                <span class="font-mono">{{ d }}</span>
+              </span>
+            </div>
+          </div>
+          <div class="dns-form">
+            <input
+              v-model="dnsAddInput"
+              placeholder="Add resolver IP (1.1.1.1)…"
+              class="dns-input"
+              @keydown.enter="addServer"
+            >
+            <Button
+              variant="secondary"
+              size="sm"
+              :disabled="!dnsAddInput.trim()"
+              @click="addServer"
+            >
+              <Plus class="w-3.5 h-3.5" /> Add
+            </Button>
+            <input
+              v-model="dns.search"
+              placeholder="search domain (optional)"
+              class="dns-input narrow"
+            >
           </div>
         </div>
 
-        <div class="dns-form">
-          <input
-            v-model="dnsAddInput"
-            placeholder="Add resolver IP (1.1.1.1)…"
-            class="dns-input"
-            @keydown.enter="addServer"
+        <!-- Custom records row -->
+        <div class="dns-row">
+          <div class="dns-row-label">
+            Host overrides
+            <span class="dns-row-meta">{{ dns.records.length }} record{{ dns.records.length === 1 ? '' : 's' }}</span>
+          </div>
+          <div
+            v-if="dns.records.length"
+            class="dns-records"
           >
-          <Button
-            variant="secondary"
-            size="sm"
-            :disabled="!dnsAddInput.trim()"
-            @click="addServer"
+            <div
+              v-for="(rec, idx) in dns.records"
+              :key="rec.host + idx"
+              class="dns-record"
+            >
+              <span class="font-mono text-white text-xs flex-1 truncate">{{ rec.host }}</span>
+              <span class="text-foreground-muted text-xs">→</span>
+              <span class="font-mono text-foreground text-xs flex-1 truncate">{{ rec.ip }}</span>
+              <button
+                class="dns-chip-x"
+                title="Remove"
+                @click="removeRecord(idx)"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div
+            v-else
+            class="text-xs text-foreground-muted italic px-1"
           >
-            <Plus class="w-3.5 h-3.5" /> Add
-          </Button>
-          <input
-            v-model="dns.search"
-            placeholder="search domain (optional)"
-            class="dns-input narrow"
-          >
-          <span class="flex-1" />
+            No overrides. Anything resolves through the upstream resolvers above.
+          </div>
+          <div class="dns-form">
+            <input
+              v-model="recordHostInput"
+              placeholder="hostname (api.internal)"
+              class="dns-input"
+              @keydown.enter="addRecord"
+            >
+            <span class="text-foreground-muted text-xs">→</span>
+            <input
+              v-model="recordIPInput"
+              placeholder="IP (10.0.5.10)"
+              class="dns-input narrow"
+              @keydown.enter="addRecord"
+            >
+            <Button
+              variant="secondary"
+              size="sm"
+              :disabled="!(recordHostInput.trim() && recordIPInput.trim())"
+              @click="addRecord"
+            >
+              <Plus class="w-3.5 h-3.5" /> Add record
+            </Button>
+          </div>
+        </div>
+
+        <!-- Save bar -->
+        <div class="dns-savebar">
+          <span class="dns-hint">
+            Records win over upstream DNS — anything in the override list bypasses
+            resolution entirely. Existing warm workers keep their previous files;
+            toggle the function's network off and on, or wait for idle TTL, to apply.
+          </span>
           <button
-            v-if="dns.servers.length || dns.search"
+            v-if="dns.servers.length || dns.search || dns.records.length"
             class="text-[11px] text-foreground-muted hover:text-white px-2 py-1 transition-colors"
             @click="resetDNS"
           >
@@ -131,12 +201,6 @@
             Save
           </Button>
         </div>
-
-        <p class="dns-hint">
-          Applies to every function with <span class="text-white">network_mode: egress</span>.
-          Existing warm workers keep their previous resolv.conf — toggle the
-          function's egress off and on, or wait for idle TTL, to apply.
-        </p>
       </div>
     </Section>
 
@@ -305,16 +369,36 @@ const creating = ref(false)
 const resolving = ref(false)
 const newRule = ref({ rule_type: 'cidr', value: '', label: '' })
 
-// DNS settings — operator-managed resolvers for egress sandboxes.
-const dns = ref({ servers: [], search: '', defaults: [] })
-const savedDNS = ref({ servers: [], search: '' })  // last persisted; for dirty check
+// DNS settings — operator-managed resolvers and host overrides for
+// sandboxed functions with outbound network access.
+const dns = ref({ servers: [], search: '', records: [], defaults: [] })
+const savedDNS = ref({ servers: [], search: '', records: [] })  // last persisted; for dirty check
 const dnsAddInput = ref('')
+const recordHostInput = ref('')
+const recordIPInput = ref('')
 const savingDNS = ref(false)
 
 const dnsDirty = computed(() => {
-  const a = JSON.stringify({ s: dns.value.servers || [], q: dns.value.search || '' })
-  const b = JSON.stringify({ s: savedDNS.value.servers || [], q: savedDNS.value.search || '' })
+  const a = JSON.stringify({
+    s: dns.value.servers || [],
+    q: dns.value.search || '',
+    r: (dns.value.records || []).map(r => `${r.host}=${r.ip}`).sort(),
+  })
+  const b = JSON.stringify({
+    s: savedDNS.value.servers || [],
+    q: savedDNS.value.search || '',
+    r: (savedDNS.value.records || []).map(r => `${r.host}=${r.ip}`).sort(),
+  })
   return a !== b
+})
+
+const dnsSubtitle = computed(() => {
+  const parts = []
+  parts.push(dns.value.servers.length
+    ? `${dns.value.servers.length} resolver${dns.value.servers.length === 1 ? '' : 's'}`
+    : `defaults (${(dns.value.defaults || []).join(', ') || 'none'})`)
+  if (dns.value.records.length) parts.push(`${dns.value.records.length} override${dns.value.records.length === 1 ? '' : 's'}`)
+  return parts.join(' · ')
 })
 
 const loadDNS = async () => {
@@ -323,9 +407,14 @@ const loadDNS = async () => {
     dns.value = {
       servers: res.data.servers || [],
       search:  res.data.search  || '',
+      records: res.data.records || [],
       defaults: res.data.defaults || [],
     }
-    savedDNS.value = { servers: [...dns.value.servers], search: dns.value.search }
+    savedDNS.value = {
+      servers: [...dns.value.servers],
+      search: dns.value.search,
+      records: dns.value.records.map(r => ({ ...r })),
+    }
   } catch (e) {
     console.error('loadDNS failed', e)
   }
@@ -351,9 +440,35 @@ const addServer = () => {
 const removeServer = (idx) => {
   dns.value.servers = dns.value.servers.filter((_, i) => i !== idx)
 }
+const addRecord = () => {
+  const host = recordHostInput.value.trim()
+  const ip = recordIPInput.value.trim()
+  if (!host || !ip) return
+  const looksHost = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(host)
+  const looksIP = /^[0-9.]+$/.test(ip) || ip.includes(':')
+  if (!looksHost) {
+    confirmStore.notify({ title: 'Invalid hostname', message: `"${host}" is not a valid hostname.` })
+    return
+  }
+  if (!looksIP) {
+    confirmStore.notify({ title: 'Invalid IP', message: `"${ip}" is not a literal IPv4 or IPv6 address.` })
+    return
+  }
+  if ((dns.value.records || []).some(r => r.host === host)) {
+    confirmStore.notify({ title: 'Duplicate host', message: `"${host}" already has an override.` })
+    return
+  }
+  dns.value.records = [...(dns.value.records || []), { host, ip }]
+  recordHostInput.value = ''
+  recordIPInput.value = ''
+}
+const removeRecord = (idx) => {
+  dns.value.records = dns.value.records.filter((_, i) => i !== idx)
+}
 const resetDNS = () => {
   dns.value.servers = []
   dns.value.search = ''
+  dns.value.records = []
 }
 const saveDNS = async () => {
   savingDNS.value = true
@@ -361,13 +476,19 @@ const saveDNS = async () => {
     const res = await apiClient.put('/firewall/dns', {
       servers: dns.value.servers,
       search: dns.value.search || '',
+      records: dns.value.records || [],
     })
     dns.value = {
       servers: res.data.servers || [],
       search:  res.data.search  || '',
+      records: res.data.records || [],
       defaults: res.data.defaults || dns.value.defaults,
     }
-    savedDNS.value = { servers: [...dns.value.servers], search: dns.value.search }
+    savedDNS.value = {
+      servers: [...dns.value.servers],
+      search: dns.value.search,
+      records: dns.value.records.map(r => ({ ...r })),
+    }
   } catch (e) {
     confirmStore.notify({
       title: 'Save failed',
@@ -412,9 +533,9 @@ const statusIcon = computed(() => {
 const statusBannerText = computed(() => {
   if (status.value.last_error) return status.value.last_error
   if (!status.value.nftables_available) {
-    return 'nftables unavailable on this host — packet-level enforcement is disabled. Per-function egress isolation still works (sandbox only).'
+    return 'nftables unavailable on this host — packet-level enforcement is disabled. Sandbox-level isolation still works.'
   }
-  return 'Firewall active. Rules below apply to every function with network_mode: egress.'
+  return 'Active. Rules apply to every function with outbound network enabled.'
 })
 
 const load = async () => {
@@ -859,5 +980,61 @@ const RuleCard = defineComponent({
   color: var(--color-foreground-muted);
   line-height: 1.5;
   margin: 0;
+}
+
+.dns-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+.dns-row + .dns-row {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.85rem;
+}
+.dns-row-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-foreground-muted);
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.dns-row-meta {
+  font-size: 10.5px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.dns-records {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.4rem;
+}
+.dns-record {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+}
+
+.dns-savebar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+.dns-savebar .dns-hint {
+  flex: 1;
+  min-width: 240px;
 }
 </style>

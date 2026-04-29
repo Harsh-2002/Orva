@@ -69,14 +69,17 @@ func NewManager(db *database.Database, dataDir string) *Manager {
 func (m *Manager) Start(ctx context.Context) {
 	m.stopCh = make(chan struct{})
 
-	// DNS (resolv.conf) is independent of nftables — write it on every
-	// boot, even if packet filtering is disabled. Otherwise functions
-	// with network_mode=egress on hosts without nftables would lose
-	// the operator-configured DNS resolver.
+	// DNS (resolv.conf + hosts file) is independent of nftables — write
+	// both on every boot, even if packet filtering is disabled. Otherwise
+	// functions with network_mode=egress on hosts without nftables would
+	// lose operator-configured DNS resolvers and host overrides.
 	if m.dataDir != "" {
 		dnsCfg := LoadDNSConfig(m.db)
 		if err := WriteResolvConf(m.dataDir, dnsCfg); err != nil {
 			slog.Warn("firewall: initial resolv.conf write failed", "err", err)
+		}
+		if err := WriteHostsFile(m.dataDir, dnsCfg.Records); err != nil {
+			slog.Warn("firewall: initial hosts file write failed", "err", err)
 		}
 	}
 
@@ -196,15 +199,18 @@ func (m *Manager) refresh() error {
 		return err
 	}
 
-	// Regenerate the per-sandbox resolv.conf alongside the nft rules.
-	// Both come from operator-driven settings; both should re-apply on
-	// the same tick. Failure here is non-fatal — sandboxes fall back to
-	// whatever resolv.conf was last on disk (or the host's if we never
+	// Regenerate the per-sandbox resolv.conf + /etc/hosts alongside the
+	// nft rules. Both come from operator-driven settings; all three should
+	// re-apply on the same tick. Failure here is non-fatal — sandboxes
+	// fall back to whatever was last on disk (or the host's if we never
 	// wrote one).
 	if m.dataDir != "" {
 		dnsCfg := LoadDNSConfig(m.db)
 		if err := WriteResolvConf(m.dataDir, dnsCfg); err != nil {
 			slog.Warn("firewall: write resolv.conf failed", "err", err)
+		}
+		if err := WriteHostsFile(m.dataDir, dnsCfg.Records); err != nil {
+			slog.Warn("firewall: write hosts file failed", "err", err)
 		}
 	}
 

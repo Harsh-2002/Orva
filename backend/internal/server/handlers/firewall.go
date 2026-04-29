@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -235,13 +236,22 @@ func (h *FirewallHandler) GetDNS(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateDNSRequest struct {
-	Servers []string `json:"servers"` // explicit IPs; empty array = use defaults
-	Search  string   `json:"search"`  // optional search domain
+	Servers []string             `json:"servers"` // explicit IPs; empty array = use defaults
+	Search  string               `json:"search"`  // optional search domain
+	Records []firewall.DNSRecord `json:"records"` // operator host→IP overrides (nil = leave unchanged is wrong; we always overwrite)
 }
+
+// validHostname enforces RFC 1123-ish names for the host side of an
+// override. We intentionally allow the wildcard-free single-label case
+// (e.g. "db", "api") because operators commonly map short internal names
+// alongside short DNS search domains.
+var validHostnameRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 
 // PutDNS handles PUT /api/v1/firewall/dns. Validates each server as a
 // literal IP (no hostnames — would be a chicken/egg). Empty servers
 // list means "fall back to default resolvers"; empty search clears it.
+// Records are operator-defined host→IP overrides written into the
+// generated /etc/hosts; they take precedence over upstream DNS.
 func (h *FirewallHandler) PutDNS(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	var req updateDNSRequest
@@ -267,11 +277,46 @@ func (h *FirewallHandler) PutDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cleanRecords := []firewall.DNSRecord{}
+	seenHosts := map[string]bool{}
+	for _, rec := range req.Records {
+		host := strings.TrimSpace(rec.Host)
+		ip := strings.TrimSpace(rec.IP)
+		if host == "" && ip == "" {
+			continue
+		}
+		if !validHostnameRe.MatchString(host) {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid hostname: "+host+" (use letters, digits, dots, hyphens)", reqID)
+			return
+		}
+		if net.ParseIP(ip) == nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid IP for "+host+": "+ip+" (must be a literal IPv4 or IPv6 address)", reqID)
+			return
+		}
+		if seenHosts[host] {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"duplicate host in records: "+host, reqID)
+			return
+		}
+		seenHosts[host] = true
+		cleanRecords = append(cleanRecords, firewall.DNSRecord{Host: host, IP: ip})
+	}
+	if len(cleanRecords) > 64 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "max 64 host records", reqID)
+		return
+	}
+
 	if err := h.DB.SetSystemConfig("dns_servers", strings.Join(clean, ",")); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
 		return
 	}
 	if err := h.DB.SetSystemConfig("dns_search", strings.TrimSpace(req.Search)); err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
+		return
+	}
+	if err := h.DB.SetSystemConfig("dns_records", firewall.SerializeDNSRecords(cleanRecords)); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
 		return
 	}

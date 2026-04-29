@@ -490,6 +490,27 @@ import {
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
 
+// Syntax highlighting — highlight.js core + only the grammars we use.
+// Importing the lite core (vs. the auto-bundle) keeps the Docs chunk small;
+// each registerLanguage adds a few KB. We register python, js, json, bash,
+// and http; everything else falls through as plain text.
+import hljs from 'highlight.js/lib/core'
+import python from 'highlight.js/lib/languages/python'
+import javascript from 'highlight.js/lib/languages/javascript'
+import json from 'highlight.js/lib/languages/json'
+import bash from 'highlight.js/lib/languages/bash'
+import http from 'highlight.js/lib/languages/http'
+import 'highlight.js/styles/github-dark.css'
+
+hljs.registerLanguage('python', python)
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('js', javascript)
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('shell', bash)
+hljs.registerLanguage('sh', bash)
+hljs.registerLanguage('http', http)
+
 const origin = computed(() => window.location.origin)
 
 const quickSteps = [
@@ -497,6 +518,8 @@ const quickSteps = [
   { title: 'Write the handler', body: 'A single function that accepts an event and returns { statusCode, headers, body }.' },
   { title: 'Deploy', body: 'One click. Code is content-addressed, the prior version stays available for rollback.' },
   { title: 'Invoke', body: 'Curl the URL printed under the editor, or wire it up to a custom route or cron schedule.' },
+  { title: 'Secure it', body: 'Verify a JWT in your handler, or flip Invoke gate to platform_key / signed for server-to-server.' },
+  { title: 'Observe', body: 'Watch live invocations on the Logs page. Each row links to its execution detail and stderr stream.' },
 ]
 
 // ── Section component ─────────────────────────────────────────────────
@@ -539,6 +562,25 @@ const CodeBlock = defineComponent({
         setTimeout(() => { copied.value = false }, 1200)
       }
     }
+    // Pre-render highlighted HTML once per (code, lang) pair. highlight.js
+    // returns escaped HTML so it's safe to dump via v-html. Fallback to the
+    // raw escaped code when the language isn't registered.
+    const highlighted = computed(() => {
+      const lang = (props.lang || '').toLowerCase()
+      if (lang && hljs.getLanguage(lang)) {
+        try {
+          return hljs.highlight(props.code, { language: lang, ignoreIllegals: true }).value
+        } catch {
+          // fall through to plain
+        }
+      }
+      // Plain text — escape so user payloads don't render as HTML.
+      return props.code
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+    })
+
     return () =>
       h('div', { class: 'codeblock' }, [
         h('div', { class: 'codeblock-bar' }, [
@@ -548,7 +590,9 @@ const CodeBlock = defineComponent({
             copied.value ? 'Copied' : 'Copy',
           ]),
         ]),
-        h('pre', { class: 'codeblock-pre' }, h('code', null, props.code)),
+        h('pre', { class: 'codeblock-pre' }, [
+          h('code', { class: `hljs language-${(props.lang || 'text').toLowerCase()}`, innerHTML: highlighted.value }),
+        ]),
       ])
   },
 })
@@ -596,21 +640,60 @@ const TabbedCode = defineComponent({
 })
 
 // ── Inline icons (light-touch SVG components for runtime cards) ──────
+// Brand-accurate Python logo (two interlocking serpents). Uses the
+// classic blue/yellow palette via gradient fills rather than the
+// generic line-art placeholder.
 const PythonGlyph = defineComponent({
   setup() {
     return () =>
-      h('svg', { viewBox: '0 0 32 32', width: '20', height: '20', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
-        h('path', { d: 'M11 6h6a4 4 0 0 1 4 4v3H11a4 4 0 0 0-4 4v3a4 4 0 0 0 4 4h2' }),
-        h('path', { d: 'M21 26h-6a4 4 0 0 1-4-4v-3h10a4 4 0 0 0 4-4v-3a4 4 0 0 0-4-4h-2' }),
+      h('svg', { viewBox: '0 0 256 256', width: '32', height: '32', xmlns: 'http://www.w3.org/2000/svg' }, [
+        h('defs', null, [
+          h('linearGradient', { id: 'pygradBlue', x1: '0', y1: '0', x2: '1', y2: '1' }, [
+            h('stop', { offset: '0', 'stop-color': '#5A9FD4' }),
+            h('stop', { offset: '1', 'stop-color': '#306998' }),
+          ]),
+          h('linearGradient', { id: 'pygradYellow', x1: '0', y1: '0', x2: '1', y2: '1' }, [
+            h('stop', { offset: '0', 'stop-color': '#FFE873' }),
+            h('stop', { offset: '1', 'stop-color': '#FFD43B' }),
+          ]),
+        ]),
+        // Top (blue) serpent
+        h('path', {
+          fill: 'url(#pygradBlue)',
+          d: 'M126.9 12c-58.3 0-54.7 25.3-54.7 25.3l.1 26.2H128v8H50.5S12 67.2 12 126.1c0 58.9 33.6 56.8 33.6 56.8h19.4v-27.4s-1-33.6 33.1-33.6h55.9s32 .5 32-30.9V43.5S191.7 12 126.9 12zM95.7 29.9a10 10 0 0 1 0 20 10 10 0 0 1 0-20z',
+        }),
+        // Bottom (yellow) serpent
+        h('path', {
+          fill: 'url(#pygradYellow)',
+          d: 'M129.1 244c58.3 0 54.7-25.3 54.7-25.3l-.1-26.2H128v-8h77.5s38.5 4.4 38.5-54.5c0-58.9-33.6-56.8-33.6-56.8h-19.4v27.4s1 33.6-33.1 33.6H102s-32-.5-32 30.9v51.5S64.3 244 129.1 244zm31.2-17.9a10 10 0 0 1 0-20 10 10 0 0 1 0 20z',
+        }),
       ])
   },
 })
+
+// Brand-accurate Node.js mark — the canonical hexagon with the inner
+// "Node" silhouette path simplified for crisp rendering at 32px.
 const NodeGlyph = defineComponent({
   setup() {
     return () =>
-      h('svg', { viewBox: '0 0 32 32', width: '20', height: '20', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
-        h('path', { d: 'M16 3 4 10v12l12 7 12-7V10z' }),
-        h('path', { d: 'M16 3v26' }),
+      h('svg', { viewBox: '0 0 256 280', width: '32', height: '32', xmlns: 'http://www.w3.org/2000/svg' }, [
+        h('defs', null, [
+          h('linearGradient', { id: 'nodegrad', x1: '0', y1: '0', x2: '1', y2: '1' }, [
+            h('stop', { offset: '0', 'stop-color': '#41873F' }),
+            h('stop', { offset: '0.5', 'stop-color': '#3F8B3D' }),
+            h('stop', { offset: '1', 'stop-color': '#2D5F26' }),
+          ]),
+        ]),
+        // Hexagon outer
+        h('path', {
+          fill: 'url(#nodegrad)',
+          d: 'M128 0 12 67v146l116 67 116-67V67L128 0zm0 24.6 95 54.8v121.2l-95 54.8-95-54.8V79.4l95-54.8z',
+        }),
+        // Inner mark — stylised "N"
+        h('path', {
+          fill: '#FFFFFF',
+          d: 'M128 64c-3 0-5.7.7-8 2.3L73 92c-5 2.7-8 8-8 13.6V169c0 5.6 3 10.7 8 13.5l13 7.4c6.3 3.1 8.5 3.1 11.4 3.1 9.4 0 14.8-5.7 14.8-15.6V117c0-1-.7-1.7-1.7-1.7H103c-1 0-1.7.7-1.7 1.7v60.2c0 4.4-4.5 8.7-11.8 5.1l-13.7-7.9a1.6 1.6 0 0 1-.8-1.4v-63.4c0-.6.3-1 .8-1.4l46.8-26.9c.4-.3 1-.3 1.4 0L171 110c.5.4.8.8.8 1.4V174a1.7 1.7 0 0 1-.8 1.4l-46.8 27c-.4.2-1 .2-1.4 0l-12-7.2c-.4-.2-.8-.2-1.2 0-3.4 1.9-4 2.2-7.2 3.3-.8.3-2 .7.4 2.1l15.7 9.3c2.5 1.4 5.3 2.2 8.2 2.2 2.9 0 5.7-.8 8.2-2.2L181 184c5-2.8 8-7.9 8-13.5V107c0-5.6-3-10.7-8-13.5l-46.7-26.7a17 17 0 0 0-6.3-2.8z',
+        }),
       ])
   },
 })
@@ -1113,6 +1196,15 @@ const Callout = defineComponent({
   line-height: 1.6;
   color: white;
   white-space: pre;
+}
+/* highlight.js github-dark imports its own background; we override so the
+   highlighted block blends with the page surface and only the token colors
+   come from the theme. */
+.codeblock-pre code.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+  font-size: inherit;
+  font-family: inherit;
 }
 
 /* Inline KV grid (handler section) */

@@ -17,6 +17,7 @@
     "@codemirror/view": "^6.39.11",
     "axios": "^1.13.2",
     "codemirror": "^6.0.2",
+    "highlight.js": "^11.11.1",
     "lucide-vue-next": "^0.562.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.24",

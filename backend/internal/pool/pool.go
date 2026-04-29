@@ -520,8 +520,9 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				NetworkMode:    fn.NetworkMode,
 				// Operator-managed DNS for egress sandboxes; written by
 				// internal/firewall on every refresh tick. Bound at
-				// /etc/resolv.conf when present.
+				// /etc/resolv.conf and /etc/hosts when present.
 				ResolvConfPath: dataDir + "/firewall/resolv.conf",
+				HostsPath:      dataDir + "/firewall/hosts",
 				NsjailBin:      tmpl.NsjailBin,
 				RootfsDir:      tmpl.RootfsDir,
 				Timeout:        time.Duration(fn.TimeoutMS) * time.Millisecond,
