@@ -196,7 +196,7 @@
       />
 
       <details class="mcp-manual-details">
-        <summary>Manual config-file edit (Claude Desktop, Continue, Windsurf, Cline, …)</summary>
+        <summary>Hand-editing the config file instead? Cursor JSON / Cline / etc.</summary>
         <TabbedCode
           :tabs="mcpConfigTabs"
           storage-key="docs.mcp.manual"
@@ -852,6 +852,7 @@ const TabbedCode = defineComponent({
             }, t.label)
           )
         ),
+        tab.note ? h('div', { class: 'tabbed-note' }, tab.note) : null,
         h(CodeBlock, { code: tab.code, lang: tab.lang }),
       ])
     }
@@ -1045,68 +1046,61 @@ const onMintMcpToken = async () => {
   }
 }
 
-// One-line install commands. Order: things with a real CLI first,
-// then deeplinks, then UI-only.
+// One-line install commands. Each tab's `code` is paste-ready —
+// no comments, no extra prose. Tabs that target a config file
+// surface the file path via the `note` field, rendered above the
+// code block by TabbedCode.
 const mcpInstallTabs = computed(() => [
   {
     label: 'Claude Code',
     lang: 'bash',
-    code: `# Anthropic's official 'claude' CLI — adds Orva as a user-scoped
-# MCP server. Restart 'claude' after the command; /mcp will list
-# Orva's 37 tools.
-claude mcp add --transport http --scope user orva \\
-  ${origin.value}/api/v1/mcp \\
-  --header "Authorization: Bearer ${T.value}"`,
+    note: 'Anthropic\'s official `claude` CLI. Restart Claude Code after running; `/mcp` will list Orva\'s 37 tools.',
+    code: `claude mcp add --transport http --scope user orva ${origin.value}/api/v1/mcp --header "Authorization: Bearer ${T.value}"`,
+  },
+  {
+    label: 'Claude Desktop',
+    lang: 'json',
+    note: 'No CLI install. Paste into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS), %APPDATA%\\Claude\\claude_desktop_config.json (Windows), or ~/.config/Claude/claude_desktop_config.json (Linux). Restart Claude Desktop.',
+    code: `{
+  "mcpServers": {
+    "orva": {
+      "url": "${origin.value}/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer ${T.value}"
+      }
+    }
+  }
+}`,
   },
   {
     label: 'Cursor',
     lang: 'bash',
-    code: `# One-click deeplink. Open this URL in your browser; Cursor pops
-# up an approval dialog and writes ~/.cursor/mcp.json on accept.
-cursor://anysphere.cursor-deeplink/mcp/install?name=orva&config=${cursorConfigBase64.value}`,
+    note: 'Open this URL in your browser. Cursor pops up an approval dialog and writes ~/.cursor/mcp.json on accept.',
+    code: `cursor://anysphere.cursor-deeplink/mcp/install?name=orva&config=${cursorConfigBase64.value}`,
   },
   {
     label: 'VS Code',
     lang: 'bash',
-    code: `# VS Code's --add-mcp flag (Copilot-MCP). User-scoped install —
-# answer 'Workspace' at the prompt to write .vscode/mcp.json instead.
-code --add-mcp '{"name":"orva","type":"http","url":"${origin.value}/api/v1/mcp","headers":{"Authorization":"Bearer ${T.value}"}}'`,
+    note: 'User-scoped install via the Copilot-MCP `code --add-mcp` flag. Answer "Workspace" at the prompt to write .vscode/mcp.json instead.',
+    code: `code --add-mcp '{"name":"orva","type":"http","url":"${origin.value}/api/v1/mcp","headers":{"Authorization":"Bearer ${T.value}"}}'`,
   },
   {
     label: 'Codex CLI',
     lang: 'bash',
-    code: `# OpenAI's 'codex' CLI. Writes to ~/.codex/config.toml.
-codex mcp add --transport streamable-http orva \\
-  ${origin.value}/api/v1/mcp \\
-  --header "Authorization: Bearer ${T.value}"`,
+    note: 'OpenAI\'s official `codex` CLI. Writes to ~/.codex/config.toml.',
+    code: `codex mcp add --transport streamable-http orva ${origin.value}/api/v1/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {
     label: 'OpenCode',
     lang: 'bash',
-    code: `# 'opencode' is interactive — choose: Add → Remote → URL → header
-# When prompted:
-#   URL:    ${origin.value}/api/v1/mcp
-#   Header: Authorization: Bearer ${T.value}
-opencode mcp add`,
-  },
-  {
-    label: 'Goose',
-    lang: 'bash',
-    code: `# Block's 'goose' CLI — interactive add.
-# Choose: Add Extension → Remote (Streamable HTTP)
-#   URL:     ${origin.value}/api/v1/mcp
-#   Headers: Authorization: Bearer ${T.value}
-goose configure
-
-# Or use the deeplink:
-goose://extension?type=streamable_http&id=orva&name=orva&url=${encodeURIComponent(origin.value + '/api/v1/mcp')}`,
+    note: `Interactive add. When prompted: pick "Remote", paste the URL ${origin.value}/api/v1/mcp, then add the header Authorization: Bearer ${T.value}.`,
+    code: `opencode mcp add`,
   },
   {
     label: 'Zed',
     lang: 'json',
-    code: `// Zed runs MCP as stdio child processes — wrap with mcp-remote.
-// Edit ~/.config/zed/settings.json:
-{
+    note: 'Zed runs MCP as stdio subprocesses, so the bridge is `mcp-remote`. Paste into ~/.config/zed/settings.json under context_servers. Restart Zed.',
+    code: `{
   "context_servers": {
     "orva": {
       "source": "custom",
@@ -1121,22 +1115,10 @@ goose://extension?type=streamable_http&id=orva&name=orva&url=${encodeURIComponen
 }`,
   },
   {
-    label: 'Continue',
-    lang: 'yaml',
-    code: `# ~/.continue/config.yaml
-mcpServers:
-  - name: orva
-    type: streamable-http
-    url: ${origin.value}/api/v1/mcp
-    requestOptions:
-      headers:
-        Authorization: Bearer ${T.value}`,
-  },
-  {
     label: 'Windsurf',
     lang: 'json',
-    code: `// ~/.codeium/windsurf/mcp_config.json
-{
+    note: 'Paste into ~/.codeium/windsurf/mcp_config.json and reload Windsurf.',
+    code: `{
   "mcpServers": {
     "orva": {
       "serverUrl": "${origin.value}/api/v1/mcp",
@@ -1150,30 +1132,21 @@ mcpServers:
   {
     label: 'ChatGPT',
     lang: 'text',
-    code: `// No CLI — UI-only flow.
-Settings → Apps & Connectors → Developer mode ON → Add new connector
-
-  URL:    ${origin.value}/api/v1/mcp
-  Auth:   API key (Bearer)
-  Token:  ${T.value}
-
-ChatGPT renders the tool catalog in the connector UI and asks
-for confirmation before destructive calls (the destructiveHint
-annotation we set on every delete_*/rollback_* tool).`,
+    note: 'No CLI — UI-only flow. Go to Settings → Apps & Connectors → toggle Developer mode → Add new connector. ChatGPT renders the tool catalog and asks for confirmation before destructive calls.',
+    code: `URL:    ${origin.value}/api/v1/mcp
+Auth:   API key (Bearer)
+Token:  ${T.value}`,
   },
   {
     label: 'curl',
     lang: 'bash',
-    code: `# Talk to Orva's MCP endpoint directly. Useful for debugging.
-# Step 1: initialize and read the Mcp-Session-Id header back.
-curl -sD - -X POST ${origin.value}/api/v1/mcp \\
+    note: 'Talk to the MCP endpoint directly. Step 1 prints the response headers — copy the Mcp-Session-Id value into Step 2.',
+    code: `curl -sD - -X POST ${origin.value}/api/v1/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
   -H 'Accept: application/json, text/event-stream' \\
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 
-# Step 2: list tools, replacing <SID> with the value from the
-#         Mcp-Session-Id header in step 1.
 curl -sX POST ${origin.value}/api/v1/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
@@ -1194,34 +1167,15 @@ const cursorConfigBase64 = computed(() => {
   return typeof btoa === 'function' ? btoa(cfg) : cfg
 })
 
-// Manual config snippets — kept under a <details> for users who prefer
-// hand-editing the client's config file rather than running a CLI.
+// Manual config snippets — kept under a <details> for users who
+// prefer hand-editing the client's config file rather than running
+// a CLI. Snippets are clean JSON; file paths in the `note` field.
 const mcpConfigTabs = computed(() => [
   {
-    label: 'Claude Desktop',
+    label: 'Cursor (global)',
     lang: 'json',
-    code: `// ~/Library/Application Support/Claude/claude_desktop_config.json
-//   (macOS)
-// %APPDATA%\\Claude\\claude_desktop_config.json
-//   (Windows)
-// ~/.config/Claude/claude_desktop_config.json
-//   (Linux)
-{
-  "mcpServers": {
-    "orva": {
-      "url": "${origin.value}/api/v1/mcp",
-      "headers": {
-        "Authorization": "Bearer ${T.value}"
-      }
-    }
-  }
-}`,
-  },
-  {
-    label: 'Cursor',
-    lang: 'json',
-    code: `// ~/.cursor/mcp.json (global) — or .cursor/mcp.json (project-local)
-{
+    note: 'Paste into ~/.cursor/mcp.json. Use .cursor/mcp.json in your project root for a per-workspace install.',
+    code: `{
   "mcpServers": {
     "orva": {
       "url": "${origin.value}/api/v1/mcp",
@@ -1235,9 +1189,8 @@ const mcpConfigTabs = computed(() => [
   {
     label: 'Cline',
     lang: 'json',
-    code: `// VS Code → Cline extension → MCP icon → Configure MCP Servers.
-// Edits cline_mcp_settings.json:
-{
+    note: 'In VS Code: open the Cline panel → MCP icon → Configure MCP Servers. Cline writes to cline_mcp_settings.json.',
+    code: `{
   "mcpServers": {
     "orva": {
       "url": "${origin.value}/api/v1/mcp",
@@ -1642,6 +1595,23 @@ const Callout = defineComponent({
   border: none;
   border-radius: 0;
   background: var(--color-surface);
+}
+.tabbed-note {
+  padding: 0.7rem 1rem;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-foreground-muted);
+  background: var(--color-background);
+  border-bottom: 1px solid var(--color-border);
+}
+.tabbed-note code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+  color: white;
 }
 
 .codeblock {
