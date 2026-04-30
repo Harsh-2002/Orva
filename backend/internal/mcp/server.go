@@ -17,6 +17,7 @@ package mcp
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/Harsh-2002/Orva/internal/builder"
 	"github.com/Harsh-2002/Orva/internal/database"
@@ -160,10 +161,23 @@ production state.`
 // PRMHandler returns a minimal RFC 9728 OAuth Protected Resource
 // Metadata response describing the static-bearer auth mechanism.
 // Mounted at /.well-known/oauth-protected-resource.
+//
+// The `resource` field MUST match the URL the MCP client called when
+// it received a 401 (i.e. /mcp on this host) — otherwise some clients
+// reject the metadata as referring to a different resource. We build
+// the URL from the request's Host + scheme rather than hard-coding,
+// so the same binary works on localhost, behind reverse proxies, and
+// on custom domains without code changes.
 func PRMHandler(w http.ResponseWriter, r *http.Request) {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	host := r.Host
+	resource := scheme + "://" + host + "/mcp"
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{
-  "resource": "orva",
+  "resource": "` + resource + `",
   "authorization_servers": [],
   "bearer_methods_supported": ["header"],
   "resource_documentation": "https://github.com/Harsh-2002/Orva"

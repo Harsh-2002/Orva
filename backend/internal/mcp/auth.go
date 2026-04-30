@@ -80,8 +80,21 @@ func resolvePermissions(db *database.Database, r *http.Request) permSet {
 }
 
 // writeAuthError writes a JSON error envelope matching what the rest
-// of the REST API emits — agents see a consistent error shape.
+// of the REST API emits — agents see a consistent error shape. On 401
+// it also emits a WWW-Authenticate header per RFC 9728 pointing the
+// MCP client at our Protected Resource Metadata document, so the
+// client knows it's a static-bearer resource and skips OAuth-AS
+// discovery (which would 404 against our Plaintext "404 page not
+// found" body and break JSON parsing).
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
+	if status == http.StatusUnauthorized {
+		// RFC 9728: resource_metadata is a URL the client fetches to
+		// learn how to authenticate. The PRM doc itself lists no
+		// OAuth servers + bearer_methods_supported=["header"], which
+		// signals "send a static bearer token, no OAuth flow needed".
+		w.Header().Set("WWW-Authenticate",
+			`Bearer realm="orva", resource_metadata_uri="/.well-known/oauth-protected-resource"`)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(`{"error":{"code":"` + code + `","message":"` + message + `"}}`))
