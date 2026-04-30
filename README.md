@@ -30,8 +30,10 @@ over HTTP, and get warm-pool latency without paying anyone.
   on SQLite, optional TTL. No external service needed.
 - **Roll back** to any prior content-hashed version in one click.
   Each deploy is archived; rollback is an atomic symlink retarget.
-- **MCP server** — `/mcp` exposes the same API surface as 37 tools an
-  AI agent (Claude Code, Cursor, etc.) can call directly.
+- **MCP server** — `/mcp` exposes the full management surface (functions,
+  deploys, invocations, secrets, routes, keys, firewall, cron, KV,
+  jobs, webhooks) as 57 tools an AI agent (Claude Code, Cursor, etc.)
+  can call directly.
 - **Live dashboard** — every invocation, deploy, and metric streams
   over a single SSE connection. No polling.
 - **Per-function secrets**, encrypted at rest, injected as env vars
