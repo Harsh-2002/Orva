@@ -379,7 +379,13 @@ const onPrefixInput = () => {
 // ── Inspect drawer ─────────────────────────────────────────────────
 const openInspect = (row) => {
   inspect.row = row
-  inspect.text = JSON.stringify(row.value, null, 2)
+  // SDKs in different runtimes (Python's orva.kv vs the Node SDK)
+  // sometimes double-encode values: a dict written via Python ends up
+  // stored as a JSON string of the dict, so `row.value` arrives as
+  // a string that itself parses as JSON. Detect that and unwrap before
+  // pretty-printing so the textarea shows the real shape, not an
+  // escape-laden one-line string.
+  inspect.text = prettyJSON(row.value)
   inspect.ttlSeconds = row.expires_at ? Math.max(0, Math.floor((new Date(row.expires_at) - Date.now()) / 1000)) : 0
   inspect.error = ''
   inspect.open = true
@@ -490,14 +496,49 @@ const deleteKey = async (key) => {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+// deepParse strips a layer of JSON-string wrapping, recursively. The
+// Python SDK (orva.kv) sometimes stores dict values as their JSON
+// string form, which round-trips here as a string that itself parses
+// as JSON. Operators expect to see the *actual* stored shape, not
+// "{\"foo\":...}" with escaped quotes; this normalises that.
+const deepParse = (v, depth = 3) => {
+  if (depth <= 0 || typeof v !== 'string') return v
+  const s = v.trim()
+  // Cheap heuristic: only attempt parse when the string looks like JSON.
+  if (!s || !'{["tfn0123456789-'.includes(s[0])) return v
+  try {
+    const parsed = JSON.parse(s)
+    return deepParse(parsed, depth - 1)
+  } catch {
+    return v
+  }
+}
+
+// prettyJSON renders a value as multi-line indented JSON, after
+// stripping any double-encoding. Used for the drawer textarea.
+const prettyJSON = (v) => {
+  const u = deepParse(v)
+  try {
+    return JSON.stringify(u, null, 2)
+  } catch {
+    return String(v)
+  }
+}
+
 const valuePreview = (val) => {
   if (val === null || val === undefined) return '—'
-  if (typeof val === 'string') return JSON.stringify(val)
+  const u = deepParse(val)
+  if (typeof u === 'string') {
+    // Wrap in quotes so it's visually distinct from objects/numbers.
+    const s = JSON.stringify(u)
+    return s.length > 80 ? s.slice(0, 80) + '…' : s
+  }
   try {
-    const s = JSON.stringify(val)
+    const s = JSON.stringify(u)
     return s.length > 80 ? s.slice(0, 80) + '…' : s
   } catch {
-    return String(val)
+    return String(u)
   }
 }
 

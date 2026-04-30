@@ -328,6 +328,531 @@ def handler(event):
 const py_image_thumbnail_deps = `Pillow>=10.0
 `
 
+// Showcase: a single function that uses *every* core Orva surface —
+// HTML rendering, JSON API, orva.kv for state, orva.jobs for background
+// enrichment, cron-triggered cleanup, secret-gated admin DELETE, custom
+// route mounting, content negotiation, full status-code spectrum. The
+// best starting point for "what can a single Orva function do?"
+const py_guestbook = `"""
+guestbook — Orva showcase template
+
+A single function that demonstrates EVERY core Orva surface:
+
+  • Server-rendered dark-mode HTML page with form + feed
+  • JSON API with pagination, validation, and CORS
+  • orva.kv for durable per-function state
+  • orva.jobs to enqueue post-submit enrichment work back to itself
+  • Cron-trigger handling for periodic cleanup of stale entries
+  • Admin auth via a function secret (ADMIN_TOKEN) on destructive ops
+  • Custom route mount under /guestbook/*
+
+Setup steps after deploy:
+  1. Set the ADMIN_TOKEN secret (Settings → Secrets) to enable DELETE.
+  2. Create a custom route /guestbook/* → this function (Routes API).
+  3. (optional) Schedule a daily cron via the Schedules page; the
+     handler reads x-orva-trigger and runs the cleanup branch.
+
+Endpoints (after the route is mounted):
+  GET  /guestbook/                       → render the page
+  POST /guestbook/                       → form submission, 303 back
+  GET  /guestbook/api/submissions        → list with ?limit=&cursor=
+  GET  /guestbook/api/submissions/<id>   → one entry
+  POST /guestbook/api/submissions        → JSON body, 201
+  DELETE /guestbook/api/submissions/<id> → admin only (Bearer ADMIN_TOKEN)
+  GET  /guestbook/api/stats              → totals + last-24h count
+"""
+
+import html as _html
+import json
+import os
+import re
+import secrets
+import time
+from urllib.parse import parse_qs
+
+from orva import kv, jobs
+
+ROUTE_BASE = "/guestbook"
+NAME_RE    = re.compile(r"^[\\w \\-\\.\\'\\"@]{1,40}$")
+MAX_MSG    = 280
+LIST_LIMIT = 200
+RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "30"))
+
+
+# ── helpers ──────────────────────────────────────────────────────────
+
+def _new_id():
+    return f"sub:{time.time_ns()}:{secrets.token_hex(2)}"
+
+
+def _now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _now_unix():
+    return int(time.time())
+
+
+def _json_response(status, body, headers=None):
+    h = {"Content-Type": "application/json", "Cache-Control": "no-store",
+         "Access-Control-Allow-Origin": "*"}
+    if headers:
+        h.update(headers)
+    return {"statusCode": status, "headers": h, "body": body}
+
+
+def _html_response(body, status=200):
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"},
+        "body": body,
+    }
+
+
+def _read_body(event):
+    body = event.get("body")
+    ct = (event.get("headers") or {}).get("content-type", "").lower()
+    if isinstance(body, dict):
+        return body
+    if not body:
+        return {}
+    if "application/json" in ct:
+        try:
+            return json.loads(body) if isinstance(body, str) else body
+        except json.JSONDecodeError:
+            return {}
+    if "application/x-www-form-urlencoded" in ct or "multipart/form-data" in ct:
+        if isinstance(body, str):
+            return {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
+    if isinstance(body, str):
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _validate(data):
+    name = (data.get("name") or "").strip()
+    message = (data.get("message") or "").strip()
+    if not name:
+        return "", "", "name is required"
+    if not NAME_RE.match(name):
+        return "", "", "name must be <= 40 chars; letters / digits / @ . - _ ' \\" space only"
+    if not message:
+        return "", "", "message is required"
+    if len(message) > MAX_MSG:
+        return "", "", f"message must be <= {MAX_MSG} chars"
+    return name, message, ""
+
+
+def _save(name, message):
+    sid = _new_id()
+    record = {
+        "id":      sid,
+        "name":    name,
+        "message": message,
+        "ts":      _now_iso(),
+        "ts_unix": _now_unix(),
+    }
+    kv.put(sid, record)
+    counter = (kv.get("meta:counter", default=0) or 0) + 1
+    kv.put("meta:counter", counter)
+
+    # Hand off enrichment to the background queue. The same function
+    # picks up the job (see _on_job_trigger) — no separate worker
+    # function. The user's POST returns immediately.
+    try:
+        jobs.enqueue("guestbook", {"action": "enrich", "id": sid})
+    except Exception as e:
+        _log("warn", "jobs.enqueue failed", error=str(e))
+
+    return record
+
+
+def _unwrap(row):
+    """orva.kv.list returns either a parsed dict OR a {key, value: <json
+    string>} envelope depending on runtime. Handle both."""
+    if isinstance(row, dict) and "key" in row and "value" in row:
+        v = row["value"]
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return None
+        return v
+    return row
+
+
+def _list(limit=LIST_LIMIT, cursor=None):
+    rows = kv.list(prefix="sub:", limit=limit) or []
+    parsed = [_unwrap(r) for r in rows]
+    parsed = [r for r in parsed if isinstance(r, dict)]
+    parsed = list(reversed(parsed))  # newest first
+    if cursor:
+        try:
+            i = next(idx for idx, r in enumerate(parsed) if r.get("id") == cursor)
+            parsed = parsed[i + 1:]
+        except StopIteration:
+            pass
+    return parsed
+
+
+def _log(level, msg, **fields):
+    fields.update({"level": level, "msg": msg})
+    print(json.dumps(fields))
+
+
+# ── HTML page (inline CSS, no external deps) ────────────────────────
+
+PAGE = """\\
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>guestbook · {count}</title>
+<style>
+  :root {{
+    --bg: #0a0a0d; --surface: #15151b; --border: #25252e;
+    --fg: #e5e7eb; --muted: #8b8d97; --accent: #a78bfa; --error: #f87171;
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ background: var(--bg); color: var(--fg); margin: 0; }}
+  body {{
+    font-family: var(--sans); font-size: 14px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased; padding: 4rem 1.5rem 6rem;
+  }}
+  main {{ max-width: 36rem; margin: 0 auto; }}
+  header {{ margin-bottom: 2.5rem; }}
+  h1 {{
+    font-family: var(--mono); font-size: 1.05rem; margin: 0 0 .25rem;
+    font-weight: 600; letter-spacing: -.01em;
+  }}
+  h1 .accent {{ color: var(--accent); }}
+  header p {{ color: var(--muted); margin: 0; font-size: 13px; }}
+  form {{
+    display: grid; gap: .6rem; margin-bottom: 2.5rem; padding: 1rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  }}
+  label {{
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    letter-spacing: .04em; text-transform: uppercase;
+  }}
+  input, textarea {{
+    width: 100%; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: .55rem .7rem; font-family: var(--sans); font-size: 14px;
+    resize: vertical; transition: border-color .12s ease;
+  }}
+  input:focus, textarea:focus {{ outline: none; border-color: var(--accent); }}
+  textarea {{ min-height: 4.5rem; max-height: 12rem; font-family: var(--mono); font-size: 13px; }}
+  .row {{ display: flex; align-items: center; justify-content: space-between; gap: .75rem; }}
+  .charcount {{ font-family: var(--mono); font-size: 11px; color: var(--muted); }}
+  button {{
+    font-family: var(--mono); font-size: 12px;
+    background: var(--accent); color: #0a0a0d; border: 0;
+    padding: .55rem 1rem; border-radius: 6px; cursor: pointer;
+    font-weight: 600; letter-spacing: .02em; transition: filter .12s ease;
+  }}
+  button:hover {{ filter: brightness(1.08); }}
+  .error {{ color: var(--error); font-size: 12px; margin: 0; font-family: var(--mono); }}
+  ul.entries {{ list-style: none; margin: 0; padding: 0; }}
+  .entries li {{ padding: 1rem 0; border-top: 1px solid var(--border); }}
+  .entries li:first-child {{ border-top: 0; padding-top: 0; }}
+  .entries .head {{
+    display: flex; justify-content: space-between; gap: .75rem;
+    align-items: baseline; margin-bottom: .25rem;
+  }}
+  .entries .name {{ font-weight: 600; color: var(--fg); }}
+  .entries time {{ font-family: var(--mono); font-size: 11px; color: var(--muted); }}
+  .entries .msg {{ color: var(--fg); white-space: pre-wrap; word-break: break-word; font-size: 13.5px; }}
+  .empty {{ color: var(--muted); font-style: italic; text-align: center; padding: 2.5rem 0; }}
+  footer {{
+    margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px; font-family: var(--mono); text-align: center;
+  }}
+  footer code {{ color: var(--accent); }}
+  a {{ color: var(--accent); }}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>guestbook<span class="accent">.</span></h1>
+    <p>Drop a note — say hi, share a link, leave a thought.</p>
+  </header>
+
+  <form method="POST" action="{base}/" autocomplete="off">
+    <div>
+      <label for="name">Name</label>
+      <input id="name" name="name" maxlength="40" required value="{prefill_name}">
+    </div>
+    <div>
+      <label for="message">Message</label>
+      <textarea id="message" name="message" maxlength="{max_msg}" required>{prefill_msg}</textarea>
+    </div>
+    {error_html}
+    <div class="row">
+      <span class="charcount" id="cc">0 / {max_msg}</span>
+      <button type="submit">Sign</button>
+    </div>
+  </form>
+
+  {entries_html}
+
+  <footer>
+    <span>{count} {entry_word}</span>
+    · <span>JSON at <code>{base}/api/submissions</code></span>
+    · <span>Stats at <code>{base}/api/stats</code></span>
+  </footer>
+</main>
+<script>
+  (function () {{
+    var ta = document.getElementById('message');
+    var cc = document.getElementById('cc');
+    function tick() {{ cc.textContent = ta.value.length + ' / {max_msg}'; }}
+    ta.addEventListener('input', tick);
+    tick();
+  }})();
+</script>
+</body>
+</html>
+"""
+
+
+def _render_page(entries, count, error="", prefill_name="", prefill_msg="", base=ROUTE_BASE):
+    if entries:
+        items = []
+        for e in entries:
+            items.append(
+                "<li>"
+                "<div class=\\"head\\">"
+                f"<span class=\\"name\\">{_html.escape(str(e.get('name','')))}</span>"
+                f"<time datetime=\\"{_html.escape(str(e.get('ts','')))}\\">{_html.escape(_pretty_time(str(e.get('ts',''))))}</time>"
+                "</div>"
+                f"<div class=\\"msg\\">{_html.escape(str(e.get('message','')))}</div>"
+                "</li>"
+            )
+        entries_html = "<ul class=\\"entries\\">" + "".join(items) + "</ul>"
+    else:
+        entries_html = "<div class=\\"empty\\">No entries yet — be the first.</div>"
+
+    error_html = f"<p class=\\"error\\">{_html.escape(error)}</p>" if error else ""
+
+    return PAGE.format(
+        count=count,
+        entry_word="entry" if count == 1 else "entries",
+        max_msg=MAX_MSG,
+        prefill_name=_html.escape(prefill_name),
+        prefill_msg=_html.escape(prefill_msg),
+        error_html=error_html,
+        entries_html=entries_html,
+        base=base,
+    )
+
+
+def _pretty_time(iso):
+    if not iso:
+        return ""
+    try:
+        ts = time.mktime(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
+    except Exception:
+        return iso
+    delta = max(0, time.time() - ts)
+    if delta < 45:        return "just now"
+    if delta < 90:        return "1 min ago"
+    if delta < 3600:      return f"{int(delta // 60)} min ago"
+    if delta < 7200:      return "1 hour ago"
+    if delta < 86400:     return f"{int(delta // 3600)} hours ago"
+    if delta < 172800:    return "yesterday"
+    return iso[:10]
+
+
+def _strip_route_prefix(path):
+    if path.startswith(ROUTE_BASE):
+        rest = path[len(ROUTE_BASE):]
+        return rest if rest else "/"
+    if path.startswith("/fn/"):
+        rest = path[len("/fn/"):]
+        i = rest.find("/")
+        return rest[i:] if i >= 0 else "/"
+    return path
+
+
+# ── trigger dispatch (cron / job) ───────────────────────────────────
+
+def _on_cron_trigger(event):
+    """Fired by the scheduler. Sweeps records older than RETENTION_DAYS."""
+    cutoff = _now_unix() - RETENTION_DAYS * 86400
+    deleted = 0
+    rows = kv.list(prefix="sub:", limit=1000) or []
+    for row in (_unwrap(r) for r in rows):
+        if not isinstance(row, dict):
+            continue
+        if row.get("ts_unix", 0) < cutoff:
+            kv.delete(row["id"])
+            kv.delete(f"enriched:{row['id']}")
+            deleted += 1
+    _log("info", "cron cleanup",
+         retention_days=RETENTION_DAYS, cutoff=cutoff, deleted=deleted)
+    return _json_response(200, {"trigger": "cron", "deleted": deleted, "cutoff": cutoff})
+
+
+def _on_job_trigger(event):
+    """Fired by orva.jobs.enqueue. Computes enrichment after a
+    submission lands so the user's POST returns instantly."""
+    body = event.get("body") or {}
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError:
+            body = {}
+    action = body.get("action")
+    sid = body.get("id")
+    if action != "enrich" or not sid:
+        return _json_response(400, {"error": "unknown job action", "body": body})
+
+    record = kv.get(sid)
+    if not record:
+        return _json_response(404, {"error": "submission not found", "id": sid})
+
+    msg = record.get("message", "")
+    enriched = {
+        "id":      sid,
+        "length":  len(msg),
+        "tokens":  len(msg.split()),
+        "links":   bool(re.search(r"https?://", msg)),
+        "checked": _now_iso(),
+    }
+    kv.put(f"enriched:{sid}", enriched)
+    _log("info", "job enriched", id=sid, length=enriched["length"], tokens=enriched["tokens"])
+    return _json_response(200, {"trigger": "job", "enriched": enriched})
+
+
+# ── admin auth ──────────────────────────────────────────────────────
+
+def _is_admin(event):
+    """Authorization: Bearer <ADMIN_TOKEN>. Token from a function secret."""
+    token = os.environ.get("ADMIN_TOKEN", "")
+    if not token:
+        return False
+    auth = (event.get("headers") or {}).get("authorization", "")
+    if auth.startswith("Bearer "):
+        return secrets.compare_digest(auth[7:], token)
+    return False
+
+
+# ── main dispatch ───────────────────────────────────────────────────
+
+def handler(event):
+    headers = event.get("headers") or {}
+    trigger = headers.get("x-orva-trigger", "")
+
+    # Cron / job invocations short-circuit. Same function, same KV
+    # namespace — just a different entry point.
+    if trigger == "cron":
+        return _on_cron_trigger(event)
+    if trigger == "job":
+        return _on_job_trigger(event)
+
+    method = (event.get("method") or "GET").upper()
+    raw_path = (event.get("path") or "/").split("?", 1)[0]
+    path = _strip_route_prefix(raw_path)
+    parts = [p for p in path.split("/") if p]
+
+    if method == "OPTIONS":
+        return {
+            "statusCode": 204,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Access-Control-Max-Age": "600",
+            },
+            "body": "",
+        }
+
+    # GET / → HTML
+    if method == "GET" and not parts:
+        entries = _list(limit=50)
+        count = kv.get("meta:counter", default=0) or 0
+        return _html_response(_render_page(entries, count))
+
+    # POST / → form submission
+    if method == "POST" and not parts:
+        data = _read_body(event)
+        name, message, err = _validate(data)
+        if err:
+            entries = _list(limit=50)
+            count = kv.get("meta:counter", default=0) or 0
+            return _html_response(_render_page(
+                entries, count, error=err,
+                prefill_name=str(data.get("name", "")),
+                prefill_msg=str(data.get("message", "")),
+            ), status=400)
+        _save(name, message)
+        return {"statusCode": 303, "headers": {"Location": ROUTE_BASE + "/"}, "body": ""}
+
+    # ── JSON API ────────────────────────────────────────────────────
+    if parts and parts[0] == "api":
+
+        # GET /api/stats
+        if method == "GET" and len(parts) == 2 and parts[1] == "stats":
+            count = kv.get("meta:counter", default=0) or 0
+            day_ago = _now_unix() - 86400
+            recent = sum(1 for r in _list(limit=500) if r.get("ts_unix", 0) >= day_ago)
+            return _json_response(200, {
+                "total":         count,
+                "last_24h":      recent,
+                "retention_days": RETENTION_DAYS,
+            })
+
+        if len(parts) >= 2 and parts[1] == "submissions":
+            # GET /api/submissions[?limit=&cursor=]
+            if method == "GET" and len(parts) == 2:
+                q = event.get("query", {}) or {}
+                limit = min(int(q.get("limit", LIST_LIMIT)), LIST_LIMIT)
+                cursor = q.get("cursor")
+                items = _list(limit=limit, cursor=cursor)
+                next_cursor = items[-1]["id"] if len(items) == limit else None
+                return _json_response(200, {
+                    "count":       kv.get("meta:counter", default=0) or 0,
+                    "submissions": items,
+                    "next_cursor": next_cursor,
+                })
+
+            # GET /api/submissions/<id>
+            if method == "GET" and len(parts) == 3:
+                row = kv.get(parts[2])
+                if not row:
+                    return _json_response(404, {"error": "not found"})
+                enriched = kv.get(f"enriched:{parts[2]}")
+                if enriched:
+                    row = {**row, "enriched": enriched}
+                return _json_response(200, row)
+
+            # POST /api/submissions
+            if method == "POST" and len(parts) == 2:
+                data = _read_body(event)
+                name, message, err = _validate(data)
+                if err:
+                    return _json_response(400, {"error": err})
+                return _json_response(201, _save(name, message))
+
+            # DELETE /api/submissions/<id>  (admin only)
+            if method == "DELETE" and len(parts) == 3:
+                if not _is_admin(event):
+                    return _json_response(401, {"error": "admin token required"})
+                kv.delete(parts[2])
+                kv.delete(f"enriched:{parts[2]}")
+                return _json_response(200, {"status": "deleted", "id": parts[2]})
+
+    return _json_response(404, {"error": "not found", "path": path})
+`
+
 // ─────────────────────────────────────────────────────────────────────
 //  Node
 // ─────────────────────────────────────────────────────────────────────
@@ -681,6 +1206,10 @@ const pythonTemplates = [
   { id: 'py-image-thumbnail', category: 'Utility',  label: 'Image thumbnail',
     description: 'Resize a base64 image with Pillow; returns PNG.',
     code: py_image_thumbnail, deps: py_image_thumbnail_deps },
+
+  { id: 'py-guestbook',      category: 'Showcase',  label: 'Guestbook (full-stack showcase)', cron: true,
+    description: 'HTML page + JSON API + KV + jobs + cron + secrets in one file. Best demo of what one Orva function can do.',
+    code: py_guestbook, deps: '' },
 ]
 
 const nodeTemplates = [
@@ -735,4 +1264,4 @@ export const defaultCode = {
 }
 
 // Categories in display order — used by the picker UX to group entries.
-export const categoryOrder = ['Starter', 'Webhooks', 'Auth', 'Utility', 'Scheduled']
+export const categoryOrder = ['Starter', 'Webhooks', 'Auth', 'Utility', 'Scheduled', 'Showcase']
