@@ -136,18 +136,8 @@
             class="text-foreground-muted"
           >· template: {{ templateId }}</span>
         </div>
-        <div class="flex items-center gap-3">
-          <button
-            v-if="!isEditing"
-            class="ai-gen-link"
-            title="Open ChatGPT pre-loaded with everything Orva supports"
-            @click="onGenerateWithAI"
-          >
-            <Sparkles class="w-3 h-3" /> Generate with AI
-          </button>
-          <div class="text-[10px] text-foreground-muted font-mono">
-            {{ code.length }} chars
-          </div>
+        <div class="text-[10px] text-foreground-muted font-mono">
+          {{ code.length }} chars
         </div>
       </div>
       <CodeEditor
@@ -185,10 +175,19 @@
           <button
             v-if="terminalTab === 'test'"
             :disabled="!canTest || invoking"
-            class="panel-btn"
+            class="run-btn"
+            :title="canTest ? 'Invoke with the payload below' : 'Deploy first'"
             @click="invokeFunction"
           >
-            <Play class="w-3 h-3" /> Run
+            <Play
+              v-if="!invoking"
+              class="w-3 h-3"
+            />
+            <span
+              v-else
+              class="run-spinner"
+            />
+            Run
           </button>
           <button
             class="p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors"
@@ -226,72 +225,88 @@
           </div>
         </div>
 
-        <!-- Test tab: payload editor on the left, response + function
-             stdout/stderr on the right. Single surface — no clicking
-             between Test and Output. -->
+        <!-- Test tab — VS-Code-style split: request on the left, response
+             on the right. Each side has its own column header that
+             matches the surrounding tab strip's micro-label rhythm so
+             the divider line and label baselines align across both
+             columns. -->
         <div
           v-else-if="terminalTab === 'test'"
-          class="grid grid-cols-1 md:grid-cols-2 gap-0 h-full"
+          class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] h-full"
         >
-          <!-- Payload column -->
-          <div class="p-3 border-b md:border-b-0 md:border-r border-border flex flex-col gap-2 min-h-0">
-            <div class="flex items-center justify-between">
-              <label class="text-[10px] uppercase tracking-wider text-foreground-muted">Payload (JSON)</label>
+          <!-- Request column -->
+          <div class="flex flex-col min-h-0 border-b md:border-b-0 md:border-r border-border">
+            <div class="h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
+              <span class="text-[10px] uppercase tracking-[0.14em] font-medium text-foreground-muted">
+                Request · JSON
+              </span>
               <span
                 v-if="!canTest"
-                class="text-[10px] text-amber-400/70"
+                class="text-[10px] text-amber-400/80"
               >Deploy first</span>
+              <span
+                v-else
+                class="text-[10px] text-foreground-muted/70 font-mono"
+              >{{ testPayload.length }} chars</span>
             </div>
             <textarea
               v-model="testPayload"
               :disabled="!canTest"
-              class="flex-1 w-full bg-surface-hover border border-border rounded text-xs font-mono p-2 text-foreground focus:outline-none focus:border-white resize-none disabled:opacity-50"
+              spellcheck="false"
+              class="flex-1 w-full min-h-0 bg-background text-xs font-mono p-3 text-foreground focus:outline-none resize-none disabled:opacity-50 placeholder:text-foreground-muted/50"
               placeholder="{}"
             />
           </div>
 
           <!-- Response + logs column -->
-          <div class="p-3 flex flex-col gap-3 min-h-0 overflow-y-auto">
-            <!-- Response panel -->
-            <div
-              v-if="output || error"
-              class="rounded bg-surface border border-border text-xs font-mono break-all"
-            >
-              <div
-                class="px-3 py-2 border-b border-border flex items-center justify-between text-[10px] uppercase tracking-wider"
-                :class="error ? 'text-red-400' : 'text-success'"
+          <div class="flex flex-col min-h-0">
+            <div class="h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
+              <span class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5"
+                :class="error ? 'text-red-400' : output ? 'text-success' : 'text-foreground-muted'"
               >
-                <span>{{ error ? 'Error' : 'Response' }}</span>
                 <span
-                  v-if="duration"
-                  class="text-foreground-muted normal-case tracking-normal"
-                >{{ status }} · {{ duration }}ms</span>
-              </div>
-              <pre class="px-3 py-2 text-foreground whitespace-pre-wrap">{{ output || error }}</pre>
-            </div>
-            <div
-              v-else
-              class="text-xs text-foreground-muted italic"
-            >
-              Hit <span class="text-white not-italic">Run</span> to invoke this function with the payload on the left.
+                  class="w-1.5 h-1.5 rounded-full"
+                  :class="error ? 'bg-red-400' : output ? 'bg-success' : 'bg-foreground-muted/40'"
+                />
+                {{ error ? 'Error' : output ? 'Response' : 'Idle' }}
+              </span>
+              <span
+                v-if="duration"
+                class="text-[10px] text-foreground-muted/80 font-mono"
+              >{{ status }} · {{ duration }}ms</span>
             </div>
 
-            <!-- stdout/stderr from the function. Always shown when there
-                 are entries — saves a tab switch. -->
-            <div
-              v-if="invokeLogs.length"
-              class="rounded bg-surface border border-border text-xs"
-            >
-              <div class="px-3 py-2 border-b border-border text-[10px] uppercase tracking-wider text-foreground-muted">
-                Function logs
+            <div class="flex-1 min-h-0 overflow-y-auto">
+              <!-- Response body -->
+              <pre
+                v-if="output || error"
+                class="px-3 py-2.5 font-mono text-xs whitespace-pre-wrap break-all leading-relaxed"
+                :class="error ? 'text-red-200' : 'text-foreground'"
+              >{{ output || error }}</pre>
+              <div
+                v-else
+                class="px-3 py-3 text-xs text-foreground-muted italic"
+              >
+                Hit <span class="not-italic text-white">Run</span> to invoke this function with the request payload.
               </div>
-              <div class="px-3 py-2 font-mono space-y-0.5 max-h-40 overflow-y-auto">
-                <div
-                  v-for="(log, idx) in invokeLogs"
-                  :key="idx"
-                  class="text-foreground-muted whitespace-pre-wrap break-words"
-                >
-                  {{ log }}
+
+              <!-- Function stdout/stderr — only when present, with its own
+                   micro-divider so it doesn't blend into the response. -->
+              <div
+                v-if="invokeLogs.length"
+                class="border-t border-border"
+              >
+                <div class="h-6 px-3 flex items-center text-[10px] uppercase tracking-[0.14em] text-foreground-muted/80 bg-surface/30">
+                  Function logs · {{ invokeLogs.length }}
+                </div>
+                <div class="px-3 py-2 font-mono text-xs space-y-0.5">
+                  <div
+                    v-for="(log, idx) in invokeLogs"
+                    :key="idx"
+                    class="text-foreground-muted whitespace-pre-wrap break-words"
+                  >
+                    {{ log }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -805,7 +820,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Sparkles, Shuffle } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
@@ -815,7 +830,6 @@ import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import { generateFunctionName } from '@/utils/funName'
 import { templates, defaultCode, categoryOrder } from '@/templates'
-import { openInChatGPT } from '@/utils/aiPrompts'
 import { rollbackFunction } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 
@@ -913,10 +927,6 @@ const totalSecretsCount = computed(() => secrets.value.length + pendingSecrets.v
 
 const isEditing = computed(() => !!route.params.name)
 
-// "Generate with AI" — opens ChatGPT in a new tab pre-loaded with the
-// shared Orva system prompt. Only shown when creating a new function
-// (the link is hidden once the user is editing an existing one).
-const onGenerateWithAI = () => openInChatGPT()
 // canTest: function has deployed code AND there's no active build in
 // flight. While `deploying` is true, the warm pool may be holding stale
 // code (or none, on a first deploy) so test invocations should wait.
@@ -1645,26 +1655,42 @@ const resetForm = async () => {
   cursor: not-allowed;
 }
 
-/* "Generate with AI" entry point in the editor file header — only
-   shown when creating a new function. Subtle by default; sparkle
-   icon and hover accent surface it without competing with Deploy. */
-.ai-gen-link {
+/* Compact Run button in the terminal-tab strip. Smaller than panel-btn
+   but distinguishable via the primary tint so the user spots the
+   action immediately. Sits right-aligned next to the collapse chevron. */
+.run-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
   padding: 0.2rem 0.55rem;
-  border-radius: 0.375rem;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--color-foreground-muted);
+  border-radius: 0.3rem;
+  border: 1px solid rgba(85, 63, 131, 0.55);
+  background: rgba(85, 63, 131, 0.18);
+  color: var(--color-foreground);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.ai-gen-link:hover {
+.run-btn:hover:not(:disabled) {
+  background: rgba(85, 63, 131, 0.32);
+  border-color: var(--color-primary);
   color: white;
-  border-color: rgba(16, 163, 127, 0.45);
-  background: rgba(16, 163, 127, 0.08);
 }
+.run-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.run-spinner {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: run-spin 700ms linear infinite;
+}
+@keyframes run-spin {
+  to { transform: rotate(360deg); }
+}
+
 </style>
