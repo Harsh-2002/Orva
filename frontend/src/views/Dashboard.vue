@@ -1,27 +1,8 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-xl font-semibold text-foreground tracking-tight">System Overview</h1>
-        <p class="text-xs text-foreground-muted mt-1">Live snapshot of what your platform is doing right now.</p>
-      </div>
-      <div
-        class="flex items-center gap-2 text-xs"
-        :class="system.isConnected ? 'text-success' : 'text-error'"
-        :title="system.isConnected ? 'Live event stream connected' : 'Reconnecting…'"
-      >
-        <span class="relative flex h-2 w-2">
-          <span
-            v-if="system.isConnected"
-            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-60"
-          />
-          <span
-            class="relative inline-flex rounded-full h-2 w-2"
-            :class="system.isConnected ? 'bg-success' : 'bg-error'"
-          />
-        </span>
-        {{ system.isConnected ? 'Live' : 'Reconnecting…' }}
-      </div>
+    <div>
+      <h1 class="text-xl font-semibold text-foreground tracking-tight">System Overview</h1>
+      <p class="text-xs text-foreground-muted mt-1">Live snapshot of what your platform is doing right now.</p>
     </div>
 
     <!-- Top-line numbers — every tile has a one-line "what does this mean" -->

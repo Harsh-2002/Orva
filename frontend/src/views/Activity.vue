@@ -1,44 +1,13 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between gap-4">
-      <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
-          Activity
-        </h1>
-        <p class="text-xs text-foreground-muted mt-1">
-          Live feed of every API call hitting Orva — UI clicks, REST/SDK,
-          MCP tools, webhook deliveries.
-        </p>
-      </div>
-      <div class="flex items-center gap-2">
-        <span
-          class="text-[11px] inline-flex items-center gap-1.5"
-          :class="paused ? 'text-amber-400' : (eventsStore.connected ? 'text-emerald-400' : 'text-foreground-muted')"
-        >
-          <span
-            class="w-1.5 h-1.5 rounded-full"
-            :class="paused ? 'bg-amber-400' : (eventsStore.connected ? 'bg-emerald-400 animate-pulse' : 'bg-foreground-muted')"
-          />
-          {{ paused ? 'Paused' : (eventsStore.connected ? 'Live' : 'Reconnecting…') }}
-        </span>
-        <Button
-          variant="secondary"
-          size="xs"
-          @click="paused = !paused"
-        >
-          <Pause v-if="!paused" class="w-3.5 h-3.5" />
-          <Play v-else class="w-3.5 h-3.5" />
-          {{ paused ? 'Resume' : 'Pause' }}
-        </Button>
-        <Button
-          variant="secondary"
-          size="xs"
-          @click="refresh"
-        >
-          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
-          Refresh
-        </Button>
-      </div>
+    <div>
+      <h1 class="text-xl font-semibold text-white tracking-tight">
+        Activity
+      </h1>
+      <p class="text-xs text-foreground-muted mt-1">
+        Live feed of every API call hitting Orva — UI clicks, REST/SDK,
+        MCP tools, webhook deliveries.
+      </p>
     </div>
 
     <!-- Filter strip -->
@@ -59,7 +28,7 @@
         variant="chip"
         size="xs"
         :active="filters.source === opt.value"
-        @click="filters.source = opt.value; refresh()"
+        @click="filters.source = opt.value; reset()"
       >
         {{ opt.label }}
         <span
@@ -76,7 +45,7 @@
         variant="chip"
         size="xs"
         :active="filters.statusBucket === opt.value"
-        @click="filters.statusBucket = opt.value; refresh()"
+        @click="filters.statusBucket = opt.value; reset()"
       >
         {{ opt.label }}
       </Button>
@@ -89,7 +58,7 @@
         variant="chip"
         size="xs"
         :active="filters.range === opt.value"
-        @click="filters.range = opt.value; refresh()"
+        @click="filters.range = opt.value; reset()"
       >
         {{ opt.label }}
       </Button>
@@ -164,66 +133,106 @@
       </table>
     </div>
 
-    <div v-if="hasMore" class="flex justify-center">
-      <Button variant="secondary" size="xs" :loading="loading" @click="loadMore">
-        Load more
-      </Button>
+    <!-- Pagination: numbered pages over the historical query. Live SSE
+         prepends new rows on page 1 only — when the operator paginates
+         back, we stop appending live rows (the page they're reading
+         must stay stable) but the live tail keeps building in memory
+         and rejoins the top when they come back. -->
+    <div
+      v-if="totalPages > 1"
+      class="flex items-center justify-between text-xs"
+    >
+      <div class="text-foreground-muted">
+        Page {{ page }} of {{ totalPages }} · {{ totalKnown }}{{ hasMoreBeyondKnown ? '+' : '' }} rows
+      </div>
+      <div class="flex items-center gap-1">
+        <Button
+          variant="secondary"
+          size="xs"
+          :disabled="page <= 1"
+          @click="goToPage(page - 1)"
+        >
+          <ChevronLeft class="w-3.5 h-3.5" />
+          Prev
+        </Button>
+        <Button
+          v-for="p in visiblePages"
+          :key="p"
+          :variant="p === page ? 'primary' : 'secondary'"
+          size="xs"
+          @click="goToPage(p)"
+        >
+          {{ p }}
+        </Button>
+        <Button
+          variant="secondary"
+          size="xs"
+          :disabled="page >= totalPages && !hasMoreBeyondKnown"
+          @click="goToPage(page + 1)"
+        >
+          Next
+          <ChevronRight class="w-3.5 h-3.5" />
+        </Button>
+      </div>
     </div>
 
     <!-- Detail drawer -->
     <Drawer v-model="drawerOpen" :title="drawerTitle" width="640px">
-      <div v-if="drawerRow" class="space-y-5 text-sm">
+      <div v-if="drawerRow" class="p-5 space-y-5 text-sm">
+        <!-- Stat grid — 2 cols, mirrors InvocationsLog drawer for visual parity. -->
         <div class="grid grid-cols-2 gap-3">
-          <div>
-            <div class="text-[10px] uppercase tracking-wide text-foreground-muted">Time</div>
-            <div class="text-white font-mono mt-0.5">{{ formatFullTime(drawerRow.ts) }}</div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Time</div>
+            <div class="text-xs text-white font-mono truncate">{{ formatFullTime(drawerRow.ts) }}</div>
           </div>
-          <div>
-            <div class="text-[10px] uppercase tracking-wide text-foreground-muted">Source</div>
-            <div class="mt-0.5"><SourceTag :source="drawerRow.source" /></div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Source</div>
+            <SourceTag :source="drawerRow.source" />
           </div>
-          <div>
-            <div class="text-[10px] uppercase tracking-wide text-foreground-muted">Actor</div>
-            <div class="text-white mt-0.5">{{ drawerRow.actor_label || '—' }}</div>
-            <div v-if="drawerRow.actor_id" class="text-[11px] text-foreground-muted font-mono">{{ drawerRow.actor_id }}</div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Actor</div>
+            <div class="text-sm text-white truncate">{{ drawerRow.actor_label || '—' }}</div>
+            <div v-if="drawerRow.actor_id" class="text-[11px] text-foreground-muted font-mono truncate mt-0.5">{{ drawerRow.actor_id }}</div>
           </div>
-          <div>
-            <div class="text-[10px] uppercase tracking-wide text-foreground-muted">Status</div>
-            <div class="mt-0.5">
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Status</div>
+            <div class="flex items-center gap-2">
               <StatusBadge v-if="drawerRow.status" :status="statusLabel(drawerRow.status)" />
               <span v-else class="text-foreground-muted text-xs">—</span>
-              <span v-if="drawerRow.status" class="ml-2 text-xs text-foreground-muted font-mono">{{ drawerRow.status }}</span>
+              <span v-if="drawerRow.status" class="text-xs text-foreground-muted font-mono">HTTP {{ drawerRow.status }}</span>
             </div>
           </div>
-          <div>
-            <div class="text-[10px] uppercase tracking-wide text-foreground-muted">Method</div>
-            <div class="text-white font-mono mt-0.5">{{ drawerRow.method || '—' }}</div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Method</div>
+            <div class="text-xs text-white font-mono truncate">{{ drawerRow.method || '—' }}</div>
           </div>
-          <div>
-            <div class="text-[10px] uppercase tracking-wide text-foreground-muted">Duration</div>
-            <div class="text-white font-mono mt-0.5">{{ formatDuration(drawerRow.duration_ms) }}</div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Duration</div>
+            <div class="text-xs text-white font-mono">{{ formatDuration(drawerRow.duration_ms) }}</div>
           </div>
         </div>
 
+        <!-- Path / tool — full-width -->
         <div>
-          <div class="text-[10px] uppercase tracking-wide text-foreground-muted mb-1">Path / Tool</div>
-          <div class="bg-surface border border-border rounded px-3 py-2 text-xs text-white font-mono break-all">
-            {{ drawerRow.path || '—' }}
-          </div>
+          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Path / Tool</div>
+          <pre class="bg-surface border border-border rounded p-3 text-xs text-white font-mono whitespace-pre-wrap break-all">{{ drawerRow.path || '—' }}</pre>
         </div>
 
+        <!-- Summary -->
         <div>
-          <div class="text-[10px] uppercase tracking-wide text-foreground-muted mb-1">Summary</div>
-          <div class="text-foreground">{{ drawerRow.summary || '—' }}</div>
+          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Summary</div>
+          <div class="text-foreground break-words">{{ drawerRow.summary || '—' }}</div>
         </div>
 
+        <!-- Request id -->
         <div v-if="drawerRow.request_id">
-          <div class="text-[10px] uppercase tracking-wide text-foreground-muted mb-1">Request ID</div>
-          <div class="text-xs font-mono text-foreground-muted break-all">{{ drawerRow.request_id }}</div>
+          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request ID</div>
+          <pre class="bg-surface border border-border rounded p-3 text-xs text-foreground-muted font-mono whitespace-pre-wrap break-all">{{ drawerRow.request_id }}</pre>
         </div>
 
+        <!-- Metadata JSON -->
         <div v-if="prettyMetadata">
-          <div class="text-[10px] uppercase tracking-wide text-foreground-muted mb-1">Metadata</div>
+          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Metadata</div>
           <pre class="bg-surface border border-border rounded p-3 text-xs text-foreground font-mono overflow-auto max-h-72 whitespace-pre-wrap break-words">{{ prettyMetadata }}</pre>
         </div>
       </div>
@@ -233,7 +242,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
-import { Search, RefreshCw, Pause, Play } from 'lucide-vue-next'
+import { Search, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
@@ -273,17 +282,33 @@ const filters = ref({
 })
 
 // ── State ───────────────────────────────────────────────────────────
-const rows = ref([])
-const loading = ref(false)
-const paused = ref(false)
-const hasMore = ref(false)
-const cursor = ref(0)
-const drawerOpen = ref(false)
-const drawerRow = ref(null)
+// historyRows  = rows fetched for the current page (server-side).
+// liveRows     = rows that arrived via SSE while the user is on page 1.
+//                Rendered ABOVE historyRows on page 1, dropped on
+//                navigate-away to keep the visible page stable.
+// page / pageSize / totalKnown drive numbered pagination. The server
+// hands back next_cursor when more rows exist; we use it to detect
+// whether the next page exists without forcing an upfront full count.
+const historyRows = ref([])
+const liveRows    = ref([])
+const drawerOpen  = ref(false)
+const drawerRow   = ref(null)
+const totalKnown  = ref(0)
+const hasMoreBeyondKnown = ref(false)
 
-const MAX_LIVE_ROWS = 1000
+const PAGE_SIZE       = 100
+const MAX_LIVE_BUFFER = 200
 
-// ── Counts (per-source pill suffix) ────────────────────────────────
+const page  = ref(1)
+const pages = ref([{ since: undefined, until: undefined }])
+
+// Visible rows = live (only on page 1) + paginated history.
+const rows = computed(() => {
+  if (page.value === 1) return [...liveRows.value, ...historyRows.value]
+  return historyRows.value
+})
+
+// Counts pill suffix — based on the rows currently visible. Cheap.
 const counts = computed(() => {
   const out = {}
   for (const r of rows.value) {
@@ -293,16 +318,16 @@ const counts = computed(() => {
   return out
 })
 
-// ── Fetching history (initial + on filter change + Load more) ──────
-const buildParams = (extra = {}) => {
-  const p = { limit: 200 }
-  if (filters.value.source) p.source = filters.value.source
-  if (filters.value.statusBucket === 'err') p.status_min = 400
-  if (filters.value.q) p.q = filters.value.q
-  const since = rangeMS(filters.value.range)
-  if (since) p.since = Date.now() - since
-  return Object.assign(p, extra)
-}
+// totalPages is a best-effort: we know about (pages loaded so far).
+// If the server tells us there's more, we tack on a "+" indicator.
+const totalPages = computed(() => Math.max(pages.value.length, page.value))
+const visiblePages = computed(() => {
+  // Show up to 5 pages around the current one, plus first + last.
+  const t = totalPages.value
+  const c = page.value
+  const set = new Set([1, t, c - 1, c, c + 1])
+  return [...set].filter((p) => p >= 1 && p <= t).sort((a, b) => a - b)
+})
 
 const rangeMS = (key) => {
   switch (key) {
@@ -314,32 +339,61 @@ const rangeMS = (key) => {
   }
 }
 
-const refresh = async () => {
-  loading.value = true
-  try {
-    const res = await listActivity(buildParams())
-    rows.value = res.data?.rows || []
-    cursor.value = res.data?.next_cursor || 0
-    hasMore.value = cursor.value > 0
-  } finally {
-    loading.value = false
-  }
+const buildParams = (extra = {}) => {
+  const p = { limit: PAGE_SIZE }
+  if (filters.value.source) p.source = filters.value.source
+  if (filters.value.statusBucket === 'err') p.status_min = 400
+  if (filters.value.q) p.q = filters.value.q
+  const since = rangeMS(filters.value.range)
+  if (since) p.since = Date.now() - since
+  return Object.assign(p, extra)
 }
 
-const loadMore = async () => {
-  if (!cursor.value) return
-  loading.value = true
-  try {
-    const res = await listActivity(buildParams({ cursor: cursor.value }))
-    rows.value = rows.value.concat(res.data?.rows || [])
-    cursor.value = res.data?.next_cursor || 0
-    hasMore.value = cursor.value > 0
-  } finally {
-    loading.value = false
+// goToPage swaps in the next page of history. Page 1 always uses no
+// cursor (newest-first); page N uses pages[N-1].cursor (the next_cursor
+// the server returned at the end of page N-1).
+const goToPage = async (p) => {
+  if (p < 1) return
+  // We can only go forward as far as we have a recorded cursor for.
+  if (p > pages.value.length + 1) return
+
+  // Need to fetch page p? Always — we don't cache page rows because
+  // live activity invalidates them anyway.
+  const cursorForPage = pages.value[p - 1]?.cursor
+  const res = await listActivity(buildParams(cursorForPage ? { cursor: cursorForPage } : {}))
+  historyRows.value = res.data?.rows || []
+  const next = res.data?.next_cursor || 0
+  hasMoreBeyondKnown.value = next > 0
+
+  // Record this page's bounds for back-nav and the next page's cursor.
+  if (!pages.value[p - 1]) pages.value[p - 1] = {}
+  pages.value[p - 1].cursor = cursorForPage
+  if (next) {
+    if (!pages.value[p]) pages.value[p] = {}
+    pages.value[p].cursor = next
+  } else {
+    // No more pages — trim the recorded list.
+    pages.value = pages.value.slice(0, p)
   }
+
+  totalKnown.value = (p - 1) * PAGE_SIZE + historyRows.value.length
+
+  page.value = p
+  // On page > 1, freeze the live tail so the visible page stays stable.
+  if (p > 1) liveRows.value = []
 }
 
-// ── Live subscription via SSE ───────────────────────────────────────
+// resetAndReload returns the user to page 1 and re-runs the query
+// from scratch with the current filters. Called after any filter
+// change.
+const reset = async () => {
+  pages.value = [{ since: undefined, until: undefined }]
+  liveRows.value = []
+  page.value = 1
+  await goToPage(1)
+}
+
+// Live tail.
 let unsub = null
 
 const matchesFilters = (row) => {
@@ -354,19 +408,21 @@ const matchesFilters = (row) => {
 }
 
 const onLiveActivity = (row) => {
-  if (paused.value) return
   if (!matchesFilters(row)) return
-  rows.value.unshift(row)
-  if (rows.value.length > MAX_LIVE_ROWS) {
-    rows.value = rows.value.slice(0, MAX_LIVE_ROWS)
+  // Only render live rows on page 1; on deeper pages the user's scroll
+  // would jump if we prepended.
+  if (page.value !== 1) return
+  liveRows.value.unshift(row)
+  if (liveRows.value.length > MAX_LIVE_BUFFER) {
+    liveRows.value = liveRows.value.slice(0, MAX_LIVE_BUFFER)
   }
 }
 
-// ── Search debounce ─────────────────────────────────────────────────
+// Search debounce.
 let searchTimer = null
 const onSearchInput = () => {
   clearTimeout(searchTimer)
-  searchTimer = setTimeout(refresh, 250)
+  searchTimer = setTimeout(reset, 250)
 }
 
 // ── Drawer ──────────────────────────────────────────────────────────
@@ -424,9 +480,9 @@ const unsubscribeLive = () => {
 
 onMounted(() => {
   subscribeLive()
-  refresh()
+  reset()
 })
 onUnmounted(unsubscribeLive)
-onActivated(() => { subscribeLive(); refresh() })
+onActivated(() => { subscribeLive(); reset() })
 onDeactivated(unsubscribeLive)
 </script>
