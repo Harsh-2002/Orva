@@ -3,16 +3,20 @@
     <Transition name="drawer-fade">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-50"
+        class="fixed inset-0 z-50 pointer-events-none"
       >
+        <!-- Click-outside to close. Transparent — no overlay, no blur,
+             no dimming. The drawer reads as an inline panel that slides
+             in from the right, not a modal floating on top of a darkened
+             page. -->
         <div
-          class="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+          class="absolute inset-0 pointer-events-auto"
           @click="close"
         />
         <Transition name="drawer-slide">
           <div
             v-if="modelValue"
-            class="absolute right-0 top-0 bottom-0 bg-background border-l border-border shadow-2xl flex flex-col"
+            class="absolute right-0 top-0 bottom-0 bg-background border-l border-border flex flex-col pointer-events-auto"
             :style="{ width: width }"
             @keydown.esc="close"
             tabindex="-1"
