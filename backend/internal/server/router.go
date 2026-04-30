@@ -183,6 +183,15 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/functions/{fn_id}/secrets", secretHandler.Upsert)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/secrets/{key}", secretHandler.Delete)
 
+	// Operator-facing KV inspector (the dashboard's KV page). The
+	// internal-token /api/v1/_kv/* surface stays separate for SDK calls
+	// from inside sandboxes.
+	kvOperatorHandler := &handlers.KVOperatorHandler{DB: r.db, Registry: r.registry}
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/kv", kvOperatorHandler.List)
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Get)
+	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Put)
+	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Delete)
+
 	// Cron schedules (per-function, fired by internal/scheduler).
 	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry}
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/cron",         cronHandler.List)

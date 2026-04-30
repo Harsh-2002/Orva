@@ -73,6 +73,21 @@ export const getInvocationLogs = (id) => apiClient.get(`/executions/${id}/logs`)
 // limit (default 200, max 1000), cursor (ts millis from prior page).
 export const listActivity = (params) => apiClient.get('/activity', { params })
 
+// Per-function KV inspector. Same axios apiClient + same error shape as
+// the rest of the surface. Keys can contain ":" / "/" so we always
+// encode them; both fnId-as-id (fn_xxx) and fnId-as-name work.
+export const kvList = (fnId, params) =>
+  apiClient.get(`/functions/${encodeURIComponent(fnId)}/kv`, { params })
+
+export const kvGet = (fnId, key) =>
+  apiClient.get(`/functions/${encodeURIComponent(fnId)}/kv/${encodeURIComponent(key)}`)
+
+export const kvPut = (fnId, key, body) =>
+  apiClient.put(`/functions/${encodeURIComponent(fnId)}/kv/${encodeURIComponent(key)}`, body)
+
+export const kvDelete = (fnId, key) =>
+  apiClient.delete(`/functions/${encodeURIComponent(fnId)}/kv/${encodeURIComponent(key)}`)
+
 // API Keys
 export const listApiKeys = () => apiClient.get('/keys')
 

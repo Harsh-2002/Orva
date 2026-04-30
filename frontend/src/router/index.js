@@ -26,6 +26,7 @@ const router = createRouter({
         { path: 'functions', name: 'functions', component: () => import('@/views/FunctionsList.vue') },
         { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue') },
         { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue') },
+        { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
         { path: 'deploy', name: 'deploy', component: () => import('@/views/Editor.vue') },
         { path: 'cron', name: 'cron', component: () => import('@/views/CronJobs.vue') },
         { path: 'jobs', name: 'jobs', component: () => import('@/views/Jobs.vue') },

@@ -58,6 +58,14 @@
         >{{ totalSecretsCount }}</span>
       </button>
       <button
+        v-if="isEditing"
+        class="panel-btn"
+        title="KV store · per-function key/value state"
+        @click="router.push({ name: 'function-kv', params: { name: form.name } })"
+      >
+        <Database class="w-3.5 h-3.5" /> KV
+      </button>
+      <button
         v-if="isEditing && versions.length"
         class="panel-btn"
         title="Version history & rollback"
@@ -819,8 +827,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
@@ -834,6 +842,7 @@ import { rollbackFunction } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 
 const route = useRoute()
+const router = useRouter()
 const confirmStore = useConfirmStore()
 
 // Modals open-state. One per panel; clicking a header button toggles it.

@@ -179,6 +179,23 @@ func shouldSkipActivity(path string, status int) bool {
 func summaryFor(method, path string, status int) string {
 	// /api/v1/functions[/{id}[/...]]
 	if strings.HasPrefix(path, "/api/v1/functions") {
+		// KV operator endpoints — recognise these BEFORE the generic
+		// PUT/DELETE under /api/v1/functions/{id} so the activity feed
+		// reads "kv put: link:claude" rather than "update fn_…".
+		if i := strings.Index(path, "/kv"); i > 0 {
+			rest := path[i+len("/kv"):] // "" for list, "/<key>" for single
+			switch method {
+			case http.MethodGet:
+				if rest == "" {
+					return "kv list"
+				}
+				return "kv get: " + strings.TrimPrefix(rest, "/")
+			case http.MethodPut:
+				return "kv put: " + strings.TrimPrefix(rest, "/")
+			case http.MethodDelete:
+				return "kv delete: " + strings.TrimPrefix(rest, "/")
+			}
+		}
 		switch {
 		case method == http.MethodPost && path == "/api/v1/functions":
 			return "create function"

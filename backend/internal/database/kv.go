@@ -122,6 +122,22 @@ func (db *Database) KVList(functionID, prefix string, limit int) ([]*KVEntry, er
 	return out, rows.Err()
 }
 
+// KVCount returns the number of live (non-expired) keys for a function.
+// Used by the dashboard "X keys" badge so the operator sees the namespace
+// size at a glance without having to page through the full list.
+func (db *Database) KVCount(functionID string) (int, error) {
+	var n int
+	err := db.read.QueryRow(`
+		SELECT COUNT(*) FROM kv_store
+		WHERE function_id = ? AND (expires_at IS NULL OR expires_at > ?)`,
+		functionID, time.Now().UTC(),
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // KVSweepExpired deletes all rows whose expires_at is in the past.
 // Returns the number of rows removed. Called periodically by the
 // scheduler.
