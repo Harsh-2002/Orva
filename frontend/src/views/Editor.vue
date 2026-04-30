@@ -20,7 +20,7 @@
         >
           <Shuffle class="w-3.5 h-3.5" />
         </button>
-        <span class="text-[10px] text-foreground-muted font-mono uppercase tracking-wider">{{ runtimeShort(form.runtime) }}</span>
+        <span class="text-[11px] text-foreground-muted font-medium tracking-tight">{{ runtimeShort(form.runtime) }}</span>
       </div>
 
       <button
@@ -860,9 +860,17 @@ const terminalTabs = computed(() => [
   { id: 'test',  label: 'Test',  icon: Play,     badge: invokeLogs.value.length || null },
 ])
 
+// Pretty runtime label for the editor strip — "python314" → "Python 3.14",
+// "node24" → "Node.js 24". Anything we don't recognize falls back to the
+// raw id so an unknown runtime still surfaces something visible.
 const runtimeShort = (rt) => {
   if (!rt) return ''
-  return rt.replace('python', 'py').replace('node', 'node')
+  const m = /^(python|node)(\d)(\d+)$/.exec(rt)
+  if (!m) return rt
+  const family = m[1] === 'python' ? 'Python' : 'Node.js'
+  const major = m[2]
+  const minor = m[3]
+  return m[1] === 'python' ? `${family} ${major}.${minor}` : `${family} ${major}`
 }
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
