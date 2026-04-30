@@ -158,6 +158,27 @@ Destructive tools (delete_*, rollback_*) require an explicit
 "confirm: true" argument so a runaway loop can't accidentally delete
 production state.`
 
+// OAuthASNotFoundHandler returns a JSON-shaped 404 for OAuth
+// Authorization Server discovery endpoints (RFC 8414, OpenID Connect
+// Discovery). MCP SDKs follow these endpoints AFTER our PRM as part
+// of their auth-bootstrap cascade. The default Go mux returns
+// `text/plain` "404 page not found" which the typescript-sdk OAuth
+// handler tries to JSON.parse and crashes on, surfacing the
+// confusing "Invalid OAuth error response: SyntaxError" dialog.
+//
+// Returning a parseable JSON envelope here lets the SDK accept the
+// 404 cleanly, fall back to the static-bearer path advertised in our
+// PRM (authorization_servers: []), and use whatever Authorization
+// header the operator has configured for this server.
+func OAuthASNotFoundHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(`{
+  "error": "not_found",
+  "error_description": "Orva uses static bearer auth — no OAuth Authorization Server. See /.well-known/oauth-protected-resource."
+}`))
+}
+
 // PRMHandler returns a minimal RFC 9728 OAuth Protected Resource
 // Metadata response describing the static-bearer auth mechanism.
 // Mounted at /.well-known/oauth-protected-resource.

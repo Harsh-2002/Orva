@@ -309,7 +309,20 @@ func (r *Router) setupRoutes() {
 	})
 	r.mux.Handle("/mcp", mcpHandler)
 	r.mux.Handle("/mcp/", mcpHandler)
+	// RFC 9728 §3.1 — clients MAY look up resource metadata at a path
+	// derived from the protected resource's URL. Serve the same
+	// document at both the bare and the /mcp-suffixed location so MCP
+	// SDKs that try the path-aware variant first don't get a 404.
 	r.mux.HandleFunc("GET /.well-known/oauth-protected-resource", orvampc.PRMHandler)
+	r.mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", orvampc.PRMHandler)
+	// RFC 8414 / OpenID-Connect discovery — MCP clients fall through
+	// to these after PRM and choke on plain-text 404s. Returning a
+	// JSON-shaped 404 with a tiny stub lets the SDK parse the response
+	// and treat "no authorization_endpoint" as "static bearer only".
+	r.mux.HandleFunc("GET /.well-known/oauth-authorization-server", orvampc.OAuthASNotFoundHandler)
+	r.mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp", orvampc.OAuthASNotFoundHandler)
+	r.mux.HandleFunc("GET /.well-known/openid-configuration", orvampc.OAuthASNotFoundHandler)
+	r.mux.HandleFunc("GET /.well-known/openid-configuration/mcp", orvampc.OAuthASNotFoundHandler)
 
 	// UI routes — serve the Vue SPA at /web/. No credentials are injected;
 	// the UI uses /auth/onboard + /auth/login to establish a session.
