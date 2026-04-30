@@ -108,13 +108,104 @@
       </div>
     </section>
 
-    <!-- ── 2. Deploy & invoke ─────────────────────────────────────── -->
+    <!-- ── 2. Generate with AI ────────────────────────────────────── -->
+    <section
+      id="generate"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">02</span>
+        <div>
+          <h2 class="doc-section-title">
+            Generate with AI
+          </h2>
+          <p class="doc-lede">
+            Skip the boilerplate. Open ChatGPT or Claude pre-loaded with a
+            system prompt that teaches the model Orva's runtimes, handler
+            contract, sandbox limits, the in-sandbox
+            <code class="doc-chip">orva</code>
+            SDK, and built-in auth modes — so a "describe what I want" turns
+            into pasteable handler code on the first try.
+          </p>
+        </div>
+      </div>
+
+      <div class="ai-cta-row">
+        <button
+          class="ai-btn ai-btn-chatgpt"
+          @click="onOpenChatGPT"
+        >
+          <span class="ai-btn-glyph">
+            <OpenAIGlyph />
+          </span>
+          <span class="ai-btn-text">
+            <span class="ai-btn-title">Open in ChatGPT</span>
+            <span class="ai-btn-sub">Prefilled — press Enter to send</span>
+          </span>
+        </button>
+        <button
+          class="ai-btn ai-btn-claude"
+          @click="onOpenClaude"
+        >
+          <span class="ai-btn-glyph">
+            <ClaudeGlyph />
+          </span>
+          <span class="ai-btn-text">
+            <span class="ai-btn-title">Open in Claude</span>
+            <span class="ai-btn-sub">Prompt copied — paste in the new tab</span>
+          </span>
+        </button>
+      </div>
+
+      <Callout
+        :icon="Wand2"
+        title="What we send"
+      >
+        A system prompt teaching the model Orva's runtimes, handler
+        contract, sandbox limits, the
+        <code class="doc-chip">orva</code>
+        SDK (kv / invoke / jobs), cron triggers, and built-in auth modes.
+        The full text is below — copy it for any other AI tool (Gemini, le
+        Chat, your self-hosted model). Free to tweak before you send.
+      </Callout>
+
+      <div class="ai-prompt-actions">
+        <button
+          class="ai-copy-btn"
+          :class="{ copied: promptCopied }"
+          @click="onCopyPrompt"
+        >
+          <Check
+            v-if="promptCopied"
+            class="w-3.5 h-3.5"
+          />
+          <Copy
+            v-else
+            class="w-3.5 h-3.5"
+          />
+          {{ promptCopied ? 'Copied' : 'Copy system prompt' }}
+        </button>
+        <span
+          v-if="claudeNote"
+          class="ai-claude-note"
+        >
+          claude.ai removed direct prompt links in 2025 — we put the prompt on your clipboard, paste it in the chat that just opened.
+        </span>
+      </div>
+
+      <CodeBlock
+        :code="aiPromptText"
+        lang="text"
+      />
+    </section>
+
+    <!-- ── 3. Deploy & invoke ─────────────────────────────────────── -->
     <section
       id="deploy"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">02</span>
+        <span class="doc-section-num">03</span>
         <div>
           <h2 class="doc-section-title">
             Deploy &amp; invoke
@@ -178,13 +269,13 @@
       </Callout>
     </section>
 
-    <!-- ── 3. Configuration reference ─────────────────────────────── -->
+    <!-- ── 4. Configuration reference ─────────────────────────────── -->
     <section
       id="config"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">03</span>
+        <span class="doc-section-num">04</span>
         <div>
           <h2 class="doc-section-title">
             Configuration reference
@@ -257,13 +348,13 @@
       </details>
     </section>
 
-    <!-- ── 4. Schedules (cron triggers) ───────────────────────────── -->
+    <!-- ── 5. Schedules (cron triggers) ───────────────────────────── -->
     <section
       id="schedules"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">04</span>
+        <span class="doc-section-num">05</span>
         <div>
           <h2 class="doc-section-title">
             Schedules
@@ -301,13 +392,13 @@
       </Callout>
     </section>
 
-    <!-- ── 5. SDK (KV, invoke, jobs) ──────────────────────────────── -->
+    <!-- ── 7. SDK (KV, invoke, jobs) ──────────────────────────────── -->
     <section
       id="sdk"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">05</span>
+        <span class="doc-section-num">07</span>
         <div>
           <h2 class="doc-section-title">
             SDK from inside a function
@@ -405,13 +496,13 @@
       </Callout>
     </section>
 
-    <!-- ── 6. Webhooks ────────────────────────────────────────────── -->
+    <!-- ── 8. Webhooks ────────────────────────────────────────────── -->
     <section
       id="webhooks"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">06</span>
+        <span class="doc-section-num">08</span>
         <div>
           <h2 class="doc-section-title">
             Webhooks
@@ -503,13 +594,13 @@
       </div>
     </section>
 
-    <!-- ── 7. MCP ─────────────────────────────────────────────────── -->
+    <!-- ── 9. MCP ─────────────────────────────────────────────────── -->
     <section
       id="mcp"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">07</span>
+        <span class="doc-section-num">09</span>
         <div>
           <h2 class="doc-section-title">
             MCP — Model Context Protocol
@@ -627,13 +718,13 @@
       </details>
     </section>
 
-    <!-- ── 8. Error envelope ──────────────────────────────────────── -->
+    <!-- ── 10. Error envelope ─────────────────────────────────────── -->
     <section
       id="errors"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">08</span>
+        <span class="doc-section-num">10</span>
         <div>
           <h2 class="doc-section-title">
             Errors &amp; recovery
@@ -692,8 +783,15 @@ import {
   Gauge,
   ChevronRight,
   CalendarClock,
+  Wand2,
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
+import {
+  buildPromptText,
+  openInChatGPT,
+  openInClaude,
+  copyPromptToClipboard,
+} from '@/utils/aiPrompts'
 import apiClient from '@/api/client'
 import { useConfirmStore } from '@/stores/confirm'
 
@@ -720,6 +818,32 @@ hljs.registerLanguage('sh', bash)
 hljs.registerLanguage('http', http)
 
 const origin = computed(() => window.location.origin)
+
+// ── "Generate with AI" state ────────────────────────────────────────
+// aiPromptText is computed once (the spec rarely changes) and rendered
+// inline in section 02 as a plain CodeBlock — full transparency.
+const aiPromptText = buildPromptText()
+const promptCopied = ref(false)
+const claudeNote = ref(false)
+let promptCopiedTimer = null
+let claudeNoteTimer = null
+
+const onOpenChatGPT = () => openInChatGPT()
+
+const onOpenClaude = async () => {
+  await openInClaude()
+  claudeNote.value = true
+  clearTimeout(claudeNoteTimer)
+  claudeNoteTimer = setTimeout(() => { claudeNote.value = false }, 8000)
+}
+
+const onCopyPrompt = async () => {
+  const ok = await copyPromptToClipboard()
+  if (!ok) return
+  promptCopied.value = true
+  clearTimeout(promptCopiedTimer)
+  promptCopiedTimer = setTimeout(() => { promptCopied.value = false }, 1500)
+}
 
 // ── Runtime icons (compact, table-sized) ────────────────────────────
 const PythonGlyph = defineComponent({
@@ -759,6 +883,35 @@ const NodeGlyph = defineComponent({
         h('path', {
           fill: '#3F873F',
           d: 'M128 64c-3 0-5.7.7-8 2.3L73 92c-5 2.7-8 8-8 13.6V169c0 5.6 3 10.7 8 13.5l13 7.4c6.3 3.1 8.5 3.1 11.4 3.1 9.4 0 14.8-5.7 14.8-15.6V117c0-1-.7-1.7-1.7-1.7H103c-1 0-1.7.7-1.7 1.7v60.2c0 4.4-4.5 8.7-11.8 5.1l-13.7-7.9a1.6 1.6 0 0 1-.8-1.4v-63.4c0-.6.3-1 .8-1.4l46.8-26.9c.4-.3 1-.3 1.4 0L171 110c.5.4.8.8.8 1.4V174a1.7 1.7 0 0 1-.8 1.4l-46.8 27c-.4.2-1 .2-1.4 0l-12-7.2c-.4-.2-.8-.2-1.2 0-3.4 1.9-4 2.2-7.2 3.3-.8.3-2 .7.4 2.1l15.7 9.3c2.5 1.4 5.3 2.2 8.2 2.2 2.9 0 5.7-.8 8.2-2.2L181 184c5-2.8 8-7.9 8-13.5V107c0-5.6-3-10.7-8-13.5l-46.7-26.7a17 17 0 0 0-6.3-2.8z',
+        }),
+      ])
+  },
+})
+
+// Official OpenAI mark from the public brand kit. Single monochrome
+// path using currentColor so the button's --ai-accent flows through.
+const OpenAIGlyph = defineComponent({
+  setup() {
+    return () =>
+      h('svg', { viewBox: '0 0 24 24', width: '16', height: '16', xmlns: 'http://www.w3.org/2000/svg' }, [
+        h('path', {
+          fill: 'currentColor',
+          d: 'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.073zM13.2599 22.4222a4.4866 4.4866 0 0 1-2.8814-1.0408l.1419-.0804 4.7783-2.7582a.7762.7762 0 0 0 .3927-.6814v-6.7361l2.02 1.1685a.071.071 0 0 1 .038.052v5.5826a4.5046 4.5046 0 0 1-4.4914 4.4938zM3.6029 18.3543a4.4866 4.4866 0 0 1-.5364-3.0218l.1418.0851 4.7783 2.7582a.7704.7704 0 0 0 .7805 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4939 4.4939 0 0 1-6.1372-1.5959zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7762.7762 0 0 0 .3879.6813l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z',
+        }),
+      ])
+  },
+})
+
+// Official Anthropic/Claude wordmark "A" — public brand asset (slug
+// "anthropic" on simpleicons). currentColor inherits the terracotta
+// --ai-accent.
+const ClaudeGlyph = defineComponent({
+  setup() {
+    return () =>
+      h('svg', { viewBox: '0 0 24 24', width: '16', height: '16', xmlns: 'http://www.w3.org/2000/svg' }, [
+        h('path', {
+          fill: 'currentColor',
+          d: 'M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5527h3.7442L10.5363 3.541Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z',
         }),
       ])
   },
@@ -1846,6 +1999,117 @@ const Callout = defineComponent({
   font-size: 13px;
   line-height: 1.55;
   color: var(--color-foreground);
+}
+
+/* ── "Generate with AI" — section 02 ─────────────────────────────── */
+.ai-cta-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+.ai-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.95rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: white;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+  position: relative;
+  overflow: hidden;
+}
+.ai-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--ai-glow, transparent);
+  opacity: 0.08;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.ai-btn:hover {
+  transform: translateY(-1px);
+}
+.ai-btn:hover::before {
+  opacity: 0.16;
+}
+.ai-btn-glyph {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  color: var(--ai-accent, white);
+}
+.ai-btn-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ai-btn-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1.2;
+}
+.ai-btn-sub {
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+  margin-top: 0.2rem;
+}
+.ai-btn-chatgpt {
+  --ai-accent: #10a37f;
+  --ai-glow: linear-gradient(120deg, #10a37f 0%, #0d8a6a 100%);
+}
+.ai-btn-chatgpt:hover {
+  border-color: rgba(16, 163, 127, 0.55);
+}
+.ai-btn-claude {
+  --ai-accent: #d97757;
+  --ai-glow: linear-gradient(120deg, #d97757 0%, #b35e3f 100%);
+}
+.ai-btn-claude:hover {
+  border-color: rgba(217, 119, 87, 0.55);
+}
+.ai-prompt-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.ai-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-foreground-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.ai-copy-btn:hover {
+  color: white;
+  border-color: var(--color-foreground-muted);
+}
+.ai-copy-btn.copied {
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.4);
+}
+.ai-claude-note {
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+  line-height: 1.5;
+  flex: 1 1 220px;
 }
 
 /* ── highlight.js calibration ────────────────────────────────────── */
