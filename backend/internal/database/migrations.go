@@ -277,6 +277,29 @@ CREATE TABLE IF NOT EXISTS egress_blocklist (
 CREATE INDEX IF NOT EXISTS idx_egress_blocklist_kind ON egress_blocklist(kind);
 CREATE INDEX IF NOT EXISTS idx_egress_blocklist_enabled ON egress_blocklist(enabled);
 
+-- Single live activity log: one row per inbound HTTP request, MCP tool
+-- call, webhook delivery attempt, or internal SDK call. Rendered live in
+-- the dashboard's Activity page; swept on a TTL.
+CREATE TABLE IF NOT EXISTS activity_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           INTEGER NOT NULL,                      -- unix millis
+    source       TEXT NOT NULL,                         -- web|api|mcp|sdk|webhook|cron|internal
+    actor_type   TEXT NOT NULL DEFAULT '',              -- session|api_key|internal_token|webhook|system|anon
+    actor_id     TEXT NOT NULL DEFAULT '',
+    actor_label  TEXT NOT NULL DEFAULT '',
+    method       TEXT NOT NULL DEFAULT '',              -- HTTP method, "tool", or "deliver"
+    path         TEXT NOT NULL DEFAULT '',
+    status       INTEGER NOT NULL DEFAULT 0,
+    duration_ms  INTEGER NOT NULL DEFAULT 0,
+    summary      TEXT NOT NULL DEFAULT '',
+    request_id   TEXT NOT NULL DEFAULT '',
+    metadata     TEXT NOT NULL DEFAULT ''               -- optional JSON blob
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_source_ts ON activity_log(source, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_actor ON activity_log(actor_id, ts DESC);
+
 -- Seed system config (ignore if already exists)
 INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('max_total_containers', '100'),
@@ -298,7 +321,11 @@ INSERT OR IGNORE INTO system_config (key, value) VALUES
     -- Operator-managed host→IP overrides for sandboxes with
     -- network_mode=egress. Format: one record per line, "host ip"
     -- (matches /etc/hosts format). Empty by default.
-    ('dns_records', '');
+    ('dns_records', ''),
+    -- Activity log retention. The Activity page is observability,
+    -- not audit; rotate aggressively to keep the table small.
+    ('activity_retention_days', '7'),
+    ('activity_retention_max_rows', '50000');
 
 -- Seed default rules (shipped enabled). Kept deliberately minimal:
 -- only entries that are universally dangerous to expose to user code

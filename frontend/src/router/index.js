@@ -29,6 +29,7 @@ const router = createRouter({
         { path: 'deploy', name: 'deploy', component: () => import('@/views/Editor.vue') },
         { path: 'cron', name: 'cron', component: () => import('@/views/CronJobs.vue') },
         { path: 'jobs', name: 'jobs', component: () => import('@/views/Jobs.vue') },
+        { path: 'activity', name: 'activity', component: () => import('@/views/Activity.vue') },
         { path: 'invocations', name: 'invocations', component: () => import('@/views/InvocationsLog.vue') },
         { path: 'api-keys', name: 'api-keys', component: () => import('@/views/ApiKeys.vue') },
         { path: 'webhooks', name: 'webhooks', component: () => import('@/views/Webhooks.vue') },

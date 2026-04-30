@@ -16,8 +16,10 @@
 package mcp
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Harsh-2002/Orva/internal/builder"
 	"github.com/Harsh-2002/Orva/internal/database"
@@ -69,6 +71,12 @@ func NewHandler(deps Deps) http.Handler {
 		// to surface a less useful "internal error".
 		perms := resolvePermissions(deps.DB, r)
 
+		// Re-resolve the API key so we can attribute tool calls in the
+		// activity log. We discard the bool — middleware on the server
+		// is best-effort observability; if auth somehow degrades, we
+		// log an anonymous mcp call instead of crashing.
+		actorKey, _ := authenticateRequest(deps.DB, r)
+
 		s := mcpsdk.NewServer(
 			&mcpsdk.Implementation{
 				Name:    "orva",
@@ -79,6 +87,13 @@ func NewHandler(deps Deps) http.Handler {
 				Instructions: serverInstructions,
 			},
 		)
+
+		// Activity middleware: each tools/call goes through here, so we
+		// see every MCP tool invocation as a distinct row in the live
+		// feed even though the underlying transport is one streaming
+		// POST to /mcp. The HTTP-level loggerMiddleware would otherwise
+		// only show the streaming request itself.
+		s.AddReceivingMiddleware(activityMiddleware(deps, actorKey))
 
 		registerSystemTools(s, deps, perms)
 		registerFunctionTools(s, deps, perms)
@@ -234,3 +249,99 @@ func PRMHandler(w http.ResponseWriter, r *http.Request) {
 // agents) and any same-origin browser request. Tighten later if
 // hosted Orva needs CSRF-style protection on the MCP path.
 func originAllowed(_ string) bool { return true }
+
+// activityMiddleware emits an activity_log row for every MCP method
+// call (primarily tools/call). It runs INSIDE the JSON-RPC dispatcher,
+// so the live Activity feed sees per-tool granularity even though the
+// outer HTTP transport is one streaming POST to /mcp.
+//
+// actorKey may be nil if auth couldn't resolve the bearer (the outer
+// http.Handler would already have returned 401 in that case, but we
+// defend by still emitting an anonymous activity row).
+func activityMiddleware(deps Deps, actorKey *database.APIKey) mcpsdk.Middleware {
+	return func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
+		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
+			// We only attribute the protocol calls that an operator
+			// would consider "actions" — tools/call, tools/list (since
+			// agents probe the surface), and resources/read. Skip the
+			// chatty pings and capability negotiation — they'd flood
+			// the feed without telling the operator anything new.
+			if !shouldRecordMCPMethod(method) {
+				return next(ctx, method, req)
+			}
+
+			started := time.Now()
+			result, err := next(ctx, method, req)
+			elapsed := time.Since(started).Milliseconds()
+
+			actorID, actorLabel := "", ""
+			if actorKey != nil {
+				actorID = actorKey.ID
+				actorLabel = actorKey.Name
+			}
+			toolName := extractToolName(method, req)
+			summary := summariseMCPCall(method, toolName)
+			status := 200
+			if err != nil {
+				status = 500
+			}
+
+			row := database.ActivityRow{
+				TS:         time.Now().UnixMilli(),
+				Source:     "mcp",
+				ActorType:  "api_key",
+				ActorID:    actorID,
+				ActorLabel: actorLabel,
+				Method:     "tool",
+				Path:       toolName,
+				Status:     status,
+				DurationMS: elapsed,
+				Summary:    summary,
+			}
+			if deps.DB != nil {
+				deps.DB.InsertActivity(row)
+			}
+			if deps.EventHub != nil {
+				deps.EventHub.Publish(events.TypeActivity, row)
+			}
+			return result, err
+		}
+	}
+}
+
+// shouldRecordMCPMethod is the allowlist for activity emission. Keep
+// it tight — list/initialize/ping spam would drown out the genuinely
+// useful "tool was called" rows.
+func shouldRecordMCPMethod(method string) bool {
+	switch method {
+	case "tools/call", "resources/read":
+		return true
+	}
+	return false
+}
+
+// extractToolName pulls the tool name out of a tools/call request.
+// For other recorded methods (resources/read), returns the method
+// itself so the operator at least sees what kind of MCP call hit.
+func extractToolName(method string, req mcpsdk.Request) string {
+	if method != "tools/call" {
+		return method
+	}
+	if p, ok := req.GetParams().(*mcpsdk.CallToolParamsRaw); ok {
+		return p.Name
+	}
+	if p, ok := req.GetParams().(*mcpsdk.CallToolParams); ok {
+		return p.Name
+	}
+	return method
+}
+
+// summariseMCPCall produces the one-line summary rendered in the
+// Activity feed. Special-cased for the most common ops the operator
+// will recognise; everything else falls back to the tool name.
+func summariseMCPCall(method, tool string) string {
+	if method == "resources/read" {
+		return "mcp resource read"
+	}
+	return "mcp tool: " + tool
+}

@@ -159,6 +159,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	go s.kvSweepLoop(ctx)
 	go s.jobsLoop(ctx)
 	go s.webhookLoop(ctx)
+	go s.activitySweepLoop(ctx)
 	slog.Info("scheduler started",
 		"cron_interval_s", int(s.cronInterval.Seconds()),
 		"kv_sweep_interval_s", int(s.kvInterval.Seconds()),
@@ -421,6 +422,40 @@ func (s *Scheduler) kvSweepOnce() {
 	}
 }
 
+// activitySweepLoop trims the activity_log table every 5 minutes
+// against the configured retention window AND row cap. Activity is
+// observability data, not audit; aggressive rotation keeps the table
+// tiny so queries stay fast on long-lived deployments.
+func (s *Scheduler) activitySweepLoop(ctx context.Context) {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+
+	// Boot sweep so a long downtime doesn't leave stale rows around.
+	s.activitySweepOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stop:
+			return
+		case <-t.C:
+			s.activitySweepOnce()
+		}
+	}
+}
+
+func (s *Scheduler) activitySweepOnce() {
+	deleted, err := s.db.SweepActivity()
+	if err != nil {
+		slog.Warn("activity: sweep failed", "err", err)
+		return
+	}
+	if deleted > 0 {
+		slog.Debug("activity: sweep removed rows", "deleted", deleted)
+	}
+}
+
 // ── Jobs queue ───────────────────────────────────────────────────────
 
 func (s *Scheduler) jobsLoop(ctx context.Context) {
@@ -598,6 +633,7 @@ func (s *Scheduler) webhookTick(parent context.Context) {
 // records the outcome. Mirrors the Stripe-style signature verifiable
 // by the receiver with HMAC-SHA256 over "<ts>.<body>".
 func (s *Scheduler) deliverWebhook(parent context.Context, d *database.WebhookDelivery) {
+	started := time.Now()
 	sub, err := s.db.GetEventSubscription(d.SubscriptionID)
 	if err != nil {
 		// Subscription was deleted between claim and delivery (the
@@ -606,6 +642,7 @@ func (s *Scheduler) deliverWebhook(parent context.Context, d *database.WebhookDe
 		// we don't retry into thin air.
 		_ = s.db.MarkDeliveryFailure(d.ID, "subscription deleted: "+err.Error(),
 			d.MaxAttempts, d.MaxAttempts, 0)
+		s.publishWebhookActivity(d, nil, 0, started, "subscription deleted")
 		return
 	}
 
@@ -622,6 +659,7 @@ func (s *Scheduler) deliverWebhook(parent context.Context, d *database.WebhookDe
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sub.URL, bytes.NewReader(d.Payload))
 	if err != nil {
 		s.handleDeliveryFailure(d, sub, "build request: "+err.Error(), 0)
+		s.publishWebhookActivity(d, sub, 0, started, "build request failed")
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -634,6 +672,7 @@ func (s *Scheduler) deliverWebhook(parent context.Context, d *database.WebhookDe
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		s.handleDeliveryFailure(d, sub, "transport: "+err.Error(), 0)
+		s.publishWebhookActivity(d, sub, 0, started, "transport error")
 		return
 	}
 	_, _ = io.Copy(io.Discard, resp.Body) // drain so connection can be reused
@@ -642,10 +681,13 @@ func (s *Scheduler) deliverWebhook(parent context.Context, d *database.WebhookDe
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		_ = s.db.MarkDeliverySuccess(d.ID, resp.StatusCode)
 		_ = s.db.MarkSubscriptionResult(sub.ID, "ok", "")
+		s.publishWebhookActivity(d, sub, resp.StatusCode, started, "")
 		return
 	}
 	s.handleDeliveryFailure(d, sub,
 		fmt.Sprintf("HTTP %d from receiver", resp.StatusCode), resp.StatusCode)
+	s.publishWebhookActivity(d, sub, resp.StatusCode, started,
+		fmt.Sprintf("HTTP %d", resp.StatusCode))
 }
 
 // handleDeliveryFailure records the failure on both the delivery row
@@ -655,6 +697,44 @@ func (s *Scheduler) handleDeliveryFailure(d *database.WebhookDelivery, sub *data
 	_ = s.db.MarkDeliveryFailure(d.ID, errMsg, d.Attempts, d.MaxAttempts, respStatus)
 	if d.Attempts >= d.MaxAttempts {
 		_ = s.db.MarkSubscriptionResult(sub.ID, "failed", errMsg)
+	}
+}
+
+// publishWebhookActivity persists a row in activity_log AND fans an
+// activity event on the SSE hub so the live dashboard sees outbound
+// webhook attempts in the same feed as inbound API calls. errLabel is
+// the short summary appended to a non-2xx attempt; pass "" for success.
+func (s *Scheduler) publishWebhookActivity(d *database.WebhookDelivery, sub *database.EventSubscription, status int, started time.Time, errLabel string) {
+	subID, subName, subURL := d.SubscriptionID, "", ""
+	if sub != nil {
+		subName = sub.Name
+		subURL = sub.URL
+	}
+	summary := d.EventName + " → " + subName
+	if errLabel != "" {
+		summary += " (" + errLabel + ")"
+	}
+	if status == 0 {
+		// Carry "0" for transport errors so the UI can render a
+		// neutral "—" instead of "0 OK".
+		status = 0
+	}
+	row := database.ActivityRow{
+		TS:         time.Now().UnixMilli(),
+		Source:     "webhook",
+		ActorType:  "webhook",
+		ActorID:    subID,
+		ActorLabel: subName,
+		Method:     "deliver",
+		Path:       subURL,
+		Status:     status,
+		DurationMS: time.Since(started).Milliseconds(),
+		Summary:    summary,
+		RequestID:  d.ID,
+	}
+	s.db.InsertActivity(row)
+	if s.hub != nil {
+		s.hub.Publish(events.TypeActivity, row)
 	}
 }
 

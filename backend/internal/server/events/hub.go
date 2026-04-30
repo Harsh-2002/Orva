@@ -36,6 +36,7 @@ const (
 	TypeExecution  = "execution"  // new invocation row committed to DB
 	TypeDeployment = "deployment" // build queue phase / status change
 	TypeFunction   = "function"   // function created / updated / deleted
+	TypeActivity   = "activity"   // any inbound API call / MCP tool / webhook deliver
 )
 
 // Hub is the in-process broker. Zero value is not usable — call NewHub.

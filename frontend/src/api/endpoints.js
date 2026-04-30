@@ -68,6 +68,11 @@ export const getInvocation = (id) => apiClient.get(`/executions/${id}`)
 
 export const getInvocationLogs = (id) => apiClient.get(`/executions/${id}/logs`)
 
+// Live Activity feed — historical companion to the SSE event stream.
+// params: source, actor_id, since (unix-millis), until, status_min, q,
+// limit (default 200, max 1000), cursor (ts millis from prior page).
+export const listActivity = (params) => apiClient.get('/activity', { params })
+
 // API Keys
 export const listApiKeys = () => apiClient.get('/keys')
 

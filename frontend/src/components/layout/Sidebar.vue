@@ -102,6 +102,7 @@ import {
   CalendarClock,
   ListChecks,
   Activity,
+  ListTree,
   Fingerprint,
   Webhook,
   ShieldHalf,
@@ -128,16 +129,17 @@ const handleLogout = async () => {
 // Rocket, Activity, Fingerprint, ShieldHalf, LibraryBig) so each item
 // is recognizable at a glance instead of a row of similar shields.
 const navItems = [
-  { path: '/',            label: 'Overview',  icon: Gauge },
-  { path: '/functions',   label: 'Functions', icon: Boxes },
-  { path: '/deploy',      label: 'Deploy',    icon: Rocket },
-  { path: '/cron',        label: 'Schedules', icon: CalendarClock },
-  { path: '/jobs',        label: 'Jobs',      icon: ListChecks },
-  { path: '/invocations', label: 'Activity',  icon: Activity },
-  { path: '/api-keys',    label: 'Keys',      icon: Fingerprint },
-  { path: '/webhooks',    label: 'Webhooks',  icon: Webhook },
-  { path: '/firewall',    label: 'Firewall',  icon: ShieldHalf },
-  { path: '/docs',        label: 'Docs',      icon: LibraryBig },
+  { path: '/',            label: 'Overview',    icon: Gauge },
+  { path: '/functions',   label: 'Functions',   icon: Boxes },
+  { path: '/deploy',      label: 'Deploy',      icon: Rocket },
+  { path: '/cron',        label: 'Schedules',   icon: CalendarClock },
+  { path: '/jobs',        label: 'Jobs',        icon: ListChecks },
+  { path: '/activity',    label: 'Activity',    icon: Activity },
+  { path: '/invocations', label: 'Invocations', icon: ListTree },
+  { path: '/api-keys',    label: 'Keys',        icon: Fingerprint },
+  { path: '/webhooks',    label: 'Webhooks',    icon: Webhook },
+  { path: '/firewall',    label: 'Firewall',    icon: ShieldHalf },
+  { path: '/docs',        label: 'Docs',        icon: LibraryBig },
 ]
 
 const isActive = (path) => {

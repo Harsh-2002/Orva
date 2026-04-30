@@ -152,6 +152,10 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/v1/executions/{exec_id}", execHandler.Delete)
 	r.mux.HandleFunc("POST /api/v1/executions/bulk-delete", execHandler.BulkDelete)
 
+	// Live Activity feed — historical companion to the SSE event stream.
+	activityHandler := &handlers.ActivityHandler{DB: r.db}
+	r.mux.HandleFunc("GET /api/v1/activity", activityHandler.List)
+
 	// Invoke route (catch-all for invoke paths AND custom user routes).
 	invokeHandler := &handlers.InvokeHandler{
 		Registry:       r.registry,
@@ -371,7 +375,7 @@ func (r *Router) buildMiddlewareChain() {
 	}
 
 	// Build chain from inside out: Handler -> Logger -> RequestID -> Auth -> BodySize -> CORS
-	chain := loggerMiddleware(r.mux)
+	chain := loggerMiddleware(r.db, r.eventHub, r.mux)
 	chain = requestIDMiddleware(chain)
 	chain = authMiddleware(r.db, chain)
 	chain = bodySizeMiddleware(maxBody, chain)

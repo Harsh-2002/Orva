@@ -49,17 +49,24 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 		}
 		// Internal SDK endpoints (KV / F2F invoke) authenticate via the
 		// per-process internal token, NOT API keys. Skip the API-key
-		// middleware here; the handlers themselves enforce the token.
+		// middleware here; the handlers themselves enforce the token. We
+		// still tag the actor as sdk so the activity log identifies the
+		// calling function (X-Orva-Caller-Function header is set by the
+		// SDK adapter for both KV and invoke paths).
 		if strings.HasPrefix(r.URL.Path, "/api/v1/_kv/") ||
 			strings.HasPrefix(r.URL.Path, "/api/v1/_internal/") {
-			next.ServeHTTP(w, r)
+			caller := r.Header.Get("X-Orva-Caller-Function")
+			actor := &Actor{Source: "sdk", Type: "internal_token", ID: caller, Label: caller}
+			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 			return
 		}
 		// Worker SDK requests bearing a non-empty internal token bypass
 		// the public auth gate; the handler validates the token. This
 		// lets jobs.enqueue() / dashboard share the /api/v1/jobs route.
 		if r.Header.Get("X-Orva-Internal-Token") != "" {
-			next.ServeHTTP(w, r)
+			caller := r.Header.Get("X-Orva-Caller-Function")
+			actor := &Actor{Source: "sdk", Type: "internal_token", ID: caller, Label: caller}
+			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 			return
 		}
 
@@ -68,14 +75,20 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			now := time.Now()
 			if cached, ok := sessionCache.Load(cookie.Value); ok {
 				if entry := cached.(sessionCacheEntry); now.Before(entry.validUntil) {
-					next.ServeHTTP(w, r)
+					actor := &Actor{Source: "web", Type: "session", ID: cookie.Value[:8], Label: "session"}
+					next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 					return
 				}
 				sessionCache.Delete(cookie.Value)
 			}
-			if _, err := db.GetSessionUser(cookie.Value); err == nil {
+			if user, err := db.GetSessionUser(cookie.Value); err == nil {
 				sessionCache.Store(cookie.Value, sessionCacheEntry{validUntil: now.Add(sessionCacheTTL)})
-				next.ServeHTTP(w, r)
+				label := "session"
+				if user != nil && user.Username != "" {
+					label = user.Username
+				}
+				actor := &Actor{Source: "web", Type: "session", ID: cookie.Value[:8], Label: label}
+				next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 				return
 			}
 		}
@@ -131,7 +144,11 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// Tag the request with the resolved API-key identity so
+		// downstream observers (notably the activity log) know who
+		// called us.
+		actor := &Actor{Source: "api", Type: "api_key", ID: key.ID, Label: key.Name}
+		next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 
 		// Update last_used_at asynchronously (db.Async so db.Close waits).
 		db.Async(func() { db.UpdateAPIKeyLastUsed(keyHash) })
