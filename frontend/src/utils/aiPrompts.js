@@ -219,20 +219,20 @@ export const ORVA_OPENING_USER_MESSAGE = `Now ask me what kind of function I wan
 export const buildPromptText = () =>
   `${ORVA_SYSTEM_PROMPT}\n\n---\n\n${ORVA_OPENING_USER_MESSAGE}`
 
-// Both branches: copy prompt to clipboard, open the chat home in a
-// new tab, user pastes once and sends. ?q= prefill is unreliable
-// past ~8 KB of URL-encoded prompt (Cloudflare 401), and our v0.3
-// prompt clears that.
+// Both branches: open the chat home in a new tab FIRST (while the
+// click's user-gesture activation is still fresh — popup blockers
+// reject window.open after an await), then write the prompt to the
+// clipboard so the user can paste once and send. ?q= prefill is
+// unreliable past ~8 KB of URL-encoded prompt (Cloudflare 401), and
+// our v0.3 prompt clears that.
 export const openInChatGPT = async () => {
-  const ok = await copyText(buildPromptText())
   window.open('https://chatgpt.com/', '_blank', 'noopener')
-  return ok
+  return await copyText(buildPromptText())
 }
 
 export const openInClaude = async () => {
-  const ok = await copyText(buildPromptText())
   window.open('https://claude.ai/new', '_blank', 'noopener')
-  return ok
+  return await copyText(buildPromptText())
 }
 
 // Sanity helper for anyone who wants to drop the prompt straight into
