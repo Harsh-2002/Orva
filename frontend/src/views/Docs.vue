@@ -537,6 +537,10 @@
           </div>
           <div class="doc-card-body">
             <code class="doc-chip break-all">Authorization: Bearer &lt;token&gt;</code>
+            <p class="mt-1.5 text-foreground-muted">
+              Or as a fallback:
+              <code class="doc-chip">X-Orva-API-Key: &lt;token&gt;</code>
+            </p>
           </div>
         </div>
         <div class="doc-card">
@@ -549,6 +553,22 @@
           </div>
         </div>
       </div>
+
+      <Callout
+        :icon="KeyRound"
+        title="Two header formats; same auth"
+      >
+        Either header works against the same API key store with identical
+        permission gating. <code class="doc-chip">Authorization: Bearer</code>
+        is the MCP / OAuth 2 spec form — every MCP SDK (Claude Code,
+        Claude Desktop, Cursor, mcp-remote, Python <code class="doc-chip">mcp</code>)
+        configures it natively, so prefer it for new setups.
+        <code class="doc-chip">X-Orva-API-Key</code> is the same header
+        the REST API accepts — useful when a tool reuses an existing
+        Orva REST integration. Internally both paths SHA-256-hash the
+        token and look it up against the same
+        <code class="doc-chip">api_keys</code> table.
+      </Callout>
 
       <!-- Token bar -->
       <div class="doc-token-bar">
