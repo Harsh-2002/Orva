@@ -215,6 +215,19 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST   /api/v1/jobs/{id}/retry", jobsHandler.Retry)
 	r.mux.HandleFunc("DELETE /api/v1/jobs/{id}",       jobsHandler.Delete)
 
+	// Webhook subscriptions (Phase v0.3). Operator-managed; system
+	// events fan out to subscribers via internal/scheduler's webhook
+	// delivery loop.
+	webhooksHandler := &handlers.WebhooksHandler{DB: r.db}
+	r.mux.HandleFunc("GET    /api/v1/webhooks",                       webhooksHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/webhooks",                       webhooksHandler.Create)
+	r.mux.HandleFunc("GET    /api/v1/webhooks/{id}",                  webhooksHandler.Get)
+	r.mux.HandleFunc("PUT    /api/v1/webhooks/{id}",                  webhooksHandler.Update)
+	r.mux.HandleFunc("DELETE /api/v1/webhooks/{id}",                  webhooksHandler.Delete)
+	r.mux.HandleFunc("POST   /api/v1/webhooks/{id}/test",             webhooksHandler.Test)
+	r.mux.HandleFunc("GET    /api/v1/webhooks/{id}/deliveries",       webhooksHandler.ListDeliveries)
+	r.mux.HandleFunc("POST   /api/v1/webhooks/deliveries/{id}/retry", webhooksHandler.RetryDelivery)
+
 	// Custom routes: user-defined URL → function mappings.
 	routeHandler := &handlers.RouteHandler{DB: r.db, Registry: r.registry}
 	r.mux.HandleFunc("GET /api/v1/routes", routeHandler.List)

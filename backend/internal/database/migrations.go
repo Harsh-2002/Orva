@@ -205,6 +205,50 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_due    ON jobs(status, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_fn     ON jobs(function_id, created_at DESC);
 
+-- Operator-managed webhook subscriptions for system events. One row
+-- per "send these events to this URL". The events column is a JSON
+-- array of event names; '*' matches all. The HMAC secret is the key
+-- the receiver verifies signatures with.
+CREATE TABLE IF NOT EXISTS event_subscriptions (
+    id               TEXT PRIMARY KEY,            -- sub_<nanoid>
+    name             TEXT NOT NULL,
+    url              TEXT NOT NULL,
+    secret           TEXT NOT NULL,                -- 32-byte hex, generated server-side
+    events           TEXT NOT NULL DEFAULT '["*"]',
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    last_delivery_at DATETIME,
+    last_status      TEXT,                         -- 'ok' | 'failed' | NULL
+    last_error       TEXT,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_subs_enabled ON event_subscriptions(enabled);
+
+-- Per-(subscription × event) delivery queue. Status state machine
+-- mirrors the jobs table: pending → running → succeeded | failed
+-- (terminal). Failed runs with attempts < max_attempts go back to
+-- pending with exponential backoff scheduled_at.
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id               TEXT PRIMARY KEY,            -- whd_<nanoid>
+    subscription_id  TEXT NOT NULL,
+    event_name       TEXT NOT NULL,
+    payload          BLOB NOT NULL,
+    status           TEXT NOT NULL,                -- pending|running|succeeded|failed
+    scheduled_at     DATETIME NOT NULL,
+    started_at       DATETIME,
+    finished_at      DATETIME,
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    max_attempts     INTEGER NOT NULL DEFAULT 5,
+    response_status  INTEGER,
+    last_error       TEXT,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (subscription_id) REFERENCES event_subscriptions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_whd_due ON webhook_deliveries(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_whd_sub ON webhook_deliveries(subscription_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS system_config (
     key           TEXT PRIMARY KEY,
     value         TEXT NOT NULL,

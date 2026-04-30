@@ -93,10 +93,15 @@ func runServe(cmd *cobra.Command, args []string) {
 	go srv.Prewarm(ctx)
 
 	// Start the scheduler after the HTTP listener so health probes don't
-	// block on it. The scheduler runs cron triggers today; future phases
-	// (KV TTL sweep, queued jobs) reuse the same goroutine.
+	// block on it. The scheduler runs cron triggers, KV TTL sweep,
+	// queued jobs, and (v0.3) webhook delivery.
 	if srv.Scheduler != nil {
 		srv.Scheduler.Start(ctx)
+	}
+	// Webhook fanout listener subscribes to the Hub and queues
+	// webhook_deliveries for any matching subscription. Cheap goroutine.
+	if srv.WebhookFanout != nil {
+		srv.WebhookFanout.Start(ctx)
 	}
 
 	<-ctx.Done()

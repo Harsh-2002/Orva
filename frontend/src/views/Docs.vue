@@ -405,13 +405,111 @@
       </Callout>
     </section>
 
-    <!-- ── 6. MCP ─────────────────────────────────────────────────── -->
+    <!-- ── 6. Webhooks ────────────────────────────────────────────── -->
+    <section
+      id="webhooks"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">06</span>
+        <div>
+          <h2 class="doc-section-title">
+            Webhooks
+          </h2>
+          <p class="doc-lede">
+            Operator-managed subscriptions for system events. Configure
+            URLs from the
+            <router-link
+              to="/webhooks"
+              class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
+            >Webhooks page</router-link>; Orva delivers signed POSTs to
+            them when matching events fire (deployments, function
+            lifecycle, cron failures, job outcomes). Subscriptions are
+            global, not per-function.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="doc-card">
+          <div class="doc-microlabel">
+            Headers
+          </div>
+          <div class="doc-card-body">
+            <code class="doc-chip">X-Orva-Event</code>
+            <code class="doc-chip">X-Orva-Delivery-Id</code>
+            <code class="doc-chip">X-Orva-Timestamp</code>
+            <code class="doc-chip">X-Orva-Signature</code>
+          </div>
+        </div>
+        <div class="doc-card">
+          <div class="doc-microlabel">
+            Signature
+          </div>
+          <div class="doc-card-body">
+            <code class="doc-chip">sha256=hex(hmac(secret, ts.body))</code>
+            <p class="mt-1.5 text-foreground-muted">
+              Same shape as Stripe / signed-invoke. Receivers verify
+              with the secret returned at create time.
+            </p>
+          </div>
+        </div>
+        <div class="doc-card">
+          <div class="doc-microlabel">
+            Retries
+          </div>
+          <div class="doc-card-body">
+            <code class="doc-chip">5 attempts</code>
+            <code class="doc-chip">exp backoff (≤ 1h)</code>
+            <p class="mt-1.5 text-foreground-muted">
+              Receiver must 2xx within 15s.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="doc-table-wrap">
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Event</th>
+              <th>When it fires</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="e in webhookEvents"
+              :key="e.name"
+            >
+              <td class="doc-cell-key whitespace-nowrap">
+                <code>{{ e.name }}</code>
+              </td>
+              <td class="doc-cell-body">
+                {{ e.when }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">
+          Verify a delivery
+        </div>
+        <TabbedCode
+          :tabs="webhookVerifyTabs"
+          storage-key="docs.webhooks.verify"
+        />
+      </div>
+    </section>
+
+    <!-- ── 7. MCP ─────────────────────────────────────────────────── -->
     <section
       id="mcp"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">06</span>
+        <span class="doc-section-num">07</span>
         <div>
           <h2 class="doc-section-title">
             MCP — Model Context Protocol
@@ -509,13 +607,13 @@
       </details>
     </section>
 
-    <!-- ── 7. Error envelope ──────────────────────────────────────── -->
+    <!-- ── 8. Error envelope ──────────────────────────────────────── -->
     <section
       id="errors"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">07</span>
+        <span class="doc-section-num">08</span>
         <div>
           <h2 class="doc-section-title">
             Errors &amp; recovery
@@ -897,6 +995,69 @@ exports.handler = async (event) => {
   )
   return { statusCode: 202, body: jobId }
 }`,
+  },
+]
+
+// ── Webhooks (system events) ────────────────────────────────────────
+
+const webhookEvents = [
+  { name: 'deployment.succeeded', when: 'A function build finished and the new version is active.' },
+  { name: 'deployment.failed',    when: 'A build failed or was rejected.' },
+  { name: 'function.changed',     when: 'A function was created or its config was updated.' },
+  { name: 'function.deleted',     when: 'A function was removed.' },
+  { name: 'execution.error',      when: 'An invocation finished with status=error or 5xx.' },
+  { name: 'cron.failed',          when: 'A scheduled run failed (bad expr, missing fn, dispatch error, or 5xx).' },
+  { name: 'job.succeeded',        when: 'A queued background job finished successfully.' },
+  { name: 'job.failed',           when: 'A queued job exhausted its retries (terminal failure).' },
+]
+
+const webhookVerifyTabs = [
+  {
+    label: 'Python',
+    lang: 'python',
+    note: 'Run on the receiver. Reject anything that fails verification — the signature ensures the request really came from this Orva instance.',
+    code: `import hmac, hashlib, time
+
+def verify(secret: str, ts: str, body: bytes, sig_header: str) -> bool:
+    if abs(time.time() - int(ts)) > 300:   # 5-min skew window
+        return False
+    mac = hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256)
+    expected = "sha256=" + mac.hexdigest()
+    return hmac.compare_digest(expected, sig_header)
+
+# In your Flask/FastAPI/etc. handler:
+ts  = request.headers["X-Orva-Timestamp"]
+sig = request.headers["X-Orva-Signature"]
+if not verify(WEBHOOK_SECRET, ts, request.get_data(), sig):
+    return "bad signature", 401`,
+  },
+  {
+    label: 'Node.js',
+    lang: 'js',
+    note: 'Same shape as Stripe. Use timingSafeEqual to avoid sig-leak via timing.',
+    code: `const crypto = require('crypto')
+
+function verify(secret, ts, body, sigHeader) {
+  if (Math.abs(Date.now() / 1000 - parseInt(ts, 10)) > 300) return false
+  const mac = crypto.createHmac('sha256', secret)
+  mac.update(ts + '.')
+  mac.update(body)
+  const expected = 'sha256=' + mac.digest('hex')
+  if (expected.length !== sigHeader.length) return false
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sigHeader))
+}
+
+// In an express handler with raw body middleware:
+app.post('/webhooks/orva', (req, res) => {
+  const ok = verify(
+    process.env.WEBHOOK_SECRET,
+    req.headers['x-orva-timestamp'],
+    req.body,                  // raw bytes — NOT parsed JSON
+    req.headers['x-orva-signature']
+  )
+  if (!ok) return res.status(401).send('bad signature')
+  res.sendStatus(200)
+})`,
   },
 ]
 

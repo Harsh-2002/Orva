@@ -5,16 +5,24 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/pool"
+	"github.com/Harsh-2002/Orva/internal/server/events"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/robfig/cron/v3"
 )
@@ -40,16 +48,24 @@ type Scheduler struct {
 	pool    *pool.Manager
 	dataDir string
 
+	// hub is the in-process events broker. Optional — tests can pass
+	// nil and the scheduler stays usable; webhook fanout is the only
+	// consumer that cares.
+	hub *events.Hub
+
 	// Tick intervals for each loop. Cron fires due rows; KV sweeps
-	// expired entries; jobs claims due jobs and dispatches them. All
-	// have sane defaults but are exported via setters for tests.
-	cronInterval time.Duration
-	kvInterval   time.Duration
-	jobsInterval time.Duration
+	// expired entries; jobs claims due jobs and dispatches them;
+	// webhooks delivers queued event payloads. All have sane defaults
+	// but are exported via setters for tests.
+	cronInterval     time.Duration
+	kvInterval       time.Duration
+	jobsInterval     time.Duration
+	webhookInterval  time.Duration
 
 	// Concurrency cap on background jobs so a queue spike can't starve
 	// HTTP traffic. Default min(8, sandbox.max_concurrent / 4).
-	jobsConcurrency int
+	jobsConcurrency    int
+	webhookConcurrency int
 
 	// Inflight prevents the same cron row from being fired twice if a
 	// previous tick's invocation overruns the next tick (a 1-minute
@@ -57,28 +73,77 @@ type Scheduler struct {
 	inflight   sync.Map
 	inflightWG sync.WaitGroup
 
-	// jobsSem caps jobs concurrency.
-	jobsSem chan struct{}
+	// jobsSem / webhookSem cap their respective tick concurrency.
+	jobsSem    chan struct{}
+	webhookSem chan struct{}
+
+	// httpClient delivers webhook POSTs. 10s timeout — receivers
+	// should ack quickly or fail; long blocking would tie up workers.
+	httpClient *http.Client
 
 	// stop signals the loop to exit. Closed by Stop().
 	stop chan struct{}
 }
 
 // New constructs a Scheduler. Wire by passing the running database +
-// pool manager from server.New.
-func New(db *database.Database, pm *pool.Manager, dataDir string) *Scheduler {
+// pool manager from server.New. hub may be nil — the scheduler still
+// works, only the webhook fanout consumer misses out on cron/job
+// signals (which is fine for tests).
+func New(db *database.Database, pm *pool.Manager, dataDir string, hub *events.Hub) *Scheduler {
 	jobsConc := 8
+	webhookConc := 4
 	return &Scheduler{
-		db:              db,
-		pool:            pm,
-		dataDir:         dataDir,
-		cronInterval:    30 * time.Second,
-		kvInterval:      5 * time.Minute,
-		jobsInterval:    5 * time.Second,
-		jobsConcurrency: jobsConc,
-		jobsSem:         make(chan struct{}, jobsConc),
-		stop:            make(chan struct{}),
+		db:                 db,
+		pool:               pm,
+		dataDir:            dataDir,
+		hub:                hub,
+		cronInterval:       30 * time.Second,
+		kvInterval:         5 * time.Minute,
+		jobsInterval:       5 * time.Second,
+		webhookInterval:    5 * time.Second,
+		jobsConcurrency:    jobsConc,
+		webhookConcurrency: webhookConc,
+		jobsSem:            make(chan struct{}, jobsConc),
+		webhookSem:         make(chan struct{}, webhookConc),
+		httpClient:         &http.Client{Timeout: 10 * time.Second},
+		stop:               make(chan struct{}),
 	}
+}
+
+// publishCron emits a cron-related Hub event when a hub is wired. Used
+// by the webhook fanout to translate cron failures into user-visible
+// notifications. Safe to call with hub=nil (tests).
+func (s *Scheduler) publishCron(status string, row *database.CronSchedule, fnName, errMsg string) {
+	if s.hub == nil {
+		return
+	}
+	s.hub.Publish("cron", map[string]any{
+		"status":        status,
+		"schedule_id":   row.ID,
+		"function_id":   row.FunctionID,
+		"function_name": fnName,
+		"cron_expr":     row.CronExpr,
+		"error_message": errMsg,
+	})
+}
+
+// publishJob emits a job-related Hub event. Only called for terminal
+// outcomes (success or final failure) — intermediate retries don't
+// fire so receivers don't get spammed during backoff.
+func (s *Scheduler) publishJob(status string, j *database.Job, fnName, errMsg string, durationMS int64) {
+	if s.hub == nil {
+		return
+	}
+	s.hub.Publish("job", map[string]any{
+		"status":        status,
+		"job_id":        j.ID,
+		"function_id":   j.FunctionID,
+		"function_name": fnName,
+		"attempts":      j.Attempts,
+		"max_attempts":  j.MaxAttempts,
+		"duration_ms":   durationMS,
+		"last_error":    errMsg,
+	})
 }
 
 // Start kicks off the timer loops. Returns immediately. ctx cancellation
@@ -93,11 +158,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 	go s.cronLoop(ctx)
 	go s.kvSweepLoop(ctx)
 	go s.jobsLoop(ctx)
+	go s.webhookLoop(ctx)
 	slog.Info("scheduler started",
 		"cron_interval_s", int(s.cronInterval.Seconds()),
 		"kv_sweep_interval_s", int(s.kvInterval.Seconds()),
 		"jobs_interval_s", int(s.jobsInterval.Seconds()),
-		"jobs_concurrency", s.jobsConcurrency)
+		"jobs_concurrency", s.jobsConcurrency,
+		"webhook_interval_s", int(s.webhookInterval.Seconds()),
+		"webhook_concurrency", s.webhookConcurrency)
 }
 
 // Stop drains in-flight invocations and signals the loop to exit. Safe
@@ -201,7 +269,9 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	} else {
 		// Bad expression — back off an hour and surface the error.
 		nextAt = ranAt.Add(time.Hour)
-		s.persistResult(row.ID, ranAt, nextAt, "failed", "invalid cron_expr: "+err.Error())
+		errMsg := "invalid cron_expr: " + err.Error()
+		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		s.publishCron("failed", row, "", errMsg)
 		return
 	}
 
@@ -210,7 +280,9 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	// the timeout for the dispatch context.
 	fn, err := s.db.GetFunction(row.FunctionID)
 	if err != nil {
-		s.persistResult(row.ID, ranAt, nextAt, "failed", "function lookup: "+err.Error())
+		errMsg := "function lookup: " + err.Error()
+		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		s.publishCron("failed", row, "", errMsg)
 		return
 	}
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
@@ -223,7 +295,9 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 
 	acq, err := s.pool.Acquire(ctx, row.FunctionID)
 	if err != nil {
-		s.persistResult(row.ID, ranAt, nextAt, "failed", "pool acquire: "+err.Error())
+		errMsg := "pool acquire: " + err.Error()
+		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
 	var reqErr error
@@ -261,6 +335,7 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 		}
 		s.recordExecution(execID, fn.ID, "error", 0, ranAt, stderr, errMsg)
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
 
@@ -276,8 +351,10 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	}
 
 	if statusCode >= 500 {
-		s.recordExecution(execID, fn.ID, "error", statusCode, ranAt, stderr, "function returned "+http3xxLabel(statusCode))
-		s.persistResult(row.ID, ranAt, nextAt, "failed", "function returned "+http3xxLabel(statusCode))
+		errMsg := "function returned " + http3xxLabel(statusCode)
+		s.recordExecution(execID, fn.ID, "error", statusCode, ranAt, stderr, errMsg)
+		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
 
@@ -392,9 +469,35 @@ func (s *Scheduler) jobsTick(parent context.Context) {
 }
 
 func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
+	startedAt := time.Now()
+
+	// finalize handles the dual concerns of (a) persisting the
+	// outcome to the jobs table (which decides whether to retry or
+	// terminate) and (b) firing a Hub event ONLY when the outcome is
+	// terminal — so cross-process subscribers (the webhook fanout)
+	// see one event per job, not one per attempt.
+	finalize := func(fnName, errMsg string, success bool) {
+		durationMS := time.Since(startedAt).Milliseconds()
+		if success {
+			_ = s.db.MarkJobSuccess(j.ID)
+			s.publishJob("succeeded", j, fnName, "", durationMS)
+			return
+		}
+		_ = s.db.MarkJobFailure(j.ID, errMsg, j.Attempts, j.MaxAttempts)
+		// MarkJobFailure transitions to "failed" only when attempts
+		// have run out; otherwise it leaves the row in pending for
+		// the next tick. Mirror that decision here so we don't fire
+		// during retries.
+		if j.Attempts >= j.MaxAttempts {
+			s.publishJob("failed", j, fnName, errMsg, durationMS)
+		}
+	}
+
 	fn, err := s.db.GetFunction(j.FunctionID)
 	if err != nil {
-		_ = s.db.MarkJobFailure(j.ID, "function lookup: "+err.Error(), j.Attempts, j.MaxAttempts)
+		// No fn name to report (the row's gone) — webhook receivers
+		// still get the function_id.
+		finalize("", "function lookup: "+err.Error(), false)
 		return
 	}
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
@@ -406,7 +509,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 
 	acq, err := s.pool.Acquire(ctx, j.FunctionID)
 	if err != nil {
-		_ = s.db.MarkJobFailure(j.ID, "pool acquire: "+err.Error(), j.Attempts, j.MaxAttempts)
+		finalize(fn.Name, "pool acquire: "+err.Error(), false)
 		return
 	}
 	var reqErr error
@@ -433,7 +536,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	respJSON, _, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {
 		reqErr = err
-		_ = s.db.MarkJobFailure(j.ID, err.Error(), j.Attempts, j.MaxAttempts)
+		finalize(fn.Name, err.Error(), false)
 		return
 	}
 
@@ -443,10 +546,116 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	}
 	_ = json.Unmarshal(respJSON, &resp)
 	if resp.StatusCode >= 500 {
-		_ = s.db.MarkJobFailure(j.ID, "function returned 5xx", j.Attempts, j.MaxAttempts)
+		finalize(fn.Name, "function returned 5xx", false)
 		return
 	}
-	_ = s.db.MarkJobSuccess(j.ID)
+	finalize(fn.Name, "", true)
+}
+
+// ── Webhook delivery worker ──────────────────────────────────────────
+
+func (s *Scheduler) webhookLoop(ctx context.Context) {
+	t := time.NewTicker(s.webhookInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stop:
+			return
+		case <-t.C:
+			s.webhookTick(ctx)
+		}
+	}
+}
+
+func (s *Scheduler) webhookTick(parent context.Context) {
+	free := cap(s.webhookSem) - len(s.webhookSem)
+	if free <= 0 {
+		return
+	}
+	deliveries, err := s.db.ClaimDueDeliveries(time.Now().UTC(), free)
+	if err != nil {
+		slog.Warn("webhook: claim due deliveries failed", "err", err)
+		return
+	}
+	for _, d := range deliveries {
+		select {
+		case s.webhookSem <- struct{}{}:
+		default:
+			continue
+		}
+		s.inflightWG.Add(1)
+		go func(d *database.WebhookDelivery) {
+			defer s.inflightWG.Done()
+			defer func() { <-s.webhookSem }()
+			s.deliverWebhook(parent, d)
+		}(d)
+	}
+}
+
+// deliverWebhook signs the payload, POSTs to the subscriber, and
+// records the outcome. Mirrors the Stripe-style signature verifiable
+// by the receiver with HMAC-SHA256 over "<ts>.<body>".
+func (s *Scheduler) deliverWebhook(parent context.Context, d *database.WebhookDelivery) {
+	sub, err := s.db.GetEventSubscription(d.SubscriptionID)
+	if err != nil {
+		// Subscription was deleted between claim and delivery (the
+		// CASCADE delete should have removed the row, but the FK
+		// race-with-claim is possible). Mark permanently failed so
+		// we don't retry into thin air.
+		_ = s.db.MarkDeliveryFailure(d.ID, "subscription deleted: "+err.Error(),
+			d.MaxAttempts, d.MaxAttempts, 0)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(sub.Secret))
+	mac.Write([]byte(ts))
+	mac.Write([]byte("."))
+	mac.Write(d.Payload)
+	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sub.URL, bytes.NewReader(d.Payload))
+	if err != nil {
+		s.handleDeliveryFailure(d, sub, "build request: "+err.Error(), 0)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Orva-Webhook/1.0")
+	req.Header.Set("X-Orva-Event", d.EventName)
+	req.Header.Set("X-Orva-Delivery-Id", d.ID)
+	req.Header.Set("X-Orva-Timestamp", ts)
+	req.Header.Set("X-Orva-Signature", signature)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		s.handleDeliveryFailure(d, sub, "transport: "+err.Error(), 0)
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body) // drain so connection can be reused
+	_ = resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		_ = s.db.MarkDeliverySuccess(d.ID, resp.StatusCode)
+		_ = s.db.MarkSubscriptionResult(sub.ID, "ok", "")
+		return
+	}
+	s.handleDeliveryFailure(d, sub,
+		fmt.Sprintf("HTTP %d from receiver", resp.StatusCode), resp.StatusCode)
+}
+
+// handleDeliveryFailure records the failure on both the delivery row
+// (which decides retry vs terminate) and the subscription row (so the
+// dashboard's "last status" lights up red on persistent failures).
+func (s *Scheduler) handleDeliveryFailure(d *database.WebhookDelivery, sub *database.EventSubscription, errMsg string, respStatus int) {
+	_ = s.db.MarkDeliveryFailure(d.ID, errMsg, d.Attempts, d.MaxAttempts, respStatus)
+	if d.Attempts >= d.MaxAttempts {
+		_ = s.db.MarkSubscriptionResult(sub.ID, "failed", errMsg)
+	}
 }
 
 // http3xxLabel renders an HTTP status as a short string for log lines.

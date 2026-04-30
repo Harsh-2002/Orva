@@ -103,6 +103,7 @@ import {
   ListChecks,
   Activity,
   Fingerprint,
+  Webhook,
   ShieldHalf,
   LibraryBig,
   LogOut,
@@ -134,6 +135,7 @@ const navItems = [
   { path: '/jobs',        label: 'Jobs',      icon: ListChecks },
   { path: '/invocations', label: 'Activity',  icon: Activity },
   { path: '/api-keys',    label: 'Keys',      icon: Fingerprint },
+  { path: '/webhooks',    label: 'Webhooks',  icon: Webhook },
   { path: '/firewall',    label: 'Firewall',  icon: ShieldHalf },
   { path: '/docs',        label: 'Docs',      icon: LibraryBig },
 ]

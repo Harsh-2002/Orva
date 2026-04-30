@@ -31,6 +31,7 @@ const router = createRouter({
         { path: 'jobs', name: 'jobs', component: () => import('@/views/Jobs.vue') },
         { path: 'invocations', name: 'invocations', component: () => import('@/views/InvocationsLog.vue') },
         { path: 'api-keys', name: 'api-keys', component: () => import('@/views/ApiKeys.vue') },
+        { path: 'webhooks', name: 'webhooks', component: () => import('@/views/Webhooks.vue') },
         { path: 'firewall', name: 'firewall', component: () => import('@/views/Firewall.vue') },
         { path: 'docs', name: 'docs', component: () => import('@/views/Docs.vue') },
       ],

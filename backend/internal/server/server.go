@@ -43,6 +43,7 @@ type Server struct {
 	EventHub   *events.Hub
 	Firewall   *firewall.Manager
 	Scheduler  *scheduler.Scheduler
+	WebhookFanout *events.WebhookFanout
 }
 
 func New(cfg *config.Config, db *database.Database) *Server {
@@ -207,7 +208,12 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// Scheduler runs cron triggers (P1) + future TTL/queue ticks. Started
 	// later in serve.go after the HTTP listener is up so health probes
 	// pass first.
-	sched := scheduler.New(db, poolMgr, cfg.Data.Dir)
+	sched := scheduler.New(db, poolMgr, cfg.Data.Dir, hub)
+
+	// WebhookFanout subscribes to the Hub and writes webhook_deliveries
+	// rows for every event that any operator-configured subscription
+	// matches. Started later in serve.go alongside the scheduler.
+	fanout := events.NewWebhookFanout(db, hub)
 
 	return &Server{
 		httpServer: &http.Server{
@@ -215,17 +221,18 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			ReadTimeout:  time.Duration(cfg.Server.ReadTimeoutSec) * time.Second,
 			WriteTimeout: time.Duration(cfg.Server.WriteTimeoutSec) * time.Second,
 		},
-		router:     router,
-		cfg:        cfg,
-		db:         db,
-		Pool:       limiter,
-		PoolMgr:    poolMgr,
-		Registry:   reg,
-		Metrics:    met,
-		BuildQueue: buildQueue,
-		EventHub:   hub,
-		Firewall:   fw,
-		Scheduler:  sched,
+		router:        router,
+		cfg:           cfg,
+		db:            db,
+		Pool:          limiter,
+		PoolMgr:       poolMgr,
+		Registry:      reg,
+		Metrics:       met,
+		BuildQueue:    buildQueue,
+		EventHub:      hub,
+		Firewall:      fw,
+		Scheduler:     sched,
+		WebhookFanout: fanout,
 	}
 }
 

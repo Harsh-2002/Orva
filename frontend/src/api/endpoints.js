@@ -203,3 +203,14 @@ export const enqueueJob = (body) => apiClient.post('/jobs', body)
 export const retryJob = (id) => apiClient.post(`/jobs/${id}/retry`)
 
 export const deleteJob = (id) => apiClient.delete(`/jobs/${id}`)
+
+// ── Webhook subscriptions (Phase v0.3) ──────────────────────────────
+
+export const listWebhooks = () => apiClient.get('/webhooks')
+export const createWebhook = (body) => apiClient.post('/webhooks', body)
+export const getWebhook = (id) => apiClient.get(`/webhooks/${id}`)
+export const updateWebhook = (id, body) => apiClient.put(`/webhooks/${id}`, body)
+export const deleteWebhook = (id) => apiClient.delete(`/webhooks/${id}`)
+export const testWebhook = (id) => apiClient.post(`/webhooks/${id}/test`)
+export const listWebhookDeliveries = (id) => apiClient.get(`/webhooks/${id}/deliveries`)
+export const retryWebhookDelivery = (id) => apiClient.post(`/webhooks/deliveries/${id}/retry`)
