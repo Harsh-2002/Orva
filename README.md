@@ -27,7 +27,10 @@ over HTTP, and get warm-pool latency without paying anyone.
   function in-process via the warm pool, no HTTP roundtrip. 8-deep
   call-depth guard.
 - **KV store** — `orva.kv.put/get/delete/list` per-function namespace
-  on SQLite, optional TTL. No external service needed.
+  on SQLite, optional TTL. No external service needed. Operators can
+  browse / edit / delete / set keys from the dashboard at
+  `/functions/<name>/kv`, the REST API
+  (`/api/v1/functions/<id>/kv[/<key>]`), or via MCP tools.
 - **Roll back** to any prior content-hashed version in one click.
   Each deploy is archived; rollback is an atomic symlink retarget.
 - **MCP server** — `/mcp` exposes the full management surface (functions,

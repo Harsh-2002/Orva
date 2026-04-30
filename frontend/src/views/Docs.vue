@@ -324,6 +324,21 @@
           :tabs="sdkKvTabs"
           storage-key="docs.sdk.kv"
         />
+        <p class="text-xs text-foreground-muted">
+          Browse / inspect / edit / delete / set keys without leaving
+          the dashboard at
+          <code class="doc-chip">/web/functions/&lt;name&gt;/kv</code>
+          (or click the
+          <code class="doc-chip">KV</code>
+          button in the editor's action bar). REST mirror at
+          <code class="doc-chip">GET/PUT/DELETE /api/v1/functions/&lt;id&gt;/kv[/&lt;key&gt;]</code>;
+          MCP tools
+          <code class="doc-chip">kv_list</code> /
+          <code class="doc-chip">kv_get</code> /
+          <code class="doc-chip">kv_put</code> /
+          <code class="doc-chip">kv_delete</code>
+          for agents.
+        </p>
       </div>
 
       <div class="space-y-2">

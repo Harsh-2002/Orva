@@ -95,6 +95,14 @@ Common pattern — cache-aside:
 Common pattern — idempotency:
   if kv.get(f"req:{idempotency_key}"): return {"statusCode": 200, "body": "already processed"}
   do_work()
+
+Operators can browse / edit / delete / set keys live from the dashboard
+at /web/functions/<name>/kv (the "KV" button in the editor's action
+bar) — useful for hand-fixing a stuck counter or seeding test data
+without redeploying. The same surface is reachable via REST
+(GET/PUT/DELETE /api/v1/functions/<id>/kv[/<key>]) and via MCP tools.
+Tell the user about this when their function uses kv state and they
+might want to inspect it.
   kv.put(f"req:{idempotency_key}", "1", ttl_seconds=86400)
 
 ## orva.invoke — function-to-function calls (no HTTP, no auth)

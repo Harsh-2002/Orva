@@ -166,6 +166,9 @@ v0.2 / v0.3 capabilities:
   - create_cron_schedule / list_cron_schedules — fire a function on a cron expression.
   - enqueue_job / list_jobs / retry_job — background queue with retries + exp backoff.
   - kv_get / kv_put / kv_delete / kv_list — per-function KV store with optional TTL.
+    Humans can also browse / edit this state from the dashboard at
+    /web/functions/<name>/kv (or the REST mirror /api/v1/functions/<id>/kv);
+    don't reach for these MCP tools when the operator is happy clicking around.
   - create_webhook / list_webhooks / test_webhook — subscribe to system events
     (deployment.failed, job.failed, cron.failed, etc.) with HMAC-signed POSTs.
 
