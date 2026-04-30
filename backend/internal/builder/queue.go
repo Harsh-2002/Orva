@@ -173,7 +173,7 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	// active code (first deploy).
 	if fn.Status == "created" || fn.Status == "error" {
 		fn.Status = "building"
-		_ = q.reg.Set(fn)
+		_ = q.reg.SetSilent(fn)
 	}
 
 	lw := newLogWriter(q.db, job.DeploymentID)
@@ -191,7 +191,7 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 		// otherwise leave the previous active code serving traffic.
 		if fn.Status == "building" {
 			fn.Status = "error"
-			_ = q.reg.Set(fn)
+			_ = q.reg.SetSilent(fn)
 		}
 		return
 	}
@@ -201,7 +201,9 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	fn.CodeHash = result.CodeHash
 	fn.Status = "active"
 	fn.Version++
-	if err := q.reg.Set(fn); err != nil {
+	// Silent: deployment.succeeded covers this transition for webhook
+	// subscribers; the dashboard already sees the deployment event too.
+	if err := q.reg.SetSilent(fn); err != nil {
 		q.fail(job, "persist", err.Error(), started)
 		return
 	}

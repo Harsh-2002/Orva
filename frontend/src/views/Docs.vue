@@ -1003,7 +1003,8 @@ exports.handler = async (event) => {
 const webhookEvents = [
   { name: 'deployment.succeeded', when: 'A function build finished and the new version is active.' },
   { name: 'deployment.failed',    when: 'A build failed or was rejected.' },
-  { name: 'function.changed',     when: 'A function was created or its config was updated.' },
+  { name: 'function.created',     when: 'A new function row was created via POST /api/v1/functions.' },
+  { name: 'function.updated',     when: 'A function config was edited via PUT /api/v1/functions/{id} (status flips during a deploy do NOT fire this — see deployment.*).' },
   { name: 'function.deleted',     when: 'A function was removed.' },
   { name: 'execution.error',      when: 'An invocation finished with status=error or 5xx.' },
   { name: 'cron.failed',          when: 'A scheduled run failed (bad expr, missing fn, dispatch error, or 5xx).' },

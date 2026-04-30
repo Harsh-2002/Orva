@@ -30,6 +30,8 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/harsh-2002/orva
+  # Opt every actions/* step into Node 24 (June 2026 deprecation).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # ── 1. Go binary: matrix amd64 + arm64 ───────────────────────────────

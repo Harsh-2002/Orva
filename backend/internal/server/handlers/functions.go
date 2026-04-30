@@ -662,13 +662,15 @@ func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Requ
 	// Fallback synchronous path — used by tests and any env without the
 	// Queue wired. Same observable shape as before Phase 9 landed.
 	defer removeTempFile(tarballPath)
+	// Status flips during the synchronous build path are silent for the
+	// same reason as the queue path — covered by deployment.* events.
 	fn.Status = "building"
-	h.Registry.Set(fn)
+	h.Registry.SetSilent(fn)
 	result, buildErr := h.Builder.Build(r.Context(), fn, tarballPath)
 	h.Metrics.RecordBuild(buildErr != nil)
 	if buildErr != nil {
 		fn.Status = "error"
-		h.Registry.Set(fn)
+		h.Registry.SetSilent(fn)
 		_ = h.DB.FinishDeployment(deploymentID, "failed", buildErr.Error(), 0)
 		respond.Error(w, http.StatusInternalServerError, "BUILD_ERROR", "build failed: "+buildErr.Error(), reqID)
 		return
@@ -678,7 +680,7 @@ func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Requ
 	fn.CodeHash = result.CodeHash
 	fn.Status = "active"
 	fn.Version++
-	h.Registry.Set(fn)
+	h.Registry.SetSilent(fn)
 	// See queue.go for rationale — capture the function's full state so
 	// rollback restores env + spawn config alongside the code.
 	_ = h.DB.SetDeploymentSnapshot(deploymentID, database.SnapshotFromFunction(fn))

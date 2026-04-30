@@ -118,12 +118,16 @@ func qualifyEvent(ev Event) (string, any) {
 			return "deployment.failed", data
 		}
 	case "function":
-		// registry publishes "upsert" (create or update — there's no
-		// separate created signal today) and "delete".
+		// registry publishes "created" on first insert, "updated" on
+		// edits via PUT /functions/{id}, and "deleted" on removal.
+		// Status flips during build use SetSilent and never reach
+		// here — those are covered by deployment.* events.
 		switch data["action"] {
-		case "upsert":
-			return "function.changed", data
-		case "delete":
+		case "created":
+			return "function.created", data
+		case "updated":
+			return "function.updated", data
+		case "deleted":
 			return "function.deleted", data
 		}
 	case "execution":

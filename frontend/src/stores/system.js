@@ -85,14 +85,13 @@ export const useSystemStore = defineStore('system', () => {
     // leave alone on plain updates. Cheaper than re-listing, and the
     // metrics tick on the next ~5s tick will reconcile any drift.
     unsubFunction = ev.subscribe('function', (data) => {
-      if (data.action === 'delete') {
+      // v0.3: registry now publishes split actions (created / updated /
+      // deleted) instead of upsert. We only adjust the counter on
+      // create / delete; updates leave it stable.
+      if (data.action === 'deleted') {
         functionsCount.value = Math.max(0, functionsCount.value - 1)
-      } else if (data.action === 'upsert' && data.function) {
-        // upsert covers both create and update — only bump the counter
-        // when the version is 1 (fresh create). Updates keep the count.
-        if (data.function.version === 1) {
-          functionsCount.value = functionsCount.value + 1
-        }
+      } else if (data.action === 'created') {
+        functionsCount.value = functionsCount.value + 1
       }
     })
   }

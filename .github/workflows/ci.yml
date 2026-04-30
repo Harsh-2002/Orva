@@ -12,6 +12,13 @@ concurrency:
 permissions:
   contents: read
 
+# Opt every job into Node.js 24 for actions/* steps that still ship as
+# Node 20 wrappers (deprecated June 2026). One env var beats bumping
+# each action to a v24-native release; the actions themselves still
+# work either way, this just silences the deprecation warning.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   go:
     name: go ${{ matrix.go }} / ${{ matrix.os }}

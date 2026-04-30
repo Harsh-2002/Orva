@@ -55,8 +55,24 @@ func (r *Registry) Get(id string) (*database.Function, error) {
 }
 
 // Set writes a function to SQLite and updates the cache.
-// If the function has no ID, one is generated.
+// If the function has no ID, one is generated. Publishes "created" on
+// fresh inserts and "updated" on updates so subscribers (dashboard live
+// counter, webhook fanout) can distinguish.
 func (r *Registry) Set(fn *database.Function) error {
+	return r.set(fn, true)
+}
+
+// SetSilent persists without publishing a Hub event. Used by code
+// paths that flip internal state during a deploy lifecycle (build
+// queue moving status: queued → building → active). Those changes
+// already surface to subscribers via the deployment.* events; firing
+// function.updated alongside would duplicate the signal and flood
+// webhook receivers during a single deploy.
+func (r *Registry) SetSilent(fn *database.Function) error {
+	return r.set(fn, false)
+}
+
+func (r *Registry) set(fn *database.Function, publish bool) error {
 	if fn.ID == "" {
 		id, err := GenerateID()
 		if err != nil {
@@ -67,7 +83,9 @@ func (r *Registry) Set(fn *database.Function) error {
 
 	// Try insert first; fall back to update only if the function already
 	// exists by ID (i.e. an upsert). Other insert errors (e.g. UNIQUE
-	// constraint on name) are propagated.
+	// constraint on name) are propagated. The action we ultimately
+	// publish depends on which path actually wrote the row.
+	action := "created"
 	if err := r.db.InsertFunction(fn); err != nil {
 		if _, existsErr := r.db.GetFunction(fn.ID); existsErr != nil {
 			// Function doesn't exist by ID — propagate the original error.
@@ -76,14 +94,15 @@ func (r *Registry) Set(fn *database.Function) error {
 		if err2 := r.db.UpdateFunction(fn); err2 != nil {
 			return fmt.Errorf("set function: insert=%w, update=%v", err, err2)
 		}
+		action = "updated"
 	}
 
 	// Invalidate (remove then store fresh) to ensure consistency.
 	r.cache.Delete(fn.ID)
 	r.cache.Store(fn.ID, fn)
-	if r.PublishEvent != nil {
+	if publish && r.PublishEvent != nil {
 		r.PublishEvent("function", map[string]any{
-			"action":   "upsert",
+			"action":   action,
 			"function": fn,
 		})
 	}
@@ -98,7 +117,7 @@ func (r *Registry) Delete(id string) error {
 	r.cache.Delete(id)
 	if r.PublishEvent != nil {
 		r.PublishEvent("function", map[string]any{
-			"action": "delete",
+			"action": "deleted",
 			"id":     id,
 		})
 	}

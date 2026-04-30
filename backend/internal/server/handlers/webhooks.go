@@ -261,7 +261,8 @@ var allowedEvents = map[string]struct{}{
 	"*":                    {},
 	"deployment.succeeded": {},
 	"deployment.failed":    {},
-	"function.changed":     {}, // upsert — the registry doesn't split create vs update
+	"function.created":     {}, // POST /functions
+	"function.updated":     {}, // PUT /functions/{id} (excludes silent status flips)
 	"function.deleted":     {},
 	"execution.error":      {},
 	"cron.failed":          {},
