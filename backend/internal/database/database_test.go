@@ -32,11 +32,11 @@ func TestMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify seed data
+	// Verify seed data — bump this when migrations.go gains new rows.
 	var count int
 	db.read.QueryRow("SELECT COUNT(*) FROM system_config").Scan(&count)
-	if count != 14 {
-		t.Errorf("expected 14 system config rows, got %d", count)
+	if count != 16 {
+		t.Errorf("expected 16 system config rows, got %d", count)
 	}
 }
 
