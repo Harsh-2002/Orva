@@ -51,7 +51,10 @@
             <td class="px-6 py-4">
               <div class="flex flex-col gap-1">
                 <span class="text-foreground font-mono text-xs">{{ job.cron_expression }}</span>
-                <span class="text-foreground-muted text-[10px]">{{ humanizeCron(job.cron_expression) }}</span>
+                <span class="text-foreground-muted text-[10px]">
+                  {{ humanizeCron(job.cron_expression) }}
+                  <span class="text-foreground-muted/70">· {{ job.timezone || 'UTC' }}</span>
+                </span>
               </div>
             </td>
             <td class="px-6 py-4 hidden sm:table-cell">
@@ -302,11 +305,33 @@
             </div>
           </div>
 
+          <!-- Timezone -->
+          <div>
+            <label class="block text-xs font-medium text-foreground-muted uppercase tracking-wide mb-1.5">
+              Timezone
+            </label>
+            <select
+              v-model="form.timezone"
+              class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            >
+              <option v-for="tz in timezoneOptions" :key="tz" :value="tz">
+                {{ tz }}{{ tz === detectedTZ ? '  (your browser)' : '' }}
+              </option>
+            </select>
+            <div class="text-xs text-foreground-muted mt-1.5">
+              The cron expression is interpreted in this zone — e.g.
+              <code class="bg-surface px-1 rounded">0 9 * * *</code>
+              with timezone
+              <code class="bg-surface px-1 rounded">{{ form.timezone }}</code>
+              fires at 9 AM local time every day.
+            </div>
+          </div>
+
           <!-- Enabled Toggle -->
           <div class="flex items-center gap-3">
-            <input 
+            <input
               id="enabled-toggle"
-              v-model="form.enabled" 
+              v-model="form.enabled"
               type="checkbox"
               class="w-4 h-4 text-primary bg-background border-border rounded focus:ring-primary focus:ring-2"
             >
@@ -343,8 +368,32 @@ import { ref, onMounted } from 'vue'
 import { PlusCircle, Trash2, Clock, X, Edit, Play, Pause } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
-import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions } from '@/api/endpoints'
+import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions, browserTimezone } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
+
+// Detect the operator's browser timezone so new schedules default to
+// it (operators expect "every day at 9 AM" to mean their 9 AM, not
+// orvad's process 9 AM which is typically UTC in containers).
+const detectedTZ = browserTimezone()
+
+// timezoneOptions is a curated list — full IANA list has 600+ zones,
+// but ~95% of operators want one of these or their own browser TZ.
+// `detectedTZ` is always shown first (and labelled) so the operator's
+// own zone is one click away, then a few major hubs by region.
+const timezoneOptions = (() => {
+  const major = [
+    'UTC',
+    'America/Los_Angeles', 'America/New_York', 'America/Chicago', 'America/Denver',
+    'America/Sao_Paulo',
+    'Europe/London', 'Europe/Berlin', 'Europe/Paris', 'Europe/Moscow',
+    'Africa/Lagos', 'Africa/Cairo', 'Africa/Johannesburg',
+    'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Shanghai', 'Asia/Tokyo',
+    'Australia/Sydney',
+    'Pacific/Auckland',
+  ]
+  const set = new Set([detectedTZ, ...major])
+  return [...set]
+})()
 
 const confirmStore = useConfirmStore()
 
@@ -357,6 +406,7 @@ const scheduleType = ref('simple')
 const form = ref({
   function_name: '',
   cron: '0 0 * * *',
+  timezone: detectedTZ,
   enabled: true
 })
 
@@ -450,11 +500,13 @@ const saveSchedule = async () => {
       await updateCronSchedule(editingJob.value.id, {
         function_id: editingJob.value.function_id,
         cron: form.value.cron,
+        timezone: form.value.timezone,
         enabled: form.value.enabled,
       })
     } else {
       await createCronSchedule(form.value.function_name, {
         cron: form.value.cron,
+        timezone: form.value.timezone,
         enabled: form.value.enabled,
       })
     }
@@ -471,6 +523,7 @@ const editSchedule = (job) => {
   form.value = {
     function_name: job.function_name,
     cron: job.cron_expression,
+    timezone: job.timezone || 'UTC',
     enabled: job.enabled
   }
   showCreateModal.value = true
@@ -511,6 +564,7 @@ const closeModal = () => {
   form.value = {
     function_name: '',
     cron: '0 0 * * *',
+    timezone: detectedTZ,
     enabled: true
   }
   simpleSchedule.value = {

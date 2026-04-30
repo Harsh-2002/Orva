@@ -382,6 +382,11 @@ PRAGMA foreign_keys = ON;
 		// Per-function rate limit (requests/minute, per client IP). 0 =
 		// unlimited. Token-bucket implementation lives in handlers/ratelimit.go.
 		"ALTER TABLE functions ADD COLUMN rate_limit_per_min INTEGER NOT NULL DEFAULT 0",
+		// Per-cron timezone. The expression "0 9 * * *" with timezone
+		// "Asia/Kolkata" fires at 9 AM IST every day, regardless of the
+		// orvad process timezone. UTC default keeps legacy rows behaving
+		// identically to before this migration.
+		"ALTER TABLE cron_schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// "duplicate column name" is expected on boot after the first.

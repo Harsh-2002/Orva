@@ -23,11 +23,30 @@ type CronHandler struct {
 }
 
 // cronRequest is the shape of POST/PUT bodies. Payload is optional and
-// defaults to "{}" when absent.
+// defaults to "{}" when absent. Timezone is an IANA name (e.g.
+// "Asia/Kolkata"); empty string defaults to "UTC" so older clients keep
+// working unchanged.
 type cronRequest struct {
 	CronExpr string `json:"cron_expr"`
+	Timezone string `json:"timezone,omitempty"`
 	Enabled  *bool  `json:"enabled,omitempty"`
 	Payload  any    `json:"payload,omitempty"`
+}
+
+// resolveTZ validates a timezone string and returns its *time.Location.
+// Empty string maps to UTC. Invalid IANA names return an error so the
+// caller can reject the request with a 400 instead of silently
+// reverting to UTC (which would surprise the operator).
+func resolveTZ(name string) (*time.Location, string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return time.UTC, "UTC", nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, "", errors.New("invalid timezone: " + name)
+	}
+	return loc, name, nil
 }
 
 // List handles GET /api/v1/functions/{fn_id}/cron.
@@ -75,6 +94,11 @@ func (h *CronHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "invalid cron_expr: "+err.Error(), reqID)
 		return
 	}
+	loc, tzName, err := resolveTZ(req.Timezone)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
+	}
 
 	enabled := true
 	if req.Enabled != nil {
@@ -89,10 +113,13 @@ func (h *CronHandler) Create(w http.ResponseWriter, r *http.Request) {
 	row := &database.CronSchedule{
 		FunctionID: fnID,
 		CronExpr:   expr,
+		Timezone:   tzName,
 		Enabled:    enabled,
 		Payload:    payload,
 	}
-	next := sched.Next(time.Now().UTC())
+	// Compute next fire time IN THE SCHEDULE'S TIMEZONE so "0 9 * * *"
+	// in Asia/Kolkata fires at 9 AM IST, not 9 AM UTC. Store as UTC.
+	next := sched.Next(time.Now().In(loc)).UTC()
 	row.NextRunAt = &next
 
 	if err := h.DB.InsertCronSchedule(row); err != nil {
@@ -122,14 +149,22 @@ func (h *CronHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exprChanged := false
+	changed := false
 	if expr := strings.TrimSpace(req.CronExpr); expr != "" && expr != row.CronExpr {
 		if _, err := scheduler.ParseCronExpr(expr); err != nil {
 			respond.Error(w, http.StatusBadRequest, "VALIDATION", "invalid cron_expr: "+err.Error(), reqID)
 			return
 		}
 		row.CronExpr = expr
-		exprChanged = true
+		changed = true
+	}
+	if tz := strings.TrimSpace(req.Timezone); tz != "" && tz != row.Timezone {
+		if _, _, err := resolveTZ(tz); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+			return
+		}
+		row.Timezone = tz
+		changed = true
 	}
 	if req.Enabled != nil {
 		row.Enabled = *req.Enabled
@@ -143,12 +178,13 @@ func (h *CronHandler) Update(w http.ResponseWriter, r *http.Request) {
 		row.Payload = payload
 	}
 
-	// Recompute next_run_at when the expression changes or when toggling
-	// from disabled→enabled (so a long-paused schedule fires soon, not
-	// according to its stale next_run_at).
-	if exprChanged || row.Enabled {
+	// Recompute next_run_at when the expression OR timezone changes, or
+	// when toggling from disabled→enabled (so a long-paused schedule
+	// fires soon, not according to its stale next_run_at).
+	if changed || row.Enabled {
 		sched, _ := scheduler.ParseCronExpr(row.CronExpr)
-		next := sched.Next(time.Now().UTC())
+		loc, _, _ := resolveTZ(row.Timezone)
+		next := sched.Next(time.Now().In(loc)).UTC()
 		row.NextRunAt = &next
 	}
 

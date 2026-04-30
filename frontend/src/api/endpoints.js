@@ -161,11 +161,12 @@ export const getCronSchedule = async (id) => {
   return { data: found || null }
 }
 
-// createCronSchedule(functionName, {cron, enabled, payload?})
+// createCronSchedule(functionName, {cron, timezone?, enabled, payload?})
 export const createCronSchedule = async (functionName, body) => {
   const fnId = await _resolveFnId(functionName)
   const payload = {
     cron_expr: body.cron,
+    timezone: body.timezone || browserTimezone(),
     enabled: body.enabled !== false,
     payload: body.payload ?? {},
   }
@@ -173,17 +174,29 @@ export const createCronSchedule = async (functionName, body) => {
   return { data: _decorateSchedule(res.data) }
 }
 
-// updateCronSchedule(scheduleId, {function_id, cron?, enabled?, payload?})
+// updateCronSchedule(scheduleId, {function_id, cron?, timezone?, enabled?, payload?})
 // function_id is required so the route matches.
 export const updateCronSchedule = async (scheduleId, body) => {
   const fnId = body.function_id
   if (!fnId) throw new Error('updateCronSchedule: function_id is required')
   const payload = {}
-  if (body.cron !== undefined)    payload.cron_expr = body.cron
-  if (body.enabled !== undefined) payload.enabled   = body.enabled
-  if (body.payload !== undefined) payload.payload   = body.payload
+  if (body.cron !== undefined)     payload.cron_expr = body.cron
+  if (body.timezone !== undefined) payload.timezone  = body.timezone
+  if (body.enabled !== undefined)  payload.enabled   = body.enabled
+  if (body.payload !== undefined)  payload.payload   = body.payload
   const res = await apiClient.put(`/functions/${fnId}/cron/${scheduleId}`, payload)
   return { data: _decorateSchedule(res.data) }
+}
+
+// browserTimezone returns the user's IANA name (e.g. "Asia/Kolkata") so
+// new schedules default to the operator's local zone instead of the
+// orvad process timezone (typically UTC in containers).
+export const browserTimezone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
 }
 
 // deleteCronSchedule(scheduleId, functionId) — both required because the

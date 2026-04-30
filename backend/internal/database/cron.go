@@ -14,6 +14,11 @@ type CronSchedule struct {
 	ID         string     `json:"id"`
 	FunctionID string     `json:"function_id"`
 	CronExpr   string     `json:"cron_expr"`
+	// Timezone is the IANA name (e.g. "Asia/Kolkata", "America/Los_Angeles",
+	// "UTC") that the cron expression is interpreted against. A row with
+	// CronExpr "0 9 * * *" and Timezone "Asia/Kolkata" fires at 9 AM IST,
+	// regardless of the orvad process timezone. Defaults to "UTC".
+	Timezone   string     `json:"timezone"`
 	Enabled    bool       `json:"enabled"`
 	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
 	NextRunAt  *time.Time `json:"next_run_at,omitempty"`
@@ -38,14 +43,17 @@ func (db *Database) InsertCronSchedule(s *CronSchedule) error {
 	if s.Payload == "" {
 		s.Payload = "{}"
 	}
+	if s.Timezone == "" {
+		s.Timezone = "UTC"
+	}
 	now := time.Now().UTC()
 	s.CreatedAt = now
 	s.UpdatedAt = now
 	_, err := db.write.Exec(`
 		INSERT INTO cron_schedules
-			(id, function_id, cron_expr, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.FunctionID, s.CronExpr, boolToInt(s.Enabled),
+			(id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.FunctionID, s.CronExpr, s.Timezone, boolToInt(s.Enabled),
 		nullTime(s.LastRunAt), nullTime(s.NextRunAt),
 		nullString(s.LastStatus), nullString(s.LastError),
 		s.Payload, s.CreatedAt, s.UpdatedAt,
@@ -59,9 +67,9 @@ func (db *Database) GetCronSchedule(id string) (*CronSchedule, error) {
 	var last, next sql.NullTime
 	var lastStatus, lastErr sql.NullString
 	err := db.read.QueryRow(`
-		SELECT id, function_id, cron_expr, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules WHERE id = ?`, id,
-	).Scan(&s.ID, &s.FunctionID, &s.CronExpr, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt)
+	).Scan(&s.ID, &s.FunctionID, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +91,7 @@ func (db *Database) GetCronSchedule(id string) (*CronSchedule, error) {
 // function, newest first.
 func (db *Database) ListCronSchedulesForFunction(functionID string) ([]*CronSchedule, error) {
 	rows, err := db.read.Query(`
-		SELECT id, function_id, cron_expr, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules WHERE function_id = ? ORDER BY created_at DESC`, functionID)
 	if err != nil {
 		return nil, err
@@ -96,7 +104,7 @@ func (db *Database) ListCronSchedulesForFunction(functionID string) ([]*CronSche
 // the dashboard.
 func (db *Database) ListAllCronSchedules() ([]*CronSchedule, error) {
 	rows, err := db.read.Query(`
-		SELECT id, function_id, cron_expr, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -118,7 +126,7 @@ type CronScheduleWithFunction struct {
 // query per row.
 func (db *Database) ListAllCronSchedulesWithFunction() ([]*CronScheduleWithFunction, error) {
 	rows, err := db.read.Query(`
-		SELECT c.id, c.function_id, c.cron_expr, c.enabled, c.last_run_at, c.next_run_at, c.last_status, c.last_error, c.payload, c.created_at, c.updated_at,
+		SELECT c.id, c.function_id, c.cron_expr, c.timezone, c.enabled, c.last_run_at, c.next_run_at, c.last_status, c.last_error, c.payload, c.created_at, c.updated_at,
 		       COALESCE(f.name, '')
 		FROM cron_schedules c
 		LEFT JOIN functions f ON f.id = c.function_id
@@ -135,7 +143,7 @@ func (db *Database) ListAllCronSchedulesWithFunction() ([]*CronScheduleWithFunct
 		var last, next sql.NullTime
 		var lastStatus, lastErr sql.NullString
 		var fnName string
-		if err := rows.Scan(&s.ID, &s.FunctionID, &s.CronExpr, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt, &fnName); err != nil {
+		if err := rows.Scan(&s.ID, &s.FunctionID, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt, &fnName); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
@@ -161,7 +169,7 @@ func (db *Database) DueCronSchedules(now time.Time, limit int) ([]*CronSchedule,
 		limit = 50
 	}
 	rows, err := db.read.Query(`
-		SELECT id, function_id, cron_expr, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules
 		WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
 		ORDER BY next_run_at ASC
@@ -173,16 +181,19 @@ func (db *Database) DueCronSchedules(now time.Time, limit int) ([]*CronSchedule,
 	return scanCronRows(rows)
 }
 
-// UpdateCronSchedule applies the editable fields. cron_expr / enabled /
-// payload pass through; next_run_at must be supplied so the scheduler
-// doesn't drift after expr changes.
+// UpdateCronSchedule applies the editable fields. cron_expr / timezone /
+// enabled / payload pass through; next_run_at must be supplied so the
+// scheduler doesn't drift after expr or TZ changes.
 func (db *Database) UpdateCronSchedule(s *CronSchedule) error {
+	if s.Timezone == "" {
+		s.Timezone = "UTC"
+	}
 	s.UpdatedAt = time.Now().UTC()
 	_, err := db.write.Exec(`
 		UPDATE cron_schedules
-		SET cron_expr = ?, enabled = ?, payload = ?, next_run_at = ?, updated_at = ?
+		SET cron_expr = ?, timezone = ?, enabled = ?, payload = ?, next_run_at = ?, updated_at = ?
 		WHERE id = ?`,
-		s.CronExpr, boolToInt(s.Enabled), s.Payload, nullTime(s.NextRunAt), s.UpdatedAt, s.ID)
+		s.CronExpr, s.Timezone, boolToInt(s.Enabled), s.Payload, nullTime(s.NextRunAt), s.UpdatedAt, s.ID)
 	return err
 }
 
@@ -211,7 +222,7 @@ func scanCronRows(rows *sql.Rows) ([]*CronSchedule, error) {
 		var enabled int
 		var last, next sql.NullTime
 		var lastStatus, lastErr sql.NullString
-		if err := rows.Scan(&s.ID, &s.FunctionID, &s.CronExpr, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.FunctionID, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1

@@ -40,6 +40,20 @@ func ParseCronExpr(expr string) (cron.Schedule, error) {
 	return cronParser.Parse(expr)
 }
 
+// loadLocationOr returns the IANA location for `name`, falling back to
+// UTC for unknown / empty names. Activity-critical paths use this so a
+// silently-corrupted timezone column can't crash the scheduler.
+func loadLocationOr(name string) *time.Location {
+	if name == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil || loc == nil {
+		return time.UTC
+	}
+	return loc
+}
+
 // Scheduler owns the timer goroutine. Constructed once at server boot
 // and started immediately after the HTTP server is listening so cron
 // fires don't compete with the prewarm path on a cold container.
@@ -203,7 +217,11 @@ func (s *Scheduler) recomputeNextRunOnBoot() {
 			slog.Warn("scheduler: bad cron expr at boot", "id", r.ID, "expr", r.CronExpr, "err", err)
 			continue
 		}
-		next := sched.Next(now)
+		// Compute next-run in the schedule's own timezone so a row with
+		// timezone="Asia/Kolkata" + "0 9 * * *" fires at 9 AM IST every
+		// day, regardless of orvad's process timezone.
+		loc := loadLocationOr(r.Timezone)
+		next := sched.Next(now.In(loc)).UTC()
 		// Only update when the row had no next_run_at OR it's in the past.
 		if r.NextRunAt == nil || r.NextRunAt.Before(now) {
 			r.NextRunAt = &next
@@ -266,7 +284,8 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	// matching the "due" query every tick and saturate the goroutine.
 	var nextAt time.Time
 	if sched, err := ParseCronExpr(row.CronExpr); err == nil {
-		nextAt = sched.Next(ranAt)
+		loc := loadLocationOr(row.Timezone)
+		nextAt = sched.Next(ranAt.In(loc)).UTC()
 	} else {
 		// Bad expression — back off an hour and surface the error.
 		nextAt = ranAt.Add(time.Hour)
