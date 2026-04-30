@@ -88,6 +88,12 @@ func NewHandler(deps Deps) http.Handler {
 		registerKeyTools(s, deps, perms)
 		registerFirewallTools(s, deps, perms)
 		registerPoolTools(s, deps, perms)
+		// v0.2 + v0.3: cron schedules, KV store, background jobs, and
+		// system-event webhooks. Each respects the same permission gates.
+		registerCronTools(s, deps, perms)
+		registerKVTools(s, deps, perms)
+		registerJobTools(s, deps, perms)
+		registerWebhookTools(s, deps, perms)
 
 		registerResources(s, deps, perms)
 
@@ -124,10 +130,12 @@ func NewHandler(deps Deps) http.Handler {
 // then wait then invoke" workflow.
 const serverInstructions = `Orva is a self-hosted serverless platform.
 
-You can use these tools to do everything a developer can do from the
-web UI: list and create functions, deploy code, watch builds, invoke
-functions, read execution logs, manage secrets, configure custom
-routes, and inspect system health.
+You can use these tools to do everything a developer or operator can do
+from the web UI: list and create functions, deploy code, watch builds,
+invoke functions, read execution logs, manage secrets, configure
+custom routes, schedule cron jobs, enqueue background work, store
+key/value state, subscribe to system-event webhooks, and inspect
+system health.
 
 A typical workflow to ship a new function:
   1. list_runtimes  — see which Python/Node versions are available.
@@ -137,6 +145,13 @@ A typical workflow to ship a new function:
   5. deploy_function_inline with wait=true — pass the handler source as a string.
   6. invoke_function — call it and inspect the response.
   7. get_execution_logs — read stderr if invocation failed.
+
+v0.2 / v0.3 capabilities:
+  - create_cron_schedule / list_cron_schedules — fire a function on a cron expression.
+  - enqueue_job / list_jobs / retry_job — background queue with retries + exp backoff.
+  - kv_get / kv_put / kv_delete / kv_list — per-function KV store with optional TTL.
+  - create_webhook / list_webhooks / test_webhook — subscribe to system events
+    (deployment.failed, job.failed, cron.failed, etc.) with HMAC-signed POSTs.
 
 Destructive tools (delete_*, rollback_*) require an explicit
 "confirm: true" argument so a runaway loop can't accidentally delete
