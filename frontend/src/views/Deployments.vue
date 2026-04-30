@@ -136,14 +136,15 @@
               class="px-6 py-4 text-right text-xs"
               @click.stop
             >
-              <button
+              <Button
                 v-if="canRollback(d)"
+                size="xs"
+                variant="ghost"
                 :disabled="rollingBack"
-                class="text-foreground-muted hover:text-white disabled:opacity-50 inline-flex items-center gap-1"
                 @click="rollbackTo(d)"
               >
                 <RotateCcw class="w-3 h-3" /> Rollback
-              </button>
+              </Button>
               <span
                 v-else-if="d.source === 'rollback'"
                 class="text-foreground-muted/50"

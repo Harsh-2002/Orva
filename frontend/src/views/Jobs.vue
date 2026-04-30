@@ -12,13 +12,12 @@
 
     <!-- Status filter strip. -->
     <div class="flex items-center gap-2 flex-wrap">
-      <button
+      <Button
         v-for="opt in statusOptions"
         :key="opt.value"
-        class="px-2.5 py-1 rounded-md border text-xs transition-colors"
-        :class="statusFilter === opt.value
-          ? 'bg-primary text-primary-foreground border-primary'
-          : 'bg-surface text-foreground-muted border-border hover:text-white hover:border-foreground-muted'"
+        variant="chip"
+        size="xs"
+        :active="statusFilter === opt.value"
         @click="statusFilter = opt.value"
       >
         {{ opt.label }}
@@ -26,15 +25,16 @@
           v-if="counts[opt.value] !== undefined"
           class="ml-1 opacity-70"
         >{{ counts[opt.value] }}</span>
-      </button>
+      </Button>
       <div class="flex-1" />
-      <button
-        class="px-2.5 py-1 rounded-md border border-border bg-surface text-foreground-muted hover:text-white text-xs flex items-center gap-1.5"
+      <Button
+        variant="secondary"
+        size="xs"
         @click="loadJobs"
       >
         <RefreshCcw class="w-3 h-3" />
         Refresh
-      </button>
+      </Button>
     </div>
 
     <!-- Table. -->
@@ -99,21 +99,21 @@
               {{ job.finished_at ? formatDate(job.finished_at) : '—' }}
             </td>
             <td class="px-4 py-3 text-right">
-              <button
-                v-if="job.status === 'failed'"
-                class="text-foreground-muted hover:text-foreground transition-colors p-1 mr-1"
-                title="Retry"
-                @click="retry(job)"
-              >
-                <RotateCcw class="w-4 h-4" />
-              </button>
-              <button
-                class="text-foreground-muted hover:text-error transition-colors p-1"
-                title="Delete"
-                @click="remove(job)"
-              >
-                <Trash2 class="w-4 h-4" />
-              </button>
+              <div class="inline-flex items-center gap-1">
+                <IconButton
+                  v-if="job.status === 'failed'"
+                  :icon="RotateCcw"
+                  variant="success"
+                  title="Retry"
+                  @click="retry(job)"
+                />
+                <IconButton
+                  :icon="Trash2"
+                  variant="danger"
+                  title="Delete"
+                  @click="remove(job)"
+                />
+              </div>
             </td>
           </tr>
           <tr v-if="filteredJobs.length === 0">
@@ -142,6 +142,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Trash2, RotateCcw, RefreshCcw, Inbox } from 'lucide-vue-next'
 import { listJobs, retryJob, deleteJob } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
+import Button from '@/components/common/Button.vue'
+import IconButton from '@/components/common/IconButton.vue'
 
 const confirmStore = useConfirmStore()
 

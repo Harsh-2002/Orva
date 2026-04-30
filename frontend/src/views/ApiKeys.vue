@@ -177,12 +177,12 @@
               >{{ formatRelative(key.expires_at) }}</span>
             </td>
             <td class="px-6 py-4 text-right">
-              <button
-                class="text-red-400 hover:text-red-300 text-xs font-medium"
+              <IconButton
+                :icon="Trash2"
+                variant="danger"
+                title="Delete key"
                 @click="removeKey(key)"
-              >
-                Delete
-              </button>
+              />
             </td>
           </tr>
           <tr v-if="keys.length === 0">
@@ -201,8 +201,9 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { KeyRound, Copy, Check, X } from 'lucide-vue-next'
+import { KeyRound, Copy, Check, X, Trash2 } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
+import IconButton from '@/components/common/IconButton.vue'
 import { listApiKeys, createApiKey, deleteApiKey } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'

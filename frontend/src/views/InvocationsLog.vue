@@ -395,12 +395,17 @@ const FilterChip = defineComponent({
         onMouseenter: () => { document.addEventListener('mousedown', onDoc) },
         onMouseleave: () => { /* keep listener while open */ },
       }, [
+        // Visual rhythm matches Button variant=chip size=xs (h-7 px-2.5)
+        // so this stateful dropdown chip lines up with the flat toggle
+        // chips on Jobs.vue / Webhooks.vue. We can't reuse <Button> here
+        // because this trigger needs to host a child clear-x and a
+        // dropdown — different shape from a single-action chip.
         h('button', {
           class: [
-            'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] transition-colors',
+            'inline-flex items-center gap-1.5 rounded-md border h-7 px-2.5 text-xs transition-colors',
             active.value
-              ? 'bg-white text-black border-white hover:bg-foreground-muted/10'
-              : 'bg-background text-foreground-muted border-border hover:text-white hover:border-foreground-muted',
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-surface text-foreground-muted border-border hover:text-white hover:border-foreground-muted',
           ],
           onClick: () => { open.value = !open.value },
         }, [

@@ -5,13 +5,10 @@
       <h1 class="text-xl font-semibold text-white tracking-tight">
         Webhooks
       </h1>
-      <button
-        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover transition-colors"
-        @click="openCreate"
-      >
+      <Button @click="openCreate">
         <Plus class="w-4 h-4" />
         New webhook
-      </button>
+      </Button>
     </div>
 
     <p class="text-xs text-foreground-muted max-w-2xl leading-relaxed">
@@ -90,27 +87,24 @@
               class="px-4 py-3 text-right"
               @click.stop
             >
-              <button
-                class="text-foreground-muted hover:text-foreground transition-colors p-1 mr-1"
-                title="Send test event"
-                @click="testSubscription(sub)"
-              >
-                <Zap class="w-4 h-4" />
-              </button>
-              <button
-                class="text-foreground-muted hover:text-foreground transition-colors p-1 mr-1"
-                title="Edit"
-                @click="openEdit(sub)"
-              >
-                <Edit class="w-4 h-4" />
-              </button>
-              <button
-                class="text-foreground-muted hover:text-error transition-colors p-1"
-                title="Delete"
-                @click="removeSubscription(sub)"
-              >
-                <Trash2 class="w-4 h-4" />
-              </button>
+              <div class="inline-flex items-center gap-1">
+                <IconButton
+                  :icon="Zap"
+                  title="Send test event"
+                  @click="testSubscription(sub)"
+                />
+                <IconButton
+                  :icon="Edit"
+                  title="Edit"
+                  @click="openEdit(sub)"
+                />
+                <IconButton
+                  :icon="Trash2"
+                  variant="danger"
+                  title="Delete"
+                  @click="removeSubscription(sub)"
+                />
+              </div>
             </td>
           </tr>
           <tr v-if="subscriptions.length === 0">
@@ -142,12 +136,11 @@
           <h2 class="text-base font-semibold text-foreground">
             {{ editingId ? 'Edit webhook' : 'New webhook' }}
           </h2>
-          <button
-            class="text-foreground-muted hover:text-foreground"
+          <IconButton
+            :icon="X"
+            title="Close"
             @click="closeForm"
-          >
-            <X class="w-5 h-5" />
-          </button>
+          />
         </div>
 
         <div
@@ -176,18 +169,17 @@
           <div>
             <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Events</label>
             <div class="flex flex-wrap gap-1.5">
-              <button
+              <Button
                 v-for="ev in allEvents"
                 :key="ev.value"
-                type="button"
-                class="px-2.5 py-1 rounded-md text-xs font-mono border transition-colors"
-                :class="form.events.includes(ev.value)
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-surface text-foreground-muted border-border hover:border-foreground-muted'"
+                variant="chip"
+                size="xs"
+                :active="form.events.includes(ev.value)"
+                class="font-mono"
                 @click="toggleEvent(ev.value)"
               >
                 {{ ev.value }}
-              </button>
+              </Button>
             </div>
             <p class="text-[11px] text-foreground-muted mt-1.5">
               Pick <code class="font-mono">*</code> to receive every event. Each badge above is one of the 8 system events that can fire today.
@@ -221,45 +213,35 @@
           </p>
           <div class="bg-background border border-border rounded p-3 font-mono text-xs break-all flex items-center gap-2">
             <code class="flex-1 text-foreground">{{ mintedSecret }}</code>
-            <button
-              class="px-2 py-1 rounded text-foreground-muted hover:text-foreground hover:bg-surface-hover text-xs"
+            <IconButton
+              :icon="mintedCopied ? Check : Copy"
+              :title="mintedCopied ? 'Copied' : 'Copy secret'"
               @click="copyMinted"
-            >
-              <Check
-                v-if="mintedCopied"
-                class="w-3.5 h-3.5 text-success"
-              />
-              <Copy
-                v-else
-                class="w-3.5 h-3.5"
-              />
-            </button>
+            />
           </div>
         </div>
 
         <div class="border-t border-border px-6 py-4 flex justify-end gap-2">
-          <button
+          <Button
             v-if="!mintedSecret"
-            class="px-3 py-1.5 rounded-md text-sm text-foreground-muted hover:text-foreground"
+            variant="ghost"
             @click="closeForm"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             v-if="!mintedSecret"
-            class="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
             :disabled="!canSubmit || saving"
             @click="save"
           >
             {{ saving ? 'Saving…' : (editingId ? 'Save' : 'Create') }}
-          </button>
-          <button
+          </Button>
+          <Button
             v-else
-            class="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary-hover transition-colors"
             @click="closeForm"
           >
             Done
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -280,12 +262,11 @@
               {{ drawerSub.id }}
             </p>
           </div>
-          <button
-            class="text-foreground-muted hover:text-foreground"
+          <IconButton
+            :icon="X"
+            title="Close"
             @click="closeDrawer"
-          >
-            <X class="w-5 h-5" />
-          </button>
+          />
         </div>
 
         <div class="p-4 space-y-2">
@@ -325,14 +306,15 @@
             >
               {{ d.last_error }}
             </p>
-            <button
+            <Button
               v-if="d.status === 'failed'"
-              class="text-xs text-foreground-muted hover:text-foreground inline-flex items-center gap-1.5"
+              size="xs"
+              variant="ghost"
               @click="retryDelivery(d)"
             >
               <RotateCcw class="w-3.5 h-3.5" />
               Retry
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -351,6 +333,8 @@ import {
 } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import { copyText } from '@/utils/clipboard'
+import Button from '@/components/common/Button.vue'
+import IconButton from '@/components/common/IconButton.vue'
 
 const confirmStore = useConfirmStore()
 

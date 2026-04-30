@@ -110,22 +110,22 @@
             <td class="px-4 py-3 hidden md:table-cell">
               <div class="flex items-center gap-2">
                 <code class="text-xs font-mono text-foreground-muted bg-surface px-2 py-1 rounded border border-border">{{ fn.id }}</code>
-                <button
-                  class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-white transition-colors text-[11px]"
-                  :class="copiedId === fn.id ? 'text-success border-success/40' : ''"
+                <Button
+                  variant="secondary"
+                  size="xs"
                   :title="copiedId === fn.id ? 'Copied!' : 'Copy invoke URL to clipboard'"
                   @click="copyUrl(fn)"
                 >
                   <Check
                     v-if="copiedId === fn.id"
-                    class="w-3.5 h-3.5"
+                    class="w-3.5 h-3.5 text-success"
                   />
                   <Copy
                     v-else
                     class="w-3.5 h-3.5"
                   />
                   {{ copiedId === fn.id ? 'Copied' : 'Copy URL' }}
-                </button>
+                </Button>
               </div>
             </td>
             <td class="px-4 py-3 text-foreground-muted hidden xl:table-cell">
@@ -133,21 +133,18 @@
             </td>
             <td class="px-4 py-3 text-right">
               <div class="inline-flex items-center gap-1">
-                <button
-                  class="p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface transition-colors"
+                <IconButton
+                  :icon="Pencil"
                   title="Edit function"
                   @click="router.push('/functions/' + fn.name)"
-                >
-                  <Pencil class="w-4 h-4" />
-                </button>
-                <button
-                  class="p-1.5 rounded text-foreground-muted hover:text-red-400 hover:bg-surface transition-colors disabled:opacity-50"
-                  :disabled="deletingId === fn.id"
+                />
+                <IconButton
+                  :icon="Trash2"
+                  variant="danger"
                   title="Delete function"
+                  :disabled="deletingId === fn.id"
                   @click="deleteFn(fn)"
-                >
-                  <Trash2 class="w-4 h-4" />
-                </button>
+                />
               </div>
             </td>
           </tr>
@@ -216,6 +213,7 @@ import { ref, computed, onMounted, onActivated, onDeactivated, onUnmounted } fro
 import { useRouter } from 'vue-router'
 import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
+import IconButton from '@/components/common/IconButton.vue'
 import apiClient from '@/api/client'
 import { listFunctions } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'

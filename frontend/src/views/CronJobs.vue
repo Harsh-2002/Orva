@@ -68,31 +68,25 @@
             <td class="px-6 py-4 text-foreground-muted text-xs hidden lg:table-cell">
               {{ job.next_run_at ? formatDate(job.next_run_at) : '—' }}
             </td>
-            <td class="px-6 py-4 text-right flex items-center justify-end gap-2">
-              <button 
-                class="text-foreground-muted hover:text-foreground transition-colors p-1"
-                :title="job.enabled ? 'Pause' : 'Resume'"
-                @click="toggleSchedule(job)"
-              >
-                <component
-                  :is="job.enabled ? Pause : Play"
-                  class="w-4 h-4"
+            <td class="px-6 py-4 text-right">
+              <div class="inline-flex items-center gap-1">
+                <IconButton
+                  :icon="job.enabled ? Pause : Play"
+                  :title="job.enabled ? 'Pause' : 'Resume'"
+                  @click="toggleSchedule(job)"
                 />
-              </button>
-              <button 
-                class="text-foreground-muted hover:text-foreground transition-colors p-1"
-                title="Edit"
-                @click="editSchedule(job)"
-              >
-                <Edit class="w-4 h-4" />
-              </button>
-              <button
-                class="text-foreground-muted hover:text-error transition-colors p-1"
-                title="Delete"
-                @click="deleteSchedule(job)"
-              >
-                <Trash2 class="w-4 h-4" />
-              </button>
+                <IconButton
+                  :icon="Edit"
+                  title="Edit"
+                  @click="editSchedule(job)"
+                />
+                <IconButton
+                  :icon="Trash2"
+                  variant="danger"
+                  title="Delete"
+                  @click="deleteSchedule(job)"
+                />
+              </div>
             </td>
           </tr>
           <tr v-if="jobs.length === 0">
@@ -348,6 +342,7 @@
 import { ref, onMounted } from 'vue'
 import { PlusCircle, Trash2, Clock, X, Edit, Play, Pause } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
+import IconButton from '@/components/common/IconButton.vue'
 import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 
