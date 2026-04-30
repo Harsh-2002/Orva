@@ -140,7 +140,7 @@
           </span>
           <span class="ai-btn-text">
             <span class="ai-btn-title">Open in ChatGPT</span>
-            <span class="ai-btn-sub">Prefilled — press Enter to send</span>
+            <span class="ai-btn-sub">Prompt copied — paste in the new tab</span>
           </span>
         </button>
         <button
@@ -156,18 +156,6 @@
           </span>
         </button>
       </div>
-
-      <Callout
-        :icon="Wand2"
-        title="What we send"
-      >
-        A system prompt teaching the model Orva's runtimes, handler
-        contract, sandbox limits, the
-        <code class="doc-chip">orva</code>
-        SDK (kv / invoke / jobs), cron triggers, and built-in auth modes.
-        The full text is below — copy it for any other AI tool (Gemini, le
-        Chat, your self-hosted model). Free to tweak before you send.
-      </Callout>
 
       <div class="ai-prompt-actions">
         <button
@@ -189,7 +177,7 @@
           v-if="claudeNote"
           class="ai-claude-note"
         >
-          claude.ai removed direct prompt links in 2025 — we put the prompt on your clipboard, paste it in the chat that just opened.
+          Prompt copied to your clipboard — paste it in the chat that just opened (Ctrl/Cmd+V) and send.
         </span>
       </div>
 
@@ -783,7 +771,6 @@ import {
   Gauge,
   ChevronRight,
   CalendarClock,
-  Wand2,
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
 import {
@@ -828,7 +815,12 @@ const claudeNote = ref(false)
 let promptCopiedTimer = null
 let claudeNoteTimer = null
 
-const onOpenChatGPT = () => openInChatGPT()
+const onOpenChatGPT = async () => {
+  await openInChatGPT()
+  claudeNote.value = true
+  clearTimeout(claudeNoteTimer)
+  claudeNoteTimer = setTimeout(() => { claudeNote.value = false }, 8000)
+}
 
 const onOpenClaude = async () => {
   await openInClaude()
@@ -2003,16 +1995,17 @@ const Callout = defineComponent({
 
 /* ── "Generate with AI" — section 02 ─────────────────────────────── */
 .ai-cta-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 0.75rem;
 }
 .ai-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.85rem;
-  padding: 0.95rem 1.1rem;
-  border-radius: 12px;
+  gap: 0.7rem;
+  padding: 0.7rem 0.95rem;
+  border-radius: 10px;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: white;
@@ -2039,12 +2032,12 @@ const Callout = defineComponent({
 }
 .ai-btn-glyph {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--color-background);
   border: 1px solid var(--color-border);
   color: var(--ai-accent, white);

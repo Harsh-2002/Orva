@@ -12,15 +12,14 @@
 // consumer chat UI exposes a real "system prompt" channel via URL.
 //
 // URL-prefill behavior verified 2026-04-30:
-//   - chatgpt.com still accepts ?q=<URL-encoded text>; prefills only,
-//     does not auto-send on cross-site nav (TRA-2025-22 patch).
-//   - claude.ai removed ?q= around Oct 2025 — there is no working web
-//     URL prefill. We copy the prompt to the clipboard and open
-//     claude.ai/new in a new tab; user pastes one keystroke and sends.
+//   - chatgpt.com's ?q= prefill 401s when the encoded URL exceeds
+//     Cloudflare's request-URI limit (~8 KB). Our prompt is ~17 KB
+//     URL-encoded with all the v0.3 surface coverage, so we ALSO use
+//     the clipboard pattern for ChatGPT now.
+//   - claude.ai removed ?q= around Oct 2025 — same clipboard pattern.
 //
-// Re-check both URLs on every Orva release that touches the runtime
-// adapters or sandbox limits — both behaviors have shifted twice in
-// the last 18 months.
+// Both buttons now: copy prompt → open the chat home in a new tab →
+// user pastes once and sends. Same UX in both branches.
 
 import { copyText } from '@/utils/clipboard'
 
@@ -220,16 +219,16 @@ export const ORVA_OPENING_USER_MESSAGE = `Now ask me what kind of function I wan
 export const buildPromptText = () =>
   `${ORVA_SYSTEM_PROMPT}\n\n---\n\n${ORVA_OPENING_USER_MESSAGE}`
 
-// ChatGPT still accepts ?q= for prefill (no auto-send on cross-site nav).
-export const openInChatGPT = () => {
-  const q = encodeURIComponent(buildPromptText())
-  window.open(`https://chatgpt.com/?q=${q}`, '_blank', 'noopener')
+// Both branches: copy prompt to clipboard, open the chat home in a
+// new tab, user pastes once and sends. ?q= prefill is unreliable
+// past ~8 KB of URL-encoded prompt (Cloudflare 401), and our v0.3
+// prompt clears that.
+export const openInChatGPT = async () => {
+  const ok = await copyText(buildPromptText())
+  window.open('https://chatgpt.com/', '_blank', 'noopener')
+  return ok
 }
 
-// claude.ai has no working web ?q= as of 2026. Copy the prompt to
-// clipboard, open claude.ai/new — the user pastes and sends. Returns
-// whether the clipboard write succeeded so the caller can render the
-// right inline confirmation.
 export const openInClaude = async () => {
   const ok = await copyText(buildPromptText())
   window.open('https://claude.ai/new', '_blank', 'noopener')
