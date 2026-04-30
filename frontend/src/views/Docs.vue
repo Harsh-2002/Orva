@@ -7,7 +7,7 @@
       </h1>
     </header>
 
-    <!-- ── 1. Handler contract ────────────────────────────────────── -->
+    <!-- ── 1. Handler contract ─────────────────────────────── -->
     <section
       id="handler"
       class="space-y-5 scroll-mt-6"
@@ -108,61 +108,13 @@
       </div>
     </section>
 
-    <!-- ── 2. System prompt for AI assistants ─────────────────────── -->
-    <section
-      id="generate"
-      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
-    >
-      <div class="doc-section-head">
-        <span class="doc-section-num">02</span>
-        <div>
-          <h2 class="doc-section-title">
-            System prompt for AI assistants
-          </h2>
-          <p class="doc-lede">
-            Paste the prompt below into ChatGPT, Claude, Gemini, Cursor,
-            Copilot, or any other AI tool to teach it Orva's full surface
-            — handler contract, runtimes, sandbox limits, the in-sandbox
-            <code class="doc-chip">orva</code>
-            SDK (kv / invoke / jobs), cron triggers, system-event
-            webhooks, auth modes, and production patterns. The model
-            then turns "describe what I want" into a pasteable handler
-            on the first try.
-          </p>
-        </div>
-      </div>
-
-      <div class="ai-prompt-actions">
-        <button
-          class="ai-copy-btn"
-          :class="{ copied: promptCopied }"
-          @click="onCopyPrompt"
-        >
-          <Check
-            v-if="promptCopied"
-            class="w-3.5 h-3.5"
-          />
-          <Copy
-            v-else
-            class="w-3.5 h-3.5"
-          />
-          {{ promptCopied ? 'Copied' : 'Copy system prompt' }}
-        </button>
-      </div>
-
-      <CodeBlock
-        :code="aiPromptText"
-        lang="text"
-      />
-    </section>
-
-    <!-- ── 3. Deploy & invoke ─────────────────────────────────────── -->
+    <!-- ── 2. Deploy & invoke ─────────────────────────────── -->
     <section
       id="deploy"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">03</span>
+        <span class="doc-section-num">02</span>
         <div>
           <h2 class="doc-section-title">
             Deploy &amp; invoke
@@ -226,13 +178,13 @@
       </Callout>
     </section>
 
-    <!-- ── 4. Configuration reference ─────────────────────────────── -->
+    <!-- ── 3. Configuration reference ─────────────────────────────── -->
     <section
       id="config"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">04</span>
+        <span class="doc-section-num">03</span>
         <div>
           <h2 class="doc-section-title">
             Configuration reference
@@ -305,57 +257,13 @@
       </details>
     </section>
 
-    <!-- ── 5. Schedules (cron triggers) ───────────────────────────── -->
-    <section
-      id="schedules"
-      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
-    >
-      <div class="doc-section-head">
-        <span class="doc-section-num">05</span>
-        <div>
-          <h2 class="doc-section-title">
-            Schedules
-          </h2>
-          <p class="doc-lede">
-            Fire any function on a cron expression. The scheduler runs as
-            part of the orvad process — no external service. Manage from
-            the
-            <router-link
-              to="/cron"
-              class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
-            >Schedules page</router-link>
-            or via the API. Standard 5-field cron with the usual shorthands
-            (<code class="doc-chip">@daily</code>,
-            <code class="doc-chip">@hourly</code>,
-            <code class="doc-chip">*/5 * * * *</code>).
-          </p>
-        </div>
-      </div>
-
-      <TabbedCode
-        :tabs="cronTabs"
-        storage-key="docs.cron"
-      />
-
-      <Callout
-        :icon="CalendarClock"
-        title="Cron-fired headers"
-      >
-        Every cron-triggered invocation arrives at the function with
-        <code class="doc-chip">x-orva-trigger: cron</code>
-        and
-        <code class="doc-chip">x-orva-cron-id: cron_…</code>
-        on the event headers, so user code can branch on origin.
-      </Callout>
-    </section>
-
-    <!-- ── 7. SDK (KV, invoke, jobs) ──────────────────────────────── -->
+    <!-- ── 4. SDK (KV, invoke, jobs) ─────────────────────────────── -->
     <section
       id="sdk"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">07</span>
+        <span class="doc-section-num">04</span>
         <div>
           <h2 class="doc-section-title">
             SDK from inside a function
@@ -453,13 +361,57 @@
       </Callout>
     </section>
 
-    <!-- ── 8. Webhooks ────────────────────────────────────────────── -->
+    <!-- ── 5. Schedules (cron triggers) ─────────────────────────────── -->
+    <section
+      id="schedules"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">05</span>
+        <div>
+          <h2 class="doc-section-title">
+            Schedules
+          </h2>
+          <p class="doc-lede">
+            Fire any function on a cron expression. The scheduler runs as
+            part of the orvad process — no external service. Manage from
+            the
+            <router-link
+              to="/cron"
+              class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
+            >Schedules page</router-link>
+            or via the API. Standard 5-field cron with the usual shorthands
+            (<code class="doc-chip">@daily</code>,
+            <code class="doc-chip">@hourly</code>,
+            <code class="doc-chip">*/5 * * * *</code>).
+          </p>
+        </div>
+      </div>
+
+      <TabbedCode
+        :tabs="cronTabs"
+        storage-key="docs.cron"
+      />
+
+      <Callout
+        :icon="CalendarClock"
+        title="Cron-fired headers"
+      >
+        Every cron-triggered invocation arrives at the function with
+        <code class="doc-chip">x-orva-trigger: cron</code>
+        and
+        <code class="doc-chip">x-orva-cron-id: cron_…</code>
+        on the event headers, so user code can branch on origin.
+      </Callout>
+    </section>
+
+    <!-- ── 6. Webhooks ─────────────────────────────── -->
     <section
       id="webhooks"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">08</span>
+        <span class="doc-section-num">06</span>
         <div>
           <h2 class="doc-section-title">
             Webhooks
@@ -551,13 +503,13 @@
       </div>
     </section>
 
-    <!-- ── 9. MCP ─────────────────────────────────────────────────── -->
+    <!-- ── 7. MCP ─────────────────────────────── -->
     <section
       id="mcp"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">09</span>
+        <span class="doc-section-num">07</span>
         <div>
           <h2 class="doc-section-title">
             MCP — Model Context Protocol
@@ -675,13 +627,61 @@
       </details>
     </section>
 
-    <!-- ── 10. Error envelope ─────────────────────────────────────── -->
+    <!-- ── 8. System prompt for AI assistants ─────────────────────────────── -->
+    <section
+      id="generate"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">08</span>
+        <div>
+          <h2 class="doc-section-title">
+            System prompt for AI assistants
+          </h2>
+          <p class="doc-lede">
+            Paste the prompt below into ChatGPT, Claude, Gemini, Cursor,
+            Copilot, or any other AI tool to teach it Orva's full surface
+            — handler contract, runtimes, sandbox limits, the in-sandbox
+            <code class="doc-chip">orva</code>
+            SDK (kv / invoke / jobs), cron triggers, system-event
+            webhooks, auth modes, and production patterns. The model
+            then turns "describe what I want" into a pasteable handler
+            on the first try.
+          </p>
+        </div>
+      </div>
+
+      <div class="ai-prompt-actions">
+        <button
+          class="ai-copy-btn"
+          :class="{ copied: promptCopied }"
+          @click="onCopyPrompt"
+        >
+          <Check
+            v-if="promptCopied"
+            class="w-3.5 h-3.5"
+          />
+          <Copy
+            v-else
+            class="w-3.5 h-3.5"
+          />
+          {{ promptCopied ? 'Copied' : 'Copy system prompt' }}
+        </button>
+      </div>
+
+      <CodeBlock
+        :code="aiPromptText"
+        lang="text"
+      />
+    </section>
+
+    <!-- ── 9. Errors & recovery ─────────────────────────────── -->
     <section
       id="errors"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">10</span>
+        <span class="doc-section-num">09</span>
         <div>
           <h2 class="doc-section-title">
             Errors &amp; recovery
