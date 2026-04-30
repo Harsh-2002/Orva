@@ -18,8 +18,9 @@ type JobView struct {
 	ID           string `json:"id"`
 	FunctionID   string `json:"function_id"`
 	FunctionName string `json:"function_name,omitempty"`
-	Status       string `json:"status"`
-	Payload      any    `json:"payload"`
+	Status       string         `json:"status"`
+	// See tools_cron.go for the rationale on map[string]any over `any`.
+	Payload      map[string]any `json:"payload"`
 	ScheduledAt  string `json:"scheduled_at"`
 	StartedAt    string `json:"started_at,omitempty"`
 	FinishedAt   string `json:"finished_at,omitempty"`
@@ -47,22 +48,26 @@ func toJobView(j *database.Job) JobView {
 	if j.FinishedAt != nil {
 		v.FinishedAt = j.FinishedAt.UTC().Format(time.RFC3339)
 	}
-	var parsed any
+	v.Payload = map[string]any{}
 	if len(j.Payload) > 0 {
-		if err := json.Unmarshal(j.Payload, &parsed); err == nil {
-			v.Payload = parsed
+		var asObj map[string]any
+		if err := json.Unmarshal(j.Payload, &asObj); err == nil {
+			v.Payload = asObj
 		} else {
-			v.Payload = string(j.Payload)
+			var asAny any
+			if err := json.Unmarshal(j.Payload, &asAny); err == nil {
+				v.Payload = map[string]any{"value": asAny}
+			} else {
+				v.Payload = map[string]any{"raw": string(j.Payload)}
+			}
 		}
-	} else {
-		v.Payload = map[string]any{}
 	}
 	return v
 }
 
 type EnqueueJobInput struct {
 	FunctionID  string `json:"function_id" jsonschema:"function id (fn_...) or name to run when the job fires"`
-	Payload     any    `json:"payload,omitempty" jsonschema:"JSON value delivered as the invoke body; default {}"`
+	Payload     map[string]any `json:"payload,omitempty" jsonschema:"JSON object delivered as the invoke body; default {}"`
 	ScheduledAt string `json:"scheduled_at,omitempty" jsonschema:"RFC3339 timestamp; omit to run as soon as the scheduler picks it up (~5s)"`
 	MaxAttempts int    `json:"max_attempts,omitempty" jsonschema:"retry budget; default 3, exponential backoff between attempts"`
 }

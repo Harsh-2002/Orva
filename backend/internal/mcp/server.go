@@ -179,6 +179,30 @@ func OAuthASNotFoundHandler(w http.ResponseWriter, _ *http.Request) {
 }`))
 }
 
+// OAuthEndpointNotSupportedHandler returns an RFC 6749-shaped error
+// response for OAuth endpoints we deliberately don't implement
+// (/register for Dynamic Client Registration per RFC 7591, /oauth/token,
+// /oauth/authorize). The MCP TypeScript SDK calls registerClient() at
+// /register when it can't find OAuth-AS metadata, then JSON-parses any
+// non-2xx body via parseErrorResponse. Without this handler the
+// default mux returns `text/plain` "404 page not found", JSON.parse
+// throws SyntaxError, and the user sees the cryptic "HTTP 404: Invalid
+// OAuth error response: SyntaxError: JSON Parse error" dialog.
+//
+// The OAuth error code "invalid_client" is the closest standard match
+// for "this server doesn't do OAuth at all". The accompanying
+// description points operators at the right configuration: add an
+// Authorization header to their MCP client config rather than rely on
+// dynamic client registration.
+func OAuthEndpointNotSupportedHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(`{
+  "error": "invalid_client",
+  "error_description": "Orva does not support OAuth dynamic client registration or token exchange — it uses static API-key bearer auth. Configure your MCP client with: \"headers\": {\"Authorization\": \"Bearer <orva-api-key>\"}"
+}`))
+}
+
 // PRMHandler returns a minimal RFC 9728 OAuth Protected Resource
 // Metadata response describing the static-bearer auth mechanism.
 // Mounted at /.well-known/oauth-protected-resource.

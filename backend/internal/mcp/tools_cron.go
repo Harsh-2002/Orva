@@ -25,9 +25,15 @@ type CronView struct {
 	LastRunAt    string `json:"last_run_at,omitempty"`
 	NextRunAt    string `json:"next_run_at,omitempty"`
 	LastStatus   string `json:"last_status,omitempty"`
-	LastError    string `json:"last_error,omitempty"`
-	Payload      any    `json:"payload"`
-	CreatedAt    string `json:"created_at"`
+	LastError    string         `json:"last_error,omitempty"`
+	// Payload is the JSON object delivered as the invoke body when the
+	// schedule fires. Declared as map[string]any (rather than `any`) so
+	// the SDK emits a JSON Schema {type: "object"} that strict Zod v4
+	// validators in MCP clients accept — `any` would emit `true`, the
+	// JSON-Schema-spec shorthand for "any value", which Zod rejects as
+	// a non-object schema and crashes tools/list parsing.
+	Payload map[string]any `json:"payload"`
+	CreatedAt string `json:"created_at"`
 }
 
 func toCronView(s *database.CronSchedule, fnName string) CronView {
@@ -48,15 +54,22 @@ func toCronView(s *database.CronSchedule, fnName string) CronView {
 		v.NextRunAt = s.NextRunAt.UTC().Format(time.RFC3339)
 	}
 	// Decode the JSON payload so the agent sees structure, not "{}".
-	var decoded any
+	// We constrain to map[string]any (object) for schema compatibility;
+	// non-object payloads (arrays, primitives) get wrapped under "value"
+	// so the agent can still inspect them.
+	v.Payload = map[string]any{}
 	if s.Payload != "" {
-		if err := json.Unmarshal([]byte(s.Payload), &decoded); err == nil {
-			v.Payload = decoded
+		var asObj map[string]any
+		if err := json.Unmarshal([]byte(s.Payload), &asObj); err == nil {
+			v.Payload = asObj
 		} else {
-			v.Payload = s.Payload
+			var asAny any
+			if err := json.Unmarshal([]byte(s.Payload), &asAny); err == nil {
+				v.Payload = map[string]any{"value": asAny}
+			} else {
+				v.Payload = map[string]any{"raw": s.Payload}
+			}
 		}
-	} else {
-		v.Payload = map[string]any{}
 	}
 	return v
 }
@@ -72,14 +85,14 @@ type CreateCronInput struct {
 	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or friendly name"`
 	CronExpr   string `json:"cron_expr"   jsonschema:"5-field cron expression. Supports @daily / @hourly / @weekly / @monthly / @yearly shorthands"`
 	Enabled    *bool  `json:"enabled,omitempty"  jsonschema:"defaults to true"`
-	Payload    any    `json:"payload,omitempty"  jsonschema:"JSON value delivered as the invoke body when the schedule fires; default {}"`
+	Payload    map[string]any `json:"payload,omitempty"  jsonschema:"JSON object delivered as the invoke body when the schedule fires; default {}"`
 }
 
 type UpdateCronInput struct {
 	ID       string `json:"id"        jsonschema:"schedule id (cron_...)"`
 	CronExpr string `json:"cron_expr,omitempty" jsonschema:"new cron expression; omit to keep"`
 	Enabled  *bool  `json:"enabled,omitempty"   jsonschema:"new enabled flag; omit to keep"`
-	Payload  any    `json:"payload,omitempty"   jsonschema:"new payload; omit to keep"`
+	Payload  map[string]any `json:"payload,omitempty"   jsonschema:"new payload; omit to keep"`
 }
 
 type DeleteCronInput struct {

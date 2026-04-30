@@ -323,6 +323,14 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp", orvampc.OAuthASNotFoundHandler)
 	r.mux.HandleFunc("GET /.well-known/openid-configuration", orvampc.OAuthASNotFoundHandler)
 	r.mux.HandleFunc("GET /.well-known/openid-configuration/mcp", orvampc.OAuthASNotFoundHandler)
+	// RFC 7591 / RFC 6749 — when AS metadata is missing the MCP SDK
+	// falls through to /register (DCR), /oauth/token, /oauth/authorize.
+	// Returning OAuth-shaped errors here lets the SDK throw a clean
+	// OAuthError with our hint instead of "Invalid OAuth error
+	// response: SyntaxError" from parsing text/plain "404 page not found".
+	r.mux.HandleFunc("POST /register", orvampc.OAuthEndpointNotSupportedHandler)
+	r.mux.HandleFunc("POST /oauth/token", orvampc.OAuthEndpointNotSupportedHandler)
+	r.mux.HandleFunc("GET /oauth/authorize", orvampc.OAuthEndpointNotSupportedHandler)
 
 	// UI routes — serve the Vue SPA at /web/. No credentials are injected;
 	// the UI uses /auth/onboard + /auth/login to establish a session.

@@ -12,15 +12,84 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// KVView surfaces a single KV entry with the value parsed back into an
-// object. Per-function namespacing means agents must always pass the
-// function id (or name) — there is no global keyspace.
+// KVView surfaces a single KV entry. Value is wrapped in a tiny
+// envelope ({json: <decoded>, raw: "<string>"}) rather than a bare
+// `any` — the latter compiles to JSON-Schema `true` in the Go MCP
+// SDK, and Zod v4 strict validators in MCP clients reject that as
+// "not a valid object schema". The wrapper keeps both decoded and
+// raw forms available so agents can reason structurally OR
+// reconstruct the original bytes for re-hashing/HMAC use cases.
 type KVView struct {
-	FunctionID string `json:"function_id"`
-	Key        string `json:"key"`
-	Value      any    `json:"value"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
-	UpdatedAt  string `json:"updated_at"`
+	FunctionID string  `json:"function_id"`
+	Key        string  `json:"key"`
+	Value      KVValue `json:"value"`
+	ExpiresAt  string  `json:"expires_at,omitempty"`
+	UpdatedAt  string  `json:"updated_at"`
+}
+
+// KVValue is the wire envelope for a stored value. Exactly one of the
+// typed fields is populated based on the JSON kind.
+type KVValue struct {
+	Type   string         `json:"type"             jsonschema:"one of: object, array, string, number, boolean, null"`
+	Object map[string]any `json:"object,omitempty"`
+	Array  []any          `json:"array,omitempty"`
+	String string         `json:"string,omitempty"`
+	Number float64        `json:"number,omitempty"`
+	Bool   bool           `json:"bool,omitempty"`
+}
+
+// encodeKVValue serializes a KVValue envelope back into the canonical
+// JSON for storage. Used on the kv_put path. Returns an error if the
+// envelope's `type` doesn't match a populated field.
+func encodeKVValue(v KVValue) ([]byte, error) {
+	switch v.Type {
+	case "object":
+		if v.Object == nil {
+			v.Object = map[string]any{}
+		}
+		return json.Marshal(v.Object)
+	case "array":
+		if v.Array == nil {
+			v.Array = []any{}
+		}
+		return json.Marshal(v.Array)
+	case "string":
+		return json.Marshal(v.String)
+	case "number":
+		return json.Marshal(v.Number)
+	case "boolean":
+		return json.Marshal(v.Bool)
+	case "null":
+		return []byte("null"), nil
+	case "":
+		return nil, errors.New("value.type is required (object | array | string | number | boolean | null)")
+	}
+	return nil, errors.New("unknown value.type: " + v.Type)
+}
+
+func decodeKVValue(raw []byte) KVValue {
+	if len(raw) == 0 {
+		return KVValue{Type: "null"}
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return KVValue{Type: "string", String: string(raw)}
+	}
+	switch x := v.(type) {
+	case map[string]any:
+		return KVValue{Type: "object", Object: x}
+	case []any:
+		return KVValue{Type: "array", Array: x}
+	case string:
+		return KVValue{Type: "string", String: x}
+	case float64:
+		return KVValue{Type: "number", Number: x}
+	case bool:
+		return KVValue{Type: "boolean", Bool: x}
+	case nil:
+		return KVValue{Type: "null"}
+	}
+	return KVValue{Type: "string", String: string(raw)}
 }
 
 func toKVView(e *database.KVEntry) KVView {
@@ -28,15 +97,10 @@ func toKVView(e *database.KVEntry) KVView {
 		FunctionID: e.FunctionID,
 		Key:        e.Key,
 		UpdatedAt:  e.UpdatedAt.UTC().Format(time.RFC3339),
+		Value:      decodeKVValue(e.Value),
 	}
 	if e.ExpiresAt != nil {
 		v.ExpiresAt = e.ExpiresAt.UTC().Format(time.RFC3339)
-	}
-	var parsed any
-	if err := json.Unmarshal(e.Value, &parsed); err == nil {
-		v.Value = parsed
-	} else {
-		v.Value = string(e.Value)
 	}
 	return v
 }
@@ -50,11 +114,16 @@ type KVGetOutput struct {
 	Entry KVView `json:"entry,omitempty"`
 }
 
+// KVPutInput uses the same KVValue envelope as the output. Agents pick
+// exactly one of the typed fields based on the JSON kind they want to
+// store. Slightly more verbose than `value: any` but Zod-strict
+// validators accept the schema; bare `any` would emit JSON-Schema
+// `true` and crash MCP clients on tools/list parsing.
 type KVPutInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name owning this key"`
-	Key        string `json:"key"`
-	Value      any    `json:"value" jsonschema:"any JSON value; arrays/objects/strings/numbers all work"`
-	TTLSeconds int    `json:"ttl_seconds,omitempty" jsonschema:"0 (default) = no expiry; positive = expire after that many seconds"`
+	FunctionID string  `json:"function_id" jsonschema:"function id (fn_...) or name owning this key"`
+	Key        string  `json:"key"`
+	Value      KVValue `json:"value" jsonschema:"the value to store; populate one typed field matching the type field"`
+	TTLSeconds int     `json:"ttl_seconds,omitempty" jsonschema:"0 (default) = no expiry; positive = expire after that many seconds"`
 }
 type KVPutOutput struct {
 	Key        string `json:"key"`
@@ -124,12 +193,9 @@ func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				if key == "" {
 					return nil, KVPutOutput{}, errors.New("key is required")
 				}
-				if in.Value == nil {
-					return nil, KVPutOutput{}, errors.New("value is required")
-				}
-				body, err := json.Marshal(in.Value)
+				body, err := encodeKVValue(in.Value)
 				if err != nil {
-					return nil, KVPutOutput{}, errors.New("value must be JSON-serializable")
+					return nil, KVPutOutput{}, err
 				}
 				if err := deps.DB.KVPut(fn.ID, key, body, in.TTLSeconds); err != nil {
 					return nil, KVPutOutput{}, err
