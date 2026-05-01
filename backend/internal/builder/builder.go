@@ -2,11 +2,13 @@ package builder
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -122,10 +124,11 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	if err := ValidateArchive(scratchDir, fn.Runtime, fn.Entrypoint); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
 	}
-	if err := b.installDependencies(ctx, scratchDir, fn.Runtime); err != nil {
+	resolvedEntrypoint, err := b.installDependencies(ctx, scratchDir, fn.Runtime, fn.Entrypoint)
+	if err != nil {
 		return nil, fmt.Errorf("install dependencies: %w", err)
 	}
-	if err := installAdapter(scratchDir, fn.Runtime, fn.Entrypoint); err != nil {
+	if err := installAdapter(scratchDir, fn.Runtime, resolvedEntrypoint); err != nil {
 		return nil, fmt.Errorf("install adapter: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(scratchDir, ".orva-ready"), []byte(codeHash), 0644); err != nil {
@@ -307,21 +310,34 @@ func extractTarGz(archivePath, destDir string) error {
 }
 
 // installDependencies installs packages into the code directory so they are
-// available at /code/<pkgs> inside the nsjail sandbox.
+// available at /code/<pkgs> inside the nsjail sandbox. It returns the
+// (possibly rewritten) entrypoint path that should be baked into the
+// adapter wrapper — for a TypeScript build that's the compiled `.js` under
+// the resolved `outDir`; for everything else it's the unchanged
+// `entrypoint` argument.
 //
-//   - node22: if package.json is present, runs `npm install --prefix <codeDir>`.
-//     node_modules/ lands at /code/node_modules and require() finds it automatically.
+//   - node22 / node24: if package.json is present, runs `npm install --prefix
+//     <codeDir>`. node_modules/ lands at /code/node_modules and require()
+//     finds it automatically. If a tsconfig.json is *also* present, runs
+//     `npx --no-install tsc --project tsconfig.json` after the install
+//     completes — gated on `typescript` appearing in package.json's
+//     dependencies / devDependencies. The resolved entrypoint becomes
+//     `<outDir>/<stem>.js`.
 //
 //   - python313: if requirements.txt is present, runs `pip install -t <codeDir>`.
 //     Packages land at /code/<pkg> and the Python adapter adds /code to sys.path.
 //
 // Both commands run on the host (not inside nsjail) during the build phase.
-func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime string) error {
+func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, entrypoint string) (string, error) {
 	switch {
 	case isNodeRuntime(runtime):
 		pkgJSON := filepath.Join(codeDir, "package.json")
 		if _, err := os.Stat(pkgJSON); os.IsNotExist(err) {
-			return nil // no deps file → nothing to install
+			// No package.json → nothing to install. We still allow a
+			// tsconfig.json-only directory through to the TS step so a
+			// user with a globally available tsc can be told clearly
+			// that they need to declare typescript as a dep.
+			return b.maybeCompileTypeScript(ctx, codeDir, entrypoint)
 		}
 		slog.Info("installing node dependencies", "dir", codeDir)
 		cmd := exec.CommandContext(ctx, "npm", "install", "--prefix", codeDir, "--no-audit", "--no-fund")
@@ -329,14 +345,15 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime stri
 		out, err := cmd.CombinedOutput()
 		logLines(b, "npm", out)
 		if err != nil {
-			return fmt.Errorf("npm install failed: %w\n%s", err, string(out))
+			return entrypoint, fmt.Errorf("npm install failed: %w\n%s", err, string(out))
 		}
 		slog.Info("npm install complete", "output", strings.TrimSpace(string(out)))
+		return b.maybeCompileTypeScript(ctx, codeDir, entrypoint)
 
 	case isPythonRuntime(runtime):
 		reqTxt := filepath.Join(codeDir, "requirements.txt")
 		if _, err := os.Stat(reqTxt); os.IsNotExist(err) {
-			return nil
+			return entrypoint, nil
 		}
 		slog.Info("installing python dependencies", "dir", codeDir, "runtime", runtime)
 		// Cross-install wheels for the sandbox's Python version (not the
@@ -362,11 +379,137 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime stri
 		out, err := cmd.CombinedOutput()
 		logLines(b, "pip", out)
 		if err != nil {
-			return fmt.Errorf("pip install failed: %w\n%s", err, string(out))
+			return entrypoint, fmt.Errorf("pip install failed: %w\n%s", err, string(out))
 		}
 		slog.Info("pip install complete")
 	}
-	return nil
+	return entrypoint, nil
+}
+
+// maybeCompileTypeScript runs `tsc --project tsconfig.json` when the code
+// directory contains a tsconfig.json. The user must declare typescript in
+// their package.json (deps OR devDeps) — otherwise we fail loudly so the
+// hint is in build_logs rather than a node_modules-not-found 500 at
+// invocation time. Returns the post-compile entrypoint
+// (`<outDir>/<stem>.js`); when no tsconfig.json is present it returns the
+// original entrypoint unchanged so existing .js-only deploys are untouched.
+func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoint string) (string, error) {
+	tsConfigPath := filepath.Join(codeDir, "tsconfig.json")
+	if _, err := os.Stat(tsConfigPath); os.IsNotExist(err) {
+		return entrypoint, nil
+	}
+
+	// Hard requirement: typescript must be declared in package.json. We
+	// don't fall back to a host-installed tsc because that produces a
+	// version skew between dev (whatever the box has) and prod (whatever
+	// the operator's box has) that's painful to debug.
+	pkgJSON := filepath.Join(codeDir, "package.json")
+	if err := verifyTypeScriptDeclared(pkgJSON); err != nil {
+		return entrypoint, err
+	}
+
+	// Honor the existing build_timeout_seconds knob. Default 5 min — long
+	// enough for a real typed app, short enough that a runaway build
+	// can't hang the queue worker forever.
+	timeoutSec := 300
+	if b.DB != nil {
+		timeoutSec = b.DB.GetSystemConfigInt("build_timeout_seconds", 300)
+		if timeoutSec <= 0 {
+			timeoutSec = 300
+		}
+	}
+	tscCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	slog.Info("compiling typescript", "dir", codeDir, "timeout_sec", timeoutSec)
+	// `--no-install` keeps us from quietly fetching tsc when it's missing —
+	// npm install above should have placed it. If the operator has air-
+	// gapped their box this preserves the failure mode.
+	cmd := exec.CommandContext(tscCtx, "npx", "--no-install", "tsc", "--project", "tsconfig.json")
+	cmd.Dir = codeDir
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	stdoutBytes, runErr := cmd.Output()
+	logLines(b, "tsc", stdoutBytes)
+	logLines(b, "tsc", stderrBuf.Bytes())
+	if tscCtx.Err() == context.DeadlineExceeded {
+		return entrypoint, fmt.Errorf("tsc timed out after %ds", timeoutSec)
+	}
+	if runErr != nil {
+		// tsc prints diagnostics to stdout (TS6059, TS2322, …) — surface
+		// both streams so the user sees the actual type error in the
+		// build log.
+		combined := strings.TrimSpace(string(stdoutBytes) + "\n" + stderrBuf.String())
+		return entrypoint, fmt.Errorf("tsc failed: %w\n%s", runErr, combined)
+	}
+
+	outDir := readTSConfigOutDir(tsConfigPath)
+	stem := strings.TrimSuffix(entrypoint, filepath.Ext(entrypoint))
+	resolved := filepath.Join(outDir, stem+".js")
+	compiled := filepath.Join(codeDir, resolved)
+	if _, err := os.Stat(compiled); err != nil {
+		return entrypoint, fmt.Errorf("tsc succeeded but compiled entrypoint not found at %s: %w", resolved, err)
+	}
+	slog.Info("typescript compile complete", "entrypoint", resolved)
+	return resolved, nil
+}
+
+// verifyTypeScriptDeclared reads package.json and confirms `typescript`
+// appears in either dependencies or devDependencies. Anything else (a
+// missing package.json, malformed JSON, missing key) is converted into a
+// build-time error with a paste-ready hint so users don't have to dig.
+func verifyTypeScriptDeclared(pkgJSONPath string) error {
+	raw, err := os.ReadFile(pkgJSONPath)
+	if err != nil {
+		return fmt.Errorf("tsconfig.json present but typescript not in package.json — add \"typescript\": \"^5.4\" to your dependencies")
+	}
+	var pkg struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		return fmt.Errorf("tsconfig.json present but package.json is invalid JSON — add \"typescript\": \"^5.4\" to your dependencies")
+	}
+	if _, ok := pkg.Dependencies["typescript"]; ok {
+		return nil
+	}
+	if _, ok := pkg.DevDependencies["typescript"]; ok {
+		return nil
+	}
+	return fmt.Errorf("tsconfig.json present but typescript not in package.json — add \"typescript\": \"^5.4\" to your dependencies")
+}
+
+// readTSConfigOutDir extracts compilerOptions.outDir from a tsconfig.json,
+// falling back to "dist" when the file is missing the field, has comments
+// (the TS spec allows JSON-with-comments), or is otherwise unparseable. We
+// deliberately don't pull in a JSON-with-comments parser — operators who
+// need a non-default outDir can supply a comment-free tsconfig, and the
+// fallback is safe (the post-compile stat() will fail loudly if outDir
+// actually differs from `dist`).
+func readTSConfigOutDir(tsConfigPath string) string {
+	const fallback = "dist"
+	raw, err := os.ReadFile(tsConfigPath)
+	if err != nil {
+		return fallback
+	}
+	var cfg struct {
+		CompilerOptions struct {
+			OutDir string `json:"outDir"`
+		} `json:"compilerOptions"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fallback
+	}
+	out := strings.TrimSpace(cfg.CompilerOptions.OutDir)
+	if out == "" {
+		return fallback
+	}
+	// Strip a leading "./" so filepath.Join produces a clean relative path.
+	out = strings.TrimPrefix(out, "./")
+	if out == "" {
+		return fallback
+	}
+	return out
 }
 
 // logLines pipes a captured stdout/stderr blob into the Builder's Logger

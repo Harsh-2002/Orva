@@ -105,6 +105,68 @@ func TestBuild_UnsupportedRuntime(t *testing.T) {
 	}
 }
 
+func TestReadTSConfigOutDir(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"missing field", `{"compilerOptions":{}}`, "dist"},
+		{"explicit dist", `{"compilerOptions":{"outDir":"dist"}}`, "dist"},
+		{"leading dotslash", `{"compilerOptions":{"outDir":"./build"}}`, "build"},
+		{"empty string", `{"compilerOptions":{"outDir":""}}`, "dist"},
+		{"unparseable", `not json`, "dist"},
+		{"nested out", `{"compilerOptions":{"outDir":"build/js"}}`, "build/js"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "tsconfig.json")
+			if err := os.WriteFile(f, []byte(tc.body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if got := readTSConfigOutDir(f); got != tc.want {
+				t.Errorf("readTSConfigOutDir(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestVerifyTypeScriptDeclared(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"in deps", `{"dependencies":{"typescript":"^5.4"}}`, false},
+		{"in devDeps", `{"devDependencies":{"typescript":"^5.4"}}`, false},
+		{"missing", `{"dependencies":{"axios":"^1.0"}}`, true},
+		{"empty file", ``, true},
+		{"malformed", `{not json`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "package.json")
+			if err := os.WriteFile(f, []byte(tc.body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			err := verifyTypeScriptDeclared(f)
+			if tc.wantErr && err == nil {
+				t.Errorf("expected error for %s, got nil", tc.name)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error for %s: %v", tc.name, err)
+			}
+		})
+	}
+
+	t.Run("missing file", func(t *testing.T) {
+		err := verifyTypeScriptDeclared(filepath.Join(t.TempDir(), "nope.json"))
+		if err == nil {
+			t.Error("expected error for missing package.json")
+		}
+	})
+}
+
 func createTestArchive(t *testing.T, files map[string]string) string {
 	t.Helper()
 	archivePath := filepath.Join(t.TempDir(), "test.tar.gz")

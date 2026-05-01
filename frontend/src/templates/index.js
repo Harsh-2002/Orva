@@ -1170,6 +1170,79 @@ exports.handler = async (event) => {
 `
 
 // ─────────────────────────────────────────────────────────────────────
+//  TypeScript
+// ─────────────────────────────────────────────────────────────────────
+
+// Minimal typed handler. The build pipeline detects tsconfig.json and
+// runs `npx --no-install tsc --project tsconfig.json` after `npm install`,
+// so the deployed runtime entrypoint is actually `dist/handler.js` — but
+// the user authors only TypeScript and the source-map / type-error
+// reporting is what they expect.
+const ts_hello = `// Minimal TypeScript handler. The Orva builder compiles this with tsc
+// at deploy time; the runtime invokes the emitted dist/handler.js.
+type OrvaEvent = {
+  method?: string
+  path?: string
+  headers?: Record<string, string>
+  body?: string | Record<string, unknown>
+}
+
+type OrvaResponse = {
+  statusCode: number
+  headers?: Record<string, string>
+  body: string
+}
+
+const handler = async (event: OrvaEvent): Promise<OrvaResponse> => {
+  const body =
+    typeof event.body === 'string'
+      ? (event.body ? JSON.parse(event.body) : {})
+      : (event.body ?? {})
+  const name = (body as { name?: string }).name ?? 'World'
+
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ok: true, runtime: 'typescript', message: \`Hello \${name}!\` }),
+  }
+}
+
+export = handler
+`
+
+// Companion package.json — typescript declared as a dep so the build
+// pipeline's verifyTypeScriptDeclared() is satisfied. Pin to ^5.4 so a
+// future tsc release that breaks our default tsconfig doesn't silently
+// blow up redeploys of saved snapshots.
+const ts_hello_deps = `{
+  "name": "ts-hello",
+  "version": "1.0.0",
+  "dependencies": {
+    "typescript": "^5.4"
+  }
+}
+`
+
+// Minimal tsconfig — emits to ./dist (matches the builder's default
+// outDir fallback) and targets a Node-compatible spec. CommonJS so
+// `export = handler` matches the adapter's `require()`-based loader.
+const ts_hello_tsconfig = `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "outDir": "./dist",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["handler.ts"],
+  "exclude": ["node_modules", "dist"]
+}
+`
+
+// ─────────────────────────────────────────────────────────────────────
 //  Manifest — one entry per template. Code/deps come from the constants
 //  above. The Editor reads this list directly.
 // ─────────────────────────────────────────────────────────────────────
@@ -1244,6 +1317,18 @@ const nodeTemplates = [
   { id: 'node-url-shortener',   category: 'Utility',   label: 'URL shortener',
     description: 'POST creates a slug, GET redirects. Uses Orva KV.',
     code: node_url_shortener, deps: '' },
+
+  // TypeScript starter — the builder's tsc step picks this up via the
+  // companion tsconfig.json. The `extras` field carries auxiliary files
+  // the Editor will eventually surface as additional tabs / drop into the
+  // archive at deploy time. Today the Editor reads `code` + `deps` only;
+  // `extras` is forward-compatible — additional fields are ignored, not
+  // an error, so this entry won't break the existing template loader.
+  { id: 'ts-hello',             category: 'Starter',   label: 'TypeScript hello',
+    description: 'Typed handler compiled at deploy time via tsc. Outputs to dist/handler.js.',
+    code: ts_hello, deps: ts_hello_deps,
+    extras: { 'tsconfig.json': ts_hello_tsconfig },
+    entrypoint: 'handler.ts' },
 ]
 
 // Indexed by runtime — Editor.vue uses this directly.
