@@ -60,7 +60,7 @@ func runSystemMetrics(cmd *cobra.Command, args []string) {
 		exitError("%v", err)
 	}
 
-	resp, err := client.Get("/api/v1/system/metrics")
+	resp, err := client.Get("/api/v1/system/metrics.json")
 	if err != nil {
 		exitError("request failed: %v", err)
 	}

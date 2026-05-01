@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -41,16 +42,25 @@ import (
 
 const tableName = "orva_firewall"
 
-// nftablesAvail caches whether `nft` is on PATH and works; checked once
-// per process. If unavailable, Apply becomes a no-op and the API
-// surfaces a warning via Snapshot.LastError.
-var nftablesAvail atomic.Bool
+// nftablesAvail caches whether `nft` is on PATH and works; probed lazily
+// the first time nftablesAvailable() is called. If unavailable, Apply
+// becomes a no-op and the API surfaces a warning via Snapshot.LastError.
+//
+// Lazy probe — not init() — so that simply importing this package (e.g.,
+// by the CLI which transitively pulls in internal/server) does not run
+// nft and emit warnings before the user has even invoked a subcommand.
+// The probe still runs at most once per process via nftablesProbeOnce.
+var (
+	nftablesAvail     atomic.Bool
+	nftablesProbeOnce sync.Once
+)
 
 func nftablesAvailable() bool {
+	nftablesProbeOnce.Do(probeNftables)
 	return nftablesAvail.Load()
 }
 
-func init() {
+func probeNftables() {
 	if _, err := exec.LookPath("nft"); err == nil {
 		// Probe: try a no-op list. If we don't have CAP_NET_ADMIN this
 		// will fail; that's information we want surfaced to the operator.
@@ -72,7 +82,7 @@ func init() {
 // sets are empty, the table is created with empty sets so a "deny
 // everything matching" chain still exists (matching nothing).
 func nftablesApply(v4, v6 []string) error {
-	if !nftablesAvail.Load() {
+	if !nftablesAvailable() {
 		return nil // best-effort: silently no-op
 	}
 
@@ -145,7 +155,7 @@ func elementsLine(items []string) string {
 
 // nftablesFlush is called on shutdown to drop our table.
 func nftablesFlush() error {
-	if !nftablesAvail.Load() {
+	if !nftablesAvailable() {
 		return nil
 	}
 	cmd := exec.Command("nft", "delete", "table", "inet", tableName)

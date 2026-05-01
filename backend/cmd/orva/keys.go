@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -99,7 +100,7 @@ func runKeysList(cmd *cobra.Command, args []string) {
 		Keys []struct {
 			ID          string     `json:"id"`
 			Name        string     `json:"name"`
-			Permissions string     `json:"permissions"`
+			Permissions []string   `json:"permissions"`
 			CreatedAt   time.Time  `json:"created_at"`
 			LastUsedAt  *time.Time `json:"last_used_at"`
 		} `json:"keys"`
@@ -115,8 +116,12 @@ func runKeysList(cmd *cobra.Command, args []string) {
 		if key.LastUsedAt != nil {
 			lastUsed = key.LastUsedAt.Format(time.DateTime)
 		}
+		perms := strings.Join(key.Permissions, ",")
+		if perms == "" {
+			perms = "-"
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			key.ID, key.Name, key.Permissions,
+			key.ID, key.Name, perms,
 			key.CreatedAt.Format(time.DateTime), lastUsed,
 		)
 	}

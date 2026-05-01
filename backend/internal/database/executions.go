@@ -279,10 +279,14 @@ func (db *Database) GetExecutionLog(executionID string) (*ExecutionLog, error) {
 	return &log, nil
 }
 
-// DeleteExecution removes one execution row + its logs (FK CASCADE).
-// Used by the bulk-delete endpoint and the per-row delete in the Logs UI.
+// DeleteExecution removes one execution row + its logs (FK CASCADE on
+// execution_logs) and its captured request envelope (manual cleanup —
+// execution_requests dropped its FK in v0.4 to avoid async-batch FK
+// failures on the hot path; see dropExecutionRequestsFK).
 func (db *Database) DeleteExecution(id string) error {
-	// execution_logs has ON DELETE CASCADE; orphan rows aren't a concern.
+	if _, err := db.write.Exec("DELETE FROM execution_requests WHERE execution_id = ?", id); err != nil {
+		return err
+	}
 	_, err := db.write.Exec("DELETE FROM executions WHERE id = ?", id)
 	return err
 }

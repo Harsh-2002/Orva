@@ -26,7 +26,7 @@ var deployCmd = &cobra.Command{
 
 func init() {
 	deployCmd.Flags().String("name", "", "function name (required)")
-	deployCmd.Flags().String("runtime", "", "runtime (node22, python313, go123) (required)")
+	deployCmd.Flags().String("runtime", "", "runtime (node24, node22, python314, python313) (required)")
 	deployCmd.MarkFlagRequired("name")
 	deployCmd.MarkFlagRequired("runtime")
 	rootCmd.AddCommand(deployCmd)

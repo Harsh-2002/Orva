@@ -45,7 +45,7 @@ var functionsDeleteCmd = &cobra.Command{
 
 func init() {
 	functionsCreateCmd.Flags().String("name", "", "function name (required)")
-	functionsCreateCmd.Flags().String("runtime", "", "runtime (node22, python313, go123) (required)")
+	functionsCreateCmd.Flags().String("runtime", "", "runtime (node24, node22, python314, python313) (required)")
 	functionsCreateCmd.MarkFlagRequired("name")
 	functionsCreateCmd.MarkFlagRequired("runtime")
 

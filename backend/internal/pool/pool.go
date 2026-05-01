@@ -647,5 +647,14 @@ func buildEnv(fn *database.Function) map[string]string {
 	}
 	env["ORVA_FUNCTION_ID"] = fn.ID
 	env["ORVA_MEMORY_MB"] = fmt.Sprintf("%d", fn.MemoryMB)
+	// Tell the Node / Python adapter which file to load. The builder
+	// rewrites this during a TypeScript build to "<outDir>/<stem>.js"
+	// (e.g. "dist/handler.js") so the worker requires the compiled
+	// artifact rather than the raw .ts source. For non-TS deploys this
+	// is just the user-supplied entrypoint (handler.js / handler.py),
+	// matching what the adapter would have defaulted to anyway.
+	if fn.Entrypoint != "" {
+		env["ORVA_ENTRYPOINT"] = fn.Entrypoint
+	}
 	return env
 }

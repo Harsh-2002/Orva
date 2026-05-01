@@ -199,6 +199,15 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	fn.Image = result.ImageTag
 	fn.ImageSize = result.ImageSize
 	fn.CodeHash = result.CodeHash
+	// For TypeScript deploys the builder rewrites the entrypoint from
+	// the user's `handler.ts` to the compiled `<outDir>/<stem>.js`. We
+	// persist this back onto the function row so the pool's buildEnv
+	// can publish ORVA_ENTRYPOINT to the sandbox at spawn time. For
+	// non-TS deploys result.Entrypoint == fn.Entrypoint, so this is a
+	// no-op assignment.
+	if result.Entrypoint != "" {
+		fn.Entrypoint = result.Entrypoint
+	}
 	fn.Status = "active"
 	fn.Version++
 	// Silent: deployment.succeeded covers this transition for webhook

@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Harsh-2002/Orva/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -50,15 +51,13 @@ func init() {
 	cronCreateCmd.MarkFlagRequired("fn")
 	cronCreateCmd.MarkFlagRequired("expr")
 
-	cronUpdateCmd.Flags().String("fn", "", "function name or ID (required to scope the update)")
+	cronUpdateCmd.Flags().String("fn", "", "function name or ID (optional; auto-resolved from cron id when omitted)")
 	cronUpdateCmd.Flags().String("expr", "", "new cron expression")
 	cronUpdateCmd.Flags().String("tz", "", "new IANA timezone")
 	cronUpdateCmd.Flags().String("payload", "", "new JSON payload")
 	cronUpdateCmd.Flags().String("enabled", "", "enable/disable the schedule (true|false)")
-	cronUpdateCmd.MarkFlagRequired("fn")
 
-	cronDeleteCmd.Flags().String("fn", "", "function name or ID (required to scope the delete)")
-	cronDeleteCmd.MarkFlagRequired("fn")
+	cronDeleteCmd.Flags().String("fn", "", "function name or ID (optional; auto-resolved from cron id when omitted)")
 
 	cronCmd.AddCommand(cronListCmd)
 	cronCmd.AddCommand(cronCreateCmd)
@@ -171,7 +170,12 @@ func runCronUpdate(cmd *cobra.Command, args []string) {
 
 	id := args[0]
 	fnNameOrID, _ := cmd.Flags().GetString("fn")
-	fnID := resolveFunctionID(client, fnNameOrID)
+	var fnID string
+	if fnNameOrID != "" {
+		fnID = resolveFunctionID(client, fnNameOrID)
+	} else {
+		fnID = lookupCronFunctionID(client, id)
+	}
 
 	body := map[string]any{}
 	if expr, _ := cmd.Flags().GetString("expr"); expr != "" {
@@ -222,7 +226,12 @@ func runCronDelete(cmd *cobra.Command, args []string) {
 
 	id := args[0]
 	fnNameOrID, _ := cmd.Flags().GetString("fn")
-	fnID := resolveFunctionID(client, fnNameOrID)
+	var fnID string
+	if fnNameOrID != "" {
+		fnID = resolveFunctionID(client, fnNameOrID)
+	} else {
+		fnID = lookupCronFunctionID(client, id)
+	}
 
 	resp, err := client.Delete("/api/v1/functions/" + fnID + "/cron/" + id)
 	if err != nil {
@@ -233,4 +242,37 @@ func runCronDelete(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Printf("Cron schedule %s deleted\n", id)
+}
+
+// lookupCronFunctionID resolves a cron schedule id to its owning
+// function id by querying GET /api/v1/cron and matching on the
+// returned schedule rows. Used when the user supplies a cron id
+// without a --fn flag (cron ids are globally unique).
+func lookupCronFunctionID(client *cli.Client, cronID string) string {
+	resp, err := client.Get("/api/v1/cron")
+	if err != nil {
+		exitError("lookup cron: %v", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		exitError("lookup cron: %v", err)
+	}
+
+	var result struct {
+		Schedules []struct {
+			ID         string `json:"id"`
+			FunctionID string `json:"function_id"`
+		} `json:"schedules"`
+	}
+	if err := decodeJSON(resp, &result); err != nil {
+		exitError("decode cron list: %v", err)
+	}
+
+	for _, s := range result.Schedules {
+		if s.ID == cronID {
+			return s.FunctionID
+		}
+	}
+
+	exitError("cron schedule %s not found", cronID)
+	return "" // unreachable
 }

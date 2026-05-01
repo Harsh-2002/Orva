@@ -24,6 +24,26 @@ type InboundWebhookHandler struct {
 	Registry *registry.Registry
 }
 
+// resolveFnID accepts either an ID (fn_xxx) or a friendly name and
+// returns the canonical function ID. Mirrors the KV / fixtures helpers
+// so /functions/shrt/inbound-webhooks works the same as
+// /functions/fn_n4r39…/inbound-webhooks.
+func (h *InboundWebhookHandler) resolveFnID(idOrName string) (string, bool) {
+	idOrName = strings.TrimSpace(idOrName)
+	if idOrName == "" {
+		return "", false
+	}
+	if strings.HasPrefix(idOrName, "fn_") {
+		if _, err := h.Registry.Get(idOrName); err == nil {
+			return idOrName, true
+		}
+	}
+	if fn, err := h.DB.GetFunctionByName(idOrName); err == nil && fn != nil {
+		return fn.ID, true
+	}
+	return "", false
+}
+
 type inboundCreateRequest struct {
 	Name            string `json:"name"`
 	SignatureFormat string `json:"signature_format,omitempty"`
@@ -41,14 +61,12 @@ type inboundUpdateRequest struct {
 // List handles GET /api/v1/functions/{fn_id}/inbound-webhooks.
 func (h *InboundWebhookHandler) List(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-
-	fn, err := h.Registry.Get(fnID)
-	if err != nil {
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
-	rows, err := h.DB.ListInboundWebhooksForFunction(fn.ID)
+	rows, err := h.DB.ListInboundWebhooksForFunction(fnID)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "list inbound webhooks failed: "+err.Error(), reqID)
 		return
@@ -65,10 +83,8 @@ func (h *InboundWebhookHandler) List(w http.ResponseWriter, r *http.Request) {
 // + api_keys flows.
 func (h *InboundWebhookHandler) Create(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-
-	fn, err := h.Registry.Get(fnID)
-	if err != nil {
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
@@ -102,7 +118,7 @@ func (h *InboundWebhookHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	secret := database.NewInboundWebhookSecret()
 	row := &database.InboundWebhook{
-		FunctionID:      fn.ID,
+		FunctionID:      fnID,
 		Name:            name,
 		Secret:          secret,
 		SignatureHeader: header,
@@ -125,16 +141,14 @@ func (h *InboundWebhookHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Plaintext secret is never returned.
 func (h *InboundWebhookHandler) Get(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-	id := r.PathValue("id")
-
-	fn, err := h.Registry.Get(fnID)
-	if err != nil {
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
+	id := r.PathValue("id")
 	row, err := h.DB.GetInboundWebhook(id)
-	if err != nil || row.FunctionID != fn.ID {
+	if err != nil || row.FunctionID != fnID {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "inbound webhook not found", reqID)
 		return
 	}
@@ -146,16 +160,14 @@ func (h *InboundWebhookHandler) Get(w http.ResponseWriter, r *http.Request) {
 // be supplied; omitted fields keep their previous values.
 func (h *InboundWebhookHandler) Update(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-	id := r.PathValue("id")
-
-	fn, err := h.Registry.Get(fnID)
-	if err != nil {
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
+	id := r.PathValue("id")
 	row, err := h.DB.GetInboundWebhook(id)
-	if err != nil || row.FunctionID != fn.ID {
+	if err != nil || row.FunctionID != fnID {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "inbound webhook not found", reqID)
 		return
 	}
@@ -207,16 +219,14 @@ func (h *InboundWebhookHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /api/v1/functions/{fn_id}/inbound-webhooks/{id}.
 func (h *InboundWebhookHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-	id := r.PathValue("id")
-
-	fn, err := h.Registry.Get(fnID)
-	if err != nil {
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
+	id := r.PathValue("id")
 	row, err := h.DB.GetInboundWebhook(id)
-	if err != nil || row.FunctionID != fn.ID {
+	if err != nil || row.FunctionID != fnID {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "inbound webhook not found", reqID)
 		return
 	}

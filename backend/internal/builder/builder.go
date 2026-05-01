@@ -31,6 +31,14 @@ type BuildResult struct {
 	CodeHash   string        `json:"code_hash"`
 	VersionDir string        `json:"version_dir"` // absolute path to versions/<hash>; activate sets `current` to point at this
 	Cached     bool          `json:"cached"`      // true when an identical-hash version already existed and we skipped extract+install
+	// Entrypoint is the resolved relative path of the file the sandbox
+	// adapter should require/import. For Python and plain JS it equals
+	// fn.Entrypoint as submitted. For TypeScript builds it is rewritten
+	// to the compiled `<outDir>/<stem>.js` (e.g. "dist/handler.js") so
+	// the worker process can find the emitted artifact at runtime. The
+	// queue worker persists this back onto the function row so the
+	// pool's buildEnv can publish it as ORVA_ENTRYPOINT to the sandbox.
+	Entrypoint string `json:"entrypoint"`
 }
 
 // ErrInsufficientDisk is returned by Build when the data directory has
@@ -96,6 +104,12 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	// Idempotent fast path: same hash, fully published before. Skip
 	// extract + install. Activation still happens upstream so a redeploy
 	// of identical content can re-point `current` if it had drifted.
+	//
+	// Entrypoint resolution still has to happen on this path: the function
+	// row may have been migrated from a pre-fix version where
+	// fn.Entrypoint is still the .ts source, while the cached version dir
+	// already contains the compiled dist/. Re-resolve from disk so the
+	// queue worker writes the correct value back.
 	if _, err := os.Stat(filepath.Join(versionDir, ".orva-ready")); err == nil {
 		slog.Info("build cache hit", "fn", fn.ID, "hash", codeHash[:12])
 		return &BuildResult{
@@ -104,6 +118,7 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 			CodeHash:   codeHash,
 			VersionDir: versionDir,
 			Cached:     true,
+			Entrypoint: resolveCachedEntrypoint(versionDir, fn.Entrypoint),
 		}, nil
 	}
 
@@ -157,7 +172,26 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 		Duration:   time.Since(start),
 		CodeHash:   codeHash,
 		VersionDir: versionDir,
+		Entrypoint: resolvedEntrypoint,
 	}, nil
+}
+
+// resolveCachedEntrypoint inspects an already-published version dir to
+// pick the correct entrypoint when the cache short-circuit fires. For TS
+// deploys this means returning "<outDir>/<stem>.js" if the compiled file
+// exists; otherwise we trust the function row's original entrypoint.
+func resolveCachedEntrypoint(versionDir, original string) string {
+	tsConfig := filepath.Join(versionDir, "tsconfig.json")
+	if _, err := os.Stat(tsConfig); err != nil {
+		return original
+	}
+	outDir := readTSConfigOutDir(tsConfig)
+	stem := strings.TrimSuffix(original, filepath.Ext(original))
+	candidate := filepath.Join(outDir, stem+".js")
+	if _, err := os.Stat(filepath.Join(versionDir, candidate)); err == nil {
+		return candidate
+	}
+	return original
 }
 
 // checkFreeDisk returns ErrInsufficientDisk when the data dir has less
@@ -195,6 +229,16 @@ func randSuffix() string {
 
 // installAdapter writes a main.py/main.js wrapper that imports the user's
 // handler with the correct entrypoint name.
+//
+// Historical note: the wrapper used to be the canonical way to feed
+// ORVA_ENTRYPOINT to the worker, but the nsjail argv in
+// internal/sandbox.buildArgs hardcodes /opt/orva/adapter.{js,py} as the
+// entrypoint — this wrapper is therefore never invoked by the runtime
+// today. ORVA_ENTRYPOINT is now plumbed through internal/pool.buildEnv
+// onto the sandbox env map at spawn time. We keep emitting the wrapper
+// because (a) it's a tiny file, (b) the builder unit tests assert on
+// its presence, and (c) it's a useful artifact for ad-hoc debugging
+// (`node /code/main.js` outside nsjail). Treat as no-op for routing.
 func installAdapter(codeDir, runtime, entrypoint string) error {
 	switch {
 	case isNodeRuntime(runtime):
@@ -449,6 +493,12 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoin
 	compiled := filepath.Join(codeDir, resolved)
 	if _, err := os.Stat(compiled); err != nil {
 		return entrypoint, fmt.Errorf("tsc succeeded but compiled entrypoint not found at %s: %w", resolved, err)
+	}
+	// Successful tsc runs silently — surface a single line into build_logs
+	// so operators can see "tsc ran" in the deploy progress UI without
+	// having to grep for absence-of-error.
+	if b != nil && b.Logger != nil {
+		b.Logger.Append("tsc", fmt.Sprintf("compiled to %s", resolved))
 	}
 	slog.Info("typescript compile complete", "entrypoint", resolved)
 	return resolved, nil

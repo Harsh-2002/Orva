@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -306,8 +307,17 @@ CREATE INDEX IF NOT EXISTS idx_activity_actor ON activity_log(actor_id, ts DESC)
 -- proxy-authorization). truncated=1 means the body exceeded
 -- replay_capture_max_bytes and was cut at the cap; replay handler
 -- refuses to re-run those (would corrupt at-rest state).
+--
+-- No FK on execution_id by design (v0.4 A3 fix): the proxy queues this
+-- row at request-receive time, but the parent executions row only lands
+-- on the async batch *after* the function returns. Because batches flush
+-- on a 50ms timer, the two rows often commit in different transactions —
+-- a hard FK would fail at commit ("FOREIGN KEY constraint failed (787)")
+-- and roll the whole batch back, losing every other row riding the
+-- transaction. Cascade-on-delete semantics are preserved by the explicit
+-- cleanup paths in PurgeOldExecutions and DeleteExecution.
 CREATE TABLE IF NOT EXISTS execution_requests (
-    execution_id  TEXT PRIMARY KEY REFERENCES executions(id) ON DELETE CASCADE,
+    execution_id  TEXT PRIMARY KEY,
     method        TEXT NOT NULL,
     path          TEXT NOT NULL,
     headers_json  TEXT NOT NULL,
@@ -478,6 +488,16 @@ PRAGMA foreign_keys = ON;
 		}
 	}
 
+	// v0.4 A3 fix: drop the legacy FK on execution_requests.execution_id
+	// for databases that were created before the FK-removal change. SQLite
+	// has no ALTER TABLE DROP CONSTRAINT, so the only way to remove an FK
+	// is a table rebuild. The check below uses sqlite_master to detect the
+	// "REFERENCES executions" substring; on a fresh DB the CREATE TABLE
+	// already lacks the FK and the rebuild is skipped.
+	if err := dropExecutionRequestsFK(db); err != nil {
+		slog.Warn("execution_requests FK drop failed", "err", err)
+	}
+
 	// Backfill deployment snapshots for the most-recent succeeded deploy
 	// of each function. Without this, rolling back from a brand-new build
 	// to anything that landed before this migration would only swap code
@@ -557,5 +577,60 @@ PRAGMA foreign_keys = ON;
 		db.writer = newAsyncWriter(db)
 		db.writer.start()
 	}
+	return nil
+}
+
+// dropExecutionRequestsFK rebuilds the execution_requests table without
+// the legacy FK on execution_id. Idempotent: if the stored CREATE TABLE
+// no longer contains a REFERENCES clause we skip the rebuild. The proxy
+// queues capture rows on request-receive while the parent executions
+// row only lands at the end of dispatch, so the two writes commonly
+// land in different async batches and the FK fires at commit time,
+// rolling back the entire batch (FOREIGN KEY constraint failed (787)).
+// See migrations.go schema comment for full rationale.
+func dropExecutionRequestsFK(db *Database) error {
+	var sqlText string
+	err := db.write.QueryRow(
+		"SELECT sql FROM sqlite_master WHERE type='table' AND name='execution_requests'",
+	).Scan(&sqlText)
+	if err != nil {
+		// Fresh DB or table not yet created — nothing to do.
+		return nil
+	}
+	if !strings.Contains(strings.ToUpper(sqlText), "REFERENCES EXECUTIONS") {
+		return nil
+	}
+
+	tx, err := db.write.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`CREATE TABLE execution_requests_new (
+			execution_id  TEXT PRIMARY KEY,
+			method        TEXT NOT NULL,
+			path          TEXT NOT NULL,
+			headers_json  TEXT NOT NULL,
+			body          BLOB,
+			truncated     INTEGER NOT NULL DEFAULT 0,
+			captured_at   INTEGER NOT NULL
+		)`,
+		`INSERT INTO execution_requests_new (execution_id, method, path, headers_json, body, truncated, captured_at)
+			SELECT execution_id, method, path, headers_json, body, truncated, captured_at
+			FROM execution_requests`,
+		`DROP TABLE execution_requests`,
+		`ALTER TABLE execution_requests_new RENAME TO execution_requests`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return fmt.Errorf("rebuild step: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	slog.Info("execution_requests FK dropped")
 	return nil
 }

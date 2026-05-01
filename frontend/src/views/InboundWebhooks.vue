@@ -345,9 +345,17 @@ const formatDate = (s) => {
 const refresh = async () => {
   loading.value = true
   try {
+    // The backend resolves names → ids on /functions/{id_or_name}/inbound-webhooks,
+    // so we hit it directly with the URL slug. Best-effort getFunction call still
+    // populates fnId for downstream callers that prefer the canonical id, but a
+    // failure there must not block list/CRUD — the slug works either way.
     if (!fnId.value) {
-      const fn = await getFunction(fnName.value)
-      fnId.value = fn.data.id || fn.data.function?.id || fnName.value
+      try {
+        const fn = await getFunction(fnName.value)
+        fnId.value = fn.data.id || fn.data.function?.id || fnName.value
+      } catch {
+        fnId.value = fnName.value
+      }
     }
     const res = await listInboundWebhooks(fnId.value)
     rows.value = res.data?.inbound_webhooks || []

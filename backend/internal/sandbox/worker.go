@@ -49,6 +49,21 @@ type Worker struct {
 
 	dead atomic.Bool
 
+	// waitDone is closed exactly once when the single background
+	// cmd.Wait() goroutine (started in Spawn) has reaped the underlying
+	// process. Quit() / Kill() use this to synchronize their grace timers
+	// without ever calling cmd.Wait() themselves — that prevents the
+	// "Wait was already called" race we used to hit when a Quit grace
+	// expired and the escalation path called Kill() concurrently.
+	//
+	// Reaping in Spawn guarantees that no matter how the worker dies
+	// (Quit, Kill, markDead-then-pool-kill, child crashes on its own),
+	// nsjail does NOT linger as a zombie waiting for orvad to wait() on it.
+	// See v0.4 zombie-nsjail bug: streaming-disconnect closed stdin via
+	// markDead but the kill that followed sometimes spawned a duplicate
+	// Wait() goroutine which errored out without reaping.
+	waitDone chan struct{}
+
 	errBuf *ringBuffer
 }
 
@@ -111,13 +126,25 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	}
 
 	w := &Worker{
-		Cmd:     cmd,
-		stdin:   stdinPipe,
-		stdout:  stdoutPipe,
-		stderr:  stderrPipe,
-		Spawned: time.Now(),
-		errBuf:  newRingBuffer(64 * 1024),
+		Cmd:      cmd,
+		stdin:    stdinPipe,
+		stdout:   stdoutPipe,
+		stderr:   stderrPipe,
+		Spawned:  time.Now(),
+		errBuf:   newRingBuffer(64 * 1024),
+		waitDone: make(chan struct{}),
 	}
+
+	// Single, authoritative Wait() for this worker's lifetime. Whichever
+	// path tears the process down (clean Quit, SIGKILL via Kill, child
+	// crash, ctx cancel that closes stdin), this goroutine is the one
+	// that reaps the kernel-side PID. Nothing else may call cmd.Wait().
+	// On return we close waitDone so any blocked Quit/Kill grace-timer
+	// can wake up.
+	go func() {
+		_ = cmd.Wait()
+		close(w.waitDone)
+	}()
 
 	// Resolve the nsjail cgroup path asynchronously. nsjail names the cgroup
 	// after its jailed child's PID (not its own), so we scan for it in a
@@ -477,6 +504,12 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 }
 
 // Quit sends a clean shutdown frame, waits grace, then SIGTERMs, then SIGKILLs.
+//
+// All synchronization with the underlying process happens via w.waitDone,
+// which the single Wait() goroutine launched in Spawn closes once the PID
+// has been reaped. Quit MUST NOT call cmd.Wait() itself — doing so races
+// with the Spawn-side Wait and yields "Wait was already called" errors,
+// which would silently leave nsjail unreaped.
 func (w *Worker) Quit(grace time.Duration) error {
 	if w.dead.Load() {
 		return w.Kill()
@@ -485,11 +518,8 @@ func (w *Worker) Quit(grace time.Duration) error {
 	_ = writeFrame(w.stdin, quitFrame)
 	_ = w.stdin.Close()
 
-	done := make(chan error, 1)
-	go func() { done <- w.Cmd.Wait() }()
-
 	select {
-	case <-done:
+	case <-w.waitDone:
 		w.markDead()
 		return nil
 	case <-time.After(grace):
@@ -500,15 +530,29 @@ func (w *Worker) Quit(grace time.Duration) error {
 		_ = w.Cmd.Process.Signal(syscall.SIGTERM)
 	}
 	select {
-	case <-done:
+	case <-w.waitDone:
 	case <-time.After(grace):
 		_ = w.Kill()
+		// Wait briefly for the Spawn-side reaper to finish so the caller
+		// returning from Quit can rely on the process being gone. Bounded
+		// so a wedged kernel can't hang shutdown forever.
+		select {
+		case <-w.waitDone:
+		case <-time.After(grace):
+		}
 	}
 	w.markDead()
 	return nil
 }
 
 // Kill is an immediate SIGKILL of the worker's process group.
+//
+// Reaping is owned by the single Wait() goroutine launched in Spawn — we
+// must NOT call cmd.Wait() here. Calling Wait() twice on the same
+// *exec.Cmd is a documented race that can leave nsjail unreaped (the
+// loser sees "Wait was already called" and returns without reaping).
+// Pre-fix this was the path that produced <defunct> nsjail entries after
+// streaming-client disconnects: markDead → pool kill → duplicate Wait.
 func (w *Worker) Kill() error {
 	w.markDead()
 	if w.Cmd == nil || w.Cmd.Process == nil {
@@ -517,7 +561,9 @@ func (w *Worker) Kill() error {
 	// Signal the whole process group (Setpgid=true at Spawn).
 	_ = syscall.Kill(-w.Cmd.Process.Pid, syscall.SIGKILL)
 	_ = w.Cmd.Process.Kill()
-	go w.Cmd.Wait() // reap without blocking caller
+	// The Spawn-side reaper goroutine will pick up the SIGKILL exit and
+	// close waitDone. Caller does not block on it — w.Kill returns as soon
+	// as the signal is delivered.
 	return nil
 }
 
