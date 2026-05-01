@@ -28,6 +28,13 @@
       </Button>
       <div class="flex-1" />
       <Button
+        size="xs"
+        @click="openEnqueue"
+      >
+        <Plus class="w-3 h-3" />
+        Enqueue
+      </Button>
+      <Button
         variant="secondary"
         size="xs"
         @click="loadJobs"
@@ -36,6 +43,89 @@
         Refresh
       </Button>
     </div>
+
+    <!-- Enqueue drawer — minimal. The dashboard's job here is to be a
+         convenient operator UI for one-off enqueues; real producers
+         call the SDK / REST API directly. The "Schedule for later"
+         toggle exposes v0.4 C2b. -->
+    <Drawer
+      v-model="enqueue.open"
+      title="Enqueue a job"
+      width="560px"
+    >
+      <div class="p-5 space-y-5 text-sm">
+        <div>
+          <label class="text-xs uppercase tracking-wider text-foreground-muted">Function</label>
+          <select
+            v-model="enqueue.fnId"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+          >
+            <option
+              v-for="f in functions"
+              :key="f.id"
+              :value="f.id"
+            >
+              {{ f.name }} ({{ f.runtime }})
+            </option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-wider text-foreground-muted">Payload (JSON)</label>
+          <textarea
+            v-model="enqueue.payload"
+            rows="6"
+            spellcheck="false"
+            class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono focus:outline-none focus:border-white"
+            placeholder='{"hello":"world"}'
+          />
+        </div>
+        <div>
+          <label class="flex items-center gap-2 text-xs text-foreground-muted">
+            <input
+              v-model="enqueue.scheduleLater"
+              type="checkbox"
+            >
+            Schedule for later
+          </label>
+          <p class="text-[11px] text-foreground-muted mt-1">
+            Off: runs on the next scheduler tick (~5s). On: holds until the timestamp below.
+          </p>
+        </div>
+        <div v-if="enqueue.scheduleLater">
+          <label class="text-xs uppercase tracking-wider text-foreground-muted">Run at (local time)</label>
+          <input
+            v-model="enqueue.scheduledAt"
+            type="datetime-local"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+          >
+        </div>
+        <div
+          v-if="enqueue.error"
+          class="text-xs text-error"
+        >
+          {{ enqueue.error }}
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex items-center justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="enqueue.open = false"
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            :disabled="!enqueue.fnId || enqueue.saving"
+            :loading="enqueue.saving"
+            @click="submitEnqueue"
+          >
+            Enqueue
+          </Button>
+        </div>
+      </template>
+    </Drawer>
 
     <!-- Table. -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
@@ -138,18 +228,33 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Trash2, RotateCcw, RefreshCcw, Inbox } from 'lucide-vue-next'
-import { listJobs, retryJob, deleteJob } from '@/api/endpoints'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus } from 'lucide-vue-next'
+import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import Drawer from '@/components/common/Drawer.vue'
 
 const confirmStore = useConfirmStore()
 
 const jobs = ref([])
+const functions = ref([])
 const statusFilter = ref('all')
 let pollTimer = null
+
+// Enqueue drawer state. scheduleLater toggles whether the request body
+// carries scheduled_at — when off the scheduler picks the row up on
+// the next tick (~5s).
+const enqueue = reactive({
+  open: false,
+  fnId: '',
+  payload: '{}',
+  scheduleLater: false,
+  scheduledAt: '',
+  saving: false,
+  error: '',
+})
 
 const statusOptions = [
   { value: 'all',       label: 'All' },
@@ -224,6 +329,58 @@ const remove = async (job) => {
     await loadJobs()
   } catch (e) {
     confirmStore.notify({ title: 'Delete failed', message: e.message, danger: true })
+  }
+}
+
+const openEnqueue = async () => {
+  enqueue.error = ''
+  enqueue.payload = '{}'
+  enqueue.scheduleLater = false
+  enqueue.scheduledAt = ''
+  if (functions.value.length === 0) {
+    try {
+      const res = await listFunctions()
+      functions.value = res.data?.functions || []
+      if (functions.value.length && !enqueue.fnId) {
+        enqueue.fnId = functions.value[0].id
+      }
+    } catch (e) {
+      console.error('list functions failed', e)
+    }
+  }
+  enqueue.open = true
+}
+
+const submitEnqueue = async () => {
+  enqueue.error = ''
+  // Parse payload JSON up-front so a typo doesn't blow up server-side.
+  let payload
+  try {
+    payload = enqueue.payload.trim() ? JSON.parse(enqueue.payload) : {}
+  } catch (e) {
+    enqueue.error = 'Payload must be valid JSON: ' + e.message
+    return
+  }
+  const body = { function_id: enqueue.fnId, payload }
+  if (enqueue.scheduleLater) {
+    if (!enqueue.scheduledAt) {
+      enqueue.error = 'Pick a date/time, or untick "Schedule for later".'
+      return
+    }
+    // datetime-local fields are interpreted as the user's local zone.
+    // Convert to UTC ISO so the backend (which stores UTC) doesn't get
+    // mismatched.
+    body.scheduled_at = new Date(enqueue.scheduledAt).toISOString()
+  }
+  enqueue.saving = true
+  try {
+    await enqueueJob(body)
+    enqueue.open = false
+    await loadJobs()
+  } catch (e) {
+    enqueue.error = e?.response?.data?.error?.message || e.message || 'Enqueue failed'
+  } finally {
+    enqueue.saving = false
   }
 }
 

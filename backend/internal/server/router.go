@@ -81,7 +81,7 @@ func isReservedPath(path string) bool {
 	if path == "/" || path == "/mcp" {
 		return true
 	}
-	for _, p := range []string{"/api/", "/fn/", "/mcp/", "/web/", "/_orva/"} {
+	for _, p := range []string{"/api/", "/fn/", "/mcp/", "/web/", "/_orva/", "/webhook/"} {
 		if strings.HasPrefix(path, p) {
 			return true
 		}
@@ -258,6 +258,29 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET    /api/v1/jobs/{id}",       jobsHandler.Get)
 	r.mux.HandleFunc("POST   /api/v1/jobs/{id}/retry", jobsHandler.Retry)
 	r.mux.HandleFunc("DELETE /api/v1/jobs/{id}",       jobsHandler.Delete)
+
+	// Inbound webhook triggers (v0.4 C2a). CRUD lives under the
+	// authenticated /api/v1/functions/{fn_id}/inbound-webhooks tree;
+	// the public POST /webhook/{id} that external services hit is
+	// registered separately below so the auth middleware skips it.
+	inboundHandler := &handlers.InboundWebhookHandler{DB: r.db, Registry: r.registry}
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/inbound-webhooks",      inboundHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/inbound-webhooks",      inboundHandler.Create)
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Get)
+	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Update)
+	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Delete)
+
+	// Public trigger endpoint. Path is at the root (NOT under /api/v1)
+	// so external callers — GitHub, Stripe, Slack, your own services —
+	// don't need an API key. Authentication is the HMAC signature on
+	// the request body itself.
+	inboundTrigger := &handlers.InboundTriggerHandler{
+		DB: r.db, Registry: r.registry, Pool: r.poolMgr,
+	}
+	if r.eventHub != nil {
+		inboundTrigger.PublishEvent = r.eventHub.Publish
+	}
+	r.mux.Handle("/webhook/", inboundTrigger)
 
 	// Webhook subscriptions (Phase v0.3). Operator-managed; system
 	// events fan out to subscribers via internal/scheduler's webhook

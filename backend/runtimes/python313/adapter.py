@@ -22,11 +22,14 @@ stdout for the Orva proxy.
 """
 
 import asyncio
+import base64
 import importlib.util
 import inspect
 import json
 import os
 import sys
+import threading
+import time
 import traceback
 
 FUNCTION_DIR = "/code"
@@ -317,19 +320,251 @@ def _read_frame():
         return {"type": "request", "event": {"method": "POST", "path": "/", "headers": {}, "body": ""}}
 
 
+# Stdout writes must be serialised — the heartbeat thread (sync generators)
+# and the foreground yield-loop both write frames. JSON+length-prefix means
+# any interleave corrupts the wire. The lock is uncontended on the hot
+# path (one writer at a time when no heartbeat is firing).
+_stdout_lock = threading.Lock()
+
+
 def _write_frame(obj):
     body = json.dumps(obj).encode("utf-8")
-    _stdout.write(struct.pack(">I", len(body)))
-    _stdout.write(body)
-    _stdout.flush()
+    with _stdout_lock:
+        try:
+            _stdout.write(struct.pack(">I", len(body)))
+            _stdout.write(body)
+            _stdout.flush()
+        except (BrokenPipeError, OSError):
+            # The proxy went away — typically because the HTTP client
+            # disconnected mid-stream. Re-raise so the caller can stop
+            # iterating; the worker process exit then unblocks the pool.
+            raise
 
 
-def _dispatch(event):
+def _stream_chunk(data):
+    """Send a single chunk frame. data may be bytes / bytearray / str."""
+    if isinstance(data, (bytes, bytearray)):
+        b = bytes(data)
+    elif isinstance(data, str):
+        b = data.encode("utf-8")
+    elif data is None:
+        b = b""
+    else:
+        # Any other type: best-effort JSON-encode then utf-8.
+        b = json.dumps(data).encode("utf-8")
+    encoded = base64.b64encode(b).decode("ascii") if b else ""
+    _write_frame({"type": "chunk", "data": encoded})
+
+
+def _looks_like_head(item):
+    """First yield can carry the response head if it's an Orva-shaped dict
+    with statusCode (and no body, or with body that we treat as the first
+    chunk). Returns (status, headers, leftover_body_or_None) on match,
+    None otherwise."""
+    if not isinstance(item, dict):
+        return None
+    if "statusCode" not in item:
+        return None
+    status = item.get("statusCode", 200)
+    headers = item.get("headers", {"Content-Type": "text/plain"})
+    body = item.get("body", None)
+    return (status, headers, body)
+
+
+def _stream_iterable(iterable, streaming_enabled, keepalive_s):
+    """Drive a sync iterable / generator through the streaming protocol.
+
+    If streaming_enabled is False we buffer everything into a single
+    response frame for back-compat — operators flipping the system_config
+    flag get the pre-C1 single-shot behaviour without redeploying.
+
+    A separate thread fires an empty chunk every keepalive_s seconds if
+    no real chunk has flown in that window, so intermediate proxies / LBs
+    don't kill the connection during slow phases (LLM token generation,
+    DB cursor walks). The thread reads last_emit under no lock — the
+    timestamp is a single 64-bit float so torn reads aren't a concern.
+    """
+    if not streaming_enabled:
+        # Fallback: buffer the entire generator output into a single
+        # response. Tries to honor an Orva-shaped first item as the head;
+        # otherwise wraps everything into text/plain.
+        head = None
+        body_parts = []
+        for item in iterable:
+            if head is None:
+                detected = _looks_like_head(item)
+                if detected is not None:
+                    status, headers, body = detected
+                    head = (status, headers)
+                    if body is not None:
+                        body_parts.append(body if isinstance(body, str) else str(body))
+                    continue
+                head = (200, {"Content-Type": "text/plain"})
+            if isinstance(item, (bytes, bytearray)):
+                body_parts.append(item.decode("utf-8", errors="replace"))
+            else:
+                body_parts.append(item if isinstance(item, str) else str(item))
+        if head is None:
+            head = (200, {"Content-Type": "text/plain"})
+        status, headers = head
+        _write_frame({
+            "type": "response", "statusCode": status,
+            "headers": headers, "body": "".join(body_parts),
+        })
+        return
+
+    # Streaming path.
+    head_sent = False
+    last_emit = [time.monotonic()]
+    stop_evt = threading.Event()
+
+    def _heartbeat():
+        while not stop_evt.wait(keepalive_s):
+            if time.monotonic() - last_emit[0] >= keepalive_s:
+                try:
+                    _write_frame({"type": "chunk", "data": ""})
+                    last_emit[0] = time.monotonic()
+                except Exception:
+                    return
+
+    hb = None
+
+    def _send_head(status, headers):
+        nonlocal head_sent
+        if head_sent:
+            return
+        _write_frame({
+            "type": "response_start",
+            "statusCode": status,
+            "headers": headers,
+        })
+        head_sent = True
+
+    try:
+        for item in iterable:
+            if not head_sent:
+                detected = _looks_like_head(item)
+                if detected is not None:
+                    status, headers, body = detected
+                    _send_head(status, headers)
+                    # Start the heartbeat AFTER the head so the empty
+                    # chunk frames never precede the response_start.
+                    hb = threading.Thread(target=_heartbeat, daemon=True)
+                    hb.start()
+                    if body is not None and body != "":
+                        _stream_chunk(body)
+                        last_emit[0] = time.monotonic()
+                    continue
+                _send_head(200, {"Content-Type": "text/plain; charset=utf-8"})
+                hb = threading.Thread(target=_heartbeat, daemon=True)
+                hb.start()
+            _stream_chunk(item)
+            last_emit[0] = time.monotonic()
+        if not head_sent:
+            _send_head(200, {"Content-Type": "text/plain; charset=utf-8"})
+        _write_frame({"type": "response_end"})
+    except (BrokenPipeError, OSError):
+        # Client disconnected. Stop iterating; the worker continues
+        # serving subsequent requests if its stdin is still open.
+        pass
+    finally:
+        stop_evt.set()
+
+
+async def _stream_async_iterable(aiterable, streaming_enabled, keepalive_s):
+    """Async-gen variant. Uses an asyncio Task as the heartbeat instead
+    of a thread so it cooperates with the same event loop as the user
+    code (no GIL contention, no thread-safe-stdout double-locking).
+    """
+    if not streaming_enabled:
+        head = None
+        body_parts = []
+        async for item in aiterable:
+            if head is None:
+                detected = _looks_like_head(item)
+                if detected is not None:
+                    status, headers, body = detected
+                    head = (status, headers)
+                    if body is not None:
+                        body_parts.append(body if isinstance(body, str) else str(body))
+                    continue
+                head = (200, {"Content-Type": "text/plain"})
+            if isinstance(item, (bytes, bytearray)):
+                body_parts.append(item.decode("utf-8", errors="replace"))
+            else:
+                body_parts.append(item if isinstance(item, str) else str(item))
+        if head is None:
+            head = (200, {"Content-Type": "text/plain"})
+        status, headers = head
+        _write_frame({
+            "type": "response", "statusCode": status,
+            "headers": headers, "body": "".join(body_parts),
+        })
+        return
+
+    head_sent = [False]
+    last_emit = [time.monotonic()]
+
+    def _send_head(status, headers):
+        if head_sent[0]:
+            return
+        _write_frame({
+            "type": "response_start",
+            "statusCode": status,
+            "headers": headers,
+        })
+        head_sent[0] = True
+
+    async def _heartbeat():
+        try:
+            while True:
+                await asyncio.sleep(keepalive_s)
+                if time.monotonic() - last_emit[0] >= keepalive_s:
+                    _write_frame({"type": "chunk", "data": ""})
+                    last_emit[0] = time.monotonic()
+        except asyncio.CancelledError:
+            return
+
+    hb_task = None
+    try:
+        async for item in aiterable:
+            if not head_sent[0]:
+                detected = _looks_like_head(item)
+                if detected is not None:
+                    status, headers, body = detected
+                    _send_head(status, headers)
+                    hb_task = asyncio.create_task(_heartbeat())
+                    if body is not None and body != "":
+                        _stream_chunk(body)
+                        last_emit[0] = time.monotonic()
+                    continue
+                _send_head(200, {"Content-Type": "text/plain; charset=utf-8"})
+                hb_task = asyncio.create_task(_heartbeat())
+            _stream_chunk(item)
+            last_emit[0] = time.monotonic()
+        if not head_sent[0]:
+            _send_head(200, {"Content-Type": "text/plain; charset=utf-8"})
+        _write_frame({"type": "response_end"})
+    except (BrokenPipeError, OSError):
+        pass
+    finally:
+        if hb_task is not None:
+            hb_task.cancel()
+            try:
+                await hb_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
+def _call_handler(event):
+    """Invoke the user handler and return the raw return value (NOT
+    normalised). Splits dispatch from normalisation so the caller can
+    detect generators / async iterables before we collapse them into a
+    single response."""
     if style == "asgi":
-        status, headers, body = asyncio.run(_call_asgi(handler, event))
-        return status, headers, body
+        return ("normal", asyncio.run(_call_asgi(handler, event)))
     if style == "wsgi":
-        return _call_wsgi(handler, event)
+        return ("wsgi-tuple", _call_wsgi(handler, event))
 
     # Lambda / plain style.
     try:
@@ -351,7 +586,38 @@ def _dispatch(event):
     if inspect.iscoroutine(result):
         result = asyncio.run(result)
 
-    return _normalise_response(result)
+    return ("raw", result)
+
+
+def _dispatch_and_emit(event, streaming_enabled, keepalive_s):
+    """End-to-end dispatch path: invoke the handler and either emit a
+    streaming protocol exchange (response_start + chunks + response_end)
+    or a single response frame, depending on the handler's return value.
+
+    Returns nothing — frames go straight out via _write_frame.
+    """
+    kind, result = _call_handler(event)
+    if kind == "normal":
+        # ASGI tuple (status, headers, body)
+        status, headers, body = result
+        _write_frame({"type": "response", "statusCode": status, "headers": headers, "body": body})
+        return
+    if kind == "wsgi-tuple":
+        status, headers, body = result
+        _write_frame({"type": "response", "statusCode": status, "headers": headers, "body": body})
+        return
+
+    # Streaming detection. Async generators take precedence because
+    # inspect.isgenerator is False for them.
+    if inspect.isasyncgen(result):
+        asyncio.run(_stream_async_iterable(result, streaming_enabled, keepalive_s))
+        return
+    if inspect.isgenerator(result):
+        _stream_iterable(result, streaming_enabled, keepalive_s)
+        return
+
+    status, headers, body = _normalise_response(result)
+    _write_frame({"type": "response", "statusCode": status, "headers": headers, "body": body})
 
 
 # ── Main loop ──────────────────────────────────────────────────────────
@@ -381,16 +647,36 @@ try:
             os.environ["ORVA_CALL_DEPTH"] = _depth
         else:
             os.environ.pop("ORVA_CALL_DEPTH", None)
+
+        # v0.4 C1: streaming flag + heartbeat interval ride on per-request
+        # headers so the proxy can flip them at runtime without redeploying
+        # the worker. Defaults match the system_config seed values.
+        _streaming_on = (_hdrs.get("x-orva-streaming-enabled") or "1") != "0"
         try:
-            status, headers, body = _dispatch(event)
+            _keepalive = max(1, int(_hdrs.get("x-orva-stream-keepalive-seconds") or "15"))
+        except (TypeError, ValueError):
+            _keepalive = 15
+
+        try:
+            _dispatch_and_emit(event, _streaming_on, _keepalive)
         except Exception:
             traceback.print_exc()
-            status, headers, body = (
-                500,
-                {"Content-Type": "application/json"},
-                json.dumps({"error": "Internal function error"}),
-            )
-        _write_frame({"type": "response", "statusCode": status, "headers": headers, "body": body})
+            # If we already started streaming we can't undo the head; emit
+            # response_end and let the proxy close out. Otherwise emit a
+            # plain 500 response.
+            try:
+                _write_frame({
+                    "type": "response", "statusCode": 500,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"error": "Internal function error"}),
+                })
+            except Exception:
+                # Best-effort terminator — the foreground proxy frame loop
+                # will see EOF on the next read if even this fails.
+                try:
+                    _write_frame({"type": "response_end"})
+                except Exception:
+                    pass
 
         served += 1
         if max_reqs > 0 and served >= max_reqs:

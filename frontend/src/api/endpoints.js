@@ -339,3 +339,25 @@ export const deleteWebhook = (id) => apiClient.delete(`/webhooks/${id}`)
 export const testWebhook = (id) => apiClient.post(`/webhooks/${id}/test`)
 export const listWebhookDeliveries = (id) => apiClient.get(`/webhooks/${id}/deliveries`)
 export const retryWebhookDelivery = (id) => apiClient.post(`/webhooks/deliveries/${id}/retry`)
+
+// ── Inbound webhook triggers (v0.4 C2a) ─────────────────────────────
+//
+// Each row maps a trigger URL (/webhook/<id>) to a function. Authentication
+// is the HMAC signature on the request body — set up the trigger in Orva,
+// configure the upstream service (GitHub, Stripe, Slack, your own backend)
+// with the same secret, and the function fires on every signed POST.
+
+export const listInboundWebhooks = (fnId) =>
+  apiClient.get(`/functions/${encodeURIComponent(fnId)}/inbound-webhooks`)
+
+export const createInboundWebhook = (fnId, body) =>
+  apiClient.post(`/functions/${encodeURIComponent(fnId)}/inbound-webhooks`, body)
+
+export const getInboundWebhook = (fnId, id) =>
+  apiClient.get(`/functions/${encodeURIComponent(fnId)}/inbound-webhooks/${id}`)
+
+export const updateInboundWebhook = (fnId, id, body) =>
+  apiClient.put(`/functions/${encodeURIComponent(fnId)}/inbound-webhooks/${id}`, body)
+
+export const deleteInboundWebhook = (fnId, id) =>
+  apiClient.delete(`/functions/${encodeURIComponent(fnId)}/inbound-webhooks/${id}`)

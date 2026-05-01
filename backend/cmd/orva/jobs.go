@@ -51,6 +51,9 @@ func init() {
 	jobsEnqueueCmd.Flags().String("fn", "", "function name or ID to invoke (required)")
 	jobsEnqueueCmd.Flags().String("data", "", "JSON payload to send to the function")
 	jobsEnqueueCmd.Flags().Int("max-attempts", 0, "maximum retry attempts (default 3)")
+	jobsEnqueueCmd.Flags().String("at", "",
+		"RFC3339 timestamp to fire the job at (e.g. 2026-05-15T09:00:00Z). "+
+			"Omit to run on the next scheduler tick (~5s).")
 	jobsEnqueueCmd.MarkFlagRequired("fn")
 
 	jobsCmd.AddCommand(jobsListCmd)
@@ -136,6 +139,7 @@ func runJobsEnqueue(cmd *cobra.Command, args []string) {
 	fnNameOrID, _ := cmd.Flags().GetString("fn")
 	dataStr, _ := cmd.Flags().GetString("data")
 	maxAttempts, _ := cmd.Flags().GetInt("max-attempts")
+	atStr, _ := cmd.Flags().GetString("at")
 
 	fnID := resolveFunctionID(client, fnNameOrID)
 
@@ -151,6 +155,13 @@ func runJobsEnqueue(cmd *cobra.Command, args []string) {
 	}
 	if maxAttempts > 0 {
 		body["max_attempts"] = maxAttempts
+	}
+	if atStr != "" {
+		t, err := time.Parse(time.RFC3339, atStr)
+		if err != nil {
+			exitError("enqueue: --at must be RFC3339 (e.g. 2026-05-15T09:00:00Z): %v", err)
+		}
+		body["scheduled_at"] = t.UTC().Format(time.RFC3339)
 	}
 
 	resp, err := client.Post("/api/v1/jobs", body)

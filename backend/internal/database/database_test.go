@@ -3,6 +3,7 @@ package database
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestDB(t *testing.T) *Database {
@@ -35,8 +36,8 @@ func TestMigrate(t *testing.T) {
 	// Verify seed data — bump this when migrations.go gains new rows.
 	var count int
 	db.read.QueryRow("SELECT COUNT(*) FROM system_config").Scan(&count)
-	if count != 18 {
-		t.Errorf("expected 18 system config rows, got %d", count)
+	if count != 21 {
+		t.Errorf("expected 21 system config rows, got %d", count)
 	}
 }
 
@@ -293,6 +294,141 @@ func TestFixtureCRUD(t *testing.T) {
 	rows, _ = db.ListFixtures(fn.ID)
 	if len(rows) != 0 {
 		t.Errorf("expected fixtures to cascade-delete with the function, got %d rows", len(rows))
+	}
+}
+
+// TestInboundWebhookCRUD covers v0.4 C2a — list/insert/update/delete
+// of inbound webhook trigger rows + verifies that deleting the owning
+// function cascades through the FK.
+func TestInboundWebhookCRUD(t *testing.T) {
+	db := newTestDB(t)
+
+	fn := &Function{
+		ID: "fn_inb12345678", Name: "inbound-test", Runtime: "node22",
+		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 128,
+		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
+	}
+	if err := db.InsertFunction(fn); err != nil {
+		t.Fatal(err)
+	}
+
+	hook := &InboundWebhook{
+		FunctionID:      fn.ID,
+		Name:            "github-deploys",
+		Secret:          NewInboundWebhookSecret(),
+		SignatureHeader: "X-Hub-Signature-256",
+		SignatureFormat: "github",
+		Active:          true,
+	}
+	if err := db.InsertInboundWebhook(hook); err != nil {
+		t.Fatal(err)
+	}
+	if hook.ID == "" {
+		t.Errorf("expected ID to be auto-assigned")
+	}
+
+	got, err := db.GetInboundWebhook(hook.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SignatureFormat != "github" || got.Name != "github-deploys" {
+		t.Errorf("unexpected fields: %+v", got)
+	}
+	if got.Secret != hook.Secret {
+		t.Errorf("secret should round-trip; got %q vs %q", got.Secret, hook.Secret)
+	}
+
+	// Reject unknown format on insert.
+	bad := &InboundWebhook{
+		FunctionID: fn.ID, Name: "x",
+		Secret: "abc", SignatureFormat: "made-up",
+	}
+	if err := db.InsertInboundWebhook(bad); err == nil {
+		t.Error("expected unknown signature_format to fail insert")
+	}
+
+	// Update name + flip active off.
+	got.Name = "renamed"
+	got.Active = false
+	if err := db.UpdateInboundWebhook(got); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := db.GetInboundWebhook(hook.ID)
+	if got2.Name != "renamed" || got2.Active {
+		t.Errorf("update did not stick: %+v", got2)
+	}
+
+	rows, err := db.ListInboundWebhooksForFunction(fn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("expected 1 row, got %d", len(rows))
+	}
+
+	// Cascade: deleting the function removes its inbound webhooks.
+	db.write.Exec("PRAGMA foreign_keys = ON")
+	if err := db.DeleteFunction(fn.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetInboundWebhook(hook.ID); err == nil {
+		t.Error("expected inbound webhook to cascade-delete with the function")
+	}
+}
+
+// TestJobScheduledAtFiltering covers the v0.4 C2b feature: a job
+// scheduled in the future MUST NOT be claimed before its time, and a
+// job whose scheduled_at is in the past MUST be claimed immediately.
+// The scheduled_at column already exists; this test pins the
+// ClaimDueJobs filter behaviour against regression.
+func TestJobScheduledAtFiltering(t *testing.T) {
+	db := newTestDB(t)
+
+	fn := &Function{
+		ID: "fn_jobsched12345", Name: "job-sched-test", Runtime: "node22",
+		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 64,
+		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
+	}
+	if err := db.InsertFunction(fn); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	future := &Job{
+		FunctionID:  fn.ID,
+		Payload:     []byte("{}"),
+		ScheduledAt: now.Add(2 * time.Hour),
+	}
+	past := &Job{
+		FunctionID:  fn.ID,
+		Payload:     []byte("{}"),
+		ScheduledAt: now.Add(-1 * time.Minute),
+	}
+	if err := db.EnqueueJob(future); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EnqueueJob(past); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := db.ClaimDueJobs(now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("expected exactly 1 due job (the past one), got %d", len(claimed))
+	}
+	if claimed[0].ID != past.ID {
+		t.Errorf("claimed wrong job: got %s, want %s", claimed[0].ID, past.ID)
+	}
+
+	// Advance the clock — now the future job should also be due.
+	claimed2, err := db.ClaimDueJobs(now.Add(3*time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed2) != 1 || claimed2[0].ID != future.ID {
+		t.Fatalf("expected future job to be due after clock advance; got %+v", claimed2)
 	}
 }
 

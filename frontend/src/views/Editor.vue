@@ -66,6 +66,14 @@
         <Database class="w-3.5 h-3.5" /> KV
       </button>
       <button
+        v-if="isEditing"
+        class="panel-btn"
+        title="Inbound webhooks · external services trigger this function via signed POST"
+        @click="router.push({ name: 'function-inbound-webhooks', params: { name: form.name } })"
+      >
+        <Webhook class="w-3.5 h-3.5" /> Webhooks
+      </button>
+      <button
         v-if="isEditing && versions.length"
         class="panel-btn"
         title="Version history & rollback"
@@ -988,7 +996,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles, Webhook } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'

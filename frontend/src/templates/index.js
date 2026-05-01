@@ -853,6 +853,52 @@ def handler(event):
     return _json_response(404, {"error": "not found", "path": path})
 `
 
+const py_stream_llm = `# Streaming LLM-style token generator (v0.4 C1 showcase).
+#
+# Yields one fake "token" every 100ms so curl --no-buffer renders the
+# response progressively. Demonstrates the streaming protocol:
+#
+#   1. The first yield is an Orva-shaped dict { statusCode, headers }.
+#      The adapter recognises this as the response head and emits a
+#      'response_start' frame to the proxy.
+#   2. Each subsequent yield becomes a 'chunk' frame; the proxy writes +
+#      flushes those to the HTTP client over chunked transfer encoding.
+#   3. When the generator returns, the adapter sends 'response_end' and
+#      the connection closes cleanly.
+#
+# Replace the fake_tokens list + sleep with your real LLM SDK call (e.g.
+# OpenAI's stream=True API or Anthropic's stream(): for a real backend
+# you'd "yield" from the SDK's iterator). TTFB stays ~10ms because the
+# first yield fires before any network I/O.
+import time
+
+
+def handler(event):
+    fake_tokens = (
+        "Streaming responses arrive token by token, just like the major "
+        "LLM APIs. Each yield in this generator becomes one chunk on the "
+        "wire — the HTTP client renders progress as soon as bytes leave "
+        "the function. Try this with: curl --no-buffer http://localhost:8443/fn/<short_id>/"
+    ).split()
+
+    # First yield = response head. statusCode + headers establish the
+    # connection; body is empty here because the words come as chunks.
+    yield {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "text/plain; charset=utf-8",
+            # X-Accel-Buffering disables nginx response buffering for
+            # operators who put a reverse proxy in front of orvad.
+            "X-Accel-Buffering": "no",
+        },
+    }
+
+    for word in fake_tokens:
+        yield word + " "
+        time.sleep(0.1)
+    yield "\\n"
+`
+
 // ─────────────────────────────────────────────────────────────────────
 //  Node
 // ─────────────────────────────────────────────────────────────────────
@@ -1283,6 +1329,10 @@ const pythonTemplates = [
   { id: 'py-guestbook',      category: 'Showcase',  label: 'Guestbook (full-stack showcase)', cron: true,
     description: 'HTML page + JSON API + KV + jobs + cron + secrets in one file. Best demo of what one Orva function can do.',
     code: py_guestbook, deps: '' },
+
+  { id: 'py-stream-llm',     category: 'Showcase',  label: 'Streaming LLM tokens',
+    description: 'Generator that yields one word every 100ms. Demonstrates v0.4 chunked streaming end-to-end.',
+    code: py_stream_llm, deps: '' },
 ]
 
 const nodeTemplates = [

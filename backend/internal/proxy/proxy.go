@@ -89,6 +89,15 @@ func captureSettings() (bool, int64) {
 }
 
 // Proxy executes function code via warm pool workers and writes the response.
+//
+// Capture vs. streaming (v0.4 A3 + C1 interaction): the request capture
+// machinery only persists the *inbound* request body for the dashboard's
+// Replay button. It deliberately does not buffer the response — streaming
+// handlers can emit gigabytes of chunks over a long-lived connection, and
+// turning that into a SQLite blob would defeat the streaming UX. Replay
+// re-invokes the function fresh anyway, so capture-of-request is enough
+// to reconstruct any execution. This keeps streaming + capture mutually
+// compatible by construction.
 type Proxy struct {
 	// Sandbox is the legacy host-wide concurrency limiter. Retained for API
 	// compatibility with server.go; the real ceiling now lives inside the
@@ -107,6 +116,12 @@ type Proxy struct {
 	Config ProxyConfig
 }
 
+// streamMaxFallback is the wall-clock cap for a streaming response when
+// the database lookup for stream_max_seconds is unavailable. Matches the
+// migrations.go default so behaviour is consistent with operators who
+// haven't customised the row.
+const streamMaxFallback = 300 * time.Second
+
 // ProxyConfig holds sandbox paths needed for execution.
 type ProxyConfig struct {
 	NsjailBin string
@@ -124,13 +139,6 @@ type request struct {
 	Path    string            `json:"path"`
 	Headers map[string]string `json:"headers"`
 	Body    string            `json:"body"`
-}
-
-// response is the JSON structure the adapter writes to stdout.
-type response struct {
-	StatusCode int               `json:"statusCode"`
-	Headers    map[string]string `json:"headers"`
-	Body       string            `json:"body"`
 }
 
 // Result is returned from Forward so the caller can record stderr
@@ -201,6 +209,17 @@ func (p *Proxy) Forward(
 	headers["x-orva-function-id"] = fnID
 	headers["x-orva-execution-id"] = execID
 	headers["x-orva-timeout-ms"] = strconv.FormatInt(timeoutMS, 10)
+	// v0.4 C1: streaming feature flag. Operator-tunable via system_config;
+	// when off the adapters treat generators as buffered single-frame
+	// responses (back-compat fallback). Default on.
+	streamingOn := 1
+	streamKeepaliveS := 15
+	if p.DB != nil {
+		streamingOn = p.DB.GetSystemConfigInt("streaming_enabled", 1)
+		streamKeepaliveS = p.DB.GetSystemConfigInt("stream_keepalive_seconds", 15)
+	}
+	headers["x-orva-streaming-enabled"] = strconv.Itoa(streamingOn)
+	headers["x-orva-stream-keepalive-seconds"] = strconv.Itoa(streamKeepaliveS)
 
 	// v0.4 A3: capture the inbound request for the dashboard's Replay
 	// button. We piggy-back on the body bytes already in memory and on
@@ -257,9 +276,16 @@ func (p *Proxy) Forward(
 	defer func() { p.Pool.Release(fnID, acq.Worker, reqErr) }()
 
 	dispatchStart := time.Now()
-	respJSON, stderr, err := acq.Worker.Dispatch(ctx, reqJSON)
+	dres, err := acq.Worker.DispatchEx(ctx, reqJSON)
 	// Feed the per-fn EWMA so the autoscaler can compute Little's-Law floor.
+	// (Streaming responses inflate this number — the dispatch "duration"
+	// includes the entire stream wall-clock. The autoscaler treats this as
+	// signal regardless; see pool.go's note near recordAcquire.)
 	p.Pool.RecordLatency(fnID, time.Since(dispatchStart))
+	var stderr []byte
+	if dres != nil {
+		stderr = dres.Stderr()
+	}
 	result := &Result{Stderr: stderr, ColdStart: acq.ColdStart}
 	if err != nil {
 		reqErr = err
@@ -272,33 +298,124 @@ func (p *Proxy) Forward(
 		return result, fmt.Errorf("dispatch: %w", err)
 	}
 
-	var resp response
-	if err := json.Unmarshal(respJSON, &resp); err != nil {
-		reqErr = err
-		return result, fmt.Errorf("adapter returned invalid response: %w", err)
-	}
-
 	coldStartStr := "false"
 	if acq.ColdStart {
 		coldStartStr = "true"
 	}
-	for k, v := range resp.Headers {
+	for k, v := range dres.Headers {
 		w.Header().Set(k, v)
 	}
 	w.Header().Set("X-Orva-Execution-ID", execID)
 	w.Header().Set("X-Orva-Cold-Start", coldStartStr)
 	w.Header().Set("X-Orva-Duration-MS", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
 
-	sc := resp.StatusCode
+	sc := dres.StatusCode
 	if sc == 0 {
 		sc = 200
 	}
+
+	if !dres.Streaming {
+		// Historical single-write path — preserves byte-for-byte parity
+		// with pre-C1 behaviour for non-streaming handlers.
+		w.WriteHeader(sc)
+		n, _ := w.Write([]byte(dres.Body))
+		result.StatusCode = sc
+		result.ResponseSize = n
+		result.Wrote = true
+		return result, nil
+	}
+
+	// ── Streaming path (v0.4 C1) ─────────────────────────────────────
+	//
+	// Wire shape: adapter sent {"type":"response_start", ...}; we now loop
+	// reading {"type":"chunk", ...} frames until a terminal
+	// {"type":"response_end"} arrives. Each chunk is written + flushed so
+	// the HTTP client sees TTFB = time-to-first-yield.
+	//
+	// Backpressure: the adapter blocks on its stdout write when this side
+	// stops reading (kernel pipe buffer fills). The kernel pipe buffer
+	// gives us ~64KiB of headroom before the handler's yield blocks —
+	// good enough that a slow consumer slows the handler instead of OOM.
+	//
+	// HTTP/2 caveat: Flusher is not guaranteed on every ResponseWriter.
+	// Standard library serves HTTP/1.1 keep-alive connections through a
+	// chunked-transfer writer that DOES implement http.Flusher; HTTP/2
+	// streams behave similarly via http2.responseWriter. If for some
+	// reason the wrapped writer doesn't implement Flusher (custom
+	// middleware, unusual TLS termination), we still write — the data
+	// just gets buffered until the stream closes. We log nothing here
+	// because the path runs per-request.
+	flusher, _ := w.(http.Flusher)
 	w.WriteHeader(sc)
-	n, _ := w.Write([]byte(resp.Body))
+	if flusher != nil {
+		flusher.Flush() // push headers immediately so TTFB is measurable
+	}
+
+	// Hard cap — operator-tunable via system_config.stream_max_seconds.
+	// This is a wall-clock fence: even if the handler keeps yielding, we
+	// close the connection and let the pool reap the worker. Without this
+	// a runaway generator could hold a worker for the entire lease.
+	streamCap := streamMaxFallback
+	if p.DB != nil {
+		if secs := p.DB.GetSystemConfigInt("stream_max_seconds", 300); secs > 0 {
+			streamCap = time.Duration(secs) * time.Second
+		}
+	}
+	streamCtx, streamCancel := context.WithTimeout(r.Context(), streamCap)
+	defer streamCancel()
+
+	totalBytes := 0
+	for {
+		kind, data, err := dres.NextFrame(streamCtx)
+		if err != nil {
+			reqErr = err
+			result.StatusCode = sc
+			result.ResponseSize = totalBytes
+			// Headers + status already flew. Nothing useful to write
+			// back — return the error so the caller can record the
+			// execution row as failed but DO NOT try to emit a JSON
+			// envelope (Wrote=true tells invoke.go we're done).
+			result.Wrote = true
+			result.Stderr = dres.Stderr()
+			return result, fmt.Errorf("stream: %w", err)
+		}
+		if kind == "end" {
+			break
+		}
+		// kind == "chunk"
+		if len(data) == 0 {
+			// Heartbeat — nothing to push to the wire. Flushing without
+			// data is a no-op for HTTP/1.1 chunked, but we still flush to
+			// be safe against intermediate buffering.
+			if flusher != nil {
+				flusher.Flush()
+			}
+			continue
+		}
+		n, werr := w.Write(data)
+		totalBytes += n
+		if werr != nil {
+			// Client disconnected. Cancel the parent ctx so the worker's
+			// next stdin/stdout op unblocks and the pool reaps it. We
+			// return the disconnect as the request error so Release
+			// kills the worker (mid-stream is unrecoverable).
+			reqErr = werr
+			streamCancel()
+			result.StatusCode = sc
+			result.ResponseSize = totalBytes
+			result.Wrote = true
+			result.Stderr = dres.Stderr()
+			return result, fmt.Errorf("stream write: %w", werr)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 
 	result.StatusCode = sc
-	result.ResponseSize = n
+	result.ResponseSize = totalBytes
 	result.Wrote = true
+	result.Stderr = dres.Stderr()
 	return result, nil
 }
 

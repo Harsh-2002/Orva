@@ -236,8 +236,152 @@ function writeFrame(obj) {
   const body = Buffer.from(JSON.stringify(obj), 'utf-8');
   const hdr = Buffer.alloc(4);
   hdr.writeUInt32BE(body.length, 0);
+  // Node's process.stdout.write returns false if the kernel pipe buffer
+  // is full (backpressure from the proxy). We ignore the return — the
+  // next write blocks naturally until drain. EPIPE is rethrown to the
+  // caller so streaming loops can stop iterating on client disconnect.
   originalStdoutWrite(hdr);
   originalStdoutWrite(body);
+}
+
+// v0.4 C1: streaming helpers — translate user-yielded values into
+// `chunk` frames. data may be Buffer | string | Uint8Array | object.
+function streamChunk(data) {
+  let buf;
+  if (data == null) {
+    buf = Buffer.alloc(0);
+  } else if (Buffer.isBuffer(data)) {
+    buf = data;
+  } else if (data instanceof Uint8Array) {
+    buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  } else if (typeof data === 'string') {
+    buf = Buffer.from(data, 'utf-8');
+  } else {
+    buf = Buffer.from(JSON.stringify(data), 'utf-8');
+  }
+  writeFrame({ type: 'chunk', data: buf.length === 0 ? '' : buf.toString('base64') });
+}
+
+function looksLikeHead(item) {
+  if (!item || typeof item !== 'object') return null;
+  if (!('statusCode' in item)) return null;
+  return {
+    status: item.statusCode || 200,
+    headers: item.headers || { 'Content-Type': 'text/plain' },
+    body: 'body' in item ? item.body : null,
+  };
+}
+
+// streamIterable consumes any sync/async iterable and emits the
+// streaming protocol exchange. When streamingEnabled is false we
+// buffer everything into a single response frame for back-compat —
+// operators flipping the system_config flag get pre-C1 behaviour
+// without redeploying.
+async function streamIterable(iterable, streamingEnabled, keepaliveMs) {
+  if (!streamingEnabled) {
+    let head = null;
+    const parts = [];
+    const collect = (item) => {
+      if (head === null) {
+        const detected = looksLikeHead(item);
+        if (detected) {
+          head = { status: detected.status, headers: detected.headers };
+          if (detected.body != null) parts.push(typeof detected.body === 'string' ? detected.body : String(detected.body));
+          return;
+        }
+        head = { status: 200, headers: { 'Content-Type': 'text/plain' } };
+      }
+      if (Buffer.isBuffer(item)) parts.push(item.toString('utf-8'));
+      else if (item instanceof Uint8Array) parts.push(Buffer.from(item).toString('utf-8'));
+      else if (typeof item === 'string') parts.push(item);
+      else parts.push(String(item));
+    };
+    for await (const item of iterable) collect(item);
+    if (head === null) head = { status: 200, headers: { 'Content-Type': 'text/plain' } };
+    writeFrame({
+      type: 'response', statusCode: head.status,
+      headers: head.headers, body: parts.join(''),
+    });
+    return;
+  }
+
+  let headSent = false;
+  let lastEmit = Date.now();
+  let hbTimer = null;
+
+  const sendHead = (status, headers) => {
+    if (headSent) return;
+    writeFrame({ type: 'response_start', statusCode: status, headers });
+    headSent = true;
+  };
+
+  const startHeartbeat = () => {
+    if (hbTimer) return;
+    // setInterval fires regardless of how busy the loop is. The check
+    // against lastEmit prevents an empty chunk from racing a real one;
+    // worst case we emit one extra empty chunk per period, which is
+    // harmless on the wire.
+    hbTimer = setInterval(() => {
+      if (Date.now() - lastEmit >= keepaliveMs) {
+        try {
+          writeFrame({ type: 'chunk', data: '' });
+          lastEmit = Date.now();
+        } catch { /* pipe closed — clearInterval below */ }
+      }
+    }, keepaliveMs);
+  };
+
+  try {
+    for await (const item of iterable) {
+      if (!headSent) {
+        const detected = looksLikeHead(item);
+        if (detected) {
+          sendHead(detected.status, detected.headers);
+          startHeartbeat();
+          if (detected.body != null && detected.body !== '') {
+            streamChunk(detected.body);
+            lastEmit = Date.now();
+          }
+          continue;
+        }
+        sendHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        startHeartbeat();
+      }
+      streamChunk(item);
+      lastEmit = Date.now();
+    }
+    if (!headSent) sendHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    writeFrame({ type: 'response_end' });
+  } catch (err) {
+    // EPIPE = client disconnected mid-stream. Stop iterating; the
+    // worker continues serving subsequent requests if its stdin is
+    // still open. Anything else we re-raise so the outer try/catch
+    // emits an error frame BEFORE the head went out.
+    if (err && err.code !== 'EPIPE') {
+      if (!headSent) throw err;
+      // Head already flew — nothing useful to surface. Best-effort end.
+      try { writeFrame({ type: 'response_end' }); } catch {}
+    }
+  } finally {
+    if (hbTimer) clearInterval(hbTimer);
+  }
+}
+
+// drainReadableStream yields chunks from a fetch-API ReadableStream
+// (e.g. `new Response(stream).body`). Used when the handler returns a
+// Response whose body is a stream — we surface it as if the user had
+// written an async generator yielding bytes.
+async function* drainReadableStream(readable) {
+  const reader = readable.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value) yield value;
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
 }
 
 // readExactly reads exactly n bytes from process.stdin, resolving with null
@@ -313,19 +457,76 @@ async function readFrame() {
     if (_depth) process.env.ORVA_CALL_DEPTH = _depth;
     else delete process.env.ORVA_CALL_DEPTH;
 
-    let out;
+    // v0.4 C1: streaming flag + heartbeat interval ride on per-request
+    // headers so the proxy can flip them at runtime without redeploying
+    // the worker. Defaults match the system_config seed values.
+    const streamingOn = (_hdrs['x-orva-streaming-enabled'] ?? '1') !== '0';
+    const keepaliveS = Math.max(1, Number(_hdrs['x-orva-stream-keepalive-seconds'] ?? '15') || 15);
+    const keepaliveMs = keepaliveS * 1000;
+
     try {
       const result = await dispatch(event);
-      out = await normaliseResponse(result);
+
+      // Streaming detection — async iterables, sync iterables, or a
+      // Response whose body is a ReadableStream. Order matters:
+      // Response objects are also iterable (ReadableStream is async-
+      // iterable in Node 18+) so we MUST check the Response branch
+      // first to extract status + headers, then drain the body stream.
+      if (
+        result &&
+        typeof result === 'object' &&
+        typeof result.status === 'number' &&
+        result.body && typeof result.body.getReader === 'function'
+      ) {
+        const headers = {};
+        if (result.headers && typeof result.headers.forEach === 'function') {
+          result.headers.forEach((v, k) => { headers[k] = v; });
+        }
+        // Wrap in a generator that prepends the head, then yields chunks.
+        async function* withHead() {
+          yield { statusCode: result.status, headers, body: '' };
+          for await (const chunk of drainReadableStream(result.body)) yield chunk;
+        }
+        await streamIterable(withHead(), streamingOn, keepaliveMs);
+      } else if (
+        result != null &&
+        typeof result === 'object' &&
+        (typeof result[Symbol.asyncIterator] === 'function' ||
+         (typeof result[Symbol.iterator] === 'function' && typeof result !== 'string'))
+      ) {
+        // Exclude strings, Buffers, and arrays from being treated as
+        // streaming iterables — those are perfectly valid response
+        // bodies and shouldn't surprise the user.
+        const isExcluded =
+          typeof result === 'string' ||
+          Buffer.isBuffer(result) ||
+          Array.isArray(result) ||
+          result instanceof Uint8Array;
+        if (isExcluded) {
+          const out = await normaliseResponse(result);
+          writeFrame({ type: 'response', statusCode: out.statusCode, headers: out.headers, body: out.body });
+        } else {
+          await streamIterable(result, streamingOn, keepaliveMs);
+        }
+      } else {
+        const out = await normaliseResponse(result);
+        writeFrame({ type: 'response', statusCode: out.statusCode, headers: out.headers, body: out.body });
+      }
     } catch (err) {
       process.stderr.write(`Handler error: ${err.stack || err.message}\n`);
-      out = {
-        statusCode: 500,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'Internal function error', message: err.message }),
-      };
+      // If we already started streaming the response head, the proxy is
+      // mid-loop and writeFrame on a fresh "response" envelope would
+      // confuse it. Best-effort: just close. The proxy will surface the
+      // truncation via the connection close.
+      try {
+        writeFrame({
+          type: 'response',
+          statusCode: 500,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: 'Internal function error', message: err.message }),
+        });
+      } catch {}
     }
-    writeFrame({ type: 'response', statusCode: out.statusCode, headers: out.headers, body: out.body });
 
     served++;
     if (maxReqs > 0 && served >= maxReqs) {

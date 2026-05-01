@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -64,6 +65,11 @@ type frameResponse struct {
 	Body       string            `json:"body,omitempty"`
 	Fatal      bool              `json:"fatal,omitempty"`
 	Message    string            `json:"message,omitempty"`
+	// Streaming chunk frames carry base64-encoded bytes in Data so the
+	// transport stays JSON-safe (raw bytes can include 0x00 / NUL which
+	// upset some intermediaries). v0.4 C1 — see proxy.Forward + adapter.py
+	// / adapter.js for the producer/consumer.
+	Data string `json:"data,omitempty"`
 }
 
 // Spawn boots a fresh nsjail+adapter process. Caller owns the returned
@@ -142,15 +148,221 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 // Dispatch writes a request frame and reads the response frame. Returns
 // (respBody, stderrSnapshot, err). On context cancellation or protocol
 // error the worker is marked dead and must not be reused.
+//
+// Backwards-compatible non-streaming wrapper around DispatchEx. For
+// streaming responses (v0.4 C1) callers should prefer DispatchEx so they
+// can drive chunk frames out to the HTTP client incrementally.
 func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte, error) {
+	res, err := w.DispatchEx(ctx, eventJSON)
+	if err != nil {
+		var stderr []byte
+		if res != nil {
+			stderr = res.Stderr()
+		}
+		return nil, stderr, err
+	}
+	if res.Streaming {
+		// Caller used the back-compat path on a streaming handler. Drain
+		// chunks into a buffer so the existing single-write path still
+		// works; this is the path tests + non-HTTP callers take.
+		var buf []byte
+		for {
+			kind, data, err := res.NextFrame(ctx)
+			if err != nil {
+				return nil, res.Stderr(), err
+			}
+			if kind == "end" {
+				break
+			}
+			if kind == "chunk" {
+				buf = append(buf, data...)
+			}
+		}
+		envelope, _ := json.Marshal(map[string]any{
+			"statusCode": res.StatusCode,
+			"headers":    res.Headers,
+			"body":       string(buf),
+		})
+		return envelope, res.Stderr(), nil
+	}
+	envelope, _ := json.Marshal(map[string]any{
+		"statusCode": res.StatusCode,
+		"headers":    res.Headers,
+		"body":       res.Body,
+	})
+	return envelope, res.Stderr(), nil
+}
+
+// DispatchResult is returned from DispatchEx. Two shapes:
+//
+//   - Streaming=false: StatusCode/Headers/Body fully populated; the call
+//     completed with the historical single-frame "response" path. Callers
+//     just write the envelope and move on.
+//   - Streaming=true:  StatusCode/Headers populated from "response_start";
+//     Body is empty. Caller MUST loop on NextFrame until kind == "end".
+//     During the loop the Worker holds w.mu — Release should run only
+//     after the loop terminates.
+//
+// Stderr() is safe to call at any point; it returns the bytes written to
+// the worker's stderr ring buffer since dispatch began. Most callers wait
+// until after the loop completes so they capture the full snapshot.
+type DispatchResult struct {
+	Streaming  bool
+	StatusCode int
+	Headers    map[string]string
+	Body       string
+
+	w         *Worker
+	errBefore int64
+	finished  bool
+	// readErr is sticky — once the underlying pipe surfaces an error, all
+	// subsequent NextFrame calls return it.
+	readErr error
+	// finishHook is called exactly once when the streaming loop reaches a
+	// terminal state (end / error / ctx-cancel). Used by DispatchEx to
+	// release the worker mutex it held across the stream.
+	finishHook func()
+}
+
+// finalize runs the finishHook (if set) exactly once. Idempotent.
+func (r *DispatchResult) finalize() {
+	if r.finishHook != nil {
+		hook := r.finishHook
+		r.finishHook = nil
+		hook()
+	}
+}
+
+// NextFrame reads the next frame from a streaming response. Returns:
+//
+//	kind="chunk", data=<bytes>   — one chunk of body bytes
+//	kind="end",   data=nil       — terminator; loop should exit
+//	kind="",      err=...        — protocol error; worker is dead
+//
+// An empty chunk (data length 0) is a heartbeat from the adapter and is
+// surfaced as kind="chunk", data=nil. Callers can choose to forward an
+// empty Write+Flush (keeps proxies/LBs alive) or skip it.
+func (r *DispatchResult) NextFrame(ctx context.Context) (kind string, data []byte, err error) {
+	if r.finished {
+		r.finalize()
+		return "end", nil, nil
+	}
+	if r.readErr != nil {
+		r.finalize()
+		return "", nil, r.readErr
+	}
+
+	// Read the next frame from worker stdout, with ctx cancellation.
+	type framePayload struct {
+		payload []byte
+		err     error
+	}
+	ch := make(chan framePayload, 1)
+	go func() {
+		p, err := readFrame(r.w.stdout)
+		ch <- framePayload{p, err}
+	}()
+	select {
+	case fp := <-ch:
+		if fp.err != nil {
+			r.w.markDead()
+			r.readErr = fmt.Errorf("%w: read chunk frame: %v", ErrWorkerExited, fp.err)
+			r.finalize()
+			return "", nil, r.readErr
+		}
+		var f frameResponse
+		if err := json.Unmarshal(fp.payload, &f); err != nil {
+			r.w.markDead()
+			r.readErr = fmt.Errorf("%w: invalid chunk frame: %v", ErrWorkerExited, err)
+			r.finalize()
+			return "", nil, r.readErr
+		}
+		switch f.Type {
+		case "chunk":
+			// Body bytes are base64 to keep the JSON transport binary-safe.
+			if f.Data == "" {
+				return "chunk", nil, nil
+			}
+			dec, err := base64.StdEncoding.DecodeString(f.Data)
+			if err != nil {
+				r.w.markDead()
+				r.readErr = fmt.Errorf("%w: invalid chunk data: %v", ErrWorkerExited, err)
+				r.finalize()
+				return "", nil, r.readErr
+			}
+			return "chunk", dec, nil
+		case "response_end":
+			r.finished = true
+			r.w.Served.Add(1)
+			r.finalize()
+			return "end", nil, nil
+		case "error":
+			// Adapter surfaced an error mid-stream. Always treat as fatal
+			// because the response head was already written — there is no
+			// clean way to convert this into a 5xx envelope at this point.
+			r.w.markDead()
+			r.readErr = fmt.Errorf("%w: adapter mid-stream error: %s", ErrWorkerExited, f.Message)
+			r.finalize()
+			return "", nil, r.readErr
+		default:
+			r.w.markDead()
+			r.readErr = fmt.Errorf("%w: unexpected stream frame type %q", ErrWorkerExited, f.Type)
+			r.finalize()
+			return "", nil, r.readErr
+		}
+	case <-ctx.Done():
+		r.w.markDead()
+		r.readErr = ctx.Err()
+		r.finalize()
+		return "", nil, r.readErr
+	}
+}
+
+// Stderr returns the bytes written to the worker's stderr since dispatch
+// began. Callers typically defer this until after the streaming loop has
+// drained so the snapshot covers the full handler invocation.
+func (r *DispatchResult) Stderr() []byte {
+	if r == nil || r.w == nil {
+		return nil
+	}
+	return r.w.errBuf.Snapshot(r.errBefore)
+}
+
+// DispatchEx writes a request frame, reads the FIRST response frame, and
+// dispatches by frame type:
+//
+//   - "response"        → DispatchResult{Streaming:false} populated end-to-end
+//   - "response_start"  → DispatchResult{Streaming:true}; caller drives
+//     NextFrame until kind=="end"
+//
+// On protocol errors the worker is marked dead. Worker.mu is held until
+// the streaming caller finishes the loop (DispatchEx releases it inside
+// NextFrame's terminal cases via finished=true; non-streaming returns
+// release the lock immediately). This matches the contract that one
+// Worker handles one request at a time.
+//
+// NOTE: holding w.mu across the streaming loop is fine because the pool
+// guarantees a single goroutine owns each Worker, and Release happens
+// after the proxy's Forward unwinds.
+func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchResult, error) {
 	if w.dead.Load() {
-		return nil, nil, errors.New("worker dead")
+		return nil, errors.New("worker dead")
 	}
 	w.mu.Lock()
-	defer w.mu.Unlock()
+	// We can't unconditionally defer Unlock here because streaming holds
+	// the lock until NextFrame finishes. Both terminal paths (non-stream
+	// + stream-end + error) take responsibility for unlocking.
+	unlocked := false
+	unlock := func() {
+		if !unlocked {
+			unlocked = true
+			w.mu.Unlock()
+		}
+	}
 
 	if w.dead.Load() {
-		return nil, nil, errors.New("worker dead")
+		unlock()
+		return nil, errors.New("worker dead")
 	}
 
 	errBefore := w.errBuf.Len()
@@ -164,7 +376,8 @@ func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte
 		writeErrCh <- writeFrame(w.stdin, reqFrame)
 	}()
 
-	// Read response on another goroutine so ctx cancel can break us out.
+	// Read FIRST response frame on another goroutine so ctx cancel can
+	// break us out.
 	respCh := make(chan []byte, 1)
 	readErrCh := make(chan error, 1)
 	go func() {
@@ -180,14 +393,14 @@ func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte
 	case err := <-writeErrCh:
 		if err != nil {
 			w.markDead()
-			// stdin write failure means the adapter side closed the pipe —
-			// classify as worker-exit, not a generic transport error.
-			return nil, w.errBuf.Snapshot(errBefore),
+			unlock()
+			return &DispatchResult{w: w, errBefore: errBefore},
 				fmt.Errorf("%w: write frame: %v", ErrWorkerExited, err)
 		}
 	case <-ctx.Done():
 		w.markDead()
-		return nil, w.errBuf.Snapshot(errBefore), ctx.Err()
+		unlock()
+		return &DispatchResult{w: w, errBefore: errBefore}, ctx.Err()
 	}
 
 	select {
@@ -195,41 +408,71 @@ func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte
 		var resp frameResponse
 		if err := json.Unmarshal(payload, &resp); err != nil {
 			w.markDead()
-			return nil, w.errBuf.Snapshot(errBefore),
+			unlock()
+			return &DispatchResult{w: w, errBefore: errBefore},
 				fmt.Errorf("%w: invalid response frame: %v", ErrWorkerExited, err)
 		}
 		if resp.Type == "error" {
 			if resp.Fatal {
 				w.markDead()
-				return nil, w.errBuf.Snapshot(errBefore),
+				unlock()
+				return &DispatchResult{w: w, errBefore: errBefore},
 					fmt.Errorf("%w: adapter fatal: %s", ErrWorkerExited, resp.Message)
 			}
 			// Non-fatal adapter error: handler threw but VM is healthy. Do
 			// NOT mark dead; do NOT classify as ErrWorkerExited.
-			return nil, w.errBuf.Snapshot(errBefore), fmt.Errorf("adapter: %s", resp.Message)
+			unlock()
+			return &DispatchResult{w: w, errBefore: errBefore},
+				fmt.Errorf("adapter: %s", resp.Message)
 		}
-		if resp.Type != "response" {
-			w.markDead()
-			return nil, w.errBuf.Snapshot(errBefore),
-				fmt.Errorf("%w: unexpected frame type %q", ErrWorkerExited, resp.Type)
+		if resp.Type == "response" {
+			// Non-streaming back-compat path: full response in one frame.
+			w.Served.Add(1)
+			unlock()
+			return &DispatchResult{
+				Streaming:  false,
+				StatusCode: resp.StatusCode,
+				Headers:    resp.Headers,
+				Body:       resp.Body,
+				w:          w,
+				errBefore:  errBefore,
+				finished:   true,
+			}, nil
 		}
-		// Repack as Orva envelope for proxy.go which expects the historical
-		// shape {"statusCode","headers","body"} in a JSON blob.
-		envelope, _ := json.Marshal(map[string]any{
-			"statusCode": resp.StatusCode,
-			"headers":    resp.Headers,
-			"body":       resp.Body,
-		})
-		w.Served.Add(1)
-		return envelope, w.errBuf.Snapshot(errBefore), nil
+		if resp.Type == "response_start" {
+			// Streaming: keep the lock — the caller drives NextFrame and
+			// unlocks via the wrapper below when finished.
+			r := &DispatchResult{
+				Streaming:  true,
+				StatusCode: resp.StatusCode,
+				Headers:    resp.Headers,
+				w:          w,
+				errBefore:  errBefore,
+			}
+			// Wrap NextFrame so the worker unlocks on terminal kinds. We
+			// achieve this by replacing the helper closure ... but Go
+			// doesn't let us mutate a method, so instead we install the
+			// unlock as a finalizer triggered on every NextFrame return
+			// path that flips finished=true OR sets readErr.
+			//
+			// Simpler: use a tiny goroutine-free finishHook that the
+			// NextFrame body checks. We attach via a new field.
+			r.finishHook = unlock
+			return r, nil
+		}
+		w.markDead()
+		unlock()
+		return &DispatchResult{w: w, errBefore: errBefore},
+			fmt.Errorf("%w: unexpected frame type %q", ErrWorkerExited, resp.Type)
 	case err := <-readErrCh:
 		w.markDead()
-		// stdout read failure / EOF is the canonical worker-died signal.
-		return nil, w.errBuf.Snapshot(errBefore),
+		unlock()
+		return &DispatchResult{w: w, errBefore: errBefore},
 			fmt.Errorf("%w: read frame: %v", ErrWorkerExited, err)
 	case <-ctx.Done():
 		w.markDead()
-		return nil, w.errBuf.Snapshot(errBefore), ctx.Err()
+		unlock()
+		return &DispatchResult{w: w, errBefore: errBefore}, ctx.Err()
 	}
 }
 

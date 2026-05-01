@@ -27,6 +27,7 @@ const router = createRouter({
         { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue') },
         { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue') },
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
+        { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue') },
         { path: 'deploy', name: 'deploy', component: () => import('@/views/Editor.vue') },
         { path: 'cron', name: 'cron', component: () => import('@/views/CronJobs.vue') },
         { path: 'jobs', name: 'jobs', component: () => import('@/views/Jobs.vue') },

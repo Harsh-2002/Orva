@@ -338,6 +338,26 @@ CREATE TABLE IF NOT EXISTS fixtures (
 
 CREATE INDEX IF NOT EXISTS idx_fixtures_fn ON fixtures(function_id, name);
 
+-- Inbound webhook triggers (v0.4 C2a). One row per "POST /webhook/<id>
+-- with this signature scheme fires this function". Auth is the HMAC
+-- signature; the path is intentionally outside /api/v1 so external
+-- callers don't need an Orva API key. signature_format is a string enum
+-- ("hmac_sha256_hex" | "hmac_sha256_base64" | "github" | "stripe" |
+-- "slack") — the trigger handler picks the verifier to run.
+CREATE TABLE IF NOT EXISTS inbound_webhooks (
+    id                TEXT PRIMARY KEY,                     -- iwh_<hex>
+    function_id       TEXT NOT NULL,
+    name              TEXT NOT NULL,
+    secret            TEXT NOT NULL,                        -- 32-byte hex
+    signature_header  TEXT NOT NULL,
+    signature_format  TEXT NOT NULL DEFAULT 'hmac_sha256_hex',
+    active            INTEGER NOT NULL DEFAULT 1,
+    created_at        INTEGER NOT NULL,
+    FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbound_webhooks_fn ON inbound_webhooks(function_id);
+
 -- Seed system config (ignore if already exists)
 INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('max_total_containers', '100'),
@@ -370,7 +390,20 @@ INSERT OR IGNORE INTO system_config (key, value) VALUES
     -- mirrors the API max_request_body_bytes default; bodies larger
     -- than the cap are truncated and replay is refused for them.
     ('replay_capture_enabled', '1'),
-    ('replay_capture_max_bytes', '1048576');
+    ('replay_capture_max_bytes', '1048576'),
+    -- v0.4 C1: streaming responses. When streaming_enabled=0 the
+    -- adapter falls back to buffering generator yields into a single
+    -- response frame so existing handlers keep working byte-for-byte;
+    -- operators can flip this off if their reverse-proxy / LB doesn't
+    -- handle chunked responses well. stream_keepalive_seconds is the
+    -- adapter-side heartbeat interval — if no chunk arrived within
+    -- that window an empty chunk is emitted to stop intermediaries
+    -- closing an idle connection. stream_max_seconds is the proxy-side
+    -- wall-clock cap; runaway generators are torn down at this fence
+    -- and the worker is reaped.
+    ('streaming_enabled', '1'),
+    ('stream_keepalive_seconds', '15'),
+    ('stream_max_seconds', '300');
 
 -- Seed default rules (shipped enabled). Kept deliberately minimal:
 -- only entries that are universally dangerous to expose to user code

@@ -35,7 +35,7 @@ over HTTP, and get warm-pool latency without paying anyone.
   Each deploy is archived; rollback is an atomic symlink retarget.
 - **MCP server** — `/mcp` exposes the full management surface (functions,
   deploys, invocations, secrets, routes, keys, firewall, cron, KV,
-  jobs, webhooks, fixtures) as 61 tools an AI agent (Claude Code, Cursor, etc.)
+  jobs, webhooks, fixtures, inbound triggers) as 64 tools an AI agent (Claude Code, Cursor, etc.)
   can call directly.
 - **Live dashboard** — every invocation, deploy, and metric streams
   over a single SSE connection. No polling.

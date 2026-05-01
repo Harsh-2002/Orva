@@ -110,6 +110,8 @@ func NewHandler(deps Deps) http.Handler {
 		registerKVTools(s, deps, perms)
 		registerJobTools(s, deps, perms)
 		registerWebhookTools(s, deps, perms)
+		// v0.4 C2a: inbound webhook triggers (signed external POSTs).
+		registerInboundWebhookTools(s, deps, perms)
 		// v0.4 B3 + B5: saved request fixtures (Postman-style presets) +
 		// test_function_with_fixture invoke variant.
 		registerFixtureTools(s, deps, perms)

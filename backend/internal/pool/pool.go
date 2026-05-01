@@ -264,6 +264,16 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		return nil, err
 	}
 	// Bump autoscaler signal so rate EWMA reflects real traffic.
+	//
+	// v0.4 C1 caveat (streaming): every Acquire bumps the rate counter
+	// once, but a streaming request holds the worker for the full
+	// response duration (potentially up to stream_max_seconds = 300s).
+	// The autoscaler will see "1 req/burst" and a long latency EWMA, so
+	// Little's-Law floor inflates apparent target concurrency. For
+	// mixed streaming + non-streaming workloads this can over-provision.
+	// We accept the tradeoff for v1; if it becomes a real problem we
+	// could weight streaming acquires differently or sample inflight
+	// concurrency separately. — TODO(autoscaler-streaming-weight)
 	p.recordAcquire()
 	return res, nil
 }
