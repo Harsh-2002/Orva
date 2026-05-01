@@ -55,6 +55,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /var/lib/orva/functions
 
+# /usr/local/bin/orva is dual-purpose: `orva serve` is the daemon (CMD below),
+# every other subcommand is the standalone CLI. `docker exec orva orva …`
+# uses the same binary; the entrypoint pre-writes ~/.orva/config.yaml.
 COPY dist/orva-${TARGETARCH}   /usr/local/bin/orva
 COPY dist/nsjail-${TARGETARCH} /usr/local/bin/nsjail
 RUN chmod +x /usr/local/bin/orva /usr/local/bin/nsjail

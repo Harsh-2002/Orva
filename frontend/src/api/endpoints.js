@@ -313,6 +313,15 @@ export const deleteJob = (id) => apiClient.delete(`/jobs/${id}`)
 // link (e.g. CLI doc copy buttons or future Settings card variants).
 export const backupDownloadURL = () => '/api/v1/backup'
 
+// ── Storage / VACUUM (v0.4) ─────────────────────────────────────────
+//
+// Settings page reads the breakdown via getStorage() and triggers a
+// VACUUM via runVacuum(). VACUUM holds an exclusive lock on the live
+// DB; the handler serializes via TryLock and 409s if another caller is
+// already in flight.
+export const getStorage = () => apiClient.get('/system/storage')
+export const runVacuum = () => apiClient.post('/system/vacuum')
+
 // uploadRestore POSTs the tarball as multipart/form-data with field name
 // `archive`. ?confirm=1 is mandatory — the backend rejects requests
 // without it as a guard against accidental clobber. On success the

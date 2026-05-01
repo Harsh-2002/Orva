@@ -18,6 +18,19 @@ SERVICE_USER="orva"
 REPO="${ORVA_REPO:-Harsh-2002/Orva}"
 DRYRUN="${ORVA_INSTALL_DRYRUN:-0}"
 
+# CLI-only install: drops just the `orva` CLI client at /usr/local/bin/orva
+# (no systemd unit, no rootfs, no service user). Useful on operator
+# laptops / CI runners that talk to a remote orvad over HTTPS. Triggered
+# by `--cli-only` (or ORVA_CLI_ONLY=1).
+CLI_ONLY=0
+CLI_INSTALL_PATH="${ORVA_CLI_PATH:-/usr/local/bin/orva}"
+for arg in "$@"; do
+    case "$arg" in
+        --cli-only) CLI_ONLY=1 ;;
+    esac
+done
+[ "${ORVA_CLI_ONLY:-0}" = "1" ] && CLI_ONLY=1
+
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxxx\033[0m %s\n' "$*" >&2; exit 1; }
@@ -245,6 +258,27 @@ download_and_install_binaries() {
     install -m 0755 "$tmp/nsjail" "$PREFIX/bin/nsjail"
 }
 
+install_cli() {
+    if [ "$DRYRUN" = "1" ]; then
+        log "(dryrun) would install CLI to $CLI_INSTALL_PATH"
+        return
+    fi
+    base="https://github.com/${REPO}/releases/download/${VERSION}"
+    tmp_cli=$(mktemp -d)
+    log "downloading orva CLI (linux-${ARCH}) → $CLI_INSTALL_PATH"
+    if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            -o "$tmp_cli/orva" "$base/orva-cli-linux-${ARCH}"; then
+        warn "orva-cli-linux-${ARCH} not in this release — falling back to orva-linux-${ARCH} (same binary, different name)"
+        curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            -o "$tmp_cli/orva" "$base/orva-linux-${ARCH}" \
+            || die "could not download orva CLI binary"
+    fi
+    install -d -m 0755 "$(dirname "$CLI_INSTALL_PATH")"
+    install -m 0755 "$tmp_cli/orva" "$CLI_INSTALL_PATH"
+    rm -rf "$tmp_cli"
+    log "CLI installed: $($CLI_INSTALL_PATH --version 2>/dev/null || echo 'orva')"
+}
+
 download_rootfs() {
     if [ "$DRYRUN" = "1" ]; then
         log "(dryrun) skipping rootfs download"
@@ -450,6 +484,7 @@ print_followup() {
   Data directory:  $DATA_DIR
   Service user:    $SERVICE_USER
   Binary:          $PREFIX/bin/orva
+  CLI shortcut:    $CLI_INSTALL_PATH (same binary on \$PATH for ad-hoc use)
   nsjail:          $PREFIX/bin/nsjail (static, no glibc/libstdc++ deps)
   Egress firewall: $NFTABLES_STATUS${NFTABLES_HINT:+ ($NFTABLES_HINT)}
 
@@ -494,10 +529,39 @@ EOF
 EOF
 }
 
+print_cli_followup() {
+    cat <<EOF
+
+══════════════════════════════════════════════════════════════════════
+  orva CLI $VERSION installed → $CLI_INSTALL_PATH
+══════════════════════════════════════════════════════════════════════
+
+  Authenticate against your Orva server:
+    orva login --endpoint https://orva.example.com --api-key <key>
+
+  Or pass flags on every call:
+    orva --endpoint https://orva.example.com --api-key <key> functions list
+
+  Config is persisted at ~/.orva/config.yaml (mode 0600).
+
+EOF
+}
+
 main() {
     require_root "$@"
     detect_distro
     detect_arch
+
+    # CLI-only mode: skip everything that requires nsjail / systemd /
+    # rootfs / a service user. The CLI is a pure-Go HTTP client.
+    if [ "$CLI_ONLY" = "1" ]; then
+        log "running in --cli-only mode; skipping daemon install"
+        resolve_version
+        install_cli
+        print_cli_followup
+        return
+    fi
+
     install_prereqs
     check_kernel_features
     check_nftables
@@ -507,6 +571,7 @@ main() {
     create_user
     download_rootfs
     install_service
+    install_cli
     print_followup
 }
 

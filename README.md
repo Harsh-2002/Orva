@@ -95,6 +95,50 @@ Or `docker compose up -d` from this repo.
 
 After install, open `http://localhost:8443` and complete onboarding.
 
+## CLI install
+
+The same `orva` binary that powers the daemon doubles as a standalone CLI
+(`orva functions list`, `orva deploy`, `orva invoke`, `orva logs`, etc.).
+You can grab just the client without installing the server.
+
+### Standalone (laptop / CI runner / remote operator)
+
+```bash
+# Linux amd64 — pick arm64 / darwin-arm64 from the assets list
+curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/orva-cli-linux-amd64 \
+  -o /usr/local/bin/orva
+chmod +x /usr/local/bin/orva
+
+orva login --endpoint https://orva.example.com --api-key <admin-key>
+orva functions list
+```
+
+Or via the installer:
+
+```bash
+curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh \
+  | sudo sh -s -- --cli-only
+```
+
+Released binaries: `orva-cli-linux-amd64`, `orva-cli-linux-arm64`,
+`orva-cli-darwin-arm64`. CGO-disabled, fully static (Linux), `-trimpath` +
+stripped — no dependencies.
+
+### Inside the container (zero-config)
+
+The Docker image pre-writes `~/.orva/config.yaml` on first boot using the
+auto-generated bootstrap admin key, so the CLI works straight away:
+
+```bash
+docker exec -it orva orva system health
+docker exec -it orva orva functions list
+docker exec -it orva orva deploy hello-world ./code
+```
+
+If you exposed orvad on a non-default port, edit
+`/root/.orva/config.yaml` inside the container or pass `--endpoint`
+on each call.
+
 ## SDK from inside a function
 
 Every worker is spawned with `ORVA_INTERNAL_TOKEN` + `ORVA_API_BASE`

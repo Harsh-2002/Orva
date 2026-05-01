@@ -336,6 +336,13 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/backup", backupHandler.Download)
 	r.mux.HandleFunc("POST /api/v1/restore", backupHandler.Restore)
 
+	// Storage breakdown + VACUUM. Same admin gate as backup; the VACUUM
+	// path also serializes itself behind a sync.Mutex inside the
+	// handler so concurrent button-mashes 409 instead of queue.
+	storageHandler := &handlers.SystemStorageHandler{DB: r.db, Cfg: r.cfg}
+	r.mux.HandleFunc("GET /api/v1/system/storage", storageHandler.GetStorage)
+	r.mux.HandleFunc("POST /api/v1/system/vacuum", storageHandler.Vacuum)
+
 	// Per-function autoscaler tuning. PUT/POST require admin (enforced by
 	// middleware_auth.go). Errmap.go advertises this as the recovery path
 	// for POOL_AT_CAPACITY, so the route must exist.

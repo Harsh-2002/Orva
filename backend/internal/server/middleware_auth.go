@@ -168,6 +168,12 @@ func requiredPermission(method, path string) string {
 	if path == "/api/v1/backup" || path == "/api/v1/restore" {
 		return "admin"
 	}
+	// Storage stats are read-only but VACUUM rewrites the live DB; gate
+	// both behind admin so the whole card is operator-only and the UI
+	// can hide it for non-admin keys via 403 fingerprinting.
+	if path == "/api/v1/system/storage" || path == "/api/v1/system/vacuum" {
+		return "admin"
+	}
 
 	// GET requests require "read" permission.
 	if method == http.MethodGet {

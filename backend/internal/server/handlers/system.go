@@ -3,10 +3,14 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/builder"
+	"github.com/Harsh-2002/Orva/internal/config"
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
@@ -319,4 +323,176 @@ func (h *SystemHandler) BuildMetricsSnapshot() MetricsJSONShape {
 	}
 
 	return out
+}
+
+// ─── Storage breakdown + VACUUM (v0.4) ─────────────────────────────
+
+// SystemStorageHandler exposes disk-usage breakdowns for the data dir
+// plus a "compact database" action that runs SQLite VACUUM.
+//
+// VACUUM acquires an EXCLUSIVE lock on the database for its full
+// duration — every other writer is blocked until it returns. On a
+// healthy single-node Orva this is typically sub-second, but a stuffed
+// activity_log + executions table can push it into multi-second
+// territory. We serialize requests behind vacuumMu so two operators
+// hammering the button don't queue up a stampede; the second caller
+// sees a 409.
+//
+// Both endpoints are admin-gated by middleware_auth.go::requiredPermission.
+type SystemStorageHandler struct {
+	DB  *database.Database
+	Cfg *config.Config
+
+	// vacuumMu is held for the duration of a VACUUM. The TryLock pattern
+	// surfaces a friendly 409 instead of stacking callers behind a
+	// blocking write that could already be 30 s deep.
+	vacuumMu sync.Mutex
+}
+
+// StorageInfo is the response shape for GET /api/v1/system/storage.
+type StorageInfo struct {
+	DBBytes        int64 `json:"db_bytes"`         // size of orva.db on disk
+	DBPages        int64 `json:"db_pages"`         // PRAGMA page_count
+	DBPageSize     int64 `json:"db_page_size"`     // PRAGMA page_size
+	DBFreePages    int64 `json:"db_free_pages"`    // PRAGMA freelist_count — reclaimable on next VACUUM
+	WALBytes       int64 `json:"wal_bytes"`        // size of orva.db-wal sidecar
+	FunctionsBytes int64 `json:"functions_bytes"`  // recursive size of <data_dir>/functions
+	TotalBytes     int64 `json:"total_bytes"`      // db + wal + functions
+}
+
+// VacuumResult is the response shape for POST /api/v1/system/vacuum.
+type VacuumResult struct {
+	BeforeBytes int64 `json:"before_bytes"` // orva.db size before VACUUM
+	AfterBytes  int64 `json:"after_bytes"`  // orva.db size after VACUUM
+	FreedBytes  int64 `json:"freed_bytes"`  // BeforeBytes - AfterBytes (>=0 on success)
+	DurationMS  int64 `json:"duration_ms"`  // wall-clock time in VACUUM (incl. WAL checkpoint)
+}
+
+// GetStorage handles GET /api/v1/system/storage. Returns DB + functions
+// tree sizes plus the SQLite page-level breakdown used by the Settings
+// UI to render the "compact" affordance.
+func (h *SystemStorageHandler) GetStorage(w http.ResponseWriter, r *http.Request) {
+	if h.DB == nil || h.Cfg == nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "storage handler not wired", "")
+		return
+	}
+
+	info := StorageInfo{}
+
+	dbPath := h.DB.Path()
+	if st, err := os.Stat(dbPath); err == nil {
+		info.DBBytes = st.Size()
+	}
+	if st, err := os.Stat(dbPath + "-wal"); err == nil {
+		info.WALBytes = st.Size()
+	}
+
+	// Page-level stats. Use the read-only handle — these pragmas don't
+	// lock and the read pool has more capacity than the singleton writer.
+	if rdb := h.DB.ReadDB(); rdb != nil {
+		_ = rdb.QueryRow(`PRAGMA page_count`).Scan(&info.DBPages)
+		_ = rdb.QueryRow(`PRAGMA page_size`).Scan(&info.DBPageSize)
+		_ = rdb.QueryRow(`PRAGMA freelist_count`).Scan(&info.DBFreePages)
+	}
+
+	functionsDir := filepath.Join(h.Cfg.Data.Dir, "functions")
+	info.FunctionsBytes = storageDirSize(functionsDir)
+
+	info.TotalBytes = info.DBBytes + info.WALBytes + info.FunctionsBytes
+
+	respond.JSON(w, http.StatusOK, info)
+}
+
+// Vacuum handles POST /api/v1/system/vacuum. Runs PRAGMA wal_checkpoint(TRUNCATE)
+// to fold the WAL back into the main file, then VACUUM to repack pages
+// and shrink the file. Returns the before/after sizes so the UI can
+// surface "freed N MB".
+//
+// VACUUM holds an exclusive lock and rewrites the database — every
+// writer blocks until it returns. The handler serializes requests
+// through vacuumMu and returns 409 if another VACUUM is already in
+// flight, so a stuck button-mash doesn't queue.
+func (h *SystemStorageHandler) Vacuum(w http.ResponseWriter, r *http.Request) {
+	if h.DB == nil || h.Cfg == nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "storage handler not wired", "")
+		return
+	}
+
+	if !h.vacuumMu.TryLock() {
+		respond.Error(w, http.StatusConflict, "VACUUM_IN_PROGRESS", "another VACUUM is already running; retry shortly", "")
+		return
+	}
+	defer h.vacuumMu.Unlock()
+
+	dbPath := h.DB.Path()
+	var before int64
+	if st, err := os.Stat(dbPath); err == nil {
+		before = st.Size()
+	}
+
+	started := time.Now()
+
+	// Step 1: checkpoint the WAL into the main DB. Without this any
+	// committed-but-uncheckpointed pages live in orva.db-wal, and the
+	// shrink we're about to do isn't visible to operators looking at
+	// `ls -la orva.db`. TRUNCATE truncates the WAL afterwards.
+	if _, err := h.DB.WriteDB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		respond.Error(w, http.StatusInternalServerError, "VACUUM_FAILED", "wal_checkpoint: "+err.Error(), "")
+		return
+	}
+
+	// Step 2: VACUUM. Rewrites every page sequentially, drops the
+	// freelist, and shrinks the file. Blocks every other writer for the
+	// duration — see handler comment.
+	if _, err := h.DB.WriteDB().Exec(`VACUUM`); err != nil {
+		respond.Error(w, http.StatusInternalServerError, "VACUUM_FAILED", err.Error(), "")
+		return
+	}
+
+	duration := time.Since(started)
+
+	var after int64
+	if st, err := os.Stat(dbPath); err == nil {
+		after = st.Size()
+	}
+	freed := before - after
+	if freed < 0 {
+		// VACUUM occasionally grows the file slightly when an operator
+		// vacuums a database that was already tightly packed (page
+		// metadata fluctuations). Surface 0 instead of a confusing
+		// negative number.
+		freed = 0
+	}
+
+	respond.JSON(w, http.StatusOK, VacuumResult{
+		BeforeBytes: before,
+		AfterBytes:  after,
+		FreedBytes:  freed,
+		DurationMS:  duration.Milliseconds(),
+	})
+}
+
+// storageDirSize returns the cumulative size of every regular file
+// beneath root. Errors during walk are tolerated (we'd rather show a
+// slightly low number than fail the whole storage card); symlinks
+// contribute nothing — Walk reports the link's own size, not the
+// target's, and we skip them explicitly.
+func storageDirSize(root string) int64 {
+	var total int64
+	if root == "" {
+		return 0
+	}
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }

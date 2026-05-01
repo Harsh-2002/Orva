@@ -2,11 +2,23 @@ package mcp
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// mcpVacuumMu serializes system_vacuum invocations from the MCP layer.
+// Independent from the HTTP handler's mutex because MCP tools call the
+// DB directly without going through the HTTP path. Two operators —
+// one in the dashboard and one via an agent — can still race, but
+// SQLite's own EXCLUSIVE lock is the ultimate serialization point;
+// this mutex just keeps things tidy and predictable from one side.
+var mcpVacuumMu sync.Mutex
 
 // ─── system_health ──────────────────────────────────────────────────
 
@@ -61,6 +73,42 @@ func registerSystemTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 			},
 			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemMetricsOutput, error) {
 				return nil, buildSystemMetrics(deps), nil
+			},
+		)
+	})
+
+	// ─── system_storage ──────────────────────────────────────────────
+	gatedAdd(perms, permAdmin, func() {
+		mcpsdk.AddTool(s,
+			&mcpsdk.Tool{
+				Name:        "system_storage",
+				Description: "Return on-disk sizes for orva.db, the WAL sidecar, and the functions/ tree. Useful before deciding to run system_vacuum — db_free_pages × db_page_size is the upper bound on reclaimable bytes.",
+				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+			},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemStorageOutput, error) {
+				return nil, buildSystemStorage(deps), nil
+			},
+		)
+	})
+
+	// ─── system_vacuum ──────────────────────────────────────────────
+	gatedAdd(perms, permAdmin, func() {
+		mcpsdk.AddTool(s,
+			&mcpsdk.Tool{
+				Name:        "system_vacuum",
+				Description: "Run PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM on orva.db. DESTRUCTIVE: holds an exclusive lock and rewrites the database; every other writer blocks until it returns. Pass confirm=true to actually run; without confirm the tool returns the would-be reclaimable bytes without touching the DB.",
+				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+			},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, in SystemVacuumInput) (*mcpsdk.CallToolResult, SystemVacuumOutput, error) {
+				if !in.Confirm {
+					info := buildSystemStorage(deps)
+					return nil, SystemVacuumOutput{
+						DryRun:           true,
+						BeforeBytes:      info.DBBytes,
+						ReclaimableBytes: info.DBFreePages * info.DBPageSize,
+					}, nil
+				}
+				return runMCPVacuum(deps)
 			},
 		)
 	})
@@ -188,4 +236,115 @@ func orDefault(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// ─── system_storage / system_vacuum types & helpers ─────────────────
+
+// SystemStorageOutput mirrors handlers.StorageInfo — kept independent
+// so the MCP package doesn't pull the HTTP handlers into its import
+// graph (which would cycle on the registry tests).
+type SystemStorageOutput struct {
+	DBBytes        int64 `json:"db_bytes"`
+	DBPages        int64 `json:"db_pages"`
+	DBPageSize     int64 `json:"db_page_size"`
+	DBFreePages    int64 `json:"db_free_pages"`
+	WALBytes       int64 `json:"wal_bytes"`
+	FunctionsBytes int64 `json:"functions_bytes"`
+	TotalBytes     int64 `json:"total_bytes"`
+}
+
+type SystemVacuumInput struct {
+	// Confirm must be true to actually run VACUUM. Without it the tool
+	// returns a dry-run preview so an agent can show the operator how
+	// much VACUUM would reclaim before committing.
+	Confirm bool `json:"confirm" jsonschema:"set to true to actually execute VACUUM; false returns a dry-run preview"`
+}
+
+type SystemVacuumOutput struct {
+	DryRun           bool  `json:"dry_run"`
+	BeforeBytes      int64 `json:"before_bytes"`
+	AfterBytes       int64 `json:"after_bytes,omitempty"`
+	FreedBytes       int64 `json:"freed_bytes,omitempty"`
+	DurationMS       int64 `json:"duration_ms,omitempty"`
+	ReclaimableBytes int64 `json:"reclaimable_bytes,omitempty"` // dry-run only
+}
+
+func buildSystemStorage(deps Deps) SystemStorageOutput {
+	out := SystemStorageOutput{}
+	if deps.DB == nil {
+		return out
+	}
+	dbPath := deps.DB.Path()
+	if st, err := os.Stat(dbPath); err == nil {
+		out.DBBytes = st.Size()
+	}
+	if st, err := os.Stat(dbPath + "-wal"); err == nil {
+		out.WALBytes = st.Size()
+	}
+	if rdb := deps.DB.ReadDB(); rdb != nil {
+		_ = rdb.QueryRow(`PRAGMA page_count`).Scan(&out.DBPages)
+		_ = rdb.QueryRow(`PRAGMA page_size`).Scan(&out.DBPageSize)
+		_ = rdb.QueryRow(`PRAGMA freelist_count`).Scan(&out.DBFreePages)
+	}
+	if deps.DataDir != "" {
+		out.FunctionsBytes = mcpDirSize(filepath.Join(deps.DataDir, "functions"))
+	}
+	out.TotalBytes = out.DBBytes + out.WALBytes + out.FunctionsBytes
+	return out
+}
+
+func runMCPVacuum(deps Deps) (*mcpsdk.CallToolResult, SystemVacuumOutput, error) {
+	if deps.DB == nil {
+		return nil, SystemVacuumOutput{}, fmt.Errorf("database not wired")
+	}
+	mcpVacuumMu.Lock()
+	defer mcpVacuumMu.Unlock()
+
+	dbPath := deps.DB.Path()
+	var before int64
+	if st, err := os.Stat(dbPath); err == nil {
+		before = st.Size()
+	}
+	started := time.Now()
+	if _, err := deps.DB.WriteDB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return nil, SystemVacuumOutput{}, fmt.Errorf("wal_checkpoint: %w", err)
+	}
+	if _, err := deps.DB.WriteDB().Exec(`VACUUM`); err != nil {
+		return nil, SystemVacuumOutput{}, fmt.Errorf("vacuum: %w", err)
+	}
+	duration := time.Since(started)
+	var after int64
+	if st, err := os.Stat(dbPath); err == nil {
+		after = st.Size()
+	}
+	freed := before - after
+	if freed < 0 {
+		freed = 0
+	}
+	return nil, SystemVacuumOutput{
+		BeforeBytes: before,
+		AfterBytes:  after,
+		FreedBytes:  freed,
+		DurationMS:  duration.Milliseconds(),
+	}, nil
+}
+
+func mcpDirSize(root string) int64 {
+	var total int64
+	if root == "" {
+		return 0
+	}
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }

@@ -95,6 +95,65 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # ── 1b. Standalone CLI binaries (linux + darwin) ──────────────────────
+  # Same Go program as the daemon — but built without the embedded UI
+  # bundle and named `orva-cli-<os>-<arch>` so operators on laptops /
+  # CI runners can curl-install just the client. Cross-compiled from a
+  # single ubuntu runner: pure Go, CGO disabled, fully static.
+  build-cli:
+    name: build orva-cli (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+
+      - name: embed adapters
+        run: make adapters-embed
+
+      - name: resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: go build (static cli)
+        working-directory: backend
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p ../dist
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${{ steps.v.outputs.tag }}" \
+            -o ../dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./cmd/orva
+          file ../dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }} || true
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 7
+
   # ── 2. nsjail: static build per arch ──────────────────────────────────
   build-nsjail:
     name: build nsjail (${{ matrix.goarch }})
@@ -184,7 +243,7 @@ jobs:
   # ── 4. Collate + compute checksums + publish GitHub Release ───────────
   release:
     name: publish github release
-    needs: [build-orva, build-nsjail, build-rootfs]
+    needs: [build-orva, build-cli, build-nsjail, build-rootfs]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -208,7 +267,9 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           find artifacts -type f -exec cp -v {} dist/ \;
-          chmod +x dist/orva-linux-* dist/nsjail-linux-*
+          # Mark every binary executable. The cli covers linux + darwin;
+          # the daemon + nsjail are linux-only.
+          chmod +x dist/orva-linux-* dist/nsjail-linux-* dist/orva-cli-* 2>/dev/null || true
           ls -lh dist/
 
       - name: sha256 checksums
@@ -250,7 +311,8 @@ jobs:
 
             | asset | description |
             |---|---|
-            | `orva-linux-amd64`, `orva-linux-arm64` | Static Go binary |
+            | `orva-linux-amd64`, `orva-linux-arm64` | Static daemon binary (`orva serve`) |
+            | `orva-cli-linux-amd64`, `orva-cli-linux-arm64`, `orva-cli-darwin-arm64` | Standalone CLI client — drop in `/usr/local/bin/orva` and `orva login` to a remote server |
             | `nsjail-linux-amd64`, `nsjail-linux-arm64` | Pre-built nsjail (downloaded by install.sh) |
             | `rootfs-{node22,node24,python313,python314}-{amd64,arm64}.tar.zst` | Language rootfs; extracted by `orva setup --rootfs-url` |
             | `checksums.txt` | sha256 of every asset above |

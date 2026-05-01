@@ -79,6 +79,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /var/lib/orva/functions
 
 COPY --from=nsjail /nsjail/nsjail /usr/local/bin/nsjail
+# /usr/local/bin/orva is dual-purpose: `orva serve` is the daemon (CMD below),
+# every other subcommand is the standalone CLI. `docker exec orva orva …`
+# uses the same binary; the entrypoint pre-writes ~/.orva/config.yaml so
+# common commands work without re-passing --endpoint / --api-key.
 COPY --from=go /out/orva /usr/local/bin/orva
 COPY --from=rootfs-node22    / /opt/orva/rootfs/node22/
 COPY --from=rootfs-node24    / /opt/orva/rootfs/node24/
