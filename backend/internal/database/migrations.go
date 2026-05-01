@@ -316,6 +316,28 @@ CREATE TABLE IF NOT EXISTS execution_requests (
     captured_at   INTEGER NOT NULL
 );
 
+-- Saved request fixtures (v0.4 B3). Per-function "Postman-style" presets
+-- reused from the editor's Test pane and the test_function_with_fixture
+-- MCP tool. Headers are stored as a JSON object; body is opaque bytes.
+-- (function_id, name) is the natural composite key — UNIQUE prevents
+-- duplicate-name races and lets callers upsert by the human-friendly
+-- name without first looking up the random id.
+CREATE TABLE IF NOT EXISTS fixtures (
+    id            TEXT PRIMARY KEY,
+    function_id   TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    method        TEXT NOT NULL,
+    path          TEXT NOT NULL,
+    headers_json  TEXT NOT NULL DEFAULT '{}',
+    body          BLOB,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    UNIQUE(function_id, name),
+    FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_fixtures_fn ON fixtures(function_id, name);
+
 -- Seed system config (ignore if already exists)
 INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('max_total_containers', '100'),

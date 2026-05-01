@@ -212,6 +212,17 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Put)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Delete)
 
+	// Saved request fixtures (v0.4 B3) — Postman-style presets reused by
+	// the editor's Test pane and the test_function_with_fixture MCP tool.
+	// Per-(function, name) UNIQUE; PUT acts as an upsert on the {name}
+	// path segment so callers don't need a separate insert/update split.
+	fixtureHandler := &handlers.FixtureHandler{DB: r.db, Registry: r.registry}
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/fixtures",        fixtureHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/fixtures",        fixtureHandler.Create)
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Get)
+	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Upsert)
+	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Delete)
+
 	// Cron schedules (per-function, fired by internal/scheduler).
 	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry}
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/cron",         cronHandler.List)

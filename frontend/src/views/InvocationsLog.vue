@@ -275,6 +275,19 @@
             <div v-if="requestData.truncated" class="text-[11px] text-yellow-500/90">
               Body was truncated at the configured cap. Replay is disabled for this row.
             </div>
+            <!-- v0.4 B3: Save as fixture. Round-trips the captured envelope
+                 to the editor's Test pane with `prefill=` so the user can
+                 review redacted headers before persisting. -->
+            <div class="pt-1 flex justify-end">
+              <button
+                type="button"
+                class="text-[11px] text-foreground-muted hover:text-white px-2 py-1 rounded hover:bg-surface-hover transition-colors"
+                title="Open the editor with this request prefilled"
+                @click="saveAsFixture"
+              >
+                Save as fixture →
+              </button>
+            </div>
           </div>
         </div>
 
@@ -664,6 +677,39 @@ const prettyBody = (raw) => {
   } catch {
     return String(raw)
   }
+}
+
+// v0.4 B3: pack the captured request envelope into a base64-encoded
+// query param and route to the editor. The editor's onMounted hook
+// pulls `prefill` off the URL, decodes it, and lands the user on the
+// Test pane with method/path/headers/body already filled in. We pass
+// through the redacted headers as-is — the editor lets the user prune
+// them before saving.
+const saveAsFixture = () => {
+  if (!drawerRow.value || !requestData.value) return
+  const fnName = getFnName(drawerRow.value.function_id)
+  if (!fnName || fnName === drawerRow.value.function_id?.slice(0, 12)) {
+    confirmStore.notify({
+      title: 'Function not loaded',
+      message: 'Could not resolve the function name. Try opening the function from the dashboard first, then revisit this drawer.',
+      danger: true,
+    })
+    return
+  }
+  const env = {
+    method: requestData.value.method,
+    path: requestData.value.path,
+    headers: requestData.value.headers || {},
+    body: requestData.value.body || '',
+  }
+  // base64(JSON) keeps the URL short and survives nested quotes / newlines
+  // in the body without each layer needing its own URL-encoding pass.
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(env))))
+  router.push({
+    path: `/functions/${fnName}`,
+    query: { prefill: encoded },
+  })
+  drawerOpen.value = false
 }
 
 const replay = async () => {

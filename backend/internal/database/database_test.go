@@ -201,6 +201,101 @@ func TestAPIKeyCRUD(t *testing.T) {
 	}
 }
 
+func TestFixtureCRUD(t *testing.T) {
+	db := newTestDB(t)
+
+	fn := &Function{
+		ID: "fn_fixt12345678", Name: "fixture-test", Runtime: "node22",
+		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 128,
+		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
+	}
+	if err := db.InsertFunction(fn); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert
+	f := &Fixture{
+		FunctionID:  fn.ID,
+		Name:        "hello",
+		Method:      "GET",
+		Path:        "/",
+		HeadersJSON: `{"X-Foo":"bar"}`,
+		Body:        []byte(`{"name":"world"}`),
+	}
+	if err := db.InsertFixture(f); err != nil {
+		t.Fatal(err)
+	}
+	if f.ID == "" {
+		t.Errorf("expected ID to be auto-assigned")
+	}
+
+	// UNIQUE(function_id, name) — duplicate name should fail.
+	dup := &Fixture{FunctionID: fn.ID, Name: "hello", Method: "POST", Path: "/", HeadersJSON: `{}`}
+	if err := db.InsertFixture(dup); err == nil {
+		t.Error("expected UNIQUE conflict on duplicate name")
+	}
+
+	// Get by name
+	got, err := db.GetFixtureByName(fn.ID, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Method != "GET" || got.Path != "/" {
+		t.Errorf("unexpected fixture fields: %+v", got)
+	}
+
+	// List
+	rows, err := db.ListFixtures(fn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("expected 1 fixture, got %d", len(rows))
+	}
+
+	// Upsert via UpsertFixture should overwrite method/path/body but
+	// keep id and created_at.
+	saved, err := db.UpsertFixture(&Fixture{
+		FunctionID: fn.ID, Name: "hello", Method: "POST", Path: "/echo",
+		HeadersJSON: `{"X-Bar":"baz"}`, Body: []byte("hi"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.ID != got.ID {
+		t.Errorf("upsert should keep id; got %s vs original %s", saved.ID, got.ID)
+	}
+	if saved.Method != "POST" || saved.Path != "/echo" {
+		t.Errorf("upsert did not overwrite: %+v", saved)
+	}
+
+	// Delete (idempotent)
+	if err := db.DeleteFixture(fn.ID, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteFixture(fn.ID, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetFixtureByName(fn.ID, "hello"); err == nil {
+		t.Error("expected ErrFixtureNotFound after delete")
+	}
+
+	// Cascade: deleting the function removes its fixtures.
+	if err := db.InsertFixture(&Fixture{
+		FunctionID: fn.ID, Name: "again", Method: "GET", Path: "/", HeadersJSON: `{}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db.write.Exec("PRAGMA foreign_keys = ON")
+	if err := db.DeleteFunction(fn.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = db.ListFixtures(fn.ID)
+	if len(rows) != 0 {
+		t.Errorf("expected fixtures to cascade-delete with the function, got %d rows", len(rows))
+	}
+}
+
 func TestCascadeDelete(t *testing.T) {
 	db := newTestDB(t)
 

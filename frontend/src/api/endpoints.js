@@ -53,6 +53,34 @@ export const deployInline = (fnId, code, filename) =>
 export const invokeFunction = (fnId, payload) =>
   fnClient.post(`/${fnId.replace(/^fn_/, '')}`, payload, { responseType: 'text' })
 
+// invokeFunctionFull is the v0.4 B3 richer-invoke entry point used by the
+// Postman-style Test pane. Supports any HTTP method, sub-paths beneath
+// /fn/<id>, custom headers, and a raw body string. Response is returned
+// as text — callers parse JSON themselves so non-JSON responses (HTML,
+// CSV, etc.) round-trip cleanly. Unlike `invokeFunction`, this hits
+// fnClient.request directly so non-POST verbs are honoured.
+export const invokeFunctionFull = (fnId, { method = 'POST', path = '/', headers = {}, body = '' } = {}) => {
+  const shortId = fnId.replace(/^fn_/, '')
+  let url = `/${shortId}`
+  if (path && path !== '/') {
+    url += path.startsWith('/') ? path : `/${path}`
+  }
+  const cfg = {
+    url,
+    method,
+    headers: { ...headers },
+    responseType: 'text',
+    transformRequest: [(data) => data],  // pass body through unchanged
+  }
+  // Only attach a body for verbs that conventionally carry one; axios
+  // otherwise sets Content-Length: 0 on GET/HEAD which some servers refuse.
+  const m = (method || 'POST').toUpperCase()
+  if (body && m !== 'GET' && m !== 'HEAD') {
+    cfg.data = body
+  }
+  return fnClient.request(cfg)
+}
+
 // Invoke function by name (resolves to ID first).
 export const invokeFunctionByName = async (name, payload) => {
   const listResp = await apiClient.get('/functions')
@@ -102,6 +130,27 @@ export const kvPut = (fnId, key, body) =>
 
 export const kvDelete = (fnId, key) =>
   apiClient.delete(`/functions/${encodeURIComponent(fnId)}/kv/${encodeURIComponent(key)}`)
+
+// ── Saved request fixtures (v0.4 B3) ────────────────────────────────
+//
+// Per-function Postman-style presets the editor's Test pane reuses and
+// the test_function_with_fixture MCP tool consumes. Backend stores
+// {method, path, headers, body} per (function_id, name); UNIQUE on the
+// composite key means PUT-by-name is a safe upsert.
+export const listFixtures = (fnId) =>
+  apiClient.get(`/functions/${encodeURIComponent(fnId)}/fixtures`)
+
+export const getFixture = (fnId, name) =>
+  apiClient.get(`/functions/${encodeURIComponent(fnId)}/fixtures/${encodeURIComponent(name)}`)
+
+export const createFixture = (fnId, body) =>
+  apiClient.post(`/functions/${encodeURIComponent(fnId)}/fixtures`, body)
+
+export const updateFixture = (fnId, name, body) =>
+  apiClient.put(`/functions/${encodeURIComponent(fnId)}/fixtures/${encodeURIComponent(name)}`, body)
+
+export const deleteFixture = (fnId, name) =>
+  apiClient.delete(`/functions/${encodeURIComponent(fnId)}/fixtures/${encodeURIComponent(name)}`)
 
 // API Keys
 export const listApiKeys = () => apiClient.get('/keys')

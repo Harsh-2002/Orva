@@ -122,6 +122,38 @@ type BulkDeleteOutput struct {
 	Failed  int `json:"failed"`
 }
 
+// ─── test_function_with_fixture ────────────────────────────────────
+
+// FixtureOverride is the optional shallow-merge override for
+// test_function_with_fixture. Each field, when non-zero/non-nil, replaces
+// the matching fixture field for this one call only — the saved fixture
+// row is never mutated.
+type FixtureOverride struct {
+	Method  string            `json:"method,omitempty"`
+	Path    string            `json:"path,omitempty"`
+	Headers map[string]string `json:"headers,omitempty" jsonschema:"merged onto the fixture's headers; key collisions: override wins"`
+	Body    string            `json:"body,omitempty"    jsonschema:"raw replacement body; if set, fully replaces the fixture's body"`
+}
+
+type TestFunctionWithFixtureInput struct {
+	FunctionID  string          `json:"function" jsonschema:"function id (fn_...) or name owning the fixture"`
+	FixtureName string          `json:"fixture_name" jsonschema:"name of a previously-saved fixture for this function"`
+	Override    FixtureOverride `json:"override,omitempty" jsonschema:"optional per-call overrides; shallow-merge onto the fixture (override wins)"`
+	TimeoutMS   int64           `json:"timeout_ms,omitempty"`
+}
+
+// FixtureApplied is the audit trail returned alongside the invoke result
+// so agents can confirm which knobs were swapped from the saved fixture.
+type FixtureApplied struct {
+	Name             string   `json:"name"`
+	AppliedOverrides []string `json:"applied_overrides"`
+}
+
+type TestFunctionWithFixtureOutput struct {
+	InvokeFunctionOutput
+	Fixture FixtureApplied `json:"fixture"`
+}
+
 // ─── registration ──────────────────────────────────────────────────
 
 func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
@@ -137,6 +169,22 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 			},
 			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in InvokeFunctionInput) (*mcpsdk.CallToolResult, InvokeFunctionOutput, error) {
 				return invokeFunction(ctx, deps, in)
+			},
+		)
+	})
+
+	gatedAdd(perms, permInvoke, func() {
+		mcpsdk.AddTool(s,
+			&mcpsdk.Tool{
+				Name:        "test_function_with_fixture",
+				Description: "Invoke a function using a previously-saved fixture as the request envelope. Applies optional shallow-merge overrides (override wins on key collision). Returns the same shape as invoke_function plus a `fixture` block listing which overrides were applied. Use list_fixtures to see what's saved.",
+				Annotations: &mcpsdk.ToolAnnotations{
+					DestructiveHint: ptrFalse(),
+					OpenWorldHint:   ptrTrue(),
+				},
+			},
+			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in TestFunctionWithFixtureInput) (*mcpsdk.CallToolResult, TestFunctionWithFixtureOutput, error) {
+				return testFunctionWithFixture(ctx, deps, in)
 			},
 		)
 	})
@@ -450,4 +498,76 @@ func hasPriorCode(dataDir, fnID string) bool {
 		return true
 	}
 	return false
+}
+
+// testFunctionWithFixture loads a fixture, applies the caller's overrides
+// (shallow-merge: override wins), and routes through invokeFunction so
+// the execution shows up in the same activity / executions tables as a
+// regular invoke. The saved fixture row is never mutated.
+func testFunctionWithFixture(ctx context.Context, deps Deps, in TestFunctionWithFixtureInput) (*mcpsdk.CallToolResult, TestFunctionWithFixtureOutput, error) {
+	fn, err := resolveFunction(deps, in.FunctionID)
+	if err != nil {
+		return nil, TestFunctionWithFixtureOutput{}, err
+	}
+	name := strings.TrimSpace(in.FixtureName)
+	if name == "" {
+		return nil, TestFunctionWithFixtureOutput{}, errors.New("fixture_name is required")
+	}
+	fix, err := deps.DB.GetFixtureByName(fn.ID, name)
+	if errors.Is(err, database.ErrFixtureNotFound) {
+		return nil, TestFunctionWithFixtureOutput{}, fmt.Errorf("fixture not found: %s", name)
+	}
+	if err != nil {
+		return nil, TestFunctionWithFixtureOutput{}, err
+	}
+
+	// Decode stored headers, then merge per-call overrides.
+	headers := map[string]string{}
+	if fix.HeadersJSON != "" {
+		_ = json.Unmarshal([]byte(fix.HeadersJSON), &headers)
+	}
+
+	method := fix.Method
+	path := fix.Path
+	body := string(fix.Body)
+	applied := []string{}
+	if v := strings.TrimSpace(in.Override.Method); v != "" {
+		method = strings.ToUpper(v)
+		applied = append(applied, "method")
+	}
+	if v := strings.TrimSpace(in.Override.Path); v != "" {
+		path = v
+		applied = append(applied, "path")
+	}
+	if len(in.Override.Headers) > 0 {
+		for k, v := range in.Override.Headers {
+			headers[k] = v
+		}
+		applied = append(applied, "headers")
+	}
+	// Body override is "set or skip"; we treat the empty string as "no
+	// override" so an agent that wants to clear the body can omit the
+	// field. This matches how shallow-merge works for headers/path.
+	if in.Override.Body != "" {
+		body = in.Override.Body
+		applied = append(applied, "body")
+	}
+
+	invokeIn := InvokeFunctionInput{
+		FunctionID: fn.ID,
+		Method:     method,
+		Path:       path,
+		Headers:    headers,
+		Body:       body,
+		TimeoutMS:  in.TimeoutMS,
+	}
+	_, invokeOut, ferr := invokeFunction(ctx, deps, invokeIn)
+	out := TestFunctionWithFixtureOutput{
+		InvokeFunctionOutput: invokeOut,
+		Fixture: FixtureApplied{
+			Name:             fix.Name,
+			AppliedOverrides: applied,
+		},
+	}
+	return nil, out, ferr
 }

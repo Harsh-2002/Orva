@@ -237,16 +237,158 @@
              on the right. Each side has its own column header that
              matches the surrounding tab strip's micro-label rhythm so
              the divider line and label baselines align across both
-             columns. -->
+             columns. v0.4 B3: method/path/headers/body controls + saved
+             fixtures popover land in the request column. -->
         <div
           v-else-if="terminalTab === 'test'"
           class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] h-full"
         >
           <!-- Request column -->
           <div class="flex flex-col min-h-0 border-b md:border-b-0 md:border-r border-border">
-            <div class="h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
+            <!-- Method + path + Saved popover sit on the column header. -->
+            <div class="h-7 px-2 flex items-center gap-1.5 bg-surface/60 border-b border-border shrink-0">
+              <select
+                v-model="testMethod"
+                :disabled="!canTest"
+                class="text-[11px] font-mono bg-background border border-border rounded px-1.5 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+              >
+                <option v-for="m in methods" :key="m" :value="m">{{ m }}</option>
+              </select>
+              <input
+                v-model="testPath"
+                :disabled="!canTest"
+                spellcheck="false"
+                placeholder="/"
+                class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+              >
+              <div class="relative shrink-0">
+                <button
+                  type="button"
+                  class="text-[11px] font-medium text-foreground-muted hover:text-white px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1"
+                  :disabled="!fnId"
+                  :title="fnId ? 'Saved fixtures for this function' : 'Deploy first'"
+                  @click="toggleSavedPopover"
+                >
+                  Saved
+                  <span
+                    v-if="fixtures.length"
+                    class="text-[10px] text-foreground-muted"
+                  >· {{ fixtures.length }}</span>
+                  <ChevronDown class="w-3 h-3" />
+                </button>
+                <div
+                  v-if="savedPopoverOpen"
+                  class="absolute right-0 top-full mt-1 z-30 w-64 bg-surface border border-border rounded shadow-lg overflow-hidden"
+                  @mouseleave="savedPopoverOpen = false"
+                >
+                  <div class="px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-foreground-muted/80 border-b border-border bg-surface/60">
+                    Saved fixtures
+                  </div>
+                  <div
+                    v-if="!fixtures.length"
+                    class="px-3 py-3 text-[11px] text-foreground-muted italic"
+                  >
+                    No fixtures yet. Set up a request and click Save.
+                  </div>
+                  <ul
+                    v-else
+                    class="max-h-56 overflow-y-auto"
+                  >
+                    <li
+                      v-for="fx in fixtures"
+                      :key="fx.id"
+                      class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-surface-hover cursor-pointer group"
+                      @click="loadFixture(fx)"
+                    >
+                      <span class="font-mono text-[10px] text-foreground-muted shrink-0">{{ fx.method }}</span>
+                      <span class="truncate flex-1 text-foreground">{{ fx.name }}</span>
+                      <button
+                        type="button"
+                        class="opacity-0 group-hover:opacity-100 text-foreground-muted hover:text-red-400 transition-colors"
+                        :title="`Delete ${fx.name}`"
+                        @click.stop="removeFixture(fx)"
+                      >
+                        <Trash2 class="w-3 h-3" />
+                      </button>
+                    </li>
+                  </ul>
+                  <div class="border-t border-border px-2 py-1.5 bg-surface/50">
+                    <button
+                      type="button"
+                      class="text-[11px] text-foreground hover:text-white w-full text-left px-1.5 py-1 rounded hover:bg-surface-hover transition-colors disabled:opacity-50"
+                      :disabled="!canTest"
+                      @click="saveCurrentAsFixture"
+                    >
+                      + Save current as…
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Headers (collapsible). -->
+            <div class="border-b border-border shrink-0">
+              <button
+                type="button"
+                class="w-full h-6 px-3 flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-white bg-surface/30 transition-colors"
+                @click="headersOpen = !headersOpen"
+              >
+                <span>
+                  Headers
+                  <span
+                    v-if="headerCount"
+                    class="ml-1 text-foreground-muted/80 normal-case tracking-normal"
+                  >· {{ headerCount }}</span>
+                </span>
+                <ChevronDown
+                  class="w-3 h-3 transition-transform"
+                  :class="headersOpen ? 'rotate-0' : '-rotate-90'"
+                />
+              </button>
+              <div v-if="headersOpen" class="px-2 py-2 space-y-1">
+                <div
+                  v-for="(h, idx) in testHeaders"
+                  :key="idx"
+                  class="flex items-center gap-1.5"
+                >
+                  <input
+                    v-model="h.name"
+                    :disabled="!canTest"
+                    spellcheck="false"
+                    placeholder="Header name"
+                    class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                  >
+                  <input
+                    v-model="h.value"
+                    :disabled="!canTest"
+                    spellcheck="false"
+                    placeholder="value"
+                    class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                  >
+                  <button
+                    type="button"
+                    class="text-foreground-muted hover:text-red-400 p-0.5 transition-colors"
+                    title="Remove header"
+                    @click="removeHeaderRow(idx)"
+                  >
+                    <X class="w-3 h-3" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="text-[11px] text-foreground-muted hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-surface-hover"
+                  :disabled="!canTest"
+                  @click="addHeaderRow"
+                >
+                  + Add header
+                </button>
+              </div>
+            </div>
+
+            <!-- Body sub-header + textarea. -->
+            <div class="h-6 px-3 flex items-center justify-between bg-surface/30 border-b border-border shrink-0">
               <span class="text-[10px] uppercase tracking-[0.14em] font-medium text-foreground-muted">
-                Request · JSON
+                Body
               </span>
               <span
                 v-if="!canTest"
@@ -838,7 +980,7 @@ import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import { generateFunctionName } from '@/utils/funName'
 import { templates, defaultCode, categoryOrder } from '@/templates'
-import { rollbackFunction } from '@/api/endpoints'
+import { rollbackFunction, listFixtures, createFixture, updateFixture, deleteFixture, invokeFunctionFull } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 
 const route = useRoute()
@@ -898,6 +1040,19 @@ const form = ref({
 const fnId = ref('')  // backend function ID
 
 const testPayload = ref('{"name": "World"}')
+// v0.4 B3: Postman-style request controls. testHeaders is an array of
+// {name, value} pairs so the editor can render an ordered list with
+// inline edit + delete; we collapse to a flat object on send. headersOpen
+// keeps the headers section collapsed by default to stay focused on the
+// body, which is still the primary input for most users.
+const testMethod = ref('POST')
+const testPath = ref('/')
+const testHeaders = ref([])
+const headersOpen = ref(false)
+const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+const fixtures = ref([])
+const savedPopoverOpen = ref(false)
+const headerCount = computed(() => testHeaders.value.filter((h) => h.name && h.name.trim()).length)
 const deploying = ref(false)
 const invoking = ref(false)
 const deployedThisSession = ref(false)
@@ -1145,6 +1300,11 @@ onMounted(async () => {
       await loadSecrets()
       // Load deployment history so the Versions card can render.
       await loadVersions(fn)
+      // v0.4 B3: pre-fill the test pane from a deep link. Used by the
+      // Activity drawer's "Save as fixture" button which round-trips
+      // through this route with the captured method/path/headers/body
+      // ready to be reviewed and saved.
+      applyPrefillFromQuery()
     } catch (e) {
       console.error("Failed to load function", e)
       error.value = "Failed to load function: " + (e.response?.data?.error?.message || e.message)
@@ -1159,6 +1319,37 @@ onMounted(async () => {
     }
   }
 })
+
+// applyPrefillFromQuery reads a base64-encoded JSON request envelope from
+// the `prefill` query param and populates the test pane. Used by the
+// "Save as fixture" affordance in InvocationsLog.vue's Request panel:
+// the drawer encodes the captured request and links here so the user
+// lands on the editor with the form already filled in.
+const applyPrefillFromQuery = () => {
+  const raw = route.query.prefill
+  if (!raw) return
+  try {
+    const decoded = atob(String(raw))
+    const data = JSON.parse(decoded)
+    if (data.method) testMethod.value = String(data.method).toUpperCase()
+    if (data.path)   testPath.value = String(data.path)
+    if (data.headers && typeof data.headers === 'object') {
+      testHeaders.value = Object.entries(data.headers).map(([name, value]) => ({ name, value: String(value) }))
+      if (testHeaders.value.length) headersOpen.value = true
+    }
+    if (data.body !== undefined) {
+      testPayload.value = typeof data.body === 'string' ? data.body : JSON.stringify(data.body, null, 2)
+    }
+    // Drop the focus to the test panel so the user sees the prefill.
+    terminalTab.value = 'test'
+    terminalOpen.value = true
+    // Strip the query param without triggering a fresh navigation
+    // (router.replace keeps the same component instance).
+    router.replace({ query: { ...route.query, prefill: undefined } })
+  } catch {
+    /* ignore malformed prefill */
+  }
+}
 
 // Re-roll the auto-generated function name. No-op once the function
 // has been deployed (the name is the routing identity at that point).
@@ -1412,7 +1603,33 @@ const streamBuild = (depId) => new Promise((resolve) => {
   }
 })
 
-// Invoke function by ID
+// Collapse the editor's [{name, value}, …] header rows into a flat object
+// for the request. Empty/whitespace-only names are dropped — the user
+// often leaves an empty trailing row from the "+ Add header" button.
+const buildHeadersObject = () => {
+  const out = {}
+  for (const h of testHeaders.value) {
+    const k = (h.name || '').trim()
+    if (!k) continue
+    out[k] = h.value ?? ''
+  }
+  return out
+}
+
+// Default Content-Type for body-bearing methods. Keeping the test pane's
+// behaviour roughly aligned with curl: if the user supplied a body but
+// didn't explicitly set Content-Type, assume JSON (the most common case).
+const ensureContentType = (headers, method, body) => {
+  const m = (method || 'POST').toUpperCase()
+  if (m === 'GET' || m === 'HEAD') return headers
+  if (!body) return headers
+  const hasCT = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
+  if (!hasCT) headers['Content-Type'] = 'application/json'
+  return headers
+}
+
+// Invoke function by ID. v0.4 B3: routes through invokeFunctionFull so
+// the method/path/headers from the Test pane round-trip correctly.
 const invokeFunction = async () => {
   if (!fnId.value) {
     error.value = 'No function deployed yet'
@@ -1429,38 +1646,143 @@ const invokeFunction = async () => {
   invokeLogs.value = []
 
   try {
-    const payload = testPayload.value ? JSON.parse(testPayload.value) : {}
+    const headers = ensureContentType(buildHeadersObject(), testMethod.value, testPayload.value)
+    headers['X-Orva-API-Key'] = headers['X-Orva-API-Key'] || getApiKey()
 
-    const res = await fetch(`/fn/${fnId.value.replace(/^fn_/, '')}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Orva-API-Key': getApiKey(),
-      },
-      credentials: 'include',
-      body: JSON.stringify(payload),
+    const res = await invokeFunctionFull(fnId.value, {
+      method: testMethod.value,
+      path: testPath.value || '/',
+      headers,
+      body: testPayload.value || '',
     })
 
-    const text = await res.text()
+    const text = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
     status.value = `${res.status}`
-    duration.value = res.headers.get('X-Orva-Duration-MS') || '?'
+    duration.value = res.headers?.['x-orva-duration-ms'] || res.headers?.['X-Orva-Duration-MS'] || '?'
 
-    if (res.ok) {
-      try {
-        output.value = JSON.stringify(JSON.parse(text), null, 2)
-      } catch {
-        output.value = text
-      }
-    } else {
-      error.value = text
+    try {
+      output.value = JSON.stringify(JSON.parse(text), null, 2)
+    } catch {
+      output.value = text
     }
   } catch (err) {
-    error.value = err.message || 'Invocation failed'
-    status.value = 'Error'
+    // Axios surfaces non-2xx as throws — pull out body + status for the UI.
+    if (err.response) {
+      status.value = `${err.response.status}`
+      const t = err.response.data
+      error.value = typeof t === 'string' ? t : JSON.stringify(t)
+    } else {
+      error.value = err.message || 'Invocation failed'
+      status.value = 'Error'
+    }
   } finally {
     invoking.value = false
   }
 }
+
+// ── Fixtures (v0.4 B3) ──────────────────────────────────────────────
+//
+// A fixture is one saved (method, path, headers, body) preset attached
+// to a function. We refresh them on first deploy / first test-tab open
+// so the popover always reflects what the backend has. Concurrency note:
+// the backend's UNIQUE(function_id, name) means create races resolve
+// server-side via 409; the editor opts into the simpler "PUT acts as
+// upsert" path so there's never a true race in normal use.
+const addHeaderRow = () => {
+  testHeaders.value.push({ name: '', value: '' })
+  headersOpen.value = true
+}
+const removeHeaderRow = (idx) => {
+  testHeaders.value.splice(idx, 1)
+}
+
+const refreshFixtures = async () => {
+  if (!fnId.value) return
+  try {
+    const res = await listFixtures(fnId.value)
+    fixtures.value = res.data?.fixtures || []
+  } catch (e) {
+    // Soft-fail — fixture popover stays empty if the backend is
+    // unreachable; the rest of the editor still works.
+    fixtures.value = []
+  }
+}
+
+const toggleSavedPopover = async () => {
+  savedPopoverOpen.value = !savedPopoverOpen.value
+  if (savedPopoverOpen.value) {
+    await refreshFixtures()
+  }
+}
+
+// loadFixture populates the test pane from a saved fixture and closes
+// the popover. We replace (not merge) headers so the operator never gets
+// a surprise mash-up of "what I had typed" + "what the fixture saved".
+const loadFixture = (fx) => {
+  testMethod.value = fx.method || 'POST'
+  testPath.value = fx.path || '/'
+  testHeaders.value = Object.entries(fx.headers || {}).map(([name, value]) => ({ name, value }))
+  if (testHeaders.value.length) headersOpen.value = true
+  testPayload.value = fx.body || ''
+  savedPopoverOpen.value = false
+}
+
+const removeFixture = async (fx) => {
+  const ok = await confirmStore.ask({
+    title: `Delete fixture "${fx.name}"?`,
+    message: 'This only removes the saved request preset. Function code and execution history are untouched.',
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await deleteFixture(fnId.value, fx.name)
+    await refreshFixtures()
+  } catch (e) {
+    confirmStore.notify({
+      title: 'Delete failed',
+      message: e.response?.data?.error?.message || e.message,
+      danger: true,
+    })
+  }
+}
+
+const saveCurrentAsFixture = async () => {
+  if (!fnId.value) return
+  // window.prompt is a deliberate choice — confirmStore is async-confirm,
+  // not async-input, and we don't want a heavyweight modal for "name?".
+  // Hooking up a richer dialog later is one localised swap.
+  const name = (window.prompt('Save fixture as…') || '').trim()
+  if (!name) return
+  const headers = buildHeadersObject()
+  const body = {
+    name,
+    method: testMethod.value,
+    path: testPath.value || '/',
+    headers,
+    body: testPayload.value || '',
+  }
+  try {
+    // PUT-by-name is an upsert on (function_id, name) so re-saving with
+    // the same name overwrites without a separate confirm step.
+    await updateFixture(fnId.value, name, body)
+    savedPopoverOpen.value = false
+    await refreshFixtures()
+  } catch (e) {
+    confirmStore.notify({
+      title: 'Save failed',
+      message: e.response?.data?.error?.message || e.message,
+      danger: true,
+    })
+  }
+}
+
+// Refresh fixtures whenever fnId becomes known (initial load for an
+// existing function, or right after first deploy lands a fresh id).
+watch(fnId, async (id) => {
+  if (id) await refreshFixtures()
+  else fixtures.value = []
+})
 
 // describeRollbackDiff compares the current function record against a
 // deployment snapshot and returns human lines describing what's about to
