@@ -452,3 +452,141 @@ export const buildPromptText = () =>
 // Drop-into-clipboard helper. The user pastes the result into ChatGPT,
 // Claude, Gemini, Cursor, Copilot, or any other AI tool of choice.
 export const copyPromptToClipboard = () => copyText(buildPromptText())
+
+// ── v0.4 B4: AI "Suggest fix" prompt ────────────────────────────────
+//
+// Builds a paste-ready debug prompt the operator hands to an external
+// LLM when an Orva invocation fails. NOTHING is sent over the network
+// from this helper — we just assemble the text and write it to the
+// clipboard via copyText(). The operator pastes it manually into
+// ChatGPT, Claude, Gemini, Cursor, Copilot, etc.
+//
+// XML-tagged section order is intentional: <context> primes the role,
+// <source> + <request> + <stderr> + <error> are the artefacts, and
+// <task> is the closing instruction. Modern LLMs reference the tags
+// directly when reasoning, so keep the names stable.
+
+// 8 KB cap on stderr — deep tracebacks (especially Python) can run to
+// hundreds of KB and would blow past the model's context window for
+// the rest of the prompt. Operators rarely need more than the head of
+// the trace to spot the bug, so we keep the FIRST 8 KB and prepend a
+// "[truncated]" marker so the model knows tail frames were dropped.
+const STDERR_CAP_BYTES = 8 * 1024
+
+const truncateStderr = (s) => {
+  if (!s) return ''
+  // Byte-aware truncation via TextEncoder so multi-byte UTF-8 doesn't
+  // get split mid-codepoint when the stderr happens to contain emoji
+  // or non-ASCII identifiers.
+  const enc = new TextEncoder()
+  const dec = new TextDecoder('utf-8', { fatal: false })
+  const bytes = enc.encode(s)
+  if (bytes.length <= STDERR_CAP_BYTES) return s
+  // Slice + decode loses any partial trailing codepoint silently
+  // because we passed fatal:false on the decoder.
+  const head = dec.decode(bytes.slice(0, STDERR_CAP_BYTES))
+  return `[truncated — original was ${bytes.length} bytes; showing first ${STDERR_CAP_BYTES}]\n${head}`
+}
+
+// Map runtime → language attr on the <source> tag. The runtime string
+// arrives as the platform's canonical form (python314, node24, …); we
+// collapse to the broad family the model recognises.
+const sourceLanguageFor = (runtime) => {
+  if (!runtime) return 'text'
+  const r = String(runtime).toLowerCase()
+  if (r.startsWith('python')) return 'python'
+  if (r.startsWith('node'))   return 'node'
+  if (r.startsWith('ts') || r.includes('typescript')) return 'typescript'
+  return 'text'
+}
+
+// Pretty-print a runtime tag for the <context> blurb. python314 →
+// "Python 3.14"; node24 → "Node.js 24"; falls back to the raw id.
+// Python tags pack {major}{minor:2}, Node tags pack {major:2} — so
+// Python splits at first/rest, Node uses the whole numeric tail.
+const formatRuntime = (runtime) => {
+  if (!runtime) return 'unknown runtime'
+  const r = String(runtime).toLowerCase()
+  let m = r.match(/^python(\d)(\d+)$/)
+  if (m) return `Python ${m[1]}.${m[2]}`
+  m = r.match(/^node(\d+)$/)
+  if (m) return `Node.js ${m[1]}`
+  return runtime
+}
+
+// Format the captured request envelope into the prompt. requestPreview
+// arrives as either {method, path, headers, body} (A3 capture present)
+// or null (capture disabled / row predates A3 / fetch failed). When
+// null, we tell the model directly so it doesn't hallucinate input.
+const formatRequest = (req) => {
+  if (!req || (!req.method && !req.path && !req.headers && !req.body)) {
+    return 'no captured request — operator triggered the failure outside the dashboard or capture was disabled.'
+  }
+  const lines = []
+  const method = (req.method || 'POST').toUpperCase()
+  const path = req.path || '/'
+  lines.push(`${method} ${path}`)
+  const headers = req.headers || {}
+  const headerKeys = Object.keys(headers)
+  if (headerKeys.length) {
+    lines.push('')
+    for (const k of headerKeys) {
+      lines.push(`${k}: ${headers[k]}`)
+    }
+  }
+  if (req.body) {
+    lines.push('')
+    lines.push(typeof req.body === 'string' ? req.body : JSON.stringify(req.body))
+  }
+  return lines.join('\n')
+}
+
+// buildFixSuggestionPrompt assembles the full clipboard payload. All
+// args optional except `source` — without source code there's nothing
+// useful for the model to debug. Returns a plain string.
+export const buildFixSuggestionPrompt = ({
+  source = '',
+  language,           // optional — falls back to detection from runtime
+  runtime = '',       // canonical Orva runtime id (python314 / node24 / …)
+  stderr = '',
+  requestPreview = null,
+  errorMessage = '',
+  statusCode = '',
+} = {}) => {
+  const lang = language || sourceLanguageFor(runtime)
+  const runtimeLabel = formatRuntime(runtime)
+  const errLine = [statusCode, errorMessage].filter(Boolean).join(' ').trim() ||
+    'function failed without an explicit error message.'
+  return [
+    '<context>',
+    `An Orva serverless function (${runtimeLabel}) failed at runtime. Below are the function source, the captured HTTP request that triggered the failure, the stderr emitted by the worker, and the error the platform recorded. Help me diagnose and patch it.`,
+    '</context>',
+    '',
+    `<source language="${lang}">`,
+    source || '(source unavailable — fetch from the dashboard before debugging)',
+    '</source>',
+    '',
+    '<request>',
+    formatRequest(requestPreview),
+    '</request>',
+    '',
+    '<stderr>',
+    truncateStderr(stderr) || '(no stderr captured)',
+    '</stderr>',
+    '',
+    '<error>',
+    errLine,
+    '</error>',
+    '',
+    '<task>',
+    'Explain the failure in 2-3 sentences. Then propose the smallest patch that fixes it. Output the patched function in a code block. Do not include unrelated changes or refactors.',
+    '</task>',
+  ].join('\n')
+}
+
+// Mirror of copyPromptToClipboard for the fix-suggestion prompt. Pass
+// through whatever args the caller has — any missing field renders as
+// a sensible fallback inside buildFixSuggestionPrompt. Returns a
+// Promise<boolean> from copyText so callers can toast on success.
+export const copyFixSuggestionToClipboard = (args) =>
+  copyText(buildFixSuggestionPrompt(args))

@@ -420,10 +420,28 @@
                 />
                 {{ error ? 'Error' : output ? 'Response' : 'Idle' }}
               </span>
-              <span
-                v-if="duration"
-                class="text-[10px] text-foreground-muted/80 font-mono"
-              >{{ status }} · {{ duration }}ms</span>
+              <div class="flex items-center gap-2">
+                <!-- v0.4 B4: AI Suggest-fix button. Only shows after a
+                     failed run; assembles a debug prompt from the
+                     in-memory editor state (no network fetch needed —
+                     source, request, and stderr are all already loaded
+                     in this pane) and writes it to the clipboard. -->
+                <button
+                  v-if="lastRunFailed"
+                  type="button"
+                  class="text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-white px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1 disabled:opacity-50"
+                  :disabled="suggestingFix"
+                  title="Build a paste-ready debug prompt with source + request + stderr"
+                  @click="suggestFix"
+                >
+                  <Sparkles class="w-3 h-3" />
+                  Suggest fix
+                </button>
+                <span
+                  v-if="duration"
+                  class="text-[10px] text-foreground-muted/80 font-mono"
+                >{{ status }} · {{ duration }}ms</span>
+              </div>
             </div>
 
             <div class="flex-1 min-h-0 overflow-y-auto">
@@ -970,7 +988,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
@@ -981,6 +999,7 @@ import { copyText } from '@/utils/clipboard'
 import { generateFunctionName } from '@/utils/funName'
 import { templates, defaultCode, categoryOrder } from '@/templates'
 import { rollbackFunction, listFixtures, createFixture, updateFixture, deleteFixture, invokeFunctionFull } from '@/api/endpoints'
+import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
 
 const route = useRoute()
@@ -1063,6 +1082,12 @@ const status = ref('')
 const buildLogs = ref([])
 const invokeLogs = ref([])
 const urlCopied = ref(false)
+// v0.4 B4 — Suggest-fix affordance for the Test pane. Tracks "did the
+// most recent run fail" so the button hides on idle / success runs.
+// Set true when status >= 500 OR the request threw before getting a
+// response (network error, timeout); reset when the user runs again.
+const lastRunFailed = ref(false)
+const suggestingFix = ref(false)
 
 // Invoke URL is built from window.location.origin so it works on localhost,
 // custom IPs/ports, and behind reverse proxies with TLS termination — the
@@ -1644,6 +1669,10 @@ const invokeFunction = async () => {
   output.value = null
   error.value = null
   invokeLogs.value = []
+  // Reset the failed-run flag at the start of every run so the
+  // Suggest-fix button stays in sync with THIS run's outcome, not a
+  // stale one from a prior invocation.
+  lastRunFailed.value = false
 
   try {
     const headers = ensureContentType(buildHeadersObject(), testMethod.value, testPayload.value)
@@ -1665,18 +1694,89 @@ const invokeFunction = async () => {
     } catch {
       output.value = text
     }
+    // 2xx/3xx are happy paths; only flag 5xx so the Suggest-fix button
+    // shows on real failures (a deliberate 4xx from an authz check is
+    // not a bug to debug).
+    if (typeof res.status === 'number' && res.status >= 500) {
+      lastRunFailed.value = true
+    }
   } catch (err) {
     // Axios surfaces non-2xx as throws — pull out body + status for the UI.
     if (err.response) {
       status.value = `${err.response.status}`
       const t = err.response.data
       error.value = typeof t === 'string' ? t : JSON.stringify(t)
+      if (err.response.status >= 500) lastRunFailed.value = true
     } else {
       error.value = err.message || 'Invocation failed'
       status.value = 'Error'
+      // Network-level error: no status, but the operator still wants
+      // the AI to look at the source + payload + whatever the platform
+      // wrote to stderr. Treat as a failure.
+      lastRunFailed.value = true
     }
   } finally {
     invoking.value = false
+  }
+}
+
+// v0.4 B4 — assemble a debug prompt for the most-recent failed run
+// and write it to the clipboard. All inputs are already in memory:
+// - source: the editor's `code` ref (what the user is currently
+//   editing). This is the right thing to debug; if the user has made
+//   uncommitted edits since the failed run, those edits are what they
+//   want the AI to look at.
+// - runtime: from form.runtime.
+// - request preview: built from the test pane's method/path/headers/body.
+// - stderr: joined from invokeLogs (the function logs panel content).
+// - error/status: from the response panel's existing refs.
+// NOTHING goes to the network from this handler.
+const suggestFix = async () => {
+  if (suggestingFix.value) return
+  suggestingFix.value = true
+  try {
+    // Stitch invokeLogs into a single stderr-shaped string so the
+    // prompt's <stderr> section reads like a real traceback.
+    const stderrText = (invokeLogs.value || []).join('\n')
+    // Normalise the request preview. Headers in testHeaders are an
+    // ordered list of {name,value}; collapse to a flat object and
+    // drop empty rows so the prompt isn't littered with blank pairs.
+    const headersObj = {}
+    for (const h of testHeaders.value || []) {
+      if (h?.name && h.name.trim()) headersObj[h.name.trim()] = h.value || ''
+    }
+    const requestPreview = {
+      method: testMethod.value || 'POST',
+      path: testPath.value || '/',
+      headers: headersObj,
+      body: testPayload.value || '',
+    }
+    // status.value is a string ("500", "Error", …); coerce to a
+    // number when it parses cleanly so the prompt's <error> line
+    // reads "500 …" instead of "500 (string) …".
+    const sc = /^\d+$/.test(status.value) ? Number(status.value) : status.value
+    const ok = await copyFixSuggestionToClipboard({
+      source: code.value || '',
+      runtime: form.value.runtime || '',
+      stderr: stderrText,
+      requestPreview,
+      errorMessage: error.value || '',
+      statusCode: sc || '',
+    })
+    if (ok) {
+      confirmStore.notify({
+        title: 'Prompt copied',
+        message: 'Paste into ChatGPT, Claude, or your AI tool of choice.',
+      })
+    } else {
+      confirmStore.notify({
+        title: 'Copy failed',
+        message: 'Could not write to the clipboard. Try again, or copy the stderr by hand.',
+        danger: true,
+      })
+    }
+  } finally {
+    suggestingFix.value = false
   }
 }
 

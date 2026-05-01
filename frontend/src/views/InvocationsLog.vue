@@ -311,7 +311,12 @@
         </div>
 
         <!-- Replay action — disabled when capture is unavailable or the
-             body was truncated. Tooltip explains why. -->
+             body was truncated. Tooltip explains why.
+             v0.4 B4: the AI "Suggest fix" button lives next to Replay
+             so the failure-debugging path stays one drawer-click away.
+             It only renders when the row failed (status>=500 or
+             error_message), and stays disabled when stderr is empty
+             since there's nothing for the model to chew on. -->
         <div class="pt-2 border-t border-border flex items-center gap-3">
           <Button
             variant="primary"
@@ -322,6 +327,17 @@
           >
             <Play class="w-4 h-4 mr-2" />
             Replay
+          </Button>
+          <Button
+            v-if="canSuggestFix"
+            variant="secondary"
+            :disabled="!stderrText || suggestingFix"
+            :loading="suggestingFix"
+            :title="suggestFixTooltip"
+            @click="suggestFix"
+          >
+            <Sparkles class="w-4 h-4 mr-2" />
+            Suggest fix
           </Button>
           <span
             v-if="requestUnavailable"
@@ -338,13 +354,14 @@
 <script setup>
 import { ref, computed, h, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw } from 'lucide-vue-next'
+import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
-import { listInvocations, getInvocation, getInvocationLogs, getExecutionRequest, replayExecution, listFunctions } from '@/api/endpoints'
+import { listInvocations, getInvocation, getInvocationLogs, getExecutionRequest, replayExecution, listFunctions, getFunctionSource, getFunction } from '@/api/endpoints'
 import apiClient from '@/api/client'
 import { copyText } from '@/utils/clipboard'
+import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
 
 const confirmStore = useConfirmStore()
@@ -368,6 +385,11 @@ const fnMap = ref({})
 const requestData = ref(null)
 const requestUnavailable = ref(false)
 const replaying = ref(false)
+// v0.4 B4 — Suggest-fix affordance. We cache the source fetch for the
+// lifetime of an open drawer so repeated clicks don't refetch the same
+// blob; openDetail() resets this when a new row is loaded.
+const suggestingFix = ref(false)
+const cachedSource = ref(null)  // { source, language, runtime } | null
 let pollTimer = null
 
 const hasMore = computed(() => logs.value.length < total.value)
@@ -447,6 +469,23 @@ const replayTooltip = computed(() => {
   if (requestUnavailable.value) return 'request not captured'
   if (requestData.value?.truncated) return 'body was truncated; replay would be inaccurate'
   return 'Re-run this exact request against the current code'
+})
+
+// v0.4 B4 — show the Suggest-fix button only on rows we know failed.
+// Status >= 500 covers handler exceptions + sandbox-level kills; an
+// explicit error_message catches the rare cases where the handler
+// returned <500 but the platform still recorded an error (e.g. timeout
+// returns 504 but the row is also tagged with status='error').
+const canSuggestFix = computed(() => {
+  const r = drawerRow.value
+  if (!r) return false
+  if (typeof r.status_code === 'number' && r.status_code >= 500) return true
+  return !!r.error_message
+})
+
+const suggestFixTooltip = computed(() => {
+  if (!stderrText.value) return 'no stderr to debug from'
+  return 'Build a paste-ready debug prompt with source + request + stderr'
 })
 
 const Stat = {
@@ -628,6 +667,7 @@ const openDetail = async (log) => {
   copied.value = false
   requestData.value = null
   requestUnavailable.value = false
+  cachedSource.value = null
   try {
     const [detailRes, logsRes, reqRes] = await Promise.allSettled([
       getInvocation(log.id),
@@ -747,6 +787,77 @@ const copy = async (text) => {
   if (await copyText(text)) {
     copied.value = true
     setTimeout(() => (copied.value = false), 1500)
+  }
+}
+
+// v0.4 B4 — assemble a debug prompt from {source, request, stderr,
+// error} and write it to the clipboard. NOTHING is sent to the network
+// from this handler beyond the GET /functions/<id>/source call (and
+// even that we cache for the drawer lifetime). Operator pastes the
+// result into ChatGPT / Claude / Cursor / Copilot manually.
+const suggestFix = async () => {
+  if (!drawerRow.value || suggestingFix.value) return
+  if (!stderrText.value) return  // disabled state already enforces this
+  suggestingFix.value = true
+  try {
+    // Resolve runtime + source. cachedSource lives until the drawer
+    // closes or the user opens a different row.
+    if (!cachedSource.value) {
+      // The /source endpoint returns {code, filename, runtime}. Fall
+      // back to a function GET if the runtime field is missing on the
+      // older shape — we want a clean "Python 3.14"-style label in the
+      // prompt's <context> section.
+      try {
+        const res = await getFunctionSource(drawerRow.value.function_id)
+        cachedSource.value = {
+          source: res.data?.code || res.data?.source || '',
+          runtime: res.data?.runtime || '',
+        }
+        if (!cachedSource.value.runtime) {
+          try {
+            const fnRes = await getFunction(drawerRow.value.function_id)
+            cachedSource.value.runtime = fnRes.data?.runtime || ''
+          } catch { /* non-fatal — prompt still works without runtime */ }
+        }
+      } catch (e) {
+        confirmStore.notify({
+          title: 'Could not load function source',
+          message: e?.response?.data?.error?.message || e.message ||
+            'Source fetch failed. The function may have been deleted.',
+          danger: true,
+        })
+        return
+      }
+    }
+    const ok = await copyFixSuggestionToClipboard({
+      source:         cachedSource.value.source,
+      runtime:        cachedSource.value.runtime,
+      stderr:         stderrText.value,
+      requestPreview: requestData.value
+        ? {
+            method:  requestData.value.method,
+            path:    requestData.value.path,
+            headers: requestData.value.headers || {},
+            body:    requestData.value.body || '',
+          }
+        : null,
+      errorMessage: drawerRow.value.error_message || '',
+      statusCode:   drawerRow.value.status_code || '',
+    })
+    if (ok) {
+      confirmStore.notify({
+        title: 'Prompt copied',
+        message: 'Paste into ChatGPT, Claude, or your AI tool of choice.',
+      })
+    } else {
+      confirmStore.notify({
+        title: 'Copy failed',
+        message: 'Could not write to the clipboard. Try again, or copy the stderr by hand.',
+        danger: true,
+      })
+    }
+  } finally {
+    suggestingFix.value = false
   }
 }
 
