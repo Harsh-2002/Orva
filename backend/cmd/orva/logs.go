@@ -185,7 +185,11 @@ func printExecutionEvent(data, wantFnID string) {
 		return
 	}
 	// Filter client-side: the unified hub doesn't honour ?function=.
-	if wantFnID != "" && ev.FunctionID != wantFnID {
+	// Accept either form — the SSE payload always carries the full
+	// fn_<suffix> id, but the operator may pass either the full id, the
+	// short suffix (used in /fn/<suffix>/ URLs), or a function name that
+	// resolveFunctionID couldn't resolve and returned as-is.
+	if wantFnID != "" && ev.FunctionID != wantFnID && ev.FunctionID != "fn_"+wantFnID {
 		return
 	}
 	cold := "warm"
