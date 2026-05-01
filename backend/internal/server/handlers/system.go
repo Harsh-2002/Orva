@@ -130,7 +130,21 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, resp)
 }
 
-// GetMetrics handles GET /api/v1/system/metrics.
+// writeHistogram emits Prometheus-format cumulative histogram lines for
+// the given metric prefix. Format: `<name>_bucket{le="..."} <count>` for
+// every boundary plus `+Inf`, then `<name>_count` and `<name>_sum`. The
+// `_sum` value is in milliseconds (matches the `_ms` in the metric name).
+func writeHistogram(w http.ResponseWriter, name string, h metrics.HistogramSnapshot) {
+	for i, le := range h.BucketsMS {
+		fmt.Fprintf(w, "%s_bucket{le=\"%g\"} %d\n", name, le, h.BucketCounts[i])
+	}
+	fmt.Fprintf(w, "%s_bucket{le=\"+Inf\"} %d\n", name, h.Count)
+	fmt.Fprintf(w, "%s_count %d\n", name, h.Count)
+	fmt.Fprintf(w, "%s_sum %d\n", name, h.SumMS)
+}
+
+// GetMetrics handles GET /api/v1/system/metrics. Also wired at /metrics
+// at the root so Prometheus scrapers can use the convention path.
 func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	snap := h.Metrics.Snapshot()
 
@@ -148,11 +162,36 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "orva_builds_total %d\n", snap.TotalBuilds)
 	fmt.Fprintf(w, "orva_build_errors_total %d\n", snap.BuildErrors)
 	fmt.Fprintf(w, "orva_active_requests %d\n", snap.ActiveRequests)
+	// Summary-style quantile lines kept for backwards compatibility with
+	// the existing Grafana dashboard. Operators are encouraged to migrate
+	// to the histogram lines below — they let Grafana draw heatmaps and
+	// recompute quantiles over arbitrary windows via histogram_quantile().
 	fmt.Fprintf(w, "orva_invocation_duration_ms{quantile=\"0.5\"} %d\n", snap.P50MS)
 	fmt.Fprintf(w, "orva_invocation_duration_ms{quantile=\"0.95\"} %d\n", snap.P95MS)
 	fmt.Fprintf(w, "orva_invocation_duration_ms{quantile=\"0.99\"} %d\n", snap.P99MS)
+	// Histogram-shape duration metric. Cumulative counts: each bucket
+	// includes every sample with le ≤ its boundary, plus a +Inf bucket
+	// that mirrors the total count. _sum and _count complete the
+	// Prometheus histogram convention.
+	writeHistogram(w, "orva_invocation_duration_ms", h.Metrics.SnapshotInvocationHistogram())
+	// Sandbox spawn-duration histogram. Populated from the pool layer
+	// once a worker comes up. Until that wiring lands all buckets
+	// remain 0 — the lines are still emitted so dashboards can be
+	// pre-built without if-exists guards.
+	writeHistogram(w, "orva_sandbox_spawn_duration_ms", h.Metrics.SnapshotSpawnHistogram())
 	fmt.Fprintf(w, "orva_sandbox_active %d\n", active)
 	fmt.Fprintf(w, "orva_sandbox_total %d\n", total)
+	// Job queue depth — pending jobs that the runner hasn't claimed yet.
+	// Cheap COUNT per scrape; the metrics endpoint isn't on the hot
+	// path. Returns 0 cleanly when there are no pending jobs (or when
+	// the DB handle is missing in tests).
+	if h.DB != nil {
+		var depth int64
+		if rdb := h.DB.ReadDB(); rdb != nil {
+			_ = rdb.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status='pending'`).Scan(&depth)
+		}
+		fmt.Fprintf(w, "orva_jobs_queue_depth %d\n", depth)
+	}
 
 	// Per-function warm pool stats — exposed so operators can see which
 	// functions are hot, which keep getting killed (OOMing, crashing), and

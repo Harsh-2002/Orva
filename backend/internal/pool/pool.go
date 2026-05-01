@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/sandbox"
 )
@@ -68,6 +69,12 @@ type SandboxTemplate struct {
 	// sandboxes can always reach localhost on the host port via the
 	// loopback network, even with network_mode=none.
 	APIBaseURL string
+
+	// Metrics, when non-nil, receives sandbox spawn-duration samples on
+	// every successful Spawn so the /metrics histogram has data to draw.
+	// Optional so unit tests that wire pools without a metrics instance
+	// don't have to fake one.
+	Metrics *metrics.Metrics
 }
 
 // Manager owns all function-scoped pools.
@@ -562,7 +569,8 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				env["ORVA_INTERNAL_TOKEN"] = m.tmpl.InternalToken
 				env["ORVA_API_BASE"] = m.tmpl.APIBaseURL
 			}
-			return sandbox.Spawn(ctx, sandbox.ExecConfig{
+			start := time.Now()
+			w, err := sandbox.Spawn(ctx, sandbox.ExecConfig{
 				Language:       sandbox.Language(fn.Runtime),
 				CodeDir:        codeDir,
 				MemoryMB:       int(fn.MemoryMB),
@@ -579,6 +587,10 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				RootfsDir:      tmpl.RootfsDir,
 				Timeout:        time.Duration(fn.TimeoutMS) * time.Millisecond,
 			})
+			if err == nil && m.tmpl.Metrics != nil {
+				m.tmpl.Metrics.RecordSpawnDuration(time.Since(start))
+			}
+			return w, err
 		},
 	}
 

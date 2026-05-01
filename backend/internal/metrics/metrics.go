@@ -9,6 +9,21 @@ import (
 
 const durationRingSize = 8192
 
+// histogramBucketCount is the number of finite buckets in the cumulative
+// duration histograms. Kept as a `const` so the bucket arrays can be sized
+// at compile time (no slice -> len() in array bounds, which Go rejects).
+const histogramBucketCount = 11
+
+// HistogramBucketsMS are the cumulative upper bounds (in milliseconds) used
+// for the Prometheus-format histogram lines. The "+Inf" bucket is implicit
+// in the total count and not stored here. Length must equal
+// histogramBucketCount; an init-time assertion below catches drift.
+//
+// Tuning rationale: 1 ms catches the trivial-handler / kv-roundtrip floor;
+// 5–25 ms covers warm Python invocations; 50–250 ms covers warm Node + a
+// bit of cold-start; 500 ms–5 s catches cold starts and pathological cases.
+var HistogramBucketsMS = [histogramBucketCount]float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
+
 // Metrics holds atomic counters and duration tracking for the platform.
 type Metrics struct {
 	TotalInvocations atomic.Int64
@@ -20,8 +35,23 @@ type Metrics struct {
 
 	mu    sync.Mutex
 	ring  [durationRingSize]time.Duration
-	idx   int  // next write index
-	count int  // total entries (capped at ring size)
+	idx   int // next write index
+	count int // total entries (capped at ring size)
+
+	// Cumulative histogram buckets for invocation duration. buckets[i] is
+	// the running count of samples ≤ HistogramBucketsMS[i] in ms.
+	// invocCount/invocSumMS hold the global count and sum for the
+	// matching `_count` / `_sum` Prometheus lines.
+	invocBuckets [histogramBucketCount]atomic.Uint64
+	invocCount   atomic.Uint64
+	invocSumMS   atomic.Uint64
+
+	// Sandbox spawn-duration histogram — populated by RecordSpawnDuration
+	// from the pool layer once a worker comes up. Same bucket layout as
+	// invocations because operators usually look at both side-by-side.
+	spawnBuckets [histogramBucketCount]atomic.Uint64
+	spawnCount   atomic.Uint64
+	spawnSumMS   atomic.Uint64
 }
 
 // New creates a new Metrics instance.
@@ -40,9 +70,11 @@ func (m *Metrics) RecordInvocation(coldStart bool) {
 	}
 }
 
-// RecordDuration writes a duration into the fixed-size ring buffer.
-// Old samples overwrite once the ring is full — percentile reports
-// reflect the most recent ~8k invocations.
+// RecordDuration writes a duration into the fixed-size ring buffer AND
+// increments the cumulative histogram buckets. Old samples overwrite once
+// the ring is full — the percentile report still reflects only the most
+// recent ~8k invocations, but histogram buckets are lifetime cumulative
+// (Prometheus convention; rate() recovers the windowed view).
 func (m *Metrics) RecordDuration(d time.Duration) {
 	m.mu.Lock()
 	m.ring[m.idx] = d
@@ -51,6 +83,65 @@ func (m *Metrics) RecordDuration(d time.Duration) {
 		m.count++
 	}
 	m.mu.Unlock()
+
+	ms := float64(d) / float64(time.Millisecond)
+	bumpHistogram(&m.invocBuckets, &m.invocCount, &m.invocSumMS, ms)
+}
+
+// RecordSpawnDuration feeds a sandbox-spawn duration into the spawn
+// histogram. Called by the pool layer once `sandbox.Spawn` returns. Cheap
+// — N atomic adds where N is the bucket count.
+func (m *Metrics) RecordSpawnDuration(d time.Duration) {
+	ms := float64(d) / float64(time.Millisecond)
+	bumpHistogram(&m.spawnBuckets, &m.spawnCount, &m.spawnSumMS, ms)
+}
+
+// bumpHistogram increments the matching cumulative buckets, the count,
+// and the running sum (in ms, rounded down). Inlined into the hot path
+// via small fixed-size loop.
+func bumpHistogram(buckets *[histogramBucketCount]atomic.Uint64, count, sumMS *atomic.Uint64, ms float64) {
+	for i, le := range HistogramBucketsMS {
+		if ms <= le {
+			buckets[i].Add(1)
+		}
+	}
+	count.Add(1)
+	if ms > 0 {
+		sumMS.Add(uint64(ms))
+	}
+}
+
+// HistogramSnapshot is a point-in-time copy of one cumulative histogram.
+type HistogramSnapshot struct {
+	BucketsMS    []float64 // upper bounds (excluding +Inf)
+	BucketCounts []uint64  // cumulative counts, parallel to BucketsMS
+	Count        uint64    // total samples (== +Inf bucket value)
+	SumMS        uint64    // running sum of samples in milliseconds
+}
+
+// SnapshotInvocationHistogram copies the invocation duration histogram
+// for emission in the Prometheus text endpoint.
+func (m *Metrics) SnapshotInvocationHistogram() HistogramSnapshot {
+	return snapshotHist(&m.invocBuckets, &m.invocCount, &m.invocSumMS)
+}
+
+// SnapshotSpawnHistogram copies the sandbox spawn duration histogram.
+func (m *Metrics) SnapshotSpawnHistogram() HistogramSnapshot {
+	return snapshotHist(&m.spawnBuckets, &m.spawnCount, &m.spawnSumMS)
+}
+
+func snapshotHist(buckets *[histogramBucketCount]atomic.Uint64, count, sumMS *atomic.Uint64) HistogramSnapshot {
+	out := HistogramSnapshot{
+		BucketsMS:    make([]float64, len(HistogramBucketsMS)),
+		BucketCounts: make([]uint64, len(HistogramBucketsMS)),
+	}
+	copy(out.BucketsMS, HistogramBucketsMS[:])
+	for i := range buckets {
+		out.BucketCounts[i] = buckets[i].Load()
+	}
+	out.Count = count.Load()
+	out.SumMS = sumMS.Load()
+	return out
 }
 
 // RecordBuild increments the build counter and optionally the error counter.

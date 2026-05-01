@@ -103,6 +103,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/system/health", sysHandler.Health)
 	r.mux.HandleFunc("GET /api/v1/system/metrics", sysHandler.GetMetrics)
 	r.mux.HandleFunc("GET /api/v1/system/metrics.json", sysHandler.GetMetricsJSON)
+	// Prometheus-convention root alias. authMiddleware skips any path
+	// outside /api/, so this is reachable without an API key. The catch-all
+	// "/" handler is keyed by exact path here so the routes table never
+	// shadows it.
+	r.mux.HandleFunc("GET /metrics", sysHandler.GetMetrics)
 
 	// Round-G PR4: unified SSE stream — one connection per browser tab,
 	// fans out metrics + execution + deployment events. Client filters

@@ -124,6 +124,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			DefaultSeccomp: cfg.Sandbox.SeccompPolicy,
 			InternalToken:  internalToken,
 			APIBaseURL:     apiBase,
+			Metrics:        met,
 		},
 		db, reg, limiter,
 	)

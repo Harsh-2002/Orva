@@ -73,9 +73,12 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 
 // Chatty endpoints polled by the UI every few seconds. We skip INFO logging
 // on 2xx responses for these, but still log 4xx/5xx so real problems surface.
+// /metrics is the Prometheus alias for /api/v1/system/metrics; scrapes hit
+// it every few seconds and would otherwise drown out the request log.
 var quietPaths = map[string]bool{
 	"/api/v1/system/health":  true,
 	"/api/v1/system/metrics": true,
+	"/metrics":               true,
 	"/api/v1/auth/status":    true,
 	"/api/v1/auth/me":        true,
 }
