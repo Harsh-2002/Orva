@@ -213,6 +213,16 @@
           >
             HTTP {{ drawerRow.status_code }}
           </span>
+          <!-- v0.4 A3 — small breadcrumb if this row is itself a replay. -->
+          <span
+            v-if="drawerRow.replay_of"
+            class="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs border bg-background font-mono text-foreground-muted hover:text-white cursor-pointer"
+            title="Open the original execution"
+            @click="openDetail({ id: drawerRow.replay_of, function_id: drawerRow.function_id, status: 'success', started_at: drawerRow.started_at })"
+          >
+            <RotateCcw class="w-3 h-3" />
+            replay of {{ drawerRow.replay_of?.substring(0, 14) }}…
+          </span>
         </div>
 
         <!-- Stat grid -->
@@ -229,6 +239,43 @@
         <div v-if="drawerRow.error_message">
           <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Error</div>
           <pre class="bg-red-950/30 border border-red-900/40 rounded p-3 text-xs text-red-300 font-mono whitespace-pre-wrap break-words">{{ drawerRow.error_message }}</pre>
+        </div>
+
+        <!-- v0.4 A3: captured Request panel. Shown when capture is on
+             AND the row has a captured envelope. Sensitive header values
+             land here as the literal "[REDACTED]" string from the
+             backend — never the original credential. -->
+        <div v-if="requestData">
+          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request</div>
+          <div class="bg-surface border border-border rounded p-3 space-y-3">
+            <div class="flex items-center gap-2 font-mono text-xs">
+              <span class="px-2 py-0.5 rounded bg-background text-white border border-border">{{ requestData.method }}</span>
+              <span class="text-foreground-muted truncate">{{ requestData.path }}</span>
+            </div>
+            <div v-if="requestData.headers && Object.keys(requestData.headers).length">
+              <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Headers</div>
+              <div class="bg-background border border-border rounded p-2 max-h-40 overflow-auto">
+                <div
+                  v-for="(value, name) in requestData.headers"
+                  :key="name"
+                  class="font-mono text-[11px] flex gap-2 py-0.5"
+                >
+                  <span class="text-foreground-muted shrink-0">{{ name }}:</span>
+                  <span
+                    class="text-foreground break-all"
+                    :class="{ 'text-yellow-500/90': value === '[REDACTED]' }"
+                  >{{ value }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="requestData.body">
+              <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Body</div>
+              <pre class="bg-background border border-border rounded p-2 text-xs text-foreground font-mono overflow-auto max-h-40 whitespace-pre-wrap break-words">{{ prettyBody(requestData.body) }}</pre>
+            </div>
+            <div v-if="requestData.truncated" class="text-[11px] text-yellow-500/90">
+              Body was truncated at the configured cap. Replay is disabled for this row.
+            </div>
+          </div>
         </div>
 
         <!-- Stderr tail -->
@@ -249,6 +296,27 @@
             class="bg-surface border border-border rounded p-3 text-xs text-foreground font-mono overflow-auto max-h-72 whitespace-pre-wrap break-words"
           >{{ stderrText || '(no stderr captured)' }}</pre>
         </div>
+
+        <!-- Replay action — disabled when capture is unavailable or the
+             body was truncated. Tooltip explains why. -->
+        <div class="pt-2 border-t border-border flex items-center gap-3">
+          <Button
+            variant="primary"
+            :disabled="requestUnavailable || requestData?.truncated || replaying"
+            :loading="replaying"
+            :title="replayTooltip"
+            @click="replay"
+          >
+            <Play class="w-4 h-4 mr-2" />
+            Replay
+          </Button>
+          <span
+            v-if="requestUnavailable"
+            class="text-xs text-foreground-muted"
+          >
+            Request not captured for this invocation.
+          </span>
+        </div>
       </div>
     </Drawer>
   </div>
@@ -257,11 +325,11 @@
 <script setup>
 import { ref, computed, h, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, Search, ChevronDown, Check, Trash2 } from 'lucide-vue-next'
+import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
-import { listInvocations, getInvocation, getInvocationLogs, listFunctions } from '@/api/endpoints'
+import { listInvocations, getInvocation, getInvocationLogs, getExecutionRequest, replayExecution, listFunctions } from '@/api/endpoints'
 import apiClient from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
@@ -281,6 +349,12 @@ const selected = ref(new Set())  // bulk-select set of execution IDs
 const stderrText = ref('')
 const copied = ref(false)
 const fnMap = ref({})
+// v0.4 A3 — captured request envelope for the open drawer. null while
+// loading or when capture was disabled / the row is too old. Drives the
+// Request panel + the Replay button's enabled state.
+const requestData = ref(null)
+const requestUnavailable = ref(false)
+const replaying = ref(false)
 let pollTimer = null
 
 const hasMore = computed(() => logs.value.length < total.value)
@@ -355,6 +429,12 @@ const sinceFromRange = (range) => {
 const drawerTitle = computed(() =>
   drawerRow.value ? `Invocation · ${drawerRow.value.id?.substring(0, 14)}` : 'Invocation'
 )
+
+const replayTooltip = computed(() => {
+  if (requestUnavailable.value) return 'request not captured'
+  if (requestData.value?.truncated) return 'body was truncated; replay would be inaccurate'
+  return 'Re-run this exact request against the current code'
+})
 
 const Stat = {
   props: { label: String, value: [String, Number], mono: Boolean },
@@ -533,10 +613,13 @@ const openDetail = async (log) => {
   detailLoading.value = true
   stderrText.value = ''
   copied.value = false
+  requestData.value = null
+  requestUnavailable.value = false
   try {
-    const [detailRes, logsRes] = await Promise.allSettled([
+    const [detailRes, logsRes, reqRes] = await Promise.allSettled([
       getInvocation(log.id),
       getInvocationLogs(log.id),
+      getExecutionRequest(log.id),
     ])
     if (detailRes.status === 'fulfilled') {
       // Server returns the full Execution row — overlay over the row data.
@@ -545,8 +628,72 @@ const openDetail = async (log) => {
     if (logsRes.status === 'fulfilled') {
       stderrText.value = logsRes.value.data.stderr || ''
     }
+    if (reqRes.status === 'fulfilled') {
+      requestData.value = reqRes.value.data
+    } else {
+      // 404 means capture was disabled when this row ran, or the feature
+      // is off at the platform level. Either way: no Replay for this row.
+      requestUnavailable.value = true
+    }
   } finally {
     detailLoading.value = false
+  }
+}
+
+// deepParse strips a layer of JSON-string wrapping, recursively. Copied
+// from KVStore.vue — the Request panel's body display benefits from the
+// same "show the actual shape, not an escaped JSON string" treatment.
+const deepParse = (v, depth = 3) => {
+  if (depth <= 0 || typeof v !== 'string') return v
+  const s = v.trim()
+  if (!s || !'{["tfn0123456789-'.includes(s[0])) return v
+  try {
+    const parsed = JSON.parse(s)
+    return deepParse(parsed, depth - 1)
+  } catch {
+    return v
+  }
+}
+
+const prettyBody = (raw) => {
+  if (!raw) return ''
+  const u = deepParse(raw)
+  if (typeof u === 'string') return u
+  try {
+    return JSON.stringify(u, null, 2)
+  } catch {
+    return String(raw)
+  }
+}
+
+const replay = async () => {
+  if (!drawerRow.value || replaying.value || requestUnavailable.value) return
+  replaying.value = true
+  try {
+    const res = await replayExecution(drawerRow.value.id)
+    // The backend stamps the new execution id on the response header.
+    // Some axios + responseType=text combinations lower-case the keys —
+    // try both for safety.
+    const newId =
+      res.headers?.['x-orva-execution-id'] ||
+      res.headers?.['X-Orva-Execution-ID']
+    if (newId) {
+      // Open a fresh drawer pointed at the new row. We don't have the
+      // full Execution row yet — fetch the list refresh in parallel so
+      // the table reflects the new entry too.
+      fetchLogs()
+      await openDetail({ id: newId, function_id: drawerRow.value.function_id, status: 'running', started_at: new Date().toISOString() })
+    } else {
+      fetchLogs()
+    }
+  } catch (e) {
+    confirmStore.notify({
+      title: 'Replay failed',
+      message: e?.response?.data?.error?.message || e.message,
+      danger: true,
+    })
+  } finally {
+    replaying.value = false
   }
 }
 

@@ -18,12 +18,32 @@ type Execution struct {
 	ErrorMessage string     `json:"error_message"`
 	StartedAt    time.Time  `json:"started_at"`
 	FinishedAt   *time.Time `json:"finished_at"`
+	// ReplayOf points at the original execution's id when this row was
+	// produced by POST /api/v1/executions/{id}/replay. NULL on first-class
+	// invocations; non-NULL only on replays. v0.4 A3.
+	ReplayOf *string `json:"replay_of,omitempty"`
 }
 
 type ExecutionLog struct {
 	ExecutionID string `json:"execution_id"`
 	Stdout      string `json:"stdout"`
 	Stderr      string `json:"stderr"`
+}
+
+// ExecutionRequest is the captured envelope replayed by the dashboard's
+// Replay button (v0.4 A3). HeadersJSON is post-redaction; sensitive values
+// (Authorization, Cookie, X-Orva-API-Key, X-Orva-Internal-Token,
+// Proxy-Authorization) are replaced with the literal string "[REDACTED]"
+// before serialisation. Truncated=true means Body is incomplete — replay
+// will refuse those rows with HTTP 410 Gone.
+type ExecutionRequest struct {
+	ExecutionID string `json:"execution_id"`
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	HeadersJSON string `json:"headers_json"`
+	Body        []byte `json:"body"`
+	Truncated   bool   `json:"truncated"`
+	CapturedAt  int64  `json:"captured_at"` // unix millis
 }
 
 func (db *Database) InsertExecution(exec *Execution) error {
@@ -84,6 +104,64 @@ func (db *Database) AsyncInsertExecutionLog(log *ExecutionLog) {
 	)
 }
 
+// AsyncInsertExecutionRequest queues a captured-request row for the
+// batched writer (v0.4 A3). Mirrors the pattern of AsyncInsertExecutionFinal:
+// the proxy hot path never blocks on the SQLite writer. Foreign-key
+// satisfaction relies on the executions row landing first via the same
+// queue — under the batched-tx model both rows commit together.
+func (db *Database) AsyncInsertExecutionRequest(req *ExecutionRequest) {
+	truncated := 0
+	if req.Truncated {
+		truncated = 1
+	}
+	db.AsyncExec(`
+		INSERT OR REPLACE INTO execution_requests (
+			execution_id, method, path, headers_json, body, truncated, captured_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		req.ExecutionID, req.Method, req.Path, req.HeadersJSON,
+		req.Body, truncated, req.CapturedAt,
+	)
+}
+
+// GetExecutionRequest returns the captured request envelope for an
+// execution, or (nil, sql.ErrNoRows) if capture was disabled at the time
+// or the row was purged with the parent execution.
+func (db *Database) GetExecutionRequest(id string) (*ExecutionRequest, error) {
+	var req ExecutionRequest
+	var truncated int
+	var body []byte
+	err := db.read.QueryRow(`
+		SELECT execution_id, method, path, headers_json, body, truncated, captured_at
+		FROM execution_requests WHERE execution_id = ?`, id,
+	).Scan(&req.ExecutionID, &req.Method, &req.Path, &req.HeadersJSON,
+		&body, &truncated, &req.CapturedAt)
+	if err != nil {
+		return nil, err
+	}
+	req.Body = body
+	req.Truncated = truncated == 1
+	return &req, nil
+}
+
+// AsyncInsertExecutionFinalReplay mirrors AsyncInsertExecutionFinal but
+// also stores the replay_of pointer. Separate function so the hot
+// invoke path doesn't pay the cost of an always-NULL parameter on every
+// call.
+func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, replayOf string) {
+	coldStart := 0
+	if exec.ColdStart {
+		coldStart = 1
+	}
+	db.AsyncExec(`
+		INSERT INTO executions (
+			id, function_id, status, cold_start, container_id,
+			duration_ms, status_code, error_message, response_size, finished_at, replay_of
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+		exec.ID, exec.FunctionID, exec.Status, coldStart, exec.ContainerID,
+		durationMS, statusCode, errMsg, responseSize, replayOf,
+	)
+}
+
 func (db *Database) UpdateExecution(id, status string, durationMS int64, statusCode int, errMsg string, responseSize int) error {
 	_, err := db.write.Exec(`
 		UPDATE executions SET
@@ -98,7 +176,7 @@ func (db *Database) UpdateExecution(id, status string, durationMS int64, statusC
 func (db *Database) GetExecution(id string) (*Execution, error) {
 	row := db.read.QueryRow(`
 		SELECT id, function_id, status, cold_start, duration_ms, status_code,
-			request_size, response_size, container_id, error_message, started_at, finished_at
+			request_size, response_size, container_id, error_message, started_at, finished_at, replay_of
 		FROM executions WHERE id = ?`, id)
 	return scanExecution(row)
 }
@@ -123,7 +201,7 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 		params.Limit = 50
 	}
 
-	query := "SELECT id, function_id, status, cold_start, duration_ms, status_code, request_size, response_size, container_id, error_message, started_at, finished_at FROM executions WHERE 1=1"
+	query := "SELECT id, function_id, status, cold_start, duration_ms, status_code, request_size, response_size, container_id, error_message, started_at, finished_at, replay_of FROM executions WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM executions WHERE 1=1"
 	var args []any
 
@@ -217,6 +295,16 @@ func (db *Database) PurgeOldExecutions(retentionDays int) error {
 	if err != nil {
 		return err
 	}
+	// v0.4 A3: same explicit cleanup for the captured-request rows so
+	// PurgeOldExecutions doesn't rely on PRAGMA foreign_keys being on
+	// for the writer connection.
+	_, err = db.write.Exec(`
+		DELETE FROM execution_requests WHERE execution_id IN (
+			SELECT id FROM executions WHERE started_at < datetime('now', '-' || ? || ' days')
+		)`, retentionDays)
+	if err != nil {
+		return err
+	}
 	_, err = db.write.Exec(
 		"DELETE FROM executions WHERE started_at < datetime('now', '-' || ? || ' days')",
 		retentionDays,
@@ -228,13 +316,13 @@ func scanExecution(row *sql.Row) (*Execution, error) {
 	var exec Execution
 	var coldStart int
 	var durationMS, statusCode, reqSize, respSize sql.NullInt64
-	var containerID, errMsg sql.NullString
+	var containerID, errMsg, replayOf sql.NullString
 	var finishedAt sql.NullTime
 
 	err := row.Scan(
 		&exec.ID, &exec.FunctionID, &exec.Status, &coldStart,
 		&durationMS, &statusCode, &reqSize, &respSize,
-		&containerID, &errMsg, &exec.StartedAt, &finishedAt,
+		&containerID, &errMsg, &exec.StartedAt, &finishedAt, &replayOf,
 	)
 	if err != nil {
 		return nil, err
@@ -261,6 +349,10 @@ func scanExecution(row *sql.Row) (*Execution, error) {
 	exec.ErrorMessage = errMsg.String
 	if finishedAt.Valid {
 		exec.FinishedAt = &finishedAt.Time
+	}
+	if replayOf.Valid && replayOf.String != "" {
+		v := replayOf.String
+		exec.ReplayOf = &v
 	}
 	return &exec, nil
 }
@@ -269,13 +361,13 @@ func scanExecutionRows(rows *sql.Rows) (*Execution, error) {
 	var exec Execution
 	var coldStart int
 	var durationMS, statusCode, reqSize, respSize sql.NullInt64
-	var containerID, errMsg sql.NullString
+	var containerID, errMsg, replayOf sql.NullString
 	var finishedAt sql.NullTime
 
 	err := rows.Scan(
 		&exec.ID, &exec.FunctionID, &exec.Status, &coldStart,
 		&durationMS, &statusCode, &reqSize, &respSize,
-		&containerID, &errMsg, &exec.StartedAt, &finishedAt,
+		&containerID, &errMsg, &exec.StartedAt, &finishedAt, &replayOf,
 	)
 	if err != nil {
 		return nil, err
@@ -302,6 +394,10 @@ func scanExecutionRows(rows *sql.Rows) (*Execution, error) {
 	exec.ErrorMessage = errMsg.String
 	if finishedAt.Valid {
 		exec.FinishedAt = &finishedAt.Time
+	}
+	if replayOf.Valid && replayOf.String != "" {
+		v := replayOf.String
+		exec.ReplayOf = &v
 	}
 	return &exec, nil
 }

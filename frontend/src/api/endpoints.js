@@ -68,6 +68,21 @@ export const getInvocation = (id) => apiClient.get(`/executions/${id}`)
 
 export const getInvocationLogs = (id) => apiClient.get(`/executions/${id}/logs`)
 
+// v0.4 A3: captured request envelope for the Replay button. Returns 404
+// when capture was disabled at the time the original ran (or for legacy
+// rows from before this feature shipped). The handler shape is
+// { execution_id, method, path, headers (object), body (string),
+//   truncated, captured_at }.
+export const getExecutionRequest = (id) =>
+  apiClient.get(`/executions/${id}/request`)
+
+// Replay re-runs the captured request against the function's current
+// code. Returns the worker's response body verbatim; the new execution
+// id arrives in the X-Orva-Execution-ID response header so the
+// dashboard can swap the open drawer to the replayed row.
+export const replayExecution = (id) =>
+  apiClient.post(`/executions/${id}/replay`, null, { responseType: 'text' })
+
 // Live Activity feed — historical companion to the SSE event stream.
 // params: source, actor_id, since (unix-millis), until, status_min, q,
 // limit (default 200, max 1000), cursor (ts millis from prior page).
@@ -236,6 +251,34 @@ export const enqueueJob = (body) => apiClient.post('/jobs', body)
 export const retryJob = (id) => apiClient.post(`/jobs/${id}/retry`)
 
 export const deleteJob = (id) => apiClient.delete(`/jobs/${id}`)
+
+// ── Backup / Restore (v0.4) ─────────────────────────────────────────
+//
+// Backup downloads are intentionally NOT routed through axios. The server
+// streams a gzip tarball with a Content-Disposition: attachment header;
+// browsers handle that natively when given a top-level navigation, so the
+// dashboard just calls `window.location.assign('/api/v1/backup')` instead
+// of allocating a Blob the size of the data dir in JS heap.
+//
+// The download URL is exported for callers that need to build their own
+// link (e.g. CLI doc copy buttons or future Settings card variants).
+export const backupDownloadURL = () => '/api/v1/backup'
+
+// uploadRestore POSTs the tarball as multipart/form-data with field name
+// `archive`. ?confirm=1 is mandatory — the backend rejects requests
+// without it as a guard against accidental clobber. On success the
+// caller should reload the page; the response body carries the next
+// step ({"status":"restored","next":"reload"}).
+export const uploadRestore = (file) => {
+  const fd = new FormData()
+  fd.append('archive', file)
+  return apiClient.post('/restore?confirm=1', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    // Restore archives can be large. Bump the timeout above axios's
+    // default 60s — extracting + validating multi-GB DBs takes longer.
+    timeout: 10 * 60 * 1000,
+  })
+}
 
 // ── Webhook subscriptions (Phase v0.3) ──────────────────────────────
 

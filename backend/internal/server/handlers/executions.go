@@ -85,6 +85,47 @@ func (h *ExecutionHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, logs)
 }
 
+// GetRequest handles GET /api/v1/executions/{exec_id}/request — the
+// captured request envelope used by the dashboard's Replay button (v0.4
+// A3). Returns 404 when no row was captured (capture disabled at the
+// time, or a legacy invocation from before this feature shipped).
+//
+// The headers blob is shipped as a parsed map so the frontend doesn't
+// have to re-parse — sensitive values land here as the literal string
+// "[REDACTED]" since the proxy already redacts them at write time.
+func (h *ExecutionHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+
+	execID := extractExecRequestID(r.URL.Path)
+	if execID == "" {
+		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST",
+			"missing execution ID", reqID)
+		return
+	}
+
+	req, err := h.DB.GetExecutionRequest(execID)
+	if err != nil {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND",
+			"no captured request for this execution", reqID)
+		return
+	}
+
+	headers := map[string]string{}
+	if req.HeadersJSON != "" {
+		_ = json.Unmarshal([]byte(req.HeadersJSON), &headers)
+	}
+
+	respond.JSON(w, http.StatusOK, map[string]any{
+		"execution_id": req.ExecutionID,
+		"method":       req.Method,
+		"path":         req.Path,
+		"headers":      headers,
+		"body":         string(req.Body),
+		"truncated":    req.Truncated,
+		"captured_at":  req.CapturedAt,
+	})
+}
+
 // Delete handles DELETE /api/v1/executions/{exec_id}. Removes the row
 // + its logs (FK CASCADE in schema).
 func (h *ExecutionHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +193,22 @@ func extractExecID(path string) string {
 func extractExecLogsID(path string) string {
 	const prefix = "/api/v1/executions/"
 	const suffix = "/logs"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return ""
+	}
+	mid := strings.TrimPrefix(path, prefix)
+	mid = strings.TrimSuffix(mid, suffix)
+	if mid == "" || strings.Contains(mid, "/") {
+		return ""
+	}
+	return mid
+}
+
+// extractExecRequestID extracts the execution ID from path
+// /api/v1/executions/{exec_id}/request.
+func extractExecRequestID(path string) string {
+	const prefix = "/api/v1/executions/"
+	const suffix = "/request"
 	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
 		return ""
 	}

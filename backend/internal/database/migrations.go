@@ -300,6 +300,22 @@ CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_source_ts ON activity_log(source, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_actor ON activity_log(actor_id, ts DESC);
 
+-- Captured request envelope for replay (v0.4 A3). One row per execution
+-- that ran while replay_capture_enabled=1. Headers are JSON-serialised
+-- AFTER redaction (Authorization, Cookie, Orva API key, internal token,
+-- proxy-authorization). truncated=1 means the body exceeded
+-- replay_capture_max_bytes and was cut at the cap; replay handler
+-- refuses to re-run those (would corrupt at-rest state).
+CREATE TABLE IF NOT EXISTS execution_requests (
+    execution_id  TEXT PRIMARY KEY REFERENCES executions(id) ON DELETE CASCADE,
+    method        TEXT NOT NULL,
+    path          TEXT NOT NULL,
+    headers_json  TEXT NOT NULL,
+    body          BLOB,
+    truncated     INTEGER NOT NULL DEFAULT 0,
+    captured_at   INTEGER NOT NULL
+);
+
 -- Seed system config (ignore if already exists)
 INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('max_total_containers', '100'),
@@ -325,7 +341,14 @@ INSERT OR IGNORE INTO system_config (key, value) VALUES
     -- Activity log retention. The Activity page is observability,
     -- not audit; rotate aggressively to keep the table small.
     ('activity_retention_days', '7'),
-    ('activity_retention_max_rows', '50000');
+    ('activity_retention_max_rows', '50000'),
+    -- v0.4 A3: per-invocation Request Capture for the dashboard's
+    -- Replay button. Disabled by setting replay_capture_enabled=0 if
+    -- the operator wants to skip the SQLite write entirely. The cap
+    -- mirrors the API max_request_body_bytes default; bodies larger
+    -- than the cap are truncated and replay is refused for them.
+    ('replay_capture_enabled', '1'),
+    ('replay_capture_max_bytes', '1048576');
 
 -- Seed default rules (shipped enabled). Kept deliberately minimal:
 -- only entries that are universally dangerous to expose to user code
@@ -387,6 +410,10 @@ PRAGMA foreign_keys = ON;
 		// orvad process timezone. UTC default keeps legacy rows behaving
 		// identically to before this migration.
 		"ALTER TABLE cron_schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'",
+		// v0.4 A3: pointer back to the original execution when this row
+		// was created via POST /api/v1/executions/{id}/replay. NULL on
+		// the first-class invocation; non-NULL on every replay.
+		"ALTER TABLE executions ADD COLUMN replay_of TEXT",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// "duplicate column name" is expected on boot after the first.

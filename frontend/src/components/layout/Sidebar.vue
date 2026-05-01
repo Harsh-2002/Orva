@@ -106,6 +106,7 @@ import {
   Fingerprint,
   Webhook,
   ShieldHalf,
+  Settings,
   LibraryBig,
   LogOut,
   Menu,
@@ -139,6 +140,7 @@ const navItems = [
   { path: '/api-keys',    label: 'Keys',        icon: Fingerprint },
   { path: '/webhooks',    label: 'Webhooks',    icon: Webhook },
   { path: '/firewall',    label: 'Firewall',    icon: ShieldHalf },
+  { path: '/settings',    label: 'Settings',    icon: Settings },
   { path: '/docs',        label: 'Docs',        icon: LibraryBig },
 ]
 

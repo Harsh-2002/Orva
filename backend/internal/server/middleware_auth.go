@@ -164,6 +164,10 @@ func requiredPermission(method, path string) string {
 	if path == "/api/v1/pool/config" && (method == http.MethodPut || method == http.MethodPost) {
 		return "admin"
 	}
+	// Backup / restore touch the entire data dir; admin-only.
+	if path == "/api/v1/backup" || path == "/api/v1/restore" {
+		return "admin"
+	}
 
 	// GET requests require "read" permission.
 	if method == http.MethodGet {

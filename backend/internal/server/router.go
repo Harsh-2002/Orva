@@ -154,8 +154,23 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/executions", execHandler.List)
 	r.mux.HandleFunc("GET /api/v1/executions/{exec_id}", execHandler.Get)
 	r.mux.HandleFunc("GET /api/v1/executions/{exec_id}/logs", execHandler.GetLogs)
+	r.mux.HandleFunc("GET /api/v1/executions/{exec_id}/request", execHandler.GetRequest)
 	r.mux.HandleFunc("DELETE /api/v1/executions/{exec_id}", execHandler.Delete)
 	r.mux.HandleFunc("POST /api/v1/executions/bulk-delete", execHandler.BulkDelete)
+
+	// Replay (v0.4 A3): re-runs a captured request against the function's
+	// current code. Records a fresh execution row with replay_of pointing
+	// at the original; chains of replays are allowed.
+	replayHandler := &handlers.ReplayHandler{
+		DB:       r.db,
+		Registry: r.registry,
+		Pool:     r.poolMgr,
+		Metrics:  r.metrics,
+	}
+	if r.eventHub != nil {
+		replayHandler.PublishEvent = r.eventHub.Publish
+	}
+	r.mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", replayHandler.Replay)
 
 	// Live Activity feed — historical companion to the SSE event stream.
 	activityHandler := &handlers.ActivityHandler{DB: r.db}
@@ -280,6 +295,12 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/keys", keyHandler.Create)
 	r.mux.HandleFunc("GET /api/v1/keys", keyHandler.List)
 	r.mux.HandleFunc("DELETE /api/v1/keys/{key_id}", keyHandler.Delete)
+
+	// Backup / restore — operator-only snapshot of the data dir.
+	// admin permission gated in middleware_auth.go::requiredPermission.
+	backupHandler := &handlers.BackupHandler{DB: r.db, Cfg: r.cfg}
+	r.mux.HandleFunc("GET /api/v1/backup", backupHandler.Download)
+	r.mux.HandleFunc("POST /api/v1/restore", backupHandler.Restore)
 
 	// Per-function autoscaler tuning. PUT/POST require admin (enforced by
 	// middleware_auth.go). Errmap.go advertises this as the recovery path

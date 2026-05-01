@@ -8,11 +8,85 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/sandbox"
 )
+
+// redactHeaders names the HTTP headers whose values must not be persisted
+// in the captured-request row that powers the dashboard's Replay button
+// (v0.4 A3). Lookup is case-insensitive — the keys here are lower-case
+// and callers MUST normalise the inbound header name before checking.
+//
+// Anything that smells like an authentication credential lives here:
+// platform-issued bearer tokens, browser cookies, the operator-issued
+// Orva API key, the per-process internal token used by the SDK, and
+// HTTP/1.1's proxy auth. If a future header carries credentials, add
+// it to this map — there is no allow-list fallback.
+var redactHeaders = map[string]bool{
+	"authorization":         true,
+	"cookie":                true,
+	"x-orva-api-key":        true,
+	"x-orva-internal-token": true,
+	"proxy-authorization":   true,
+}
+
+const redactedValue = "[REDACTED]"
+
+// captureCache holds the cached value of replay_capture_enabled +
+// replay_capture_max_bytes. The proxy reads system_config exactly once at
+// package level and refreshes it on a long timer, trading a small window
+// of staleness (≤ captureRefreshEvery) for zero per-invoke DB hits on the
+// hot path. An operator who flips the toggle from the Settings page sees
+// the change apply within one refresh cycle.
+type captureCache struct {
+	enabled  atomic.Bool
+	maxBytes atomic.Int64
+	loaded   atomic.Bool
+}
+
+var capCache captureCache
+
+const captureRefreshEvery = 30 * time.Second
+
+// LoadCaptureConfig seeds the cached replay-capture settings from the
+// database and starts a background refresher. Idempotent — safe to call
+// from server.New regardless of whether tests already wired a different
+// proxy. Tests that don't call this fall through to "disabled" since the
+// loaded flag stays false.
+func LoadCaptureConfig(db *database.Database) {
+	if db == nil {
+		return
+	}
+	refresh := func() {
+		enabled := db.GetSystemConfigInt("replay_capture_enabled", 1) == 1
+		maxBytes := int64(db.GetSystemConfigInt("replay_capture_max_bytes", 1<<20))
+		capCache.enabled.Store(enabled)
+		capCache.maxBytes.Store(maxBytes)
+		capCache.loaded.Store(true)
+	}
+	refresh()
+	go func() {
+		t := time.NewTicker(captureRefreshEvery)
+		defer t.Stop()
+		for range t.C {
+			refresh()
+		}
+	}()
+}
+
+// captureSettings returns the cached toggle + cap. Returns (false, 0)
+// when LoadCaptureConfig was never called (tests, unit benchmarks);
+// callers fall back to "no capture".
+func captureSettings() (bool, int64) {
+	if !capCache.loaded.Load() {
+		return false, 0
+	}
+	return capCache.enabled.Load(), capCache.maxBytes.Load()
+}
 
 // Proxy executes function code via warm pool workers and writes the response.
 type Proxy struct {
@@ -24,6 +98,11 @@ type Proxy struct {
 	// Pool is the warm worker manager. When non-nil, Forward uses warm
 	// workers; when nil (tests), falls back to the legacy one-shot path.
 	Pool *pool.Manager
+
+	// DB is used to persist the captured request envelope for replay
+	// (v0.4 A3). Optional: when nil, capture is skipped silently. Tests
+	// without a DB wired up keep working unchanged.
+	DB *database.Database
 
 	Config ProxyConfig
 }
@@ -123,6 +202,23 @@ func (p *Proxy) Forward(
 	headers["x-orva-execution-id"] = execID
 	headers["x-orva-timeout-ms"] = strconv.FormatInt(timeoutMS, 10)
 
+	// v0.4 A3: capture the inbound request for the dashboard's Replay
+	// button. We piggy-back on the body bytes already in memory and on
+	// the cached toggle so the hot path pays at most a small JSON marshal
+	// + a non-blocking channel send.
+	//
+	// Cache-staleness tradeoff: replay_capture_enabled is read from
+	// system_config every captureRefreshEvery (30s). Operators flipping
+	// the toggle from the Settings page see it apply within one cycle —
+	// vs. a SELECT-per-invoke that would cost ~50µs at p99. The cap is
+	// likewise cached so the operator can shrink the maximum body size
+	// without redeploying.
+	if p.DB != nil {
+		if enabled, maxBytes := captureSettings(); enabled {
+			p.captureRequest(execID, r.Method, path, r.Header, body, maxBytes)
+		}
+	}
+
 	reqJSON, _ := json.Marshal(request{
 		Method:  r.Method,
 		Path:    path,
@@ -211,4 +307,61 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…(truncated)"
+}
+
+// captureRequest builds the captured-request envelope for the dashboard's
+// Replay button (v0.4 A3) and queues it via the async writer. Sensitive
+// header values (see redactHeaders) are replaced with "[REDACTED]" before
+// the JSON serialise — the on-disk row never contains a credential.
+//
+// Bodies larger than maxBytes are cut to maxBytes with truncated=1 so
+// the replay handler can refuse them (replay would be inaccurate).
+//
+// The function never returns an error — capture is best-effort and any
+// failure must not affect the in-flight invocation.
+func (p *Proxy) captureRequest(execID, method, path string, hdr http.Header, body []byte, maxBytes int64) {
+	if maxBytes <= 0 {
+		maxBytes = 1 << 20 // 1MiB safety floor
+	}
+
+	redacted := make(map[string]string, len(hdr))
+	for k, v := range hdr {
+		if len(v) == 0 {
+			continue
+		}
+		lower := strings.ToLower(k)
+		if redactHeaders[lower] {
+			redacted[lower] = redactedValue
+			continue
+		}
+		redacted[lower] = v[0]
+	}
+	headersJSON, err := json.Marshal(redacted)
+	if err != nil {
+		// JSON of a string-string map can only fail on memory pressure;
+		// give up rather than corrupt the row.
+		return
+	}
+
+	truncated := false
+	captured := body
+	if int64(len(body)) > maxBytes {
+		captured = body[:maxBytes]
+		truncated = true
+	}
+
+	// Copy the slice — body's backing array is owned by the request and
+	// we're handing this off to a different goroutine (the async writer).
+	bodyCopy := make([]byte, len(captured))
+	copy(bodyCopy, captured)
+
+	p.DB.AsyncInsertExecutionRequest(&database.ExecutionRequest{
+		ExecutionID: execID,
+		Method:      method,
+		Path:        path,
+		HeadersJSON: string(headersJSON),
+		Body:        bodyCopy,
+		Truncated:   truncated,
+		CapturedAt:  time.Now().UnixMilli(),
+	})
 }

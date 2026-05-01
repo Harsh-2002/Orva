@@ -133,11 +133,18 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	px := &proxy.Proxy{
 		Sandbox: limiter,
 		Pool:    poolMgr,
+		DB:      db,
 		Config: proxy.ProxyConfig{
 			NsjailBin: cfg.Sandbox.NsjailBin,
 			RootfsDir: cfg.Sandbox.RootfsDir,
 		},
 	}
+
+	// Seed the cached replay-capture toggle + max-bytes (v0.4 A3). The
+	// hot path reads these via atomic loads; this loader pre-fills them
+	// and starts a background refresher so operators can flip the toggle
+	// from the Settings page without restarting orvad.
+	proxy.LoadCaptureConfig(db)
 
 	sm := secrets.New(db, cfg.Data.Dir)
 

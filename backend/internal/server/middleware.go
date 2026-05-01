@@ -290,6 +290,12 @@ func generateRequestID() string {
 // get a consistent error shape across the API.
 func bodySizeMiddleware(maxBytes int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Restore uploads ship a tarball that can dwarf the JSON cap;
+		// the admin-only auth gate is the abuse control there.
+		if r.URL.Path == "/api/v1/restore" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		// Cheap up-front check: if the client sent a Content-Length we
 		// trust and it already exceeds the cap, fail before the body is
 		// streamed at all.
