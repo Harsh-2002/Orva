@@ -186,12 +186,33 @@ func resolveCachedEntrypoint(versionDir, original string) string {
 		return original
 	}
 	outDir := readTSConfigOutDir(tsConfig)
-	stem := strings.TrimSuffix(original, filepath.Ext(original))
+	// `original` may already be the post-compile path
+	// (`dist/handler.js`) on the second build of a function — strip the
+	// outDir prefix so we don't end up with `dist/dist/handler.js`.
+	stem := tsSourceStem(original, outDir)
 	candidate := filepath.Join(outDir, stem+".js")
 	if _, err := os.Stat(filepath.Join(versionDir, candidate)); err == nil {
 		return candidate
 	}
 	return original
+}
+
+// tsSourceStem returns the source-file stem (no directory, no extension)
+// for a TS entrypoint that may have already been rewritten to its
+// post-compile form. e.g.
+//
+//	("handler.ts",        "dist") → "handler"
+//	("dist/handler.js",   "dist") → "handler"
+//	("src/handler.ts",    "dist") → "src/handler"
+//
+// We only strip the leading outDir prefix; nested dirs under an outDir
+// like dist/sub/handler.js are preserved as `sub/handler` so the caller
+// can still locate the right compiled file.
+func tsSourceStem(entrypoint, outDir string) string {
+	noExt := strings.TrimSuffix(entrypoint, filepath.Ext(entrypoint))
+	prefix := outDir + string(filepath.Separator)
+	noExt = strings.TrimPrefix(noExt, prefix)
+	return noExt
 }
 
 // checkFreeDisk returns ErrInsufficientDisk when the data dir has less
@@ -488,7 +509,10 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoin
 	}
 
 	outDir := readTSConfigOutDir(tsConfigPath)
-	stem := strings.TrimSuffix(entrypoint, filepath.Ext(entrypoint))
+	// On a re-deploy `entrypoint` may already carry the `dist/` prefix
+	// from the previous build's persisted entrypoint — strip it so we
+	// don't double-nest the outDir.
+	stem := tsSourceStem(entrypoint, outDir)
 	resolved := filepath.Join(outDir, stem+".js")
 	compiled := filepath.Join(codeDir, resolved)
 	if _, err := os.Stat(compiled); err != nil {
@@ -496,12 +520,26 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoin
 	}
 	// Successful tsc runs silently — surface a single line into build_logs
 	// so operators can see "tsc ran" in the deploy progress UI without
-	// having to grep for absence-of-error.
-	if b != nil && b.Logger != nil {
-		b.Logger.Append("tsc", fmt.Sprintf("compiled to %s", resolved))
-	}
+	// having to grep for absence-of-error. We use slog as well as the
+	// build_log sink so the line shows up regardless of whether a Logger
+	// is wired (legacy synchronous deploys, unit tests).
+	logTSCCompiled(b, resolved)
 	slog.Info("typescript compile complete", "entrypoint", resolved)
 	return resolved, nil
+}
+
+// logTSCCompiled emits the post-tsc summary line. Split out so the call
+// site stays compact and so the always-fires guarantee is in one place:
+// (a) we always log to slog, (b) we always append to build_logs when a
+// Logger is attached. The previous inline `b != nil && b.Logger != nil`
+// guard meant a nil Builder (theoretical) could swallow the line; this
+// helper keeps the same nil-safety while making the intent obvious.
+func logTSCCompiled(b *Builder, resolved string) {
+	line := fmt.Sprintf("compiled to %s", resolved)
+	if b != nil && b.Logger != nil {
+		b.Logger.Append("tsc", line)
+	}
+	slog.Info("tsc compiled", "entrypoint", resolved)
 }
 
 // verifyTypeScriptDeclared reads package.json and confirms `typescript`

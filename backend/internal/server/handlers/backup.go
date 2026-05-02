@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/backup"
@@ -56,7 +58,11 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := fmt.Sprintf("orva-backup-%s.tar.gz", time.Now().UTC().Format(time.RFC3339))
+	// RFC3339 timestamps include `:` (e.g. 2026-05-01T12:34:56Z) which is
+	// illegal on Windows / SMB filesystems. Replace `:` with `-` so the
+	// filename is portable across the dashboard's likely download targets.
+	stamp := strings.ReplaceAll(time.Now().UTC().Format(time.RFC3339), ":", "-")
+	filename := fmt.Sprintf("orva-backup-%s.tar.gz", stamp)
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	// Disable any intermediate buffering proxies might do.
@@ -109,6 +115,14 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	if err := backup.RestoreFrom(file, h.Cfg.Data.Dir); err != nil {
+		// Bad gzip / non-orva tarball / corrupt-db etc are the *client's*
+		// problem, not ours — surface them as 400 BAD_ARCHIVE so callers
+		// don't page on a malformed upload. Anything else (disk I/O,
+		// rename failure, …) stays 500 RESTORE_FAILED.
+		if errors.Is(err, backup.ErrBadArchive) {
+			respond.Error(w, http.StatusBadRequest, "BAD_ARCHIVE", err.Error(), "")
+			return
+		}
 		respond.Error(w, http.StatusInternalServerError, "RESTORE_FAILED", err.Error(), "")
 		return
 	}

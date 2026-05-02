@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -77,6 +79,8 @@ func init() {
 	inboundTestCmd.Flags().String("data", `{"hello":"orva"}`, "JSON payload to sign and POST")
 	inboundTestCmd.Flags().String("secret", "",
 		"plaintext secret captured at create time (required — server can't recover it)")
+	inboundTestCmd.Flags().String("format", "",
+		"override signature format (hmac_sha256_hex|hmac_sha256_base64|github|stripe|slack); default: read from server")
 	inboundTestCmd.MarkFlagRequired("secret")
 }
 
@@ -344,10 +348,11 @@ func runInboundDelete(cmd *cobra.Command, args []string) {
 	fmt.Printf("Inbound webhook %s deleted\n", id)
 }
 
-// runInboundTest signs the payload locally with --secret using
-// hmac_sha256_hex (the "default" format) and POSTs it to the trigger
-// URL. For other formats (github/stripe/slack) operators usually use
-// `openssl dgst` directly; this CLI shortcut covers the common case.
+// runInboundTest signs the payload locally with --secret in whatever
+// format the trigger row declares (or --format override) and POSTs it
+// to the trigger URL. Mirrors the verifier in
+// internal/server/handlers/inbound_webhook_trigger.go so all five
+// supported formats round-trip.
 func runInboundTest(cmd *cobra.Command, args []string) {
 	client, err := getClient(cmd)
 	if err != nil {
@@ -358,6 +363,7 @@ func runInboundTest(cmd *cobra.Command, args []string) {
 
 	dataStr, _ := cmd.Flags().GetString("data")
 	secret, _ := cmd.Flags().GetString("secret")
+	formatOverride, _ := cmd.Flags().GetString("format")
 
 	// Pull the trigger row so we know which header + format to send.
 	getResp, err := client.Get("/api/v1/functions/" + fnID + "/inbound-webhooks/" + id)
@@ -376,21 +382,37 @@ func runInboundTest(cmd *cobra.Command, args []string) {
 		exitError("decode response: %v", err)
 	}
 
-	// Compute signature.
+	format := hook.SignatureFormat
+	if formatOverride != "" {
+		format = formatOverride
+	}
+
+	// Compute signature, dispatched by format. extraHeaders holds any
+	// additional headers the format needs alongside the primary signature
+	// (e.g. Slack's X-Slack-Request-Timestamp).
 	body := []byte(dataStr)
 	header := hook.SignatureHeader
-	value := ""
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(body)
-	digest := mac.Sum(nil)
-	switch hook.SignatureFormat {
+	var value string
+	extraHeaders := map[string]string{}
+
+	switch format {
 	case "hmac_sha256_hex":
-		value = hex.EncodeToString(digest)
+		value = hex.EncodeToString(hmacSHA256(secret, body))
+	case "hmac_sha256_base64":
+		value = base64.StdEncoding.EncodeToString(hmacSHA256(secret, body))
 	case "github":
-		value = "sha256=" + hex.EncodeToString(digest)
+		value = "sha256=" + hex.EncodeToString(hmacSHA256(secret, body))
+	case "stripe":
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		signed := []byte(ts + "." + string(body))
+		value = "t=" + ts + ",v1=" + hex.EncodeToString(hmacSHA256(secret, signed))
+	case "slack":
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		signed := []byte("v0:" + ts + ":" + string(body))
+		value = "v0=" + hex.EncodeToString(hmacSHA256(secret, signed))
+		extraHeaders["X-Slack-Request-Timestamp"] = ts
 	default:
-		exitError("CLI test only signs hmac_sha256_hex or github format; "+
-			"got %q. Use openssl/curl directly for stripe/slack/base64.", hook.SignatureFormat)
+		exitError("unknown signature format %q (expected hmac_sha256_hex|hmac_sha256_base64|github|stripe|slack)", format)
 	}
 
 	// POST to the trigger. The CLI client targets /api/v1; build the
@@ -402,6 +424,9 @@ func runInboundTest(cmd *cobra.Command, args []string) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(header, value)
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		exitError("post: %v", err)
@@ -409,4 +434,10 @@ func runInboundTest(cmd *cobra.Command, args []string) {
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	fmt.Printf("HTTP %d\n%s\n", resp.StatusCode, string(respBody))
+}
+
+func hmacSHA256(secret string, body []byte) []byte {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return mac.Sum(nil)
 }

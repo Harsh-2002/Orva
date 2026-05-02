@@ -17,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/secrets"
 	"github.com/Harsh-2002/Orva/internal/server/events"
 	"github.com/Harsh-2002/Orva/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/internal/version"
 )
 
 type Router struct {
@@ -385,7 +386,7 @@ func (r *Router) setupRoutes() {
 		Metrics:    r.metrics,
 		EventHub:   r.eventHub,
 		DataDir:    r.cfg.Data.Dir,
-		Version:    "0.1.0",
+		Version:    version.Version,
 	})
 	r.mux.Handle("/mcp", mcpHandler)
 	r.mux.Handle("/mcp/", mcpHandler)

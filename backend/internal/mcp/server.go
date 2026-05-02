@@ -155,11 +155,13 @@ You can use these tools to do everything a developer or operator can do
 from the web UI: list and create functions, deploy code, watch builds,
 invoke functions, read execution logs, manage secrets, configure
 custom routes, schedule cron jobs, enqueue background work, store
-key/value state, subscribe to system-event webhooks, and inspect
+key/value state, subscribe to system-event webhooks, accept signed
+inbound webhook POSTs, save reusable request fixtures, and inspect
 system health.
 
 A typical workflow to ship a new function:
-  1. list_runtimes  — see which Python/Node versions are available.
+  1. list_runtimes  — see which Python/Node/TypeScript versions are available
+     (Python 3.14, Node.js 24, and TypeScript on the Node runtime in v0.4).
   2. create_function — give it a name, runtime, and resource limits.
   3. (optional) set_secret — store API keys the function will read at runtime.
   4. (optional) update_function with network_mode="egress" if it needs to call external HTTPS.
@@ -176,6 +178,35 @@ v0.2 / v0.3 capabilities:
     don't reach for these MCP tools when the operator is happy clicking around.
   - create_webhook / list_webhooks / test_webhook — subscribe to system events
     (deployment.failed, job.failed, cron.failed, etc.) with HMAC-signed POSTs.
+
+v0.4 capabilities:
+  - Inbound webhook triggers — list_inbound_webhooks / create_inbound_webhook /
+    delete_inbound_webhook expose signed external POST endpoints that fan into
+    a function. Five signature formats are supported out of the box: GitHub
+    (X-Hub-Signature-256), Stripe (Stripe-Signature t=…,v1=…), Slack (v0=…),
+    generic HMAC-SHA256, and unsigned (token-in-header).
+  - Saved request fixtures — list_fixtures / save_fixture / delete_fixture
+    plus test_function_with_fixture, a Postman-style invoke variant that
+    replays a stored body+headers preset against a function.
+  - Streaming responses — invoke_function transparently streams when the
+    handler emits chunked output; SSE is preserved end-to-end.
+  - Backup / restore — full system backup (DB + functions tree) and one-shot
+    restore endpoints, exposed via the REST API and the dashboard's Settings
+    page; not yet wrapped as MCP tools.
+  - Settings storage + vacuum — GET /api/v1/system/storage breaks down DB,
+    WAL, and functions-tree sizes; POST /api/v1/system/vacuum runs
+    PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM to reclaim space.
+  - TypeScript runtime — first-class TS support on the Node 24 runtime; pick
+    runtime="node" and a .ts handler source.
+  - /metrics histograms — orva_invocation_duration_ms_bucket{le=…} +
+    orva_sandbox_spawn_duration_ms_bucket{le=…} are emitted alongside the
+    legacy quantile lines, so Grafana can render heatmaps and recompute
+    percentiles via histogram_quantile().
+
+Operators can browse saved fixtures and configured inbound webhook
+triggers from the dashboard (/web/functions/<name>/fixtures and
+/web/functions/<name>/triggers); prefer pointing humans there over
+driving these tools when the workflow is interactive.
 
 Destructive tools (delete_*, rollback_*) require an explicit
 "confirm: true" argument so a runaway loop can't accidentally delete

@@ -23,6 +23,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,6 +31,12 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrBadArchive is returned by RestoreFrom when the supplied bytes are
+// not a valid gzip-tarball produced by ArchiveTo. The HTTP layer maps
+// this to 400 BAD_ARCHIVE so the client knows the request body — not
+// the server — is at fault.
+var ErrBadArchive = errors.New("malformed archive")
 
 // SnapshotDB writes a consistent point-in-time copy of the live SQLite
 // database to outPath. Uses `VACUUM INTO`, which holds a shared lock for
@@ -82,6 +89,17 @@ func ArchiveTo(w io.Writer, dataDir, snapshotPath string) error {
 	// only the versions trees. Skip the `current` symlinks (they are
 	// re-derived on restore) and any other top-level junk operators may
 	// have left behind.
+	//
+	// We additionally filter to function ids that exist in the snapshot's
+	// `functions` table. Without this, deleted functions whose on-disk
+	// content hasn't been GC'd yet ride along in the archive — wasted
+	// bytes that would also re-create orphans on restore. Reading the IDs
+	// from the snapshot (not the live DB) keeps the archive self-consistent
+	// with the orva.db we're about to ship.
+	liveIDs, err := loadLiveFunctionIDs(snapshotPath)
+	if err != nil {
+		return fmt.Errorf("load live fn ids: %w", err)
+	}
 	functionsDir := filepath.Join(dataDir, "functions")
 	if _, err := os.Stat(functionsDir); err == nil {
 		err := filepath.Walk(functionsDir, func(path string, info os.FileInfo, err error) error {
@@ -104,6 +122,21 @@ func ArchiveTo(w io.Writer, dataDir, snapshotPath string) error {
 			if strings.HasPrefix(base, ".") && path != functionsDir {
 				return nil
 			}
+			// Orphan filter: paths under functions/<id>/ where <id> is
+			// not in the snapshot's `functions` table get pruned. The
+			// functionsDir itself and the per-function root dir are
+			// matched by the rel == "functions" / rel == "functions/<id>"
+			// checks below — the per-function root is allowed through
+			// only when <id> is live, which means orphan dirs never get
+			// a header in the tar.
+			if id, ok := fnIDFromRel(rel); ok {
+				if _, live := liveIDs[id]; !live {
+					if info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+			}
 			if info.IsDir() {
 				// Emit a directory header so `tar t` shows the tree;
 				// extraction does MkdirAll regardless.
@@ -125,6 +158,48 @@ func ArchiveTo(w io.Writer, dataDir, snapshotPath string) error {
 		}
 	}
 	return nil
+}
+
+// fnIDFromRel extracts the function ID component from an archive-relative
+// path. Paths look like "functions" (the root, no id), or
+// "functions/<id>/...". Returns ("", false) for the root and any path that
+// isn't under functions/.
+func fnIDFromRel(rel string) (string, bool) {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) < 2 || parts[0] != "functions" {
+		return "", false
+	}
+	id := parts[1]
+	if id == "" {
+		return "", false
+	}
+	return id, true
+}
+
+// loadLiveFunctionIDs reads the set of function IDs from the snapshot
+// database. The snapshot is a fully-checkpointed SQLite file written by
+// VACUUM INTO — opening it read-only is safe even while the live DB is
+// taking writes.
+func loadLiveFunctionIDs(snapshotPath string) (map[string]struct{}, error) {
+	db, err := sql.Open("sqlite", snapshotPath+"?mode=ro")
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT id FROM functions`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = struct{}{}
+	}
+	return out, rows.Err()
 }
 
 // addFileToTar streams a single regular file into the archive at the
@@ -196,13 +271,14 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 
 	stagedDB := filepath.Join(stage, "orva.db")
 	if _, err := os.Stat(stagedDB); err != nil {
-		return fmt.Errorf("restore: archive missing orva.db")
+		return fmt.Errorf("%w: archive missing orva.db", ErrBadArchive)
 	}
 	// Validate by opening + running migrations. If the file is
 	// corrupted or wasn't actually SQLite this fails loudly here, before
-	// we touch the live DB.
+	// we touch the live DB. Validation failures point at the supplied
+	// file, not the server, so flag them as bad-archive too.
 	if err := validateStagedDB(stagedDB); err != nil {
-		return fmt.Errorf("restore: validate staged db: %w", err)
+		return fmt.Errorf("%w: validate staged db: %v", ErrBadArchive, err)
 	}
 
 	livePath := filepath.Join(dataDir, "orva.db")
@@ -282,7 +358,9 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 func extractTarGz(r io.Reader, destDir string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
-		return fmt.Errorf("gzip open: %w", err)
+		// Wrap the gzip error so the HTTP layer can map it to 400
+		// BAD_ARCHIVE — the client supplied a non-gzip body.
+		return fmt.Errorf("%w: gzip open: %v", ErrBadArchive, err)
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
@@ -292,18 +370,18 @@ func extractTarGz(r io.Reader, destDir string) error {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("tar read: %w", err)
+			return fmt.Errorf("%w: tar read: %v", ErrBadArchive, err)
 		}
 		// Reject absolute paths and traversal.
 		clean := filepath.Clean(hdr.Name)
 		if filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
-			return fmt.Errorf("unsafe path in archive: %s", hdr.Name)
+			return fmt.Errorf("%w: unsafe path in archive: %s", ErrBadArchive, hdr.Name)
 		}
 		target := filepath.Join(destDir, clean)
 		// Defense-in-depth: the joined path must still live under
 		// destDir even after Clean.
 		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(filepath.Separator)) && target != filepath.Clean(destDir) {
-			return fmt.Errorf("unsafe path in archive: %s", hdr.Name)
+			return fmt.Errorf("%w: unsafe path in archive: %s", ErrBadArchive, hdr.Name)
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:

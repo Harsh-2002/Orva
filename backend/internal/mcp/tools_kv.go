@@ -110,8 +110,8 @@ type KVGetInput struct {
 	Key        string `json:"key"`
 }
 type KVGetOutput struct {
-	Found bool   `json:"found"`
-	Entry KVView `json:"entry,omitempty"`
+	Found bool    `json:"found"`
+	Entry *KVView `json:"entry,omitempty"`
 }
 
 // KVPutInput uses the same KVValue envelope as the output. Agents pick
@@ -172,7 +172,8 @@ func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				if err != nil {
 					return nil, KVGetOutput{}, err
 				}
-				return nil, KVGetOutput{Found: true, Entry: toKVView(entry)}, nil
+				view := toKVView(entry)
+				return nil, KVGetOutput{Found: true, Entry: &view}, nil
 			},
 		)
 	})

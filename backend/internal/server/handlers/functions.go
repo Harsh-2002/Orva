@@ -29,6 +29,26 @@ import (
 // has been pruned by the GC. errmap.go maps it to HTTP 410 VERSION_GCD.
 var errVersionGCd = errors.New("requested version has been garbage-collected")
 
+// resolveFnID accepts either an ID (fn_xxx) or a friendly name and
+// returns the canonical function ID. Mirrors the helper used by the KV /
+// fixtures / inbound-webhook handlers so /functions/{name}/... and
+// /functions/{id}/... behave identically across the API surface.
+func (h *FunctionHandler) resolveFnID(idOrName string) (string, bool) {
+	idOrName = strings.TrimSpace(idOrName)
+	if idOrName == "" {
+		return "", false
+	}
+	if strings.HasPrefix(idOrName, "fn_") {
+		if _, err := h.Registry.Get(idOrName); err == nil {
+			return idOrName, true
+		}
+	}
+	if fn, err := h.DB.GetFunctionByName(idOrName); err == nil && fn != nil {
+		return fn.ID, true
+	}
+	return "", false
+}
+
 // FunctionHandler handles function CRUD and deploy operations.
 type FunctionHandler struct {
 	Registry   *registry.Registry
@@ -271,9 +291,14 @@ func (h *FunctionHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Update handles PUT /api/v1/functions/{fn_id}.
 func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := extractPathParam(r.URL.Path, "/api/v1/functions/")
-	if fnID == "" {
+	rawID := extractPathParam(r.URL.Path, "/api/v1/functions/")
+	if rawID == "" {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing function ID", reqID)
+		return
+	}
+	fnID, ok := h.resolveFnID(rawID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
 
@@ -405,12 +430,16 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /api/v1/functions/{fn_id}.
 func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := extractPathParam(r.URL.Path, "/api/v1/functions/")
-	if fnID == "" {
+	rawID := extractPathParam(r.URL.Path, "/api/v1/functions/")
+	if rawID == "" {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing function ID", reqID)
 		return
 	}
-
+	fnID, ok := h.resolveFnID(rawID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
 
 	if err := h.Registry.Delete(fnID); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to delete function", reqID)
@@ -427,9 +456,14 @@ func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // can pre-populate the editor with the actual code rather than a template.
 func (h *FunctionHandler) GetSource(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-	if fnID == "" {
+	rawID := r.PathValue("fn_id")
+	if rawID == "" {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing function ID", reqID)
+		return
+	}
+	fnID, ok := h.resolveFnID(rawID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
 
@@ -496,9 +530,14 @@ func (h *FunctionHandler) GetSource(w http.ResponseWriter, r *http.Request) {
 func (h *FunctionHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 
-	fnID := extractDeployFnID(r.URL.Path)
-	if fnID == "" {
+	rawID := extractDeployFnID(r.URL.Path)
+	if rawID == "" {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing function ID", reqID)
+		return
+	}
+	fnID, ok := h.resolveFnID(rawID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
 	fn, err := h.Registry.Get(fnID)
@@ -530,9 +569,14 @@ func (h *FunctionHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 // Accepts JSON {"code": "...", "filename": "handler.js"} — no file upload needed.
 func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-	if fnID == "" {
+	rawID := r.PathValue("fn_id")
+	if rawID == "" {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing function ID", reqID)
+		return
+	}
+	fnID, ok := h.resolveFnID(rawID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
 
@@ -757,9 +801,14 @@ type rollbackRequest struct {
 // serializes this against any deploy in flight.
 func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	fnID := r.PathValue("fn_id")
-	if fnID == "" {
+	rawID := r.PathValue("fn_id")
+	if rawID == "" {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing function ID", reqID)
+		return
+	}
+	fnID, ok := h.resolveFnID(rawID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
 

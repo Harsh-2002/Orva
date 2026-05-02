@@ -307,7 +307,6 @@ func (p *Proxy) Forward(
 	}
 	w.Header().Set("X-Orva-Execution-ID", execID)
 	w.Header().Set("X-Orva-Cold-Start", coldStartStr)
-	w.Header().Set("X-Orva-Duration-MS", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
 
 	sc := dres.StatusCode
 	if sc == 0 {
@@ -316,7 +315,10 @@ func (p *Proxy) Forward(
 
 	if !dres.Streaming {
 		// Historical single-write path — preserves byte-for-byte parity
-		// with pre-C1 behaviour for non-streaming handlers.
+		// with pre-C1 behaviour for non-streaming handlers. The duration
+		// header is the full wall-clock from request entry to body emit,
+		// which on a buffered handler equals total response time.
+		w.Header().Set("X-Orva-Duration-MS", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
 		w.WriteHeader(sc)
 		n, _ := w.Write([]byte(dres.Body))
 		result.StatusCode = sc
@@ -345,6 +347,30 @@ func (p *Proxy) Forward(
 	// middleware, unusual TLS termination), we still write — the data
 	// just gets buffered until the stream closes. We log nothing here
 	// because the path runs per-request.
+
+	// v0.4 polish: echo the streaming-config knobs as RESPONSE headers so
+	// operators inspecting the wire (curl -v, load balancers, tcpdump) can
+	// tell at a glance whether a given response was delivered as a stream
+	// and what keepalive cadence was in effect. We reuse the values already
+	// computed above for the request-side hint to the adapter.
+	w.Header().Set("x-orva-streaming-enabled", strconv.Itoa(streamingOn))
+	w.Header().Set("x-orva-stream-keepalive-seconds", strconv.Itoa(streamKeepaliveS))
+
+	// v0.4 polish: rename Duration→Ttfb on streaming responses.
+	//
+	// On a streaming response, response headers are flushed at the moment
+	// the FIRST chunk arrives — before the stream is finished. So a
+	// "duration" header written here can only ever measure time-to-first-
+	// byte, not total wall-clock. Naming it X-Orva-Duration-Ms is
+	// misleading: a 30s stream would advertise "duration: 4ms".
+	//
+	// Picked Option B: rename the header to X-Orva-Ttfb-Ms so the wire
+	// label matches what's measured. Total streaming duration is recorded
+	// on the executions row by Forward's caller (server/invoke.go) and is
+	// available via the executions REST/UI surfaces. Non-streaming
+	// responses keep X-Orva-Duration-Ms unchanged for back-compat.
+	w.Header().Set("X-Orva-Ttfb-Ms", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
+
 	flusher, _ := w.(http.Flusher)
 	w.WriteHeader(sc)
 	if flusher != nil {

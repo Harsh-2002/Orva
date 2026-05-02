@@ -13,6 +13,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/config"
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/registry"
+	"github.com/Harsh-2002/Orva/internal/version"
 )
 
 // testContext holds a test server and a valid admin API key.
@@ -82,8 +83,8 @@ func TestHealthEndpoint(t *testing.T) {
 	if resp["status"] != "healthy" {
 		t.Errorf("expected healthy status, got %v", resp["status"])
 	}
-	if resp["version"] != "0.1.0" {
-		t.Errorf("expected version 0.1.0, got %v", resp["version"])
+	if resp["version"] != version.Version {
+		t.Errorf("expected version %s, got %v", version.Version, resp["version"])
 	}
 }
 

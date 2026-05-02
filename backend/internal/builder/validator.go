@@ -19,6 +19,20 @@ const (
 // - No ELF binaries
 // - No symlinks pointing outside the directory
 // - No path traversal
+//
+// TypeScript redeploy note: when the tarball contains a tsconfig.json the
+// validator looks up the *source* .ts file rather than the persisted
+// post-compile entrypoint (e.g. dist/handler.js). This is required because
+// after the first successful TS build the function row's entrypoint has
+// already been rewritten to dist/handler.js (see queue.go FIX-2), but the
+// user's tarball on the second deploy ships only handler.ts — the dist/
+// directory is freshly populated by tsc during the build phase that runs
+// AFTER validation. Without this rewrite the validator would refuse the
+// archive and tsc would never get a chance to run.
+//
+// The lookup tries `<stem-of-entrypoint>.ts` first (so a row with
+// entrypoint = "dist/handler.js" resolves to "handler.ts"), then falls back
+// to "handler.ts", then to the first non-.d.ts file at the top level.
 func ValidateArchive(dir string, runtime string, entrypoint string) error {
 	// Resolve the directory to an absolute path.
 	absDir, err := filepath.Abs(dir)
@@ -26,10 +40,15 @@ func ValidateArchive(dir string, runtime string, entrypoint string) error {
 		return fmt.Errorf("resolve dir: %w", err)
 	}
 
+	// Resolve the entrypoint we actually expect to find on disk. For TS
+	// redeploys this swaps the persisted dist/handler.js for handler.ts;
+	// for everything else it returns the entrypoint unchanged.
+	checkEntry := resolveSourceEntrypoint(absDir, entrypoint)
+
 	// Check entrypoint exists.
-	entrypointPath := filepath.Join(absDir, entrypoint)
+	entrypointPath := filepath.Join(absDir, checkEntry)
 	if _, err := os.Stat(entrypointPath); os.IsNotExist(err) {
-		return fmt.Errorf("entrypoint not found: %s", entrypoint)
+		return fmt.Errorf("entrypoint not found: %s", checkEntry)
 	}
 
 	var totalSize int64
@@ -93,6 +112,54 @@ func ValidateArchive(dir string, runtime string, entrypoint string) error {
 	}
 
 	return nil
+}
+
+// resolveSourceEntrypoint maps the persisted function-row entrypoint onto
+// the actual source file present in the tarball when the archive contains a
+// tsconfig.json. Returns the original entrypoint unchanged for non-TS
+// projects, or when no plausible .ts source is found (in which case the
+// caller's stat() will surface the original error).
+func resolveSourceEntrypoint(absDir, entrypoint string) string {
+	if _, err := os.Stat(filepath.Join(absDir, "tsconfig.json")); err != nil {
+		return entrypoint
+	}
+	// If the persisted entrypoint already exists in the tarball (e.g. the
+	// user uploaded a pre-compiled dist/) honour it.
+	if _, err := os.Stat(filepath.Join(absDir, entrypoint)); err == nil {
+		return entrypoint
+	}
+	// Try `<basename-without-ext>.ts` derived from the persisted entrypoint
+	// so a row stamped with "dist/handler.js" resolves to "handler.ts".
+	base := filepath.Base(entrypoint)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	if stem != "" {
+		candidate := stem + ".ts"
+		if _, err := os.Stat(filepath.Join(absDir, candidate)); err == nil {
+			return candidate
+		}
+	}
+	// Canonical Orva starter name.
+	if _, err := os.Stat(filepath.Join(absDir, "handler.ts")); err == nil {
+		return "handler.ts"
+	}
+	// Last resort: first non-.d.ts at the top level.
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		return entrypoint
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".d.ts") {
+			continue
+		}
+		if strings.HasSuffix(name, ".ts") {
+			return name
+		}
+	}
+	return entrypoint
 }
 
 // checkELF opens a file and checks if it starts with the ELF magic bytes.

@@ -17,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/sandbox"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/version"
 )
 
 // SystemHandler handles system-level endpoints.
@@ -115,7 +116,7 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"status":         "healthy",
-		"version":        "0.1.0",
+		"version":        version.Version,
 		"uptime_seconds": int(uptime),
 		"database": map[string]any{
 			"status": "ok",
