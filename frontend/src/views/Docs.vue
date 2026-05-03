@@ -27,6 +27,22 @@
           <div class="docs-hero-actions">
             <button
               class="docs-hero-copy"
+              :class="{ copied: chatgptOpened }"
+              :aria-label="chatgptOpened ? 'ChatGPT opened — paste docs in next message' : 'Open ChatGPT in a new tab with the docs auto-injected'"
+              @click="onChatWithGPT"
+            >
+              <MessageSquare
+                v-if="!chatgptOpened"
+                class="w-3.5 h-3.5"
+              />
+              <Check
+                v-else
+                class="w-3.5 h-3.5"
+              />
+              {{ chatgptOpened ? 'Opened — paste in chat' : 'Chat with ChatGPT' }}
+            </button>
+            <button
+              class="docs-hero-copy"
               :class="{ copied: docsCopied }"
               :aria-label="docsCopied ? 'Markdown copied to clipboard' : 'Copy entire docs page as Markdown'"
               @click="onCopyDocs"
@@ -185,6 +201,8 @@
           </p>
         </div>
       </div>
+
+      <DeployPipelineDiagram />
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div class="space-y-2">
@@ -501,6 +519,8 @@
         </div>
       </div>
 
+      <WebhookDeliveryDiagram />
+
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div class="doc-card">
           <div class="doc-microlabel">
@@ -740,10 +760,34 @@
         </button>
       </div>
 
-      <CodeBlock
-        :code="aiPromptText"
-        lang="text"
-      />
+      <!-- Collapsed by default: shows a fade-out teaser of the prompt
+           with an Expand affordance. The Copy button above works
+           either way because it pulls the full string from state. -->
+      <div
+        class="prompt-collapse"
+        :class="{ expanded: promptExpanded }"
+      >
+        <CodeBlock
+          :code="aiPromptText"
+          lang="text"
+        />
+        <div
+          v-if="!promptExpanded"
+          class="prompt-collapse-fade"
+          aria-hidden="true"
+        ></div>
+      </div>
+      <button
+        class="prompt-expand-btn"
+        :aria-expanded="promptExpanded"
+        @click="promptExpanded = !promptExpanded"
+      >
+        <ChevronDown
+          class="w-3.5 h-3.5 transition-transform"
+          :class="{ 'rotate-180': promptExpanded }"
+        />
+        {{ promptExpanded ? 'Collapse system prompt' : 'Expand full system prompt (~400 lines)' }}
+      </button>
     </section>
 
     <!-- ── 9. Tracing ──────────────────────────────────────── -->
@@ -774,6 +818,8 @@
         spans, you don't import a tracer — you just write your handler and the
         platform plumbs IDs through every internal hop.
       </p>
+
+      <TraceTreeDiagram />
 
       <h3 class="doc-h3">What user code sees</h3>
       <p class="doc-prose">
@@ -907,6 +953,149 @@
         </table>
       </div>
     </section>
+
+    <!-- ── 11. CLI ──────────────────────────────────────────────── -->
+    <section
+      id="cli"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">11</span>
+        <div>
+          <h2 class="doc-section-title">
+            CLI
+          </h2>
+          <p class="doc-lede">
+            <code class="doc-chip">orva</code> is a single static binary
+            that talks to a remote (or local) Orva server over HTTPS.
+            Same binary as the daemon — <code class="doc-chip">orva serve</code>
+            starts a server, every other subcommand is a CLI client.
+            Drop it on operator laptops, CI runners, or anywhere bash
+            runs.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="doc-card">
+          <div class="doc-microlabel">Install (server included)</div>
+          <div class="doc-card-body">
+            <code class="doc-chip">curl … install.sh | sh</code>
+            <p class="mt-1.5 text-foreground-muted">
+              Full install: daemon + nsjail + rootfs + CLI.
+            </p>
+          </div>
+        </div>
+        <div class="doc-card">
+          <div class="doc-microlabel">Install (CLI only)</div>
+          <div class="doc-card-body">
+            <code class="doc-chip">install.sh --cli-only</code>
+            <p class="mt-1.5 text-foreground-muted">
+              ~10 MB binary at <code>/usr/local/bin/orva</code>. No service.
+            </p>
+          </div>
+        </div>
+        <div class="doc-card">
+          <div class="doc-microlabel">Inside Docker</div>
+          <div class="doc-card-body">
+            <code class="doc-chip">docker exec orva orva …</code>
+            <p class="mt-1.5 text-foreground-muted">
+              CLI auto-authed via <code>~/.orva/config.yaml</code>.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="doc-h3">Authenticate</h3>
+      <p class="doc-prose">
+        The CLI reads <code class="doc-chip">~/.orva/config.yaml</code>
+        for <code class="doc-chip">endpoint</code> + <code class="doc-chip">api_key</code>.
+        Generate a key from <router-link
+          to="/api-keys"
+          class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
+        >Keys</router-link> in the dashboard, then:
+      </p>
+      <CodeBlock
+        :code="cliLogin"
+        lang="bash"
+      />
+
+      <h3 class="doc-h3">Command index</h3>
+      <div class="doc-table-wrap">
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Subcommands</th>
+              <th class="hidden md:table-cell">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in cliIndex" :key="c.cmd">
+              <td class="doc-cell-key whitespace-nowrap">
+                <code>orva {{ c.cmd }}</code>
+              </td>
+              <td class="doc-cell-mono">{{ c.subs }}</td>
+              <td class="doc-cell-body hidden md:table-cell">{{ c.purpose }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="doc-h3">Common recipes</h3>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">Deploy a function from a directory</div>
+        <CodeBlock
+          :code="cliDeploy"
+          lang="bash"
+        />
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">Invoke + tail logs</div>
+        <CodeBlock
+          :code="cliInvokeLogs"
+          lang="bash"
+        />
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">Manage KV state</div>
+        <CodeBlock
+          :code="cliKv"
+          lang="bash"
+        />
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">Secrets, cron, jobs, webhooks</div>
+        <CodeBlock
+          :code="cliMisc"
+          lang="bash"
+        />
+      </div>
+
+      <div class="space-y-2">
+        <div class="doc-microlabel">System health, metrics, vacuum</div>
+        <CodeBlock
+          :code="cliSystem"
+          lang="bash"
+        />
+      </div>
+
+      <Callout
+        :icon="KeyRound"
+        title="Shell completion"
+      >
+        Generate completion for your shell:
+        <code class="doc-chip">orva completion bash | sudo tee /etc/bash_completion.d/orva</code>,
+        or <code class="doc-chip">zsh</code> /
+        <code class="doc-chip">fish</code> /
+        <code class="doc-chip">powershell</code>.
+        Tab-completes commands, subcommands, and flags.
+      </Callout>
+    </section>
   </div>
 </template>
 
@@ -922,6 +1111,8 @@ import {
   Gauge,
   ChevronRight,
   CalendarClock,
+  MessageSquare,
+  ChevronDown,
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
 import {
@@ -972,6 +1163,7 @@ const tocItems = [
   { id: 'generate',  num: '08', label: 'AI prompt' },
   { id: 'tracing',   num: '09', label: 'Tracing' },
   { id: 'errors',    num: '10', label: 'Errors' },
+  { id: 'cli',       num: '11', label: 'CLI' },
 ]
 
 // activeSection drives the highlight on the Jump-to chips. We use
@@ -1059,6 +1251,144 @@ const NodeGlyph = defineComponent({
           fill: '#3F873F',
           d: 'M128 64c-3 0-5.7.7-8 2.3L73 92c-5 2.7-8 8-8 13.6V169c0 5.6 3 10.7 8 13.5l13 7.4c6.3 3.1 8.5 3.1 11.4 3.1 9.4 0 14.8-5.7 14.8-15.6V117c0-1-.7-1.7-1.7-1.7H103c-1 0-1.7.7-1.7 1.7v60.2c0 4.4-4.5 8.7-11.8 5.1l-13.7-7.9a1.6 1.6 0 0 1-.8-1.4v-63.4c0-.6.3-1 .8-1.4l46.8-26.9c.4-.3 1-.3 1.4 0L171 110c.5.4.8.8.8 1.4V174a1.7 1.7 0 0 1-.8 1.4l-46.8 27c-.4.2-1 .2-1.4 0l-12-7.2c-.4-.2-.8-.2-1.2 0-3.4 1.9-4 2.2-7.2 3.3-.8.3-2 .7.4 2.1l15.7 9.3c2.5 1.4 5.3 2.2 8.2 2.2 2.9 0 5.7-.8 8.2-2.2L181 184c5-2.8 8-7.9 8-13.5V107c0-5.6-3-10.7-8-13.5l-46.7-26.7a17 17 0 0 0-6.3-2.8z',
         }),
+      ])
+  },
+})
+
+// ── Generative diagrams ────────────────────────────────────────────
+// Inline SVG/CSS components — no external chart library, no images.
+// Each diagram is its own render-function component so it lives next
+// to the section it documents and never drifts into "marketing asset"
+// territory.
+
+// DeployPipelineDiagram — six-stage horizontal flow showing the path
+// from a tarball upload to a warm sandbox ready to serve traffic.
+// Pills are connected by arrowed segments; the active "stage" tone
+// is the dashboard's primary purple at low alpha.
+const DeployPipelineDiagram = defineComponent({
+  name: 'DeployPipelineDiagram',
+  setup() {
+    const stages = [
+      { glyph: '▣', label: 'Tarball',     sub: 'POST /deploy' },
+      { glyph: '⟜', label: 'Extract',     sub: 'untar → scratch dir' },
+      { glyph: '◍', label: 'Install',     sub: 'npm / pip' },
+      { glyph: '⟐', label: 'Compile',     sub: 'tsc (TypeScript)' },
+      { glyph: '◉', label: 'Activate',    sub: 'rename → current' },
+      { glyph: '✦', label: 'Warm pool',   sub: 'pre-spawn N workers' },
+    ]
+    return () =>
+      h('figure', { class: 'doc-diagram' }, [
+        h('figcaption', { class: 'doc-diagram-cap' }, 'Deploy pipeline'),
+        h('div', { class: 'doc-pipeline' },
+          stages.flatMap((s, i) => {
+            const pill = h('div', { key: `s${i}`, class: 'doc-pipeline-stage' }, [
+              h('div', { class: 'doc-pipeline-glyph' }, s.glyph),
+              h('div', { class: 'doc-pipeline-label' }, [
+                h('span', { class: 'doc-pipeline-name' }, s.label),
+                h('span', { class: 'doc-pipeline-sub' }, s.sub),
+              ]),
+            ])
+            const sep = i < stages.length - 1
+              ? h('div', { key: `a${i}`, class: 'doc-pipeline-arrow', 'aria-hidden': 'true' })
+              : null
+            return sep ? [pill, sep] : [pill]
+          }),
+        ),
+      ])
+  },
+})
+
+// TraceTreeDiagram — sketch of a causal trace: HTTP root → F2F child →
+// job descendant. Uses the same waterfall language the actual Traces
+// view does (offset bars), so users see the docs render the same shape
+// they'll find at /traces/:id. Bar widths are arbitrary "sketch"
+// proportions, not real data.
+const TraceTreeDiagram = defineComponent({
+  name: 'TraceTreeDiagram',
+  setup() {
+    const total = 220 // arbitrary "ms" axis for the sketch
+    const spans = [
+      { fn: 'api-gateway',  trigger: 'http', start:  0, dur: 220, parent: null,         klass: 'root' },
+      { fn: 'resize-image', trigger: 'f2f',  start: 30, dur:  90, parent: 'api-gateway', klass: 'child' },
+      { fn: 'send-email',   trigger: 'job',  start: 60, dur:  40, parent: 'api-gateway', klass: 'grand' },
+    ]
+    const pct = (n) => (n / total) * 100
+    return () =>
+      h('figure', { class: 'doc-diagram' }, [
+        h('figcaption', { class: 'doc-diagram-cap' }, 'Causal trace — one HTTP request, three spans'),
+        h('div', { class: 'doc-trace' }, [
+          // Header axis
+          h('div', { class: 'doc-trace-axis' }, [
+            h('span', null, '0 ms'),
+            h('span', null, `${total} ms`),
+          ]),
+          // Spans
+          ...spans.map((s) =>
+            h('div', { key: s.fn, class: ['doc-trace-row', `is-${s.klass}`] }, [
+              h('div', { class: 'doc-trace-label' }, [
+                h('span', { class: 'doc-trace-fn' }, s.fn),
+                h('span', { class: 'doc-trace-trigger' }, s.trigger),
+              ]),
+              h('div', { class: 'doc-trace-track' }, [
+                h('div', {
+                  class: 'doc-trace-bar',
+                  style: { left: `${pct(s.start)}%`, width: `${pct(s.dur)}%` },
+                  title: `+${s.start}ms · ${s.dur}ms`,
+                }),
+              ]),
+              h('div', { class: 'doc-trace-dur' }, `${s.dur}ms`),
+            ]),
+          ),
+          // Legend
+          h('div', { class: 'doc-trace-legend' }, [
+            h('span', null, 'Same '),
+            h('code', { class: 'doc-chip' }, 'trace_id'),
+            h('span', null, ' across all spans · '),
+            h('code', { class: 'doc-chip' }, 'parent_span_id'),
+            h('span', null, ' chains them into a tree.'),
+          ]),
+        ]),
+      ])
+  },
+})
+
+// WebhookDeliveryDiagram — three-actor swimlane: orvad → signed POST
+// over the wire → receiver verifies HMAC. Captures the trust boundary
+// (orvad signs, receiver verifies) without prose.
+const WebhookDeliveryDiagram = defineComponent({
+  name: 'WebhookDeliveryDiagram',
+  setup() {
+    return () =>
+      h('figure', { class: 'doc-diagram' }, [
+        h('figcaption', { class: 'doc-diagram-cap' }, 'Signed webhook delivery'),
+        h('div', { class: 'doc-webhook' }, [
+          h('div', { class: 'doc-webhook-actor' }, [
+            h('div', { class: 'doc-webhook-actor-head' }, 'orvad'),
+            h('div', { class: 'doc-webhook-actor-body' }, [
+              h('span', null, 'event fires'),
+              h('code', { class: 'doc-chip' }, 'deployment.succeeded'),
+            ]),
+          ]),
+          h('div', { class: 'doc-webhook-wire' }, [
+            h('div', { class: 'doc-webhook-wire-line', 'aria-hidden': 'true' }),
+            h('div', { class: 'doc-webhook-wire-payload' }, [
+              h('div', { class: 'doc-webhook-wire-method' }, 'POST'),
+              h('div', { class: 'doc-webhook-wire-headers' }, [
+                h('code', null, 'X-Orva-Event'),
+                h('code', null, 'X-Orva-Timestamp'),
+                h('code', null, 'X-Orva-Signature'),
+              ]),
+              h('div', { class: 'doc-webhook-wire-sig' }, 'sha256=hex(hmac(secret, ts.body))'),
+            ]),
+          ]),
+          h('div', { class: 'doc-webhook-actor' }, [
+            h('div', { class: 'doc-webhook-actor-head' }, 'your receiver'),
+            h('div', { class: 'doc-webhook-actor-body' }, [
+              h('span', null, 'verify HMAC'),
+              h('span', null, '→ 2xx within 15s or get retried'),
+            ]),
+          ]),
+        ]),
       ])
   },
 })
@@ -1438,6 +1768,108 @@ const errorCodes = [
   { code: 'INSUFFICIENT_DISK', when: 'Host is below min_free_disk_mb.' },
 ]
 
+// ── CLI reference (section 11) ──────────────────────────────────────
+// Single binary: same `cmd/orva` Go program that runs the daemon.
+// `orva serve` is the server; everything else is a client. CLI reads
+// ~/.orva/config.yaml for endpoint + api_key. Values mirror what's
+// shipped today by ./build/orva — keep in sync if subcommands change.
+
+const cliIndex = [
+  { cmd: 'login',      subs: '—',                                purpose: 'Save endpoint + API key to ~/.orva/config.yaml' },
+  { cmd: 'init',       subs: '—',                                purpose: 'Scaffold an orva.yaml in the current directory' },
+  { cmd: 'deploy',     subs: '[path]',                           purpose: 'Package a directory and deploy as a function' },
+  { cmd: 'invoke',     subs: '[name|id]',                        purpose: 'POST to /fn/<id>/ and print the response' },
+  { cmd: 'logs',       subs: '[name|id] [--tail]',               purpose: 'List recent executions; --tail follows live via SSE' },
+  { cmd: 'functions',  subs: 'list / get / create / delete',     purpose: 'CRUD for the function registry' },
+  { cmd: 'cron',       subs: 'list / create / update / delete',  purpose: 'Manage cron schedules attached to functions' },
+  { cmd: 'jobs',       subs: 'list / enqueue / retry / delete',  purpose: 'Background queue management' },
+  { cmd: 'kv',         subs: 'list / get / put / delete',        purpose: 'Browse a function’s key/value store' },
+  { cmd: 'secrets',    subs: 'list / set / delete',              purpose: 'AES-256-GCM secrets per function' },
+  { cmd: 'webhooks',   subs: 'list / create / test / delete / inbound', purpose: 'System-event subscribers + inbound triggers' },
+  { cmd: 'routes',     subs: 'list / set / delete',              purpose: 'Custom URL → function path mappings' },
+  { cmd: 'keys',       subs: 'list / create / revoke',           purpose: 'Manage API keys' },
+  { cmd: 'activity',   subs: '[--tail] [--source web|api|...]',  purpose: 'Paginated activity rows; live SSE with --tail' },
+  { cmd: 'system',     subs: 'health / metrics / db-stats / vacuum', purpose: 'Server diagnostics' },
+  { cmd: 'setup',      subs: '[--skip-nsjail] [--skip-rootfs]',  purpose: 'Install nsjail + rootfs on a bare host' },
+  { cmd: 'serve',      subs: '[--port N]',                       purpose: 'Run as the server daemon (not the CLI client)' },
+  { cmd: 'completion', subs: 'bash / zsh / fish / powershell',   purpose: 'Emit shell completion script' },
+]
+
+const cliLogin = `# 1. Generate an API key in the dashboard (Keys page) or via the API
+# 2. Tell the CLI where to find your Orva and which key to use
+orva login \\
+  --endpoint https://orva.example.com \\
+  --api-key  orva_xxx_your_key_here
+
+# Writes ~/.orva/config.yaml. Subsequent commands need no flags.
+orva system health      # smoke test`
+
+const cliDeploy = `# Init a project in cwd (creates orva.yaml + handler stub)
+orva init
+
+# Deploy from a directory. Auto-detects handler.ts when tsconfig.json
+# is present; else uses the runtime default (handler.js / handler.py).
+orva deploy ./my-fn \\
+  --name    resize-image \\
+  --runtime node24
+
+# Override the entrypoint explicitly:
+orva deploy ./my-fn --name api --runtime python314 --entrypoint app.py`
+
+const cliInvokeLogs = `# Invoke a function by name or fn_<id>:
+orva invoke resize-image --data '{"url":"https://example.com/cat.jpg"}'
+
+# Recent executions:
+orva logs resize-image
+
+# Single execution, with stdout/stderr:
+orva logs resize-image --exec-id exec_abc123
+
+# Live tail — SSE stream, Ctrl-C to stop:
+orva logs resize-image --tail`
+
+const cliKv = `# List keys (optionally by prefix)
+orva kv list resize-image
+orva kv list resize-image --prefix user:
+
+# Read / write / delete
+orva kv get  resize-image cache:home
+orva kv put  resize-image cache:home '{"hits":42}' --ttl 3600
+orva kv delete resize-image cache:home`
+
+const cliMisc = `# Secrets — encrypted at rest, injected as env vars at spawn:
+orva secrets set    resize-image S3_BUCKET my-bucket
+orva secrets list   resize-image
+orva secrets delete resize-image S3_BUCKET
+
+# Cron — fire a function on a schedule:
+orva cron create --fn daily-report --expr '0 9 * * *' --tz Asia/Kolkata
+orva cron list
+orva cron update <cron_id> --enabled false   # pause
+orva cron delete <cron_id>
+
+# Jobs — fire-and-forget background queue:
+orva jobs enqueue --fn send-email --data '{"to":"a@b.c"}'
+orva jobs list --status pending
+orva jobs retry  <job_id>
+orva jobs delete <job_id>
+
+# Outbound webhooks (system events):
+orva webhooks create --url https://hooks.slack.com/... --events deployment.failed,job.failed
+orva webhooks test   <webhook_id>
+
+# Inbound webhook triggers (external POST → function):
+orva webhooks inbound create --fn order-handler --signature stripe`
+
+const cliSystem = `orva system health        # daemon up + DB ok
+orva system metrics       # JSON metrics snapshot
+orva system db-stats      # on-disk breakdown (orva.db, WAL, functions/)
+orva system vacuum        # rewrite SQLite to reclaim freelist pages
+
+orva activity                          # last 50 activity rows
+orva activity --tail                   # live feed (Ctrl-C)
+orva activity --source mcp --limit 200 # MCP-only, last 200`
+
 // ── Docs → Markdown export ──────────────────────────────────────────
 // One big computed string mirroring the on-page sections in order.
 // Reuses the same template-literal values that drive the rendered
@@ -1477,6 +1909,11 @@ const docsMarkdown = computed(() => {
     '|---|---|\n' +
     errorCodes.map((e) => `| \`${e.code}\` | ${e.when} |`).join('\n')
 
+  const cliIndexTable =
+    '| Command | Subcommands | Purpose |\n' +
+    '|---|---|---|\n' +
+    cliIndex.map((c) => `| \`orva ${c.cmd}\` | ${c.subs} | ${c.purpose} |`).join('\n')
+
   return `# Orva — Documentation
 
 > Everything you need to write, deploy, and operate functions on Orva.
@@ -1494,6 +1931,7 @@ const docsMarkdown = computed(() => {
 8. [System prompt for AI assistants](#system-prompt-for-ai-assistants)
 9. [Tracing](#tracing)
 10. [Errors & recovery](#errors--recovery)
+11. [CLI](#cli)
 
 ---
 
@@ -1768,6 +2206,72 @@ ${errEnvelope}
 \`\`\`
 
 ${errorCodesTable}
+
+---
+
+## CLI
+
+\`orva\` is a single static binary that talks to a remote (or local)
+Orva server over HTTPS. Same binary as the daemon — \`orva serve\`
+starts a server, every other subcommand is a CLI client. Drop it on
+operator laptops, CI runners, or anywhere bash runs.
+
+### Install
+
+- **Server included:** \`curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh\` — daemon + nsjail + rootfs + CLI.
+- **CLI only:** add \`--cli-only\` for a ~10 MB binary at \`/usr/local/bin/orva\` (no service, no rootfs).
+- **Inside Docker:** the dashboard image ships the CLI at the same path; \`docker exec orva orva system health\` works out of the box (auto-authed via the bootstrap key the entrypoint writes to \`~/.orva/config.yaml\`).
+
+### Authenticate
+
+Generate a key from the Keys page in the dashboard, then:
+
+\`\`\`bash
+${cliLogin}
+\`\`\`
+
+### Command index
+
+${cliIndexTable}
+
+### Common recipes
+
+#### Deploy
+
+\`\`\`bash
+${cliDeploy}
+\`\`\`
+
+#### Invoke + tail logs
+
+\`\`\`bash
+${cliInvokeLogs}
+\`\`\`
+
+#### KV
+
+\`\`\`bash
+${cliKv}
+\`\`\`
+
+#### Secrets, cron, jobs, webhooks
+
+\`\`\`bash
+${cliMisc}
+\`\`\`
+
+#### System health, metrics, vacuum
+
+\`\`\`bash
+${cliSystem}
+\`\`\`
+
+### Shell completion
+
+\`\`\`bash
+orva completion bash | sudo tee /etc/bash_completion.d/orva
+# or zsh / fish / powershell
+\`\`\`
 `
 })
 
@@ -1782,6 +2286,46 @@ const onCopyDocs = async () => {
   clearTimeout(docsCopiedTimer)
   docsCopiedTimer = setTimeout(() => { docsCopied.value = false }, 1500)
 }
+
+// "Chat with ChatGPT" — opens chatgpt.com with a short pre-filled
+// prompt asking the model to expect a docs paste, AND copies the full
+// markdown to the clipboard at the same time. Why not URL-inject the
+// whole docs?
+//   - Our markdown is ~48 KB raw → ~150 KB after URL-encoding.
+//   - Chrome caps URLs at ~32 KB; cutting it would lose context.
+//   - Copy-to-clipboard + intro prompt works on all devices including
+//     iOS Safari where the URL ceiling is even lower in practice.
+//
+// Flow on click:
+//   1. Copy full docs markdown to clipboard (silent).
+//   2. Open https://chatgpt.com/?q=<short intro> in a new tab.
+//      ChatGPT pre-fills the prompt; user clicks send, then pastes
+//      the docs in their next message → ChatGPT now has full context.
+const chatgptOpened = ref(false)
+let chatgptOpenedTimer = null
+const onChatWithGPT = async () => {
+  // Copy first so the clipboard is hot when the new tab opens.
+  await copyText(docsMarkdown.value)
+  const intro = [
+    "I'm working with Orva, a self-hosted serverless platform.",
+    "I just copied the full Orva documentation to my clipboard — please ask me to paste it in my next message, then use it as the source of truth when answering my questions.",
+    '',
+    'After I paste, summarise back what Orva offers so I know you read it, then wait for my actual question.',
+  ].join('\n')
+  const url = `https://chatgpt.com/?q=${encodeURIComponent(intro)}`
+  // window.open with noopener to prevent the new tab from accessing
+  // window.opener (security best practice). _blank → new tab.
+  window.open(url, '_blank', 'noopener,noreferrer')
+  chatgptOpened.value = true
+  clearTimeout(chatgptOpenedTimer)
+  chatgptOpenedTimer = setTimeout(() => { chatgptOpened.value = false }, 2500)
+}
+
+// System-prompt collapse state — section 08's aiPromptText is ~400+
+// lines. Show a teaser (~5 lines worth) by default with a fade and
+// "Expand" toggle; the existing CodeBlock copy button works either
+// way because copy reads the full string from props.
+const promptExpanded = ref(false)
 
 // ── MCP install state ───────────────────────────────────────────────
 const tokenPlaceholder = '<YOUR_ORVA_TOKEN>'
@@ -2201,7 +2745,9 @@ const Callout = defineComponent({
 .docs-hero-actions {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .docs-hero-copy {
   display: inline-flex;
@@ -2283,6 +2829,375 @@ const Callout = defineComponent({
 .docs-hero-toc-link.active .docs-hero-toc-num {
   color: rgba(255, 255, 255, 0.85);
   opacity: 1;
+}
+
+/* ── Generative diagrams ────────────────────────────────────────────
+   Inline figures rendered next to the prose they explain. Same
+   palette as the rest of the docs (--color-* vars), enclosed in a
+   subtle bordered container so they read as "exhibit", not noise.
+   All diagrams share the .doc-diagram chrome; per-diagram styles
+   below add the layout-specific bits. */
+
+.doc-diagram {
+  margin: 0 0 0.75rem;
+  padding: 1.2rem 1.2rem 1.4rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.7rem;
+  background:
+    radial-gradient(
+      ellipse 50% 80% at 100% 0%,
+      rgba(85, 63, 131, 0.06) 0%,
+      transparent 70%
+    ),
+    var(--color-background);
+}
+.doc-diagram-cap {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+  margin: 0 0 1rem;
+}
+
+/* ── Deploy pipeline (horizontal six-stage flow) ──────────────────── */
+.doc-pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.4rem;
+}
+.doc-pipeline-stage {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  background: var(--color-surface);
+  min-width: 0;
+  flex-shrink: 0;
+}
+.doc-pipeline-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.4rem;
+  background: rgba(85, 63, 131, 0.18);
+  border: 1px solid rgba(85, 63, 131, 0.45);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+}
+.doc-pipeline-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+.doc-pipeline-name {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  white-space: nowrap;
+}
+.doc-pipeline-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-foreground-muted);
+  white-space: nowrap;
+}
+.doc-pipeline-arrow {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1.6rem;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.18) 100%
+  );
+  position: relative;
+}
+.doc-pipeline-arrow::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  border-right: 1px solid rgba(255, 255, 255, 0.35);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+/* ── Trace tree (waterfall sketch) ────────────────────────────────── */
+.doc-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.doc-trace-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-foreground-muted);
+  padding: 0 0 0.2rem;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+.doc-trace-row {
+  display: grid;
+  grid-template-columns: 11rem 1fr 3rem;
+  align-items: center;
+  gap: 0.7rem;
+  font-family: var(--font-sans);
+}
+.doc-trace-row.is-child .doc-trace-label,
+.doc-trace-row.is-grand .doc-trace-label {
+  position: relative;
+}
+.doc-trace-row.is-child .doc-trace-label::before,
+.doc-trace-row.is-grand .doc-trace-label::before {
+  content: '└';
+  position: absolute;
+  left: -0.7rem;
+  top: 0.05rem;
+  color: var(--color-foreground-muted);
+  font-family: var(--font-mono);
+  opacity: 0.55;
+}
+.doc-trace-row.is-child .doc-trace-label { padding-left: 1rem; }
+.doc-trace-row.is-grand .doc-trace-label { padding-left: 1rem; }
+.doc-trace-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.doc-trace-fn {
+  font-size: 12.5px;
+  color: var(--color-foreground);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.doc-trace-trigger {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  color: var(--color-foreground-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  background: var(--color-background);
+}
+.doc-trace-track {
+  position: relative;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.doc-trace-bar {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(85, 63, 131, 0.85) 0%,
+    rgba(85, 63, 131, 0.55) 100%
+  );
+  border-radius: 999px;
+  box-shadow: 0 0 12px rgba(85, 63, 131, 0.25);
+}
+.doc-trace-row.is-child .doc-trace-bar {
+  background: linear-gradient(
+    90deg,
+    rgba(96, 165, 250, 0.8) 0%,
+    rgba(96, 165, 250, 0.5) 100%
+  );
+  box-shadow: 0 0 10px rgba(96, 165, 250, 0.25);
+}
+.doc-trace-row.is-grand .doc-trace-bar {
+  background: linear-gradient(
+    90deg,
+    rgba(52, 211, 153, 0.8) 0%,
+    rgba(52, 211, 153, 0.5) 100%
+  );
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.25);
+}
+.doc-trace-dur {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-foreground);
+  text-align: right;
+}
+.doc-trace-legend {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+  padding-top: 0.4rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+/* ── Webhook delivery (3-actor swimlane) ──────────────────────────── */
+.doc-webhook {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.7rem;
+  align-items: stretch;
+}
+@media (min-width: 768px) {
+  .doc-webhook {
+    grid-template-columns: 1fr 1.4fr 1fr;
+  }
+}
+.doc-webhook-actor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  background: var(--color-surface);
+}
+.doc-webhook-actor-head {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  letter-spacing: 0.06em;
+}
+.doc-webhook-actor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--color-foreground-muted);
+}
+
+.doc-webhook-wire {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  padding: 0.85rem 0.7rem;
+  border: 1px dashed rgba(85, 63, 131, 0.45);
+  border-radius: 0.55rem;
+  background:
+    radial-gradient(
+      ellipse 80% 100% at 50% 50%,
+      rgba(85, 63, 131, 0.08) 0%,
+      transparent 70%
+    );
+}
+.doc-webhook-wire-line {
+  display: none; /* reserved for future arrow rendering */
+}
+.doc-webhook-wire-payload {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+}
+.doc-webhook-wire-method {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.15rem 0.55rem;
+  border-radius: 0.3rem;
+  background: rgba(85, 63, 131, 0.25);
+  border: 1px solid rgba(85, 63, 131, 0.55);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.doc-webhook-wire-headers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.doc-webhook-wire-headers code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+.doc-webhook-wire-sig {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-foreground-muted);
+  padding-top: 0.2rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+/* ── System-prompt collapse ────────────────────────────────────────
+   Section 08's CodeBlock is huge (~400 lines). Collapsed state
+   clamps the visible area to ~5 lines worth and fades out the
+   bottom; expanding removes the cap. Copy button on the prompt
+   keeps working either way because it reads the full source. */
+.prompt-collapse {
+  position: relative;
+  max-height: 9.5rem; /* ~5 lines + the codeblock's bar */
+  overflow: hidden;
+  border-radius: 0.6rem;
+  transition: max-height 280ms ease;
+}
+.prompt-collapse.expanded {
+  max-height: 7000px; /* generous; the codeblock rules its own height */
+}
+.prompt-collapse-fade {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 4.5rem;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--color-background) 85%
+  );
+  border-radius: 0 0 0.6rem 0.6rem;
+}
+.prompt-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.45rem;
+  background: var(--color-surface);
+  color: var(--color-foreground-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background-color 120ms;
+}
+.prompt-expand-btn:hover {
+  color: #fff;
+  border-color: var(--color-foreground-muted);
+}
+.prompt-expand-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 /* ── Section landmarks ───────────────────────────────────────────── */
