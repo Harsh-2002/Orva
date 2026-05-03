@@ -690,13 +690,124 @@
       />
     </section>
 
-    <!-- ── 9. Errors & recovery ─────────────────────────────── -->
+    <!-- ── 9. Tracing ──────────────────────────────────────── -->
+    <section
+      id="tracing"
+      class="space-y-5 scroll-mt-6 border-t border-border pt-12"
+    >
+      <div class="doc-section-head">
+        <span class="doc-section-num">09</span>
+        <div>
+          <h2 class="doc-section-title">
+            Tracing
+          </h2>
+          <p class="doc-lede">
+            Every invocation chain is recorded as a causal trace —
+            automatically, with <strong>zero changes to your function code</strong>.
+            HTTP requests, F2F invokes, jobs, cron, inbound webhooks, and replays
+            all stitch into the same tree. The dashboard renders it as a
+            waterfall at <code class="doc-chip">/traces</code>.
+          </p>
+        </div>
+      </div>
+
+      <p class="doc-prose">
+        Each execution row IS a span. Spans share a
+        <code class="doc-chip">trace_id</code>; child spans point at their parent
+        via <code class="doc-chip">parent_span_id</code>. You don't instantiate
+        spans, you don't import a tracer — you just write your handler and the
+        platform plumbs IDs through every internal hop.
+      </p>
+
+      <h3 class="doc-h3">What user code sees</h3>
+      <p class="doc-prose">
+        Two env vars are stamped per invocation. Read them only if you want to
+        log the trace_id alongside your own messages — they're optional.
+      </p>
+      <CodeBlock
+        :code="traceEnvExample"
+        lang="text"
+      />
+
+      <h3 class="doc-h3">Automatic propagation</h3>
+      <p class="doc-prose">
+        When a function calls another via the SDK, the trace context flows
+        through automatically. The called function becomes a child span of the
+        caller; both share the same <code class="doc-chip">trace_id</code>.
+      </p>
+      <CodeBlock
+        :code="traceF2FExample"
+        lang="js"
+      />
+      <p class="doc-prose">
+        Job enqueues work the same way: <code class="doc-chip">orva.jobs.enqueue()</code>
+        records the trace context on the job row. When the scheduler picks the
+        job up later, the resulting execution lands in the same trace as the
+        function that enqueued it — even if the gap is hours or days.
+      </p>
+
+      <h3 class="doc-h3">Triggers</h3>
+      <p class="doc-prose">
+        Each span carries a <code class="doc-chip">trigger</code> label so the
+        UI can show how the chain started.
+      </p>
+      <div class="doc-table-wrap">
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Trigger</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in triggers" :key="t.name">
+              <td class="doc-cell-key whitespace-nowrap"><code>{{ t.name }}</code></td>
+              <td class="doc-cell-body">{{ t.desc }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="doc-h3">External correlation (W3C traceparent)</h3>
+      <p class="doc-prose">
+        Send a standard <code class="doc-chip">traceparent</code> header on the
+        inbound HTTP request and Orva makes its trace a child of yours. The
+        same trace_id is echoed back as <code class="doc-chip">X-Trace-Id</code>
+        on every response, so external systems can correlate without parsing
+        bodies.
+      </p>
+      <CodeBlock
+        :code="traceparentExample"
+        lang="bash"
+      />
+
+      <h3 class="doc-h3">Outlier detection</h3>
+      <p class="doc-prose">
+        Each function maintains an in-memory rolling P95 baseline over its last
+        100 successful warm executions. An invocation is flagged as an outlier
+        when it has at least 20 baseline samples AND its duration exceeds
+        <strong>P95 × 2</strong>. Cold starts and errors are excluded from the
+        baseline so a flapping function can't drag it down. The flag and
+        baseline P95 are stored on the execution row and rendered as an amber
+        flag icon next to the span.
+      </p>
+
+      <h3 class="doc-h3">Where to look</h3>
+      <ul class="doc-list">
+        <li><code class="doc-chip">/traces</code> — list of recent traces, filterable by function / status / outlier-only.</li>
+        <li><code class="doc-chip">/traces/:id</code> — waterfall + per-span detail. Click a span to jump to its execution in the Invocations log.</li>
+        <li><code class="doc-chip">GET /api/v1/traces/{id}</code> — full span tree as JSON. Pair with <code class="doc-chip">list_traces</code> / <code class="doc-chip">get_trace</code> MCP tools for AI agents.</li>
+        <li><code class="doc-chip">GET /api/v1/functions/{id}/baseline</code> — current P95/P99/mean for a function.</li>
+      </ul>
+    </section>
+
+    <!-- ── 10. Errors & recovery ─────────────────────────────── -->
     <section
       id="errors"
       class="space-y-5 scroll-mt-6 border-t border-border pt-12"
     >
       <div class="doc-section-head">
-        <span class="doc-section-num">09</span>
+        <span class="doc-section-num">10</span>
         <div>
           <h2 class="doc-section-title">
             Errors &amp; recovery
@@ -1162,6 +1273,46 @@ app.post('/webhooks/orva', (req, res) => {
   res.sendStatus(200)
 })`,
   },
+]
+
+// ── Tracing ──────────────────────────────────────────────────────
+const traceEnvExample = `# Available inside every running function — refresh per-invocation:
+ORVA_TRACE_ID=tr_3e39f6991c66f140577c6021da7dd13b   # one per causal chain
+ORVA_SPAN_ID=sp_4ceba57f6b1c982e                    # this execution
+
+# Python:        os.environ["ORVA_TRACE_ID"]
+# Node.js:       process.env.ORVA_TRACE_ID
+# Reading them is optional — the platform records the trace for you.`
+
+const traceF2FExample = `// Function A — calls B via the SDK. Trace context flows automatically.
+const { invoke, jobs } = require('orva')
+
+module.exports.handler = async (event) => {
+  // F2F call — B becomes a child span under A.
+  const result = await invoke('send_email', { to: event.email })
+
+  // Job enqueue — when this job runs (now or in 6 hours), the resulting
+  // execution lands in the SAME trace as A.
+  await jobs.enqueue('audit_log', { action: 'sent', to: event.email })
+
+  return { statusCode: 200, body: 'ok' }
+}`
+
+const traceparentExample = `# Send the W3C traceparent header — Orva will adopt it as the trace root.
+curl -H "traceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01" \\
+     https://orva.example.com/fn/myfn/
+
+# Response always echoes:
+# X-Trace-Id: tr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+
+const triggers = [
+  { name: 'http',    desc: 'Public HTTP request hit /fn/<id>/. Almost always a root span.' },
+  { name: 'f2f',     desc: 'Another function called this one via orva.invoke(). Has a parent_span_id.' },
+  { name: 'job',     desc: 'Background job runner picked up an enqueued job. Parent_span_id is whoever enqueued it.' },
+  { name: 'cron',    desc: 'Scheduler fired a cron entry. Always a root span.' },
+  { name: 'inbound', desc: 'External webhook hit /webhook/{id}. Always a root span.' },
+  { name: 'replay',  desc: 'Operator clicked Replay on a captured execution. Fresh trace, no link to original.' },
+  { name: 'mcp',     desc: 'AI agent invoked the function via MCP invoke_function. Fresh trace.' },
 ]
 
 const errEnvelope = `{
