@@ -1,17 +1,24 @@
 <template>
-  <div class="space-y-5">
+  <div class="space-y-6">
+    <!-- Page header — title + breadcrumb back-link, matches the rest of
+         the dashboard. The right slot is empty here because the trace
+         id IS the page identity (rendered in the summary card below). -->
     <div class="flex items-start justify-between gap-4">
       <div>
         <button
-          class="text-xs text-foreground-muted hover:text-white inline-flex items-center gap-1 mb-1"
+          class="inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-white mb-1 transition-colors"
           @click="router.push('/traces')"
         >
           <ArrowLeft class="w-3.5 h-3.5" />
           All traces
         </button>
-        <h1 class="text-xl font-semibold text-foreground tracking-tight">
+        <h1 class="text-xl font-semibold text-white tracking-tight">
           Trace
         </h1>
+        <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+          Causal tree of every span produced by this invocation chain.
+          Click any span row to jump to its execution in the Invocations log.
+        </p>
       </div>
     </div>
 
@@ -30,13 +37,19 @@
     </div>
 
     <template v-else-if="trace">
-      <!-- Header card: trace_id + summary stats -->
-      <div class="bg-background border border-border rounded-lg p-4 space-y-3">
+      <!-- Summary card — same shell as Settings cards: bg-background +
+           border + rounded-lg + p-5 + space-y. Stats are dt/dd-style
+           label-on-top so the eye scans top-to-bottom. -->
+      <div class="bg-background border border-border rounded-lg p-5 space-y-4">
         <div class="flex items-center gap-3 flex-wrap text-xs">
-          <span class="text-foreground-muted">trace_id</span>
-          <code class="bg-surface text-white px-2 py-0.5 rounded font-mono">{{ trace.trace_id }}</code>
+          <span class="text-foreground-muted uppercase tracking-wide">
+            trace id
+          </span>
+          <code class="bg-surface text-white px-2 py-0.5 rounded font-mono">
+            {{ trace.trace_id }}
+          </code>
           <button
-            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white"
+            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors"
             title="Copy trace id"
             @click="copyID"
           >
@@ -44,31 +57,37 @@
           </button>
         </div>
 
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2 border-t border-border text-xs">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-3 border-t border-border text-xs">
           <div>
-            <div class="text-foreground-muted mb-0.5">Trigger</div>
-            <div class="text-white uppercase tracking-wide">{{ trace.trigger || '—' }}</div>
+            <div class="text-foreground-muted uppercase tracking-wide mb-1">
+              Trigger
+            </div>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-foreground-muted border-border lowercase">
+              {{ trace.trigger || '—' }}
+            </span>
           </div>
           <div>
-            <div class="text-foreground-muted mb-0.5">Total duration</div>
+            <div class="text-foreground-muted uppercase tracking-wide mb-1">
+              Total duration
+            </div>
             <div class="text-white font-mono">{{ trace.total_duration_ms }}ms</div>
           </div>
           <div>
-            <div class="text-foreground-muted mb-0.5">Spans</div>
+            <div class="text-foreground-muted uppercase tracking-wide mb-1">
+              Spans
+            </div>
             <div class="text-white">{{ trace.span_count }}</div>
           </div>
           <div>
-            <div class="text-foreground-muted mb-0.5">Status</div>
-            <div>
+            <div class="text-foreground-muted uppercase tracking-wide mb-1">
+              Status
+            </div>
+            <div class="flex items-center gap-2">
+              <StatusBadge :status="trace.status" />
               <span
-                class="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
-                :class="trace.status === 'success'
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'bg-red-500/15 text-red-300'"
+                v-if="trace.has_outlier"
+                class="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-300"
               >
-                {{ trace.status }}
-              </span>
-              <span v-if="trace.has_outlier" class="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-300">
                 <Flag class="w-3 h-3" /> Outlier
               </span>
             </div>
@@ -76,26 +95,29 @@
         </div>
       </div>
 
-      <!-- Waterfall: each span is a row with offset bar -->
-      <div class="bg-background border border-border rounded-lg p-4">
-        <div class="text-xs text-foreground-muted mb-3">Waterfall</div>
+      <!-- Waterfall card. Each span is a row with offset bar; bar
+           position/width is computed in JS from offset_ms/duration_ms.
+           Bar colors align with the broader dashboard palette: primary
+           for warm successes, amber for outliers, red for errors. -->
+      <div class="bg-background border border-border rounded-lg p-5">
+        <div class="text-xs text-foreground-muted uppercase tracking-wide mb-4">
+          Waterfall
+        </div>
         <div class="space-y-1.5">
           <div
             v-for="(s, i) in trace.spans"
             :key="s.span_id || `s${i}`"
-            class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1 rounded cursor-pointer"
+            class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1.5 rounded cursor-pointer transition-colors"
             @click="onSpanClick(s)"
           >
-            <!-- function + trigger column -->
-            <div class="col-span-3 truncate">
+            <div class="col-span-3 truncate flex items-center gap-1.5">
               <span class="text-white">{{ s.function_name || s.function_id }}</span>
-              <span class="ml-1.5 text-[10px] uppercase tracking-wide text-foreground-muted">
-                {{ s.trigger || '' }}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-foreground-muted border-border lowercase">
+                {{ s.trigger || '—' }}
               </span>
-              <Flag v-if="s.is_outlier" class="w-3 h-3 inline ml-1 text-amber-400" />
+              <Flag v-if="s.is_outlier" class="w-3 h-3 text-amber-400" />
             </div>
 
-            <!-- bar column -->
             <div class="col-span-7 relative h-4">
               <div
                 class="absolute h-2 top-1 rounded-sm"
@@ -105,7 +127,6 @@
               />
             </div>
 
-            <!-- duration column -->
             <div class="col-span-2 text-right font-mono">
               <span class="text-white">{{ s.duration_ms }}ms</span>
               <span v-if="s.baseline_p95_ms" class="block text-[10px] text-foreground-muted">
@@ -116,50 +137,45 @@
         </div>
       </div>
 
-      <!-- Span list as a table for scanning + jumping to InvocationsLog -->
-      <div class="bg-background border border-border rounded-lg overflow-hidden">
-        <table class="w-full text-xs">
-          <thead class="bg-surface/50 text-foreground-muted">
+      <!-- Span list — same table shell as Activity / Invocations / Traces. -->
+      <div class="bg-background border border-border rounded-lg overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
             <tr>
-              <th class="text-left font-medium px-3 py-2">Span</th>
-              <th class="text-left font-medium px-3 py-2">Function</th>
-              <th class="text-left font-medium px-3 py-2">Trigger</th>
-              <th class="text-right font-medium px-3 py-2">Offset</th>
-              <th class="text-right font-medium px-3 py-2">Duration</th>
-              <th class="text-left font-medium px-3 py-2">Status</th>
+              <th class="px-4 py-3 w-32">Span</th>
+              <th class="px-4 py-3">Function</th>
+              <th class="px-4 py-3 w-28 hidden md:table-cell">Trigger</th>
+              <th class="px-4 py-3 w-24 text-right">Offset</th>
+              <th class="px-4 py-3 w-24 text-right">Duration</th>
+              <th class="px-4 py-3 w-24">Status</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody class="divide-y divide-border">
             <tr
               v-for="s in trace.spans"
               :key="`tbl-${s.span_id}`"
-              class="border-t border-border hover:bg-surface/40 cursor-pointer"
+              class="hover:bg-surface/40 cursor-pointer transition-colors"
               @click="onSpanClick(s)"
             >
-              <td class="px-3 py-2 font-mono text-foreground-muted">
+              <td class="px-4 py-2.5 font-mono text-xs text-foreground-muted">
                 {{ s.span_id?.slice(0, 11) || '—' }}
               </td>
-              <td class="px-3 py-2 text-white">
+              <td class="px-4 py-2.5 text-white">
                 {{ s.function_name || s.function_id }}
               </td>
-              <td class="px-3 py-2 text-foreground-muted uppercase tracking-wide text-[10px]">
-                {{ s.trigger || '—' }}
+              <td class="px-4 py-2.5 hidden md:table-cell">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-foreground-muted border-border lowercase">
+                  {{ s.trigger || '—' }}
+                </span>
               </td>
-              <td class="px-3 py-2 text-right font-mono text-foreground-muted">
+              <td class="px-4 py-2.5 text-right font-mono text-xs text-foreground-muted">
                 +{{ s.offset_ms }}ms
               </td>
-              <td class="px-3 py-2 text-right font-mono text-white">
+              <td class="px-4 py-2.5 text-right font-mono text-xs text-white">
                 {{ s.duration_ms }}ms
               </td>
-              <td class="px-3 py-2">
-                <span
-                  class="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
-                  :class="s.status === 'success'
-                    ? 'bg-emerald-500/15 text-emerald-300'
-                    : 'bg-red-500/15 text-red-300'"
-                >
-                  {{ s.status }}
-                </span>
+              <td class="px-4 py-2.5">
+                <StatusBadge :status="s.status" />
               </td>
             </tr>
           </tbody>
@@ -173,6 +189,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Copy, Flag } from 'lucide-vue-next'
+import StatusBadge from '@/components/common/StatusBadge.vue'
 import { getTrace } from '@/api/endpoints'
 
 const route = useRoute()
