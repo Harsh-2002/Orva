@@ -1,10 +1,72 @@
 <template>
   <div class="space-y-12 pb-16">
-    <!-- ── Page header ────────────────────────────────────────────── -->
-    <header>
-      <h1 class="text-xl font-semibold text-white tracking-tight">
-        Docs
-      </h1>
+    <!-- ── Page hero ───────────────────────────────────────────────
+         Richer than a bare <h1>: signals "this is the canonical
+         reference", offers a ToC, and ships a one-click "Copy as
+         Markdown" so operators can paste the whole thing into AI
+         tools or share with teammates. The card uses a subtle
+         primary-tinted gradient + dotted texture so it has visual
+         weight without screaming, and stays inside the dashboard's
+         dark/mono aesthetic. -->
+    <header class="docs-hero">
+      <div class="docs-hero-bg" aria-hidden="true"></div>
+
+      <div class="docs-hero-content">
+        <div class="docs-hero-eyebrow">
+          <span class="docs-hero-eyebrow-mark"></span>
+          <span class="docs-hero-eyebrow-label">Orva Reference</span>
+          <code class="doc-chip">v0.5</code>
+        </div>
+
+        <div class="docs-hero-row">
+          <div class="docs-hero-text">
+            <h1 class="docs-hero-title">
+              Documentation
+            </h1>
+            <p class="docs-hero-sub">
+              Everything you need to write, deploy, and operate
+              functions on Orva. Handler contract, deploy + invoke,
+              SDK, MCP, tracing, error taxonomy.
+            </p>
+          </div>
+
+          <div class="docs-hero-actions">
+            <button
+              class="docs-hero-copy"
+              :class="{ copied: docsCopied }"
+              :aria-label="docsCopied ? 'Markdown copied to clipboard' : 'Copy entire docs page as Markdown'"
+              @click="onCopyDocs"
+            >
+              <Check
+                v-if="docsCopied"
+                class="w-3.5 h-3.5"
+              />
+              <Copy
+                v-else
+                class="w-3.5 h-3.5"
+              />
+              {{ docsCopied ? 'Copied as Markdown' : 'Copy as Markdown' }}
+            </button>
+          </div>
+        </div>
+
+        <nav
+          class="docs-hero-toc"
+          aria-label="Jump to docs section"
+        >
+          <span class="docs-hero-toc-label">Jump to</span>
+          <a
+            v-for="t in tocItems"
+            :key="t.id"
+            :href="`#${t.id}`"
+            class="docs-hero-toc-link"
+            :class="{ active: activeSection === t.id }"
+          >
+            <span class="docs-hero-toc-num">{{ t.num }}</span>
+            <span>{{ t.label }}</span>
+          </a>
+        </nav>
+      </div>
     </header>
 
     <!-- ── 1. Handler contract ─────────────────────────────── -->
@@ -855,7 +917,7 @@
 </template>
 
 <script setup>
-import { computed, h, ref, defineComponent } from 'vue'
+import { computed, h, ref, defineComponent, onMounted, onBeforeUnmount } from 'vue'
 import {
   Variable,
   KeyRound,
@@ -898,6 +960,56 @@ hljs.registerLanguage('sh', bash)
 hljs.registerLanguage('http', http)
 
 const origin = computed(() => window.location.origin)
+
+// ── Hero / table of contents ───────────────────────────────────────
+// Mirrors the section ids on the rendered page; clicking a chip uses a
+// plain in-page anchor (#) so the browser handles smooth-scroll +
+// scroll-mt for free. The order matches the on-page order and the
+// markdown export order — a single source of truth for "what's in the
+// docs and how".
+const tocItems = [
+  { id: 'handler',   num: '01', label: 'Handler' },
+  { id: 'deploy',    num: '02', label: 'Deploy' },
+  { id: 'config',    num: '03', label: 'Config' },
+  { id: 'sdk',       num: '04', label: 'SDK' },
+  { id: 'schedules', num: '05', label: 'Schedules' },
+  { id: 'webhooks',  num: '06', label: 'Webhooks' },
+  { id: 'mcp',       num: '07', label: 'MCP' },
+  { id: 'generate',  num: '08', label: 'AI prompt' },
+  { id: 'tracing',   num: '09', label: 'Tracing' },
+  { id: 'errors',    num: '10', label: 'Errors' },
+]
+
+// activeSection drives the highlight on the Jump-to chips. We use
+// IntersectionObserver (cheap, reactive, handles fast scrolls) and
+// pick the first section currently intersecting the viewport.
+const activeSection = ref('handler')
+let sectionObserver = null
+onMounted(() => {
+  if (typeof IntersectionObserver === 'undefined') return
+  const visible = new Set()
+  sectionObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) visible.add(e.target.id)
+        else visible.delete(e.target.id)
+      }
+      // Pick the topmost visible section so the chip tracks the
+      // section the user is reading, not the next one peeking in.
+      for (const item of tocItems) {
+        if (visible.has(item.id)) { activeSection.value = item.id; break }
+      }
+    },
+    { rootMargin: '-20% 0px -70% 0px', threshold: 0 },
+  )
+  for (const item of tocItems) {
+    const el = document.getElementById(item.id)
+    if (el) sectionObserver.observe(el)
+  }
+})
+onBeforeUnmount(() => {
+  if (sectionObserver) sectionObserver.disconnect()
+})
 
 // ── "System prompt for AI assistants" state ─────────────────────────
 // aiPromptText is computed once (the spec rarely changes) and rendered
@@ -1332,6 +1444,351 @@ const errorCodes = [
   { code: 'INSUFFICIENT_DISK', when: 'Host is below min_free_disk_mb.' },
 ]
 
+// ── Docs → Markdown export ──────────────────────────────────────────
+// One big computed string mirroring the on-page sections in order.
+// Reuses the same template-literal values that drive the rendered
+// CodeBlocks (curlCreate, traceEnvExample, errEnvelope, ...) so the
+// markdown can never drift from the live data — and `origin` /
+// `mcpToken` flow through automatically.
+//
+// Format is plain GFM: headings, fenced code blocks with language tags,
+// pipe tables, lists. No HTML — works in ChatGPT, Claude, GitHub,
+// Obsidian, VS Code preview, anywhere.
+const docsMarkdown = computed(() => {
+  const tabsBlock = (label, tabs) =>
+    tabs.map((t) => `### ${label} — ${t.label}\n\n${t.note ? `> ${t.note}\n\n` : ''}\`\`\`${t.lang}\n${t.code}\n\`\`\``).join('\n\n')
+
+  const runtimesTable =
+    '| Runtime | ID | Entrypoint | Dependencies |\n' +
+    '|---|---|---|---|\n' +
+    runtimes.map((r) => `| ${r.name} | \`${r.id}\` | \`${r.entry}\` | \`${r.deps}\` |`).join('\n')
+
+  const configTable =
+    '| Field | Purpose | Behaviour |\n' +
+    '|---|---|---|\n' +
+    configRows.map((r) => `| \`${r.field}\` | ${r.purpose} | ${r.body} |`).join('\n')
+
+  const triggersTable =
+    '| Trigger | Meaning |\n' +
+    '|---|---|\n' +
+    triggers.map((t) => `| \`${t.name}\` | ${t.desc} |`).join('\n')
+
+  const webhookEventsTable =
+    '| Event | When it fires |\n' +
+    '|---|---|\n' +
+    webhookEvents.map((e) => `| \`${e.name}\` | ${e.when} |`).join('\n')
+
+  const errorCodesTable =
+    '| Code | When you see it |\n' +
+    '|---|---|\n' +
+    errorCodes.map((e) => `| \`${e.code}\` | ${e.when} |`).join('\n')
+
+  return `# Orva — Documentation
+
+> Everything you need to write, deploy, and operate functions on Orva.
+> Generated from the in-app Docs page (\`${origin.value}/web/docs\`).
+
+## Table of contents
+
+1. [Handler contract](#handler-contract)
+2. [Deploy & invoke](#deploy--invoke)
+3. [Configuration reference](#configuration-reference)
+4. [SDK from inside a function](#sdk-from-inside-a-function)
+5. [Schedules](#schedules)
+6. [Webhooks](#webhooks)
+7. [MCP — Model Context Protocol](#mcp--model-context-protocol)
+8. [System prompt for AI assistants](#system-prompt-for-ai-assistants)
+9. [Tracing](#tracing)
+10. [Errors & recovery](#errors--recovery)
+
+---
+
+## Handler contract
+
+One exported function receives the inbound HTTP event and returns an
+HTTP-shaped response. The adapter handles serialization and headers.
+
+${tabsBlock('Handler', handlerTabs.value)}
+
+**Event shape:** \`method\`, \`path\`, \`headers\`, \`query\`, \`body\`.
+
+**Response:** \`{ statusCode, headers, body }\`. Non-string bodies are
+JSON-encoded by the adapter.
+
+**Runtime env:** env vars and secrets land in \`process.env\` (Node) /
+\`os.environ\` (Python).
+
+${runtimesTable}
+
+---
+
+## Deploy & invoke
+
+The dashboard handles day-to-day work; these calls are for CI and
+automation. Builds run async — poll \`/api/v1/deployments/<id>\` or
+stream \`/api/v1/deployments/<id>/stream\` until \`phase: done\`.
+
+### 1. Create the function row
+
+\`\`\`bash
+${curlCreate.value}
+\`\`\`
+
+### 2. Upload code
+
+\`\`\`bash
+${curlDeploy.value}
+\`\`\`
+
+### Invoke
+
+${tabsBlock('Invoke', invokeTabs.value)}
+
+> **Custom routes:** attach a friendly path with \`POST /api/v1/routes\`.
+> Reserved prefixes: \`/api/\` \`/fn/\` \`/mcp/\` \`/web/\` \`/_orva/\`.
+
+---
+
+## Configuration reference
+
+Everything below lives on the function record. Secrets are stored
+encrypted and only decrypt into the worker environment at spawn time.
+
+${configTable}
+
+### Set a secret
+
+\`\`\`bash
+${curlSecret.value}
+\`\`\`
+
+### Signed-invoke recipe (HMAC, opt-in)
+
+\`\`\`bash
+${recipeSigned.value}
+\`\`\`
+
+---
+
+## SDK from inside a function
+
+The bundled \`orva\` module exposes three primitives every function can
+use without extra dependencies: a per-function key/value store,
+in-process calls to other Orva functions, and a fire-and-forget
+background job queue.
+
+- **\`orva.kv\`** — \`put\` / \`get\` / \`delete\` / \`list\`. Per-function namespace on SQLite, optional TTL.
+- **\`orva.invoke\`** — \`invoke(name, payload)\`. In-process call to another function. 8-deep call cap.
+- **\`orva.jobs\`** — \`jobs.enqueue(name, payload)\`. Fire-and-forget; persisted; retried with exp backoff.
+
+### KV — get/put with TTL
+
+${tabsBlock('KV', sdkKvTabs)}
+
+> Browse / inspect / edit / delete / set keys without leaving the
+> dashboard at \`/web/functions/<name>/kv\`. REST mirror at
+> \`GET/PUT/DELETE /api/v1/functions/<id>/kv[/<key>]\`. MCP tools:
+> \`kv_list\` / \`kv_get\` / \`kv_put\` / \`kv_delete\`.
+
+### Function-to-function — invoke()
+
+${tabsBlock('F2F', sdkInvokeTabs)}
+
+### Background jobs — jobs.enqueue()
+
+${tabsBlock('Jobs', sdkJobsTabs)}
+
+> **Network mode:** the SDK reaches orvad over loopback through the
+> host gateway, so the function needs \`network_mode: "egress"\`. On
+> the default \`"none"\` the SDK throws \`OrvaUnavailableError\` with a
+> clear hint.
+
+---
+
+## Schedules
+
+Fire any function on a cron expression. The scheduler runs as part of
+the orvad process — no external service. Manage from the Schedules
+page or via the API. Standard 5-field cron with the usual shorthands
+(\`@daily\`, \`@hourly\`, \`*/5 * * * *\`).
+
+${tabsBlock('Cron', cronTabs.value)}
+
+> **Cron-fired headers:** every cron-triggered invocation arrives at
+> the function with \`x-orva-trigger: cron\` and
+> \`x-orva-cron-id: cron_…\` on the event headers, so user code can
+> branch on origin.
+
+---
+
+## Webhooks
+
+Operator-managed subscriptions for system events. Configure URLs from
+the Webhooks page; Orva delivers signed POSTs to them when matching
+events fire (deployments, function lifecycle, cron failures, job
+outcomes). Subscriptions are global, not per-function.
+
+**Headers:** \`X-Orva-Event\`, \`X-Orva-Delivery-Id\`,
+\`X-Orva-Timestamp\`, \`X-Orva-Signature\`.
+
+**Signature:** \`sha256=hex(hmac(secret, ts.body))\`. Same shape as
+Stripe / signed-invoke. Receivers verify with the secret returned at
+create time.
+
+**Retries:** 5 attempts, exponential backoff (≤ 1h). Receiver must 2xx
+within 15s.
+
+${webhookEventsTable}
+
+### Verify a delivery
+
+${tabsBlock('Verify', webhookVerifyTabs)}
+
+---
+
+## MCP — Model Context Protocol
+
+Same API surface the dashboard uses, exposed as 69 tools an agent can
+call directly. API key permissions scope the available tool set.
+
+- **Endpoint:** \`${origin.value}/mcp\`
+- **Auth header:** \`Authorization: Bearer <token>\`
+  (fallback: \`X-Orva-API-Key: <token>\`)
+- **Transport:** Streamable HTTP, MCP 2025-11-25.
+
+> Generate a token from the Docs page in the dashboard, then drop it
+> into your client config (Claude Code, Claude Desktop, Cursor, Cline,
+> Codex, Windsurf, ChatGPT, etc.). Either header works against the
+> same API key store with identical permission gating.
+
+### Install snippets (primary clients)
+
+${tabsBlock('MCP', mcpInstallTabsPrimary.value)}
+
+### More clients (Cursor, VS Code, Codex CLI, OpenCode, Zed, Windsurf, ChatGPT)
+
+${tabsBlock('MCP (extra)', mcpInstallTabsSecondary.value)}
+
+### Hand-edited config files
+
+${tabsBlock('MCP config', mcpConfigTabs.value)}
+
+---
+
+## System prompt for AI assistants
+
+Paste the prompt below into ChatGPT, Claude, Gemini, Cursor, Copilot,
+or any other AI tool to teach it Orva's full surface — handler
+contract, runtimes, sandbox limits, the in-sandbox \`orva\` SDK
+(kv / invoke / jobs), cron triggers, system-event webhooks, auth
+modes, and production patterns. The model then turns "describe what I
+want" into a pasteable handler on the first try.
+
+\`\`\`text
+${aiPromptText}
+\`\`\`
+
+---
+
+## Tracing
+
+Every invocation chain is recorded as a causal trace —
+**automatically, with zero changes to your function code**. HTTP
+requests, F2F invokes, jobs, cron, inbound webhooks, and replays all
+stitch into the same tree. The dashboard renders it as a waterfall at
+\`/traces\`.
+
+Each execution row IS a span. Spans share a \`trace_id\`; child spans
+point at their parent via \`parent_span_id\`. You don't instantiate
+spans, you don't import a tracer — you just write your handler and
+the platform plumbs IDs through every internal hop.
+
+### What user code sees
+
+Two env vars are stamped per invocation. Read them only if you want to
+log the trace_id alongside your own messages — they're optional.
+
+\`\`\`text
+${traceEnvExample}
+\`\`\`
+
+### Automatic propagation
+
+When a function calls another via the SDK, the trace context flows
+through automatically. The called function becomes a child span of
+the caller; both share the same \`trace_id\`. Job enqueues work the
+same way: \`orva.jobs.enqueue()\` records the trace context on the job
+row, so when the scheduler picks the job up later, the resulting
+execution lands in the same trace as the function that enqueued it
+— even if the gap is hours or days.
+
+\`\`\`js
+${traceF2FExample}
+\`\`\`
+
+### Triggers
+
+Each span carries a \`trigger\` label so the UI can show how the chain
+started.
+
+${triggersTable}
+
+### External correlation (W3C traceparent)
+
+Send a standard \`traceparent\` header on the inbound HTTP request and
+Orva makes its trace a child of yours. The same trace_id is echoed
+back as \`X-Trace-Id\` on every response, so external systems can
+correlate without parsing bodies.
+
+\`\`\`bash
+${traceparentExample}
+\`\`\`
+
+### Outlier detection
+
+Each function maintains an in-memory rolling P95 baseline over its
+last 100 successful warm executions. An invocation is flagged as an
+outlier when it has at least 20 baseline samples AND its duration
+exceeds **P95 × 2**. Cold starts and errors are excluded from the
+baseline so a flapping function can't drag it down. The flag and
+baseline P95 are stored on the execution row and rendered as an amber
+flag icon next to the span.
+
+### Where to look
+
+- \`/traces\` — list of recent traces, filterable by function / status / outlier-only.
+- \`/traces/:id\` — waterfall + per-span detail. Click a span to jump to its execution in the Invocations log.
+- \`GET /api/v1/traces/{id}\` — full span tree as JSON. Pair with \`list_traces\` / \`get_trace\` MCP tools for AI agents.
+- \`GET /api/v1/functions/{id}/baseline\` — current P95/P99/mean for a function.
+
+---
+
+## Errors & recovery
+
+Every error response uses the same envelope so log scrapers and
+retries can match on \`code\`. Deploys are content-addressed; rollback
+retargets the active version pointer and refreshes warm workers.
+
+\`\`\`json
+${errEnvelope}
+\`\`\`
+
+${errorCodesTable}
+`
+})
+
+// Copy state — same 1.2s flip pattern CodeBlock uses for its inline
+// copy button, so the dashboard reads as one design system.
+const docsCopied = ref(false)
+let docsCopiedTimer = null
+const onCopyDocs = async () => {
+  const ok = await copyText(docsMarkdown.value)
+  if (!ok) return
+  docsCopied.value = true
+  clearTimeout(docsCopiedTimer)
+  docsCopiedTimer = setTimeout(() => { docsCopied.value = false }, 1500)
+}
+
 // ── MCP install state ───────────────────────────────────────────────
 const tokenPlaceholder = '<YOUR_ORVA_TOKEN>'
 const mcpToken = ref('')
@@ -1636,14 +2093,203 @@ const Callout = defineComponent({
 <style>
 /* Unscoped because CodeBlock / TabbedCode / Callout are render-fn
    components inside this SFC, and Vue scoped styles don't reach those.
-   All class names are doc-prefixed (.doc-*, .codeblock, .tabbed,
-   .callout) so there's no collision risk.
+   All class names are doc-prefixed (.doc-*, .docs-hero-*, .codeblock,
+   .tabbed, .callout) so there's no collision risk.
 
    ── Type system for the Docs page ────────────────────────────────
    Body / prose:    Inter, --font-sans (inherits from body)
    Code / mono:     JetBrains Mono, --font-mono
    The classes below are the canonical set — every text node on this
    page picks one of them. No ad-hoc text-[10px] anywhere. */
+
+/* ── Hero ────────────────────────────────────────────────────────
+   Top-of-page identity card. Bigger than a list-view header to
+   match the depth of what's inside. Subtle primary-tinted gradient
+   + a stippled grid behind the content gives it visual weight
+   without breaking the dark/mono dashboard aesthetic. */
+.docs-hero {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      ellipse 60% 80% at 0% 0%,
+      rgba(85, 63, 131, 0.12) 0%,
+      rgba(85, 63, 131, 0) 60%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012) 0%, transparent 100%),
+    var(--color-background);
+}
+.docs-hero-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Faint dot grid — just dense enough to register as texture, never
+     so loud it competes with the content. */
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.025) 1px,
+    transparent 1px
+  );
+  background-size: 14px 14px;
+  background-position: 0 0;
+  mask-image: linear-gradient(180deg, black 0%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, black 0%, transparent 100%);
+}
+.docs-hero-content {
+  position: relative;
+  padding: 1.6rem 1.5rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  .docs-hero-content { padding: 2.2rem 2.2rem 1.6rem; gap: 1.4rem; }
+}
+
+.docs-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.docs-hero-eyebrow-mark {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 12px rgba(85, 63, 131, 0.6);
+}
+.docs-hero-eyebrow-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+}
+
+.docs-hero-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: stretch;
+}
+@media (min-width: 768px) {
+  .docs-hero-row {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 2rem;
+  }
+}
+.docs-hero-text { max-width: 56ch; }
+.docs-hero-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: #fff;
+}
+@media (min-width: 640px) {
+  .docs-hero-title { font-size: 38px; }
+}
+.docs-hero-sub {
+  margin: 0.6rem 0 0;
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--color-foreground-muted);
+}
+
+.docs-hero-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.docs-hero-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms, border-color 120ms, color 120ms;
+}
+.docs-hero-copy:hover {
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
+  border-color: var(--color-foreground-muted);
+}
+.docs-hero-copy:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.docs-hero-copy.copied {
+  border-color: rgba(76, 175, 80, 0.4);
+  color: #4ade80;
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.docs-hero-toc {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 1rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+}
+.docs-hero-toc-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+  margin-right: 0.3rem;
+}
+.docs-hero-toc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.32rem 0.6rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-foreground-muted);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 120ms, border-color 120ms, background-color 120ms;
+}
+.docs-hero-toc-link:hover {
+  color: #fff;
+  border-color: var(--color-foreground-muted);
+}
+.docs-hero-toc-link.active {
+  color: #fff;
+  border-color: var(--color-primary);
+  background: rgba(85, 63, 131, 0.18);
+}
+.docs-hero-toc-num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--color-foreground-muted);
+  opacity: 0.7;
+}
+.docs-hero-toc-link.active .docs-hero-toc-num {
+  color: rgba(255, 255, 255, 0.85);
+  opacity: 1;
+}
 
 /* ── Section landmarks ───────────────────────────────────────────── */
 .doc-section-head {
