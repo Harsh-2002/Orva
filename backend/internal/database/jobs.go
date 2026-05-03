@@ -30,6 +30,14 @@ type Job struct {
 	// on the row itself. Empty if the join couldn't find a match (deleted
 	// function with FK still cascading).
 	FunctionName string `json:"function_name,omitempty"`
+
+	// v0.5 tracing: jobs preserve the trace + parent span of whatever
+	// enqueued them so the eventual execution lands in the same trace
+	// as the caller. EnqueuedByFunctionID is denormalised so list views
+	// can show "enqueued by send-summary" without a join.
+	TraceID                 string `json:"trace_id,omitempty"`
+	ParentSpanID            string `json:"parent_span_id,omitempty"`
+	EnqueuedByFunctionID    string `json:"enqueued_by_function_id,omitempty"`
 }
 
 // NewJobID returns a fresh job id (job_<12-hex>).
@@ -57,10 +65,13 @@ func (db *Database) EnqueueJob(j *Job) error {
 	j.CreatedAt = now
 	_, err := db.write.Exec(`
 		INSERT INTO jobs (id, function_id, payload, status, scheduled_at,
-		                  attempts, max_attempts, last_error, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                  attempts, max_attempts, last_error, created_at,
+		                  trace_id, parent_span_id, enqueued_by_function_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.ID, j.FunctionID, j.Payload, j.Status, j.ScheduledAt,
-		j.Attempts, j.MaxAttempts, j.LastError, j.CreatedAt)
+		j.Attempts, j.MaxAttempts, j.LastError, j.CreatedAt,
+		nullableString(j.TraceID), nullableString(j.ParentSpanID),
+		nullableString(j.EnqueuedByFunctionID))
 	return err
 }
 
@@ -68,16 +79,21 @@ func (db *Database) EnqueueJob(j *Job) error {
 func (db *Database) GetJob(id string) (*Job, error) {
 	var j Job
 	var started, finished sql.NullTime
-	var lastErr sql.NullString
+	var lastErr, traceID, parentSpanID, enqBy sql.NullString
 	err := db.read.QueryRow(`
 		SELECT id, function_id, payload, status, scheduled_at, started_at, finished_at,
-		       attempts, max_attempts, last_error, created_at
+		       attempts, max_attempts, last_error, created_at,
+		       trace_id, parent_span_id, enqueued_by_function_id
 		FROM jobs WHERE id = ?`, id,
 	).Scan(&j.ID, &j.FunctionID, &j.Payload, &j.Status, &j.ScheduledAt,
-		&started, &finished, &j.Attempts, &j.MaxAttempts, &lastErr, &j.CreatedAt)
+		&started, &finished, &j.Attempts, &j.MaxAttempts, &lastErr, &j.CreatedAt,
+		&traceID, &parentSpanID, &enqBy)
 	if err != nil {
 		return nil, err
 	}
+	j.TraceID = traceID.String
+	j.ParentSpanID = parentSpanID.String
+	j.EnqueuedByFunctionID = enqBy.String
 	if started.Valid {
 		t := started.Time
 		j.StartedAt = &t
@@ -99,7 +115,8 @@ func (db *Database) ListJobs(status, functionID string, limit int) ([]*Job, erro
 	q := `
 		SELECT j.id, j.function_id, j.payload, j.status, j.scheduled_at,
 		       j.started_at, j.finished_at, j.attempts, j.max_attempts,
-		       j.last_error, j.created_at, COALESCE(f.name, '')
+		       j.last_error, j.created_at, COALESCE(f.name, ''),
+		       j.trace_id, j.parent_span_id, j.enqueued_by_function_id
 		FROM jobs j
 		LEFT JOIN functions f ON f.id = j.function_id
 		WHERE 1=1`
@@ -125,9 +142,10 @@ func (db *Database) ListJobs(status, functionID string, limit int) ([]*Job, erro
 	for rows.Next() {
 		var j Job
 		var started, finished sql.NullTime
-		var lastErr sql.NullString
+		var lastErr, traceID, parentSpanID, enqBy sql.NullString
 		if err := rows.Scan(&j.ID, &j.FunctionID, &j.Payload, &j.Status, &j.ScheduledAt,
-			&started, &finished, &j.Attempts, &j.MaxAttempts, &lastErr, &j.CreatedAt, &j.FunctionName); err != nil {
+			&started, &finished, &j.Attempts, &j.MaxAttempts, &lastErr, &j.CreatedAt, &j.FunctionName,
+			&traceID, &parentSpanID, &enqBy); err != nil {
 			return nil, err
 		}
 		if started.Valid {
@@ -139,6 +157,9 @@ func (db *Database) ListJobs(status, functionID string, limit int) ([]*Job, erro
 			j.FinishedAt = &t
 		}
 		j.LastError = lastErr.String
+		j.TraceID = traceID.String
+		j.ParentSpanID = parentSpanID.String
+		j.EnqueuedByFunctionID = enqBy.String
 		out = append(out, &j)
 	}
 	return out, rows.Err()
@@ -162,7 +183,9 @@ func (db *Database) ClaimDueJobs(now time.Time, limit int) ([]*Job, error) {
 			ORDER BY scheduled_at ASC LIMIT ?
 		)
 		RETURNING id, function_id, payload, status, scheduled_at, started_at, finished_at,
-		          attempts, max_attempts, COALESCE(last_error, ''), created_at`,
+		          attempts, max_attempts, COALESCE(last_error, ''), created_at,
+		          COALESCE(trace_id, ''), COALESCE(parent_span_id, ''),
+		          COALESCE(enqueued_by_function_id, '')`,
 		now.UTC(), now.UTC(), limit)
 	if err != nil {
 		return nil, err
@@ -174,7 +197,8 @@ func (db *Database) ClaimDueJobs(now time.Time, limit int) ([]*Job, error) {
 		var j Job
 		var started, finished sql.NullTime
 		if err := rows.Scan(&j.ID, &j.FunctionID, &j.Payload, &j.Status, &j.ScheduledAt,
-			&started, &finished, &j.Attempts, &j.MaxAttempts, &j.LastError, &j.CreatedAt); err != nil {
+			&started, &finished, &j.Attempts, &j.MaxAttempts, &j.LastError, &j.CreatedAt,
+			&j.TraceID, &j.ParentSpanID, &j.EnqueuedByFunctionID); err != nil {
 			return nil, err
 		}
 		if started.Valid {

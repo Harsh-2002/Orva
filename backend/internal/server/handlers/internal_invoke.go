@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/trace"
+	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
 // InternalInvokeHandler is the F2F (function-to-function) entrypoint.
@@ -25,6 +28,7 @@ type InternalInvokeHandler struct {
 	DB            *database.Database
 	Registry      *registry.Registry
 	Pool          *pool.Manager
+	Metrics       *metrics.Metrics
 	InternalToken string
 
 	// MaxCallDepth caps how many invoke()s can be nested before the call
@@ -97,6 +101,19 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
+	// v0.5 trace context. The SDK forwards X-Orva-Trace-Id /
+	// X-Orva-Span-Id from the caller's env (set by proxy.Forward when the
+	// caller was started). traceID may be empty for legacy calls; we
+	// generate a fresh root in that case so this F2F still produces a
+	// usable single-span trace. parentSpanID = caller's span = our parent.
+	traceID := r.Header.Get("X-Orva-Trace-Id")
+	parentSpanID := r.Header.Get("X-Orva-Span-Id")
+	if traceID == "" {
+		traceID = trace.NewTraceID()
+	}
+	spanID := trace.NewSpanID()
+	callerFnID := r.Header.Get("X-Orva-Caller-Function")
+
 	acq, err := h.Pool.Acquire(ctx, fn.ID)
 	if err != nil {
 		respond.Error(w, http.StatusServiceUnavailable, "POOL_ERROR",
@@ -106,8 +123,16 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	var reqErr error
 	defer func() { h.Pool.Release(fn.ID, acq.Worker, reqErr) }()
 
+	// Generate an execution ID so this F2F call shows up in the executions
+	// log AND in the trace tree as a distinct span. Without this, F2F
+	// children would be invisible to ops tooling.
+	execSuffix, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
+	execID := "exec_" + execSuffix
+
 	// Synthesize the event in the same shape the public /fn/ handler
 	// builds so user code can't tell the difference (which is the point).
+	// Trace headers reach the user code so the SDK can forward them on
+	// any nested invokes.
 	event := map[string]any{
 		"method": "POST",
 		"path":   "/",
@@ -116,20 +141,72 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 			"x-orva-trigger":        "f2f",
 			"x-orva-call-depth":     strconv.Itoa(depth + 1),
 			"x-orva-function-id":    fn.ID,
+			"x-orva-execution-id":   execID,
+			"x-orva-trace-id":       traceID,
+			"x-orva-span-id":        spanID,
 		},
 		"body": string(body),
 	}
 	eventJSON, _ := json.Marshal(event)
 
+	start := time.Now()
 	respJSON, _, err := acq.Worker.Dispatch(ctx, eventJSON)
+	durationMS := time.Since(start).Milliseconds()
 	if err != nil {
 		reqErr = err
 		errMsg := err.Error()
 		if errors.Is(err, context.DeadlineExceeded) {
 			errMsg = "function timed out"
 		}
+		// Record the failed F2F as a span so the trace tree shows the
+		// failure point even when the parent succeeded.
+		h.DB.AsyncInsertExecutionFinal(
+			&database.Execution{
+				ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: acq.ColdStart,
+				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
+				Trigger: "f2f", ParentFunctionID: callerFnID,
+				StartedAt: start,
+			},
+			durationMS, http.StatusBadGateway, errMsg, 0,
+		)
+		if h.Metrics != nil {
+			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", acq.ColdStart, durationMS)
+		}
 		respond.Error(w, http.StatusBadGateway, "INVOKE_FAILED", errMsg, reqID)
 		return
+	}
+
+	// Successful F2F: best-effort parse of the worker envelope to derive
+	// status code + response size for the span. The body shape is
+	// {"statusCode":N,"headers":{...},"body":"..."}; on parse failure we
+	// fall back to status=200, size=0 — the span still records.
+	var env struct {
+		StatusCode int    `json:"statusCode"`
+		Body       string `json:"body"`
+	}
+	statusCode := 200
+	respSize := len(respJSON)
+	if json.Unmarshal(respJSON, &env) == nil {
+		if env.StatusCode > 0 {
+			statusCode = env.StatusCode
+		}
+		respSize = len(env.Body)
+	}
+	execStatus := "success"
+	if statusCode >= 500 {
+		execStatus = "error"
+	}
+	h.DB.AsyncInsertExecutionFinal(
+		&database.Execution{
+			ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: acq.ColdStart,
+			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
+			Trigger: "f2f", ParentFunctionID: callerFnID,
+			StartedAt: start,
+		},
+		durationMS, statusCode, "", respSize,
+	)
+	if h.Metrics != nil {
+		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
 	}
 
 	// Pass through the worker's response verbatim so callers see exactly

@@ -53,6 +53,18 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	bld.DB = db
 	met := metrics.New()
 
+	// Warm per-function baselines from recent successful warm executions
+	// so outlier detection has signal on the first post-restart invocation
+	// instead of waiting for live traffic to fill the rolling buffers.
+	if seed, err := db.ListBaselineSeed(100); err == nil && len(seed) > 0 {
+		entries := make([]metrics.WarmEntry, 0, len(seed))
+		for _, s := range seed {
+			entries = append(entries, metrics.WarmEntry{FunctionID: s.FunctionID, DurationMS: s.DurationMS})
+		}
+		met.Baselines.Warm(entries)
+		slog.Info("baselines warmed", "samples", len(entries))
+	}
+
 	// Initialize sandbox concurrency limiter.
 	limiter := sandbox.NewLimiter(cfg.Sandbox.MaxConcurrent)
 	slog.Info("sandbox ready",
@@ -217,6 +229,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// later in serve.go after the HTTP listener is up so health probes
 	// pass first.
 	sched := scheduler.New(db, poolMgr, cfg.Data.Dir, hub)
+	sched.SetMetrics(met)
 
 	// WebhookFanout subscribes to the Hub and writes webhook_deliveries
 	// rows for every event that any operator-configured subscription

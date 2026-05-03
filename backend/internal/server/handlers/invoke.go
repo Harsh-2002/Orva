@@ -17,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/sandbox"
 	"github.com/Harsh-2002/Orva/internal/secrets"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/trace"
 )
 
 // InvokeHandler handles function invocation requests.
@@ -152,6 +153,15 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	execID := "exec_" + execSuffix
 
+	// HTTP-rooted span. Trace ID was set by requestIDMiddleware; we add
+	// the span ID for this execution and stamp the trigger label.
+	traceID := trace.TraceID(r.Context())
+	parentSpan := trace.ParentSpanID(r.Context()) // empty for true HTTP roots; non-empty if an external W3C parent was honored
+	spanID := trace.NewSpanID()
+	traceCtx := trace.WithSpanID(r.Context(), spanID)
+	traceCtx = trace.WithTrigger(traceCtx, "http")
+	r = r.WithContext(traceCtx)
+
 	// Track active requests.
 	h.Metrics.ActiveRequests.Add(1)
 	defer h.Metrics.ActiveRequests.Add(-1)
@@ -218,9 +228,16 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		coldStart := result != nil && result.ColdStart
 		h.DB.AsyncInsertExecutionFinal(
-			&database.Execution{ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: coldStart},
+			&database.Execution{
+				ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: coldStart,
+				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
+				StartedAt: start,
+			},
 			duration.Milliseconds(), statusCode, errMsg, 0,
 		)
+		if h.Metrics != nil {
+			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", coldStart, duration.Milliseconds())
+		}
 		if result != nil && len(result.Stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,
@@ -248,9 +265,16 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		execStatus = "error"
 	}
 	h.DB.AsyncInsertExecutionFinal(
-		&database.Execution{ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: result.ColdStart},
+		&database.Execution{
+			ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: result.ColdStart,
+			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
+			StartedAt: start,
+		},
 		duration.Milliseconds(), result.StatusCode, "", result.ResponseSize,
 	)
+	if h.Metrics != nil {
+		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, result.ColdStart, duration.Milliseconds())
+	}
 	// Persist stderr after the execution row so the FK constraint is satisfied.
 	if len(result.Stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{

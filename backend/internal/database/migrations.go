@@ -479,6 +479,32 @@ PRAGMA foreign_keys = ON;
 		// was created via POST /api/v1/executions/{id}/replay. NULL on
 		// the first-class invocation; non-NULL on every replay.
 		"ALTER TABLE executions ADD COLUMN replay_of TEXT",
+		// v0.5 tracing: each execution row IS a span. trace_id groups
+		// every execution that resulted (directly or indirectly) from
+		// the same top-level invocation. parent_span_id chains them
+		// into a tree. trigger captures how this span was started so
+		// the UI can show "this trace started from a cron / webhook /
+		// HTTP / etc." parent_function_id is denormalised so trace
+		// queries don't need a separate join. is_outlier + baseline_p95_ms
+		// power the anomaly indicator without recomputing.
+		"ALTER TABLE executions ADD COLUMN trace_id TEXT",
+		"ALTER TABLE executions ADD COLUMN span_id TEXT",
+		"ALTER TABLE executions ADD COLUMN parent_span_id TEXT",
+		"ALTER TABLE executions ADD COLUMN trigger TEXT",
+		"ALTER TABLE executions ADD COLUMN parent_function_id TEXT",
+		"ALTER TABLE executions ADD COLUMN is_outlier INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE executions ADD COLUMN baseline_p95_ms INTEGER",
+		"CREATE INDEX IF NOT EXISTS idx_executions_trace_id ON executions(trace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_executions_parent_span_id ON executions(parent_span_id)",
+		// Jobs preserve trace context across the queue gap so the
+		// scheduled execution that runs them lands in the same trace
+		// as whatever enqueued them.
+		"ALTER TABLE jobs ADD COLUMN trace_id TEXT",
+		"ALTER TABLE jobs ADD COLUMN parent_span_id TEXT",
+		"ALTER TABLE jobs ADD COLUMN enqueued_by_function_id TEXT",
+		// Activity rows can also be linked into traces for cross-correlation.
+		"ALTER TABLE activity_log ADD COLUMN trace_id TEXT",
+		"CREATE INDEX IF NOT EXISTS idx_activity_log_trace_id ON activity_log(trace_id)",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// "duplicate column name" is expected on boot after the first.

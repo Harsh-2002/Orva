@@ -22,6 +22,32 @@ type Execution struct {
 	// produced by POST /api/v1/executions/{id}/replay. NULL on first-class
 	// invocations; non-NULL only on replays. v0.4 A3.
 	ReplayOf *string `json:"replay_of,omitempty"`
+
+	// v0.5 tracing: each execution row is a span in a causal trace.
+	// TraceID groups every execution that resulted (directly or via F2F /
+	// jobs) from the same top-level invocation. ParentSpanID chains them
+	// into a tree. Trigger captures how this span was started; one of
+	// "http" / "cron" / "job" / "f2f" / "webhook" / "inbound" / "replay".
+	TraceID            string `json:"trace_id,omitempty"`
+	SpanID             string `json:"span_id,omitempty"`
+	ParentSpanID       string `json:"parent_span_id,omitempty"`
+	Trigger            string `json:"trigger,omitempty"`
+	ParentFunctionID   string `json:"parent_function_id,omitempty"`
+	IsOutlier          bool   `json:"is_outlier"`
+	BaselineP95MS      *int64 `json:"baseline_p95_ms,omitempty"`
+}
+
+// TraceContext bundles the four pieces of trace state that flow with a
+// request through every internal hop. TraceID stays constant inside a
+// trace; SpanID identifies this execution; ParentSpanID points at the
+// caller. Trigger is set per-span based on the entry point. Use
+// NewRootTraceContext when starting a fresh trace and ChildOf when
+// extending an existing one (F2F / job pickup / cron-scheduled).
+type TraceContext struct {
+	TraceID      string
+	SpanID       string
+	ParentSpanID string
+	Trigger      string
 }
 
 type ExecutionLog struct {
@@ -79,20 +105,119 @@ func (db *Database) InsertExecutionFinal(exec *Execution, durationMS int64, stat
 }
 
 // AsyncInsertExecutionFinal queues the final-write of a completed execution
-// for the batched writer. Non-blocking on the hot path.
+// for the batched writer. Non-blocking on the hot path. Trace fields are
+// taken from exec.TraceID/SpanID/ParentSpanID/Trigger/ParentFunctionID;
+// callers populate them before calling. IsOutlier + BaselineP95MS are NOT
+// written here — the baseline package back-writes them via UpdateOutlier
+// once the execution has been recorded against its function's baseline.
+//
+// started_at uses exec.StartedAt when non-zero; otherwise CURRENT_TIMESTAMP.
+// Setting it explicitly matters for the trace tree: under the async batch
+// writer, child spans (F2F callees) often commit BEFORE their parent
+// (parent commits only after the response is sent), so a default-on-insert
+// timestamp would invert causal ordering. Callers measure start time at
+// the top of their handler and pass it down.
 func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int) {
 	coldStart := 0
 	if exec.ColdStart {
 		coldStart = 1
 	}
+	startedAt := executionStartTime(exec.StartedAt)
 	db.AsyncExec(`
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
-			duration_ms, status_code, error_message, response_size, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+			duration_ms, status_code, error_message, response_size,
+			started_at, finished_at,
+			trace_id, span_id, parent_span_id, trigger, parent_function_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`,
 		exec.ID, exec.FunctionID, exec.Status, coldStart, exec.ContainerID,
 		durationMS, statusCode, errMsg, responseSize,
+		startedAt,
+		nullableString(exec.TraceID), nullableString(exec.SpanID),
+		nullableString(exec.ParentSpanID), nullableString(exec.Trigger),
+		nullableString(exec.ParentFunctionID),
 	)
+}
+
+// executionStartTime returns either the explicit started_at (UTC) or the
+// current time when the caller didn't track it. We pass UTC into SQLite
+// to match the schema's DATETIME convention; the column stores the raw
+// string so timezone is meaningful.
+func executionStartTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now().UTC()
+	}
+	return t.UTC()
+}
+
+// nullableString returns nil for the empty string so SQLite stores NULL
+// rather than the literal "" — keeps trace queries clean
+// (`WHERE trace_id IS NULL` works) and shrinks the index B-tree.
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// UpdateOutlier back-writes the baseline-derived fields onto an existing
+// execution row after the baseline package classifies it. Idempotent —
+// the baseline only fires once per execution finalize.
+func (db *Database) UpdateOutlier(execID string, isOutlier bool, baselineP95MS int64) {
+	flag := 0
+	if isOutlier {
+		flag = 1
+	}
+	db.AsyncExec(
+		"UPDATE executions SET is_outlier = ?, baseline_p95_ms = ? WHERE id = ?",
+		flag, baselineP95MS, execID,
+	)
+}
+
+// WarmBaselineSeed represents the data needed to warm a per-function
+// baseline at startup. Populated by ListBaselineSeed; the caller is
+// metrics.Baselines.Warm.
+type WarmBaselineSeed struct {
+	FunctionID string
+	DurationMS int64
+}
+
+// ListBaselineSeed returns up to baselineSamples × functions worth of
+// recent successful warm executions, suitable for warming the per-fn
+// rolling P95 buffers at startup. We pull only successful warm
+// executions (cold_start = 0, status = 'success', duration_ms NOT NULL)
+// because cold starts and errors are excluded from the baseline at
+// runtime — warming with them would skew the first few minutes of
+// post-start outlier classification.
+func (db *Database) ListBaselineSeed(perFnSamples int) ([]WarmBaselineSeed, error) {
+	if perFnSamples <= 0 {
+		perFnSamples = 100
+	}
+	// Window-function-style: take the most recent N rows per function.
+	// SQLite supports ROW_NUMBER() since 3.25 and modernc/sqlite is
+	// well past that.
+	rows, err := db.read.Query(`
+		SELECT function_id, duration_ms FROM (
+			SELECT function_id, duration_ms,
+				ROW_NUMBER() OVER (PARTITION BY function_id ORDER BY started_at DESC) AS rn
+			FROM executions
+			WHERE status = 'success' AND cold_start = 0 AND duration_ms IS NOT NULL
+		) WHERE rn <= ?
+	`, perFnSamples)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var seed []WarmBaselineSeed
+	for rows.Next() {
+		var s WarmBaselineSeed
+		if err := rows.Scan(&s.FunctionID, &s.DurationMS); err != nil {
+			return nil, err
+		}
+		seed = append(seed, s)
+	}
+	return seed, rows.Err()
 }
 
 // AsyncInsertExecutionLog queues a log row for the batched writer.
@@ -146,19 +271,26 @@ func (db *Database) GetExecutionRequest(id string) (*ExecutionRequest, error) {
 // AsyncInsertExecutionFinalReplay mirrors AsyncInsertExecutionFinal but
 // also stores the replay_of pointer. Separate function so the hot
 // invoke path doesn't pay the cost of an always-NULL parameter on every
-// call.
+// call. Trace fields ride along the same as AsyncInsertExecutionFinal.
 func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, replayOf string) {
 	coldStart := 0
 	if exec.ColdStart {
 		coldStart = 1
 	}
+	startedAt := executionStartTime(exec.StartedAt)
 	db.AsyncExec(`
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
-			duration_ms, status_code, error_message, response_size, finished_at, replay_of
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+			duration_ms, status_code, error_message, response_size,
+			started_at, finished_at, replay_of,
+			trace_id, span_id, parent_span_id, trigger, parent_function_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`,
 		exec.ID, exec.FunctionID, exec.Status, coldStart, exec.ContainerID,
-		durationMS, statusCode, errMsg, responseSize, replayOf,
+		durationMS, statusCode, errMsg, responseSize,
+		startedAt, replayOf,
+		nullableString(exec.TraceID), nullableString(exec.SpanID),
+		nullableString(exec.ParentSpanID), nullableString(exec.Trigger),
+		nullableString(exec.ParentFunctionID),
 	)
 }
 
@@ -173,12 +305,108 @@ func (db *Database) UpdateExecution(id, status string, durationMS int64, statusC
 	return err
 }
 
+// executionSelectColumns is the canonical column list shared by every
+// SELECT against executions. Keeping it in one place makes adding columns
+// safe; mismatched scan/select pairs are the #1 source of trace-data
+// regressions.
+const executionSelectColumns = `
+	id, function_id, status, cold_start, duration_ms, status_code,
+	request_size, response_size, container_id, error_message,
+	started_at, finished_at, replay_of,
+	trace_id, span_id, parent_span_id, trigger, parent_function_id,
+	is_outlier, baseline_p95_ms`
+
 func (db *Database) GetExecution(id string) (*Execution, error) {
-	row := db.read.QueryRow(`
-		SELECT id, function_id, status, cold_start, duration_ms, status_code,
-			request_size, response_size, container_id, error_message, started_at, finished_at, replay_of
-		FROM executions WHERE id = ?`, id)
+	row := db.read.QueryRow(
+		"SELECT "+executionSelectColumns+" FROM executions WHERE id = ?", id,
+	)
 	return scanExecution(row)
+}
+
+// ListByTraceID returns every execution that shares a trace_id, ordered
+// by started_at ASC so the root span is first and children follow in
+// causal order. Backed by idx_executions_trace_id.
+func (db *Database) ListByTraceID(traceID string) ([]*Execution, error) {
+	rows, err := db.read.Query(
+		"SELECT "+executionSelectColumns+" FROM executions WHERE trace_id = ? ORDER BY started_at ASC",
+		traceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var execs []*Execution
+	for rows.Next() {
+		exec, err := scanExecutionRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		execs = append(execs, exec)
+	}
+	return execs, rows.Err()
+}
+
+// ListRootSpans returns recent root spans (parent_span_id IS NULL)
+// optionally filtered by function_id, since/until window, and outlier
+// flag. Used by the Traces list view. Cursor pagination is by started_at.
+type ListRootSpansParams struct {
+	FunctionID   string
+	Since        string // ISO8601 inclusive
+	Until        string // ISO8601 exclusive
+	Status       string
+	OutlierOnly  bool
+	Limit        int
+	BeforeCursor string // started_at lower bound for "next page"
+}
+
+func (db *Database) ListRootSpans(p ListRootSpansParams) ([]*Execution, error) {
+	if p.Limit <= 0 || p.Limit > 200 {
+		p.Limit = 50
+	}
+	q := "SELECT " + executionSelectColumns + " FROM executions WHERE trace_id IS NOT NULL AND parent_span_id IS NULL"
+	args := []any{}
+	if p.FunctionID != "" {
+		q += " AND function_id = ?"
+		args = append(args, p.FunctionID)
+	}
+	if p.Status != "" {
+		q += " AND status = ?"
+		args = append(args, p.Status)
+	}
+	if p.OutlierOnly {
+		q += " AND is_outlier = 1"
+	}
+	if p.Since != "" {
+		q += " AND started_at >= ?"
+		args = append(args, p.Since)
+	}
+	if p.Until != "" {
+		q += " AND started_at < ?"
+		args = append(args, p.Until)
+	}
+	if p.BeforeCursor != "" {
+		q += " AND started_at < ?"
+		args = append(args, p.BeforeCursor)
+	}
+	q += " ORDER BY started_at DESC LIMIT ?"
+	args = append(args, p.Limit)
+
+	rows, err := db.read.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var execs []*Execution
+	for rows.Next() {
+		exec, err := scanExecutionRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		execs = append(execs, exec)
+	}
+	return execs, rows.Err()
 }
 
 type ListExecutionsParams struct {
@@ -201,7 +429,7 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 		params.Limit = 50
 	}
 
-	query := "SELECT id, function_id, status, cold_start, duration_ms, status_code, request_size, response_size, container_id, error_message, started_at, finished_at, replay_of FROM executions WHERE 1=1"
+	query := "SELECT " + executionSelectColumns + " FROM executions WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM executions WHERE 1=1"
 	var args []any
 
@@ -316,23 +544,30 @@ func (db *Database) PurgeOldExecutions(retentionDays int) error {
 	return err
 }
 
-func scanExecution(row *sql.Row) (*Execution, error) {
+// scanExecutionFields uses the package-level rowScanner interface
+// (defined in functions.go) so both *sql.Row and *sql.Rows share one
+// scan implementation. Adding a column to executionSelectColumns means
+// editing only this function; both call sites ride along automatically.
+func scanExecutionFields(s rowScanner) (*Execution, error) {
 	var exec Execution
-	var coldStart int
-	var durationMS, statusCode, reqSize, respSize sql.NullInt64
-	var containerID, errMsg, replayOf sql.NullString
+	var coldStart, isOutlier int
+	var durationMS, statusCode, reqSize, respSize, baselineP95 sql.NullInt64
+	var containerID, errMsg, replayOf, traceID, spanID, parentSpanID, trigger, parentFnID sql.NullString
 	var finishedAt sql.NullTime
 
-	err := row.Scan(
+	err := s.Scan(
 		&exec.ID, &exec.FunctionID, &exec.Status, &coldStart,
 		&durationMS, &statusCode, &reqSize, &respSize,
 		&containerID, &errMsg, &exec.StartedAt, &finishedAt, &replayOf,
+		&traceID, &spanID, &parentSpanID, &trigger, &parentFnID,
+		&isOutlier, &baselineP95,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	exec.ColdStart = coldStart == 1
+	exec.IsOutlier = isOutlier == 1
 	if durationMS.Valid {
 		v := durationMS.Int64
 		exec.DurationMS = &v
@@ -349,50 +584,9 @@ func scanExecution(row *sql.Row) (*Execution, error) {
 		v := int(respSize.Int64)
 		exec.ResponseSize = &v
 	}
-	exec.ContainerID = containerID.String
-	exec.ErrorMessage = errMsg.String
-	if finishedAt.Valid {
-		exec.FinishedAt = &finishedAt.Time
-	}
-	if replayOf.Valid && replayOf.String != "" {
-		v := replayOf.String
-		exec.ReplayOf = &v
-	}
-	return &exec, nil
-}
-
-func scanExecutionRows(rows *sql.Rows) (*Execution, error) {
-	var exec Execution
-	var coldStart int
-	var durationMS, statusCode, reqSize, respSize sql.NullInt64
-	var containerID, errMsg, replayOf sql.NullString
-	var finishedAt sql.NullTime
-
-	err := rows.Scan(
-		&exec.ID, &exec.FunctionID, &exec.Status, &coldStart,
-		&durationMS, &statusCode, &reqSize, &respSize,
-		&containerID, &errMsg, &exec.StartedAt, &finishedAt, &replayOf,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	exec.ColdStart = coldStart == 1
-	if durationMS.Valid {
-		v := durationMS.Int64
-		exec.DurationMS = &v
-	}
-	if statusCode.Valid {
-		v := int(statusCode.Int64)
-		exec.StatusCode = &v
-	}
-	if reqSize.Valid {
-		v := int(reqSize.Int64)
-		exec.RequestSize = &v
-	}
-	if respSize.Valid {
-		v := int(respSize.Int64)
-		exec.ResponseSize = &v
+	if baselineP95.Valid {
+		v := baselineP95.Int64
+		exec.BaselineP95MS = &v
 	}
 	exec.ContainerID = containerID.String
 	exec.ErrorMessage = errMsg.String
@@ -403,5 +597,13 @@ func scanExecutionRows(rows *sql.Rows) (*Execution, error) {
 		v := replayOf.String
 		exec.ReplayOf = &v
 	}
+	exec.TraceID = traceID.String
+	exec.SpanID = spanID.String
+	exec.ParentSpanID = parentSpanID.String
+	exec.Trigger = trigger.String
+	exec.ParentFunctionID = parentFnID.String
 	return &exec, nil
 }
+
+func scanExecution(row *sql.Row) (*Execution, error)     { return scanExecutionFields(row) }
+func scanExecutionRows(rows *sql.Rows) (*Execution, error) { return scanExecutionFields(rows) }

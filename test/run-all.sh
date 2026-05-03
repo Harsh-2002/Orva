@@ -42,6 +42,7 @@ run errors-test.sh
 run rollback-test.sh
 run egress-test.sh
 run auth-test.sh
+run tracing-test.sh
 run atscale.sh
 
 echo

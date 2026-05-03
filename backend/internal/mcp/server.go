@@ -115,6 +115,8 @@ func NewHandler(deps Deps) http.Handler {
 		// v0.4 B3 + B5: saved request fixtures (Postman-style presets) +
 		// test_function_with_fixture invoke variant.
 		registerFixtureTools(s, deps, perms)
+		// v0.5: causal tracing — get_trace / list_traces / get_function_baseline.
+		registerTraceTools(s, deps, perms)
 
 		registerResources(s, deps, perms)
 

@@ -93,6 +93,14 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 	if req.ScheduledAt != nil {
 		job.ScheduledAt = req.ScheduledAt.UTC()
 	}
+	// v0.5 trace context: when a function inside a sandbox enqueues this
+	// job, the SDK forwards the caller's trace headers. We persist them on
+	// the job row so the eventual execution lands in the same trace as
+	// whatever enqueued it. Empty headers (dashboard or external API
+	// caller) leave these blank → the picked-up job becomes a new root.
+	job.TraceID = r.Header.Get("X-Orva-Trace-Id")
+	job.ParentSpanID = r.Header.Get("X-Orva-Span-Id")
+	job.EnqueuedByFunctionID = r.Header.Get("X-Orva-Caller-Function")
 	if err := h.DB.EnqueueJob(job); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "enqueue failed: "+err.Error(), reqID)
 		return

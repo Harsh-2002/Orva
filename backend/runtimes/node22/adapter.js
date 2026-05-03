@@ -457,6 +457,14 @@ async function readFrame() {
     if (_depth) process.env.ORVA_CALL_DEPTH = _depth;
     else delete process.env.ORVA_CALL_DEPTH;
 
+    // v0.5 trace context. Each event carries the trace_id + span_id of
+    // this invocation; the SDK reads them from env when issuing nested
+    // F2F calls or job enqueues so causal chains stay linked.
+    const _tID = _hdrs['x-orva-trace-id'] || _hdrs['X-Orva-Trace-Id'] || '';
+    const _sID = _hdrs['x-orva-span-id']  || _hdrs['X-Orva-Span-Id']  || '';
+    if (_tID) process.env.ORVA_TRACE_ID = _tID; else delete process.env.ORVA_TRACE_ID;
+    if (_sID) process.env.ORVA_SPAN_ID  = _sID; else delete process.env.ORVA_SPAN_ID;
+
     // v0.4 C1: streaming flag + heartbeat interval ride on per-request
     // headers so the proxy can flip them at runtime without redeploying
     // the worker. Defaults match the system_config seed values.

@@ -30,6 +30,20 @@ const _apiBase = () => process.env.ORVA_API_BASE || ''
 const _token   = () => process.env.ORVA_INTERNAL_TOKEN || ''
 const _fnID    = () => process.env.ORVA_FUNCTION_ID || ''
 
+// Trace headers forwarded on every internal call so causal chains stay
+// linked across F2F invokes / job enqueues. Empty when the function
+// wasn't started inside a trace (legacy or test).
+function _traceHeaders() {
+  const h = {}
+  const trace  = process.env.ORVA_TRACE_ID
+  const span   = process.env.ORVA_SPAN_ID
+  const fnID   = _fnID()
+  if (trace)  h['X-Orva-Trace-Id'] = trace
+  if (span)   h['X-Orva-Span-Id']  = span
+  if (fnID)   h['X-Orva-Caller-Function'] = fnID
+  return h
+}
+
 async function _request(method, path, { body = null, headers = {} } = {}) {
   const base  = _apiBase()
   const token = _token()
@@ -43,6 +57,7 @@ async function _request(method, path, { body = null, headers = {} } = {}) {
     headers: {
       'X-Orva-Internal-Token': token,
       'Content-Type': 'application/json',
+      ..._traceHeaders(),
       ...headers,
     },
   }

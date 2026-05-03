@@ -173,6 +173,13 @@ func (r *Router) setupRoutes() {
 	}
 	r.mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", replayHandler.Replay)
 
+	// Tracing surface — every execution row is also a span; these
+	// endpoints stitch them into causal trees on demand.
+	tracesHandler := &handlers.TracesHandler{DB: r.db, Registry: r.registry, Metrics: r.metrics}
+	r.mux.HandleFunc("GET /api/v1/traces", tracesHandler.ListTraces)
+	r.mux.HandleFunc("GET /api/v1/traces/{trace_id}", tracesHandler.GetTrace)
+	r.mux.HandleFunc("GET /api/v1/functions/{id}/baseline", tracesHandler.GetFunctionBaseline)
+
 	// Live Activity feed — historical companion to the SSE event stream.
 	activityHandler := &handlers.ActivityHandler{DB: r.db}
 	r.mux.HandleFunc("GET /api/v1/activity", activityHandler.List)
@@ -246,7 +253,7 @@ func (r *Router) setupRoutes() {
 
 	// Function-to-function calls (Phase 4). Path uses the friendly name.
 	f2fHandler := &handlers.InternalInvokeHandler{
-		DB: r.db, Registry: r.registry, Pool: r.poolMgr, InternalToken: internalToken,
+		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics, InternalToken: internalToken,
 	}
 	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}", f2fHandler.Invoke)
 
@@ -276,7 +283,7 @@ func (r *Router) setupRoutes() {
 	// don't need an API key. Authentication is the HMAC signature on
 	// the request body itself.
 	inboundTrigger := &handlers.InboundTriggerHandler{
-		DB: r.db, Registry: r.registry, Pool: r.poolMgr,
+		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics,
 	}
 	if r.eventHub != nil {
 		inboundTrigger.PublishEvent = r.eventHub.Publish

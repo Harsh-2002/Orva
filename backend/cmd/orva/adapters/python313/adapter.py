@@ -648,6 +648,16 @@ try:
         else:
             os.environ.pop("ORVA_CALL_DEPTH", None)
 
+        # v0.5 trace context. Each event carries the trace_id + span_id of
+        # this invocation; the SDK reads them from env when issuing nested
+        # F2F calls or job enqueues so causal chains stay linked.
+        _tid = _hdrs.get("x-orva-trace-id") or _hdrs.get("X-Orva-Trace-Id") or ""
+        _sid = _hdrs.get("x-orva-span-id")  or _hdrs.get("X-Orva-Span-Id")  or ""
+        if _tid: os.environ["ORVA_TRACE_ID"] = _tid
+        else:    os.environ.pop("ORVA_TRACE_ID", None)
+        if _sid: os.environ["ORVA_SPAN_ID"] = _sid
+        else:    os.environ.pop("ORVA_SPAN_ID", None)
+
         # v0.4 C1: streaming flag + heartbeat interval ride on per-request
         # headers so the proxy can flip them at runtime without redeploying
         # the worker. Defaults match the system_config seed values.

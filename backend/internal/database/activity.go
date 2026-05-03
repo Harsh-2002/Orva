@@ -25,6 +25,10 @@ type ActivityRow struct {
 	Summary    string `json:"summary"`
 	RequestID  string `json:"request_id"`
 	Metadata   string `json:"metadata"`
+	// v0.5: link this row into a trace so the activity feed can show
+	// "this 500 was part of trace tr_xxx". Empty when the request was
+	// authless / hit a non-traced endpoint.
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 // InsertActivity queues a single row through the batched async writer.
@@ -37,11 +41,11 @@ func (db *Database) InsertActivity(row ActivityRow) {
 	db.AsyncExec(`
 		INSERT INTO activity_log (
 			ts, source, actor_type, actor_id, actor_label,
-			method, path, status, duration_ms, summary, request_id, metadata
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			method, path, status, duration_ms, summary, request_id, metadata, trace_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		row.TS, row.Source, row.ActorType, row.ActorID, row.ActorLabel,
 		row.Method, row.Path, row.Status, row.DurationMS, row.Summary,
-		row.RequestID, row.Metadata,
+		row.RequestID, row.Metadata, nullableString(row.TraceID),
 	)
 }
 
@@ -105,7 +109,8 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 	}
 	q := fmt.Sprintf(`
 		SELECT id, ts, source, actor_type, actor_id, actor_label,
-		       method, path, status, duration_ms, summary, request_id, metadata
+		       method, path, status, duration_ms, summary, request_id, metadata,
+		       COALESCE(trace_id, '')
 		FROM activity_log
 		%s
 		ORDER BY ts DESC, id DESC
@@ -122,7 +127,7 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 		if err := res.Scan(
 			&r.ID, &r.TS, &r.Source, &r.ActorType, &r.ActorID, &r.ActorLabel,
 			&r.Method, &r.Path, &r.Status, &r.DurationMS, &r.Summary,
-			&r.RequestID, &r.Metadata,
+			&r.RequestID, &r.Metadata, &r.TraceID,
 		); err != nil {
 			return nil, 0, err
 		}

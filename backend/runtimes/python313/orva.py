@@ -53,6 +53,20 @@ def _function_id() -> str:
     return os.environ.get("ORVA_FUNCTION_ID", "")
 
 
+def _trace_headers() -> dict:
+    """Forward trace context on every internal call so F2F / job enqueues
+    stay linked into the same trace as the caller. Empty when the
+    function wasn't started inside a trace (legacy or test)."""
+    h: dict = {}
+    if v := os.environ.get("ORVA_TRACE_ID"):
+        h["X-Orva-Trace-Id"] = v
+    if v := os.environ.get("ORVA_SPAN_ID"):
+        h["X-Orva-Span-Id"] = v
+    if v := _function_id():
+        h["X-Orva-Caller-Function"] = v
+    return h
+
+
 def _request(method: str, path: str, *, body: bytes = b"", headers: dict | None = None) -> tuple[int, bytes]:
     base = _api_base()
     token = _token()
@@ -60,6 +74,7 @@ def _request(method: str, path: str, *, body: bytes = b"", headers: dict | None 
         raise OrvaUnavailableError("Orva SDK not available (missing ORVA_API_BASE or ORVA_INTERNAL_TOKEN)")
 
     h = {"X-Orva-Internal-Token": token, "Content-Type": "application/json"}
+    h.update(_trace_headers())
     if headers:
         h.update(headers)
 

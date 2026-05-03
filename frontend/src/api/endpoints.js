@@ -338,6 +338,20 @@ export const uploadRestore = (file) => {
   })
 }
 
+// ── Tracing (v0.5) ──────────────────────────────────────────────────
+// A trace is the set of executions sharing a trace_id. The list view
+// returns root spans only; getTrace expands one trace into its full
+// span tree with offsets pre-computed for the waterfall view.
+
+export const getTrace = (traceID) => apiClient.get(`/traces/${traceID}`)
+
+export const listTraces = (params = {}) => apiClient.get('/traces', { params })
+
+// Per-function rolling baseline (P95/P99/mean over the last N samples).
+// Drives the "P95: Xms · K anomalies" chip on function detail pages.
+export const getFunctionBaseline = (idOrName) =>
+  apiClient.get(`/functions/${idOrName}/baseline`)
+
 // ── Webhook subscriptions (Phase v0.3) ──────────────────────────────
 
 export const listWebhooks = () => apiClient.get('/webhooks')

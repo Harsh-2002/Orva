@@ -88,6 +88,7 @@
             <th class="px-4 py-3 font-medium hidden md:table-cell">Cold</th>
             <th class="px-4 py-3 font-medium hidden lg:table-cell">HTTP</th>
             <th class="px-4 py-3 font-medium hidden sm:table-cell">Duration</th>
+            <th class="px-4 py-3 font-medium hidden lg:table-cell">Trace</th>
             <th class="px-4 py-3 font-medium text-right hidden xl:table-cell">ID</th>
           </tr>
         </thead>
@@ -135,6 +136,18 @@
             </td>
             <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden sm:table-cell">
               {{ log.duration_ms != null ? log.duration_ms + 'ms' : '—' }}
+            </td>
+            <td class="px-4 py-3 hidden lg:table-cell">
+              <button
+                v-if="log.trace_id"
+                class="text-foreground-muted hover:text-white font-mono text-xs underline-offset-2 hover:underline inline-flex items-center gap-1"
+                :title="log.trace_id"
+                @click.stop="router.push('/traces/' + log.trace_id)"
+              >
+                <Network class="w-3 h-3" />
+                {{ log.trace_id.substring(0, 11) }}
+              </button>
+              <span v-else class="text-foreground-muted">—</span>
             </td>
             <td class="px-4 py-3 text-right text-foreground-muted font-mono text-xs hidden xl:table-cell">
               {{ log.id?.substring(0, 12) }}
@@ -354,7 +367,7 @@
 <script setup>
 import { ref, computed, h, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles } from 'lucide-vue-next'
+import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles, Network } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'

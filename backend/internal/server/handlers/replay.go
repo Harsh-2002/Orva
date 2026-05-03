@@ -17,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/trace"
 )
 
 // ReplayHandler powers POST /api/v1/executions/{id}/replay (v0.4 A3).
@@ -133,10 +134,17 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal([]byte(captured.HeadersJSON), &rebuiltHeaders)
 	}
 	// Stamp the standard Orva-internal headers the proxy normally adds.
+	// Replay creates a fresh root trace — we don't reuse the original
+	// trace_id because operators expect to debug the replay independently
+	// (and the original trace is preserved for comparison).
+	traceID := trace.NewTraceID()
+	spanID := trace.NewSpanID()
 	rebuiltHeaders["x-orva-function-id"] = fn.ID
 	rebuiltHeaders["x-orva-execution-id"] = newExecID
 	rebuiltHeaders["x-orva-trigger"] = "replay"
 	rebuiltHeaders["x-orva-timeout-ms"] = strconv.FormatInt(fn.TimeoutMS, 10)
+	rebuiltHeaders["x-orva-trace-id"] = traceID
+	rebuiltHeaders["x-orva-span-id"] = spanID
 
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -193,9 +201,16 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 				FunctionID: fn.ID,
 				Status:     "error",
 				ColdStart:  acq.ColdStart,
+				TraceID:    traceID,
+				SpanID:     spanID,
+				Trigger:    "replay",
+				StartedAt:  start,
 			},
 			duration.Milliseconds(), 0, errMsg, 0, origID,
 		)
+		if h.Metrics != nil {
+			h.Metrics.Baselines.FinalizeExecution(h.DB, newExecID, fn.ID, "error", acq.ColdStart, duration.Milliseconds())
+		}
 		if len(stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: newExecID,
@@ -236,9 +251,16 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 			FunctionID: fn.ID,
 			Status:     execStatus,
 			ColdStart:  acq.ColdStart,
+			TraceID:    traceID,
+			SpanID:     spanID,
+			Trigger:    "replay",
+			StartedAt:  start,
 		},
 		duration.Milliseconds(), sc, "", len(resp.Body), origID,
 	)
+	if h.Metrics != nil {
+		h.Metrics.Baselines.FinalizeExecution(h.DB, newExecID, fn.ID, execStatus, acq.ColdStart, duration.Milliseconds())
+	}
 	if len(stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: newExecID,

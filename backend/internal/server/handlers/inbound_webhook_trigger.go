@@ -28,9 +28,11 @@ import (
 	gonanoid "github.com/matoous/go-nanoid/v2"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/trace"
 )
 
 // maxInboundBody caps the request body the trigger will read. nsjail
@@ -45,6 +47,7 @@ type InboundTriggerHandler struct {
 	DB       *database.Database
 	Registry *registry.Registry
 	Pool     *pool.Manager
+	Metrics  *metrics.Metrics
 
 	// PublishEvent fires an `event: execution` so the live UI sees
 	// inbound-triggered runs in the same feed as HTTP invokes. Wired in
@@ -153,6 +156,15 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	execID := "exec_" + execSuffix
 	startedAt := time.Now()
 
+	// Inbound webhook is always a root span. The middleware already
+	// generated a trace_id for the incoming HTTP request — we reuse it
+	// so external callers correlating on X-Trace-Id see the same id.
+	traceID := trace.TraceID(r.Context())
+	if traceID == "" {
+		traceID = trace.NewTraceID()
+	}
+	spanID := trace.NewSpanID()
+
 	// Build the event envelope. We forward the original headers so user
 	// code (e.g. a GitHub handler that wants X-GitHub-Event) can branch
 	// on them, plus stamp our own x-orva-* tags so a function can tell
@@ -162,6 +174,8 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	headers["x-orva-inbound-webhook-id"] = hook.ID
 	headers["x-orva-execution-id"] = execID
 	headers["x-orva-function-id"] = fn.ID
+	headers["x-orva-trace-id"] = traceID
+	headers["x-orva-span-id"] = spanID
 
 	event := map[string]any{
 		"method":  "POST",
@@ -182,9 +196,16 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		// Record an execution row tagged with status=error so the
 		// dashboard's invocations list shows the failure.
 		h.DB.AsyncInsertExecutionFinal(
-			&database.Execution{ID: execID, FunctionID: fn.ID, Status: "error"},
+			&database.Execution{
+				ID: execID, FunctionID: fn.ID, Status: "error",
+				TraceID: traceID, SpanID: spanID, Trigger: "inbound",
+				StartedAt: startedAt,
+			},
 			durationMS, 0, errMsg, 0,
 		)
+		if h.Metrics != nil {
+			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", false, durationMS)
+		}
 		if len(stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID, Stderr: string(stderr),
@@ -214,9 +235,16 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		execStatus = "error"
 	}
 	h.DB.AsyncInsertExecutionFinal(
-		&database.Execution{ID: execID, FunctionID: fn.ID, Status: execStatus},
+		&database.Execution{
+			ID: execID, FunctionID: fn.ID, Status: execStatus,
+			TraceID: traceID, SpanID: spanID, Trigger: "inbound",
+			StartedAt: startedAt,
+		},
 		durationMS, statusCode, "", len(fnResp.Body),
 	)
+	if h.Metrics != nil {
+		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, false, durationMS)
+	}
 	if len(stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: execID, Stderr: string(stderr),

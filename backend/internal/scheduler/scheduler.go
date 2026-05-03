@@ -21,8 +21,10 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/server/events"
+	"github.com/Harsh-2002/Orva/internal/trace"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/robfig/cron/v3"
 )
@@ -97,7 +99,17 @@ type Scheduler struct {
 
 	// stop signals the loop to exit. Closed by Stop().
 	stop chan struct{}
+
+	// metrics is the shared metrics struct that owns per-function
+	// baselines. Optional — may be nil in tests; recordExecution
+	// short-circuits the outlier hook when it's missing.
+	metrics *metrics.Metrics
 }
+
+// SetMetrics wires the metrics container so cron/job-recorded executions
+// feed per-function baselines and get an outlier flag back-written.
+// Optional — leave unset in tests where metrics aren't relevant.
+func (s *Scheduler) SetMetrics(m *metrics.Metrics) { s.metrics = m }
 
 // New constructs a Scheduler. Wire by passing the running database +
 // pool manager from server.New. hub may be nil — the scheduler still
@@ -328,6 +340,9 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	// header so user code can branch on origin.
 	execID, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
 	execID = "exec_" + execID
+	// Cron is always a root span — fresh trace.
+	traceID := trace.NewTraceID()
+	spanID := trace.NewSpanID()
 	body := row.Payload
 	if body == "" {
 		body = "{}"
@@ -341,6 +356,8 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 			"x-orva-cron-id":        row.ID,
 			"x-orva-execution-id":   execID,
 			"x-orva-function-id":    fn.ID,
+			"x-orva-trace-id":       traceID,
+			"x-orva-span-id":        spanID,
 		},
 		"body": body,
 	}
@@ -353,7 +370,7 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 		if errors.Is(err, context.DeadlineExceeded) {
 			errMsg = "function timed out"
 		}
-		s.recordExecution(execID, fn.ID, "error", 0, ranAt, stderr, errMsg)
+		s.recordExecution(execID, fn.ID, "error", 0, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, fn.Name, errMsg)
 		return
@@ -372,13 +389,13 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 
 	if statusCode >= 500 {
 		errMsg := "function returned " + http3xxLabel(statusCode)
-		s.recordExecution(execID, fn.ID, "error", statusCode, ranAt, stderr, errMsg)
+		s.recordExecution(execID, fn.ID, "error", statusCode, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
 
-	s.recordExecution(execID, fn.ID, "success", statusCode, ranAt, stderr, "")
+	s.recordExecution(execID, fn.ID, "success", statusCode, ranAt, stderr, "", traceID, spanID, "", "cron", "")
 	s.persistResult(row.ID, ranAt, nextAt, "ok", "")
 }
 
@@ -391,15 +408,27 @@ func (s *Scheduler) persistResult(id string, ranAt, nextAt time.Time, status, er
 // recordExecution mirrors what handlers/invoke.go does for HTTP-triggered
 // runs. The Activity tab + Dashboard recent-invocations list both read
 // from the executions table so cron-fired runs need to land there too.
-func (s *Scheduler) recordExecution(execID, fnID, status string, statusCode int, startedAt time.Time, stderr []byte, errMsg string) {
+// trigger is the cause (cron / job / etc); traceID/spanID/parentSpanID
+// link the row into a causal chain. parentFnID is empty for cron roots
+// and set to the enqueuing function for jobs.
+func (s *Scheduler) recordExecution(execID, fnID, status string, statusCode int, startedAt time.Time, stderr []byte, errMsg, traceID, spanID, parentSpanID, trigger, parentFnID string) {
 	durationMS := time.Since(startedAt).Milliseconds()
 	exec := &database.Execution{
-		ID:         execID,
-		FunctionID: fnID,
-		Status:     status,
-		ColdStart:  false, // best-effort; cron ignores cold-start signal
+		ID:               execID,
+		FunctionID:       fnID,
+		Status:           status,
+		ColdStart:        false, // best-effort; cron ignores cold-start signal
+		TraceID:          traceID,
+		SpanID:           spanID,
+		ParentSpanID:     parentSpanID,
+		Trigger:          trigger,
+		ParentFunctionID: parentFnID,
+		StartedAt:        startedAt,
 	}
 	s.db.AsyncInsertExecutionFinal(exec, durationMS, statusCode, errMsg, 0)
+	if s.metrics != nil {
+		s.metrics.Baselines.FinalizeExecution(s.db, execID, fnID, status, false, durationMS)
+	}
 	if len(stderr) > 0 {
 		s.db.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: execID,
@@ -573,6 +602,19 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	if body == "" {
 		body = "{}"
 	}
+
+	// v0.5 trace propagation. The job row carries the trace_id and
+	// parent_span_id of whatever enqueued it. If they're empty (job
+	// enqueued from outside any function — e.g. dashboard, external
+	// API), this becomes a fresh root trace.
+	traceID := j.TraceID
+	if traceID == "" {
+		traceID = trace.NewTraceID()
+	}
+	spanID := trace.NewSpanID()
+	execSuffix, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
+	execID := "exec_" + execSuffix
+
 	event := map[string]any{
 		"method": "POST",
 		"path":   "/",
@@ -582,14 +624,19 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 			"x-orva-job-id":         j.ID,
 			"x-orva-function-id":    fn.ID,
 			"x-orva-attempt":        strconv.Itoa(j.Attempts),
+			"x-orva-execution-id":   execID,
+			"x-orva-trace-id":       traceID,
+			"x-orva-span-id":        spanID,
 		},
 		"body": body,
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	respJSON, _, err := acq.Worker.Dispatch(ctx, eventJSON)
+	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {
 		reqErr = err
+		s.recordExecution(execID, fn.ID, "error", 0, startedAt, stderr, err.Error(),
+			traceID, spanID, j.ParentSpanID, "job", j.EnqueuedByFunctionID)
 		finalize(fn.Name, err.Error(), false)
 		return
 	}
@@ -600,9 +647,18 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	}
 	_ = json.Unmarshal(respJSON, &resp)
 	if resp.StatusCode >= 500 {
+		s.recordExecution(execID, fn.ID, "error", resp.StatusCode, startedAt, stderr,
+			"function returned 5xx", traceID, spanID, j.ParentSpanID, "job",
+			j.EnqueuedByFunctionID)
 		finalize(fn.Name, "function returned 5xx", false)
 		return
 	}
+	statusCode := resp.StatusCode
+	if statusCode == 0 {
+		statusCode = 200
+	}
+	s.recordExecution(execID, fn.ID, "success", statusCode, startedAt, stderr, "",
+		traceID, spanID, j.ParentSpanID, "job", j.EnqueuedByFunctionID)
 	finalize(fn.Name, "", true)
 }
 

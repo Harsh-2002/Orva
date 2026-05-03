@@ -14,6 +14,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/server/events"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/trace"
 )
 
 type contextKey string
@@ -67,6 +68,20 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), requestIDKey, id)
 		w.Header().Set("X-Request-ID", id)
+
+		// Trace context. Honor incoming W3C `traceparent` or our own
+		// X-Orva-Trace-Id / X-Orva-Span-Id; fall back to a fresh trace
+		// rooted at this request. We always emit X-Trace-Id back so
+		// external systems can correlate without parsing JSON bodies.
+		tID, parentSpan := trace.FromHTTPRequest(r)
+		if tID == "" {
+			tID = trace.NewTraceID()
+		}
+		ctx = trace.WithTraceID(ctx, tID)
+		if parentSpan != "" {
+			ctx = trace.WithParentSpanID(ctx, parentSpan)
+		}
+		w.Header().Set("X-Trace-Id", tID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -130,6 +145,7 @@ func loggerMiddleware(db *database.Database, hub *events.Hub, next http.Handler)
 			DurationMS: durationMS,
 			Summary:    summaryFor(r.Method, r.URL.Path, rec.status),
 			RequestID:  RequestID(r.Context()),
+			TraceID:    trace.TraceID(r.Context()),
 		}
 		if db != nil {
 			db.InsertActivity(row)

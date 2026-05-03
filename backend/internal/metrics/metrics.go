@@ -33,6 +33,12 @@ type Metrics struct {
 	BuildErrors      atomic.Int64
 	ActiveRequests   atomic.Int64
 
+	// Baselines holds per-function rolling-percentile windows used for
+	// the anomaly indicator on each execution. Set once at server start
+	// (via metrics.New, which initialises an empty store) and warmed
+	// from DB before the HTTP listener accepts traffic.
+	Baselines *Baselines
+
 	mu    sync.Mutex
 	ring  [durationRingSize]time.Duration
 	idx   int // next write index
@@ -56,7 +62,7 @@ type Metrics struct {
 
 // New creates a new Metrics instance.
 func New() *Metrics {
-	return &Metrics{}
+	return &Metrics{Baselines: NewBaselines()}
 }
 
 // RecordInvocation increments the total invocation counter and tracks

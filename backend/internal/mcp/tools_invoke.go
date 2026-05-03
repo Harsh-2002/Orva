@@ -15,6 +15,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/sandbox"
+	"github.com/Harsh-2002/Orva/internal/trace"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -400,6 +401,15 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	execSuffix, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
 	execID := "exec_" + execSuffix
 
+	// MCP-rooted invocation gets a fresh trace. The proxy reads trace
+	// context off the request — we stamp it via WithContext so spans
+	// land with the right metadata.
+	traceID := trace.NewTraceID()
+	spanID := trace.NewSpanID()
+	tCtx := trace.WithTraceID(ctx, traceID)
+	tCtx = trace.WithSpanID(tCtx, spanID)
+	tCtx = trace.WithTrigger(tCtx, "mcp")
+
 	// Track active requests for /system/metrics.json's active gauge.
 	if deps.Metrics != nil {
 		deps.Metrics.ActiveRequests.Add(1)
@@ -411,7 +421,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	seccompPolicy := sandbox.BuildSeccompPolicy("", nil, nil)
 
 	start := time.Now()
-	reqWithCtx := req.WithContext(ctx)
+	reqWithCtx := req.WithContext(tCtx)
 	result, ferr := deps.Proxy.Forward(
 		rec, reqWithCtx, codeDir, lang,
 		fn.ID, execID, timeoutMS,
@@ -458,9 +468,16 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	if deps.DB != nil {
 		coldStart := result != nil && result.ColdStart
 		deps.DB.AsyncInsertExecutionFinal(
-			&database.Execution{ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: coldStart},
+			&database.Execution{
+				ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: coldStart,
+				TraceID: traceID, SpanID: spanID, Trigger: "mcp",
+				StartedAt: start,
+			},
 			duration.Milliseconds(), rec.Code, errMsg, len(out.Body),
 		)
+		if deps.Metrics != nil {
+			deps.Metrics.Baselines.FinalizeExecution(deps.DB, execID, fn.ID, execStatus, coldStart, duration.Milliseconds())
+		}
 		if result != nil && len(result.Stderr) > 0 {
 			deps.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,

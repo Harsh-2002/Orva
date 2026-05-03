@@ -30,7 +30,7 @@ go vet ./...
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `secrets` | AES-256-GCM encrypted secrets per function |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
-| `mcp` | MCP server (go-sdk); 66 tools |
+| `mcp` | MCP server (go-sdk); 69 tools (+ get_trace, list_traces, get_function_baseline) |
 | `firewall` | nftables outbound allow-list per function (lazy `sync.Once` probe) |
 | `server` | HTTP router + middleware chain + all handlers |
 | `server/events` | SSE event hub + outbound webhook fanout |

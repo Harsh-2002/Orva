@@ -14,6 +14,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/sandbox"
+	"github.com/Harsh-2002/Orva/internal/trace"
 )
 
 // redactHeaders names the HTTP headers whose values must not be persisted
@@ -209,6 +210,15 @@ func (p *Proxy) Forward(
 	headers["x-orva-function-id"] = fnID
 	headers["x-orva-execution-id"] = execID
 	headers["x-orva-timeout-ms"] = strconv.FormatInt(timeoutMS, 10)
+	// v0.5 trace context. The function's adapter reads these (or the
+	// equivalent ORVA_TRACE_ID / ORVA_SPAN_ID env vars) and forwards them
+	// on F2F invokes / job enqueues so causal chains stay linked.
+	if tID := trace.TraceID(r.Context()); tID != "" {
+		headers["x-orva-trace-id"] = tID
+	}
+	if sID := trace.SpanID(r.Context()); sID != "" {
+		headers["x-orva-span-id"] = sID
+	}
 	// v0.4 C1: streaming feature flag. Operator-tunable via system_config;
 	// when off the adapters treat generators as buffered single-frame
 	// responses (back-compat fallback). Default on.
@@ -256,6 +266,12 @@ func (p *Proxy) Forward(
 	env["ORVA_EXECUTION_ID"] = execID
 	env["ORVA_TIMEOUT_MS"] = strconv.FormatInt(timeoutMS, 10)
 	env["ORVA_MEMORY_MB"] = strconv.Itoa(memoryMB)
+	if tID := trace.TraceID(r.Context()); tID != "" {
+		env["ORVA_TRACE_ID"] = tID
+	}
+	if sID := trace.SpanID(r.Context()); sID != "" {
+		env["ORVA_SPAN_ID"] = sID
+	}
 
 	if p.Pool == nil {
 		// Tests and tooling without a pool wired up: fail fast with a clear
