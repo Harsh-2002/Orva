@@ -12,12 +12,6 @@
       <div class="docs-hero-bg" aria-hidden="true"></div>
 
       <div class="docs-hero-content">
-        <div class="docs-hero-eyebrow">
-          <span class="docs-hero-eyebrow-mark"></span>
-          <span class="docs-hero-eyebrow-label">Orva Reference</span>
-          <code class="doc-chip">v0.5</code>
-        </div>
-
         <div class="docs-hero-row">
           <div class="docs-hero-text">
             <h1 class="docs-hero-title">
