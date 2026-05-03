@@ -26,36 +26,20 @@
 
           <div class="docs-hero-actions">
             <button
-              class="docs-hero-copy"
-              :class="{ copied: chatgptOpened }"
-              :aria-label="chatgptOpened ? 'ChatGPT opened with the docs pre-loaded' : 'Open ChatGPT in a new tab with the full docs pre-loaded as the first prompt'"
-              @click="onChatWithGPT"
-            >
-              <MessageSquare
-                v-if="!chatgptOpened"
-                class="w-3.5 h-3.5"
-              />
-              <Check
-                v-else
-                class="w-3.5 h-3.5"
-              />
-              {{ chatgptOpened ? 'Opened in new tab' : 'Chat with ChatGPT' }}
-            </button>
-            <button
-              class="docs-hero-copy"
+              class="docs-hero-copy-icon"
               :class="{ copied: docsCopied }"
+              :title="docsCopied ? 'Copied' : 'Copy entire docs page as Markdown'"
               :aria-label="docsCopied ? 'Markdown copied to clipboard' : 'Copy entire docs page as Markdown'"
               @click="onCopyDocs"
             >
               <Check
                 v-if="docsCopied"
-                class="w-3.5 h-3.5"
+                class="w-4 h-4"
               />
               <Copy
                 v-else
-                class="w-3.5 h-3.5"
+                class="w-4 h-4"
               />
-              {{ docsCopied ? 'Copied as Markdown' : 'Copy as Markdown' }}
             </button>
           </div>
         </div>
@@ -1111,7 +1095,6 @@ import {
   Gauge,
   ChevronRight,
   CalendarClock,
-  MessageSquare,
   ChevronDown,
 } from 'lucide-vue-next'
 import { copyText } from '@/utils/clipboard'
@@ -2287,37 +2270,6 @@ const onCopyDocs = async () => {
   docsCopiedTimer = setTimeout(() => { docsCopied.value = false }, 1500)
 }
 
-// "Chat with ChatGPT" — copies the full docs to the clipboard, then
-// opens chatgpt.com with a short pre-filled prompt instructing the
-// model to expect a docs paste. Two physical actions in the new tab:
-// Cmd/Ctrl-V to paste, Enter to send.
-//
-// Why not inject the docs directly into the URL?
-//   - ChatGPT runs behind Cloudflare which 414s on URLs over ~8 KB.
-//     Our markdown is ~48 KB raw / ~150 KB after URL-encoding —
-//     guaranteed rejection.
-//   - Truncating the docs to fit would silently lose context, which
-//     is worse than asking for one paste action.
-// The pre-filled prompt is short enough to fly through every server
-// limit and works on web + iOS + Android.
-const chatgptOpened = ref(false)
-let chatgptOpenedTimer = null
-const onChatWithGPT = async () => {
-  // Hot the clipboard so the user just pastes in the new tab.
-  await copyText(docsMarkdown.value)
-  const intro = [
-    "I'll paste the full Orva documentation right after this message — please use it as your source of truth when I ask questions.",
-    '',
-    'Reply once you have read it.',
-  ].join('\n')
-  const url = `https://chatgpt.com/?q=${encodeURIComponent(intro)}`
-  // _blank + noopener: new tab, no window.opener leak.
-  window.open(url, '_blank', 'noopener,noreferrer')
-  chatgptOpened.value = true
-  clearTimeout(chatgptOpenedTimer)
-  chatgptOpenedTimer = setTimeout(() => { chatgptOpened.value = false }, 2500)
-}
-
 // System-prompt collapse state — section 08's aiPromptText is ~400+
 // lines. Show a teaser (~5 lines worth) by default with a fade and
 // "Expand" toggle; the existing CodeBlock copy button works either
@@ -2713,7 +2665,7 @@ const Callout = defineComponent({
 @media (min-width: 768px) {
   .docs-hero-row {
     flex-direction: row;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 2rem;
   }
@@ -2741,14 +2693,38 @@ const Callout = defineComponent({
 
 .docs-hero-actions {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.5rem;
+  align-items: flex-start;
   flex-shrink: 0;
-  min-width: 13rem;
 }
-.docs-hero-actions .docs-hero-copy {
+/* Icon-only Copy button. Sits in the top-right corner of the hero
+   row — quiet by default, primary tint on hover, green check on
+   success. Same 1.2s flip pattern as CodeBlock copy. */
+.docs-hero-copy-icon {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-foreground-muted);
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background-color 120ms;
+}
+.docs-hero-copy-icon:hover {
+  color: #fff;
+  border-color: var(--color-foreground-muted);
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
+}
+.docs-hero-copy-icon:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.docs-hero-copy-icon.copied {
+  color: #4ade80;
+  border-color: rgba(76, 175, 80, 0.45);
+  background: rgba(76, 175, 80, 0.08);
 }
 .docs-hero-copy {
   display: inline-flex;
