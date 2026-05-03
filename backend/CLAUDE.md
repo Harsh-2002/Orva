@@ -30,7 +30,8 @@ go vet ./...
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `secrets` | AES-256-GCM encrypted secrets per function |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
-| `mcp` | MCP server (go-sdk); 70 tools (incl. get_trace, list_traces, get_function_baseline, get_orva_docs) |
+| `mcp` | MCP server (go-sdk); 70 tools (incl. get_trace, list_traces, get_function_baseline, get_orva_docs); auth accepts API keys or OAuth 2.1 access tokens |
+| `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. |
 | `firewall` | nftables outbound allow-list per function (lazy `sync.Once` probe) |
 | `server` | HTTP router + middleware chain + all handlers |
 | `server/events` | SSE event hub + outbound webhook fanout |

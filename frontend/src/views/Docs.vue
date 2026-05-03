@@ -2034,12 +2034,18 @@ const mcpInstallTabsSecondary = computed(() => [
 }`,
   },
   {
+    label: 'claude.ai web',
+    lang: 'text',
+    note: 'UI-only flow. Settings → Connectors → Add custom connector. claude.ai opens an Orva login + consent popup and issues an OAuth 2.1 token automatically — no token paste required.',
+    code: `URL:  ${origin.value}/mcp
+Auth: OAuth (auto-discovered)`,
+  },
+  {
     label: 'ChatGPT',
     lang: 'text',
-    note: 'UI-only flow. Settings → Apps & Connectors → Developer mode → Add new connector. ChatGPT renders the tool catalog and confirms before destructive calls.',
-    code: `URL:    ${origin.value}/mcp
-Auth:   API key (Bearer)
-Token:  ${T.value}`,
+    note: 'UI-only flow. Settings → Apps & Connectors → Developer mode → Add new connector. ChatGPT discovers OIDC metadata, performs Dynamic Client Registration, and pops the Orva consent screen. No token paste required.',
+    code: `URL:  ${origin.value}/mcp
+Auth: OAuth (auto-discovered)`,
   },
 ])
 

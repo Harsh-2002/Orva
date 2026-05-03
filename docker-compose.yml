@@ -13,8 +13,11 @@ services:
     container_name: orva
     restart: unless-stopped
 
+    # Local dev: host :3000 → container :8443. Keep the container side
+    # at 8443 so the in-container healthcheck and ORVA_PORT default
+    # don't need overriding.
     ports:
-      - "8443:8443"
+      - "3000:8443"
 
     # Share the host cgroup namespace and bind-mount the cgroupfs rw so
     # nsjail can create NSJAIL.<pid> child cgroups with memory.max and

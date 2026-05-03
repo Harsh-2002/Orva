@@ -216,54 +216,9 @@ Destructive tools (delete_*, rollback_*) require an explicit
 "confirm: true" argument so a runaway loop can't accidentally delete
 production state.`
 
-// OAuthASNotFoundHandler returns a JSON-shaped 404 for OAuth
-// Authorization Server discovery endpoints (RFC 8414, OpenID Connect
-// Discovery). MCP SDKs follow these endpoints AFTER our PRM as part
-// of their auth-bootstrap cascade. The default Go mux returns
-// `text/plain` "404 page not found" which the typescript-sdk OAuth
-// handler tries to JSON.parse and crashes on, surfacing the
-// confusing "Invalid OAuth error response: SyntaxError" dialog.
-//
-// Returning a parseable JSON envelope here lets the SDK accept the
-// 404 cleanly, fall back to the static-bearer path advertised in our
-// PRM (authorization_servers: []), and use whatever Authorization
-// header the operator has configured for this server.
-func OAuthASNotFoundHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write([]byte(`{
-  "error": "not_found",
-  "error_description": "Orva uses static bearer auth — no OAuth Authorization Server. See /.well-known/oauth-protected-resource."
-}`))
-}
-
-// OAuthEndpointNotSupportedHandler returns an RFC 6749-shaped error
-// response for OAuth endpoints we deliberately don't implement
-// (/register for Dynamic Client Registration per RFC 7591, /oauth/token,
-// /oauth/authorize). The MCP TypeScript SDK calls registerClient() at
-// /register when it can't find OAuth-AS metadata, then JSON-parses any
-// non-2xx body via parseErrorResponse. Without this handler the
-// default mux returns `text/plain` "404 page not found", JSON.parse
-// throws SyntaxError, and the user sees the cryptic "HTTP 404: Invalid
-// OAuth error response: SyntaxError: JSON Parse error" dialog.
-//
-// The OAuth error code "invalid_client" is the closest standard match
-// for "this server doesn't do OAuth at all". The accompanying
-// description points operators at the right configuration: add an
-// Authorization header to their MCP client config rather than rely on
-// dynamic client registration.
-func OAuthEndpointNotSupportedHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write([]byte(`{
-  "error": "invalid_client",
-  "error_description": "Orva does not support OAuth dynamic client registration or token exchange — it uses static API-key bearer auth. Configure your MCP client with: \"headers\": {\"Authorization\": \"Bearer <orva-api-key>\"}"
-}`))
-}
-
-// PRMHandler returns a minimal RFC 9728 OAuth Protected Resource
-// Metadata response describing the static-bearer auth mechanism.
-// Mounted at /.well-known/oauth-protected-resource.
+// PRMHandler returns the RFC 9728 OAuth Protected Resource Metadata
+// document for /mcp. Mounted at /.well-known/oauth-protected-resource
+// (and the /mcp-suffixed variant some SDKs probe).
 //
 // The `resource` field MUST match the URL the MCP client called when
 // it received a 401 (i.e. /mcp on this host) — otherwise some clients
@@ -271,18 +226,25 @@ func OAuthEndpointNotSupportedHandler(w http.ResponseWriter, _ *http.Request) {
 // the URL from the request's Host + scheme rather than hard-coding,
 // so the same binary works on localhost, behind reverse proxies, and
 // on custom domains without code changes.
+//
+// `authorization_servers` lists this same host: Orva is its own
+// authorization server. claude.ai/ChatGPT use this to find the AS
+// metadata at /.well-known/oauth-authorization-server and bootstrap
+// the OAuth 2.1 flow.
 func PRMHandler(w http.ResponseWriter, r *http.Request) {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
 	host := r.Host
-	resource := scheme + "://" + host + "/mcp"
+	issuer := scheme + "://" + host
+	resource := issuer + "/mcp"
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{
   "resource": "` + resource + `",
-  "authorization_servers": [],
+  "authorization_servers": ["` + issuer + `"],
   "bearer_methods_supported": ["header"],
+  "scopes_supported": ["read", "invoke", "write", "admin"],
   "resource_documentation": "https://github.com/Harsh-2002/Orva"
 }`))
 }

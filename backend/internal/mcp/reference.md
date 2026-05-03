@@ -579,15 +579,50 @@ opencode mcp add
 }
 ```
 
-### MCP (extra) — ChatGPT
+### MCP (extra) — claude.ai web
 
-> UI-only flow. Settings → Apps & Connectors → Developer mode → Add new connector. ChatGPT renders the tool catalog and confirms before destructive calls.
+> UI-only flow. Settings → Connectors → Add custom connector. claude.ai opens an Orva login + consent popup, then issues an OAuth 2.1 token automatically — no token paste required. Refresh tokens rotate per OAuth 2.1 §4.3.1.
 
 ```text
-URL:    {{ORIGIN}}/mcp
-Auth:   API key (Bearer)
-Token:  <YOUR_ORVA_TOKEN>
+URL:  {{ORIGIN}}/mcp
+Auth: OAuth (auto-discovered)
 ```
+
+### MCP (extra) — ChatGPT
+
+> UI-only flow. Settings → Apps & Connectors → Developer mode → Add new connector. ChatGPT discovers OIDC metadata, performs Dynamic Client Registration, and pops the Orva consent screen. No token paste required.
+
+```text
+URL:  {{ORIGIN}}/mcp
+Auth: OAuth (auto-discovered)
+```
+
+### MCP — OAuth 2.1 vs static bearer
+
+`/mcp` accepts either a static API-key bearer (the existing path used
+by Claude Code, Cursor, Cline, etc.) **or** an OAuth 2.1 access token.
+The OAuth path exists for the browser-based "Add custom connector"
+flows in the **claude.ai web UI** and **ChatGPT web UI** — they don't
+expose a token-paste field, so static bearers can't be wired in by
+hand. Orva ships its own OAuth authorization server so operators don't
+need to run a second service.
+
+| Endpoint | RFC | Purpose |
+|---|---|---|
+| `GET /.well-known/oauth-protected-resource` | 9728 | Tells clients `/mcp` is OAuth-protected. |
+| `GET /.well-known/oauth-authorization-server` | 8414 | Authorization Server Metadata. |
+| `GET /.well-known/openid-configuration` | OIDC | Same metadata + OIDC fields (ChatGPT probes this). |
+| `POST /register` | 7591 | Dynamic Client Registration. Per-IP rate-limited. |
+| `GET/POST /oauth/authorize` | OAuth 2.1 | Server-rendered consent screen (uses session cookie). |
+| `POST /oauth/token` | OAuth 2.1 | `authorization_code` + `refresh_token` grants. |
+| `POST /oauth/revoke` | 7009 | Revoke an access or refresh token. |
+
+PKCE S256 is mandatory for every authorization request — "plain" is
+forbidden per OAuth 2.1 §7.5.2. Access tokens live 1 hour; refresh
+tokens live 30 days and rotate on use. Tokens are stored as SHA-256
+hashes (mirroring Orva's API-key posture). The consent screen is
+gated by the Orva session cookie; if the user isn't logged in,
+the request bounces through `/web/login` and back.
 
 ### Hand-edited config files
 

@@ -11,6 +11,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/firewall"
 	orvampc "github.com/Harsh-2002/Orva/internal/mcp"
 	"github.com/Harsh-2002/Orva/internal/metrics"
+	"github.com/Harsh-2002/Orva/internal/oauth"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/proxy"
 	"github.com/Harsh-2002/Orva/internal/registry"
@@ -404,22 +405,27 @@ func (r *Router) setupRoutes() {
 	// SDKs that try the path-aware variant first don't get a 404.
 	r.mux.HandleFunc("GET /.well-known/oauth-protected-resource", orvampc.PRMHandler)
 	r.mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", orvampc.PRMHandler)
-	// RFC 8414 / OpenID-Connect discovery — MCP clients fall through
-	// to these after PRM and choke on plain-text 404s. Returning a
-	// JSON-shaped 404 with a tiny stub lets the SDK parse the response
-	// and treat "no authorization_endpoint" as "static bearer only".
-	r.mux.HandleFunc("GET /.well-known/oauth-authorization-server", orvampc.OAuthASNotFoundHandler)
-	r.mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp", orvampc.OAuthASNotFoundHandler)
-	r.mux.HandleFunc("GET /.well-known/openid-configuration", orvampc.OAuthASNotFoundHandler)
-	r.mux.HandleFunc("GET /.well-known/openid-configuration/mcp", orvampc.OAuthASNotFoundHandler)
-	// RFC 7591 / RFC 6749 — when AS metadata is missing the MCP SDK
-	// falls through to /register (DCR), /oauth/token, /oauth/authorize.
-	// Returning OAuth-shaped errors here lets the SDK throw a clean
-	// OAuthError with our hint instead of "Invalid OAuth error
-	// response: SyntaxError" from parsing text/plain "404 page not found".
-	r.mux.HandleFunc("POST /register", orvampc.OAuthEndpointNotSupportedHandler)
-	r.mux.HandleFunc("POST /oauth/token", orvampc.OAuthEndpointNotSupportedHandler)
-	r.mux.HandleFunc("GET /oauth/authorize", orvampc.OAuthEndpointNotSupportedHandler)
+	// RFC 8414 Authorization Server Metadata + OIDC discovery alias.
+	// Both URLs return the same RFC 8414 document; the OIDC variant
+	// adds subject_types_supported / id_token_signing_alg_values_supported
+	// so ChatGPT's discovery probe validates without a fallback round-trip.
+	r.mux.HandleFunc("GET /.well-known/oauth-authorization-server", handlers.OAuthAuthServerMetadataHandler)
+	r.mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp", handlers.OAuthAuthServerMetadataHandler)
+	r.mux.HandleFunc("GET /.well-known/openid-configuration", handlers.OpenIDConfigurationHandler)
+	r.mux.HandleFunc("GET /.well-known/openid-configuration/mcp", handlers.OpenIDConfigurationHandler)
+	// OAuth 2.1 endpoints — DCR (RFC 7591), authorize (consent SSR),
+	// token (authorization_code + refresh_token grants), revoke (RFC 7009).
+	// Lets claude.ai / ChatGPT add /mcp as a custom connector via OAuth
+	// without the operator pasting a bearer token.
+	oauthHandler := &oauth.Handler{
+		DB:            r.db,
+		SecureCookies: r.cfg.Security.SecureCookies,
+	}
+	r.mux.HandleFunc("POST /register", oauthHandler.Register)
+	r.mux.HandleFunc("GET /oauth/authorize", oauthHandler.AuthorizeGET)
+	r.mux.HandleFunc("POST /oauth/authorize", oauthHandler.AuthorizePOST)
+	r.mux.HandleFunc("POST /oauth/token", oauthHandler.Token)
+	r.mux.HandleFunc("POST /oauth/revoke", oauthHandler.Revoke)
 
 	// UI routes — serve the Vue SPA at /web/. No credentials are injected;
 	// the UI uses /auth/onboard + /auth/login to establish a session.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/oauth"
 )
 
 // permSet is the set of permission strings (read/write/admin/invoke)
@@ -33,9 +34,14 @@ func extractToken(r *http.Request) string {
 }
 
 // authenticateRequest looks up the bearer token against the API-key
-// store. Returns the resolved key (with permissions JSON) and true
-// on success; nil + false on any failure (missing token, bad token,
-// expired key, transient DB error).
+// store first, then falls through to oauth_access_tokens if the
+// API-key lookup misses. Returns a resolved *APIKey-shaped value
+// (synthesized from the OAuth row when that path matched) so all
+// downstream code — permission checks, activity logging — stays
+// uniform regardless of which credential the caller presented.
+//
+// Returns nil + false on any failure: missing token, unknown token in
+// both stores, expired key, revoked OAuth token, transient DB error.
 func authenticateRequest(db *database.Database, r *http.Request) (*database.APIKey, bool) {
 	tok := extractToken(r)
 	if tok == "" || db == nil {
@@ -45,20 +51,56 @@ func authenticateRequest(db *database.Database, r *http.Request) (*database.APIK
 	keyHash := hex.EncodeToString(hash[:])
 
 	key, err := db.GetAPIKeyByHash(keyHash)
-	if err != nil {
-		// sql.ErrNoRows = unknown key. Anything else = DB problem; fail
-		// closed (auth denied) since the agent will just retry anyway.
-		_ = err == sql.ErrNoRows
-		return nil, false
+	if err == nil {
+		if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
+			return nil, false
+		}
+		// Touch last_used_at asynchronously — same pattern as REST middleware.
+		db.Async(func() { _ = db.UpdateAPIKeyLastUsed(keyHash) })
+		return key, true
 	}
-	if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
+	if err != sql.ErrNoRows {
+		// Real DB error — fail closed.
 		return nil, false
 	}
 
-	// Touch last_used_at asynchronously — same pattern as REST middleware.
-	db.Async(func() { _ = db.UpdateAPIKeyLastUsed(keyHash) })
+	// API-key miss: try the OAuth access-token store. Browser-based
+	// connectors (claude.ai web, ChatGPT) reach us through this path.
+	return resolveOAuthAccessToken(db, tok)
+}
 
-	return key, true
+// resolveOAuthAccessToken looks the bearer up as an OAuth access token
+// and synthesises a *database.APIKey so the rest of the MCP layer
+// (permission gating, activity feed) doesn't need to know which token
+// flavor matched. ID/Name come from the OAuth client — that's what an
+// operator wants to see in the audit log ("ChatGPT (auto-registered)"
+// did this), not an opaque token storage ID.
+func resolveOAuthAccessToken(db *database.Database, plaintext string) (*database.APIKey, bool) {
+	row, err := db.GetOAuthAccessTokenByAccessHash(oauth.HashToken(plaintext))
+	if err != nil || row == nil {
+		return nil, false
+	}
+	if row.IsExpired(time.Now()) {
+		return nil, false
+	}
+
+	perms := oauth.ScopeToPermissions(row.Scope)
+	permsJSON, _ := json.Marshal(perms)
+
+	// Pull the friendly client name. Best-effort — if the join fails,
+	// we still authenticate (the row is valid), just with the raw
+	// client_id as the actor label.
+	label := row.ClientID
+	if c, cerr := db.GetOAuthClientByID(row.ClientID); cerr == nil && c.ClientName != "" {
+		label = c.ClientName
+	}
+
+	return &database.APIKey{
+		ID:          row.ID,
+		Name:        label,
+		KeyHash:     row.AccessTokenHash,
+		Permissions: string(permsJSON),
+	}, true
 }
 
 // resolvePermissions runs authenticateRequest and returns a parsed

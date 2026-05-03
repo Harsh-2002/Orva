@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Authorize {{.ClientName}} — Orva</title>
+<style>
+  :root {
+    --bg: #0b0b0e;
+    --panel: #131318;
+    --panel-2: #1a1a21;
+    --border: #2a2a33;
+    --text: #e8e8ed;
+    --text-dim: #9aa0a6;
+    --accent: #7c5cff;
+    --accent-hover: #8e72ff;
+    --danger: #ff5d6c;
+    --danger-hover: #ff7a86;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem 1rem;
+  }
+  .card {
+    width: 100%; max-width: 28rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.75rem 1.75rem 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  }
+  .brand {
+    display: flex; align-items: center; gap: 0.5rem;
+    color: var(--text-dim);
+    font-size: 0.78rem; letter-spacing: 0.18em; text-transform: uppercase;
+    margin-bottom: 1.25rem;
+  }
+  .brand-mark {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: linear-gradient(135deg, #7c5cff 0%, #2dd4bf 100%);
+  }
+  h1 {
+    margin: 0 0 1rem; font-size: 1.25rem; font-weight: 600;
+    line-height: 1.35;
+  }
+  .row {
+    display: flex; gap: 0.5rem; align-items: baseline;
+    padding: 0.5rem 0;
+    font-size: 0.92rem;
+  }
+  .row .label { color: var(--text-dim); min-width: 6rem; font-size: 0.85rem; }
+  .row .value { color: var(--text); word-break: break-word; }
+  .scopes {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0 1.25rem;
+  }
+  .scopes-title {
+    font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text-dim); margin-bottom: 0.5rem;
+  }
+  .scopes ul { margin: 0; padding-left: 1.1rem; }
+  .scopes li { margin: 0.25rem 0; line-height: 1.4; font-size: 0.92rem; }
+  .actions {
+    display: flex; gap: 0.5rem; margin-top: 1.25rem;
+  }
+  button {
+    flex: 1; padding: 0.7rem 1rem;
+    font: inherit; font-weight: 600;
+    border: 1px solid transparent; border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button.primary {
+    background: var(--accent); color: white;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button.secondary {
+    background: transparent; color: var(--text);
+    border-color: var(--border);
+  }
+  button.secondary:hover { border-color: #3a3a45; background: var(--panel-2); }
+  .footnote {
+    margin-top: 1.25rem;
+    color: var(--text-dim); font-size: 0.78rem; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand"><span class="brand-mark"></span><span>ORVA</span></div>
+    <h1>Allow {{.ClientName}} access to your Orva?</h1>
+
+    <div class="row">
+      <span class="label">Application</span>
+      <span class="value">{{.ClientName}}</span>
+    </div>
+    <div class="row">
+      <span class="label">Signed in as</span>
+      <span class="value">{{.Username}}</span>
+    </div>
+
+    <div class="scopes">
+      <div class="scopes-title">Asking permission to</div>
+      <ul>
+        {{- range .ScopeBullets }}
+        <li>{{ . }}</li>
+        {{- end }}
+      </ul>
+    </div>
+
+    <form method="POST" action="/oauth/authorize">
+      <input type="hidden" name="client_id" value="{{.ClientID}}">
+      <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
+      <input type="hidden" name="scope" value="{{.Scope}}">
+      <input type="hidden" name="state" value="{{.State}}">
+      <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
+      <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
+      <input type="hidden" name="resource" value="{{.Resource}}">
+      <input type="hidden" name="response_type" value="code">
+      <div class="actions">
+        <button type="submit" name="decision" value="deny" class="secondary">Deny</button>
+        <button type="submit" name="decision" value="allow" class="primary">Allow access</button>
+      </div>
+    </form>
+
+    <p class="footnote">
+      Granting access issues a {{.AccessTokenLifetimeHuman}} access token plus a refresh token. You can revoke it any time from Settings.
+    </p>
+  </div>
+</body>
+</html>

@@ -505,6 +505,55 @@ PRAGMA foreign_keys = ON;
 		// Activity rows can also be linked into traces for cross-correlation.
 		"ALTER TABLE activity_log ADD COLUMN trace_id TEXT",
 		"CREATE INDEX IF NOT EXISTS idx_activity_log_trace_id ON activity_log(trace_id)",
+		// v0.5 OAuth 2.1 authorization server. Three tables back the full
+		// browser-based MCP connector flow (claude.ai web + ChatGPT web).
+		// Tokens map onto the same permission strings api_keys uses; the
+		// MCP middleware accepts both bearer types.
+		`CREATE TABLE IF NOT EXISTS oauth_clients (
+			id                          TEXT PRIMARY KEY,
+			client_id                   TEXT UNIQUE NOT NULL,
+			client_secret_hash          TEXT,
+			client_name                 TEXT NOT NULL,
+			client_uri                  TEXT,
+			redirect_uris               TEXT NOT NULL,
+			grant_types                 TEXT NOT NULL DEFAULT '["authorization_code","refresh_token"]',
+			response_types              TEXT NOT NULL DEFAULT '["code"]',
+			token_endpoint_auth_method  TEXT NOT NULL DEFAULT 'none',
+			scope                       TEXT NOT NULL DEFAULT 'read invoke',
+			created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			revoked_at                  DATETIME
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_oauth_clients_client_id ON oauth_clients(client_id)",
+		`CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+			code                  TEXT PRIMARY KEY,
+			client_id             TEXT NOT NULL,
+			user_id               INTEGER NOT NULL,
+			redirect_uri          TEXT NOT NULL,
+			scope                 TEXT NOT NULL,
+			resource              TEXT,
+			code_challenge        TEXT NOT NULL,
+			code_challenge_method TEXT NOT NULL DEFAULT 'S256',
+			expires_at            DATETIME NOT NULL,
+			used_at               DATETIME,
+			created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_authorization_codes(expires_at)",
+		`CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+			id                  TEXT PRIMARY KEY,
+			access_token_hash   TEXT UNIQUE NOT NULL,
+			refresh_token_hash  TEXT UNIQUE,
+			client_id           TEXT NOT NULL,
+			user_id             INTEGER NOT NULL,
+			scope               TEXT NOT NULL,
+			resource            TEXT,
+			issued_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			access_expires_at   DATETIME NOT NULL,
+			refresh_expires_at  DATETIME,
+			revoked_at          DATETIME
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_oauth_at_access_hash  ON oauth_access_tokens(access_token_hash)",
+		"CREATE INDEX IF NOT EXISTS idx_oauth_at_refresh_hash ON oauth_access_tokens(refresh_token_hash)",
+		"CREATE INDEX IF NOT EXISTS idx_oauth_at_access_expires ON oauth_access_tokens(access_expires_at)",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// "duplicate column name" is expected on boot after the first.

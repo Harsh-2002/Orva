@@ -186,6 +186,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	go s.jobsLoop(ctx)
 	go s.webhookLoop(ctx)
 	go s.activitySweepLoop(ctx)
+	go s.oauthSweepLoop(ctx)
 	slog.Info("scheduler started",
 		"cron_interval_s", int(s.cronInterval.Seconds()),
 		"kv_sweep_interval_s", int(s.kvInterval.Seconds()),
@@ -501,6 +502,43 @@ func (s *Scheduler) activitySweepOnce() {
 	}
 	if deleted > 0 {
 		slog.Debug("activity: sweep removed rows", "deleted", deleted)
+	}
+}
+
+// ── OAuth sweep ──────────────────────────────────────────────────────
+//
+// Removes long-expired authorization codes (10-min TTL + 1-hour grace)
+// and stale access/refresh token rows (24-hour grace past expiry).
+// Same 5-minute cadence as the activity sweep — neither is hot-path.
+
+func (s *Scheduler) oauthSweepLoop(ctx context.Context) {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+
+	s.oauthSweepOnce()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stop:
+			return
+		case <-t.C:
+			s.oauthSweepOnce()
+		}
+	}
+}
+
+func (s *Scheduler) oauthSweepOnce() {
+	if codes, err := s.db.SweepExpiredOAuthCodes(); err != nil {
+		slog.Warn("oauth: code sweep failed", "err", err)
+	} else if codes > 0 {
+		slog.Debug("oauth: sweep removed expired codes", "deleted", codes)
+	}
+	if tokens, err := s.db.SweepExpiredOAuthTokens(); err != nil {
+		slog.Warn("oauth: token sweep failed", "err", err)
+	} else if tokens > 0 {
+		slog.Debug("oauth: sweep removed expired tokens", "deleted", tokens)
 	}
 }
 

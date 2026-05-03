@@ -36,7 +36,10 @@ over HTTP, and get warm-pool latency without paying anyone.
 - **MCP server** — `/mcp` exposes the full management surface (functions,
   deploys, invocations, secrets, routes, keys, firewall, cron, KV,
   jobs, webhooks, fixtures, inbound triggers, traces, full Orva docs export) as 70 tools an AI agent (Claude Code, Cursor, etc.)
-  can call directly.
+  can call directly. Authenticates with either a static API-key bearer
+  *or* OAuth 2.1 — the latter lets operators add Orva as a custom
+  connector in the **claude.ai web UI** and **ChatGPT web UI** with
+  one URL paste, without copying an API key.
 - **Live dashboard** — every invocation, deploy, and metric streams
   over a single SSE connection. No polling.
 - **Per-function secrets**, encrypted at rest, injected as env vars
