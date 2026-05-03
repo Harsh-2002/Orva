@@ -14,6 +14,8 @@ Human-maintained reference documentation. Keep these in sync when changing API s
 | `OPERATIONS.md` | Day-2 ops: backup/restore, VACUUM, log rotation, upgrades |
 | `RUNTIMES.md` | Per-runtime handler contract, streaming (generators/async iterables), TypeScript |
 | `SECURITY.md` | Threat model, nsjail sandbox isolation, network firewall (nftables) |
+| `TRACING.md` | Causal trace model, propagation, W3C interop, outlier detection |
+| `reference.md` | **Canonical** Orva reference (~53 KB GFM markdown) — single source of truth shipped to the dashboard's Copy-as-Markdown button (via `frontend/public/docs.md`) and the `get_orva_docs` MCP tool (via `backend/internal/mcp/reference.md`). `make docs-embed` syncs both copies. Uses `{{ORIGIN}}` placeholders that consumers substitute at runtime. |
 
 ## Update Triggers
 

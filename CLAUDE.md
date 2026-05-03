@@ -25,6 +25,7 @@ make embed          # build UI, copy dist/ → backend/internal/server/ui_dist/
 make cli            # static CLI binary → build/orva-cli (current OS)
 make cli-all        # cross-compile CLI: linux/amd64, linux/arm64, darwin/arm64
 make adapters-embed # sync runtimes/ → backend/cmd/orva/adapters/ (auto-called by build)
+make docs-embed     # sync docs/reference.md → mcp + frontend (auto-called by build/ui)
 make clean          # remove build/ and embedded artefacts
 ```
 
@@ -72,3 +73,4 @@ The release workflow builds `ghcr.io/harsh-2002/orva:<tag>` + `:latest` (multi-a
 - **UI is embedded** in the Go binary via `//go:embed ui_dist`; `make build` alone reuses the last embedded snapshot. Run `make build-all` (or `make embed` first) to pick up frontend changes.
 - **nsjail required on Linux** for sandbox invocations; the server starts without it but every invocation fails until it is installed.
 - **Firewall (nft) probe is lazy** — the nftables package does not probe on import; it probes on first use via `sync.Once`, so CLI invocations do not trigger nft warnings.
+- **Docs single source:** `docs/reference.md` is the canonical Orva reference markdown. `make docs-embed` ships copies to `backend/internal/mcp/reference.md` (embedded by the `get_orva_docs` MCP tool) and `frontend/public/docs.md` (served at `/docs.md` and read by the dashboard's Copy as Markdown button). Both consumers serve identical bytes.

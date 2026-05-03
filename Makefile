@@ -2,7 +2,18 @@ VERSION ?= 0.1.0
 BINARY  = orva
 BUILD   = build
 
-.PHONY: build test lint clean ui embed build-all dev adapters-embed cli cli-all
+.PHONY: build test lint clean ui embed build-all dev adapters-embed docs-embed cli cli-all
+
+# Sync the canonical docs reference markdown into both consumers:
+# - backend/internal/mcp/reference.md → embedded by the get_orva_docs MCP
+#   tool via //go:embed
+# - frontend/public/docs.md → served by Vite at /docs.md so the Docs page's
+#   "Copy as Markdown" button reads the same bytes
+# Single source of truth lives at docs/reference.md. Edit it, run
+# `make docs-embed`, and both UI + MCP serve the new content.
+docs-embed:
+	@cp docs/reference.md backend/internal/mcp/reference.md
+	@cp docs/reference.md frontend/public/docs.md
 
 # Copy adapter sources + bundled SDK into backend/cmd/orva/adapters/ so
 # //go:embed has them at build time. Keeps backend/runtimes/ as the
@@ -21,7 +32,7 @@ adapters-embed:
 	@cp backend/runtimes/python313/orva.py    backend/cmd/orva/adapters/python313/orva.py
 	@cp backend/runtimes/python314/orva.py    backend/cmd/orva/adapters/python314/orva.py
 
-build: adapters-embed
+build: adapters-embed docs-embed
 	@mkdir -p $(BUILD)
 	cd backend && go build -ldflags="-s -w -X main.Version=$(VERSION)" -o ../$(BUILD)/$(BINARY) ./cmd/orva
 
@@ -31,7 +42,7 @@ test:
 lint:
 	cd backend && go vet ./...
 
-ui:
+ui: docs-embed
 	cd frontend && npm install && npm run build
 
 embed: ui
@@ -48,7 +59,7 @@ dev:
 # share `./cmd/orva`), but built without the embedded UI/rootfs assumptions
 # and named distinctly so release artifacts don't collide with the server.
 # CGO disabled + -trimpath + stripped symbols → fully static, ships anywhere.
-cli: adapters-embed
+cli: adapters-embed docs-embed
 	@mkdir -p $(BUILD)
 	cd backend && CGO_ENABLED=0 go build \
 	  -trimpath \
@@ -58,7 +69,7 @@ cli: adapters-embed
 # Cross-compile the CLI for every target we ship as a release asset.
 # Output naming matches the GitHub release-asset convention so install.sh
 # (and the README curl recipe) can point straight at /releases/latest/download/.
-cli-all: adapters-embed
+cli-all: adapters-embed docs-embed
 	@mkdir -p $(BUILD)
 	@for target in linux/amd64 linux/arm64 darwin/arm64; do \
 	  os=$${target%/*}; arch=$${target#*/}; \

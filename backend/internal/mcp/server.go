@@ -117,6 +117,8 @@ func NewHandler(deps Deps) http.Handler {
 		registerFixtureTools(s, deps, perms)
 		// v0.5: causal tracing — get_trace / list_traces / get_function_baseline.
 		registerTraceTools(s, deps, perms)
+		// v0.5: get_orva_docs — return the canonical Orva reference markdown.
+		registerDocsTools(s, deps, perms)
 
 		registerResources(s, deps, perms)
 

@@ -30,7 +30,7 @@ go vet ./...
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `secrets` | AES-256-GCM encrypted secrets per function |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
-| `mcp` | MCP server (go-sdk); 69 tools (+ get_trace, list_traces, get_function_baseline) |
+| `mcp` | MCP server (go-sdk); 70 tools (incl. get_trace, list_traces, get_function_baseline, get_orva_docs) |
 | `firewall` | nftables outbound allow-list per function (lazy `sync.Once` probe) |
 | `server` | HTTP router + middleware chain + all handlers |
 | `server/events` | SSE event hub + outbound webhook fanout |
@@ -73,3 +73,4 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 - `execution_requests` has **no FK** to `executions` (intentionally dropped to fix async insert ordering); manual cascade runs in `DeleteExecution`.
 - TypeScript deploys: after a successful `tsc`, the function's `Entrypoint` is updated to `dist/handler.js` in the DB. The validator on re-deploy checks for the source `.ts` file, not the compiled output.
 - Zombie nsjail fix: `cmd.Wait()` is centralized in `Spawn` via `waitDone chan struct{}`; never call `Wait()` on the sandbox `cmd` anywhere else.
+- **Docs single source:** `docs/reference.md` is the canonical Orva reference markdown (~53 KB). `make docs-embed` syncs it to `backend/internal/mcp/reference.md` (embedded by the `get_orva_docs` MCP tool) and `frontend/public/docs.md` (served at `/docs.md` for the dashboard's Copy as Markdown button). Edit the canonical file then run `make docs-embed`; the Vue Docs page is the rendered version (separate templates) and must be updated alongside if content changes.

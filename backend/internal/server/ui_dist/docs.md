@@ -1,7 +1,7 @@
 # Orva — Documentation
 
 > Everything you need to write, deploy, and operate functions on Orva.
-> Generated from the in-app Docs page (`http://localhost:8443/web/docs`).
+> Generated from the in-app Docs page (`{{ORIGIN}}/web/docs`).
 
 ## Table of contents
 
@@ -75,7 +75,7 @@ stream `/api/v1/deployments/<id>/stream` until `phase: done`.
 ### 1. Create the function row
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/functions \
+curl -X POST {{ORIGIN}}/api/v1/functions \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"name":"hello","runtime":"python314","memory_mb":128,"cpus":0.5}'
@@ -85,7 +85,7 @@ curl -X POST http://localhost:8443/api/v1/functions \
 
 ```bash
 tar czf code.tar.gz handler.py requirements.txt
-curl -X POST http://localhost:8443/api/v1/functions/<function_id>/deploy \
+curl -X POST {{ORIGIN}}/api/v1/functions/<function_id>/deploy \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -F code=@code.tar.gz
 ```
@@ -95,7 +95,7 @@ curl -X POST http://localhost:8443/api/v1/functions/<function_id>/deploy \
 ### Invoke — curl
 
 ```bash
-curl -X POST http://localhost:8443/fn/<function_id> \
+curl -X POST {{ORIGIN}}/fn/<function_id> \
   -H 'Content-Type: application/json' \
   -d '{"name": "Orva"}'
 ```
@@ -103,7 +103,7 @@ curl -X POST http://localhost:8443/fn/<function_id> \
 ### Invoke — fetch
 
 ```js
-const res = await fetch('http://localhost:8443/fn/<function_id>', {
+const res = await fetch('{{ORIGIN}}/fn/<function_id>', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ name: 'Orva' }),
@@ -117,7 +117,7 @@ console.log(await res.json());
 import httpx
 
 r = httpx.post(
-    "http://localhost:8443/fn/<function_id>",
+    "{{ORIGIN}}/fn/<function_id>",
     json={"name": "Orva"},
 )
 print(r.json())
@@ -144,7 +144,7 @@ encrypted and only decrypt into the worker environment at spawn time.
 ### Set a secret
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/functions/<function_id>/secrets \
+curl -X POST {{ORIGIN}}/api/v1/functions/<function_id>/secrets \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"key":"DATABASE_URL","value":"postgres://..."}'
@@ -159,7 +159,7 @@ TS=$(date +%s)
 BODY='{"hello":"world"}'
 SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
 
-curl -X POST http://localhost:8443/fn/<function_id> \
+curl -X POST {{ORIGIN}}/fn/<function_id> \
   -H "X-Orva-Timestamp: $TS" \
   -H "X-Orva-Signature: sha256=$SIG" \
   -H 'Content-Type: application/json' \
@@ -314,7 +314,7 @@ page or via the API. Standard 5-field cron with the usual shorthands
 > Create a daily-9am schedule for an existing function. payload is delivered as the invoke body.
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/functions/<function_id>/cron \
+curl -X POST {{ORIGIN}}/api/v1/functions/<function_id>/cron \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -330,13 +330,13 @@ curl -X POST http://localhost:8443/api/v1/functions/<function_id>/cron \
 
 ```bash
 # pause
-curl -X PUT http://localhost:8443/api/v1/functions/<function_id>/cron/<cron_id> \
+curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<cron_id> \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"enabled": false}'
 
 # change schedule
-curl -X PUT http://localhost:8443/api/v1/functions/<function_id>/cron/<cron_id> \
+curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<cron_id> \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"cron_expr": "*/15 * * * *"}'
@@ -348,11 +348,11 @@ curl -X PUT http://localhost:8443/api/v1/functions/<function_id>/cron/<cron_id> 
 
 ```bash
 # all schedules
-curl http://localhost:8443/api/v1/cron \
+curl {{ORIGIN}}/api/v1/cron \
   -H 'X-Orva-API-Key: <YOUR_KEY>'
 
 # delete one
-curl -X DELETE http://localhost:8443/api/v1/functions/<function_id>/cron/<cron_id> \
+curl -X DELETE {{ORIGIN}}/api/v1/functions/<function_id>/cron/<cron_id> \
   -H 'X-Orva-API-Key: <YOUR_KEY>'
 ```
 
@@ -452,7 +452,7 @@ app.post('/webhooks/orva', (req, res) => {
 Same API surface the dashboard uses, exposed as 69 tools an agent can
 call directly. API key permissions scope the available tool set.
 
-- **Endpoint:** `http://localhost:8443/mcp`
+- **Endpoint:** `{{ORIGIN}}/mcp`
 - **Auth header:** `Authorization: Bearer <token>`
   (fallback: `X-Orva-API-Key: <token>`)
 - **Transport:** Streamable HTTP, MCP 2025-11-25.
@@ -469,7 +469,7 @@ call directly. API key permissions scope the available tool set.
 > Anthropic's `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva's 57 tools.
 
 ```bash
-claude mcp add --transport http --scope user orva http://localhost:8443/mcp --header "Authorization: Bearer <YOUR_ORVA_TOKEN>"
+claude mcp add --transport http --scope user orva {{ORIGIN}}/mcp --header "Authorization: Bearer <YOUR_ORVA_TOKEN>"
 ```
 
 ### MCP — curl
@@ -477,13 +477,13 @@ claude mcp add --transport http --scope user orva http://localhost:8443/mcp --he
 > Talk to MCP directly. Step 1 returns a session id (Mcp-Session-Id) that Step 2 references.
 
 ```bash
-curl -sD - -X POST http://localhost:8443/mcp \
+curl -sD - -X POST {{ORIGIN}}/mcp \
   -H 'Authorization: Bearer <YOUR_ORVA_TOKEN>' \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 
-curl -sX POST http://localhost:8443/mcp \
+curl -sX POST {{ORIGIN}}/mcp \
   -H 'Authorization: Bearer <YOUR_ORVA_TOKEN>' \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -501,7 +501,7 @@ curl -sX POST http://localhost:8443/mcp \
 {
   "mcpServers": {
     "orva": {
-      "url": "http://localhost:8443/mcp",
+      "url": "{{ORIGIN}}/mcp",
       "headers": {
         "Authorization": "Bearer <YOUR_ORVA_TOKEN>"
       }
@@ -523,7 +523,7 @@ cursor://anysphere.cursor-deeplink/mcp/install?name=orva&config=eyJ1cmwiOiJodHRw
 > User-scoped install via the Copilot-MCP `code --add-mcp` flag. Pick "Workspace" at the prompt to write .vscode/mcp.json instead.
 
 ```bash
-code --add-mcp '{"name":"orva","type":"http","url":"http://localhost:8443/mcp","headers":{"Authorization":"Bearer <YOUR_ORVA_TOKEN>"}}'
+code --add-mcp '{"name":"orva","type":"http","url":"{{ORIGIN}}/mcp","headers":{"Authorization":"Bearer <YOUR_ORVA_TOKEN>"}}'
 ```
 
 ### MCP (extra) — Codex CLI
@@ -531,12 +531,12 @@ code --add-mcp '{"name":"orva","type":"http","url":"http://localhost:8443/mcp","
 > OpenAI's `codex` CLI. Writes to ~/.codex/config.toml.
 
 ```bash
-codex mcp add --transport streamable-http orva http://localhost:8443/mcp --header "Authorization: Bearer <YOUR_ORVA_TOKEN>"
+codex mcp add --transport streamable-http orva {{ORIGIN}}/mcp --header "Authorization: Bearer <YOUR_ORVA_TOKEN>"
 ```
 
 ### MCP (extra) — OpenCode
 
-> Interactive add. Pick "Remote", paste http://localhost:8443/mcp, then add the header Authorization: Bearer <YOUR_ORVA_TOKEN>.
+> Interactive add. Pick "Remote", paste {{ORIGIN}}/mcp, then add the header Authorization: Bearer <YOUR_ORVA_TOKEN>.
 
 ```bash
 opencode mcp add
@@ -554,7 +554,7 @@ opencode mcp add
       "command": "npx",
       "args": [
         "-y", "mcp-remote",
-        "http://localhost:8443/mcp",
+        "{{ORIGIN}}/mcp",
         "--header", "Authorization:Bearer <YOUR_ORVA_TOKEN>"
       ]
     }
@@ -570,7 +570,7 @@ opencode mcp add
 {
   "mcpServers": {
     "orva": {
-      "serverUrl": "http://localhost:8443/mcp",
+      "serverUrl": "{{ORIGIN}}/mcp",
       "headers": {
         "Authorization": "Bearer <YOUR_ORVA_TOKEN>"
       }
@@ -584,7 +584,7 @@ opencode mcp add
 > UI-only flow. Settings → Apps & Connectors → Developer mode → Add new connector. ChatGPT renders the tool catalog and confirms before destructive calls.
 
 ```text
-URL:    http://localhost:8443/mcp
+URL:    {{ORIGIN}}/mcp
 Auth:   API key (Bearer)
 Token:  <YOUR_ORVA_TOKEN>
 ```
@@ -599,7 +599,7 @@ Token:  <YOUR_ORVA_TOKEN>
 {
   "mcpServers": {
     "orva": {
-      "url": "http://localhost:8443/mcp",
+      "url": "{{ORIGIN}}/mcp",
       "headers": {
         "Authorization": "Bearer <YOUR_ORVA_TOKEN>"
       }
@@ -616,7 +616,7 @@ Token:  <YOUR_ORVA_TOKEN>
 {
   "mcpServers": {
     "orva": {
-      "url": "http://localhost:8443/mcp",
+      "url": "{{ORIGIN}}/mcp",
       "headers": {
         "Authorization": "Bearer <YOUR_ORVA_TOKEN>"
       },
