@@ -28,7 +28,7 @@
             <button
               class="docs-hero-copy"
               :class="{ copied: chatgptOpened }"
-              :aria-label="chatgptOpened ? 'ChatGPT opened — paste docs in next message' : 'Open ChatGPT in a new tab with the docs auto-injected'"
+              :aria-label="chatgptOpened ? 'ChatGPT opened with the docs pre-loaded' : 'Open ChatGPT in a new tab with the full docs pre-loaded as the first prompt'"
               @click="onChatWithGPT"
             >
               <MessageSquare
@@ -39,7 +39,7 @@
                 v-else
                 class="w-3.5 h-3.5"
               />
-              {{ chatgptOpened ? 'Opened — paste in chat' : 'Chat with ChatGPT' }}
+              {{ chatgptOpened ? 'Opened in new tab' : 'Chat with ChatGPT' }}
             </button>
             <button
               class="docs-hero-copy"
@@ -2287,34 +2287,31 @@ const onCopyDocs = async () => {
   docsCopiedTimer = setTimeout(() => { docsCopied.value = false }, 1500)
 }
 
-// "Chat with ChatGPT" — opens chatgpt.com with a short pre-filled
-// prompt asking the model to expect a docs paste, AND copies the full
-// markdown to the clipboard at the same time. Why not URL-inject the
-// whole docs?
-//   - Our markdown is ~48 KB raw → ~150 KB after URL-encoding.
-//   - Chrome caps URLs at ~32 KB; cutting it would lose context.
-//   - Copy-to-clipboard + intro prompt works on all devices including
-//     iOS Safari where the URL ceiling is even lower in practice.
+// "Chat with ChatGPT" — copies the full docs to the clipboard, then
+// opens chatgpt.com with a short pre-filled prompt instructing the
+// model to expect a docs paste. Two physical actions in the new tab:
+// Cmd/Ctrl-V to paste, Enter to send.
 //
-// Flow on click:
-//   1. Copy full docs markdown to clipboard (silent).
-//   2. Open https://chatgpt.com/?q=<short intro> in a new tab.
-//      ChatGPT pre-fills the prompt; user clicks send, then pastes
-//      the docs in their next message → ChatGPT now has full context.
+// Why not inject the docs directly into the URL?
+//   - ChatGPT runs behind Cloudflare which 414s on URLs over ~8 KB.
+//     Our markdown is ~48 KB raw / ~150 KB after URL-encoding —
+//     guaranteed rejection.
+//   - Truncating the docs to fit would silently lose context, which
+//     is worse than asking for one paste action.
+// The pre-filled prompt is short enough to fly through every server
+// limit and works on web + iOS + Android.
 const chatgptOpened = ref(false)
 let chatgptOpenedTimer = null
 const onChatWithGPT = async () => {
-  // Copy first so the clipboard is hot when the new tab opens.
+  // Hot the clipboard so the user just pastes in the new tab.
   await copyText(docsMarkdown.value)
   const intro = [
-    "I'm working with Orva, a self-hosted serverless platform.",
-    "I just copied the full Orva documentation to my clipboard — please ask me to paste it in my next message, then use it as the source of truth when answering my questions.",
+    "I'll paste the full Orva documentation right after this message — please use it as your source of truth when I ask questions.",
     '',
-    'After I paste, summarise back what Orva offers so I know you read it, then wait for my actual question.',
+    'Reply once you have read it.',
   ].join('\n')
   const url = `https://chatgpt.com/?q=${encodeURIComponent(intro)}`
-  // window.open with noopener to prevent the new tab from accessing
-  // window.opener (security best practice). _blank → new tab.
+  // _blank + noopener: new tab, no window.opener leak.
   window.open(url, '_blank', 'noopener,noreferrer')
   chatgptOpened.value = true
   clearTimeout(chatgptOpenedTimer)
@@ -2744,10 +2741,14 @@ const Callout = defineComponent({
 
 .docs-hero-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.5rem;
   flex-shrink: 0;
-  flex-wrap: wrap;
+  min-width: 13rem;
+}
+.docs-hero-actions .docs-hero-copy {
+  justify-content: center;
 }
 .docs-hero-copy {
   display: inline-flex;
@@ -2865,9 +2866,13 @@ const Callout = defineComponent({
 .doc-pipeline {
   display: flex;
   align-items: stretch;
+  justify-content: center;
   gap: 0.4rem;
   overflow-x: auto;
   padding-bottom: 0.4rem;
+  /* No flex-wrap: keeps the arrow chain intact. On narrow viewports
+     the row scrolls horizontally rather than breaking into 2 rows
+     with an orphan trailing arrow. */
 }
 .doc-pipeline-stage {
   display: flex;
@@ -3263,13 +3268,29 @@ const Callout = defineComponent({
 }
 
 /* ── Microlabels (the all-caps eyebrow above sub-blocks) ─────────── */
+/* Soft inline subhead: replaces the old uppercase tracked-letter
+   "form label" treatment that read as too noisy / clinical. Now
+   reads as a small section header — sentence case, slightly bolder
+   foreground, with a thin primary-tinted left rule for visual
+   anchoring. Same class everywhere; no template changes needed. */
 .doc-microlabel {
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-foreground-muted);
+  letter-spacing: -0.005em;
+  color: var(--color-foreground);
+  padding-left: 0.55rem;
+  border-left: 2px solid rgba(85, 63, 131, 0.55);
+  text-transform: none;
+}
+/* Inside .doc-card the microlabel is the card's "title" — drop the
+   left rule so it reads as a flush heading inside the card chrome. */
+.doc-card .doc-microlabel {
+  border-left: none;
+  padding-left: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-foreground);
 }
 
 /* ── Card (3-up KV style) ────────────────────────────────────────── */
@@ -3311,12 +3332,11 @@ const Callout = defineComponent({
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-foreground-muted);
+  letter-spacing: -0.005em;
+  color: var(--color-foreground);
 }
 .doc-step-num {
   display: inline-flex;
