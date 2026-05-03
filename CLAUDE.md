@@ -51,6 +51,20 @@ Dockerfile.release  Release-variant image
 - **Server config**: env vars or `/etc/orva/config.yaml`; full reference in `docs/CONFIG.md`
 - **CLI config**: `~/.orva/config.yaml` with `endpoint` and `api_key`
 
+## Release Policy
+
+**One active release at a time.** When cutting a release:
+1. Delete the existing GitHub release and its tag first
+2. Tag as `vYYYY.MM.DD` (today's date, zero-padded) and push — the workflow does the rest
+
+```bash
+gh release delete v<old-tag> --yes
+git tag -d v<old-tag> && git push origin --delete v<old-tag>
+git tag v2026.05.03 && git push origin v2026.05.03
+```
+
+The release workflow builds `ghcr.io/harsh-2002/orva:<tag>` + `:latest` (multi-arch), all CLI binaries, rootfs tarballs, and checksums automatically on any `v*` tag push.
+
 ## Non-obvious Gotchas
 
 - **`adapters-embed` must run before any `go build`** — it copies `runtimes/` into `backend/cmd/orva/adapters/` for `//go:embed`. `make build` calls it automatically; bare `go build` does not.
