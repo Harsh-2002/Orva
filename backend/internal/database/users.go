@@ -3,6 +3,7 @@ package database
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -126,5 +127,28 @@ func (db *Database) GetSession(token string) (*Session, error) {
 // DeleteSession removes a session.
 func (db *Database) DeleteSession(token string) error {
 	_, err := db.write.Exec("DELETE FROM sessions WHERE token = ?", token)
+	return err
+}
+
+// ErrWrongPassword is returned by UpdateUserPassword when the supplied
+// current password does not match the stored hash.
+var ErrWrongPassword = errors.New("wrong password")
+
+// UpdateUserPassword verifies oldPassword against the stored bcrypt hash,
+// then replaces it with a new hash derived from newPassword.
+func (db *Database) UpdateUserPassword(userID int64, oldPassword, newPassword string) error {
+	var hash string
+	err := db.read.QueryRow("SELECT password_hash FROM users WHERE id = ?", userID).Scan(&hash)
+	if err != nil {
+		return err
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(oldPassword)); err != nil {
+		return ErrWrongPassword
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = db.write.Exec("UPDATE users SET password_hash = ? WHERE id = ?", string(newHash), userID)
 	return err
 }

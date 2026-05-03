@@ -68,33 +68,13 @@
         <span>{{ item.label }}</span>
       </router-link>
     </nav>
-
-    <div class="p-4 border-t border-border space-y-4">
-      <!-- User Info & Logout -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2 text-xs text-foreground-muted">
-          <div class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-[10px]">
-            {{ auth.user?.username?.charAt(0).toUpperCase() || 'U' }}
-          </div>
-          <span class="font-medium">{{ auth.user?.username || 'User' }}</span>
-        </div>
-        <button
-          class="p-1.5 rounded-md hover:bg-surface text-foreground-muted hover:text-danger transition-colors"
-          title="Logout"
-          @click="handleLogout"
-        >
-          <LogOut class="w-4 h-4" />
-        </button>
-      </div>
-    </div>
   </aside>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import OrvaLogo from '../OrvaLogo.vue'
-import { useAuthStore } from '@/stores/auth'
 import {
   Gauge,
   Boxes,
@@ -108,22 +88,14 @@ import {
   ShieldHalf,
   Settings,
   LibraryBig,
-  LogOut,
   Menu,
   X,
 } from 'lucide-vue-next'
 
 const route = useRoute()
-const router = useRouter()
-const auth = useAuthStore()
 const open = ref(false)
 
 watch(() => route.fullPath, () => { open.value = false })
-
-const handleLogout = async () => {
-  await auth.logout()
-  router.push('/login')
-}
 
 // Sidebar nav — single-word labels, ordered operational → admin →
 // reference. Icons chosen for distinct silhouettes (Gauge, Boxes,

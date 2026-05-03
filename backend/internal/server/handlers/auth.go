@@ -201,6 +201,49 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ChangePassword handles POST /auth/change-password — verifies the current
+// password then replaces it with the new one. The session remains valid.
+func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated", "")
+		return
+	}
+	user, err := h.DB.GetSessionUser(cookie.Value)
+	if err != nil {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid session", "")
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", "")
+		return
+	}
+	if req.OldPassword == "" || req.NewPassword == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "old_password and new_password required", "")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "password must be at least 8 characters", "")
+		return
+	}
+
+	if err := h.DB.UpdateUserPassword(user.ID, req.OldPassword, req.NewPassword); err != nil {
+		if err == database.ErrWrongPassword {
+			respond.Error(w, http.StatusBadRequest, "WRONG_PASSWORD", "current password is incorrect", "")
+			return
+		}
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to update password", "")
+		return
+	}
+
+	respond.JSON(w, http.StatusOK, map[string]string{"status": "password_changed"})
+}
+
 // Logout handles POST /auth/logout — clears session.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_token")

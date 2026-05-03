@@ -154,10 +154,17 @@ export const useAuthStore = defineStore('auth', () => {
     refreshDismissedUntil.value = Date.now() + 60 * 60 * 1000
   }
 
+  const changePassword = async (oldPassword, newPassword) => {
+    await authClient.post('/api/v1/auth/change-password', {
+      old_password: oldPassword,
+      new_password: newPassword,
+    })
+  }
+
   return {
     user, isAuthenticated, loading, hasUser, expiresAt, refreshing,
     secondsUntilExpiry, shouldShowExpiryToast,
     login, onboard, logout, fetchAuthStatus, checkAuth, refreshSession,
-    dismissExpiryToast,
+    dismissExpiryToast, changePassword,
   }
 })

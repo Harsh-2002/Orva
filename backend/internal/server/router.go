@@ -314,6 +314,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/auth/me", authHandler.Me)
 	r.mux.HandleFunc("POST /api/v1/auth/logout", authHandler.Logout)
 	r.mux.HandleFunc("POST /api/v1/auth/refresh", authHandler.Refresh)
+	r.mux.HandleFunc("POST /api/v1/auth/change-password", authHandler.ChangePassword)
 
 	// Runtime routes.
 	runtimeHandler := &handlers.RuntimeHandler{}

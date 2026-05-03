@@ -135,6 +135,93 @@
       </div>
     </div>
 
+    <!-- Account card — change password + logout. -->
+    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+      <div>
+        <div class="text-sm font-semibold text-white flex items-center gap-2">
+          <KeyRound class="w-4 h-4 text-foreground-muted" />
+          Account
+        </div>
+        <p class="text-xs text-foreground-muted mt-1">
+          Update your password or end your session.
+        </p>
+      </div>
+
+      <form
+        class="space-y-3 pt-2 border-t border-border"
+        @submit.prevent="handleChangePassword"
+      >
+        <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide">
+          Change password
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="flex flex-col gap-1">
+            <label class="text-xs text-foreground-muted">Current password</label>
+            <input
+              v-model="pwForm.current"
+              type="password"
+              autocomplete="current-password"
+              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="••••••••"
+            >
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-xs text-foreground-muted">New password</label>
+            <input
+              v-model="pwForm.next"
+              type="password"
+              autocomplete="new-password"
+              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="••••••••"
+            >
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-xs text-foreground-muted">Confirm new password</label>
+            <input
+              v-model="pwForm.confirm"
+              type="password"
+              autocomplete="new-password"
+              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="••••••••"
+            >
+          </div>
+        </div>
+
+        <div
+          v-if="pwError"
+          class="rounded-md border border-red-700/40 bg-red-950/30 p-2.5 text-xs text-red-200"
+        >
+          {{ pwError }}
+        </div>
+        <div
+          v-if="pwSuccess"
+          class="rounded-md border border-emerald-700/40 bg-emerald-950/30 p-2.5 text-xs text-emerald-200"
+        >
+          Password updated successfully.
+        </div>
+
+        <Button
+          type="submit"
+          variant="primary"
+          :loading="pwLoading"
+          :disabled="pwLoading"
+        >
+          <KeyRound class="w-4 h-4" />
+          Update password
+        </Button>
+      </form>
+
+      <div class="pt-2 border-t border-border">
+        <Button
+          variant="danger"
+          @click="handleLogout"
+        >
+          <LogOut class="w-4 h-4" />
+          Log out
+        </Button>
+      </div>
+    </div>
+
     <!-- Backup / Restore card. -->
     <div class="bg-background border border-border rounded-lg p-5 space-y-4">
       <div class="flex items-start justify-between gap-4">
@@ -204,12 +291,54 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Download, Upload, DatabaseBackup, HardDrive, Wand2 } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Download, Upload, DatabaseBackup, HardDrive, Wand2, KeyRound, LogOut } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import { useConfirmStore } from '@/stores/confirm'
+import { useAuthStore } from '@/stores/auth'
 import { uploadRestore, getStorage, runVacuum } from '@/api/endpoints'
 
 const confirmStore = useConfirmStore()
+const auth = useAuthStore()
+const router = useRouter()
+
+// Account card state.
+const pwForm = ref({ current: '', next: '', confirm: '' })
+const pwLoading = ref(false)
+const pwError = ref('')
+const pwSuccess = ref(false)
+
+const handleChangePassword = async () => {
+  pwError.value = ''
+  pwSuccess.value = false
+  if (!pwForm.value.current || !pwForm.value.next || !pwForm.value.confirm) {
+    pwError.value = 'All three fields are required.'
+    return
+  }
+  if (pwForm.value.next.length < 8) {
+    pwError.value = 'New password must be at least 8 characters.'
+    return
+  }
+  if (pwForm.value.next !== pwForm.value.confirm) {
+    pwError.value = 'New password and confirmation do not match.'
+    return
+  }
+  pwLoading.value = true
+  try {
+    await auth.changePassword(pwForm.value.current, pwForm.value.next)
+    pwSuccess.value = true
+    pwForm.value = { current: '', next: '', confirm: '' }
+  } catch (err) {
+    pwError.value = err?.response?.data?.error?.message || 'Failed to update password.'
+  } finally {
+    pwLoading.value = false
+  }
+}
+
+const handleLogout = async () => {
+  await auth.logout()
+  router.push('/login')
+}
 
 const fileInput = ref(null)
 const restoring = ref(false)
