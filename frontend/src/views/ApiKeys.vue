@@ -206,6 +206,7 @@ import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import { listApiKeys, createApiKey, deleteApiKey } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
+import { formatRelative, isExpired } from '@/utils/time'
 import { useConfirmStore } from '@/stores/confirm'
 
 const confirmStore = useConfirmStore()
@@ -278,23 +279,6 @@ const removeKey = async (key) => {
 }
 
 const formatDate = (date) => new Date(date).toLocaleString()
-
-const formatRelative = (date) => {
-  const ms = new Date(date).getTime() - Date.now()
-  const abs = Math.abs(ms)
-  const past = ms < 0
-  const mins = Math.round(abs / 60000)
-  if (mins < 1) return past ? 'just now' : 'in <1m'
-  if (mins < 60) return past ? `${mins}m ago` : `in ${mins}m`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return past ? `${hrs}h ago` : `in ${hrs}h`
-  const days = Math.round(hrs / 24)
-  if (days < 90) return past ? `${days}d ago` : `in ${days}d`
-  const months = Math.round(days / 30)
-  return past ? `${months}mo ago` : `in ${months}mo`
-}
-
-const isExpired = (date) => new Date(date).getTime() < Date.now()
 
 onMounted(loadKeys)
 </script>

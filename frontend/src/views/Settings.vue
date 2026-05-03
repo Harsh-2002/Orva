@@ -222,6 +222,183 @@
       </div>
     </div>
 
+    <!-- Connected applications card — OAuth grants from claude.ai
+         web, ChatGPT web, etc. Each row maps to one active
+         oauth_access_tokens row. Revoke flips revoked_at; the next
+         /mcp call from that connector returns 401. -->
+    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="text-sm font-semibold text-white flex items-center gap-2">
+            <Plug class="w-4 h-4 text-foreground-muted" />
+            Connected applications
+          </div>
+          <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+            Apps you've granted access to your Orva via OAuth.
+            Connect new ones from the
+            <RouterLink to="/docs#mcp" class="text-primary hover:underline">Docs</RouterLink>
+            page.
+          </p>
+        </div>
+        <span
+          v-if="connectedApps.length > 0"
+          class="text-xs text-foreground-muted self-center"
+        >
+          {{ connectedApps.length }} active
+        </span>
+      </div>
+
+      <div
+        v-if="connectedAppsError"
+        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+      >
+        <div class="font-semibold text-red-100 mb-1">Failed to load connected apps</div>
+        <div class="font-mono break-all">{{ connectedAppsError }}</div>
+      </div>
+
+      <div
+        v-else-if="connectedAppsLoading"
+        class="text-xs text-foreground-muted italic"
+      >
+        Loading…
+      </div>
+
+      <div
+        v-else-if="connectedApps.length === 0"
+        class="rounded-md border border-dashed border-border p-6 text-center"
+      >
+        <Plug class="w-8 h-8 text-foreground-muted mx-auto mb-2 opacity-40" />
+        <p class="text-xs text-foreground-muted">
+          No connected applications yet.
+        </p>
+        <p class="text-[11px] text-foreground-muted mt-1">
+          Add Orva as a custom connector in
+          <span class="text-foreground-muted">claude.ai</span> or
+          <span class="text-foreground-muted">ChatGPT</span> and it'll
+          appear here.
+        </p>
+      </div>
+
+      <ul v-else class="divide-y divide-border -mx-5">
+        <li
+          v-for="app in connectedApps"
+          :key="app.id"
+          class="px-5 py-3 flex items-start gap-3"
+        >
+          <component
+            :is="iconForClient(app.client_name).icon"
+            class="w-5 h-5 mt-0.5 shrink-0"
+            :class="iconForClient(app.client_name).accent"
+          />
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-white truncate">
+              {{ app.client_name }}
+            </div>
+            <div class="text-[11px] text-foreground-muted mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+              <span>Authorized {{ formatRelative(app.issued_at) }}</span>
+              <span v-if="app.last_used_at">
+                · Last used {{ formatRelative(app.last_used_at) }}
+              </span>
+              <span v-else class="italic opacity-70">· Never used</span>
+              <span v-if="app.refresh_expires_at">
+                · Re-consent {{ formatRelative(app.refresh_expires_at) }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-1 mt-2">
+              <span
+                v-for="s in scopeList(app.scope)"
+                :key="s"
+                class="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                :class="scopeBadgeClass(s)"
+              >
+                {{ s }}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="text-xs text-foreground-muted hover:text-red-400 transition-colors flex items-center gap-1 shrink-0 self-center"
+            :disabled="revokingId === app.id"
+            @click="revokeApp(app)"
+          >
+            <Trash2 class="w-3.5 h-3.5" />
+            Revoke
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Active sessions card — operator's own browser logins. The
+         calling session is flagged `current` and shows no Revoke
+         button (use the Logout button in the Account card instead). -->
+    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="text-sm font-semibold text-white flex items-center gap-2">
+            <Monitor class="w-4 h-4 text-foreground-muted" />
+            Active sessions
+          </div>
+          <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+            Browsers signed in to this Orva. Revoke a session and that
+            browser will need to log in again on its next request.
+          </p>
+        </div>
+        <span
+          v-if="sessions.length > 0"
+          class="text-xs text-foreground-muted self-center"
+        >
+          {{ sessions.length }} active
+        </span>
+      </div>
+
+      <div
+        v-if="sessionsError"
+        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+      >
+        <div class="font-semibold text-red-100 mb-1">Failed to load sessions</div>
+        <div class="font-mono break-all">{{ sessionsError }}</div>
+      </div>
+
+      <ul v-else class="divide-y divide-border -mx-5">
+        <li
+          v-for="s in sessions"
+          :key="s.prefix"
+          class="px-5 py-3 flex items-start gap-3"
+        >
+          <Monitor
+            class="w-5 h-5 mt-0.5 shrink-0"
+            :class="s.current ? 'text-emerald-400' : 'text-foreground-muted'"
+          />
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-white flex items-center gap-2 flex-wrap">
+              <span v-if="s.current">This session</span>
+              <span v-else class="font-mono text-xs">{{ maskPrefix(s.prefix) }}</span>
+              <span
+                v-if="s.current"
+                class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-medium"
+              >
+                current
+              </span>
+            </div>
+            <div class="text-[11px] text-foreground-muted mt-0.5">
+              Signed in {{ formatRelative(s.created_at) }}
+              · expires {{ formatRelative(s.expires_at) }}
+            </div>
+          </div>
+          <button
+            v-if="!s.current"
+            type="button"
+            class="text-xs text-foreground-muted hover:text-red-400 transition-colors flex items-center gap-1 shrink-0 self-center"
+            :disabled="revokingPrefix === s.prefix"
+            @click="revokeOtherSession(s)"
+          >
+            <Trash2 class="w-3.5 h-3.5" />
+            Revoke
+          </button>
+        </li>
+      </ul>
+    </div>
+
     <!-- Backup / Restore card. -->
     <div class="bg-background border border-border rounded-lg p-5 space-y-4">
       <div class="flex items-start justify-between gap-4">
@@ -291,12 +468,33 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { Download, Upload, DatabaseBackup, HardDrive, Wand2, KeyRound, LogOut } from 'lucide-vue-next'
+import { useRouter, RouterLink } from 'vue-router'
+import {
+  Download,
+  Upload,
+  DatabaseBackup,
+  HardDrive,
+  Wand2,
+  KeyRound,
+  LogOut,
+  Plug,
+  Monitor,
+  Trash2,
+} from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import { useConfirmStore } from '@/stores/confirm'
 import { useAuthStore } from '@/stores/auth'
-import { uploadRestore, getStorage, runVacuum } from '@/api/endpoints'
+import {
+  uploadRestore,
+  getStorage,
+  runVacuum,
+  listConnectedApps,
+  revokeConnectedApp,
+  listSessions,
+  revokeSession,
+} from '@/api/endpoints'
+import { formatRelative } from '@/utils/time'
+import { iconForClient } from '@/utils/connectorIcons'
 
 const confirmStore = useConfirmStore()
 const auth = useAuthStore()
@@ -433,6 +631,119 @@ const formatBytes = (n) => {
 }
 
 onMounted(fetchStorage)
+
+// ── Connected applications ──────────────────────────────────────────
+
+const connectedApps = ref([])
+const connectedAppsLoading = ref(false)
+const connectedAppsError = ref('')
+const revokingId = ref('')
+
+const fetchConnectedApps = async () => {
+  connectedAppsLoading.value = true
+  connectedAppsError.value = ''
+  try {
+    const res = await listConnectedApps()
+    connectedApps.value = res.data.apps || []
+  } catch (err) {
+    connectedAppsError.value = err?.response?.data?.error?.message || err?.message || 'unknown error'
+  } finally {
+    connectedAppsLoading.value = false
+  }
+}
+
+const revokeApp = async (app) => {
+  const ok = await confirmStore.ask({
+    title: `Revoke ${app.client_name}?`,
+    message:
+      `${app.client_name} will lose access immediately. Any in-flight ` +
+      'request will fail with 401. The connector can be re-authorized ' +
+      'at any time from the originating app.',
+    confirmLabel: 'Revoke',
+    danger: true,
+  })
+  if (!ok) return
+  revokingId.value = app.id
+  try {
+    await revokeConnectedApp(app.id)
+    await fetchConnectedApps()
+  } catch (err) {
+    connectedAppsError.value = err?.response?.data?.error?.message || err?.message || 'failed to revoke'
+  } finally {
+    revokingId.value = ''
+  }
+}
+
+// scope → list. Always parse fresh from the row; the API returns
+// space-separated per RFC 6749 §3.3.
+const scopeList = (s) => (s || '').split(/\s+/).filter(Boolean)
+
+// Tailwind classes per scope. Severity gradient: read=neutral,
+// invoke=blue, write=amber, admin=red. OIDC scopes (openid/email/
+// profile) get the neutral gray — they're informational.
+const scopeBadgeClass = (s) => {
+  switch (s) {
+    case 'admin':
+      return 'bg-red-500/15 text-red-300'
+    case 'write':
+      return 'bg-amber-500/15 text-amber-300'
+    case 'invoke':
+      return 'bg-sky-500/15 text-sky-300'
+    case 'read':
+      return 'bg-foreground-muted/15 text-foreground-muted'
+    default:
+      return 'bg-foreground-muted/10 text-foreground-muted'
+  }
+}
+
+// ── Active sessions ─────────────────────────────────────────────────
+
+const sessions = ref([])
+const sessionsError = ref('')
+const revokingPrefix = ref('')
+
+const fetchSessions = async () => {
+  sessionsError.value = ''
+  try {
+    const res = await listSessions()
+    sessions.value = res.data.sessions || []
+  } catch (err) {
+    sessionsError.value = err?.response?.data?.error?.message || err?.message || 'unknown error'
+  }
+}
+
+const revokeOtherSession = async (s) => {
+  const ok = await confirmStore.ask({
+    title: 'Revoke this session?',
+    message:
+      'The browser using this session will be logged out on its next ' +
+      'request. Use this if you suspect a device was lost or to clean ' +
+      'up old logins.',
+    confirmLabel: 'Revoke',
+    danger: true,
+  })
+  if (!ok) return
+  revokingPrefix.value = s.prefix
+  try {
+    await revokeSession(s.prefix)
+    await fetchSessions()
+  } catch (err) {
+    sessionsError.value = err?.response?.data?.error?.message || err?.message || 'failed to revoke'
+  } finally {
+    revokingPrefix.value = ''
+  }
+}
+
+// Show a few characters of the prefix so the operator can disambiguate
+// rows without exposing the full token. "o••••••••42a3" pattern: first
+// + last 4, dots in between.
+const maskPrefix = (p) => {
+  if (!p || p.length < 8) return p
+  return p.slice(0, 1) + '••••••••' + p.slice(-4)
+}
+
+onMounted(fetchConnectedApps)
+onMounted(fetchSessions)
 
 // downloadBackup just hands the URL to the browser. The session cookie
 // is sent automatically (same-origin), the server replies with

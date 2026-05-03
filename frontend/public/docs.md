@@ -624,6 +624,17 @@ hashes (mirroring Orva's API-key posture). The consent screen is
 gated by the Orva session cookie; if the user isn't logged in,
 the request bounces through `/web/login` and back.
 
+Granted apps appear in **Settings → Connected applications** with
+authorized-at, last-used-at, and per-row Revoke. The matching REST
+surface (used by the dashboard, also callable from the CLI):
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/v1/oauth/connected-apps` | GET | List active OAuth grants for the calling user |
+| `/api/v1/oauth/connected-apps/{id}` | DELETE | Revoke a grant (idempotent — re-revoke returns 404) |
+| `/api/v1/auth/sessions` | GET | List the calling user's active browser sessions (token returned as 16-char prefix only) |
+| `/api/v1/auth/sessions/{prefix}` | DELETE | Revoke another session by prefix; calling session refuses unless `?allow_self=1` |
+
 ### Hand-edited config files
 
 ### MCP config — Cursor (global)

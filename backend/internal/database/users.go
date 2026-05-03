@@ -2,6 +2,7 @@ package database
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"time"
@@ -123,6 +124,76 @@ func (db *Database) GetSession(token string) (*Session, error) {
 	).Scan(&s.Token, &s.UserID, &s.CreatedAt, &s.ExpiresAt)
 	return &s, err
 }
+
+// ListSessionsForUser returns every active session for a user, newest
+// first. Used by Settings → Active sessions to show "this device + N
+// other browsers signed in." Expired rows are filtered server-side so
+// the UI doesn't have to.
+func (db *Database) ListSessionsForUser(userID int64) ([]*Session, error) {
+	rows, err := db.read.Query(`
+		SELECT token, user_id, created_at, expires_at
+		FROM sessions
+		WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
+		ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Session
+	for rows.Next() {
+		var s Session
+		if err := rows.Scan(&s.Token, &s.UserID, &s.CreatedAt, &s.ExpiresAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &s)
+	}
+	return out, rows.Err()
+}
+
+// DeleteSessionByPrefix matches the first 16 hex chars of a session
+// token and deletes the unique row that hash-prefixes to it. The
+// dashboard never sees the full token (only its prefix), so this is
+// the safe identifier to expose in URLs without re-creating the
+// session-fixation vulnerability the prefix is designed to avoid.
+//
+// We also accept user_id for the ownership guard — even a leaked
+// prefix only lets the legitimate owner act on it.
+//
+// Returns sql.ErrNoRows if the prefix doesn't match (or matches a
+// session belonging to a different user). Returns ErrAmbiguousPrefix
+// if more than one row matches — should never happen with 16 hex
+// chars (~64 bits of entropy) but the loop is cheap insurance.
+func (db *Database) DeleteSessionByPrefix(prefix string, userID int64) error {
+	rows, err := db.read.Query(`
+		SELECT token FROM sessions
+		WHERE user_id = ? AND token LIKE ? || '%'`, userID, prefix)
+	if err != nil {
+		return err
+	}
+	var matches []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			rows.Close()
+			return err
+		}
+		matches = append(matches, t)
+	}
+	rows.Close()
+	switch len(matches) {
+	case 0:
+		return sql.ErrNoRows
+	case 1:
+		_, err := db.write.Exec("DELETE FROM sessions WHERE token = ?", matches[0])
+		return err
+	default:
+		return ErrAmbiguousSessionPrefix
+	}
+}
+
+// ErrAmbiguousSessionPrefix is the (unreachable in practice) signal
+// that more than one session shares the supplied prefix.
+var ErrAmbiguousSessionPrefix = errors.New("session prefix matches multiple rows")
 
 // DeleteSession removes a session.
 func (db *Database) DeleteSession(token string) error {

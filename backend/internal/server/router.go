@@ -323,6 +323,14 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/logout", authHandler.Logout)
 	r.mux.HandleFunc("POST /api/v1/auth/refresh", authHandler.Refresh)
 	r.mux.HandleFunc("POST /api/v1/auth/change-password", authHandler.ChangePassword)
+	r.mux.HandleFunc("GET /api/v1/auth/sessions", authHandler.Sessions)
+	r.mux.HandleFunc("DELETE /api/v1/auth/sessions/{prefix}", authHandler.RevokeSession)
+
+	// Settings → Connected applications: list + revoke OAuth grants
+	// (claude.ai web, ChatGPT web, etc.) issued through /oauth/authorize.
+	oauthAppsHandler := &handlers.OAuthAppsHandler{DB: r.db}
+	r.mux.HandleFunc("GET /api/v1/oauth/connected-apps", oauthAppsHandler.List)
+	r.mux.HandleFunc("DELETE /api/v1/oauth/connected-apps/{id}", oauthAppsHandler.Revoke)
 
 	// Runtime routes.
 	runtimeHandler := &handlers.RuntimeHandler{}

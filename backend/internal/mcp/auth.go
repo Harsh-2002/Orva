@@ -95,6 +95,12 @@ func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Re
 		return nil, false
 	}
 
+	// Touch last_used_at for the Settings → Connected applications
+	// card. Async so we don't block the hot path; mirrors the
+	// API-key UpdateAPIKeyLastUsed call above.
+	tokenHash := row.AccessTokenHash
+	db.Async(func() { _ = db.UpdateOAuthTokenLastUsed(tokenHash) })
+
 	perms := oauth.ScopeToPermissions(row.Scope)
 	permsJSON, _ := json.Marshal(perms)
 

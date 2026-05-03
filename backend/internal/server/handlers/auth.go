@@ -244,6 +244,93 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "password_changed"})
 }
 
+// sessionTokenPrefixLen is the number of hex chars the dashboard
+// receives instead of the full session token. 16 hex = 64 bits of
+// entropy — unique enough to identify a row, far short of the full
+// 256-bit token so a leaked URL can't authenticate.
+const sessionTokenPrefixLen = 16
+
+// Sessions handles GET /auth/sessions — list every active session for
+// the current user. Each row is returned with a *prefix* of its
+// token, never the full value (that would defeat the cookie's
+// HTTP-only protection). The row matching the calling cookie is
+// flagged `current: true` so the UI can mark it.
+func (h *AuthHandler) Sessions(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "session required", "")
+		return
+	}
+	user, err := h.DB.GetSessionUser(cookie.Value)
+	if err != nil {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "session expired", "")
+		return
+	}
+	sessions, err := h.DB.ListSessionsForUser(user.ID)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to list sessions", "")
+		return
+	}
+	out := make([]map[string]any, 0, len(sessions))
+	for _, s := range sessions {
+		prefix := s.Token
+		if len(prefix) > sessionTokenPrefixLen {
+			prefix = prefix[:sessionTokenPrefixLen]
+		}
+		out = append(out, map[string]any{
+			"prefix":     prefix,
+			"created_at": s.CreatedAt,
+			"expires_at": s.ExpiresAt,
+			"current":    s.Token == cookie.Value,
+		})
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"sessions": out})
+}
+
+// RevokeSession handles DELETE /auth/sessions/{prefix} — kills the
+// session whose token starts with the given prefix. By default it
+// refuses to delete the calling session (use Logout for that, which
+// also clears the cookie). Pass ?allow_self=1 to override — useful
+// for a future "log out everywhere" button.
+func (h *AuthHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "session required", "")
+		return
+	}
+	user, err := h.DB.GetSessionUser(cookie.Value)
+	if err != nil {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "session expired", "")
+		return
+	}
+	prefix := r.PathValue("prefix")
+	if len(prefix) < 8 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "prefix must be at least 8 hex chars", "")
+		return
+	}
+	// Self-protection: the calling session's prefix is the same as
+	// the cookie's first N chars. Refuse unless the operator opted in.
+	myPrefix := cookie.Value
+	if len(myPrefix) > len(prefix) {
+		myPrefix = myPrefix[:len(prefix)]
+	}
+	if myPrefix == prefix && r.URL.Query().Get("allow_self") != "1" {
+		respond.Error(w, http.StatusBadRequest, "CANT_DELETE_SELF",
+			"refusing to revoke the calling session — use POST /auth/logout instead", "")
+		return
+	}
+	if err := h.DB.DeleteSessionByPrefix(prefix, user.ID); err != nil {
+		if err == database.ErrAmbiguousSessionPrefix {
+			respond.Error(w, http.StatusBadRequest, "AMBIGUOUS_PREFIX", "prefix matches multiple sessions", "")
+			return
+		}
+		// sql.ErrNoRows or any other miss
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "no such session", "")
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // Logout handles POST /auth/logout — clears session.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_token")

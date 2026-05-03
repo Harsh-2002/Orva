@@ -341,21 +341,27 @@ func (db *Database) RevokeOAuthAccessToken(hash string) error {
 }
 
 // ListActiveOAuthAccessTokens returns the rows that the dashboard's
-// Settings → Connected apps card renders. Joined with oauth_clients for
-// the friendly name. Filters out revoked + expired rows.
+// Settings → Connected applications card renders. Joined with
+// oauth_clients for the friendly name. Filters out revoked + expired
+// rows. RefreshExpiresAt is the better "this connector keeps working
+// until…" signal than AccessExpiresAt — a fresh access token mints
+// every refresh, but the refresh itself is the long-lived credential.
 type ConnectedApp struct {
-	ID              string    `json:"id"`
-	ClientID        string    `json:"client_id"`
-	ClientName      string    `json:"client_name"`
-	Scope           string    `json:"scope"`
-	IssuedAt        time.Time `json:"issued_at"`
-	AccessExpiresAt time.Time `json:"access_expires_at"`
+	ID               string     `json:"id"`
+	ClientID         string     `json:"client_id"`
+	ClientName       string     `json:"client_name"`
+	Scope            string     `json:"scope"`
+	IssuedAt         time.Time  `json:"issued_at"`
+	AccessExpiresAt  time.Time  `json:"access_expires_at"`
+	RefreshExpiresAt *time.Time `json:"refresh_expires_at,omitempty"`
+	LastUsedAt       *time.Time `json:"last_used_at,omitempty"`
 }
 
 func (db *Database) ListActiveOAuthAccessTokens(userID int64) ([]*ConnectedApp, error) {
 	rows, err := db.read.Query(`
 		SELECT t.id, t.client_id, COALESCE(c.client_name, t.client_id),
-		       t.scope, t.issued_at, t.access_expires_at
+		       t.scope, t.issued_at, t.access_expires_at,
+		       t.refresh_expires_at, t.last_used_at
 		FROM oauth_access_tokens t
 		LEFT JOIN oauth_clients c ON c.client_id = t.client_id
 		WHERE t.user_id = ?
@@ -370,13 +376,55 @@ func (db *Database) ListActiveOAuthAccessTokens(userID int64) ([]*ConnectedApp, 
 	var out []*ConnectedApp
 	for rows.Next() {
 		var a ConnectedApp
+		var refreshExpires, lastUsed sql.NullTime
 		if err := rows.Scan(&a.ID, &a.ClientID, &a.ClientName,
-			&a.Scope, &a.IssuedAt, &a.AccessExpiresAt); err != nil {
+			&a.Scope, &a.IssuedAt, &a.AccessExpiresAt,
+			&refreshExpires, &lastUsed); err != nil {
 			return nil, err
+		}
+		if refreshExpires.Valid {
+			a.RefreshExpiresAt = &refreshExpires.Time
+		}
+		if lastUsed.Valid {
+			a.LastUsedAt = &lastUsed.Time
 		}
 		out = append(out, &a)
 	}
 	return out, rows.Err()
+}
+
+// UpdateOAuthTokenLastUsed sets last_used_at = now on the row matching
+// the access-token hash. Called async from the MCP middleware on every
+// authenticated request — mirrors UpdateAPIKeyLastUsed for the API-key
+// path. Errors are non-fatal; the caller fire-and-forgets.
+func (db *Database) UpdateOAuthTokenLastUsed(accessHash string) error {
+	_, err := db.write.Exec(`
+		UPDATE oauth_access_tokens
+		SET last_used_at = CURRENT_TIMESTAMP
+		WHERE access_token_hash = ?`, accessHash)
+	return err
+}
+
+// RevokeOAuthAccessTokenByID flips revoked_at on the row identified by
+// (id, user_id) only if the row is currently active. The user_id
+// predicate is the ownership guard: a future multi-user Orva must
+// not let user A revoke user B's grants. The revoked_at IS NULL
+// predicate makes the operation idempotent at the *result* level — a
+// re-revoke maps to sql.ErrNoRows so the handler can return a clean
+// 404 ("nothing to revoke") rather than silently succeeding.
+func (db *Database) RevokeOAuthAccessTokenByID(id string, userID int64) error {
+	res, err := db.write.Exec(`
+		UPDATE oauth_access_tokens
+		SET revoked_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND user_id = ? AND revoked_at IS NULL`, id, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // SweepExpiredOAuthTokens removes access-token rows whose access_expires_at

@@ -159,6 +159,16 @@ export const createApiKey = (data) => apiClient.post('/keys', data)
 
 export const deleteApiKey = (id) => apiClient.delete(`/keys/${id}`)
 
+// Connected applications (OAuth grants — claude.ai, ChatGPT, etc.)
+export const listConnectedApps = () => apiClient.get('/oauth/connected-apps')
+
+export const revokeConnectedApp = (id) => apiClient.delete(`/oauth/connected-apps/${id}`)
+
+// Active sessions (operator's own browser logins)
+export const listSessions = () => apiClient.get('/auth/sessions')
+
+export const revokeSession = (prefix) => apiClient.delete(`/auth/sessions/${prefix}`)
+
 // Runtimes
 export const listRuntimes = () => apiClient.get('/runtimes')
 

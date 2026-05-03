@@ -554,6 +554,11 @@ PRAGMA foreign_keys = ON;
 		"CREATE INDEX IF NOT EXISTS idx_oauth_at_access_hash  ON oauth_access_tokens(access_token_hash)",
 		"CREATE INDEX IF NOT EXISTS idx_oauth_at_refresh_hash ON oauth_access_tokens(refresh_token_hash)",
 		"CREATE INDEX IF NOT EXISTS idx_oauth_at_access_expires ON oauth_access_tokens(access_expires_at)",
+		// Settings → Connected applications: surface "last used N
+		// minutes ago" so operators can spot abandoned grants. Added
+		// after the table existed in v2026.05.03; the loop below
+		// silences "duplicate column" so it's safe to re-run.
+		"ALTER TABLE oauth_access_tokens ADD COLUMN last_used_at DATETIME",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// "duplicate column name" is expected on boot after the first.
