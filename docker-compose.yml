@@ -68,6 +68,7 @@ services:
       ORVA_WRITE_TIMEOUT_SEC: "90"     # default is 60; headroom above 30 s function timeout
       ORVA_SESSION_DAYS: "30"          # default is 7; single-operator instance
       ORVA_LOG_RETENTION_DAYS: "30"    # default is 7
+      ORVA_SECURE_COOKIES: "true"      # behind HTTPS reverse proxy / public tunnel — required for OAuth consent cookie
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8443/api/v1/system/health"]

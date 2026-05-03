@@ -430,6 +430,15 @@ func (h *Handler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Re
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
 		return
 	}
+	// RFC 8707 §2.2: when resource is included on the token request,
+	// it must match what was on the authorization request. Some clients
+	// re-send it; others omit it. Empty on token is fine — we already
+	// have the canonical resource from /authorize.
+	if reqResource := r.PostFormValue("resource"); reqResource != "" && reqResource != row.Resource {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_target",
+			"resource parameter does not match the authorization request")
+		return
+	}
 
 	at, rt, expiresIn, err := h.mintTokenPair(client.ClientID, row.UserID, row.Scope, row.Resource)
 	if err != nil {

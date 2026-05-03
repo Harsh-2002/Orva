@@ -61,7 +61,7 @@ func TestOAuthEndToEnd(t *testing.T) {
 		"&state=xyz" +
 		"&code_challenge=" + challenge +
 		"&code_challenge_method=S256" +
-		"&resource=" + url.QueryEscape("https://example.com/mcp")
+		"&resource=" + url.QueryEscape("http://example.com/mcp")
 	req = httptest.NewRequest("GET", authURL, nil)
 	req.AddCookie(cookie)
 	w = httptest.NewRecorder()
@@ -88,7 +88,7 @@ func TestOAuthEndToEnd(t *testing.T) {
 	form.Set("code_challenge", challenge)
 	form.Set("code_challenge_method", "S256")
 	form.Set("response_type", "code")
-	form.Set("resource", "https://example.com/mcp")
+	form.Set("resource", "http://example.com/mcp")
 	req = httptest.NewRequest("POST", "/oauth/authorize", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
@@ -249,6 +249,76 @@ func TestOAuthDiscoveryDocuments(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOAuthAudienceBinding(t *testing.T) {
+	tc := newTestServer(t)
+	cookie := onboardAndLogin(t, tc, "alice", "supersecret123")
+
+	// Register + walk through the flow with resource bound to a
+	// DIFFERENT host than the test server (httptest = "example.com").
+	regBody := `{
+        "client_name": "Test",
+        "redirect_uris": ["http://127.0.0.1:33445/cb"],
+        "token_endpoint_auth_method": "none"
+    }`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(regBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "203.0.113.30:1"
+	w := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	var dcr map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&dcr)
+	clientID, _ := dcr["client_id"].(string)
+
+	verifier := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklm123456789-_"
+	sum := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
+
+	form := url.Values{}
+	form.Set("decision", "allow")
+	form.Set("client_id", clientID)
+	form.Set("redirect_uri", "http://127.0.0.1:33445/cb")
+	form.Set("scope", "read invoke")
+	form.Set("code_challenge", challenge)
+	form.Set("code_challenge_method", "S256")
+	form.Set("response_type", "code")
+	// Resource claims a host the request is NOT actually hitting.
+	form.Set("resource", "https://other.example.com/mcp")
+	req = httptest.NewRequest("POST", "/oauth/authorize", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	loc, _ := url.Parse(w.Header().Get("Location"))
+	code := loc.Query().Get("code")
+
+	tokForm := url.Values{}
+	tokForm.Set("grant_type", "authorization_code")
+	tokForm.Set("code", code)
+	tokForm.Set("client_id", clientID)
+	tokForm.Set("redirect_uri", "http://127.0.0.1:33445/cb")
+	tokForm.Set("code_verifier", verifier)
+	req = httptest.NewRequest("POST", "/oauth/token", strings.NewReader(tokForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	var tok map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&tok)
+	access, _ := tok["access_token"].(string)
+
+	// Token bound to other.example.com but used against example.com
+	// (the httptest default host) → MUST 401.
+	mcpReq := httptest.NewRequest("POST", "/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	mcpReq.Header.Set("Authorization", "Bearer "+access)
+	mcpReq.Header.Set("Content-Type", "application/json")
+	mcpReq.Header.Set("Accept", "application/json, text/event-stream")
+	w = httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, mcpReq)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("audience-mismatched token accepted: status=%d", w.Code)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -41,7 +42,8 @@ func extractToken(r *http.Request) string {
 // uniform regardless of which credential the caller presented.
 //
 // Returns nil + false on any failure: missing token, unknown token in
-// both stores, expired key, revoked OAuth token, transient DB error.
+// both stores, expired key, revoked OAuth token, audience mismatch
+// for OAuth tokens, transient DB error.
 func authenticateRequest(db *database.Database, r *http.Request) (*database.APIKey, bool) {
 	tok := extractToken(r)
 	if tok == "" || db == nil {
@@ -66,7 +68,7 @@ func authenticateRequest(db *database.Database, r *http.Request) (*database.APIK
 
 	// API-key miss: try the OAuth access-token store. Browser-based
 	// connectors (claude.ai web, ChatGPT) reach us through this path.
-	return resolveOAuthAccessToken(db, tok)
+	return resolveOAuthAccessToken(db, tok, r)
 }
 
 // resolveOAuthAccessToken looks the bearer up as an OAuth access token
@@ -75,12 +77,21 @@ func authenticateRequest(db *database.Database, r *http.Request) (*database.APIK
 // flavor matched. ID/Name come from the OAuth client — that's what an
 // operator wants to see in the audit log ("ChatGPT (auto-registered)"
 // did this), not an opaque token storage ID.
-func resolveOAuthAccessToken(db *database.Database, plaintext string) (*database.APIKey, bool) {
+//
+// Audience-bound: if the token row carries a `resource` (RFC 8707),
+// it must match the URL the caller is hitting. Otherwise a token
+// minted for orva-A.example.com/mcp could be replayed against
+// orva-B.example.com/mcp. Tokens with no resource (older/CLI-style)
+// skip this check.
+func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Request) (*database.APIKey, bool) {
 	row, err := db.GetOAuthAccessTokenByAccessHash(oauth.HashToken(plaintext))
 	if err != nil || row == nil {
 		return nil, false
 	}
 	if row.IsExpired(time.Now()) {
+		return nil, false
+	}
+	if row.Resource != "" && !audienceMatches(row.Resource, r) {
 		return nil, false
 	}
 
@@ -101,6 +112,37 @@ func resolveOAuthAccessToken(db *database.Database, plaintext string) (*database
 		KeyHash:     row.AccessTokenHash,
 		Permissions: string(permsJSON),
 	}, true
+}
+
+// audienceMatches enforces RFC 8707 audience binding. The token's
+// `resource` is the canonical URL the client passed at /authorize;
+// the inbound request is what they're now calling. We compare scheme
+// + host + path-prefix so a token minted for `https://x.example/mcp`
+// matches both `/mcp` and `/mcp/anything`, but is rejected against a
+// different host.
+func audienceMatches(tokenResource string, r *http.Request) bool {
+	tu, err := url.Parse(tokenResource)
+	if err != nil {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	if !strings.EqualFold(tu.Scheme, scheme) {
+		return false
+	}
+	if !strings.EqualFold(tu.Host, r.Host) {
+		return false
+	}
+	// Path prefix match — token bound to `/mcp` covers `/mcp/`,
+	// `/mcp/whatever`, etc.
+	reqPath := r.URL.Path
+	tokPath := tu.Path
+	if tokPath == "" || tokPath == "/" {
+		return true
+	}
+	return reqPath == tokPath || strings.HasPrefix(reqPath, tokPath+"/")
 }
 
 // resolvePermissions runs authenticateRequest and returns a parsed
@@ -130,12 +172,14 @@ func resolvePermissions(db *database.Database, r *http.Request) permSet {
 // found" body and break JSON parsing).
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	if status == http.StatusUnauthorized {
-		// RFC 9728: resource_metadata is a URL the client fetches to
-		// learn how to authenticate. The PRM doc itself lists no
-		// OAuth servers + bearer_methods_supported=["header"], which
-		// signals "send a static bearer token, no OAuth flow needed".
+		// RFC 9728 + MCP spec parameter is `resource_metadata`
+		// (NOT `_uri` — both ChatGPT and claude.ai look for the spec
+		// name and ignore the `_uri` variant). The PRM doc this
+		// points at lists our authorization server, so the client
+		// follows the cascade: 401 → fetch PRM → fetch AS metadata
+		// → DCR → /authorize → /token → retry with Bearer.
 		w.Header().Set("WWW-Authenticate",
-			`Bearer realm="orva", resource_metadata_uri="/.well-known/oauth-protected-resource"`)
+			`Bearer realm="orva", resource_metadata="/.well-known/oauth-protected-resource"`)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
