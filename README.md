@@ -174,6 +174,24 @@ The SDK requires `network_mode=egress` on the function (the default
 `none` mode has no network namespace at all). If absent the SDK throws
 `OrvaUnavailableError` with a clear hint.
 
+## Configuration (environment variables)
+
+Orva reads its configuration from environment variables at startup. All vars are optional — sensible defaults ship out of the box. Set them on the container (`environment:` block in `docker-compose.yml`) or as systemd `Environment=` lines.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ORVA_DATA_DIR` | `/var/lib/orva` (Docker) · `~/.orva` (bare-metal) | Root directory for `orva.db`, function code, rootfs, secrets. Database path becomes `<dir>/orva.db`; sandbox rootfs is mounted from `<dir>/rootfs`. |
+| `ORVA_PORT` | `8443` | TCP port the HTTP server listens on. Bind address is always `0.0.0.0`. |
+| `ORVA_WRITE_TIMEOUT_SEC` | `60` | HTTP write timeout. Keep ≥ your function `timeout_ms` plus headroom — set to `90`+ if you allow 30 s functions. |
+| `ORVA_DEFAULT_TIMEOUT_MS` | `30000` | Default execution timeout for new functions when none is set on the function record. |
+| `ORVA_DEFAULT_MEMORY_MB` | `64` | Default memory ceiling (MB) for new functions when none is set on the function record. |
+| `ORVA_LOG_LEVEL` | `info` | Slog level: `debug`, `info`, `warn`, `error`. |
+| `ORVA_LOG_RETENTION_DAYS` | `7` | How many days of execution logs / activity rows the sweeper keeps before pruning. |
+| `ORVA_SECURE_COOKIES` | _unset_ (false) | Set to `true` or `1` when fronting Orva with HTTPS (Caddy / Traefik / nginx) so the session cookie carries the `Secure` flag. **Do not enable for plain HTTP** — browsers will refuse to send the cookie and you'll be logged out instantly. |
+| `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Long-lived single-operator instances often want `30`. |
+
+At startup the server logs which of these were actually picked up under the key `active_env_vars` — useful for confirming a change took effect.
+
 ## Layout
 
 ```
