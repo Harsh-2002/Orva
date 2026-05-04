@@ -99,6 +99,7 @@ func registerJobTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "enqueue_job",
+				Title:        "Enqueue Job",
 				Description: "Enqueue a background job. Returns immediately with the job id; the scheduler will dispatch the function within ~5s (or at scheduled_at if supplied). Failed runs retry with exponential backoff up to max_attempts.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
 			},
@@ -140,6 +141,7 @@ func registerJobTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_jobs",
+				Title:        "List Jobs",
 				Description: "List background jobs, optionally filtered by status or function. Useful for inspecting the queue, surfacing failures, or auditing recent activity.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -169,6 +171,7 @@ func registerJobTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_job",
+				Title:        "Get Job",
 				Description: "Fetch a single job by id. Includes the original payload, full retry history, and the most recent error.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -189,6 +192,7 @@ func registerJobTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "retry_job",
+				Title:        "Retry Job",
 				Description: "Reset a terminal job (status=failed) back to pending so the scheduler picks it up on the next tick. attempts is reset to 0.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -208,6 +212,7 @@ func registerJobTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_job",
+				Title:        "Delete Job",
 				Description: "Remove a job row entirely. Pass confirm=true. Use this to clear stuck or duplicate enqueues; for a normal failed job prefer retry_job to keep the audit trail.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},

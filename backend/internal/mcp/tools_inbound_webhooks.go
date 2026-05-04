@@ -82,6 +82,7 @@ func registerInboundWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_inbound_webhooks",
+				Title:        "List Inbound Webhooks",
 				Description: "List inbound webhook triggers configured for a function. Each row exposes its trigger URL (/webhook/<id>) and signature format. Plaintext secrets are NEVER returned — use create_inbound_webhook to mint a new one if you've lost it.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -108,6 +109,7 @@ func registerInboundWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "create_inbound_webhook",
+				Title:        "Create Inbound Webhook",
 				Description: "Create a new inbound webhook trigger for a function. Returns the trigger URL AND the plaintext HMAC secret — the secret is shown ONLY once; capture it now and configure your upstream service (GitHub, Stripe, Slack, your own backend) to sign request bodies with it.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
 			},
@@ -157,6 +159,7 @@ func registerInboundWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_inbound_webhook",
+				Title:        "Delete Inbound Webhook",
 				Description: "Remove an inbound webhook trigger. Pass confirm=true. The trigger URL stops accepting calls immediately; previously-signed requests will return 404.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},

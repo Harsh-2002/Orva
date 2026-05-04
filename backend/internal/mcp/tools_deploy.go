@@ -137,6 +137,7 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_deployment",
+				Title:        "Get Deployment",
 				Description: "Fetch a single deployment by id. Returns status (queued/building/succeeded/failed), phase, code_hash, duration, and any error message. Use this to poll a deployment that's in flight.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -154,6 +155,7 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_deployment_logs",
+				Title:        "Get Deployment Logs",
 				Description: "Read the build log for a deployment. Each line has a monotonically-increasing seq — pass from=<last_seq> to tail incrementally. Empty list = no new lines. Use this for diagnosing build failures.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -182,6 +184,7 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_function_deployments",
+				Title:        "List Function Deployments",
 				Description: "List a function's deployment history (newest first). Each entry has the deployment id, code_hash, status, and timestamps — use it to find a target for rollback_function.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -211,6 +214,7 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name: "deploy_function_inline",
+				Title: "Deploy Function Inline",
 				Description: "Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but the function's network_mode is 'none' (the SDK call would fail at runtime).",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrFalse(),
@@ -227,6 +231,7 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "wait_deployment",
+				Title:        "Wait Deployment",
 				Description: "Block until a deployment reaches a terminal state (succeeded or failed) or the timeout fires. Useful after deploy_function_inline with wait=false. Default timeout 120 s, max 600 s.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -247,6 +252,7 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "rollback_function",
+				Title:        "Rollback Function",
 				Description: "Roll a function back to a prior succeeded deployment. Pass deployment_id (preferred — restores the env_vars + spawn config snapshot from that deploy) or code_hash. Pass confirm=true. Secrets are NOT versioned and remain at current values.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrTrue(),

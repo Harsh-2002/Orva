@@ -42,6 +42,7 @@ func registerSystemTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "system_health",
+				Title:        "System Health",
 				Description: "Health check for the Orva instance. Returns version, uptime, sandbox counters, and host resources. Use this to confirm an Orva instance is reachable before doing anything else.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -68,6 +69,7 @@ func registerSystemTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "system_metrics",
+				Title:        "System Metrics",
 				Description: "Return a snapshot of Orva's invocation/build/latency counters and per-function pool stats. Useful for an agent that wants to see how loaded the platform is or which functions are hot.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -82,6 +84,7 @@ func registerSystemTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "system_storage",
+				Title:        "System Storage",
 				Description: "Return on-disk sizes for orva.db, the WAL sidecar, and the functions/ tree. Useful before deciding to run system_vacuum — db_free_pages × db_page_size is the upper bound on reclaimable bytes.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -96,6 +99,7 @@ func registerSystemTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "system_vacuum",
+				Title:        "System Vacuum",
 				Description: "Run PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM on orva.db. DESTRUCTIVE: holds an exclusive lock and rewrites the database; every other writer blocks until it returns. Pass confirm=true to actually run; without confirm the tool returns the would-be reclaimable bytes without touching the DB.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
@@ -118,6 +122,7 @@ func registerSystemTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_runtimes",
+				Title:        "List Runtimes",
 				Description: "List the language runtimes Orva supports (Node.js, Python — specific minor versions). Each entry includes its id (use as the `runtime` field on create_function), display name, default entrypoint filename, and accepted file extensions.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},

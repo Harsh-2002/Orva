@@ -70,6 +70,7 @@ func registerKeyTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_api_keys",
+				Title:        "List API Keys",
 				Description: "List all API keys with their metadata (id, prefix, name, permissions, last-used, expiry). Plaintext key values are NEVER returned — they are SHA256-hashed at rest, and the only opportunity to see one is in the response of create_api_key.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -91,6 +92,7 @@ func registerKeyTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "create_api_key",
+				Title:        "Create API Key",
 				Description: "Mint a new API key. The plaintext value is returned ONLY in this response; the server keeps a SHA256 hash and forgets the plaintext. `permissions` and `expires_in_days` are REQUIRED — least-privilege scope and finite lifetime are the cheapest defenses against a leaked key. Marked destructive because issuing a key with admin permissions is high-blast-radius — confirm with the user what permissions to grant and how long it should live before calling.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
@@ -150,6 +152,7 @@ func registerKeyTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_api_key",
+				Title:        "Delete API Key",
 				Description: "Revoke an API key by id. Pass confirm=true. Active sessions using that key fail their next request with 401.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},

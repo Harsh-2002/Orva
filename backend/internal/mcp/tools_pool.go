@@ -42,6 +42,7 @@ func registerPoolTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_pool_config",
+				Title:        "Get Pool Config",
 				Description: "Get the autoscaler pool config for a function (min_warm, max_warm, idle_ttl, target_concurrency, scale_to_zero). Returns nulls/defaults if no override is configured.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -67,6 +68,7 @@ func registerPoolTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "set_pool_config",
+				Title:        "Set Pool Config",
 				Description: "Tune the autoscaler for a function. Any field omitted retains its current value. Changes apply to new sandbox spawns; existing warm workers keep their behavior until recycled.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},

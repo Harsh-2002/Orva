@@ -109,6 +109,7 @@ func registerCronTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_cron_schedules",
+				Title:        "List Cron Schedules",
 				Description: "List cron schedules. Pass function_id to filter by function (id or name); omit to list every schedule. Times are RFC3339; last_status is 'ok' / 'failed' / empty.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -144,6 +145,7 @@ func registerCronTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "create_cron_schedule",
+				Title:        "Create Cron Schedule",
 				Description: "Schedule a function to fire on a cron expression. Returns the new schedule with next_run_at filled in. The schedule is stored centrally; the orvad scheduler picks it up on its next 30s tick.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
 			},
@@ -192,6 +194,7 @@ func registerCronTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "update_cron_schedule",
+				Title:        "Update Cron Schedule",
 				Description: "Edit an existing cron schedule. Any of cron_expr / enabled / payload may be supplied; omitted fields keep their previous values. next_run_at is recomputed when the expression changes.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -239,7 +242,8 @@ func registerCronTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_cron_schedule",
-				Description: "Remove a cron schedule. Pass confirm=true. The function itself is unchanged.",
+				Title:       "Delete Cron Schedule",
+				Description: "Permanently remove a cron schedule by id; the targeted function itself stays untouched and remains invokable. Pass confirm=true to acknowledge the removal. If the operator wants to pause the schedule temporarily rather than delete it, prefer update_cron_schedule with enabled=false — that preserves the cron expression and payload for later resume.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
 			func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteCronInput) (*mcpsdk.CallToolResult, CronOpOutput, error) {

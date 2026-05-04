@@ -43,6 +43,7 @@ func registerRouteTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_routes",
+				Title:        "List Routes",
 				Description: "List all custom routes (operator-defined URL → function mappings). Each entry has the path, target function_id, allowed methods, and creation time.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -66,6 +67,7 @@ func registerRouteTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "set_route",
+				Title:        "Set Route",
 				Description: "Create or update a custom route. Use exact paths (/webhooks/stripe) for fixed URLs, or prefix paths (/shortener/*) when the function should see sub-paths. Reserved prefixes (/api/, /auth/, /web/, /_orva/) are rejected.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -102,6 +104,7 @@ func registerRouteTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_route",
+				Title:        "Delete Route",
 				Description: "Remove a custom route by path. Pass confirm=true. Does not affect the function the route pointed at.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},

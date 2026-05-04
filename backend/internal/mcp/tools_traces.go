@@ -86,6 +86,7 @@ func registerTraceTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name: "get_trace",
+				Title: "Get Trace",
 				Description: "Return the full causal tree for a trace. Each span is one execution row; spans are ordered by started_at ascending so the root is first. Use this after list_traces or after spotting a slow request.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -142,6 +143,7 @@ func registerTraceTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name: "list_traces",
+				Title: "List Traces",
 				Description: "List recent root spans (one entry per trace). Filter by function, status, time range, or outlier flag. Pair with get_trace to drill into a specific causal chain.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -199,6 +201,7 @@ func registerTraceTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name: "get_function_baseline",
+				Title: "Get Function Baseline",
 				Description: "Return the rolling P95/P99/mean latency baseline for a function plus the current sample count. baseline drives the outlier flag on each execution.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},

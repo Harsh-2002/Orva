@@ -128,6 +128,7 @@ func registerFixtureTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_fixtures",
+				Title:        "List Fixtures",
 				Description: "List saved request fixtures for one function. Fixtures are reusable Postman-style presets (method, path, headers, body) used to invoke the function from the editor's Test pane or via test_function_with_fixture.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -153,6 +154,7 @@ func registerFixtureTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "save_fixture",
+				Title:        "Save Fixture",
 				Description: "Create or update a saved request fixture for a function. Idempotent on (function_id, name) — re-calling with the same name overwrites method/path/headers/body. Use list_fixtures to see what's already saved before creating dupes.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -186,6 +188,7 @@ func registerFixtureTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_fixture",
+				Title:        "Delete Fixture",
 				Description: "Remove a saved fixture by (function_id, name). Idempotent — returns ok even if the fixture didn't exist.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},

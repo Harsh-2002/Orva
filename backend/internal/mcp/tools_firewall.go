@@ -66,6 +66,7 @@ func registerFirewallTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_firewall_rules",
+				Title:        "List Firewall Rules",
 				Description: "List all egress firewall rules — both built-in defaults and operator-added customs. Each rule is a CIDR, hostname, or wildcard pattern; enabled rules block matching outbound traffic from sandboxes with network_mode=egress.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -87,6 +88,7 @@ func registerFirewallTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "add_firewall_rule",
+				Title:        "Add Firewall Rule",
 				Description: "Add a custom egress firewall rule. Value can be a CIDR (10.0.0.0/8), hostname (example.com), or wildcard (*.example.com) — type is auto-detected. Takes effect immediately for new sandbox spawns.",
 				Annotations: &mcpsdk.ToolAnnotations{OpenWorldHint: ptrFalse()},
 			},
@@ -129,6 +131,7 @@ func registerFirewallTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_firewall_rule",
+				Title:        "Delete Firewall Rule",
 				Description: "Delete a custom firewall rule by id. Built-in (default/suggested) rules can't be deleted — disable them via add_firewall_rule's enabled flag instead. Pass confirm=true.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
@@ -151,6 +154,7 @@ func registerFirewallTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_dns_config",
+				Title:        "Get DNS Config",
 				Description: "Get the operator-managed DNS configuration: upstream resolver IPs, optional search domain, and host→IP overrides. Sandboxes with network_mode=egress see this as their /etc/resolv.conf and /etc/hosts.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -172,6 +176,7 @@ func registerFirewallTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "set_dns_config",
+				Title:        "Set DNS Config",
 				Description: "Update DNS settings. Servers must be literal IPs (not hostnames). Records (max 64) override DNS for specific hostnames. Idempotent — pass the desired full state.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},

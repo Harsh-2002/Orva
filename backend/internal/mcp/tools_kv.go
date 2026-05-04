@@ -153,6 +153,7 @@ func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "kv_get",
+				Title:        "KV Get",
 				Description: "Read a value from a function's per-namespace KV store. Returns found=false if the key is missing or has expired (TTL elapsed).",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -182,6 +183,7 @@ func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "kv_put",
+				Title:        "KV Put",
 				Description: "Write a value to a function's KV store. value can be any JSON-serializable type; it's stored as JSON and returned by kv_get with the same shape. Optional ttl_seconds expires the key automatically.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -210,6 +212,7 @@ func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "kv_delete",
+				Title:        "KV Delete",
 				Description: "Remove a single key from a function's KV store. Idempotent — returns ok even if the key never existed.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
@@ -230,6 +233,7 @@ func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "kv_list",
+				Title:        "KV List",
 				Description: "List a function's KV keys, optionally filtered by prefix. Useful for inspecting what state a function has accumulated. Expired keys are excluded.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},

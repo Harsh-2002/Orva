@@ -223,6 +223,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_functions",
+				Title:        "List Functions",
 				Description: "List all functions on this Orva instance. Each result includes invoke_url (fully-qualified canonical URL — call this directly, do NOT build it from parts) and routes (list of custom-route URLs, if any). Use id (a UUID) to refer to a function in other MCP tools, or name for human-friendly references. Supports pagination (limit/offset) and filtering by runtime, status, or substring search.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -259,6 +260,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_function",
+				Title:        "Get Function",
 				Description: "Fetch one function by id or name. Returns the full record including invoke_url (use verbatim to call the function over HTTP — never concatenate /fn/ + id manually), any custom routes, resource limits, env_vars, network_mode, auth_mode, and rate_limit_per_min.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -276,6 +278,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_function_source",
+				Title:        "Get Function Source",
 				Description: "Read the deployed source code of a function (handler.py / handler.js plus requirements.txt or package.json if any). Useful for an agent that wants to inspect or modify what's running.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -294,6 +297,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name: "create_function",
+				Title: "Create Function",
 				Description: "Create a new function shell (no code yet). The function starts in `created` status — call deploy_function_inline next to ship code and have it activate. " +
 					"Most fields are REQUIRED so the function record carries explicit intent rather than silent defaults. Specifically you MUST provide: " +
 					"`name` (URL-safe identifier), " +
@@ -326,6 +330,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "update_function",
+				Title:        "Update Function",
 				Description: "Patch a function's settings. Any field omitted is left unchanged. Flipping memory/cpus/env_vars/network_mode drains the warm pool so the next invocation respawns with the new config.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					IdempotentHint: true,
@@ -346,6 +351,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_function",
+				Title:        "Delete Function",
 				Description: "Permanently delete a function and all its deployments, secrets, routes, and execution history. Pass confirm=true. Irreversible — only do this when the user has explicitly asked.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrTrue(),

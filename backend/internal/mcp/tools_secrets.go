@@ -49,6 +49,7 @@ func registerSecretTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_secrets",
+				Title:        "List Secrets",
 				Description: "List the NAMES of secrets configured for a function. Values are write-only — they are encrypted at rest and decrypted only into the sandbox process at invocation time. There is no API path, MCP tool, or UI screen that can read a stored secret value.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -73,6 +74,7 @@ func registerSecretTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "set_secret",
+				Title:        "Set Secret",
 				Description: "Store or update a secret for a function. Value is encrypted at rest (AES-256-GCM). Idempotent — re-setting the same key overwrites the prior value. After the call returns the value is unreadable through any API. The function's warm pool is drained so the next invoke spawns with the new value.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -100,6 +102,7 @@ func registerSecretTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_secret",
+				Title:        "Delete Secret",
 				Description: "Delete a secret from a function by name. Pass confirm=true. The function's warm pool is drained so the next invoke loses access immediately.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},

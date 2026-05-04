@@ -46,6 +46,7 @@ func registerDocsTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name: "get_orva_docs",
+				Title: "Get Orva Docs",
 				Description: "Return the complete Orva documentation as a single Markdown string — the same content the dashboard's 'Copy as Markdown' icon serves. Covers handler contract, deploy/invoke, configuration, the in-sandbox SDK (KV / invoke / jobs), schedules, system-event webhooks, MCP setup, the AI codegen system prompt, tracing, error taxonomy, and the orva CLI. Pass `origin` (e.g. https://orva.example.com) to substitute the {{ORIGIN}} placeholders with the caller's live Orva URL; defaults to a generic placeholder so the response is still pasteable. Use this when an agent needs the full Orva reference as conversation context.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					ReadOnlyHint:  true,

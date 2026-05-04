@@ -22,12 +22,24 @@ var osStat = os.Stat
 
 // ─── invoke_function ───────────────────────────────────────────────
 
+// InvokeBody is the typed envelope for an HTTP request body. Replaces the
+// older `Body any` field — `any` compiled to JSON-Schema `true` (allow
+// anything), which OpenAI strict-mode and Gemini's tool-calling subset
+// reject and which lowers tool-selection quality on every model. With
+// the discriminator the agent picks an explicit `type` and the matching
+// payload field; the platform validates and dispatches.
+type InvokeBody struct {
+	Type   string         `json:"type" jsonschema:"REQUIRED — one of 'json' (Body is a structured object; sent as application/json), 'string' (Body is raw text; sent verbatim), or 'empty' (no body, e.g. GET / DELETE / HEAD)."`
+	JSON   map[string]any `json:"json,omitempty" jsonschema:"used when type='json'. The object is JSON-serialised and sent as the request body. Ignored for other types."`
+	String string         `json:"string,omitempty" jsonschema:"used when type='string'. Sent verbatim as the request body — useful for text/plain, pre-serialised payloads, or when the function expects a non-JSON content-type."`
+}
+
 type InvokeFunctionInput struct {
 	FunctionID string            `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	Method     string            `json:"method" jsonschema:"REQUIRED — HTTP method (uppercase). GET for read endpoints, POST for write/create, PUT/PATCH for updates, DELETE for removals. Set explicitly because a silent default would invoke a GET-shaped function with POST and trigger 404/405 the agent then misdiagnoses."`
 	Path       string            `json:"path,omitempty" jsonschema:"sub-path passed to the handler as event.path, default /"`
 	Headers    map[string]string `json:"headers,omitempty" jsonschema:"request headers (lowercased on the way in)"`
-	Body       any               `json:"body,omitempty" jsonschema:"request body — pass an object to send JSON, or a string for raw"`
+	Body       *InvokeBody       `json:"body,omitempty" jsonschema:"typed request-body envelope. Omit entirely for GET/DELETE/HEAD; otherwise pass {type:'json',json:{...}} or {type:'string',string:'...'} or {type:'empty'}."`
 	TimeoutMS  int64             `json:"timeout_ms,omitempty" jsonschema:"override the function's configured timeout for this one call"`
 }
 
@@ -167,6 +179,7 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name: "invoke_function",
+				Title: "Invoke Function",
 				Description: "Call a function and return its response. `method` is REQUIRED — pick GET for read endpoints, POST for create/write, PUT/PATCH for updates, DELETE for removals (no silent default; an invocation that uses the wrong verb usually returns 404/405 which is hard to debug). Pass `body` as either an object (sent as JSON) or a string. Returns status_code, headers, body, plus execution_id you can pass to get_execution_logs if you want stderr. Bypasses the function's auth_mode (the agent's MCP bearer is already trusted). When the handler crashes with a network-shaped error (ENETUNREACH / fetch failed / OrvaUnavailableError) on a function with network_mode=none, the response includes an `orva_hint` telling you exactly what to fix.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrFalse(),
@@ -183,6 +196,7 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "test_function_with_fixture",
+				Title:        "Test Function With Fixture",
 				Description: "Invoke a function using a previously-saved fixture as the request envelope. Applies optional shallow-merge overrides (override wins on key collision). Returns the same shape as invoke_function plus a `fixture` block listing which overrides were applied. Use list_fixtures to see what's saved.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrFalse(),
@@ -199,6 +213,7 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_executions",
+				Title:        "List Executions",
 				Description: "List recent invocations across all functions or filtered to one. Useful for an agent debugging why a function is failing — combine with get_execution_logs to see stderr.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -237,6 +252,7 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_execution",
+				Title:        "Get Execution",
 				Description: "Fetch one execution by id. Returns status, status_code, duration_ms, cold_start, and any error_message.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -254,6 +270,7 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_execution_logs",
+				Title:        "Get Execution Logs",
 				Description: "Read the captured stderr from one execution. Stdout was already returned as the response body to whoever invoked. Returns empty string if the function logged nothing to stderr.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -271,6 +288,7 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_execution",
+				Title:        "Delete Execution",
 				Description: "Permanently delete one execution row and its captured stderr. Pass confirm=true.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
@@ -290,6 +308,7 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "bulk_delete_executions",
+				Title:        "Bulk Delete Executions",
 				Description: "Delete multiple execution rows. Max 1000 ids per call. Pass confirm=true. Returns counts of deleted vs failed.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
@@ -369,19 +388,39 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		path = "/"
 	}
 
-	// Coerce body to a string. Accept any JSON-serialisable.
-	var bodyStr string
-	switch b := in.Body.(type) {
-	case nil:
-		bodyStr = ""
-	case string:
-		bodyStr = b
-	default:
-		buf, err := json.Marshal(b)
-		if err != nil {
-			return nil, InvokeFunctionOutput{}, fmt.Errorf("body marshal: %w", err)
+	// Coerce the typed Body envelope into the wire string. Handles four
+	// shapes: nil (no envelope) → empty body; type='empty' → empty;
+	// type='json' → marshal Body.JSON; type='string' → Body.String. The
+	// auto-Content-Type below picks JSON for the json branch and leaves
+	// the caller's Headers untouched for the string branch.
+	var (
+		bodyStr      string
+		autoCT       string
+	)
+	if in.Body != nil {
+		switch in.Body.Type {
+		case "", "empty":
+			bodyStr = ""
+		case "json":
+			if in.Body.JSON == nil {
+				// Empty json envelope is fine — caller wants `{}`.
+				bodyStr = "{}"
+			} else {
+				buf, err := json.Marshal(in.Body.JSON)
+				if err != nil {
+					return nil, InvokeFunctionOutput{}, fmt.Errorf("body marshal: %w", err)
+				}
+				bodyStr = string(buf)
+			}
+			autoCT = "application/json"
+		case "string":
+			bodyStr = in.Body.String
+		default:
+			return nil, InvokeFunctionOutput{}, fmt.Errorf(
+				"invalid body.type: %q (allowed: 'json', 'string', 'empty')",
+				in.Body.Type,
+			)
 		}
-		bodyStr = string(buf)
 	}
 
 	// Construct the synthetic HTTP request the proxy expects. With
@@ -399,9 +438,11 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	for k, v := range in.Headers {
 		req.Header.Set(k, v)
 	}
-	if req.Header.Get("Content-Type") == "" && bodyStr != "" {
-		// best effort: assume JSON since most agent payloads are JSON
-		req.Header.Set("Content-Type", "application/json")
+	if req.Header.Get("Content-Type") == "" && bodyStr != "" && autoCT != "" {
+		// Auto-set Content-Type only for type='json'. type='string' leaves
+		// the caller responsible (their Headers entry wins, or the
+		// function's adapter falls back to text/plain).
+		req.Header.Set("Content-Type", autoCT)
 	}
 	rec := httptest.NewRecorder()
 
@@ -614,12 +655,19 @@ func testFunctionWithFixture(ctx context.Context, deps Deps, in TestFunctionWith
 		applied = append(applied, "body")
 	}
 
+	// Fixtures store the wire string verbatim, so wrap it in a
+	// type='string' envelope. Empty body → omit the envelope so the
+	// dispatcher sees nil (matches GET / DELETE semantics).
+	var bodyEnv *InvokeBody
+	if body != "" {
+		bodyEnv = &InvokeBody{Type: "string", String: body}
+	}
 	invokeIn := InvokeFunctionInput{
 		FunctionID: fn.ID,
 		Method:     method,
 		Path:       path,
 		Headers:    headers,
-		Body:       body,
+		Body:       bodyEnv,
 		TimeoutMS:  in.TimeoutMS,
 	}
 	_, invokeOut, ferr := invokeFunction(ctx, deps, invokeIn)

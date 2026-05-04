@@ -151,6 +151,7 @@ func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_webhooks",
+				Title:        "List Webhooks",
 				Description: "List every operator-configured webhook subscription. The plaintext secret is never returned (only the preview); use create_webhook to mint a new one if you've lost it.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -172,6 +173,7 @@ func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "create_webhook",
+				Title:        "Create Webhook",
 				Description: "Create a new webhook subscription. Returns the subscription record AND the plaintext HMAC secret — the secret is shown ONLY once; capture it now and configure your receiver to verify X-Orva-Signature.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
 			},
@@ -212,6 +214,7 @@ func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "update_webhook",
+				Title:        "Update Webhook",
 				Description: "Edit an existing subscription. Any of name / url / events / enabled may be supplied; omitted fields keep their previous values. Secret cannot be rotated through this path — delete and re-create to rotate.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -251,6 +254,7 @@ func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "delete_webhook",
+				Title:        "Delete Webhook",
 				Description: "Remove a webhook subscription. Pass confirm=true. All in-flight deliveries are removed via FK cascade.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
@@ -273,6 +277,7 @@ func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "test_webhook",
+				Title:        "Test Webhook",
 				Description: "Queue a synthetic 'webhook.test' delivery against a subscription's URL so you can validate signature handling without waiting for a real event. Picked up on the next 5s scheduler tick.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
 			},
@@ -311,6 +316,7 @@ func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_webhook_deliveries",
+				Title:        "List Webhook Deliveries",
 				Description: "List recent deliveries for a webhook subscription. Useful for diagnosing stuck retries or confirming a fire happened.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
@@ -332,6 +338,7 @@ func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "retry_webhook_delivery",
+				Title:        "Retry Webhook Delivery",
 				Description: "Reset a terminal (failed) delivery back to pending so the scheduler will re-attempt it. attempts is reset to 0.",
 				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 			},
