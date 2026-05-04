@@ -2,40 +2,27 @@
   <div class="space-y-6">
     <!-- Page header — matches ApiKeys.vue / FunctionsList.vue:
          left-aligned title, right-aligned primary action. Subtitle
-         is terse: tells operators the *what*, the heads-up banner
-         below explains the *trust boundary*. -->
+         carries the full description including the trust boundary,
+         so the page reads as one coherent intro instead of a header
+         followed by a separate alert banner. -->
     <div class="flex items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Channels
         </h1>
-        <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+        <p class="text-xs text-foreground-muted mt-1 max-w-prose leading-relaxed">
           Bundle deployed functions and expose them as MCP tools to a
-          third-party agent. Each channel has its own bearer token.
+          third-party agent. Each channel has its own bearer token that
+          grants invoke-only access to its functions and nothing else
+          on Orva — but the bundled functions themselves remain as
+          powerful as you've configured them, including any in-sandbox
+          SDK calls they make.
         </p>
       </div>
       <Button @click="openCreate">
         <Plug class="w-4 h-4" />
         New channel
       </Button>
-    </div>
-
-    <!-- Heads-up banner. Visual structure mirrors the Settings card
-         but in amber to flag the trust boundary. The dashboard uses
-         this same shape for any "this is permanent / consequential"
-         hint (see ApiKeys's one-time secret reveal). -->
-    <div class="rounded-md border border-amber-700/30 bg-amber-950/15 px-4 py-3 text-xs text-amber-200/90 leading-relaxed flex items-start gap-2.5">
-      <AlertTriangle class="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
-      <div>
-        <div class="font-semibold text-amber-200 mb-0.5">Heads up — what a channel token can do</div>
-        <p>
-          Channel tokens grant invoke-only MCP access to the bundled
-          functions. The bundled functions remain as powerful as you've
-          configured them — including any in-sandbox SDK calls they
-          make. The channel boundary protects the MCP surface, not the
-          runtime blast radius.
-        </p>
-      </div>
     </div>
 
     <!-- One-time token reveal after Create / Rotate. Same amber-card
@@ -289,7 +276,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertTriangle, AlertCircle } from 'lucide-vue-next'
+import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import FunctionPickerModal from '@/components/channels/FunctionPickerModal.vue'
