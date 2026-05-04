@@ -659,6 +659,18 @@ Tool names are converted from dash-separated to snake_case (`stripe-charge`
 are rejected at create/update time. Channel tokens are accepted ONLY
 on `/mcp`; presenting one at any `/api/v1/*` endpoint returns 401.
 
+**Auth headers** — channel tokens accept either header form on `/mcp`,
+same as operator API keys:
+
+```
+Authorization: Bearer orva_chn_<token>     # spec-standard, recommended
+X-Orva-API-Key: orva_chn_<token>           # parity with the REST API
+```
+
+Use whichever your MCP client supports. Most (Claude Code, Claude
+Desktop, Cursor, ChatGPT custom connector, etc.) default to
+`Authorization: Bearer`.
+
 Manage channels from the dashboard.s **Channels** page or via REST:
 
 | Endpoint | Method | Purpose |

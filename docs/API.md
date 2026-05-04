@@ -259,6 +259,18 @@ surface. Token format: `orva_chn_<32 hex>`. Channel tokens are
 explicitly rejected at every `/api/v1/*` endpoint (401); they're
 MCP-only.
 
+Auth header at `/mcp` — channel tokens accept either form, same as
+operator API keys:
+
+```
+Authorization: Bearer orva_chn_<token>     # spec-standard, recommended
+X-Orva-API-Key: orva_chn_<token>           # parity with the REST API
+```
+
+The REST endpoints below (CRUD on `/api/v1/channels`) are operator-
+managed and require an **API key** or session cookie — channel tokens
+themselves cannot manage channels.
+
 ### `GET /api/v1/channels`
 List channels. Returns `{channels: [...]}` with name, description,
 prefix, function_count, last_used_at, expires_at, created_at.

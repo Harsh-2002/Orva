@@ -268,7 +268,20 @@ Function URLs:
     the human asked for the function by route path
     (e.g. "POST to /api/payments").
   - The "id" field is a UUIDv7 — pass it back to MCP tools verbatim.
-    There is no separate "short id" form anymore.`
+    There is no separate "short id" form anymore.
+
+Agent channels:
+  Operators can bundle a subset of deployed functions under a name
+  plus a static bearer token (orva_chn_<32 hex>) and hand that token
+  to a third-party agent. When that token is presented at /mcp, the
+  agent sees ONE invoke-only MCP tool per bundled function and
+  nothing else — no list_functions, no deploy, no system_*. This is
+  the right surface to expose curated function toolboxes to other
+  agentic workflows. The operator manages channels at
+  /web/channels in the dashboard or /api/v1/channels via REST. The
+  current MCP session you're connected to is full operator power
+  (you're on the API-key / OAuth path); channel-mode is what the
+  external agents you spin up will see.`
 
 // PRMHandler returns the RFC 9728 OAuth Protected Resource Metadata
 // document for /mcp. Mounted at /.well-known/oauth-protected-resource
