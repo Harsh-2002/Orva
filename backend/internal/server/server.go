@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -112,7 +113,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// detectHostIP reads /proc/net/route to find that gateway.
 	// Functions with network_mode=none have no network stack at all;
 	// the SDK surfaces OrvaUnavailableError for those.
-	apiBase := fmt.Sprintf("http://%s:%d", detectHostIP(), cfg.Server.Port)
+	apiBase := detectInternalAPIBase(cfg.Server.Port)
 	slog.Info("internal SDK base configured", "api_base", apiBase)
 
 	// Wire the warm pool manager. It owns the sandbox.Limiter as a
@@ -364,40 +365,132 @@ func printBootstrapKey(key, note string) {
 	fmt.Println("========================================")
 }
 
-// detectHostIP returns the IP a sandboxed worker should use to reach the
-// orva server. Reads /proc/net/route for the default-gateway entry; that
-// IP is what nsjail's nstun NAT exposes to sandboxes as the host. Falls
-// back to "127.0.0.1" if /proc isn't readable (rare; test environments).
-func detectHostIP() string {
-	const fallback = "127.0.0.1"
+// detectInternalAPIBase returns the URL a sandboxed worker should use
+// to reach the orva server. Has to work on every deployment shape we
+// support — Docker default-bridge, Docker user-defined network,
+// Docker `network_mode: host`, bare-metal systemd, `make run`. Each
+// shape has different "where am I, how do I reach orvad" answers, so
+// we don't try to guess from `/proc/net/route` alone — we PROBE.
+//
+// Resolution order:
+//
+//  1. Operator override via env var: `ORVA_INTERNAL_API_BASE`. When
+//     set, used verbatim. Operators behind exotic network setups
+//     (overlay networks, swarm, k8s) can pin this without us
+//     guessing wrong.
+//
+//  2. Probe a list of candidate IPs against orvad's own health
+//     endpoint at the configured port. First candidate that returns
+//     200 within a short timeout wins. Candidates, in order:
+//        - "127.0.0.1" — works on bare-metal AND
+//          `network_mode: host`. Cheapest probe.
+//        - every non-loopback non-link-local IPv4 on the host —
+//          inside Docker this enumerates bridge / user-defined
+//          network interfaces; bare-metal it's the host's NICs.
+//        - the default-route gateway from /proc/net/route — last
+//          resort for old-style `8443:8443` mappings where orvad
+//          and the host share a port.
+//
+//  3. Fallback: if every probe fails (orvad isn't listening yet,
+//     network stack confused), default to `127.0.0.1` so the SDK
+//     surfaces a clear "ECONNREFUSED" rather than hanging on a
+//     totally unreachable IP.
+//
+// The probe runs once at startup; the result is baked into the worker
+// env. No per-spawn overhead.
+func detectInternalAPIBase(port int) string {
+	if v := os.Getenv("ORVA_INTERNAL_API_BASE"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+
+	// Probe order matters because sandboxes (nsjail + pasta) have
+	// their OWN network namespace. From inside the sandbox:
+	//   - 127.0.0.1 is the sandbox's own loopback — does NOT cross
+	//     into orvad's namespace via pasta.
+	//   - Bridge / non-loopback IPs from orvad's namespace ARE
+	//     reachable through pasta's NAT.
+	// So even though 127.0.0.1 would succeed when probed from
+	// orvad's process (which we are), it would FAIL when the
+	// sandbox tries to use it. Probe non-loopback first; only fall
+	// back to loopback when nothing else exists (true bare-metal).
+	var candidates []string
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipnet.IP.To4()
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			candidates = append(candidates, ip.String())
+		}
+	}
+	if gw := defaultRouteGatewayIPv4(); gw != "" {
+		candidates = append(candidates, gw)
+	}
+	// Last-ditch loopback. Only useful in odd configs (nsjail+
+	// pasta with `--map-host-loopback`, or test environments where
+	// the worker shares the parent namespace).
+	candidates = append(candidates, "127.0.0.1")
+
+	client := &http.Client{Timeout: 300 * time.Millisecond}
+	for _, ip := range candidates {
+		base := fmt.Sprintf("http://%s:%d", ip, port)
+		resp, err := client.Get(base + "/api/v1/system/health")
+		if err != nil {
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return base
+		}
+	}
+	// Worst case: orvad isn't listening yet (we run this BEFORE the
+	// HTTP server starts on bare-metal). Default to the first
+	// non-loopback candidate if we have one — it's the most likely
+	// to actually work from inside a sandbox. If we have nothing,
+	// fall back to loopback and let the SDK surface a clear error
+	// at first use.
+	if len(candidates) > 1 {
+		return fmt.Sprintf("http://%s:%d", candidates[0], port)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
+// defaultRouteGatewayIPv4 reads /proc/net/route and returns the IPv4
+// gateway for the default route, or "" if it can't be determined.
+// Only useful as a fallback candidate — see detectInternalAPIBase
+// for the resolution order.
+func defaultRouteGatewayIPv4() string {
 	data, err := os.ReadFile("/proc/net/route")
 	if err != nil {
-		return fallback
+		return ""
 	}
 	for _, line := range strings.Split(string(data), "\n")[1:] {
 		fields := strings.Fields(line)
 		if len(fields) < 3 {
 			continue
 		}
-		// Destination 00000000 = default route. Gateway is little-endian hex.
-		if fields[1] == "00000000" {
-			gwHex := fields[2]
-			if len(gwHex) != 8 {
-				return fallback
-			}
-			// Decode 4 bytes from little-endian hex.
-			b := make([]byte, 4)
-			for i := 0; i < 4; i++ {
-				v, err := strconv.ParseUint(gwHex[i*2:i*2+2], 16, 8)
-				if err != nil {
-					return fallback
-				}
-				b[3-i] = byte(v)
-			}
-			return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
+		if fields[1] != "00000000" {
+			continue
 		}
+		gwHex := fields[2]
+		if len(gwHex) != 8 {
+			return ""
+		}
+		b := make([]byte, 4)
+		for i := 0; i < 4; i++ {
+			v, err := strconv.ParseUint(gwHex[i*2:i*2+2], 16, 8)
+			if err != nil {
+				return ""
+			}
+			b[3-i] = byte(v)
+		}
+		return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
 	}
-	return fallback
+	return ""
 }
 
 // generateInternalToken returns a fresh 32-byte random hex string used as

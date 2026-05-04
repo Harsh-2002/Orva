@@ -1378,21 +1378,11 @@ const loadRouteData = async () => {
         envVars.value = Object.entries(fn.env_vars).map(([key, value]) => ({ key, value }))
       }
 
-      // Fetch actual deployed source (not a template). If the function
-      // was created but never deployed, fall back to the default
-      // template — that's the right starting point for the operator
-      // to add their own code.
-      try {
-        const srcRes = await apiClient.get(`/functions/${fn.id}/source`)
-        if (srcRes.data.code) {
-          code.value = srcRes.data.code
-          dependencyText.value = srcRes.data.dependencies || ''
-        } else {
-          code.value = defaultCode[fn.runtime] || ''
-        }
-      } catch {
-        code.value = defaultCode[fn.runtime] || ''
-      }
+      // Fetch actual deployed source (not a template). Extracted into
+      // a helper so any state-change action (rollback, manual refresh,
+      // window-refocus) can re-pull without duplicating the fallback
+      // logic.
+      await reloadSource(fn)
 
       // Load existing secrets into the sidebar panel.
       await loadSecrets()
@@ -1417,6 +1407,57 @@ const loadRouteData = async () => {
 }
 
 watch(() => route.params.name, loadRouteData, { immediate: true })
+
+// reloadSource pulls the function's currently-deployed source from
+// `/api/v1/functions/<id>/source` and slams it into the editor buffer
+// + dependency text. If the function exists but hasn't been deployed
+// (or the source endpoint 404s), fall back to the runtime default
+// template so the buffer is never blank for an existing function.
+//
+// Used by:
+//   - Initial load (loadRouteData)
+//   - Rollback (so the editor reflects the rolled-back code without
+//     a hard browser refresh — the original bug was that rollback
+//     re-fetched metadata but not the source)
+//   - Window refocus (catches the "I deployed via CLI in another
+//     terminal, came back to the open browser tab" case)
+const reloadSource = async (fn) => {
+  if (!fn) return
+  try {
+    const srcRes = await apiClient.get(`/functions/${fn.id}/source`)
+    if (srcRes.data.code) {
+      code.value = srcRes.data.code
+      dependencyText.value = srcRes.data.dependencies || ''
+      return
+    }
+  } catch {
+    /* fall through to template */
+  }
+  code.value = defaultCode[fn.runtime] || ''
+  dependencyText.value = ''
+}
+
+// Window-refocus handler — operators commonly deploy / rollback / edit
+// configs via CLI or another browser tab, then click back to this
+// editor expecting it to reflect the latest state. Without this the
+// editor remains stale until a hard reload. Best-effort: any error
+// is swallowed so a transient network blip doesn't disrupt the
+// editing session.
+const onWindowFocus = async () => {
+  if (!fnId.value) return
+  try {
+    const listRes = await apiClient.get('/functions')
+    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
+    if (!fn) return
+    await reloadSource(fn)
+    await loadVersions(fn)
+  } catch {
+    /* ignore; user can hit Reload manually */
+  }
+}
+
+onMounted(() => window.addEventListener('focus', onWindowFocus))
+onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus))
 
 // applyPrefillFromQuery reads a base64-encoded JSON request envelope from
 // the `prefill` query param and populates the test pane. Used by the
@@ -2031,10 +2072,32 @@ const rollbackToVersion = async (v) => {
   rollingBack.value = true
   try {
     await rollbackFunction(fnId.value, { deployment_id: v.deployment_id })
-    // Re-pull function metadata + versions so the Active pill moves.
+    // Re-pull function metadata, source, AND versions so the Active
+    // pill moves AND the editor buffer reflects the rolled-back code.
+    // Without the reloadSource() call, CodeMirror keeps showing the
+    // pre-rollback content and the operator has to hard-refresh —
+    // that was the original bug report ("I rolled back, navigated
+    // back to the function, still saw the new code").
     const listRes = await apiClient.get('/functions')
     const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
     if (fn) {
+      // Re-hydrate the form too — rollback restores env_vars,
+      // memory, network_mode, etc. from the deployment snapshot.
+      form.value.runtime = fn.runtime
+      form.value.memory_mb = fn.memory_mb
+      form.value.cpus = fn.cpus
+      form.value.network_mode = fn.network_mode || 'none'
+      form.value.max_concurrency = fn.max_concurrency || 0
+      form.value.concurrency_policy = fn.concurrency_policy || 'queue'
+      form.value.auth_mode = fn.auth_mode || 'none'
+      form.value.rate_limit_per_min = fn.rate_limit_per_min || 0
+      form.value.description = fn.description || ''
+      if (fn.env_vars && Object.keys(fn.env_vars).length > 0) {
+        envVars.value = Object.entries(fn.env_vars).map(([key, value]) => ({ key, value }))
+      } else {
+        envVars.value = []
+      }
+      await reloadSource(fn)
       await loadVersions(fn)
     }
   } catch (e) {
