@@ -3,139 +3,312 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>Authorize {{.ClientName}} — Orva</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* Match the dashboard exactly — same tokens that frontend/src/style.css
+     publishes via Tailwind, so the consent screen reads as a first-class
+     Orva surface, not a bolt-on. */
   :root {
-    --bg: #0b0b0e;
-    --panel: #131318;
-    --panel-2: #1a1a21;
-    --border: #2a2a33;
-    --text: #e8e8ed;
-    --text-dim: #9aa0a6;
-    --accent: #7c5cff;
-    --accent-hover: #8e72ff;
-    --danger: #ff5d6c;
-    --danger-hover: #ff7a86;
+    --bg:               #12111C;
+    --surface:          #1A1929;
+    --surface-hover:    #252438;
+    --border:           #2D2B42;
+    --foreground:       #FFFFFF;
+    --foreground-muted: #A3A3B3;
+    --primary:          #553F83;
+    --primary-hover:    #684D9E;
+    --secondary-hover:  #3E3B5A;
+    --danger:           #ef4444;
+    --warning:          #eab308;
+    --success:          #22c55e;
   }
-  * { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0;
-    background: var(--bg); color: var(--text);
-    font-family: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--foreground);
+    font-family: "Inter", ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-feature-settings: "cv11", "ss01";
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
   }
   body {
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 2rem 1rem;
   }
-  .card {
-    width: 100%; max-width: 28rem;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.75rem 1.75rem 1.5rem;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+
+  /* ── Page chrome (matches Login.vue layout) ─────────────────────── */
+  .wrap {
+    width: 100%;
+    max-width: 28rem;
   }
-  .brand {
-    display: flex; align-items: center; gap: 0.5rem;
-    color: var(--text-dim);
-    font-size: 0.78rem; letter-spacing: 0.18em; text-transform: uppercase;
-    margin-bottom: 1.25rem;
+  .brand-row {
+    display: flex; align-items: center; justify-content: center; gap: 0.75rem;
+    margin-bottom: 1rem;
   }
   .brand-mark {
-    width: 14px; height: 14px; border-radius: 50%;
-    background: linear-gradient(135deg, #7c5cff 0%, #2dd4bf 100%);
+    width: 2.5rem; height: 2.5rem;
+    border-radius: 0.5rem;
+    background: var(--primary);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 0.85rem;
+    letter-spacing: -0.03em;
+  }
+  .brand-name {
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .brand-tag {
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--foreground-muted);
+    margin-bottom: 1.75rem;
+  }
+
+  /* ── The card itself (matches Settings card pattern) ────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 1.75rem;
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
   }
   h1 {
-    margin: 0 0 1rem; font-size: 1.25rem; font-weight: 600;
-    line-height: 1.35;
+    margin: 0 0 0.4rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
   }
-  .row {
-    display: flex; gap: 0.5rem; align-items: baseline;
-    padding: 0.5rem 0;
-    font-size: 0.92rem;
+  .lede {
+    color: var(--foreground-muted);
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin: 0 0 1.5rem;
   }
-  .row .label { color: var(--text-dim); min-width: 6rem; font-size: 0.85rem; }
-  .row .value { color: var(--text); word-break: break-word; }
-  .scopes {
-    background: var(--panel-2);
+
+  /* ── Application identity strip ─────────────────────────────────── */
+  .app-row {
+    display: flex; align-items: center; gap: 0.85rem;
+    background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
-    margin: 1rem 0 1.25rem;
+    border-radius: 0.5rem;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1.25rem;
   }
-  .scopes-title {
-    font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--text-dim); margin-bottom: 0.5rem;
+  .app-icon {
+    width: 2.25rem; height: 2.25rem;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 0.4rem;
+    background: var(--bg);
+    color: var(--foreground-muted);
   }
-  .scopes ul { margin: 0; padding-left: 1.1rem; }
-  .scopes li { margin: 0.25rem 0; line-height: 1.4; font-size: 0.92rem; }
+  .app-icon.chatgpt { color: #34D399; }    /* emerald-400 */
+  .app-icon.claude  { color: #FB923C; }    /* orange-400 */
+  .app-icon svg { width: 100%; height: 100%; }
+  .app-meta {
+    flex: 1; min-width: 0;
+  }
+  .app-name {
+    font-weight: 600; font-size: 0.95rem;
+    margin-bottom: 0.1rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .app-as {
+    font-size: 0.75rem; color: var(--foreground-muted);
+  }
+  .app-as code {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: var(--foreground);
+  }
+
+  /* ── Permission list ────────────────────────────────────────────── */
+  .scopes-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--foreground-muted);
+    font-weight: 500;
+    margin: 0 0 0.5rem 0.1rem;
+  }
+  .scopes {
+    list-style: none; padding: 0; margin: 0 0 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .scopes li {
+    display: flex; align-items: flex-start; gap: 0.65rem;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    border-bottom: 1px solid var(--border);
+  }
+  .scopes li:last-child { border-bottom: none; }
+  .scopes .check {
+    width: 1.05rem; height: 1.05rem; flex-shrink: 0; margin-top: 0.1rem;
+    color: var(--success);
+  }
+  .scopes .check svg { width: 100%; height: 100%; }
+
+  /* Admin-grant alert: same red surface as the dashboard's danger card. */
+  .danger-alert {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 0.5rem;
+    padding: 0.85rem 1rem;
+    margin: 0 0 1.25rem;
+    display: flex; align-items: flex-start; gap: 0.65rem;
+  }
+  .danger-alert .icon {
+    width: 1.1rem; height: 1.1rem; flex-shrink: 0; margin-top: 0.05rem;
+    color: var(--danger);
+  }
+  .danger-alert .icon svg { width: 100%; height: 100%; }
+  .danger-alert .text {
+    font-size: 0.82rem; line-height: 1.5;
+    color: #FCA5A5; /* red-300 — readable on the tinted surface */
+  }
+  .danger-alert .text strong {
+    color: #FECACA; font-weight: 600;
+  }
+
+  /* ── Buttons (match common/Button.vue) ──────────────────────────── */
   .actions {
-    display: flex; gap: 0.5rem; margin-top: 1.25rem;
+    display: flex; gap: 0.6rem;
   }
   button {
-    flex: 1; padding: 0.7rem 1rem;
-    font: inherit; font-weight: 600;
-    border: 1px solid transparent; border-radius: 8px;
+    flex: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 0.4rem;
+    padding: 0.65rem 1rem;
+    font: inherit; font-weight: 600; font-size: 0.875rem;
+    border-radius: 0.4rem;
+    border: 1px solid transparent;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.15s ease, border-color 0.15s ease;
   }
-  button.primary {
-    background: var(--accent); color: white;
+  button:focus-visible {
+    outline: 2px solid var(--primary-hover);
+    outline-offset: 2px;
   }
-  button.primary:hover { background: var(--accent-hover); }
-  button.secondary {
-    background: transparent; color: var(--text);
+  button.deny {
+    background: transparent;
+    color: var(--foreground);
     border-color: var(--border);
   }
-  button.secondary:hover { border-color: #3a3a45; background: var(--panel-2); }
+  button.deny:hover {
+    background: var(--surface-hover);
+    border-color: var(--secondary-hover);
+  }
+  button.allow {
+    background: var(--primary);
+    color: white;
+  }
+  button.allow:hover { background: var(--primary-hover); }
+
   .footnote {
-    margin-top: 1.25rem;
-    color: var(--text-dim); font-size: 0.78rem; line-height: 1.5;
+    margin: 1.25rem 0 0;
+    color: var(--foreground-muted);
+    font-size: 0.78rem;
+    line-height: 1.55;
+    text-align: center;
+  }
+  .footnote .pill {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    color: var(--foreground);
+    background: var(--surface);
   }
 </style>
 </head>
 <body>
-  <div class="card">
-    <div class="brand"><span class="brand-mark"></span><span>ORVA</span></div>
-    <h1>Allow {{.ClientName}} access to your Orva?</h1>
-
-    <div class="row">
-      <span class="label">Application</span>
-      <span class="value">{{.ClientName}}</span>
+  <div class="wrap">
+    <!-- Page brand: same logo + wordmark as Login.vue (the bold "Orva" in
+         primary purple) so the user instantly recognises this as part of
+         their own dashboard. -->
+    <div class="brand-row">
+      <div class="brand-mark">f(x)</div>
+      <span class="brand-name">Orva</span>
     </div>
-    <div class="row">
-      <span class="label">Signed in as</span>
-      <span class="value">{{.Username}}</span>
-    </div>
+    <div class="brand-tag">Authorize external application</div>
 
-    <div class="scopes">
-      <div class="scopes-title">Asking permission to</div>
-      <ul>
+    <div class="card">
+      <h1>{{.ClientName}} wants to connect</h1>
+      <p class="lede">
+        Allow this application to act on your Orva instance using your
+        permissions. Review what it will be able to do, then choose
+        Allow or Deny.
+      </p>
+
+      <!-- Application identity row. The icon mirrors the Settings →
+           Connected applications card so users see the same brand glyph
+           that will appear there afterwards. -->
+      <div class="app-row">
+        <div class="app-icon {{.IconClass}}">{{.IconSVG | safeSVG}}</div>
+        <div class="app-meta">
+          <div class="app-name">{{.ClientName}}</div>
+          <div class="app-as">Signing in as <code>{{.Username}}</code></div>
+        </div>
+      </div>
+
+      {{- if .IsFullAccess }}
+      <div class="danger-alert">
+        <span class="icon">{{.WarningSVG | safeSVG}}</span>
+        <span class="text">
+          <strong>Full administrative access.</strong> {{.ClientName}}
+          will be able to read, deploy, modify, and delete any function,
+          rotate API keys, run backups, and vacuum the database. Only
+          allow this for tools you operate yourself.
+        </span>
+      </div>
+      {{- end }}
+
+      <div class="scopes-label">{{.ClientName}} will be able to:</div>
+      <ul class="scopes">
         {{- range .ScopeBullets }}
-        <li>{{ . }}</li>
+        <li>
+          <span class="check">{{$.CheckSVG | safeSVG}}</span>
+          <span>{{ . }}</span>
+        </li>
         {{- end }}
       </ul>
+
+      <form method="POST" action="/oauth/authorize">
+        <input type="hidden" name="client_id" value="{{.ClientID}}">
+        <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
+        <input type="hidden" name="scope" value="{{.Scope}}">
+        <input type="hidden" name="state" value="{{.State}}">
+        <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
+        <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
+        <input type="hidden" name="resource" value="{{.Resource}}">
+        <input type="hidden" name="response_type" value="code">
+        <div class="actions">
+          <button type="submit" name="decision" value="deny" class="deny">Deny</button>
+          <button type="submit" name="decision" value="allow" class="allow">Allow access</button>
+        </div>
+      </form>
+
+      <p class="footnote">
+        Issues a <span class="pill">{{.AccessTokenLifetimeHuman}}</span>
+        access token plus a refresh token. Revoke any time from
+        <span class="pill">Settings → Connected applications</span>.
+      </p>
     </div>
-
-    <form method="POST" action="/oauth/authorize">
-      <input type="hidden" name="client_id" value="{{.ClientID}}">
-      <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
-      <input type="hidden" name="scope" value="{{.Scope}}">
-      <input type="hidden" name="state" value="{{.State}}">
-      <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
-      <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
-      <input type="hidden" name="resource" value="{{.Resource}}">
-      <input type="hidden" name="response_type" value="code">
-      <div class="actions">
-        <button type="submit" name="decision" value="deny" class="secondary">Deny</button>
-        <button type="submit" name="decision" value="allow" class="primary">Allow access</button>
-      </div>
-    </form>
-
-    <p class="footnote">
-      Granting access issues a {{.AccessTokenLifetimeHuman}} access token plus a refresh token. You can revoke it any time from Settings.
-    </p>
   </div>
 </body>
 </html>

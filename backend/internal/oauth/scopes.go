@@ -135,7 +135,12 @@ func IsValidScope(scope string) bool {
 
 // HumanScopeBullets renders each granted scope as a one-line
 // description for the consent screen. Order is fixed so the screen
-// reads the same regardless of input order.
+// reads the same regardless of input order. We list each scope
+// independently — the consent template already shows a separate red
+// "Full administrative access" banner when admin is granted, so
+// collapsing the bullets to one line would hide the granular
+// capabilities behind a single warning. Better: show the warning AND
+// the concrete things the app can do.
 func HumanScopeBullets(scope string) []string {
 	parsed := ParseScope(scope)
 	set := make(map[string]struct{}, len(parsed))
@@ -143,10 +148,6 @@ func HumanScopeBullets(scope string) []string {
 		set[s] = struct{}{}
 	}
 	var bullets []string
-	if _, ok := set[ScopeAdmin]; ok {
-		bullets = append(bullets, "Full administrative control over your Orva instance (read, invoke, write, admin).")
-		return bullets
-	}
 	if _, ok := set[ScopeRead]; ok {
 		bullets = append(bullets, "Read functions, executions, traces, baselines, KV, and docs.")
 	}
@@ -155,6 +156,9 @@ func HumanScopeBullets(scope string) []string {
 	}
 	if _, ok := set[ScopeWrite]; ok {
 		bullets = append(bullets, "Create, update, and delete functions, secrets, routes, schedules, jobs.")
+	}
+	if _, ok := set[ScopeAdmin]; ok {
+		bullets = append(bullets, "Manage API keys, run backups, and vacuum the database.")
 	}
 	// OIDC scopes — quietly omitted from the bullets to keep the
 	// consent screen focused on what the application can actually DO

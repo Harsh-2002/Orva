@@ -335,6 +335,80 @@ func TestOAuthRedirectURIRejectsHTTPNonLoopback(t *testing.T) {
 	}
 }
 
+// TestConsentScreenIsNativeOrva — the consent template should match
+// the dashboard's visual identity (Inter font + the Orva primary
+// purple wordmark) and render brand-specific glyphs for known
+// integrations. When admin scope is granted, a prominent red banner
+// must appear so the operator can't miss the elevated risk.
+func TestConsentScreenIsNativeOrva(t *testing.T) {
+	tc := newTestServer(t)
+	cookie := onboardAndLogin(t, tc, "alice", "supersecret123")
+
+	regBody := `{
+		"client_name": "ChatGPT",
+		"redirect_uris": ["http://127.0.0.1:33445/cb"],
+		"token_endpoint_auth_method": "none"
+	}`
+	req := httptest.NewRequest("POST", "/register", strings.NewReader(regBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "203.0.113.99:1"
+	w := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("DCR: %d %s", w.Code, w.Body.String())
+	}
+	var dcr map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&dcr)
+	clientID, _ := dcr["client_id"].(string)
+
+	authURL := "/oauth/authorize?response_type=code&client_id=" + clientID +
+		"&redirect_uri=" + url.QueryEscape("http://127.0.0.1:33445/cb") +
+		"&code_challenge=abcXYZ&code_challenge_method=S256&state=zz"
+	req = httptest.NewRequest("GET", authURL, nil)
+	req.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("consent GET: %d %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+
+	mustContain := []string{
+		// Native Orva chrome: same brand mark, font, and colour
+		// tokens as the dashboard's Login.vue.
+		"Inter:wght",
+		`#12111C`,    // dashboard --color-background hex, baked into the inline CSS
+		`#553F83`,    // dashboard --color-primary (the Orva purple)
+		`f(x)`, // logo glyph
+		">Orva<",
+		// Application identity row uses the brand-aware icon class
+		// chosen by iconForConsent — emerald for ChatGPT.
+		`app-icon chatgpt`,
+		// Granular per-scope bullets (full access by default).
+		"Read functions",
+		"Invoke deployed functions",
+		"Create, update, and delete",
+		"Manage API keys",
+		// Admin scope present → red full-access banner.
+		"Full administrative access",
+		// Buttons and footnote.
+		"Allow access",
+		"Deny",
+		"Settings → Connected applications",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(body, s) {
+			t.Errorf("consent screen missing: %q", s)
+		}
+	}
+
+	// Must NOT inline the OLD purple-blob theme (this was the legacy
+	// design that didn't match the dashboard).
+	if strings.Contains(body, "linear-gradient(135deg, #7c5cff 0%") {
+		t.Error("consent screen still uses the legacy off-brand gradient")
+	}
+}
+
 // onboardAndLogin creates the first admin user via /auth/onboard
 // (which both creates the row and sets a session_token cookie) and
 // returns that cookie for subsequent requests.

@@ -63,10 +63,13 @@ func TestIsValidScope(t *testing.T) {
 	}
 }
 
-func TestHumanScopeBullets_AdminCollapses(t *testing.T) {
+func TestHumanScopeBullets_FullScopeListsAllFour(t *testing.T) {
+	// Each scope renders as its own bullet so the consent screen can
+	// show concrete capabilities alongside the high-level "full
+	// access" warning banner.
 	got := HumanScopeBullets("read invoke write admin")
-	if len(got) != 1 {
-		t.Fatalf("admin should collapse to one bullet, got %v", got)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 bullets for full scope, got %d: %v", len(got), got)
 	}
 }
 

@@ -259,6 +259,15 @@ func (h *Handler) AuthorizeGET(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	iconClass, iconSVG := iconForConsent(client.ClientName)
+	parsedScopes := ParseScope(scope)
+	isFullAccess := false
+	for _, s := range parsedScopes {
+		if s == ScopeAdmin {
+			isFullAccess = true
+			break
+		}
+	}
 	data := consentData{
 		ClientName:               client.ClientName,
 		ClientID:                 client.ClientID,
@@ -271,6 +280,11 @@ func (h *Handler) AuthorizeGET(w http.ResponseWriter, r *http.Request) {
 		Username:                 user.Username,
 		ScopeBullets:             HumanScopeBullets(scope),
 		AccessTokenLifetimeHuman: humaniseLifetime(accessTokenLifetime),
+		IconClass:                iconClass,
+		IconSVG:                  iconSVG,
+		IsFullAccess:             isFullAccess,
+		CheckSVG:                 checkGlyph,
+		WarningSVG:               warningGlyph,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
