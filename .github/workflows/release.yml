@@ -42,13 +42,13 @@ jobs:
       matrix:
         goarch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -88,7 +88,7 @@ jobs:
             ./cmd/orva
 
       - name: upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orva-${{ matrix.goarch }}
           path: dist/orva-linux-${{ matrix.goarch }}
@@ -113,9 +113,9 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
 
@@ -147,7 +147,7 @@ jobs:
           file ../dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }} || true
 
       - name: upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -166,7 +166,7 @@ jobs:
           - goarch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: install build deps
         run: |
@@ -185,7 +185,7 @@ jobs:
           file "$GITHUB_WORKSPACE/nsjail-linux-${{ matrix.goarch }}"
 
       - name: upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nsjail-${{ matrix.goarch }}
           path: nsjail-linux-${{ matrix.goarch }}
@@ -207,7 +207,7 @@ jobs:
           - goarch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: install zstd
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
@@ -233,7 +233,7 @@ jobs:
           ls -lh "$GITHUB_WORKSPACE/rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}.tar.zst"
 
       - name: upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}
           path: rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}.tar.zst
@@ -246,7 +246,7 @@ jobs:
     needs: [build-orva, build-cli, build-nsjail, build-rootfs]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: resolve version
         id: v
@@ -258,7 +258,7 @@ jobs:
           fi
 
       - name: download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -278,7 +278,7 @@ jobs:
           sha256sum * | tee checksums.txt
 
       - name: create / update github release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.v.outputs.tag }}
           name: Orva ${{ steps.v.outputs.tag }}
@@ -319,7 +319,7 @@ jobs:
 
       # Upload install.sh alongside the release so the versioned URL works.
       - name: attach install.sh
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.v.outputs.tag }}
           files: scripts/install.sh
@@ -345,7 +345,7 @@ jobs:
       digest_amd64: ${{ steps.digest_out.outputs.amd64 }}
       digest_arm64: ${{ steps.digest_out.outputs.arm64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: resolve version
         id: v
@@ -356,7 +356,7 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: "*-${{ matrix.goarch }}"
           path: artifacts
@@ -370,10 +370,10 @@ jobs:
           mv artifacts/nsjail-linux-${{ matrix.goarch }}  dist/nsjail-${{ matrix.goarch }}
           chmod +x dist/orva-${{ matrix.goarch }} dist/nsjail-${{ matrix.goarch }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: login to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -384,7 +384,7 @@ jobs:
       # into the multi-arch :latest tag.
       - name: build + push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.release
@@ -412,7 +412,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.goarch }}
           path: /tmp/digests/*
@@ -425,16 +425,16 @@ jobs:
     needs: [docker-image]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: digest-*
           path: /tmp/digests
           merge-multiple: true
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: login to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
