@@ -47,10 +47,15 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
+          # No build cache — every release builds from scratch so we
+          # can't accidentally ship a stale toolchain artifact.
+          cache: false
 
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+          # No npm cache — fresh install on every run.
+          cache: ""
 
       - name: build ui
         working-directory: frontend
@@ -118,6 +123,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
+          # No build cache — every release builds from scratch so we
+          # can't accidentally ship a stale toolchain artifact.
+          cache: false
 
       - name: embed adapters
         run: make adapters-embed
@@ -389,6 +397,14 @@ jobs:
           context: .
           file: Dockerfile.release
           platforms: ${{ matrix.platform }}
+          # No layer cache — `no-cache: true` forces every layer to
+          # rebuild, and `pull: true` re-pulls every base image. The
+          # release pipeline must produce bit-identical-from-scratch
+          # output every time; cached layers can mask supply-chain
+          # surprises (a base image gets repinned but our cache still
+          # has the old one).
+          no-cache: true
+          pull: true
           labels: |
             org.opencontainers.image.title=Orva
             org.opencontainers.image.source=https://github.com/Harsh-2002/Orva
