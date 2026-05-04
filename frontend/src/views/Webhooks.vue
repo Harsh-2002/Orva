@@ -11,7 +11,7 @@
       </Button>
     </div>
 
-    <p class="text-xs text-foreground-muted max-w-2xl leading-relaxed">
+    <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
       System events fan out to operator-configured URLs. Subscriptions are
       global. Payloads are HMAC-SHA256 signed (header
       <code class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface border border-border text-white">X-Orva-Signature</code>);

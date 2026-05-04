@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Traces
         </h1>
-        <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
           Causal chains across HTTP, F2F invokes, jobs, cron, and inbound
           webhooks. One row per trace; click to see the full waterfall of
           spans.

@@ -7,7 +7,7 @@
           <h1 class="text-xl font-semibold text-white tracking-tight">
             Firewall &amp; DNS
           </h1>
-          <p class="text-sm text-foreground-muted mt-1.5 leading-relaxed">
+          <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
             Decide what your functions are allowed to talk to. Each switch
             below blocks one destination — turn one on and your functions
             can no longer reach it; turn it off and they can. DNS settings

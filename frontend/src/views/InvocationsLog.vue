@@ -5,8 +5,8 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Invocation Logs
         </h1>
-        <p class="text-xs text-foreground-muted mt-1">
-          Click any row to inspect status, latency, and stderr.
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+          Every function execution recorded across HTTP, MCP, cron, and job triggers. Click any row to drill into the captured request, response body, latency breakdown, and handler stderr; replay it against a different version when debugging regressions.
         </p>
       </div>
       <Button variant="secondary" @click="refresh">

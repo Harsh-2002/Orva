@@ -1,9 +1,14 @@
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between gap-4 flex-wrap">
-      <h1 class="text-xl font-semibold text-white tracking-tight">
-        Functions
-      </h1>
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-xl font-semibold text-white tracking-tight">
+          Functions
+        </h1>
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+          Every deployed handler on this Orva instance. Each function runs in its own nsjail sandbox and is reachable via <code class="font-mono text-[11px]">/fn/&lt;id&gt;</code> or any custom route you've attached.
+        </p>
+      </div>
       <Button @click="router.push('/functions/new')">
         <Plus class="w-4 h-4" />
         New Function

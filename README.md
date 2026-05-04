@@ -63,8 +63,10 @@ Every invocation runs in a fresh **nsjail** sandbox:
   per-spawn. Per-host memory budget refuses spawns past 80% reservation.
 - **seccomp filter** — Kafel policy blocks ~150 dangerous syscalls
   (`mount`, `unshare`, `bpf`, `kexec_load`, `init_module`, etc.).
-- **Network namespace** — `isolated` mode (default) gives the function
-  only loopback. Outbound HTTP fails with `ENETUNREACH`.
+- **Network namespace** — `network_mode: "none"` (default) gives the
+  function only loopback. Outbound HTTP fails with `ENETUNREACH`. Flip
+  to `"egress"` per function for outbound HTTPS + the `orva` SDK; the
+  per-function nftables firewall enforces the allowlist.
 
 Full security model in [`docs/SECURITY.md`](docs/SECURITY.md), with a
 copy-pasteable verification recipe that reads `/proc/self/status` from

@@ -1,10 +1,15 @@
 <template>
   <div class="space-y-4">
     <!-- Page header — matches Functions / Schedules style. -->
-    <div class="flex items-center justify-between gap-4 flex-wrap">
-      <h1 class="text-xl font-semibold text-white tracking-tight">
-        Jobs
-      </h1>
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-xl font-semibold text-white tracking-tight">
+          Jobs
+        </h1>
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+          Background work queued via <code class="font-mono text-[11px]">jobs.enqueue()</code> from the SDK or the <code class="font-mono text-[11px]">enqueue_job</code> MCP tool. Workers pick them up at the configured concurrency, retry on failure with exponential backoff, and surface here with their full lifecycle.
+        </p>
+      </div>
       <div class="flex items-center gap-2 text-xs text-foreground-muted">
         Background queue · {{ totalCount }} jobs
       </div>

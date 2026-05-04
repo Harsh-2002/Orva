@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Inbound webhooks
         </h1>
-        <p class="text-xs text-foreground-muted mt-1">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
           External services POST to a signed URL to fire
           <router-link
             :to="`/functions/${fnName}`"

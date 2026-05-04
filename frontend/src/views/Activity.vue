@@ -4,7 +4,7 @@
       <h1 class="text-xl font-semibold text-white tracking-tight">
         Activity
       </h1>
-      <p class="text-xs text-foreground-muted mt-1">
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
         Live feed of every API call hitting Orva — UI clicks, REST/SDK,
         MCP tools, webhook deliveries.
       </p>

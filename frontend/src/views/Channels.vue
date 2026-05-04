@@ -10,7 +10,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Channels
         </h1>
-        <p class="text-xs text-foreground-muted mt-1 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
           Bundle deployed functions and expose them as MCP tools to a
           third-party agent. Each channel has its own bearer token that
           grants invoke-only access to its functions and nothing else

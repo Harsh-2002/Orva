@@ -2,11 +2,11 @@
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-semibold text-foreground tracking-tight">
+        <h1 class="text-xl font-semibold text-white tracking-tight">
           Scheduled Jobs
         </h1>
-        <p class="text-sm text-foreground-muted mt-1">
-          Automate function execution with cron schedules
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+          Cron-driven triggers that fire any deployed function on a schedule. Use them for periodic cleanup, daily reports, polling external APIs — anything you'd normally pin to a server's crontab. Orva runs the schedule, captures stdout/stderr, and surfaces failures in the activity feed.
         </p>
       </div>
       <Button @click="showCreateModal = true">

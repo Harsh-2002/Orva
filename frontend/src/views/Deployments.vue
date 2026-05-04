@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Deployments
         </h1>
-        <p class="text-xs text-foreground-muted mt-1">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
           History for
           <router-link
             :to="`/functions/${fnName}`"

@@ -1,8 +1,8 @@
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-xl font-semibold text-foreground tracking-tight">System Overview</h1>
-      <p class="text-xs text-foreground-muted mt-1">Live snapshot of what your platform is doing right now.</p>
+      <h1 class="text-xl font-semibold text-white tracking-tight">System Overview</h1>
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">Live snapshot of what your platform is doing right now.</p>
     </div>
 
     <!-- Top-line numbers — every tile has a one-line "what does this mean" -->

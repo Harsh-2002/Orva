@@ -1,9 +1,14 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between gap-4">
-      <h1 class="text-xl font-semibold text-white tracking-tight">
-        API Keys
-      </h1>
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-xl font-semibold text-white tracking-tight">
+          API Keys
+        </h1>
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+          Long-lived bearer tokens that authorise REST and MCP calls from CI, scripts, and external services. Plaintext is shown once at creation; the server keeps only a SHA-256 hash.
+        </p>
+      </div>
       <Button @click="openCreate">
         <KeyRound class="w-4 h-4" />
         New Key

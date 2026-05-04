@@ -15,7 +15,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Trace
         </h1>
-        <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
           Causal tree of every span produced by this invocation chain.
           Click any span row to jump to its execution in the Invocations log.
         </p>

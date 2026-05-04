@@ -1,10 +1,10 @@
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-xl font-semibold text-foreground tracking-tight">
+      <h1 class="text-xl font-semibold text-white tracking-tight">
         Settings
       </h1>
-      <p class="text-xs text-foreground-muted mt-1">
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
         Operator-level controls for the running Orva instance.
       </p>
     </div>

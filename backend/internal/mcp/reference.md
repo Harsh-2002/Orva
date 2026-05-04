@@ -471,6 +471,24 @@ call directly. API key permissions scope the available tool set.
 > rejects missing fields at the JSON-RPC layer, so agents see "missing properties" errors at the moment of
 > the call rather than runtime surprises later.
 
+> **`invoke_function` body envelope.** The `body` field is a typed discriminator, not free-form JSON. Pick one shape:
+> ```jsonc
+> { "type": "json",   "json":   { "name": "World" } }   // sent as application/json
+> { "type": "string", "string": "raw text payload" }     // sent verbatim, no Content-Type forced
+> { "type": "empty" }                                    // no body — for GET / DELETE / HEAD
+> ```
+> Omit the `body` field entirely if you have no payload. The platform validates the type at the JSON-RPC layer; an unknown `type` is rejected with a clear error.
+
+> **`invoke_function` diagnostic hints.** When the handler crashes with a network-shaped error (`ENETUNREACH`, `ECONNREFUSED`, `fetch failed`, `OrvaUnavailableError`) AND the function's `network_mode` is `"none"`, the response carries an `orva_hint` field telling the agent exactly what to fix (`network_mode='egress'` via `update_function`). Always check this field before doing your own root-cause analysis on a network error.
+
+> **Fixture tools** (`list_fixtures`, `save_fixture`, `delete_fixture`, `test_function_with_fixture`) let you save Postman-style request envelopes per function and replay them — useful for debugging and regression checks. The `test_function_with_fixture` tool accepts a shallow-merge `override` object so a single fixture can be parameterised per call without mutating the saved row.
+
+> **Tool naming and metadata.** Every operator-mode tool name matches `^[a-z][a-z0-9_]{0,62}$` and ships with a human-readable `Title`, ≥80-char description, and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). The same rules apply to channel-mode auto-generated tools — see `backend/internal/mcp/CHECKLIST.md` for the canonical 12-rule policy if you contribute new tools.
+
+> **Channel-mode tool input.** When a downstream agent calls a channel-bundled tool, the input shape is the same `ChannelInvokeInput` envelope (`method`, `path`, `headers`, `body` with the discriminator above, `timeout_ms`). The output mirrors `invoke_function` (`status_code`, `headers`, `body` string, `execution_id`, optional `stderr`, optional `orva_hint`).
+
+> **Deploy-time SDK warning.** `deploy_function_inline` scans the source for the in-sandbox `orva` SDK import. If present AND the function's `network_mode` is `"none"`, the deploy result includes a `warning` field — the SDK will fail at runtime because it talks to orvad over the bridge network. Switch to `network_mode='egress'` and the next invoke is a cold start with a working SDK.
+
 > Generate a token from the Docs page in the dashboard, then drop it
 > into your client config (Claude Code, Claude Desktop, Cursor, Cline,
 > Codex, Windsurf, ChatGPT, etc.). Either header works against the
@@ -480,7 +498,7 @@ call directly. API key permissions scope the available tool set.
 
 ### MCP — Claude Code
 
-> Anthropic's `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva's 57 tools.
+> Anthropic's `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva's 70 operator-mode tools.
 
 ```bash
 claude mcp add --transport http --scope user orva {{ORIGIN}}/mcp --header "Authorization: Bearer <YOUR_ORVA_TOKEN>"
@@ -752,7 +770,7 @@ want" into a pasteable handler on the first try.
 You are an Orva serverless-function expert. You write production-ready Python or Node handlers that follow Orva's contract exactly, use Orva's built-in primitives instead of inventing external infrastructure, and never produce framework boilerplate the platform doesn't need.
 
 <context>
-Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel Functions / AWS Lambda, but on the user's own box. Each function runs in a firecracker-style microsandbox with cold start ~200 ms and warm reuse for ~5 minutes. The platform ships HTTP routing, encrypted secrets, custom routes, scheduled triggers, durable background jobs, an in-sandbox KV store, function-to-function calls, system-event webhooks, per-function rate limiting, an outbound firewall, content-addressed deploys with rollback, and a 57-tool MCP endpoint. Everything below is the surface you write against.
+Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel Functions / AWS Lambda, but on the user's own box. Each function runs in a firecracker-style microsandbox with cold start ~200 ms and warm reuse for ~5 minutes. The platform ships HTTP routing, encrypted secrets, custom routes, scheduled triggers, durable background jobs, an in-sandbox KV store, function-to-function calls, system-event webhooks, per-function rate limiting, an outbound firewall, content-addressed deploys with rollback, and a 70-tool operator-mode MCP endpoint plus an auto-generated channel-mode endpoint that exposes one tool per bundled function to downstream agents. Everything below is the surface you write against.
 </context>
 
 <runtimes>
