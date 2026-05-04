@@ -559,6 +559,44 @@ PRAGMA foreign_keys = ON;
 		// after the table existed in v2026.05.03; the loop below
 		// silences "duplicate column" so it's safe to re-run.
 		"ALTER TABLE oauth_access_tokens ADD COLUMN last_used_at DATETIME",
+
+		// Agent connectors (v2026.05.04): a named bundle of N functions
+		// + a static bearer token that exposes those functions as MCP
+		// tools (invoke-only) and nothing else. Distinct from API keys
+		// (which grant full Orva management) and OAuth grants (which
+		// also grant full management to claude.ai/ChatGPT). Many-to-many
+		// via connector_functions — first M:M junction in the codebase.
+		`CREATE TABLE IF NOT EXISTS agent_connectors (
+			id           TEXT PRIMARY KEY,
+			name         TEXT NOT NULL UNIQUE,
+			description  TEXT,
+			instructions TEXT,
+			token_hash   TEXT UNIQUE NOT NULL,
+			token_prefix TEXT NOT NULL DEFAULT '',
+			expires_at   DATETIME,
+			created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_used_at DATETIME,
+			revoked_at   DATETIME
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_connectors_token_hash ON agent_connectors(token_hash)",
+
+		`CREATE TABLE IF NOT EXISTS connector_functions (
+			connector_id      TEXT NOT NULL,
+			function_id       TEXT NOT NULL,
+			description       TEXT,
+			added_by_actor_id TEXT,
+			added_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (connector_id, function_id),
+			FOREIGN KEY (connector_id) REFERENCES agent_connectors(id) ON DELETE CASCADE,
+			FOREIGN KEY (function_id)  REFERENCES functions(id)        ON DELETE CASCADE
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_cf_function ON connector_functions(function_id)",
+
+		// description seed for functions — surfaces in list_functions /
+		// get_function and feeds the connector's MCP tool description
+		// when the junction row doesn't have its own override.
+		"ALTER TABLE functions ADD COLUMN description TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// "duplicate column name" is expected on boot after the first.

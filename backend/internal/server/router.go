@@ -332,6 +332,19 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/oauth/connected-apps", oauthAppsHandler.List)
 	r.mux.HandleFunc("DELETE /api/v1/oauth/connected-apps/{id}", oauthAppsHandler.Revoke)
 
+	// Agent connectors: a named bundle of N functions + a static bearer
+	// token. Presenting the token at /mcp exposes ONLY those functions
+	// as MCP tools (invoke-only) and nothing else. Operator-managed
+	// from the dashboard's Connectors page.
+	connectorHandler := &handlers.ConnectorHandler{DB: r.db}
+	r.mux.HandleFunc("GET /api/v1/connectors", connectorHandler.List)
+	r.mux.HandleFunc("POST /api/v1/connectors", connectorHandler.Create)
+	r.mux.HandleFunc("GET /api/v1/connectors/{id}", connectorHandler.Get)
+	r.mux.HandleFunc("PATCH /api/v1/connectors/{id}", connectorHandler.Update)
+	r.mux.HandleFunc("PUT /api/v1/connectors/{id}/functions", connectorHandler.SetFunctions)
+	r.mux.HandleFunc("POST /api/v1/connectors/{id}/rotate", connectorHandler.Rotate)
+	r.mux.HandleFunc("DELETE /api/v1/connectors/{id}", connectorHandler.Delete)
+
 	// Runtime routes.
 	runtimeHandler := &handlers.RuntimeHandler{}
 	r.mux.HandleFunc("GET /api/v1/runtimes", runtimeHandler.List)

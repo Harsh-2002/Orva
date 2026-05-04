@@ -15,7 +15,7 @@ const (
 // register the tool. Otherwise it's silently skipped — the agent
 // never even sees the tool name in its catalog.
 func gatedAdd(perms permSet, need string, fn func()) {
-	if perms.has(need) {
+	if perms.Has(need) {
 		fn()
 	}
 }

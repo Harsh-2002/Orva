@@ -22,7 +22,7 @@ import (
 //   orva://system/metrics                    — JSON metrics snapshot
 
 func registerResources(s *mcpsdk.Server, deps Deps, perms permSet) {
-	if !perms.has(permRead) {
+	if !perms.Has(permRead) {
 		return
 	}
 

@@ -500,6 +500,15 @@
     >
       <div class="space-y-4">
         <div>
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Description</label>
+          <textarea
+            v-model="form.description"
+            rows="2"
+            placeholder="One-line summary of what this function does. Surfaces in MCP tool catalogs and the agent connector picker."
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white resize-y"
+          />
+        </div>
+        <div>
           <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5 flex items-center justify-between">
             <span>Runtime</span>
             <span
@@ -1055,6 +1064,7 @@ const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).len
 const code = ref('')
 const form = ref({
   name: '',
+  description: '',                // surfaces in list_functions, get_function, the connector picker, and as the MCP tool description
   runtime: 'python314',
   memory_mb: 64,
   cpus: 0.5,
@@ -1302,6 +1312,7 @@ onMounted(async () => {
 
       fnId.value = fn.id
       form.value.name = fn.name
+      form.value.description = fn.description || ''
       form.value.runtime = fn.runtime
       form.value.memory_mb = fn.memory_mb
       form.value.cpus = fn.cpus
@@ -1483,6 +1494,7 @@ const runDeploy = async () => {
       try {
         const createRes = await apiClient.post('/functions', {
           name: form.value.name,
+          description: form.value.description || '',
           runtime: form.value.runtime,
           memory_mb: form.value.memory_mb,
           cpus: form.value.cpus,
@@ -1515,6 +1527,7 @@ const runDeploy = async () => {
       // pool when any of these change so the next invoke respawns with
       // the new config.
       await apiClient.put(`/functions/${fnId.value}`, {
+        description: form.value.description || '',
         memory_mb: form.value.memory_mb,
         cpus: form.value.cpus,
         env_vars: envVarsMap,

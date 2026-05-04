@@ -10,6 +10,7 @@ import (
 type Function struct {
 	ID                 string            `json:"id"`
 	Name               string            `json:"name"`
+	Description        string            `json:"description"`
 	Runtime            string            `json:"runtime"`
 	Entrypoint         string            `json:"entrypoint"`
 	Image              string            `json:"image"`
@@ -103,10 +104,10 @@ func (db *Database) InsertFunction(fn *Function) error {
 	}
 
 	err = db.write.QueryRow(`
-		INSERT INTO functions (id, name, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO functions (id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING created_at, updated_at`,
-		fn.ID, fn.Name, fn.Runtime, fn.Entrypoint, fn.Image,
+		fn.ID, fn.Name, fn.Description, fn.Runtime, fn.Entrypoint, fn.Image,
 		fn.TimeoutMS, fn.MemoryMB, fn.CPUs, string(envJSON),
 		fn.NetworkMode, fn.MaxConcurrency, fn.ConcurrencyPolicy,
 		fn.AuthMode, fn.RateLimitPerMin,
@@ -116,11 +117,11 @@ func (db *Database) InsertFunction(fn *Function) error {
 }
 
 func (db *Database) GetFunction(id string) (*Function, error) {
-	return scanFunction(db.read.QueryRow(`SELECT id, name, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE id = ?`, id))
+	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE id = ?`, id))
 }
 
 func (db *Database) GetFunctionByName(name string) (*Function, error) {
-	return scanFunction(db.read.QueryRow(`SELECT id, name, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE name = ?`, name))
+	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE name = ?`, name))
 }
 
 type ListFunctionsParams struct {
@@ -140,7 +141,7 @@ func (db *Database) ListFunctions(params ListFunctionsParams) (*ListFunctionsRes
 		params.Limit = 20
 	}
 
-	query := "SELECT id, name, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE 1=1"
+	query := "SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM functions WHERE 1=1"
 	var args []any
 
@@ -189,7 +190,7 @@ func (db *Database) UpdateFunction(fn *Function) error {
 
 	err = db.write.QueryRow(`
 		UPDATE functions SET
-			name = ?, runtime = ?, entrypoint = ?, image = ?,
+			name = ?, description = ?, runtime = ?, entrypoint = ?, image = ?,
 			timeout_ms = ?, memory_mb = ?, cpus = ?, env_vars = ?,
 			network_mode = ?, max_concurrency = ?, concurrency_policy = ?,
 			auth_mode = ?, rate_limit_per_min = ?,
@@ -197,7 +198,7 @@ func (db *Database) UpdateFunction(fn *Function) error {
 			image_size = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 		RETURNING created_at, updated_at`,
-		fn.Name, fn.Runtime, fn.Entrypoint, fn.Image,
+		fn.Name, fn.Description, fn.Runtime, fn.Entrypoint, fn.Image,
 		fn.TimeoutMS, fn.MemoryMB, fn.CPUs, string(envJSON),
 		fn.NetworkMode, fn.MaxConcurrency, fn.ConcurrencyPolicy,
 		fn.AuthMode, fn.RateLimitPerMin,
@@ -218,7 +219,7 @@ func scanFunction(row *sql.Row) (*Function, error) {
 	var image, codeHash sql.NullString
 
 	err := row.Scan(
-		&fn.ID, &fn.Name, &fn.Runtime, &fn.Entrypoint, &image,
+		&fn.ID, &fn.Name, &fn.Description, &fn.Runtime, &fn.Entrypoint, &image,
 		&fn.TimeoutMS, &fn.MemoryMB, &fn.CPUs, &envJSON,
 		&fn.NetworkMode, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
 		&fn.AuthMode, &fn.RateLimitPerMin,
@@ -246,7 +247,7 @@ func scanFunctionRow(rows *sql.Rows) (*Function, error) {
 	var image, codeHash sql.NullString
 
 	err := rows.Scan(
-		&fn.ID, &fn.Name, &fn.Runtime, &fn.Entrypoint, &image,
+		&fn.ID, &fn.Name, &fn.Description, &fn.Runtime, &fn.Entrypoint, &image,
 		&fn.TimeoutMS, &fn.MemoryMB, &fn.CPUs, &envJSON,
 		&fn.NetworkMode, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
 		&fn.AuthMode, &fn.RateLimitPerMin,

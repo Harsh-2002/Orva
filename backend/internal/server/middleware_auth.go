@@ -93,10 +93,36 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			}
 		}
 
-		// Fall back to API key header (CLI, automation).
+		// Fall back to API key header (CLI, automation). Accept either
+		// the canonical X-Orva-API-Key header or an Authorization: Bearer
+		// header so CLI tools that mirror MCP convention work.
 		apiKey := r.Header.Get("X-Orva-API-Key")
 		if apiKey == "" {
+			if a := r.Header.Get("Authorization"); strings.HasPrefix(a, "Bearer ") {
+				apiKey = strings.TrimSpace(strings.TrimPrefix(a, "Bearer "))
+			}
+		}
+		if apiKey == "" {
 			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated", RequestID(r.Context()))
+			return
+		}
+
+		// Prefix-first dispatch — connector tokens (`orva_aco_*`) and
+		// OAuth access-token plaintexts (`orva_oat_*`) MUST NOT pass
+		// the API-key gate. Connector tokens have no Orva-management
+		// authority by design; OAuth tokens use a separate dashboard
+		// path. Reject explicitly so a leaked connector token can't
+		// silently fall through and confuse the caller.
+		if strings.HasPrefix(apiKey, "orva_aco_") {
+			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
+				"connector tokens are MCP-only; use an API key for /api/v1/* requests",
+				RequestID(r.Context()))
+			return
+		}
+		if strings.HasPrefix(apiKey, "orva_oat_") || strings.HasPrefix(apiKey, "orva_ort_") {
+			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
+				"OAuth access tokens are MCP-only; use an API key for /api/v1/* requests",
+				RequestID(r.Context()))
 			return
 		}
 

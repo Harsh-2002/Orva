@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	authpkg "github.com/Harsh-2002/Orva/internal/auth"
 	"github.com/Harsh-2002/Orva/internal/builder"
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/firewall"
@@ -85,13 +86,37 @@ func NewHandler(deps Deps) http.Handler {
 		// instance so the SDK can produce a clean 401 via the auth
 		// gate — refusing to construct one here would cause the SDK
 		// to surface a less useful "internal error".
-		perms := resolvePermissions(reqDeps.DB, r)
+		principal, _ := authenticateRequest(reqDeps.DB, r)
 
-		// Re-resolve the API key so we can attribute tool calls in the
-		// activity log. We discard the bool — middleware on the server
-		// is best-effort observability; if auth somehow degrades, we
-		// log an anonymous mcp call instead of crashing.
-		actorKey, _ := authenticateRequest(reqDeps.DB, r)
+		// Connector mode: register exactly the bundled functions as
+		// MCP tools. Skip every operator-management register call —
+		// the connector token explicitly does NOT carry Orva-mgmt
+		// authority. The system prompt is per-connector so the agent
+		// sees the right tool catalog framing.
+		if principal != nil && principal.Kind == authpkg.KindConnector {
+			instr := buildConnectorInstructions(reqDeps.DB, principal.Connector)
+			s := mcpsdk.NewServer(
+				&mcpsdk.Implementation{
+					Name:    "orva",
+					Version: deps.Version,
+					Title:   "Orva — " + principal.Connector.Name,
+				},
+				&mcpsdk.ServerOptions{Instructions: instr},
+			)
+			s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal))
+			registerConnectorTools(s, reqDeps, principal.Connector)
+			return s
+		}
+
+		// Operator path. permSet derives from the principal (api_key
+		// or oauth); empty set when auth missed (the gate below
+		// rejects anyway, but defending against a SDK quirk).
+		var perms permSet
+		if principal != nil {
+			perms = principal.Perms
+		} else {
+			perms = permSet{}
+		}
 
 		s := mcpsdk.NewServer(
 			&mcpsdk.Implementation{
@@ -109,7 +134,7 @@ func NewHandler(deps Deps) http.Handler {
 		// feed even though the underlying transport is one streaming
 		// POST to /mcp. The HTTP-level loggerMiddleware would otherwise
 		// only show the streaming request itself.
-		s.AddReceivingMiddleware(activityMiddleware(reqDeps, actorKey))
+		s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal))
 
 		registerSystemTools(s, reqDeps, perms)
 		registerFunctionTools(s, reqDeps, perms)
@@ -289,10 +314,14 @@ func originAllowed(_ string) bool { return true }
 // so the live Activity feed sees per-tool granularity even though the
 // outer HTTP transport is one streaming POST to /mcp.
 //
-// actorKey may be nil if auth couldn't resolve the bearer (the outer
+// principal may be nil if auth couldn't resolve the bearer (the outer
 // http.Handler would already have returned 401 in that case, but we
-// defend by still emitting an anonymous activity row).
-func activityMiddleware(deps Deps, actorKey *database.APIKey) mcpsdk.Middleware {
+// defend by still emitting an anonymous activity row). Otherwise its
+// Kind / ID / Label flow straight into ActorType / ActorID / ActorLabel
+// — which is how connector calls show up as `actor_type=connector`
+// instead of being misattributed to api_key like the older synth-
+// APIKey hack used to do.
+func activityMiddleware(deps Deps, principal *authpkg.Principal) mcpsdk.Middleware {
 	return func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
 			// We only attribute the protocol calls that an operator
@@ -308,10 +337,11 @@ func activityMiddleware(deps Deps, actorKey *database.APIKey) mcpsdk.Middleware 
 			result, err := next(ctx, method, req)
 			elapsed := time.Since(started).Milliseconds()
 
-			actorID, actorLabel := "", ""
-			if actorKey != nil {
-				actorID = actorKey.ID
-				actorLabel = actorKey.Name
+			actorType, actorID, actorLabel := "", "", ""
+			if principal != nil {
+				actorType = principal.Kind
+				actorID = principal.ID
+				actorLabel = principal.Label
 			}
 			toolName := extractToolName(method, req)
 			summary := summariseMCPCall(method, toolName)
@@ -323,7 +353,7 @@ func activityMiddleware(deps Deps, actorKey *database.APIKey) mcpsdk.Middleware 
 			row := database.ActivityRow{
 				TS:         time.Now().UnixMilli(),
 				Source:     "mcp",
-				ActorType:  "api_key",
+				ActorType:  actorType,
 				ActorID:    actorID,
 				ActorLabel: actorLabel,
 				Method:     "tool",

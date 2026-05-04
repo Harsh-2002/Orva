@@ -10,80 +10,146 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Harsh-2002/Orva/internal/auth"
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/oauth"
 )
 
-// permSet is the set of permission strings (read/write/admin/invoke)
-// granted to a request's caller. Tool registration consults this to
-// decide which tools are visible.
-type permSet map[string]bool
+// permSet is a re-export of auth.PermSet kept for compatibility with
+// the existing tool-registration call sites (gatedAdd uses permSet).
+// New code should use auth.PermSet directly.
+type permSet = auth.PermSet
 
-// has reports whether the caller has the named permission.
-func (p permSet) has(name string) bool { return p != nil && p[name] }
+// has reports whether the caller has the named permission. Mirrors
+// auth.PermSet.Has so the older `perms.has(...)` lowercase calls still
+// resolve.
+func permSetHas(p permSet, name string) bool { return p != nil && p[name] }
 
 // extractToken pulls the bearer token from the Authorization header
 // (preferred, matches spec) or the X-Orva-API-Key header (parity with
 // our REST API). Returns the empty string if neither is set.
 func extractToken(r *http.Request) string {
-	if auth := r.Header.Get("Authorization"); auth != "" {
-		if rest, ok := strings.CutPrefix(auth, "Bearer "); ok {
+	if a := r.Header.Get("Authorization"); a != "" {
+		if rest, ok := strings.CutPrefix(a, "Bearer "); ok {
 			return strings.TrimSpace(rest)
 		}
 	}
 	return strings.TrimSpace(r.Header.Get("X-Orva-API-Key"))
 }
 
-// authenticateRequest looks up the bearer token against the API-key
-// store first, then falls through to oauth_access_tokens if the
-// API-key lookup misses. Returns a resolved *APIKey-shaped value
-// (synthesized from the OAuth row when that path matched) so all
-// downstream code — permission checks, activity logging — stays
-// uniform regardless of which credential the caller presented.
+// Token-prefix constants for the prefix-first dispatch. Each branch
+// resolves a distinct credential type — see package auth's doc comment.
+const (
+	tokenPrefixConnector = "orva_aco_"
+	tokenPrefixOAuth     = "orva_oat_" // OAuth access token plaintext
+	// API keys are everything else starting with "orva_". OAuth refresh
+	// token plaintexts (`orva_ort_`) never reach /mcp directly — they
+	// only flow through the OAuth /token endpoint.
+)
+
+// authenticateRequest resolves the inbound bearer token to a Principal.
+// Branches by token prefix BEFORE any DB lookup so an `orva_aco_*`
+// connector token never hits the API-key store, and an `orva_oat_*`
+// OAuth token never gets misinterpreted as a (non-existent) API key.
 //
-// Returns nil + false on any failure: missing token, unknown token in
-// both stores, expired key, revoked OAuth token, audience mismatch
-// for OAuth tokens, transient DB error.
-func authenticateRequest(db *database.Database, r *http.Request) (*database.APIKey, bool) {
+// Returns nil + false on any failure: missing token, unknown token,
+// expired/revoked credential, audience mismatch (OAuth), DB error.
+func authenticateRequest(db *database.Database, r *http.Request) (*auth.Principal, bool) {
 	tok := extractToken(r)
 	if tok == "" || db == nil {
 		return nil, false
 	}
-	hash := sha256.Sum256([]byte(tok))
+	switch {
+	case strings.HasPrefix(tok, tokenPrefixConnector):
+		return resolveConnectorToken(db, tok)
+	case strings.HasPrefix(tok, tokenPrefixOAuth):
+		return resolveOAuthAccessToken(db, tok, r)
+	case strings.HasPrefix(tok, "orva_"):
+		return resolveAPIKey(db, tok)
+	default:
+		// Unknown shape — refuse rather than silently falling through
+		// to OAuth. Strict prefix dispatch caught more bugs in the
+		// wild than the previous "try everything" pattern.
+		return nil, false
+	}
+}
+
+// resolveAPIKey is the operator-API-key branch.
+func resolveAPIKey(db *database.Database, plaintext string) (*auth.Principal, bool) {
+	hash := sha256.Sum256([]byte(plaintext))
 	keyHash := hex.EncodeToString(hash[:])
 
 	key, err := db.GetAPIKeyByHash(keyHash)
-	if err == nil {
-		if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
-			return nil, false
-		}
-		// Touch last_used_at asynchronously — same pattern as REST middleware.
-		db.Async(func() { _ = db.UpdateAPIKeyLastUsed(keyHash) })
-		return key, true
-	}
-	if err != sql.ErrNoRows {
-		// Real DB error — fail closed.
+	if err != nil {
+		// sql.ErrNoRows is a benign miss; anything else is a DB
+		// problem we fail closed on.
+		_ = (err == sql.ErrNoRows)
 		return nil, false
 	}
+	if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
+		return nil, false
+	}
+	db.Async(func() { _ = db.UpdateAPIKeyLastUsed(keyHash) })
 
-	// API-key miss: try the OAuth access-token store. Browser-based
-	// connectors (claude.ai web, ChatGPT) reach us through this path.
-	return resolveOAuthAccessToken(db, tok, r)
+	var perms []string
+	_ = json.Unmarshal([]byte(key.Permissions), &perms)
+	permSet := make(auth.PermSet, len(perms))
+	for _, p := range perms {
+		permSet[p] = true
+	}
+	return &auth.Principal{
+		Kind:    auth.KindAPIKey,
+		ID:      key.ID,
+		Label:   key.Name,
+		Perms:   permSet,
+		Expires: key.ExpiresAt,
+	}, true
 }
 
-// resolveOAuthAccessToken looks the bearer up as an OAuth access token
-// and synthesises a *database.APIKey so the rest of the MCP layer
-// (permission gating, activity feed) doesn't need to know which token
-// flavor matched. ID/Name come from the OAuth client — that's what an
-// operator wants to see in the audit log ("ChatGPT (auto-registered)"
-// did this), not an opaque token storage ID.
+// resolveConnectorToken is the agent-connector branch. The token is
+// SHA-256 hashed; we look up the connector row and bind the function
+// list onto the Principal so the MCP server can register exactly
+// those tools and nothing else.
+func resolveConnectorToken(db *database.Database, plaintext string) (*auth.Principal, bool) {
+	hash := sha256.Sum256([]byte(plaintext))
+	tokenHash := hex.EncodeToString(hash[:])
+
+	c, err := db.GetConnectorByTokenHash(tokenHash)
+	if err != nil {
+		return nil, false
+	}
+	if !c.IsActive(time.Now()) {
+		return nil, false
+	}
+	db.Async(func() { _ = db.TouchConnectorLastUsed(c.ID) })
+
+	return &auth.Principal{
+		Kind:  auth.KindConnector,
+		ID:    c.ID,
+		Label: c.Name,
+		// Perms intentionally empty — connector tokens have no Orva-
+		// management permissions.
+		Connector: &auth.ConnectorRef{
+			ID:           c.ID,
+			Name:         c.Name,
+			Description:  c.Description,
+			Instructions: c.Instructions,
+			FunctionIDs:  c.FunctionIDs,
+		},
+		Expires: c.ExpiresAt,
+	}, true
+}
+
+// resolveOAuthAccessToken is the OAuth branch. Returns a Principal
+// whose Kind=KindOAuth and Perms come from the granted scope (read /
+// invoke / write / admin) via oauth.ScopeToPermissions.
 //
 // Audience-bound: if the token row carries a `resource` (RFC 8707),
 // it must match the URL the caller is hitting. Otherwise a token
 // minted for orva-A.example.com/mcp could be replayed against
 // orva-B.example.com/mcp. Tokens with no resource (older/CLI-style)
 // skip this check.
-func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Request) (*database.APIKey, bool) {
+func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Request) (*auth.Principal, bool) {
 	row, err := db.GetOAuthAccessTokenByAccessHash(oauth.HashToken(plaintext))
 	if err != nil || row == nil {
 		return nil, false
@@ -94,15 +160,14 @@ func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Re
 	if row.Resource != "" && !audienceMatches(row.Resource, r) {
 		return nil, false
 	}
-
-	// Touch last_used_at for the Settings → Connected applications
-	// card. Async so we don't block the hot path; mirrors the
-	// API-key UpdateAPIKeyLastUsed call above.
 	tokenHash := row.AccessTokenHash
 	db.Async(func() { _ = db.UpdateOAuthTokenLastUsed(tokenHash) })
 
-	perms := oauth.ScopeToPermissions(row.Scope)
-	permsJSON, _ := json.Marshal(perms)
+	permList := oauth.ScopeToPermissions(row.Scope)
+	permSet := make(auth.PermSet, len(permList))
+	for _, p := range permList {
+		permSet[p] = true
+	}
 
 	// Pull the friendly client name. Best-effort — if the join fails,
 	// we still authenticate (the row is valid), just with the raw
@@ -111,12 +176,12 @@ func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Re
 	if c, cerr := db.GetOAuthClientByID(row.ClientID); cerr == nil && c.ClientName != "" {
 		label = c.ClientName
 	}
-
-	return &database.APIKey{
-		ID:          row.ID,
-		Name:        label,
-		KeyHash:     row.AccessTokenHash,
-		Permissions: string(permsJSON),
+	return &auth.Principal{
+		Kind:    auth.KindOAuth,
+		ID:      row.ID,
+		Label:   label,
+		Perms:   permSet,
+		Expires: &row.AccessExpiresAt,
 	}, true
 }
 
@@ -151,22 +216,18 @@ func audienceMatches(tokenResource string, r *http.Request) bool {
 	return reqPath == tokPath || strings.HasPrefix(reqPath, tokPath+"/")
 }
 
-// resolvePermissions runs authenticateRequest and returns a parsed
+// resolvePermissions runs authenticateRequest and returns the principal's
 // permission set. Empty set if auth failed (callers should already
 // have rejected with 401 at that point — this is a belt-and-braces
-// fallback).
+// fallback). Connector tokens always return an empty set, which is
+// intentional: connectors don't gate by permission, they gate by the
+// function list registered as tools.
 func resolvePermissions(db *database.Database, r *http.Request) permSet {
-	key, ok := authenticateRequest(db, r)
-	if !ok {
+	p, ok := authenticateRequest(db, r)
+	if !ok || p == nil {
 		return permSet{}
 	}
-	var list []string
-	_ = json.Unmarshal([]byte(key.Permissions), &list)
-	out := make(permSet, len(list))
-	for _, p := range list {
-		out[p] = true
-	}
-	return out
+	return p.Perms
 }
 
 // writeAuthError writes a JSON error envelope matching what the rest
@@ -178,12 +239,6 @@ func resolvePermissions(db *database.Database, r *http.Request) permSet {
 // found" body and break JSON parsing).
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	if status == http.StatusUnauthorized {
-		// RFC 9728 + MCP spec parameter is `resource_metadata`
-		// (NOT `_uri` — both ChatGPT and claude.ai look for the spec
-		// name and ignore the `_uri` variant). The PRM doc this
-		// points at lists our authorization server, so the client
-		// follows the cascade: 401 → fetch PRM → fetch AS metadata
-		// → DCR → /authorize → /token → retry with Bearer.
 		w.Header().Set("WWW-Authenticate",
 			`Bearer realm="orva", resource_metadata="/.well-known/oauth-protected-resource"`)
 	}

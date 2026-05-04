@@ -642,6 +642,38 @@ surface (used by the dashboard, also callable from the CLI):
 | `/api/v1/auth/sessions` | GET | List the calling user's active browser sessions (token returned as 16-char prefix only) |
 | `/api/v1/auth/sessions/{prefix}` | DELETE | Revoke another session by prefix; calling session refuses unless `?allow_self=1` |
 
+### MCP — Agent connectors (function bundles as tools)
+
+Agent connectors expose N deployed functions as MCP tools to a third-party
+agent — without giving that agent Orva-management authority. Each connector
+has its own bearer token (`orva_aco_<32 hex>`); presenting it at `/mcp`
+shows ONE MCP tool per bundled function (invoke-only) and nothing else.
+
+Use case: an agentic workflow needs `email-sender` and `summarize-text`
+capabilities. Bundle those two functions into a "support-bot" connector,
+hand the token to the workflow author. The workflow can call those two
+functions and absolutely nothing else on the Orva instance.
+
+Tool names are converted from dash-separated to snake_case (`stripe-charge`
+→ `stripe_charge`). Two functions whose names map to the same tool name
+are rejected at create/update time. Connector tokens are accepted ONLY
+on `/mcp`; presenting one at any `/api/v1/*` endpoint returns 401.
+
+Manage connectors from the dashboard's **Connectors** page or via REST:
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/v1/connectors` | GET | List connectors |
+| `/api/v1/connectors` | POST | Create (token plaintext returned ONCE) |
+| `/api/v1/connectors/{id}` | GET | Detail with function set |
+| `/api/v1/connectors/{id}` | PATCH | Update name/description/expiry |
+| `/api/v1/connectors/{id}/functions` | PUT | Replace function set |
+| `/api/v1/connectors/{id}/rotate` | POST | Re-issue token (old one invalidated) |
+| `/api/v1/connectors/{id}` | DELETE | Cascade |
+
+Or via the CLI: `orva connectors create <name> --functions fn1,fn2`,
+`orva connectors list`, `orva connectors rotate <id|name>`, etc.
+
 ### Hand-edited config files
 
 ### MCP config — Cursor (global)

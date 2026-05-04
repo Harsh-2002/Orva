@@ -169,6 +169,21 @@ export const listSessions = () => apiClient.get('/auth/sessions')
 
 export const revokeSession = (prefix) => apiClient.delete(`/auth/sessions/${prefix}`)
 
+// Agent connectors (function bundles exposed as MCP tools)
+export const listConnectors = () => apiClient.get('/connectors')
+
+export const createConnector = (data) => apiClient.post('/connectors', data)
+
+export const getConnector = (id) => apiClient.get(`/connectors/${id}`)
+
+export const updateConnector = (id, data) => apiClient.patch(`/connectors/${id}`, data)
+
+export const setConnectorFunctions = (id, data) => apiClient.put(`/connectors/${id}/functions`, data)
+
+export const rotateConnector = (id) => apiClient.post(`/connectors/${id}/rotate`)
+
+export const deleteConnector = (id) => apiClient.delete(`/connectors/${id}`)
+
 // Runtimes
 export const listRuntimes = () => apiClient.get('/runtimes')
 
