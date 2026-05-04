@@ -10,9 +10,8 @@ import (
 	"sync"
 	"time"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -21,9 +20,19 @@ import (
 // FunctionView is the JSON-shaped output for any tool returning a
 // function record. Matches the REST shape minus the internal Image
 // field, which agents don't need.
+//
+// InvokeURL is the canonical fully-qualified URL the function answers
+// at. Agents should call it verbatim and never construct it from
+// `id` + a base URL — the MCP server already knows its public host
+// (from the inbound request) and renders the right URL per response.
+// Routes lists any custom path-based routes registered for this
+// function (empty if none); agents should prefer a route URL when the
+// human asked for the function by route path.
 type FunctionView struct {
 	ID                string            `json:"id"`
 	Name              string            `json:"name"`
+	InvokeURL         string            `json:"invoke_url"`
+	Routes            []string          `json:"routes,omitempty"`
 	Runtime           string            `json:"runtime"`
 	Entrypoint        string            `json:"entrypoint"`
 	TimeoutMS         int64             `json:"timeout_ms"`
@@ -42,11 +51,11 @@ type FunctionView struct {
 	UpdatedAt         time.Time         `json:"updated_at"`
 }
 
-func toFunctionView(fn *database.Function) FunctionView {
+func toFunctionView(fn *database.Function, deps Deps) FunctionView {
 	if fn == nil {
 		return FunctionView{}
 	}
-	return FunctionView{
+	v := FunctionView{
 		ID:                fn.ID,
 		Name:              fn.Name,
 		Runtime:           fn.Runtime,
@@ -66,6 +75,24 @@ func toFunctionView(fn *database.Function) FunctionView {
 		CreatedAt:         fn.CreatedAt,
 		UpdatedAt:         fn.UpdatedAt,
 	}
+	if deps.BaseURL != "" {
+		v.InvokeURL = deps.BaseURL + "/fn/" + fn.ID
+	}
+	// Best-effort: ListRoutes returns every route in the system; we
+	// filter to this function. A miss returns an empty slice rather
+	// than failing the whole tool call — routes are a hint, not load-
+	// bearing.
+	if deps.DB != nil && deps.BaseURL != "" {
+		if all, err := deps.DB.ListRoutes(); err == nil {
+			for _, r := range all {
+				if r.FunctionID != fn.ID {
+					continue
+				}
+				v.Routes = append(v.Routes, deps.BaseURL+r.Path)
+			}
+		}
+	}
+	return v
 }
 
 // resolveFunction looks up a function by id (preferred) or name.
@@ -75,8 +102,10 @@ func resolveFunction(deps Deps, idOrName string) (*database.Function, error) {
 	if idOrName == "" {
 		return nil, errors.New("function_id or name is required")
 	}
-	// id form: starts with "fn_"
-	if strings.HasPrefix(idOrName, "fn_") {
+	// id form: any UUID. Tolerate the legacy "fn_" prefix in case a
+	// stale client (e.g. an LLM that cached an old response) sends it.
+	idOrName = strings.TrimPrefix(idOrName, "fn_")
+	if ids.IsUUID(idOrName) {
 		fn, err := deps.Registry.Get(idOrName)
 		if err == nil {
 			return fn, nil
@@ -110,7 +139,7 @@ type ListFunctionsOutput struct {
 // ─── get_function ──────────────────────────────────────────────────
 
 type GetFunctionInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 }
 
 // ─── create_function ───────────────────────────────────────────────
@@ -133,7 +162,7 @@ type CreateFunctionInput struct {
 // ─── update_function ───────────────────────────────────────────────
 
 type UpdateFunctionInput struct {
-	FunctionID        string             `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID        string             `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	Name              *string            `json:"name,omitempty"`
 	Entrypoint        *string            `json:"entrypoint,omitempty"`
 	TimeoutMS         *int64             `json:"timeout_ms,omitempty"`
@@ -151,7 +180,7 @@ type UpdateFunctionInput struct {
 // ─── delete_function ───────────────────────────────────────────────
 
 type DeleteFunctionInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	Confirm    bool   `json:"confirm" jsonschema:"must be true — guards against runaway agent loops"`
 }
 
@@ -162,7 +191,7 @@ type DeletedOutput struct {
 // ─── get_function_source ───────────────────────────────────────────
 
 type GetFunctionSourceInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 }
 
 type GetFunctionSourceOutput struct {
@@ -190,7 +219,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "list_functions",
-				Description: "List all functions on this Orva instance. Supports pagination (limit/offset) and filtering by runtime, status, or a substring match. Always call this first when an agent says 'work on the X function' so you can resolve the id.",
+				Description: "List all functions on this Orva instance. Each result includes invoke_url (fully-qualified canonical URL — call this directly, do NOT build it from parts) and routes (list of custom-route URLs, if any). Use id (a UUID) to refer to a function in other MCP tools, or name for human-friendly references. Supports pagination (limit/offset) and filtering by runtime, status, or substring search.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
 			func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFunctionsInput) (*mcpsdk.CallToolResult, ListFunctionsOutput, error) {
@@ -215,7 +244,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 							continue
 						}
 					}
-					out.Functions = append(out.Functions, toFunctionView(fn))
+					out.Functions = append(out.Functions, toFunctionView(fn, deps))
 				}
 				return nil, out, nil
 			},
@@ -226,7 +255,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "get_function",
-				Description: "Fetch one function by id or name. Returns the full record including resource limits, env_vars, network_mode, auth_mode, and rate_limit_per_min. Pass either the fn_ id or the human name.",
+				Description: "Fetch one function by id or name. Returns the full record including invoke_url (use verbatim to call the function over HTTP — never concatenate /fn/ + id manually), any custom routes, resource limits, env_vars, network_mode, auth_mode, and rate_limit_per_min.",
 				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 			},
 			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
@@ -234,7 +263,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				if err != nil {
 					return nil, FunctionView{}, err
 				}
-				return nil, toFunctionView(fn), nil
+				return nil, toFunctionView(fn, deps), nil
 			},
 		)
 	})
@@ -272,7 +301,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				if err != nil {
 					return nil, FunctionView{}, err
 				}
-				return nil, toFunctionView(fn), nil
+				return nil, toFunctionView(fn, deps), nil
 			},
 		)
 	})
@@ -292,7 +321,7 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				if err != nil {
 					return nil, FunctionView{}, err
 				}
-				return nil, toFunctionView(fn), nil
+				return nil, toFunctionView(fn, deps), nil
 			},
 		)
 	})
@@ -385,11 +414,7 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 		in.EnvVars = map[string]string{}
 	}
 
-	suffix, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	if err != nil {
-		return nil, fmt.Errorf("id generation failed: %w", err)
-	}
-	fnID := "fn_" + suffix
+	fnID := ids.New()
 
 	fn := &database.Function{
 		ID:                fnID,

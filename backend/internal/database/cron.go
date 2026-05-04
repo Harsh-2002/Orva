@@ -1,10 +1,10 @@
 package database
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"time"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // CronSchedule is a persisted cron job that fires a function on a schedule.
@@ -29,12 +29,8 @@ type CronSchedule struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
-// NewCronID returns a fresh schedule id (cron_<12-hex>).
-func NewCronID() string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return "cron_" + hex.EncodeToString(b[:])
-}
+// NewCronID returns a fresh UUIDv7. Replaces the legacy cron_<hex> form.
+func NewCronID() string { return ids.New() }
 
 func (db *Database) InsertCronSchedule(s *CronSchedule) error {
 	if s.ID == "" {

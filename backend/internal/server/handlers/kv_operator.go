@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
 )
@@ -40,15 +41,15 @@ type KVOperatorHandler struct {
 	Registry *registry.Registry
 }
 
-// resolveFnID accepts either an ID (fn_xxx) or a friendly name and
-// returns the canonical function ID. Mirrors the MCP tool helper so
-// /functions/shrt/kv works the same as /functions/fn_n4r39…/kv.
+// resolveFnID accepts either a UUID id or a friendly name and returns
+// the canonical function ID. Mirrors the MCP tool helper so
+// /functions/<name>/kv works the same as /functions/<uuid>/kv.
 func (h *KVOperatorHandler) resolveFnID(idOrName string) (string, bool) {
 	idOrName = strings.TrimSpace(idOrName)
 	if idOrName == "" {
 		return "", false
 	}
-	if strings.HasPrefix(idOrName, "fn_") {
+	if ids.IsUUID(idOrName) {
 		if _, err := h.Registry.Get(idOrName); err == nil {
 			return idOrName, true
 		}

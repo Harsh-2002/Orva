@@ -22,14 +22,17 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
-// Token / secret prefixes. Letting the prefix carry the type makes
-// debugging dramatically easier and matches how api_keys uses "orva_".
+// Token / secret prefixes for plaintext bearer credentials. Storage
+// IDs (oauth_clients.id, oauth_access_tokens.id, oauth_clients.client_id)
+// are now UUIDv7 — see NewClientStorageID / NewTokenStorageID / NewClientID
+// below. Only the credential plaintexts keep the prefixed-random form.
 const (
 	TokenPrefixAccess  = "orva_oat_" // OAuth Access Token
 	TokenPrefixRefresh = "orva_ort_" // OAuth Refresh Token
-	TokenPrefixClient  = "ocid_"     // OAuth Client ID
 	TokenPrefixSecret  = "ocs_"      // OAuth Client Secret
 	TokenPrefixCode    = "oac_"      // OAuth Authorization Code
 )
@@ -55,18 +58,27 @@ func urlSafeToken(byteLen int) string {
 // NewAccessToken returns a fresh access token plaintext of the form
 // "orva_oat_<22 url-safe>". Callers SHA256-hash before storage and
 // return the plaintext to the client exactly once.
+//
+// These plaintexts MUST stay cryptographically random — UUIDv7 leaks
+// 48 bits of timestamp and would be a credential downgrade.
 func NewAccessToken() string  { return TokenPrefixAccess + urlSafeToken(16) }
 func NewRefreshToken() string { return TokenPrefixRefresh + urlSafeToken(16) }
 func NewAuthCode() string     { return TokenPrefixCode + urlSafeToken(24) }
-func NewClientID() string     { return TokenPrefixClient + urlSafeToken(16) }
 func NewClientSecret() string { return TokenPrefixSecret + urlSafeToken(24) }
 
-// NewClientStorageID is the internal primary key for oauth_clients rows.
-// Distinct from ClientID (which is OAuth-spec-mandated and goes on the
-// wire); keeping them separate means we can rotate the wire identifier
-// without rewriting every foreign key in the future.
-func NewClientStorageID() string { return "ocl_" + hex.EncodeToString(randomBytes(8)) }
-func NewTokenStorageID() string  { return "oat_" + hex.EncodeToString(randomBytes(8)) }
+// NewClientID is the wire-side OAuth client identifier (RFC 7591).
+// It's public, not a credential, so UUIDv7 is fine — and lining up
+// with our other identifiers means client tooling that reads /register
+// responses sees a familiar shape.
+func NewClientID() string { return ids.New() }
+
+// NewClientStorageID / NewTokenStorageID are UUIDv7 storage PKs for
+// oauth_clients / oauth_access_tokens. Time-sortable so newest grants
+// appear at the right edge of the index. Distinct from the wire-side
+// client_id (NewClientID) so we could rotate the public identifier
+// without rewriting FK chains — though both are now UUIDv7.
+func NewClientStorageID() string { return ids.New() }
+func NewTokenStorageID() string  { return ids.New() }
 
 // HashToken returns the SHA256 hex digest of a token plaintext. We store
 // only the hash; the plaintext leaves the server exactly once at issue

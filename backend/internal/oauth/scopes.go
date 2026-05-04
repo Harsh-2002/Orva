@@ -35,9 +35,17 @@ func SupportedScopes() []string {
 }
 
 // DefaultGrantedScope is what we hand out when a client registers
-// without specifying scopes. Read+invoke is the minimum useful set for
-// an MCP agent — it can list and call tools but not mutate config.
-const DefaultGrantedScope = ScopeRead + " " + ScopeInvoke
+// without specifying scopes (which both claude.ai and ChatGPT do).
+//
+// Full-power default by design. Without RBAC, splitting permissions
+// between operator API keys (full) and OAuth-issued tokens (read+invoke
+// only) was artificial — and ChatGPT users hit "no create_function
+// tool exposed" because write-gated tools never registered against a
+// limited-scope token. The protection is the explicit consent screen
+// (which collapses to a single "Full administrative control" line for
+// admin scope) plus per-token revocation in Settings → Connected
+// applications.
+const DefaultGrantedScope = ScopeRead + " " + ScopeInvoke + " " + ScopeWrite + " " + ScopeAdmin
 
 // ParseScope splits an RFC 6749 §3.3 space-separated scope string,
 // dropping empties so accidental double spaces don't produce blank

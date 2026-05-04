@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
 )
@@ -33,14 +34,14 @@ type FixtureHandler struct {
 	Registry *registry.Registry
 }
 
-// resolveFnID accepts either fn_xxx or a friendly name and returns the
-// canonical function id. Mirrors the KV operator helper.
+// resolveFnID accepts either a UUID id or a friendly name and returns
+// the canonical function id. Mirrors the KV operator helper.
 func (h *FixtureHandler) resolveFnID(idOrName string) (string, bool) {
 	idOrName = strings.TrimSpace(idOrName)
 	if idOrName == "" {
 		return "", false
 	}
-	if strings.HasPrefix(idOrName, "fn_") {
+	if ids.IsUUID(idOrName) {
 		if _, err := h.Registry.Get(idOrName); err == nil {
 			return idOrName, true
 		}

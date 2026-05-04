@@ -1104,7 +1104,7 @@ const suggestingFix = ref(false)
 // root, which is what most AWS/Lambda-style routers expect.
 const invokeUrl = computed(() => {
   if (!fnId.value) return ''
-  return `${window.location.origin}/fn/${fnId.value.replace(/^fn_/, '')}`
+  return `${window.location.origin}/fn/${fnId.value}`
 })
 const copyInvokeUrl = async () => {
   if (!invokeUrl.value) return

@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // EventSubscription is an operator-managed webhook target. One row says
@@ -27,12 +29,9 @@ type EventSubscription struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
-// NewSubscriptionID returns a fresh sub_<12-hex>.
-func NewSubscriptionID() string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return "sub_" + hex.EncodeToString(b[:])
-}
+// NewSubscriptionID returns a fresh UUIDv7. Replaces the legacy
+// sub_<hex> form; existing rows are migrated by migrate_to_uuidv7.go.
+func NewSubscriptionID() string { return ids.New() }
 
 // NewWebhookSecret returns a 32-byte (64-hex) random secret, the value
 // the operator copies once and configures on the receiver to verify
@@ -178,12 +177,9 @@ type WebhookDelivery struct {
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
-// NewDeliveryID returns a fresh whd_<12-hex>.
-func NewDeliveryID() string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return "whd_" + hex.EncodeToString(b[:])
-}
+// NewDeliveryID returns a fresh UUIDv7. Replaces the legacy
+// whd_<hex> form; existing rows are migrated by migrate_to_uuidv7.go.
+func NewDeliveryID() string { return ids.New() }
 
 func (db *Database) InsertDelivery(d *WebhookDelivery) error {
 	if d.ID == "" {

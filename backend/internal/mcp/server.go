@@ -30,6 +30,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/secrets"
 	"github.com/Harsh-2002/Orva/internal/server/events"
+	"github.com/Harsh-2002/Orva/internal/urlhint"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -49,6 +50,14 @@ type Deps struct {
 	EventHub   *events.Hub
 	DataDir    string
 	Version    string // Orva version string, surfaced via initialize
+
+	// BaseURL is the canonical scheme://host the inbound MCP request
+	// arrived on (e.g. "https://orva.example.com"). Set per-request in
+	// NewHandler from urlhint.BaseURL(r); used by tool handlers to
+	// build fully-qualified `invoke_url` fields so agents never
+	// concatenate /fn/ + id manually. Empty when constructed outside
+	// the HTTP path (tests).
+	BaseURL string
 }
 
 // NewHandler returns an http.Handler that speaks MCP Streamable HTTP
@@ -64,18 +73,25 @@ type Deps struct {
 // and removes "tool exists but errors" surprises.
 func NewHandler(deps Deps) http.Handler {
 	getServer := func(r *http.Request) *mcpsdk.Server {
+		// Per-request copy of Deps with the inbound base URL
+		// stamped in. Tool handlers use this to build canonical
+		// `invoke_url` fields that match the audience the OAuth
+		// token (if any) is bound to.
+		reqDeps := deps
+		reqDeps.BaseURL = urlhint.BaseURL(r)
+
 		// Resolve the caller's permissions from the request. If the
 		// header is missing or invalid, we still return a server
 		// instance so the SDK can produce a clean 401 via the auth
 		// gate — refusing to construct one here would cause the SDK
 		// to surface a less useful "internal error".
-		perms := resolvePermissions(deps.DB, r)
+		perms := resolvePermissions(reqDeps.DB, r)
 
 		// Re-resolve the API key so we can attribute tool calls in the
 		// activity log. We discard the bool — middleware on the server
 		// is best-effort observability; if auth somehow degrades, we
 		// log an anonymous mcp call instead of crashing.
-		actorKey, _ := authenticateRequest(deps.DB, r)
+		actorKey, _ := authenticateRequest(reqDeps.DB, r)
 
 		s := mcpsdk.NewServer(
 			&mcpsdk.Implementation{
@@ -93,34 +109,34 @@ func NewHandler(deps Deps) http.Handler {
 		// feed even though the underlying transport is one streaming
 		// POST to /mcp. The HTTP-level loggerMiddleware would otherwise
 		// only show the streaming request itself.
-		s.AddReceivingMiddleware(activityMiddleware(deps, actorKey))
+		s.AddReceivingMiddleware(activityMiddleware(reqDeps, actorKey))
 
-		registerSystemTools(s, deps, perms)
-		registerFunctionTools(s, deps, perms)
-		registerDeployTools(s, deps, perms)
-		registerInvokeTools(s, deps, perms)
-		registerSecretTools(s, deps, perms)
-		registerRouteTools(s, deps, perms)
-		registerKeyTools(s, deps, perms)
-		registerFirewallTools(s, deps, perms)
-		registerPoolTools(s, deps, perms)
+		registerSystemTools(s, reqDeps, perms)
+		registerFunctionTools(s, reqDeps, perms)
+		registerDeployTools(s, reqDeps, perms)
+		registerInvokeTools(s, reqDeps, perms)
+		registerSecretTools(s, reqDeps, perms)
+		registerRouteTools(s, reqDeps, perms)
+		registerKeyTools(s, reqDeps, perms)
+		registerFirewallTools(s, reqDeps, perms)
+		registerPoolTools(s, reqDeps, perms)
 		// v0.2 + v0.3: cron schedules, KV store, background jobs, and
 		// system-event webhooks. Each respects the same permission gates.
-		registerCronTools(s, deps, perms)
-		registerKVTools(s, deps, perms)
-		registerJobTools(s, deps, perms)
-		registerWebhookTools(s, deps, perms)
+		registerCronTools(s, reqDeps, perms)
+		registerKVTools(s, reqDeps, perms)
+		registerJobTools(s, reqDeps, perms)
+		registerWebhookTools(s, reqDeps, perms)
 		// v0.4 C2a: inbound webhook triggers (signed external POSTs).
-		registerInboundWebhookTools(s, deps, perms)
+		registerInboundWebhookTools(s, reqDeps, perms)
 		// v0.4 B3 + B5: saved request fixtures (Postman-style presets) +
 		// test_function_with_fixture invoke variant.
-		registerFixtureTools(s, deps, perms)
+		registerFixtureTools(s, reqDeps, perms)
 		// v0.5: causal tracing — get_trace / list_traces / get_function_baseline.
-		registerTraceTools(s, deps, perms)
+		registerTraceTools(s, reqDeps, perms)
 		// v0.5: get_orva_docs — return the canonical Orva reference markdown.
-		registerDocsTools(s, deps, perms)
+		registerDocsTools(s, reqDeps, perms)
 
-		registerResources(s, deps, perms)
+		registerResources(s, reqDeps, perms)
 
 		return s
 	}
@@ -214,7 +230,20 @@ driving these tools when the workflow is interactive.
 
 Destructive tools (delete_*, rollback_*) require an explicit
 "confirm: true" argument so a runaway loop can't accidentally delete
-production state.`
+production state.
+
+Function URLs:
+  - Every list_functions / get_function result includes an "invoke_url"
+    field — the fully-qualified canonical URL. Use it verbatim for
+    HTTP invocations. Never construct URLs by concatenating "/fn/" +
+    id; the MCP server already knows its public host and renders the
+    correct URL per response.
+  - If a function has custom routes registered, they appear in the
+    "routes" array as fully-qualified URLs. Prefer a route URL when
+    the human asked for the function by route path
+    (e.g. "POST to /api/payments").
+  - The "id" field is a UUIDv7 — pass it back to MCP tools verbatim.
+    There is no separate "short id" form anymore.`
 
 // PRMHandler returns the RFC 9728 OAuth Protected Resource Metadata
 // document for /mcp. Mounted at /.well-known/oauth-protected-resource

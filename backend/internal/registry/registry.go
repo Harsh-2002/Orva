@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // Registry provides a cache-first function registry backed by SQLite.
@@ -26,13 +25,11 @@ func New(db *database.Database) *Registry {
 	return &Registry{db: db}
 }
 
-// GenerateID returns a new function ID in the form fn_<nanoid(12)>.
+// GenerateID returns a new function ID — a UUIDv7 in canonical
+// 36-char dashed form. Time-sortable so newest functions appear at
+// the right edge of the index without separate ORDER BY created_at.
 func GenerateID() (string, error) {
-	id, err := gonanoid.New(12)
-	if err != nil {
-		return "", fmt.Errorf("generate nanoid: %w", err)
-	}
-	return "fn_" + id, nil
+	return ids.New(), nil
 }
 
 // Get retrieves a function by ID. It checks the in-memory cache first,

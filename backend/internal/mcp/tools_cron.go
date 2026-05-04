@@ -82,7 +82,7 @@ type ListCronOutput struct {
 }
 
 type CreateCronInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or friendly name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name"`
 	CronExpr   string `json:"cron_expr"   jsonschema:"5-field cron expression. Supports @daily / @hourly / @weekly / @monthly / @yearly shorthands"`
 	Enabled    *bool  `json:"enabled,omitempty"  jsonschema:"defaults to true"`
 	Payload    map[string]any `json:"payload,omitempty"  jsonschema:"JSON object delivered as the invoke body when the schedule fires; default {}"`

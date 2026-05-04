@@ -8,9 +8,8 @@ import (
 	"sync"
 	"time"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/proxy"
 	"github.com/Harsh-2002/Orva/internal/registry"
@@ -145,13 +144,10 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Generate execution ID.
-	execSuffix, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	if err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to generate execution ID", reqID)
-		return
-	}
-	execID := "exec_" + execSuffix
+	// Generate execution ID — UUIDv7 so executions sort by creation
+	// time naturally (the highest-volume table benefits most from
+	// time-clustered B-tree inserts).
+	execID := ids.New()
 
 	// HTTP-rooted span. Trace ID was set by requestIDMiddleware; we add
 	// the span ID for this execution and stamp the trigger label.
@@ -319,22 +315,17 @@ func hasPriorCode(dataDir, fnID string) bool {
 	return err == nil && st.IsDir()
 }
 
-// extractFnID pulls the function ID from paths like /fn/{id} or /fn/{id}/sub/path.
-// The URL uses the short form without the "fn_" prefix; this function adds it back.
+// extractFnID pulls the function ID from paths like /fn/{id} or
+// /fn/{id}/sub/path. With UUIDv7 IDs, the URL form and the DB form are
+// identical — no prefix-stripping or re-adding.
 func extractFnID(path string) string {
 	const prefix = "/fn/"
 	if !strings.HasPrefix(path, prefix) {
 		return ""
 	}
 	remainder := strings.TrimPrefix(path, prefix)
-	var shortID string
 	if idx := strings.Index(remainder, "/"); idx >= 0 {
-		shortID = remainder[:idx]
-	} else {
-		shortID = remainder
+		return remainder[:idx]
 	}
-	if shortID == "" {
-		return ""
-	}
-	return "fn_" + shortID
+	return remainder
 }

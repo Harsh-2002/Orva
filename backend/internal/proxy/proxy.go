@@ -189,10 +189,10 @@ func (p *Proxy) Forward(
 			path = "/" + path
 		}
 	} else {
-		// Direct /fn/{short_id} invocation. Strip the /fn/<short_id> prefix
-		// so the function sees the sub-path (or "/" for the root).
-		shortID := strings.TrimPrefix(fnID, "fn_")
-		prefix := "/fn/" + shortID
+		// Direct /fn/{id} invocation. Strip the /fn/<id> prefix so the
+		// function sees the sub-path (or "/" for the root). With UUIDv7
+		// IDs, the URL form and the DB form are identical.
+		prefix := "/fn/" + fnID
 		if strings.HasPrefix(path, prefix) {
 			path = strings.TrimPrefix(path, prefix)
 			if path == "" {

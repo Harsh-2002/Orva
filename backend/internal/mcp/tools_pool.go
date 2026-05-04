@@ -17,7 +17,7 @@ type PoolConfigView struct {
 }
 
 type GetPoolConfigInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name"`
 }
 
 type SetPoolConfigInput struct {

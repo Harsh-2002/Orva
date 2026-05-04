@@ -2,26 +2,16 @@ package oauth
 
 import (
 	"net/http"
-	"strings"
+
+	"github.com/Harsh-2002/Orva/internal/urlhint"
 )
 
 // IssuerURL infers the canonical "https://host" identifier for this
-// Orva instance from an HTTP request. We can't hard-code it because
-// operators run Orva on localhost during dev, behind reverse proxies in
-// staging, and on custom domains in prod — and the OAuth `issuer`
-// MUST exactly match the URL clients used to discover us, or RFC 8414
-// validators (and OIDC ones) reject the metadata.
-//
-// We trust X-Forwarded-Proto when present (typical reverse-proxy
-// setup). r.TLS being non-nil means the request hit us directly over
-// TLS. Otherwise we fall back to "http", which is correct for
-// localhost loopback during integration tests.
+// Orva instance from an HTTP request. Delegates to urlhint.BaseURL
+// so OAuth metadata, MCP invoke_url, and audience binding all agree
+// on the same answer.
 func IssuerURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
+	return urlhint.BaseURL(r)
 }
 
 // authServerMetadata is the RFC 8414 metadata document we serve at

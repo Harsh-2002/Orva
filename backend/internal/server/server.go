@@ -19,6 +19,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/config"
 	"github.com/Harsh-2002/Orva/internal/database"
 	"github.com/Harsh-2002/Orva/internal/firewall"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/proxy"
@@ -286,11 +287,9 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 				return
 			}
 			// Keyfile present but DB row missing — re-insert.
-			idBytes := make([]byte, 8)
-			rand.Read(idBytes)
 			permsJSON, _ := json.Marshal([]string{"invoke", "read", "write", "admin"})
 			if err := db.InsertAPIKey(&database.APIKey{
-				ID:          "key_" + hex.EncodeToString(idBytes),
+				ID:          ids.New(),
 				KeyHash:     keyHash,
 				Prefix:      plaintext[:min(12, len(plaintext))],
 				Name:        "bootstrap-admin",
@@ -329,9 +328,7 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 
 	hash := sha256.Sum256([]byte(plaintextKey))
 	keyHash := hex.EncodeToString(hash[:])
-	idBytes := make([]byte, 8)
-	rand.Read(idBytes)
-	keyID := "key_" + hex.EncodeToString(idBytes)
+	keyID := ids.New()
 	permsJSON, _ := json.Marshal([]string{"invoke", "read", "write", "admin"})
 
 	if err := db.InsertAPIKey(&database.APIKey{

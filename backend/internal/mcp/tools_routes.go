@@ -22,7 +22,7 @@ type ListRoutesOutput struct {
 
 type SetRouteInput struct {
 	Path       string `json:"path" jsonschema:"URL path. Must start with /. Add /* suffix for prefix matching (e.g. /shortener/*)"`
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name to dispatch to"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary) to dispatch to"`
 	Methods    string `json:"methods,omitempty" jsonschema:"* (default) or comma-separated list like GET,POST"`
 }
 

@@ -1,11 +1,11 @@
 package database
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // ErrFixtureNotFound is returned when a fixture lookup misses. Callers
@@ -28,12 +28,8 @@ type Fixture struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// NewFixtureID returns a fresh fixture id (fix_<12-hex>).
-func NewFixtureID() string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return "fix_" + hex.EncodeToString(b[:])
-}
+// NewFixtureID returns a fresh UUIDv7. Replaces the legacy fix_<hex> form.
+func NewFixtureID() string { return ids.New() }
 
 // InsertFixture inserts a new fixture. Fails on UNIQUE(function_id,name)
 // conflict — callers that want upsert semantics should use UpsertFixture.

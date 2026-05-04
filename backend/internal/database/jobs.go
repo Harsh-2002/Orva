@@ -1,10 +1,10 @@
 package database
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"time"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // Job is a queued background invocation. Status transitions:
@@ -40,12 +40,8 @@ type Job struct {
 	EnqueuedByFunctionID    string `json:"enqueued_by_function_id,omitempty"`
 }
 
-// NewJobID returns a fresh job id (job_<12-hex>).
-func NewJobID() string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return "job_" + hex.EncodeToString(b[:])
-}
+// NewJobID returns a fresh UUIDv7. Replaces the legacy job_<hex> form.
+func NewJobID() string { return ids.New() }
 
 // EnqueueJob inserts a pending job. scheduledAt zero defaults to "now".
 func (db *Database) EnqueueJob(j *Job) error {

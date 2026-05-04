@@ -11,17 +11,16 @@ import (
 	"path/filepath"
 	"time"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/builder"
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ─── deploy_function_inline ────────────────────────────────────────
 
 type DeployInlineInput struct {
-	FunctionID   string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID   string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	Code         string `json:"code" jsonschema:"full source code for the handler file (handler.py or handler.js)"`
 	Filename     string `json:"filename,omitempty" jsonschema:"override the entrypoint filename — defaults to handler.{py|js}"`
 	Dependencies string `json:"dependencies,omitempty" jsonschema:"contents of requirements.txt (Python) or package.json (Node) — leave empty if no third-party deps"`
@@ -41,7 +40,7 @@ type DeployInlineOutput struct {
 // ─── rollback_function ─────────────────────────────────────────────
 
 type RollbackFunctionInput struct {
-	FunctionID   string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID   string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	DeploymentID string `json:"deployment_id,omitempty" jsonschema:"target deployment id (preferred — restores the env+config snapshot from that deployment)"`
 	CodeHash     string `json:"code_hash,omitempty" jsonschema:"alternative to deployment_id — content-addressed hash of a prior version"`
 	Confirm      bool   `json:"confirm" jsonschema:"must be true — rollback changes what's serving traffic"`
@@ -301,12 +300,7 @@ func deployInline(ctx context.Context, deps Deps, in DeployInlineInput) (*mcpsdk
 		return nil, DeployInlineOutput{}, fmt.Errorf("failed to stage tarball: %w", err)
 	}
 
-	depSuffix, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 16)
-	if err != nil {
-		_ = os.Remove(tarPath)
-		return nil, DeployInlineOutput{}, fmt.Errorf("id generation failed: %w", err)
-	}
-	deploymentID := "dep_" + depSuffix
+	deploymentID := ids.New()
 	dep := &database.Deployment{
 		ID: deploymentID, FunctionID: fn.ID, Version: int64(fn.Version + 1),
 		Status: "queued", Phase: "queued",
@@ -448,11 +442,7 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 		return nil, RollbackFunctionOutput{}, fmt.Errorf("version %s has been garbage-collected", short12(targetHash))
 	}
 
-	depSuffix, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 16)
-	if err != nil {
-		return nil, RollbackFunctionOutput{}, err
-	}
-	depID := "dep_" + depSuffix
+	depID := ids.New()
 	depRow := &database.Deployment{
 		ID: depID, FunctionID: fn.ID, Version: int64(fn.Version) + 1,
 		Status: "queued", Phase: "activate", CodeHash: targetHash,

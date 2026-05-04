@@ -49,7 +49,7 @@ func toFixtureView(f *database.Fixture) FixtureView {
 // ─── list_fixtures ─────────────────────────────────────────────────
 
 type ListFixturesInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name"`
 }
 type ListFixturesOutput struct {
 	Fixtures []FixtureView `json:"fixtures"`
@@ -58,7 +58,7 @@ type ListFixturesOutput struct {
 // ─── save_fixture ──────────────────────────────────────────────────
 
 type SaveFixtureInput struct {
-	FunctionID string            `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string            `json:"function_id" jsonschema:"function id (UUID) or name"`
 	Name       string            `json:"name"        jsonschema:"unique-per-function name; upsert on conflict"`
 	Method     string            `json:"method,omitempty"  jsonschema:"HTTP method, default POST"`
 	Path       string            `json:"path,omitempty"    jsonschema:"sub-path passed to the handler, default /"`

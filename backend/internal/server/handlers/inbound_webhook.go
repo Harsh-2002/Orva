@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
 )
@@ -33,7 +34,7 @@ func (h *InboundWebhookHandler) resolveFnID(idOrName string) (string, bool) {
 	if idOrName == "" {
 		return "", false
 	}
-	if strings.HasPrefix(idOrName, "fn_") {
+	if ids.IsUUID(idOrName) {
 		if _, err := h.Registry.Get(idOrName); err == nil {
 			return idOrName, true
 		}

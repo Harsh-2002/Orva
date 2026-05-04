@@ -3,7 +3,6 @@ package registry
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -30,11 +29,12 @@ func TestGenerateID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(id, "fn_") {
-		t.Fatalf("expected prefix fn_, got %s", id)
+	// UUIDv7 canonical form: 36 chars including 4 dashes.
+	if len(id) != 36 {
+		t.Fatalf("expected length 36 UUIDv7, got %d (%s)", len(id), id)
 	}
-	if len(id) != 3+12 { // fn_ + 12 chars
-		t.Fatalf("expected length 15, got %d (%s)", len(id), id)
+	if id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		t.Fatalf("expected canonical UUID dash positions, got %s", id)
 	}
 }
 

@@ -14,6 +14,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // InboundWebhook is a configured inbound trigger pointing at a function.
@@ -62,12 +64,10 @@ func DefaultSignatureHeader(format string) string {
 	}
 }
 
-// NewInboundWebhookID returns a fresh iwh_<12-hex>.
-func NewInboundWebhookID() string {
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return "iwh_" + hex.EncodeToString(b[:])
-}
+// NewInboundWebhookID returns a fresh UUIDv7. Replaces the legacy
+// iwh_<hex> form. The webhook URL the operator configures upstream
+// is /webhook/<uuid>.
+func NewInboundWebhookID() string { return ids.New() }
 
 // NewInboundWebhookSecret returns a 32-byte hex-encoded random secret.
 // This is the HMAC key the operator copies once and configures on the

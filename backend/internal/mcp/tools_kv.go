@@ -106,7 +106,7 @@ func toKVView(e *database.KVEntry) KVView {
 }
 
 type KVGetInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name owning this key"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name owning this key"`
 	Key        string `json:"key"`
 }
 type KVGetOutput struct {
@@ -120,7 +120,7 @@ type KVGetOutput struct {
 // validators accept the schema; bare `any` would emit JSON-Schema
 // `true` and crash MCP clients on tools/list parsing.
 type KVPutInput struct {
-	FunctionID string  `json:"function_id" jsonschema:"function id (fn_...) or name owning this key"`
+	FunctionID string  `json:"function_id" jsonschema:"function id (UUID) or name owning this key"`
 	Key        string  `json:"key"`
 	Value      KVValue `json:"value" jsonschema:"the value to store; populate one typed field matching the type field"`
 	TTLSeconds int     `json:"ttl_seconds,omitempty" jsonschema:"0 (default) = no expiry; positive = expire after that many seconds"`

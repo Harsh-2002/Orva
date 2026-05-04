@@ -3,8 +3,6 @@ package server
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"log/slog"
 	"net"
 	"net/http"
@@ -12,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/server/events"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/internal/trace"
@@ -295,9 +294,9 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func generateRequestID() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return "req_" + hex.EncodeToString(b)
+	// UUIDv7 — time-sortable so log scrapers can range over a window
+	// of request IDs without a separate timestamp join.
+	return ids.New()
 }
 
 // bodySizeMiddleware caps request bodies at maxBytes. When the cap is

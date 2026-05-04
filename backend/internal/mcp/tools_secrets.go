@@ -20,7 +20,7 @@ import (
 // any HTTP, MCP, or UI path.
 
 type ListSecretsInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 }
 
 type ListSecretsOutput struct {
@@ -29,7 +29,7 @@ type ListSecretsOutput struct {
 }
 
 type SetSecretInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	Key        string `json:"key" jsonschema:"environment variable name (typically SCREAMING_SNAKE_CASE)"`
 	Value      string `json:"value" jsonschema:"the secret value — encrypted at rest, never returned"`
 }

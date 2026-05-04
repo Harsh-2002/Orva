@@ -31,7 +31,9 @@ go vet ./...
 | `secrets` | AES-256-GCM encrypted secrets per function |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
 | `mcp` | MCP server (go-sdk); 70 tools (incl. get_trace, list_traces, get_function_baseline, get_orva_docs); auth accepts API keys or OAuth 2.1 access tokens |
-| `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps` and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. |
+| `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps` and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`. |
+| `ids` | Single canonical UUIDv7 generator (RFC 9562 §5.7). Storage IDs across every table. Plaintext bearer tokens stay `crypto/rand` — UUIDv7 leaks creation time. |
+| `urlhint` | Per-request `BaseURL(r)` helper. One source of truth for OAuth issuer URLs, MCP `invoke_url` fields, and audience-bound token validation. |
 | `firewall` | nftables outbound allow-list per function (lazy `sync.Once` probe) |
 | `server` | HTTP router + middleware chain + all handlers |
 | `server/events` | SSE event hub + outbound webhook fanout |

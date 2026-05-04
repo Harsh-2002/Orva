@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/sandbox"
 	"github.com/Harsh-2002/Orva/internal/trace"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,7 +23,7 @@ var osStat = os.Stat
 // ─── invoke_function ───────────────────────────────────────────────
 
 type InvokeFunctionInput struct {
-	FunctionID string            `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string            `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	Method     string            `json:"method,omitempty" jsonschema:"HTTP method, default POST"`
 	Path       string            `json:"path,omitempty" jsonschema:"sub-path passed to the handler as event.path, default /"`
 	Headers    map[string]string `json:"headers,omitempty" jsonschema:"request headers (lowercased on the way in)"`
@@ -137,7 +136,7 @@ type FixtureOverride struct {
 }
 
 type TestFunctionWithFixtureInput struct {
-	FunctionID  string          `json:"function" jsonschema:"function id (fn_...) or name owning the fixture"`
+	FunctionID  string          `json:"function" jsonschema:"function id (UUID) or name owning the fixture"`
 	FixtureName string          `json:"fixture_name" jsonschema:"name of a previously-saved fixture for this function"`
 	Override    FixtureOverride `json:"override,omitempty" jsonschema:"optional per-call overrides; shallow-merge onto the fixture (override wins)"`
 	TimeoutMS   int64           `json:"timeout_ms,omitempty"`
@@ -375,11 +374,10 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		bodyStr = string(buf)
 	}
 
-	// Construct the synthetic HTTP request the proxy expects. We point
-	// it at /fn/<short_id><path> so Proxy.Forward's path-strip logic
-	// matches the same shape it does for real REST callers.
-	shortID := strings.TrimPrefix(fn.ID, "fn_")
-	fullPath := "/fn/" + shortID
+	// Construct the synthetic HTTP request the proxy expects. With
+	// UUIDv7 IDs, the URL form and the DB form are identical — no
+	// prefix stripping or re-adding.
+	fullPath := "/fn/" + fn.ID
 	if path != "" && path != "/" {
 		if !strings.HasPrefix(path, "/") {
 			path = "/" + path
@@ -398,8 +396,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	rec := httptest.NewRecorder()
 
 	// Generate execution id.
-	execSuffix, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	execID := "exec_" + execSuffix
+	execID := ids.New()
 
 	// MCP-rooted invocation gets a fresh trace. The proxy reads trace
 	// context off the request — we stamp it via WithContext so spans

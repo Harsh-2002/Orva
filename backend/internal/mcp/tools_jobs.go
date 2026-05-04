@@ -66,7 +66,7 @@ func toJobView(j *database.Job) JobView {
 }
 
 type EnqueueJobInput struct {
-	FunctionID  string `json:"function_id" jsonschema:"function id (fn_...) or name to run when the job fires"`
+	FunctionID  string `json:"function_id" jsonschema:"function id (UUID) or name to run when the job fires"`
 	Payload     map[string]any `json:"payload,omitempty" jsonschema:"JSON object delivered as the invoke body; default {}"`
 	ScheduledAt string `json:"scheduled_at,omitempty" jsonschema:"RFC3339 timestamp; omit to run as soon as the scheduler picks it up (~5s)"`
 	MaxAttempts int    `json:"max_attempts,omitempty" jsonschema:"retry budget; default 3, exponential backoff between attempts"`
@@ -74,7 +74,7 @@ type EnqueueJobInput struct {
 
 type ListJobsInput struct {
 	Status     string `json:"status,omitempty"      jsonschema:"filter: pending | running | succeeded | failed"`
-	FunctionID string `json:"function_id,omitempty" jsonschema:"function id (fn_...) or name to scope the list"`
+	FunctionID string `json:"function_id,omitempty" jsonschema:"function id (UUID) or name to scope the list"`
 	Limit      int    `json:"limit,omitempty"        jsonschema:"max rows; default 50, cap 500"`
 }
 type ListJobsOutput struct {

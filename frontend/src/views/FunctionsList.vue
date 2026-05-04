@@ -269,7 +269,7 @@ const toggleAll = () => {
   }
 }
 
-const invokeUrlFor = (fn) => `${window.location.origin}/fn/${fn.id.replace(/^fn_/, '')}`
+const invokeUrlFor = (fn) => `${window.location.origin}/fn/${fn.id}`
 
 const copyUrl = async (fn) => {
   const ok = await copyText(invokeUrlFor(fn))

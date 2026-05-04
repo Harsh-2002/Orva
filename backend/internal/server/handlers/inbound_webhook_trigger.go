@@ -25,9 +25,8 @@ import (
 	"strings"
 	"time"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/registry"
@@ -152,8 +151,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	// Generate execution id up-front so the activity + execution rows
 	// stay correlated. Format mirrors invoke / cron / job.
-	execSuffix, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	execID := "exec_" + execSuffix
+	execID := ids.New()
 	startedAt := time.Now()
 
 	// Inbound webhook is always a root span. The middleware already

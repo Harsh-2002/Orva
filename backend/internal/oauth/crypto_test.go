@@ -43,6 +43,7 @@ func TestVerifyPKCE_RejectsEmpty(t *testing.T) {
 }
 
 func TestNewTokensHaveExpectedPrefixes(t *testing.T) {
+	// Plaintext bearer credentials keep their prefixed-random form.
 	cases := []struct {
 		name string
 		gen  func() string
@@ -51,7 +52,6 @@ func TestNewTokensHaveExpectedPrefixes(t *testing.T) {
 		{"access", NewAccessToken, TokenPrefixAccess},
 		{"refresh", NewRefreshToken, TokenPrefixRefresh},
 		{"code", NewAuthCode, TokenPrefixCode},
-		{"client", NewClientID, TokenPrefixClient},
 		{"secret", NewClientSecret, TokenPrefixSecret},
 	}
 	for _, c := range cases {
@@ -68,6 +68,19 @@ func TestNewTokensHaveExpectedPrefixes(t *testing.T) {
 				t.Fatalf("%s: two consecutive tokens collided — entropy bug", c.name)
 			}
 		})
+	}
+}
+
+func TestNewClientIDIsUUIDv7(t *testing.T) {
+	// Wire client_id is now UUIDv7 (no prefix). Two consecutive calls
+	// must differ; both must be canonical 36-char form.
+	a := NewClientID()
+	b := NewClientID()
+	if a == b {
+		t.Fatal("two consecutive client IDs collided")
+	}
+	if len(a) != 36 {
+		t.Fatalf("expected 36-char UUID, got %d: %q", len(a), a)
 	}
 }
 

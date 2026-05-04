@@ -16,10 +16,9 @@ import (
 	"sync"
 	"time"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/builder"
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
@@ -33,12 +32,17 @@ var errVersionGCd = errors.New("requested version has been garbage-collected")
 // returns the canonical function ID. Mirrors the helper used by the KV /
 // fixtures / inbound-webhook handlers so /functions/{name}/... and
 // /functions/{id}/... behave identically across the API surface.
+//
+// Function IDs are UUIDv7 — anything that parses as a UUID is treated
+// as an ID (Registry lookup); everything else falls through to a name
+// lookup. This is more robust than prefix-sniffing because it doesn't
+// have to know the prefix shape (and there isn't one anymore).
 func (h *FunctionHandler) resolveFnID(idOrName string) (string, bool) {
 	idOrName = strings.TrimSpace(idOrName)
 	if idOrName == "" {
 		return "", false
 	}
-	if strings.HasPrefix(idOrName, "fn_") {
+	if ids.IsUUID(idOrName) {
 		if _, err := h.Registry.Get(idOrName); err == nil {
 			return idOrName, true
 		}
@@ -202,13 +206,9 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.EnvVars = make(map[string]string)
 	}
 
-	// Generate function ID.
-	suffix, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	if err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to generate ID", reqID)
-		return
-	}
-	fnID := "fn_" + suffix
+	// Generate function ID — UUIDv7. The full canonical form is what
+	// appears in the URL: /fn/<uuid>.
+	fnID := ids.New()
 
 	fn := &database.Function{
 		ID:                fnID,
@@ -648,13 +648,7 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 // the Queue and removed when the build completes.
 func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Request, fn *database.Function, tarballPath, reqID string) {
 	// Always insert a deployments row so clients can observe state.
-	depSuffix, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 16)
-	if err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to generate deployment id", reqID)
-		removeTempFile(tarballPath)
-		return
-	}
-	deploymentID := "dep_" + depSuffix
+	deploymentID := ids.New()
 	dep := &database.Deployment{
 		ID:         deploymentID,
 		FunctionID: fn.ID,
@@ -908,7 +902,7 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 
 	// Insert the new deployment row up-front so the audit trail records
 	// the attempt even if activation fails after this point.
-	depID := "dep_" + nanoidShort()
+	depID := ids.New()
 	depRow := &database.Deployment{
 		ID:                 depID,
 		FunctionID:         fnID,
@@ -1018,13 +1012,3 @@ func short(s string) string {
 	return s
 }
 
-// nanoidShort returns a 16-char nanoid suitable for deployment IDs.
-func nanoidShort() string {
-	id, err := gonanoid.New(16)
-	if err != nil {
-		// Pathological. Fall back to time-based to avoid panicking the
-		// handler — the caller will still see a unique-enough ID.
-		return strconv.FormatInt(time.Now().UnixNano(), 36)
-	}
-	return id
-}

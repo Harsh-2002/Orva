@@ -624,6 +624,13 @@ hashes (mirroring Orva's API-key posture). The consent screen is
 gated by the Orva session cookie; if the user isn't logged in,
 the request bounces through `/web/login` and back.
 
+DCR clients that don't request a specific scope get the full
+`read invoke write admin` scope by default — without RBAC, the alternative
+("OAuth tokens see fewer tools than the operator's own API key") just
+makes browser connectors decoratively useless. The consent screen
+collapses admin to a single bold "Full administrative control over your
+Orva instance" line so the user knows exactly what they're granting.
+
 Granted apps appear in **Settings → Connected applications** with
 authorized-at, last-used-at, and per-row Revoke. The matching REST
 surface (used by the dashboard, also callable from the CLI):
@@ -907,8 +914,8 @@ Pattern:
 </cors>
 
 <custom_routes>
-Default URL: /fn/<name>. To attach a friendly path (/api/payments, /webhooks/stripe, /v1/users/{id}), the operator configures a route via the dashboard or:
-  POST /api/v1/routes   { "path": "/api/payments", "function_id": "fn_..." }
+Default URL: /fn/<id> (the function id is a UUIDv7). To attach a friendly path (/api/payments, /webhooks/stripe, /v1/users/{id}), the operator configures a route via the dashboard or:
+  POST /api/v1/routes   { "path": "/api/payments", "function_id": "<uuid>" }
 Path params with {name} are passed in event.path_params. Reserved prefixes (do NOT suggest these for custom routes): /api/, /fn/, /mcp/, /web/, /_orva/.
 </custom_routes>
 
@@ -1325,7 +1332,7 @@ orva deploy ./my-fn --name api --runtime python314 --entrypoint app.py
 #### Invoke + tail logs
 
 ```bash
-# Invoke a function by name or fn_<id>:
+# Invoke a function by name or UUID id:
 orva invoke resize-image --data '{"url":"https://example.com/cat.jpg"}'
 
 # Recent executions:

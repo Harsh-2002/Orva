@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/registry"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/internal/trace"
-	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
 // InternalInvokeHandler is the F2F (function-to-function) entrypoint.
@@ -126,8 +126,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	// Generate an execution ID so this F2F call shows up in the executions
 	// log AND in the trace tree as a distinct span. Without this, F2F
 	// children would be invisible to ops tooling.
-	execSuffix, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	execID := "exec_" + execSuffix
+	execID := ids.New()
 
 	// Synthesize the event in the same shape the public /fn/ handler
 	// builds so user code can't tell the difference (which is the point).

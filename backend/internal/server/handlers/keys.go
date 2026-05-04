@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
 )
 
@@ -68,13 +69,8 @@ func (h *KeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	hash := sha256.Sum256([]byte(plaintextKey))
 	keyHash := hex.EncodeToString(hash[:])
 
-	// Generate key ID.
-	idBytes := make([]byte, 8)
-	if _, err := rand.Read(idBytes); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to generate key ID", reqID)
-		return
-	}
-	keyID := "key_" + hex.EncodeToString(idBytes)
+	// Generate key ID — UUIDv7 for time-sortable B-tree-friendly inserts.
+	keyID := ids.New()
 
 	// Marshal permissions as JSON array.
 	permsJSON, err := json.Marshal(req.Permissions)

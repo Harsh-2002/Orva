@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -110,11 +111,7 @@ func registerKeyTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				plaintext := "orva_" + hex.EncodeToString(rawKey)
 				hash := sha256.Sum256([]byte(plaintext))
 
-				idBytes := make([]byte, 8)
-				if _, err := rand.Read(idBytes); err != nil {
-					return nil, CreateAPIKeyOutput{}, err
-				}
-				keyID := "key_" + hex.EncodeToString(idBytes)
+				keyID := ids.New()
 				prefix := plaintext[:12]
 
 				var expiresAt *time.Time

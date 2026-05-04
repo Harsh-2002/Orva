@@ -78,7 +78,7 @@ type ListTracesOutput struct {
 }
 
 type GetFunctionBaselineInput struct {
-	FunctionID string `json:"function_id" jsonschema:"the function id (fn_...) or friendly name"`
+	FunctionID string `json:"function_id" jsonschema:"the function id (UUID) or friendly name"`
 }
 
 func registerTraceTools(s *mcpsdk.Server, deps Deps, perms permSet) {

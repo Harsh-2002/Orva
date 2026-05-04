@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
-
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/registry"
@@ -117,13 +116,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	// Generate the new execution ID up-front so the captured event-JSON
 	// carries the new id (function code that logs `execution_id` shows
 	// the right one).
-	suffix, err := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	if err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL",
-			"failed to generate execution id", reqID)
-		return
-	}
-	newExecID := "exec_" + suffix
+	newExecID := ids.New()
 
 	// Rebuild the headers map from the stored JSON. Sensitive headers
 	// landed as the literal string "[REDACTED]" — those flow through to

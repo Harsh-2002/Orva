@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/cli"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/spf13/cobra"
 )
 
@@ -183,10 +184,10 @@ func runFunctionsDelete(cmd *cobra.Command, args []string) {
 }
 
 // resolveFunctionID resolves a name-or-id to a function ID.
-// If the input starts with "fn_", it is treated as an ID directly.
+// If the input parses as a UUID, it is treated as an ID directly.
 // Otherwise, it lists functions and finds one matching by name.
 func resolveFunctionID(client *cli.Client, nameOrID string) string {
-	if len(nameOrID) > 3 && nameOrID[:3] == "fn_" {
+	if ids.IsUUID(nameOrID) {
 		return nameOrID
 	}
 

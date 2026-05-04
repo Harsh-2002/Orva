@@ -21,11 +21,11 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/internal/metrics"
 	"github.com/Harsh-2002/Orva/internal/pool"
 	"github.com/Harsh-2002/Orva/internal/server/events"
 	"github.com/Harsh-2002/Orva/internal/trace"
-	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/robfig/cron/v3"
 )
 
@@ -339,8 +339,7 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	// Build the synthetic event. Cron payloads land at POST / so the
 	// handler signature is identical to a public invocation; we add a
 	// header so user code can branch on origin.
-	execID, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	execID = "exec_" + execID
+	execID := ids.New()
 	// Cron is always a root span — fresh trace.
 	traceID := trace.NewTraceID()
 	spanID := trace.NewSpanID()
@@ -650,8 +649,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 		traceID = trace.NewTraceID()
 	}
 	spanID := trace.NewSpanID()
-	execSuffix, _ := gonanoid.Generate("abcdefghijklmnopqrstuvwxyz0123456789", 12)
-	execID := "exec_" + execSuffix
+	execID := ids.New()
 
 	event := map[string]any{
 		"method": "POST",

@@ -649,6 +649,15 @@ PRAGMA foreign_keys = ON;
 		}
 	}
 
+	// One-shot rewrite of every prefix-typed storage ID (fn_, key_,
+	// oat_, etc.) to UUIDv7. Idempotent — guarded by a marker row in
+	// system_config. Runs AFTER the schema migrations so the marker
+	// table exists. Fails loud if FK integrity breaks, which is the
+	// only safe behaviour for a one-way data migration.
+	if err := db.MigrateToUUIDv7(); err != nil {
+		return fmt.Errorf("uuidv7 migration: %w", err)
+	}
+
 	// Kick off the batched async writer now that the schema exists. Safe
 	// to call multiple times — Migrate is idempotent and we only start the
 	// writer if it's nil. Tests that don't call Migrate continue to use

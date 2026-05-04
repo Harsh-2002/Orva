@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -40,7 +39,7 @@ func runInvoke(cmd *cobra.Command, args []string) {
 	}
 
 	start := time.Now()
-	resp, err := client.Post("/fn/"+strings.TrimPrefix(fnID, "fn_"), payload)
+	resp, err := client.Post("/fn/"+fnID, payload)
 	duration := time.Since(start)
 	if err != nil {
 		exitError("invoke failed: %v", err)

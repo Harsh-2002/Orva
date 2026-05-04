@@ -49,14 +49,14 @@ func toInboundWebhookView(w *database.InboundWebhook) InboundWebhookView {
 }
 
 type ListInboundWebhooksInput struct {
-	FunctionID string `json:"function_id" jsonschema:"function id (fn_...) or name"`
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name"`
 }
 type ListInboundWebhooksOutput struct {
 	InboundWebhooks []InboundWebhookView `json:"inbound_webhooks"`
 }
 
 type CreateInboundWebhookInput struct {
-	FunctionID      string `json:"function_id" jsonschema:"function id (fn_...) or name to fire when the trigger arrives"`
+	FunctionID      string `json:"function_id" jsonschema:"function id (UUID) or name to fire when the trigger arrives"`
 	Name            string `json:"name" jsonschema:"operator-friendly label"`
 	SignatureFormat string `json:"signature_format,omitempty" jsonschema:"hmac_sha256_hex (default), hmac_sha256_base64, github, stripe, slack"`
 	SignatureHeader string `json:"signature_header,omitempty" jsonschema:"override the header carrying the signature; defaults are format-specific"`
