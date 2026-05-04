@@ -64,8 +64,12 @@ type FunctionHandler struct {
 	// PoolRefresh is called by the deploy path after a successful build so
 	// the warm pool drops stale workers. Nil = no-op (dev / tests).
 	PoolRefresh func(fnID string)
-	// PoolDrain is called on delete to kill workers and remove the pool entry
-	// so the function no longer appears in metrics. Nil = no-op (dev / tests).
+	// PoolDrain is called when existing workers must be discarded entirely:
+	// (1) on delete, so the function no longer appears in metrics; (2) on a
+	// network_mode flip, since a worker spawned with the old netns is no
+	// longer safe to reuse — RefreshForDeploy only nukes idles, leaving an
+	// in-flight worker that releases moments later as a stale "warm" hit.
+	// Nil = no-op (dev / tests).
 	PoolDrain func(fnID string)
 	// FnLock returns a per-function mutex shared with the build queue, so
 	// Rollback serializes against any in-flight deploy of the same fn.
@@ -76,6 +80,7 @@ type FunctionHandler struct {
 // createFunctionRequest is the body for creating a function.
 type createFunctionRequest struct {
 	Name              string            `json:"name"`
+	Description       string            `json:"description"`
 	Runtime           string            `json:"runtime"`
 	Entrypoint        string            `json:"entrypoint"`
 	TimeoutMS         int64             `json:"timeout_ms"`
@@ -92,6 +97,7 @@ type createFunctionRequest struct {
 // updateFunctionRequest is the body for updating a function.
 type updateFunctionRequest struct {
 	Name              *string            `json:"name"`
+	Description       *string            `json:"description"`
 	Entrypoint        *string            `json:"entrypoint"`
 	TimeoutMS         *int64             `json:"timeout_ms"`
 	MemoryMB          *int64             `json:"memory_mb"`
@@ -213,6 +219,7 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	fn := &database.Function{
 		ID:                fnID,
 		Name:              req.Name,
+		Description:       req.Description,
 		Runtime:           req.Runtime,
 		Entrypoint:        req.Entrypoint,
 		TimeoutMS:         req.TimeoutMS,
@@ -345,12 +352,23 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Track whether anything that affects the spawn config changed — if
 	// so, we drain the warm pool so the next invoke re-spawns with the
-	// new config (memory, CPU, env vars, and now network_mode).
+	// new config (memory, CPU, env vars, max_concurrency, etc).
+	//
+	// network_mode is split out: it requires a HARD drain (PoolDrain) not
+	// a soft refresh (PoolRefresh). RefreshForDeploy only kills idle
+	// workers — a worker mid-request when this PUT lands will release
+	// moments later and become a stale "warm" hit serving the wrong
+	// netns to the next invocation. PoolDrain removes the pool entry
+	// outright so the next Release also kills the busy worker.
 	spawnConfigChanged := false
+	networkModeChanged := false
 
 	// Apply partial updates.
 	if req.Name != nil {
 		fn.Name = *req.Name
+	}
+	if req.Description != nil {
+		fn.Description = *req.Description
 	}
 	if req.Entrypoint != nil {
 		fn.Entrypoint = *req.Entrypoint
@@ -379,6 +397,7 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if newMode != fn.NetworkMode {
 			fn.NetworkMode = newMode
 			spawnConfigChanged = true
+			networkModeChanged = true
 		}
 	}
 	if req.MaxConcurrency != nil && *req.MaxConcurrency != fn.MaxConcurrency {
@@ -420,7 +439,13 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drain warm workers so the next invoke picks up the new spawn config.
-	if spawnConfigChanged && h.PoolRefresh != nil {
+	// network_mode flips require a hard drain (busy workers carry a netns
+	// that can't satisfy the new contract); other config changes just
+	// need idle eviction.
+	switch {
+	case networkModeChanged && h.PoolDrain != nil:
+		h.PoolDrain(fn.ID)
+	case spawnConfigChanged && h.PoolRefresh != nil:
 		h.PoolRefresh(fn.ID)
 	}
 
@@ -562,7 +587,11 @@ func (h *FunctionHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.enqueueOrBuildSync(w, r, fn, tarballPath, reqID)
+	// Tarball deploys: we'd have to unpack and scan to detect the SDK
+	// import, which is more work than this advisory is worth. The MCP
+	// inline path (which is what an agent uses) catches it; the CLI
+	// tarball path is a human flow where the operator tends to know.
+	h.enqueueOrBuildSync(w, r, fn, tarballPath, reqID, "")
 }
 
 // DeployInline handles POST /api/v1/functions/{fn_id}/deploy-inline.
@@ -639,14 +668,27 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 	gw.Close()
 	tmpFile.Close()
 
-	h.enqueueOrBuildSync(w, r, fn, tmpFile.Name(), reqID)
+	// Inline deploys carry the source verbatim — scan it for the orva SDK
+	// import while we still have it in hand, and surface a deploy-time
+	// warning if the function's netns won't let the SDK reach orvad.
+	// Without this, the failure shows up only on the first invoke as a
+	// generic runtime crash, after the agent has moved on.
+	var deployWarning string
+	if fn.NetworkMode == database.NetworkModeNone && builder.SourceUsesOrvaSDK(req.Code) {
+		deployWarning = builder.SDKNoneWarning
+	}
+
+	h.enqueueOrBuildSync(w, r, fn, tmpFile.Name(), reqID, deployWarning)
 }
 
 // enqueueOrBuildSync submits the build job. If BuildQueue is wired, returns
 // 202 + deployment_id immediately; otherwise falls back to synchronous
 // build (legacy path for tests). The tarball at tarballPath is consumed by
-// the Queue and removed when the build completes.
-func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Request, fn *database.Function, tarballPath, reqID string) {
+// the Queue and removed when the build completes. deployWarning, when
+// non-empty, is attached to the response payload so callers see advisory
+// notes (e.g. SDK import meets network_mode=none) at deploy time rather
+// than discovering the issue on the first failed invoke.
+func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Request, fn *database.Function, tarballPath, reqID, deployWarning string) {
 	// Always insert a deployments row so clients can observe state.
 	deploymentID := ids.New()
 	dep := &database.Deployment{
@@ -689,11 +731,15 @@ func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		w.Header().Set("Location", "/api/v1/deployments/"+deploymentID)
-		respond.JSON(w, http.StatusAccepted, map[string]any{
+		resp := map[string]any{
 			"deployment_id": deploymentID,
 			"status":        "queued",
 			"function_id":   fn.ID,
-		})
+		}
+		if deployWarning != "" {
+			resp["warning"] = deployWarning
+		}
+		respond.JSON(w, http.StatusAccepted, resp)
 		return
 	}
 
@@ -726,13 +772,17 @@ func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Requ
 	if h.PoolRefresh != nil {
 		h.PoolRefresh(fn.ID)
 	}
-	respond.JSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"status":        "deployed",
 		"deployment_id": deploymentID,
 		"code_hash":     result.CodeHash,
 		"duration":      result.Duration.String(),
 		"function":      fn,
-	})
+	}
+	if deployWarning != "" {
+		resp["warning"] = deployWarning
+	}
+	respond.JSON(w, http.StatusOK, resp)
 }
 
 // stashUpload saves the request body (a tar.gz upload) to a temp file and

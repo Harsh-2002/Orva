@@ -98,6 +98,11 @@
                   <Gauge class="w-3 h-3" /> {{ fn.rate_limit_per_min }}/m
                 </span>
               </div>
+              <p
+                v-if="fn.description"
+                class="mt-1 text-xs font-normal text-foreground-muted line-clamp-2"
+                :title="fn.description"
+              >{{ fn.description }}</p>
             </td>
             <td class="px-4 py-3 text-foreground hidden sm:table-cell">
               <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border border-border bg-background text-foreground-muted font-mono">
@@ -239,6 +244,7 @@ const filtered = computed(() => {
   if (!q) return functions.value
   return functions.value.filter((fn) =>
     fn.name?.toLowerCase().includes(q) ||
+    fn.description?.toLowerCase().includes(q) ||
     fn.runtime?.toLowerCase().includes(q) ||
     fn.id?.toLowerCase().includes(q),
   )

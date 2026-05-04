@@ -123,7 +123,10 @@ r = httpx.post(
 print(r.json())
 ```
 
-> **Custom routes:** attach a friendly path with `POST /api/v1/routes`.
+> **Custom routes:** attach a friendly path with `POST /api/v1/routes`,
+> the `set_route` MCP tool, the `orva routes set` CLI, OR the
+> dashboard's function settings → "Custom routes" section (it
+> collision-checks against other functions before saving).
 > Reserved prefixes: `/api/` `/fn/` `/mcp/` `/web/` `/_orva/`.
 
 ---
@@ -135,11 +138,13 @@ encrypted and only decrypt into the worker environment at spawn time.
 
 | Field | Purpose | Behaviour |
 |---|---|---|
+| `description` | Intent | One-sentence summary of what the function does (e.g. "resize uploaded images to webp"). Surfaces in `list_functions`, the dashboard's function card and search, and channel-mode tool descriptions exposed to other agents. Required when creating via MCP; optional via REST/CLI for backwards compat. |
 | `env_vars` | Plain config | Plaintext config stored on the function record. Use for feature flags and non-secret settings. |
 | `/secrets` | Encrypted | AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time. |
-| `network_mode` | Egress control | none = isolated loopback. egress = outbound HTTPS allowed; firewall blocklist applies. |
+| `network_mode` | Egress control | none = isolated loopback. egress = outbound HTTPS allowed; firewall blocklist applies. The orva SDK (kv / invoke / jobs) reaches orvad over the bridge, so it requires `egress`. |
 | `auth_mode` | Invoke gate | none = public. platform_key = require Orva API key. signed = require HMAC. |
 | `rate_limit_per_min` | Per-IP throttle | Optional cap for public or webhook-facing functions. Exceeding it returns 429. |
+| custom routes | Pretty URLs | Operator-defined `/path` or `/prefix/*` mappings to the function. Manage via `POST /api/v1/routes`, the `set_route` MCP tool, the `orva routes set` CLI, or the dashboard's function settings → "Custom routes" section (collision-checks against other functions). Optional. |
 
 ### Set a secret
 
@@ -456,6 +461,15 @@ call directly. API key permissions scope the available tool set.
 - **Auth header:** `Authorization: Bearer <token>`
   (fallback: `X-Orva-API-Key: <token>`)
 - **Transport:** Streamable HTTP, MCP 2025-11-25.
+
+> **Strict input contract.** The MCP tool surface is required-by-default: optional fields are exceptions
+> (pagination, list filters, true patches, opt-in TTLs). Notable required fields the agent must declare
+> explicitly: on `create_function` — `name`, `description`, `runtime`, `entrypoint`, `timeout_ms`,
+> `memory_mb`, `cpus`, `network_mode`, `auth_mode`; on `invoke_function` — `method` (no silent POST default);
+> on `deploy_function_inline` — `wait` (true blocks until built, false returns queued); on `create_api_key` —
+> `permissions` (least-privilege subset of `[invoke, read, write, admin]`) and `expires_in_days`. The schema
+> rejects missing fields at the JSON-RPC layer, so agents see "missing properties" errors at the moment of
+> the call rather than runtime surprises later.
 
 > Generate a token from the Docs page in the dashboard, then drop it
 > into your client config (Claude Code, Claude Desktop, Cursor, Cline,
@@ -786,7 +800,7 @@ Secrets are stored encrypted at rest, decrypted only into the worker environment
 </env_and_secrets>
 
 <orva_sdk>
-Every function has the `orva` module pre-imported — zero install, zero config. It speaks to a per-process internal control-plane socket, so it works regardless of the network toggle. THREE primitives:
+Every function has the `orva` module pre-imported — zero install, zero config. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with `network_mode: "egress"` (or updated to it later). With the default `network_mode: "none"`, every SDK call fails at runtime with `ENETUNREACH` / `OrvaUnavailableError` / `TypeError: fetch failed`. THREE primitives:
 
 ## orva.kv — per-function key/value store on SQLite
 Per-function namespace; keys never collide across functions. Optional TTL in seconds (sweep every 5 min AND filtered at read time, so stale reads are impossible). Values JSON-serialised; cap 64 KB per value. Keys cap 256 chars. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
@@ -917,7 +931,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - Filesystem: read-only EXCEPT /code (your code) and /tmp (writable, ephemeral, cleared between cold starts).
 - NO subprocess execution (subprocess / child_process disabled). NO raw sockets. NO listening ports — the platform owns the HTTP server.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
-- orva.kv / orva.invoke / orva.jobs do NOT need egress — they go over the internal control-plane socket regardless of the network toggle.
+- orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — the editor's deploy step will warn you when the import meets `none`.
 - When egress IS enabled, the operator can further restrict it via the firewall + DNS allowlist (Firewall page). Assume best-effort; handle failures.
 - Concurrency: each warm worker handles one request at a time. The pool autoscales workers up to the function's max_concurrent setting. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>

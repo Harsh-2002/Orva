@@ -287,19 +287,23 @@ func (m *Manager) RecordLatency(fnID string, d time.Duration) {
 	}
 }
 
-// RefreshForDeploy drains any existing workers for a function and lets the
-// next Acquire lazily respawn from the new code directory. Called by the
-// build queue after a successful deploy. Idempotent — no-op if the pool
-// hasn't been created yet.
+// RefreshForDeploy drains idle workers for a function so the next Acquire
+// lazily respawns from the new code directory. Called by the build queue
+// after a successful deploy. Idempotent — no-op if the pool hasn't been
+// created yet.
+//
+// Busy workers are left running: a stale code-dir or env_var on a worker
+// that's mid-request is benign (it finishes its in-flight call and the
+// next Release puts it back as idle, where the next sweep prunes it
+// anyway). For changes that make existing workers fundamentally unsafe
+// to reuse (currently: network_mode flips, where a stale "none" worker
+// has no network namespace at all), use Drain instead.
 func (m *Manager) RefreshForDeploy(fnID string) {
 	v, ok := m.pools.Load(fnID)
 	if !ok {
 		return
 	}
 	p := v.(*functionPool)
-	// Drain idle workers. Busy workers will be killed on Release via the
-	// isUnusable check once we flip closing to false again — simplest to
-	// just kill idles and let the next Acquire spawn a fresh one.
 	for {
 		select {
 		case w := <-p.idle:
@@ -312,6 +316,25 @@ func (m *Manager) RefreshForDeploy(fnID string) {
 			return
 		}
 	}
+}
+
+// Drain performs a hard reset of a function's pool: every idle worker is
+// killed synchronously, the pool entry is removed from the manager map,
+// and any busy worker mid-request is killed on its next Release (the
+// Release path detects the missing pool entry via LoadAndDelete and
+// kills rather than reparking).
+//
+// Use this when the spawn config has changed in a way that makes a
+// surviving worker incorrect — most importantly, network_mode flips.
+// A worker spawned under network_mode="none" lives in an isolated net
+// namespace with no bridge connectivity, so it cannot satisfy a
+// follow-up invocation that has been promised "egress" semantics.
+//
+// The next Acquire lazily recreates the pool via getOrCreatePool, which
+// reads the function record fresh and spawns a new worker with the
+// updated config.
+func (m *Manager) Drain(fnID string) {
+	m.DrainAndRemove(fnID)
 }
 
 // DrainAndRemove kills all idle workers for a function and removes the pool

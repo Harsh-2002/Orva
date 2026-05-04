@@ -12,6 +12,17 @@ export const getFunctionSource = (fnId) => apiClient.get(`/functions/${fnId}/sou
 
 export const deleteFunction = (id) => apiClient.delete(`/functions/${id}`)
 
+// Custom routes — operator-defined URL → function mappings (e.g.
+// /webhooks/stripe → fn xyz). Backend stores upsert-style, so setRoute
+// silently overwrites a path that already exists. The Editor's Routes
+// section runs a client-side collision check before calling this so
+// the operator confirms before remapping.
+export const listRoutes = () => apiClient.get('/routes')
+export const setRoute = (path, functionId, methods = '*') =>
+  apiClient.post('/routes', { path, function_id: functionId, methods })
+export const deleteRoute = (path) =>
+  apiClient.delete('/routes', { params: { path } })
+
 // Deploy: create function + deploy code inline.
 // data: { name, runtime, code, entrypoint? }
 export const deployFunction = async (data) => {

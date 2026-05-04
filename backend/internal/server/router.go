@@ -129,7 +129,7 @@ func (r *Router) setupRoutes() {
 	}
 	if r.poolMgr != nil {
 		fnHandler.PoolRefresh = r.poolMgr.RefreshForDeploy
-		fnHandler.PoolDrain = r.poolMgr.DrainAndRemove
+		fnHandler.PoolDrain = r.poolMgr.Drain
 		fnHandler.FnLock = r.poolMgr.FunctionLock
 	}
 	r.mux.HandleFunc("POST /api/v1/functions", fnHandler.Create)

@@ -24,7 +24,7 @@ type DeployInlineInput struct {
 	Code         string `json:"code" jsonschema:"full source code for the handler file (handler.py or handler.js)"`
 	Filename     string `json:"filename,omitempty" jsonschema:"override the entrypoint filename — defaults to handler.{py|js}"`
 	Dependencies string `json:"dependencies,omitempty" jsonschema:"contents of requirements.txt (Python) or package.json (Node) — leave empty if no third-party deps"`
-	Wait         bool   `json:"wait,omitempty" jsonschema:"if true, block until the build finishes (or fails) — recommended for chat agents that want to invoke right after"`
+	Wait         bool   `json:"wait" jsonschema:"REQUIRED — true blocks until the build terminates (succeeded or failed) and the response carries the final state; false returns immediately with status='queued' and the agent must poll get_deployment / wait_deployment. Chat agents that intend to invoke right after should pass true; long-running agents that fan out parallel deploys may pass false. No silent default — racing invoke against a still-queued build is the bug we're avoiding."`
 }
 
 type DeployInlineOutput struct {
@@ -35,6 +35,12 @@ type DeployInlineOutput struct {
 	DurationMS   int64  `json:"duration_ms,omitempty"`
 	Phase        string `json:"phase,omitempty"`
 	Error        string `json:"error,omitempty"`
+	// Warning is non-empty when the platform detected something likely
+	// wrong with this deploy that the agent should know before invoking.
+	// Currently emitted when the source imports the orva SDK but the
+	// function's network_mode is "none" (every SDK call would fail at
+	// runtime with ENETUNREACH).
+	Warning string `json:"warning,omitempty" jsonschema:"non-fatal advisory about likely runtime issues — read this before invoking"`
 }
 
 // ─── rollback_function ─────────────────────────────────────────────
@@ -204,8 +210,8 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 	gatedAdd(perms, permWrite, func() {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
-				Name:        "deploy_function_inline",
-				Description: "Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. With wait=true the tool blocks until the build finishes — strongly recommended for chat agents so the next step (invoke_function) doesn't race the build. Returns deployment_id either way.",
+				Name: "deploy_function_inline",
+				Description: "Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but the function's network_mode is 'none' (the SDK call would fail at runtime).",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrFalse(),
 					OpenWorldHint:   ptrFalse(),
@@ -341,6 +347,9 @@ func deployInline(ctx context.Context, deps Deps, in DeployInlineInput) (*mcpsdk
 		DeploymentID: deploymentID,
 		Status:       "queued",
 		FunctionID:   fn.ID,
+	}
+	if fn.NetworkMode == database.NetworkModeNone && builder.SourceUsesOrvaSDK(in.Code) {
+		out.Warning = builder.SDKNoneWarning
 	}
 
 	if !in.Wait {

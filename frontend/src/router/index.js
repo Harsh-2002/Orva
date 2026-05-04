@@ -51,6 +51,18 @@ const router = createRouter({
         { path: 'docs', name: 'docs', component: () => import('@/views/Docs.vue') },
       ],
     },
+    // Catch-all 404 — surfaces the path the user tried so typos are
+    // easy to spot. Anything not matched above lands here, including
+    // unknown nested routes and stale bookmarks pointing at removed
+    // pages. Marked requiresAuth=false so an unauthenticated request
+    // for a missing path doesn't bounce them into the login redirect
+    // loop; the page itself is harmless info.
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('@/views/NotFound.vue'),
+      meta: { requiresAuth: false },
+    },
   ],
 })
 

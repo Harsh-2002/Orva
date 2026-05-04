@@ -668,6 +668,103 @@
             <span class="font-mono">Retry-After: 60</span> when exceeded.
           </p>
         </div>
+
+        <div class="border-t border-border pt-4 space-y-3">
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide flex items-center gap-2">
+            <Globe class="w-3.5 h-3.5" /> Custom routes
+            <span
+              v-if="routesLoading"
+              class="text-[10px] normal-case tracking-normal text-foreground-muted"
+            >loading…</span>
+          </label>
+
+          <p
+            v-if="!fnId"
+            class="text-[11px] text-foreground-muted leading-snug"
+          >
+            Save the function first — custom routes need a target function id.
+          </p>
+
+          <div
+            v-else-if="myRoutes.length === 0"
+            class="text-[11px] text-foreground-muted leading-snug"
+          >
+            No custom routes for this function. Default invoke URL is
+            <span class="font-mono">/fn/{{ fnId.slice(0, 8) }}…</span>. Add a
+            pretty path below (e.g. <span class="font-mono">/webhooks/stripe</span>
+            or <span class="font-mono">/api/payments/*</span> for prefix match).
+          </div>
+
+          <ul
+            v-else
+            class="space-y-1.5"
+          >
+            <li
+              v-for="r in myRoutes"
+              :key="r.path"
+              class="flex items-center gap-2 px-2.5 py-1.5 rounded border border-border bg-surface-hover/50"
+            >
+              <code class="flex-1 min-w-0 font-mono text-xs text-foreground truncate">{{ r.path }}</code>
+              <span
+                v-if="r.methods && r.methods !== '*'"
+                class="text-[10px] font-mono text-foreground-muted"
+              >{{ r.methods }}</span>
+              <button
+                class="shrink-0 w-6 h-6 flex items-center justify-center rounded text-foreground-muted hover:text-red-400 hover:bg-surface transition-colors"
+                title="Remove route"
+                @click="removeRoute(r.path)"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </li>
+          </ul>
+
+          <div
+            v-if="fnId"
+            class="space-y-2 pt-1"
+          >
+            <div class="flex items-center gap-2">
+              <input
+                v-model="newRoute.path"
+                placeholder="/path or /prefix/*"
+                class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-white"
+              >
+              <input
+                v-model="newRoute.methods"
+                placeholder="*"
+                title="Comma-separated methods or * for any (default *)"
+                class="w-20 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-white"
+              >
+              <button
+                class="shrink-0 px-3 py-1.5 rounded-md bg-white text-black text-xs font-medium hover:bg-white/90 transition-colors"
+                @click="saveNewRoute"
+              >
+                Add
+              </button>
+            </div>
+            <p
+              v-if="newRouteCollision"
+              class="text-[11px] text-amber-400 leading-snug"
+            >
+              ⚠ <span class="font-mono">{{ newRouteCollision.path }}</span> already
+              maps to function <span class="font-mono">{{ newRouteCollision.currentFunctionId.slice(0, 8) }}…</span> —
+              clicking Add will remap it to this one.
+            </p>
+            <p
+              v-if="routesError"
+              class="text-[11px] text-red-400 leading-snug"
+            >
+              {{ routesError }}
+            </p>
+            <p class="text-[11px] text-foreground-muted leading-snug">
+              Reserved prefixes: <span class="font-mono">/api/</span>,
+              <span class="font-mono">/auth/</span>,
+              <span class="font-mono">/web/</span>,
+              <span class="font-mono">/_orva/</span>. Prefix routes must end in
+              <span class="font-mono">/*</span>.
+            </p>
+          </div>
+        </div>
       </div>
       <template #footer>
         <Button
@@ -1015,7 +1112,7 @@ import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import { generateFunctionName } from '@/utils/funName'
 import { templates, defaultCode, categoryOrder } from '@/templates'
-import { rollbackFunction, listFixtures, createFixture, updateFixture, deleteFixture, invokeFunctionFull } from '@/api/endpoints'
+import { rollbackFunction, listFixtures, createFixture, updateFixture, deleteFixture, invokeFunctionFull, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
 import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
 
@@ -1133,6 +1230,20 @@ const templateId = ref('')
 const versions = ref([])
 const secrets = ref([])
 const secretForm = ref({ name: '', value: '' })
+
+// Custom routes — operator-defined URL → function mappings (e.g.
+// /webhooks/stripe → this fn). Loaded lazily on Settings-modal open
+// so the request only fires when relevant. routesAll holds the global
+// list so we can run a collision check before saving a new path that
+// already maps to a different function.
+const routesAll = ref([])
+const routesLoading = ref(false)
+const routesError = ref('')
+const newRoute = ref({ path: '', methods: '*' })
+const newRouteCollision = ref(null) // { path, currentFunctionId } | null
+const myRoutes = computed(() =>
+  fnId.value ? routesAll.value.filter((r) => r.function_id === fnId.value) : [],
+)
 
 // Secrets queued before the function exists. New-function flow can't
 // hit POST /functions/<id>/secrets yet (no id), so we hold them here
@@ -1271,6 +1382,12 @@ const applyTemplate = () => {
   if (selected) {
     code.value = selected.code
     dependencyText.value = selected.deps || ''
+    // Pre-fill the function's description from the template if the user
+    // hasn't typed one yet — saves a step on quick-create flows and
+    // ensures the function ships with a meaningful one-liner.
+    if (selected.description && !form.value.description) {
+      form.value.description = selected.description
+    }
   }
 }
 
@@ -1301,6 +1418,115 @@ const selectedTemplateDescription = computed(() => {
 
 const addEnvVar = () => envVars.value.push({ key: '', value: '' })
 const removeEnvVar = (index) => envVars.value.splice(index, 1)
+
+// ── Custom routes ────────────────────────────────────────────────
+//
+// These manipulate the same /api/v1/routes resource the CLI/MCP use
+// (`set_route`, `delete_route`, `list_routes`). Backend stores upsert-
+// style, so saving a path that already maps to a DIFFERENT function
+// would silently remap it. We catch that client-side: loadRoutes
+// fetches the global list, and saveNewRoute checks for collisions
+// before calling the API.
+
+const loadRoutes = async () => {
+  if (!fnId.value) return // create mode — no fn yet, nothing to list
+  routesLoading.value = true
+  routesError.value = ''
+  try {
+    const res = await apiListRoutes()
+    routesAll.value = res.data?.routes || []
+  } catch (err) {
+    routesError.value = err.response?.data?.error || err.message || 'Failed to load routes'
+  } finally {
+    routesLoading.value = false
+  }
+}
+
+// Detect collisions whenever the operator types a path. Looks the
+// path up in the cached global list; collision = path exists AND
+// points at a different function.
+watch(
+  () => newRoute.value.path,
+  (path) => {
+    const trimmed = (path || '').trim()
+    if (!trimmed) {
+      newRouteCollision.value = null
+      return
+    }
+    const match = routesAll.value.find((r) => r.path === trimmed)
+    if (match && match.function_id !== fnId.value) {
+      newRouteCollision.value = { path: trimmed, currentFunctionId: match.function_id }
+    } else {
+      newRouteCollision.value = null
+    }
+  },
+)
+
+const saveNewRoute = async () => {
+  if (!fnId.value) {
+    routesError.value = 'Save the function first — routes need a target function id.'
+    return
+  }
+  const path = (newRoute.value.path || '').trim()
+  const methods = (newRoute.value.methods || '*').trim() || '*'
+  if (!path) {
+    routesError.value = 'Path is required (must start with /).'
+    return
+  }
+  if (!path.startsWith('/')) {
+    routesError.value = 'Path must start with /.'
+    return
+  }
+  // Collision-with-different-function: surface the in-app confirm so the
+  // operator approves the remap explicitly. Browser-native confirm is
+  // banned project-wide — themed dialog only.
+  if (newRouteCollision.value && newRouteCollision.value.path === path) {
+    const ok = await confirmStore.ask({
+      title: 'Remap existing route?',
+      message: `${path} currently points at function ${newRouteCollision.value.currentFunctionId.slice(0, 8)}…. Saving will remap it to this function.`,
+      confirmLabel: 'Remap',
+      cancelLabel: 'Keep existing',
+      danger: true,
+    })
+    if (!ok) return
+  }
+  routesError.value = ''
+  try {
+    await apiSetRoute(path, fnId.value, methods)
+    newRoute.value = { path: '', methods: '*' }
+    newRouteCollision.value = null
+    await loadRoutes()
+  } catch (err) {
+    routesError.value = err.response?.data?.error || err.message || 'Failed to save route'
+  }
+}
+
+const removeRoute = async (path) => {
+  const ok = await confirmStore.ask({
+    title: 'Remove custom route?',
+    message: `${path} will stop dispatching to this function. The function itself stays untouched and is still reachable at /fn/<id>.`,
+    confirmLabel: 'Remove route',
+    cancelLabel: 'Keep',
+    danger: true,
+  })
+  if (!ok) return
+  routesError.value = ''
+  try {
+    await apiDeleteRoute(path)
+    await loadRoutes()
+  } catch (err) {
+    routesError.value = err.response?.data?.error || err.message || 'Failed to delete route'
+  }
+}
+
+// Lazy-load routes when the Settings modal opens, so the request
+// doesn't fire on every page mount.
+watch(
+  () => modals.value.settings,
+  (open) => {
+    if (open) loadRoutes()
+  },
+)
 
 // loadRoute synchronises Editor state with the current route. Vue
 // Router REUSES the same component instance when navigating between
@@ -1965,10 +2191,13 @@ const removeFixture = async (fx) => {
 
 const saveCurrentAsFixture = async () => {
   if (!fnId.value) return
-  // window.prompt is a deliberate choice — confirmStore is async-confirm,
-  // not async-input, and we don't want a heavyweight modal for "name?".
-  // Hooking up a richer dialog later is one localised swap.
-  const name = (window.prompt('Save fixture as…') || '').trim()
+  const raw = await confirmStore.prompt({
+    title: 'Save fixture',
+    message: 'Give this request a name so you can replay or share it later.',
+    placeholder: 'e.g. happy-path, signed-stripe, empty-body',
+    confirmLabel: 'Save',
+  })
+  const name = (raw || '').trim()
   if (!name) return
   const headers = buildHeadersObject()
   const body = {

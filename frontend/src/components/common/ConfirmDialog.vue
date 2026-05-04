@@ -35,6 +35,15 @@
             >
               {{ confirm.message }}
             </p>
+            <input
+              v-if="confirm.promptMode"
+              ref="promptInput"
+              v-model="confirm.promptValue"
+              :placeholder="confirm.promptPlaceholder"
+              type="text"
+              class="mt-3 w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+              @keydown.enter.stop.prevent="confirm.settle(true)"
+            >
           </div>
         </div>
         <div class="flex justify-end gap-2 pt-2">
@@ -58,17 +67,31 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { AlertTriangle, HelpCircle } from 'lucide-vue-next'
 import Button from './Button.vue'
 import { useConfirmStore } from '@/stores/confirm'
 
 const confirm = useConfirmStore()
+const promptInput = ref(null)
+
+// Auto-focus the prompt input when the dialog opens in prompt mode so
+// the operator can start typing immediately. Without this they have to
+// click into the field, which feels worse than the native prompt.
+watch(
+  () => confirm.visible && confirm.promptMode,
+  (active) => {
+    if (active) nextTick(() => promptInput.value?.focus())
+  },
+)
 
 const onKey = (e) => {
   if (!confirm.visible) return
   if (e.key === 'Escape') confirm.settle(false)
-  if (e.key === 'Enter') confirm.settle(true)
+  // Enter on prompt-mode is handled by the input's @keydown.enter so the
+  // typed value commits cleanly; the global Enter handler only fires for
+  // confirm/notify dialogs without a focused input.
+  if (e.key === 'Enter' && !confirm.promptMode) confirm.settle(true)
 }
 
 onMounted(() => window.addEventListener('keydown', onKey))

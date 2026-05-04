@@ -64,7 +64,7 @@ Secrets are stored encrypted at rest, decrypted only into the worker environment
 </env_and_secrets>
 
 <orva_sdk>
-Every function has the \`orva\` module pre-imported — zero install, zero config. It speaks to a per-process internal control-plane socket, so it works regardless of the network toggle. THREE primitives:
+Every function has the \`orva\` module pre-imported — zero install, zero config. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with \`network_mode: "egress"\` (or updated to it later). With the default \`network_mode: "none"\`, every SDK call fails at runtime with \`ENETUNREACH\` / \`OrvaUnavailableError\` / \`TypeError: fetch failed\`. THREE primitives:
 
 ## orva.kv — per-function key/value store on SQLite
 Per-function namespace; keys never collide across functions. Optional TTL in seconds (sweep every 5 min AND filtered at read time, so stale reads are impossible). Values JSON-serialised; cap 64 KB per value. Keys cap 256 chars. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
@@ -195,7 +195,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - Filesystem: read-only EXCEPT /code (your code) and /tmp (writable, ephemeral, cleared between cold starts).
 - NO subprocess execution (subprocess / child_process disabled). NO raw sockets. NO listening ports — the platform owns the HTTP server.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
-- orva.kv / orva.invoke / orva.jobs do NOT need egress — they go over the internal control-plane socket regardless of the network toggle.
+- orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with \`network_mode: "none"\` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set \`network_mode: "egress"\` at create time (or update later) — the editor's deploy step will warn you when the import meets \`none\`.
 - When egress IS enabled, the operator can further restrict it via the firewall + DNS allowlist (Firewall page). Assume best-effort; handle failures.
 - Concurrency: each warm worker handles one request at a time. The pool autoscales workers up to the function's max_concurrent setting. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>
@@ -236,9 +236,11 @@ Pattern:
 </cors>
 
 <custom_routes>
-Default URL: /fn/<id> (id is a UUIDv7). To attach a friendly path (/api/payments, /webhooks/stripe, /v1/users/{id}), the operator configures a route via the dashboard or:
+Default URL: /fn/<id> (id is a UUIDv7). To attach a friendly path (/api/payments, /webhooks/stripe, /v1/users/{id}), the operator configures a route via the dashboard's function settings → "Custom routes" section (it collision-checks against other functions before saving), or via:
   POST /api/v1/routes   { "path": "/api/payments", "function_id": "<uuid>" }
-Path params with {name} are passed in event.path_params. Reserved prefixes (do NOT suggest these for custom routes): /api/, /fn/, /mcp/, /web/, /_orva/.
+  set_route MCP tool { path, function_id, methods? }
+  orva routes set <path> <function>
+All four surfaces hit the same /api/v1/routes endpoint. Path params with {name} are passed in event.path_params. Reserved prefixes (do NOT suggest these for custom routes): /api/, /fn/, /mcp/, /web/, /_orva/. Wildcard prefixes must end in /* (e.g. /shortener/*).
 </custom_routes>
 
 <channels>

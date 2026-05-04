@@ -24,7 +24,7 @@ var osStat = os.Stat
 
 type InvokeFunctionInput struct {
 	FunctionID string            `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
-	Method     string            `json:"method,omitempty" jsonschema:"HTTP method, default POST"`
+	Method     string            `json:"method" jsonschema:"REQUIRED — HTTP method (uppercase). GET for read endpoints, POST for write/create, PUT/PATCH for updates, DELETE for removals. Set explicitly because a silent default would invoke a GET-shaped function with POST and trigger 404/405 the agent then misdiagnoses."`
 	Path       string            `json:"path,omitempty" jsonschema:"sub-path passed to the handler as event.path, default /"`
 	Headers    map[string]string `json:"headers,omitempty" jsonschema:"request headers (lowercased on the way in)"`
 	Body       any               `json:"body,omitempty" jsonschema:"request body — pass an object to send JSON, or a string for raw"`
@@ -39,6 +39,12 @@ type InvokeFunctionOutput struct {
 	ColdStart   bool              `json:"cold_start"`
 	ExecutionID string            `json:"execution_id"`
 	Stderr      string            `json:"stderr,omitempty"`
+	// OrvaHint surfaces a known-shape diagnostic when the handler failed
+	// in a way the platform recognises. Currently set when the invocation
+	// crashed with a network-shaped error AND the function's network_mode
+	// is "none", which is the most common reason an orva-SDK-using
+	// handler fails after deploy. Empty when no hint applies.
+	OrvaHint string `json:"orva_hint,omitempty" jsonschema:"diagnostic hint when the handler failed in a known-shape way (e.g. network_mode=none blocking the orva SDK)"`
 }
 
 // ─── list_executions ───────────────────────────────────────────────
@@ -136,7 +142,7 @@ type FixtureOverride struct {
 }
 
 type TestFunctionWithFixtureInput struct {
-	FunctionID  string          `json:"function" jsonschema:"function id (UUID) or name owning the fixture"`
+	FunctionID  string          `json:"function_id" jsonschema:"function id (UUID) or name owning the fixture"`
 	FixtureName string          `json:"fixture_name" jsonschema:"name of a previously-saved fixture for this function"`
 	Override    FixtureOverride `json:"override,omitempty" jsonschema:"optional per-call overrides; shallow-merge onto the fixture (override wins)"`
 	TimeoutMS   int64           `json:"timeout_ms,omitempty"`
@@ -160,8 +166,8 @@ func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 	gatedAdd(perms, permInvoke, func() {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
-				Name:        "invoke_function",
-				Description: "Call a function and return its response. Pass `body` as either an object (sent as JSON) or a string. Returns status_code, headers, body, plus execution_id you can pass to get_execution_logs if you want stderr. Bypasses the function's auth_mode (the agent's MCP bearer is already trusted).",
+				Name: "invoke_function",
+				Description: "Call a function and return its response. `method` is REQUIRED — pick GET for read endpoints, POST for create/write, PUT/PATCH for updates, DELETE for removals (no silent default; an invocation that uses the wrong verb usually returns 404/405 which is hard to debug). Pass `body` as either an object (sent as JSON) or a string. Returns status_code, headers, body, plus execution_id you can pass to get_execution_logs if you want stderr. Bypasses the function's auth_mode (the agent's MCP bearer is already trusted). When the handler crashes with a network-shaped error (ENETUNREACH / fetch failed / OrvaUnavailableError) on a function with network_mode=none, the response includes an `orva_hint` telling you exactly what to fix.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrFalse(),
 					OpenWorldHint:   ptrTrue(), // function may call external APIs
@@ -352,7 +358,11 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 
 	method := strings.ToUpper(strings.TrimSpace(in.Method))
 	if method == "" {
-		method = "POST"
+		return nil, InvokeFunctionOutput{}, errors.New(
+			"method is required: pass an HTTP verb (GET, POST, PUT, " +
+				"PATCH, DELETE) — defaulting silently to POST hides bugs " +
+				"when the handler is GET-shaped and returns 404/405.",
+		)
 	}
 	path := in.Path
 	if path == "" {
@@ -483,11 +493,48 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		}
 	}
 
+	// Annotate known-shape failures so the agent doesn't have to guess at
+	// the cause. The most common foot-gun: a function created with
+	// network_mode="none" tries to call orva.kv / orva.invoke / orva.jobs
+	// or hit an external URL, and the handler crashes with ENETUNREACH /
+	// ECONNREFUSED / "fetch failed" / OrvaUnavailableError. The agent has
+	// no way to map that to "the platform is blocking my SDK call" — it
+	// looks like a generic runtime crash. Stamp a hint on the output so
+	// the next step is obvious.
+	if hint := networkErrorHint(fn, errMsg, out.Stderr); hint != "" {
+		out.OrvaHint = hint
+	}
+
 	if ferr != nil && rec.Code == 0 {
 		// Forward never wrote a response — surface the error explicitly.
 		return nil, out, fmt.Errorf("invoke failed: %s", errMsg)
 	}
 	return nil, out, nil
+}
+
+// networkErrorHint returns a non-empty hint when the function failed in a
+// way that's almost certainly explained by network_mode="none" blocking
+// the orva SDK or outbound HTTPS. The matching is intentionally broad
+// (substring sniff on errMsg + stderr) — false positives are cheap (the
+// hint is informational), false negatives are expensive (the agent goes
+// down the wrong debugging path).
+func networkErrorHint(fn *database.Function, errMsg, stderr string) string {
+	if fn == nil || fn.NetworkMode != database.NetworkModeNone {
+		return ""
+	}
+	combined := errMsg + " " + stderr
+	if !(strings.Contains(combined, "ENETUNREACH") ||
+		strings.Contains(combined, "ECONNREFUSED") ||
+		strings.Contains(combined, "fetch failed") ||
+		strings.Contains(combined, "OrvaUnavailableError")) {
+		return ""
+	}
+	return "this function's network_mode is 'none', so the sandbox has " +
+		"loopback only — orva.kv / orva.invoke / orva.jobs (which reach " +
+		"orvad over the bridge network) and any external HTTPS will fail " +
+		"with ENETUNREACH. Run update_function with network_mode='egress' " +
+		"to enable them; the next invocation will be a cold start as the " +
+		"warm pool drains."
 }
 
 // flattenHeaders collapses each header to a single value (the first).

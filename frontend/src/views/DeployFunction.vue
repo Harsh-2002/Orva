@@ -199,6 +199,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { deployFunction } from '@/api/endpoints'
+import { useConfirmStore } from '@/stores/confirm'
 import Card from '@/components/common/Card.vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
@@ -209,6 +210,7 @@ import {
 } from 'lucide-vue-next'
 
 const router = useRouter()
+const confirmStore = useConfirmStore()
 
 const formData = ref({
   name: '',
@@ -329,12 +331,21 @@ const deploy = async () => {
       handler_mode: handlerMode.value,
     })
     
-    alert(`Function "${formData.value.name}" deployed successfully!`)
+    await confirmStore.notify({
+      title: 'Deployed',
+      message: `Function "${formData.value.name}" deployed successfully.`,
+      confirmLabel: 'OK',
+    })
     router.push('/functions')
   } catch (error) {
     console.error('Deployment failed:', error)
     const errorMessage = error.response?.data?.error?.message || error.message || 'Deployment failed'
-    alert(`Failed to deploy: ${errorMessage}`)
+    await confirmStore.notify({
+      title: 'Deployment failed',
+      message: errorMessage,
+      confirmLabel: 'Dismiss',
+      danger: true,
+    })
   } finally {
     deploying.value = false
   }

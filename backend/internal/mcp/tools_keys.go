@@ -45,9 +45,9 @@ type ListAPIKeysOutput struct {
 }
 
 type CreateAPIKeyInput struct {
-	Name          string   `json:"name"`
-	Permissions   []string `json:"permissions,omitempty" jsonschema:"subset of [invoke, read, write, admin] — defaults to all four"`
-	ExpiresInDays int      `json:"expires_in_days,omitempty"`
+	Name          string   `json:"name" jsonschema:"human-readable label for this key (e.g. 'ci-deploys', 'mobile-app-prod'). Surfaces in list_api_keys and the dashboard's API Keys page."`
+	Permissions   []string `json:"permissions" jsonschema:"REQUIRED — subset of [invoke, read, write, admin]. 'invoke' = call functions; 'read' = list/get resources; 'write' = create/update/delete functions+secrets+routes etc.; 'admin' = manage API keys + system settings. Pick the smallest set the consumer actually needs (least-privilege); 'admin' should be rare. Empty / silently-defaulted to 'all four' was the previous behaviour and produced over-privileged keys."`
+	ExpiresInDays int      `json:"expires_in_days" jsonschema:"REQUIRED — days until the key auto-expires. Pick from intent: short-lived CI runs ~1-7, dev/staging ~30, production rotations ~90, long-lived service accounts up to 365. Pass 0 ONLY if the user explicitly asked for a never-expiring key (rare; usually wrong)."`
 }
 
 type CreateAPIKeyOutput struct {
@@ -64,8 +64,6 @@ type DeleteAPIKeyInput struct {
 	KeyID   string `json:"key_id"`
 	Confirm bool   `json:"confirm"`
 }
-
-var defaultKeyPerms = []string{"invoke", "read", "write", "admin"}
 
 func registerKeyTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 	gatedAdd(perms, permAdmin, func() {
@@ -93,17 +91,26 @@ func registerKeyTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
 				Name:        "create_api_key",
-				Description: "Mint a new API key. The plaintext value is returned ONLY in this response; the server keeps a SHA256 hash and forgets the plaintext. Marked destructive because issuing a key with admin permissions is high-blast-radius — confirm with the user what permissions to grant before calling.",
+				Description: "Mint a new API key. The plaintext value is returned ONLY in this response; the server keeps a SHA256 hash and forgets the plaintext. `permissions` and `expires_in_days` are REQUIRED — least-privilege scope and finite lifetime are the cheapest defenses against a leaked key. Marked destructive because issuing a key with admin permissions is high-blast-radius — confirm with the user what permissions to grant and how long it should live before calling.",
 				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 			},
 			func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateAPIKeyInput) (*mcpsdk.CallToolResult, CreateAPIKeyOutput, error) {
 				if strings.TrimSpace(in.Name) == "" {
-					return nil, CreateAPIKeyOutput{}, errors.New("name is required")
+					return nil, CreateAPIKeyOutput{}, errors.New("name is required (human-readable label, e.g. 'ci-deploys')")
+				}
+				if len(in.Permissions) == 0 {
+					return nil, CreateAPIKeyOutput{}, errors.New(
+						"permissions is required: pick a subset of [invoke, " +
+							"read, write, admin] matching what the consumer " +
+							"actually needs. Granting all four was the silent " +
+							"default and produced over-privileged keys; least-" +
+							"privilege is the right shape.",
+					)
+				}
+				if in.ExpiresInDays < 0 {
+					return nil, CreateAPIKeyOutput{}, errors.New("expires_in_days must be >= 0 (0 = never expires; >0 = days until expiry)")
 				}
 				perms := in.Permissions
-				if len(perms) == 0 {
-					perms = defaultKeyPerms
-				}
 				rawKey := make([]byte, 32)
 				if _, err := rand.Read(rawKey); err != nil {
 					return nil, CreateAPIKeyOutput{}, err

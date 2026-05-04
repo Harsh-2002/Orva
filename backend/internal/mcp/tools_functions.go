@@ -31,6 +31,7 @@ import (
 type FunctionView struct {
 	ID                string            `json:"id"`
 	Name              string            `json:"name"`
+	Description       string            `json:"description,omitempty"`
 	InvokeURL         string            `json:"invoke_url"`
 	Routes            []string          `json:"routes,omitempty"`
 	Runtime           string            `json:"runtime"`
@@ -58,6 +59,7 @@ func toFunctionView(fn *database.Function, deps Deps) FunctionView {
 	v := FunctionView{
 		ID:                fn.ID,
 		Name:              fn.Name,
+		Description:       fn.Description,
 		Runtime:           fn.Runtime,
 		Entrypoint:        fn.Entrypoint,
 		TimeoutMS:         fn.TimeoutMS,
@@ -145,17 +147,18 @@ type GetFunctionInput struct {
 // ─── create_function ───────────────────────────────────────────────
 
 type CreateFunctionInput struct {
-	Name              string            `json:"name" jsonschema:"unique function name (lowercase, dash-separated)"`
+	Name              string            `json:"name" jsonschema:"unique function name (lowercase, dash-separated, URL-safe — appears in invoke_url and logs)"`
+	Description       string            `json:"description" jsonschema:"REQUIRED — one-sentence summary of what the function does (e.g. 'resize uploaded images to webp thumbnails'). Surfaces in list_functions, the dashboard's function card, and channel-mode tool descriptions exposed to other agents — so this is how a future operator or LLM identifies what this function is for. Empty / placeholder values rejected."`
 	Runtime           string            `json:"runtime" jsonschema:"one of node22 node24 python313 python314"`
-	Entrypoint        string            `json:"entrypoint,omitempty" jsonschema:"defaults: handler.js for Node, handler.py for Python"`
-	TimeoutMS         int64             `json:"timeout_ms,omitempty" jsonschema:"per-invocation timeout in ms, default 30000"`
-	MemoryMB          int64             `json:"memory_mb,omitempty" jsonschema:"sandbox memory in MB, default 64"`
-	CPUs              float64           `json:"cpus,omitempty" jsonschema:"CPU shares (fractional ok), default 0.5"`
-	EnvVars           map[string]string `json:"env_vars,omitempty" jsonschema:"plaintext env vars (use set_secret for credentials)"`
-	NetworkMode       string            `json:"network_mode,omitempty" jsonschema:"none (default, loopback only) or egress (outbound HTTPS allowed)"`
+	Entrypoint        string            `json:"entrypoint" jsonschema:"REQUIRED — handler file path relative to deploy dir (e.g. 'handler.js' for Node, 'handler.py' for Python, 'src/index.ts' for TypeScript). Set explicitly so the runtime+entrypoint pairing is intentional; mismatched values silently fail to spawn."`
+	TimeoutMS         int64             `json:"timeout_ms" jsonschema:"REQUIRED — per-invocation timeout in ms. Cap on how long any single request can run before the sandbox is killed. Pick from the handler's expected work: a quick CRUD endpoint can use 5000-10000; an LLM/AI call usually 30000-60000; a heavy report 120000+. Must be > 0."`
+	MemoryMB          int64             `json:"memory_mb" jsonschema:"REQUIRED — sandbox RAM in MB. Hard cap; a handler that exceeds it gets OOM-killed. Pick from runtime baseline + working set: tiny Node/Python with no deps ~64; with frameworks ~128-256; image/PDF/ML work 512+. Must be > 0."`
+	CPUs              float64           `json:"cpus" jsonschema:"REQUIRED — CPU shares (fractional ok, e.g. 0.25, 0.5, 1, 2). Roughly 'how many cores worth of CPU time can this handler burn'. IO-bound (HTTP fetch, DB) → 0.25-0.5; mixed → 0.5-1; CPU-bound (image, crypto, ML) → 1+. Must be > 0."`
+	EnvVars           map[string]string `json:"env_vars,omitempty" jsonschema:"plaintext env vars injected into the sandbox at spawn time (use set_secret for credentials — env_vars are stored unencrypted). Empty map is fine."`
+	NetworkMode       string            `json:"network_mode" jsonschema:"REQUIRED — choose explicitly. 'none' = sandbox has loopback only; the orva.kv / orva.invoke / orva.jobs SDK calls (which reach orvad over the bridge network) will fail with ENETUNREACH. Use only for pure-compute handlers with no platform calls. 'egress' = sandbox has outbound TCP via pasta NAT (subject to firewall rules at /api/v1/firewall); REQUIRED for any handler that imports the orva module or makes external HTTPS. Pick 'egress' if the handler uses orva.kv, orva.invoke, orva.jobs, jobs.enqueue, or fetch/requests to an external URL."`
 	MaxConcurrency    int               `json:"max_concurrency,omitempty" jsonschema:"max parallel invocations, 0 (default) = unlimited"`
 	ConcurrencyPolicy string            `json:"concurrency_policy,omitempty" jsonschema:"queue (default) or reject when at max"`
-	AuthMode          string            `json:"auth_mode,omitempty" jsonschema:"none (default, public) or platform_key or signed"`
+	AuthMode          string            `json:"auth_mode" jsonschema:"REQUIRED — invocation auth gate. 'none' = anyone with the URL can invoke (use only for genuinely public endpoints); 'platform_key' = caller must present an Orva API key via X-Orva-API-Key or Bearer (use for server-to-server, internal dashboards, cron); 'signed' = caller signs the request HMAC-SHA256 over '<unix_ts>.<raw_body>' using ORVA_SIGNING_SECRET (use for partner integrations). Default-allow ('none') silently exposes data — pick consciously."`
 	RateLimitPerMin   int               `json:"rate_limit_per_min,omitempty" jsonschema:"per-IP rate limit, 0 (default) = unlimited"`
 }
 
@@ -164,12 +167,13 @@ type CreateFunctionInput struct {
 type UpdateFunctionInput struct {
 	FunctionID        string             `json:"function_id" jsonschema:"function id (UUID) or name (legacy fn_ prefix is tolerated but unnecessary)"`
 	Name              *string            `json:"name,omitempty"`
+	Description       *string            `json:"description,omitempty" jsonschema:"new one-sentence summary; pass any non-empty string to overwrite, omit to leave unchanged"`
 	Entrypoint        *string            `json:"entrypoint,omitempty"`
 	TimeoutMS         *int64             `json:"timeout_ms,omitempty"`
 	MemoryMB          *int64             `json:"memory_mb,omitempty"`
 	CPUs              *float64           `json:"cpus,omitempty"`
 	EnvVars           *map[string]string `json:"env_vars,omitempty"`
-	NetworkMode       *string            `json:"network_mode,omitempty" jsonschema:"none or egress — flipping triggers warm-pool drain"`
+	NetworkMode       *string            `json:"network_mode,omitempty" jsonschema:"'none' (loopback only — orva.kv/invoke/jobs WILL FAIL because the SDK uses HTTP over the bridge) or 'egress' (outbound TCP via pasta NAT — required for any orva SDK call or external HTTPS). Flipping triggers a hard pool drain so the next invocation respawns with the correct netns; expect cold_start=true on that invocation."`
 	MaxConcurrency    *int               `json:"max_concurrency,omitempty"`
 	ConcurrencyPolicy *string            `json:"concurrency_policy,omitempty"`
 	AuthMode          *string            `json:"auth_mode,omitempty"`
@@ -289,8 +293,20 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 	gatedAdd(perms, permWrite, func() {
 		mcpsdk.AddTool(s,
 			&mcpsdk.Tool{
-				Name:        "create_function",
-				Description: "Create a new function shell (no code yet). The function starts in `created` status — call deploy_function_inline next to ship code and have it activate.",
+				Name: "create_function",
+				Description: "Create a new function shell (no code yet). The function starts in `created` status — call deploy_function_inline next to ship code and have it activate. " +
+					"Most fields are REQUIRED so the function record carries explicit intent rather than silent defaults. Specifically you MUST provide: " +
+					"`name` (URL-safe identifier), " +
+					"`description` (one-sentence summary of what the function does — visible in list_functions and the dashboard), " +
+					"`runtime` (node22 / node24 / python313 / python314), " +
+					"`entrypoint` (handler file path; e.g. handler.js / handler.py / src/index.ts), " +
+					"`timeout_ms` (per-invocation cap; pick from your handler's expected work — fast CRUD ~5000-10000, AI/LLM ~30000-60000, heavy reports 120000+), " +
+					"`memory_mb` (RAM cap; tiny handlers 64, with frameworks 128-256, image/PDF/ML 512+), " +
+					"`cpus` (CPU shares; IO-bound 0.25-0.5, mixed 0.5-1, CPU-bound 1+), " +
+					"`network_mode` ('egress' if the handler imports `orva` / makes external HTTPS, 'none' only for pure compute), " +
+					"`auth_mode` ('platform_key' / 'signed' for anything that handles user data; 'none' only for genuinely public endpoints). " +
+					"Optional: env_vars, max_concurrency, concurrency_policy, rate_limit_per_min — sane defaults. " +
+					"Defaulting any of the required fields silently has been a frequent source of bugs (auth=none on private endpoints, network_mode=none on SDK handlers, undersized memory) — being explicit costs ~10 extra lines and prevents the whole class of foot-gun.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrFalse(),
 					OpenWorldHint:   ptrFalse(),
@@ -362,20 +378,84 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 // insert that FunctionHandler.Create does. Lifted here so MCP doesn't go
 // through HTTP.
 func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, error) {
+	// MCP strict-required policy: every load-bearing field must be set
+	// explicitly. The schema layer rejects missing-key cases; these guards
+	// catch empty-string / non-positive numerics that slip past the schema
+	// for non-pointer types. Each error names the field so the agent's
+	// retry has actionable feedback.
 	if strings.TrimSpace(in.Name) == "" {
-		return nil, errors.New("name is required")
+		return nil, errors.New("name is required (URL-safe identifier, e.g. 'image-resizer')")
+	}
+	if strings.TrimSpace(in.Description) == "" {
+		return nil, errors.New(
+			"description is required: pass a one-sentence summary of what " +
+				"the function does (e.g. 'resize uploaded images to webp " +
+				"thumbnails'). Surfaces in list_functions, the dashboard's " +
+				"function card, and channel-mode tool descriptions exposed " +
+				"to other agents — empty leaves an unidentifiable function.",
+		)
 	}
 	if !validRuntimesSet[in.Runtime] {
 		return nil, fmt.Errorf("unsupported runtime: %s (one of node22, node24, python313, python314)", in.Runtime)
 	}
+	if strings.TrimSpace(in.Entrypoint) == "" {
+		return nil, errors.New(
+			"entrypoint is required: handler file path (e.g. 'handler.js' " +
+				"for Node, 'handler.py' for Python, 'src/index.ts' for " +
+				"TypeScript). Set explicitly so the runtime+entrypoint " +
+				"pairing is intentional — mismatched values silently fail " +
+				"to spawn.",
+		)
+	}
+	if in.TimeoutMS <= 0 {
+		return nil, errors.New(
+			"timeout_ms is required and must be > 0: per-invocation cap " +
+				"on how long any single request can run before the sandbox " +
+				"is killed. Quick CRUD ~5000-10000; AI/LLM ~30000-60000; " +
+				"heavy reports 120000+.",
+		)
+	}
+	if in.MemoryMB <= 0 {
+		return nil, errors.New(
+			"memory_mb is required and must be > 0: sandbox RAM cap. " +
+				"Tiny handlers ~64; with frameworks 128-256; image/PDF/ML " +
+				"512+.",
+		)
+	}
+	if in.CPUs <= 0 {
+		return nil, errors.New(
+			"cpus is required and must be > 0: CPU shares (fractional ok). " +
+				"IO-bound 0.25-0.5; mixed 0.5-1; CPU-bound 1+.",
+		)
+	}
+	if strings.TrimSpace(in.NetworkMode) == "" {
+		return nil, errors.New(
+			"network_mode is required: choose 'egress' if the handler uses " +
+				"orva.kv / orva.invoke / orva.jobs (the SDK reaches orvad " +
+				"over HTTP and needs outbound network) or makes external " +
+				"HTTPS calls; choose 'none' only for a pure-compute " +
+				"handler with no platform or network access. Default-deny " +
+				"would silently break SDK calls; default-allow would erode " +
+				"sandbox isolation — so neither default is correct.",
+		)
+	}
 	if !database.ValidNetworkMode(in.NetworkMode) {
 		return nil, fmt.Errorf("invalid network_mode: %s (allowed: none, egress)", in.NetworkMode)
 	}
-	if !database.ValidConcurrencyPolicy(in.ConcurrencyPolicy) {
-		return nil, fmt.Errorf("invalid concurrency_policy: %s (allowed: queue, reject)", in.ConcurrencyPolicy)
+	if strings.TrimSpace(in.AuthMode) == "" {
+		return nil, errors.New(
+			"auth_mode is required: 'none' (public — anyone with the URL " +
+				"can invoke), 'platform_key' (caller presents an Orva API " +
+				"key), or 'signed' (HMAC-SHA256 signature). Default-allow " +
+				"silently exposes data, so pick consciously based on who " +
+				"should be able to call this function.",
+		)
 	}
 	if !database.ValidAuthMode(in.AuthMode) {
 		return nil, fmt.Errorf("invalid auth_mode: %s (allowed: none, platform_key, signed)", in.AuthMode)
+	}
+	if !database.ValidConcurrencyPolicy(in.ConcurrencyPolicy) {
+		return nil, fmt.Errorf("invalid concurrency_policy: %s (allowed: queue, reject)", in.ConcurrencyPolicy)
 	}
 	if in.MaxConcurrency < 0 {
 		return nil, errors.New("max_concurrency must be >= 0 (0 = unlimited)")
@@ -384,31 +464,10 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 		return nil, errors.New("rate_limit_per_min must be >= 0 (0 = unlimited)")
 	}
 
-	if in.Entrypoint == "" {
-		switch {
-		case runtimeIsNode(in.Runtime):
-			in.Entrypoint = "handler.js"
-		case runtimeIsPython(in.Runtime):
-			in.Entrypoint = "handler.py"
-		}
-	}
-	if in.TimeoutMS <= 0 {
-		in.TimeoutMS = 30000
-	}
-	if in.MemoryMB <= 0 {
-		in.MemoryMB = 64
-	}
-	if in.CPUs <= 0 {
-		in.CPUs = 0.5
-	}
-	if in.NetworkMode == "" {
-		in.NetworkMode = database.NetworkModeNone
-	}
+	// All required fields validated above. Optional fields keep their
+	// safe defaults: concurrency_policy=queue, env_vars=empty.
 	if in.ConcurrencyPolicy == "" {
 		in.ConcurrencyPolicy = database.ConcurrencyPolicyQueue
-	}
-	if in.AuthMode == "" {
-		in.AuthMode = database.AuthModeNone
 	}
 	if in.EnvVars == nil {
 		in.EnvVars = map[string]string{}
@@ -419,6 +478,7 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 	fn := &database.Function{
 		ID:                fnID,
 		Name:              in.Name,
+		Description:       in.Description,
 		Runtime:           in.Runtime,
 		Entrypoint:        in.Entrypoint,
 		TimeoutMS:         in.TimeoutMS,
@@ -442,18 +502,27 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 	return fn, nil
 }
 
-// updateFunction patches the function record. Mirrors the
-// pool-drain rules the REST handler uses: changes that affect the
-// spawn config trigger PoolRefresh.
+// updateFunction patches the function record. Mirrors the pool-drain rules
+// the REST handler uses:
+//   - any spawn-config change (memory, cpu, env, max_concurrency, etc.)
+//     triggers RefreshForDeploy — kills idles, busy workers age out
+//     naturally;
+//   - a network_mode flip triggers Drain — a stale netns is unsafe to
+//     reuse, so we hard-reset the pool entry and the next Acquire
+//     creates a fresh one with the new config.
 func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, error) {
 	fn, err := resolveFunction(deps, in.FunctionID)
 	if err != nil {
 		return nil, err
 	}
 	drainPool := false
+	networkModeChanged := false
 
 	if in.Name != nil {
 		fn.Name = *in.Name
+	}
+	if in.Description != nil {
+		fn.Description = *in.Description
 	}
 	if in.Entrypoint != nil {
 		fn.Entrypoint = *in.Entrypoint
@@ -486,6 +555,7 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 		}
 		if *in.NetworkMode != fn.NetworkMode {
 			drainPool = true
+			networkModeChanged = true
 		}
 		fn.NetworkMode = *in.NetworkMode
 	}
@@ -530,7 +600,11 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 		return nil, err
 	}
 	if drainPool && deps.PoolMgr != nil {
-		deps.PoolMgr.RefreshForDeploy(fn.ID)
+		if networkModeChanged {
+			deps.PoolMgr.Drain(fn.ID)
+		} else {
+			deps.PoolMgr.RefreshForDeploy(fn.ID)
+		}
 	}
 	return fn, nil
 }
