@@ -28,7 +28,15 @@ const router = createRouter({
         { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue') },
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
         { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue') },
-        { path: 'deploy', name: 'deploy', component: () => import('@/views/Editor.vue') },
+        // Canonical create route. The Editor watches `route.params.name`
+        // (undefined here) to enter create mode with a fresh slate; it
+        // resets state on every navigation so existing functions never
+        // see leaked boilerplate from a prior /functions/new visit.
+        { path: 'functions/new', name: 'function-new', component: () => import('@/views/Editor.vue') },
+        // Legacy /deploy redirects to the canonical create route. Kept so
+        // any bookmarks or external links keep working; new code points
+        // at /functions/new.
+        { path: 'deploy', redirect: { name: 'function-new' } },
         { path: 'cron', name: 'cron', component: () => import('@/views/CronJobs.vue') },
         { path: 'jobs', name: 'jobs', component: () => import('@/views/Jobs.vue') },
         { path: 'activity', name: 'activity', component: () => import('@/views/Activity.vue') },

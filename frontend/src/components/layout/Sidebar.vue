@@ -78,7 +78,6 @@ import OrvaLogo from '../OrvaLogo.vue'
 import {
   Gauge,
   Boxes,
-  Rocket,
   CalendarClock,
   ListChecks,
   Activity,
@@ -106,7 +105,6 @@ watch(() => route.fullPath, () => { open.value = false })
 const navItems = [
   { path: '/',            label: 'Overview',    icon: Gauge },
   { path: '/functions',   label: 'Functions',   icon: Boxes },
-  { path: '/deploy',      label: 'Deploy',      icon: Rocket },
   { path: '/cron',        label: 'Schedules',   icon: CalendarClock },
   { path: '/jobs',        label: 'Jobs',        icon: ListChecks },
   { path: '/activity',    label: 'Activity',    icon: Activity },

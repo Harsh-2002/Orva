@@ -4,7 +4,7 @@
       <h1 class="text-xl font-semibold text-white tracking-tight">
         Functions
       </h1>
-      <Button @click="router.push('/deploy')">
+      <Button @click="router.push('/functions/new')">
         <Plus class="w-4 h-4" />
         New Function
       </Button>

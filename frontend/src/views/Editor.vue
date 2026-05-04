@@ -1302,9 +1302,61 @@ const selectedTemplateDescription = computed(() => {
 const addEnvVar = () => envVars.value.push({ key: '', value: '' })
 const removeEnvVar = (index) => envVars.value.splice(index, 1)
 
-onMounted(async () => {
+// loadRoute synchronises Editor state with the current route. Vue
+// Router REUSES the same component instance when navigating between
+// /functions/new (create mode) and /functions/<name> (edit mode) — the
+// route record is the same shape — so a one-shot onMounted is the
+// wrong hook. Without this watcher, a user who lands on /functions/new
+// first, then clicks an existing function, would carry the boilerplate
+// code + create-mode form state into edit mode. The bug surfaces as
+// "I clicked the function but it shows the deploy template" — the
+// deploy template is just whatever the create-mode default seeded.
+//
+// The watcher fires `immediate: true` so this also handles the
+// initial mount (no separate onMounted needed).
+const resetEditorState = () => {
+  fnId.value = ''
+  form.value = {
+    name: '',
+    description: '',
+    runtime: 'python314',
+    memory_mb: 64,
+    cpus: 0.5,
+    network_mode: 'none',
+    max_concurrency: 0,
+    concurrency_policy: 'queue',
+    auth_mode: 'none',
+    rate_limit_per_min: 0,
+  }
+  envVars.value = []
+  code.value = ''
+  dependencyText.value = ''
+  buildLogs.value = []
+  invokeLogs.value = []
+  output.value = null
+  error.value = null
+  duration.value = 0
+  status.value = ''
+  deployedThisSession.value = false
+  versions.value = []
+  fixtures.value = []
+  // Test pane defaults — keep these consistent so a fresh /functions/new
+  // visit always starts with the same blank canvas.
+  testMethod.value = 'POST'
+  testPath.value = '/'
+  testHeaders.value = []
+  testPayload.value = '{"name": "World"}'
+  headersOpen.value = false
+  autoDetected.value = false
+  runtimeManuallySet.value = false
+  templateId.value = ''
+}
+
+const loadRouteData = async () => {
+  resetEditorState()
+
   if (route.params.name) {
-    // Edit mode — load function metadata + actual deployed source code
+    // Edit mode — load function metadata + actual deployed source code.
     try {
       const listRes = await apiClient.get('/functions')
       const fn = (listRes.data.functions || []).find(f => f.name === route.params.name)
@@ -1326,14 +1378,16 @@ onMounted(async () => {
         envVars.value = Object.entries(fn.env_vars).map(([key, value]) => ({ key, value }))
       }
 
-      // Fetch actual deployed source (not a template).
+      // Fetch actual deployed source (not a template). If the function
+      // was created but never deployed, fall back to the default
+      // template — that's the right starting point for the operator
+      // to add their own code.
       try {
         const srcRes = await apiClient.get(`/functions/${fn.id}/source`)
         if (srcRes.data.code) {
           code.value = srcRes.data.code
           dependencyText.value = srcRes.data.dependencies || ''
         } else {
-          // Not yet deployed — show default template.
           code.value = defaultCode[fn.runtime] || ''
         }
       } catch {
@@ -1354,15 +1408,15 @@ onMounted(async () => {
       error.value = "Failed to load function: " + (e.response?.data?.error?.message || e.message)
     }
   } else {
-    // New mode — seed a friendly auto-generated name so the field
-    // isn't empty. The user can edit it, clear it, or hit the re-roll
-    // button next to it.
+    // Create mode (/functions/new). Seed a friendly auto-generated
+    // name so the field isn't empty. The user can edit it, clear it,
+    // or hit the re-roll button next to it.
     setRuntime('python314')
-    if (!form.value.name) {
-      form.value.name = generateFunctionName()
-    }
+    form.value.name = generateFunctionName()
   }
-})
+}
+
+watch(() => route.params.name, loadRouteData, { immediate: true })
 
 // applyPrefillFromQuery reads a base64-encoded JSON request envelope from
 // the `prefill` query param and populates the test pane. Used by the
