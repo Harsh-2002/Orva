@@ -79,7 +79,7 @@ curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
   -d '{"code":"const fs=require(\"fs\");module.exports=async()=>{return fs.readFileSync(\"/proc/self/status\",\"utf8\").split(\"\\n\").filter(l=>l.startsWith(\"Cap\")||l.startsWith(\"Uid\"));}"}'
 
 curl -X POST -H "X-Orva-API-Key: $KEY" \
-  http://localhost:8443/fn/${FID#fn_} -d '{}'
+  http://localhost:8443/fn/${FID} -d '{}'
 ```
 
 Expected output (the meaningful lines):

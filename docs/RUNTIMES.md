@@ -25,7 +25,7 @@ single argument:
   "headers": {
     "content-type": "application/json",
     "x-orva-execution-id": "exec_abc123",
-    "x-orva-function-id": "fn_xyz",
+    "x-orva-function-id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
     ...
   },
   "body": "<raw request body as string>",
@@ -131,7 +131,7 @@ Both arrive at your handler as `process.env` (Node) or `os.environ`
 
 | var | what |
 |---|---|
-| `ORVA_FUNCTION_ID`  | the function's ID (`fn_xyz`) |
+| `ORVA_FUNCTION_ID`  | the function's ID (`019df200-7b00-7e00-9c00-aab1cd2e3f40`) |
 | `ORVA_EXECUTION_ID` | this invocation's ID — useful for log correlation |
 | `ORVA_ENTRYPOINT`   | your handler file (e.g. `handler.js`) |
 
@@ -176,7 +176,7 @@ in-flight concurrency. You can tune the floor/ceiling via
 
 ```json
 {
-  "function_id": "fn_xyz",
+  "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
   "min_warm": 2,
   "max_warm": 32,
   "idle_ttl_seconds": 120,
@@ -196,7 +196,7 @@ curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
 
 # 2. Deploy code (inline)
 curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
-  http://localhost:8443/api/v1/functions/fn_xyz/deploy-inline \
+  http://localhost:8443/api/v1/functions/019df200-7b00-7e00-9c00-aab1cd2e3f40/deploy-inline \
   -d '{"code":"module.exports = async () => ({hello:\"world\"});"}'
 
 # 3. Invoke
@@ -211,7 +211,7 @@ contents):
 
 ```bash
 curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
-  http://localhost:8443/api/v1/functions/fn_xyz/deploy-inline \
+  http://localhost:8443/api/v1/functions/019df200-7b00-7e00-9c00-aab1cd2e3f40/deploy-inline \
   -d '{
     "code": "import requests\ndef handler(req): return {\"v\": requests.__version__}",
     "filename": "handler.py",

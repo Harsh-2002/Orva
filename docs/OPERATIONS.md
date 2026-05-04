@@ -71,7 +71,7 @@ the adapter couldn't load it.
 
 ```bash
 KEY=$(docker exec orva cat /var/lib/orva/.admin-key)
-EXEC_ID=$(curl -s -H "X-Orva-API-Key: $KEY" "http://localhost:8443/api/v1/executions?function_id=fn_xyz&limit=1" | jq -r '.executions[0].id')
+EXEC_ID=$(curl -s -H "X-Orva-API-Key: $KEY" "http://localhost:8443/api/v1/executions?function_id=019df200-7b00-7e00-9c00-aab1cd2e3f40&limit=1" | jq -r '.executions[0].id')
 curl -s -H "X-Orva-API-Key: $KEY" "http://localhost:8443/api/v1/executions/$EXEC_ID/logs"
 ```
 
@@ -111,7 +111,7 @@ it failed:
 
 ```sql
 docker exec orva sqlite3 /var/lib/orva/orva.db \
-  "UPDATE deployments SET status='failed', error_message='killed-by-operator' WHERE id='dep_xyz'"
+  "UPDATE deployments SET status='failed', error_message='killed-by-operator' WHERE id='019df210-1234-7000-8000-deadbeef0001'"
 ```
 
 ## Symptom: rollback fails with `VERSION_GCD`
@@ -213,7 +213,7 @@ docker exec orva sqlite3 /var/lib/orva/orva.db \
 
 # build logs
 docker exec orva sqlite3 /var/lib/orva/orva.db \
-  "SELECT seq, stream, line FROM build_logs WHERE deployment_id='dep_xyz' ORDER BY seq"
+  "SELECT seq, stream, line FROM build_logs WHERE deployment_id='019df210-1234-7000-8000-deadbeef0001' ORDER BY seq"
 ```
 
 ## When all else fails

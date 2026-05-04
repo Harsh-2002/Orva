@@ -6,12 +6,12 @@ Every API error returns the same envelope:
 {
   "error": {
     "code": "POOL_AT_CAPACITY",
-    "message": "function pool at capacity for fn_xxx",
+    "message": "function pool at capacity for 019df200-7b00-7e00-9c00-aab1cd2e3f40",
     "request_id": "req_abc...",
     "hint": "raise pool_config.max_warm via PUT /api/v1/pool/config",
     "retry_after_s": 5,
     "details": {
-      "function_id": "fn_xxx",
+      "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
       "function_name": "stripe-webhook"
     }
   }

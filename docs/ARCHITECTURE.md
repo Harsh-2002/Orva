@@ -171,7 +171,7 @@ picks up the new target.
 ├── orva.db-shm
 ├── .admin-key                                 mode 0600, plaintext bootstrap key
 ├── functions/
-│   └── fn_xxx/
+│   └── 019df200-7b00-7e00-9c00-aab1cd2e3f40/
 │       ├── current → versions/abc1234...     atomic symlink (the active version)
 │       └── versions/
 │           ├── abc1234.../                   immutable per-hash dirs
@@ -203,7 +203,7 @@ picks up the new target.
 | `execution_logs`     | stderr + stdout from invocations |
 | `build_logs`         | stdout/stderr from `npm install` / `pip install` |
 | `secrets`            | per-function encrypted env vars (AES-256-GCM) |
-| `routes`             | custom URL → fn_id mappings (`/webhooks/stripe`) |
+| `routes`             | custom URL → function-id mappings (`/webhooks/stripe`) |
 | `pool_config`        | per-fn autoscaler tuning (min_warm, max_warm, target_concurrency) |
 | `system_config`      | global tuning knobs (versions_to_keep, gc_interval_seconds, etc.) |
 

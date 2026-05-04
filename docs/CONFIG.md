@@ -78,5 +78,5 @@ Edited via `PUT /api/v1/pool/config` — no restart needed.
 ```bash
 curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \
   http://localhost:8443/api/v1/pool/config \
-  -d '{"function_id":"fn_xyz","min_warm":2,"max_warm":32,"idle_ttl_seconds":60}'
+  -d '{"function_id":"019df200-7b00-7e00-9c00-aab1cd2e3f40","min_warm":2,"max_warm":32,"idle_ttl_seconds":60}'
 ```

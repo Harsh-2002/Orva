@@ -14,7 +14,7 @@ over HTTP, and get warm-pool latency without paying anyone.
 - **Deploy** Node.js (22, 24) or Python (3.13, 3.14) functions
   inline (paste code in the dashboard) or as a tarball with
   `package.json` / `requirements.txt`.
-- **Invoke** at `POST /fn/<id>/<path>` (short ID without `fn_` prefix). The path tail
+- **Invoke** at `POST /fn/<id>/<path>` where `<id>` is the function's UUID. The path tail
   reaches your handler as `event.path`. AWS-Lambda-style and HTTP-style
   handlers both work.
 - **Schedule** functions on cron expressions. The Schedules dashboard

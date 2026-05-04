@@ -16,11 +16,11 @@ Error envelope (every 4xx/5xx):
 {
   "error": {
     "code": "POOL_AT_CAPACITY",
-    "message": "function pool at capacity for fn_xyz",
+    "message": "function pool at capacity for 019df200-7b00-7e00-9c00-aab1cd2e3f40",
     "request_id": "req_abc",
     "hint": "raise pool_config.max_warm via PUT /api/v1/pool/config",
     "retry_after_s": 5,
-    "details": {"function_id": "fn_xyz", "current": 16, "limit": 16}
+    "details": {"function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40", "current": 16, "limit": 16}
   }
 }
 ```
@@ -125,7 +125,7 @@ Deploy from a tarball (multipart upload).
 Roll back to a prior version.
 
 ```json
-{"deployment_id": "dep_xyz"}    // or {"code_hash": "abc..."}
+{"deployment_id": "019df210-1234-7000-8000-deadbeef0001"}    // or {"code_hash": "abc..."}
 ```
 
 Returns 200 with a synthetic deployment row of `source: "rollback"`.
@@ -140,10 +140,10 @@ Deployment history for a function. Optional `?limit=N` (default 50).
 
 ## Invoke
 
-### `POST /fn/{short_id}/{path}`
-Calls the function. `short_id` is the function ID without the `fn_` prefix
-(e.g. function `fn_ttp836b9x3m1` → URL `/fn/ttp836b9x3m1`). Method,
-headers, body, query, and `path` (everything after `/{short_id}`) are all
+### `POST /fn/{id}/{path}`
+Calls the function. `id` is the function's UUID (the same value returned in the `id` field by GET /api/v1/functions).
+(e.g. function `019df200-7b00-7e00-9c00-aab1cd2e3f40` → URL `/fn/ttp836b9x3m1`). Method,
+headers, body, query, and `path` (everything after `/{id}`) are all
 passed to the handler as `event`.
 
 Response is whatever the handler returns. HTTP status is 200 unless
@@ -198,7 +198,7 @@ List custom routes.
 
 ### `POST /api/v1/routes`
 ```json
-{"path": "/webhooks/stripe", "function_id": "fn_xyz", "methods": "POST"}
+{"path": "/webhooks/stripe", "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40", "methods": "POST"}
 ```
 
 `methods` accepts `*` for all methods or comma-separated (`GET,POST`).
@@ -217,7 +217,7 @@ Read the row.
 ### `PUT /api/v1/pool/config`
 ```json
 {
-  "function_id": "fn_xyz",
+  "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
   "min_warm": 2,
   "max_warm": 32,
   "idle_ttl_seconds": 120,
@@ -249,6 +249,55 @@ recoverable.
 
 ### `DELETE /api/v1/keys/{id}`
 Revoke a key.
+
+## Channels
+
+A channel bundles N deployed functions under a name and a static bearer
+token. Presenting that token at `/mcp` exposes ONE MCP tool per
+bundled function (invoke-only) and nothing else — no Orva-management
+surface. Token format: `orva_chn_<32 hex>`. Channel tokens are
+explicitly rejected at every `/api/v1/*` endpoint (401); they're
+MCP-only.
+
+### `GET /api/v1/channels`
+List channels. Returns `{channels: [...]}` with name, description,
+prefix, function_count, last_used_at, expires_at, created_at.
+
+### `POST /api/v1/channels`
+```json
+{
+  "name": "support-bot",
+  "description": "Support workflow toolkit",   // optional
+  "function_ids": ["<uuid>", "<uuid>"],
+  "expires_in_days": 30                         // optional; or expires_at: "ISO timestamp"
+}
+```
+Returns the plaintext token **once** in the `token` field. Save it
+immediately — it's not recoverable. Two functions whose names
+snake_case to the same MCP tool name are rejected with 400 / `TOOL_NAME_COLLISION`.
+
+### `GET /api/v1/channels/{id}`
+Detail with the bundled function set + per-function description overrides.
+
+### `PATCH /api/v1/channels/{id}`
+Update name / description / expires_at. Function set is unchanged.
+
+### `PUT /api/v1/channels/{id}/functions`
+```json
+{
+  "function_ids": ["<uuid>", ...],
+  "descriptions": {"<uuid>": "tool description override"}   // optional
+}
+```
+Replaces the function set wholesale. Junction descriptions on
+overlapping function IDs are preserved unless explicitly overridden.
+
+### `POST /api/v1/channels/{id}/rotate`
+Re-issues the bearer token. Returns `{token: "orva_chn_..."}` once;
+the previous token stops working immediately.
+
+### `DELETE /api/v1/channels/{id}`
+Cascade — removes the channel and every junction row.
 
 ## System
 
