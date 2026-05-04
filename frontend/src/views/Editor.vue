@@ -504,7 +504,7 @@
           <textarea
             v-model="form.description"
             rows="2"
-            placeholder="One-line summary of what this function does. Surfaces in MCP tool catalogs and the agent connector picker."
+            placeholder="One-line summary of what this function does. Surfaces in MCP tool catalogs and the agent channel picker."
             class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white resize-y"
           />
         </div>
@@ -1064,7 +1064,7 @@ const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).len
 const code = ref('')
 const form = ref({
   name: '',
-  description: '',                // surfaces in list_functions, get_function, the connector picker, and as the MCP tool description
+  description: '',                // surfaces in list_functions, get_function, the channel picker, and as the MCP tool description
   runtime: 'python314',
   memory_mb: 64,
   cpus: 0.5,

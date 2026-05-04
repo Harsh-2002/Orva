@@ -107,15 +107,15 @@ func authMiddleware(db *database.Database, next http.Handler) http.Handler {
 			return
 		}
 
-		// Prefix-first dispatch — connector tokens (`orva_aco_*`) and
+		// Prefix-first dispatch — channel tokens (`orva_chn_*`) and
 		// OAuth access-token plaintexts (`orva_oat_*`) MUST NOT pass
-		// the API-key gate. Connector tokens have no Orva-management
+		// the API-key gate. Channel tokens have no Orva-management
 		// authority by design; OAuth tokens use a separate dashboard
-		// path. Reject explicitly so a leaked connector token can't
+		// path. Reject explicitly so a leaked channel token can't
 		// silently fall through and confuse the caller.
-		if strings.HasPrefix(apiKey, "orva_aco_") {
+		if strings.HasPrefix(apiKey, "orva_chn_") {
 			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
-				"connector tokens are MCP-only; use an API key for /api/v1/* requests",
+				"channel tokens are MCP-only; use an API key for /api/v1/* requests",
 				RequestID(r.Context()))
 			return
 		}

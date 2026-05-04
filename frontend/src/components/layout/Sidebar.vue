@@ -113,7 +113,7 @@ const navItems = [
   { path: '/invocations', label: 'Invocations', icon: ListTree },
   { path: '/traces',      label: 'Traces',      icon: Network },
   { path: '/api-keys',    label: 'Keys',        icon: Fingerprint },
-  { path: '/connectors',  label: 'Connectors',  icon: Plug },
+  { path: '/channels',  label: 'Channels',  icon: Plug },
   { path: '/webhooks',    label: 'Webhooks',    icon: Webhook },
   { path: '/firewall',    label: 'Firewall',    icon: ShieldHalf },
   { path: '/settings',    label: 'Settings',    icon: Settings },

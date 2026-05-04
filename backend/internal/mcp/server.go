@@ -88,23 +88,23 @@ func NewHandler(deps Deps) http.Handler {
 		// to surface a less useful "internal error".
 		principal, _ := authenticateRequest(reqDeps.DB, r)
 
-		// Connector mode: register exactly the bundled functions as
+		// Channel mode: register exactly the bundled functions as
 		// MCP tools. Skip every operator-management register call —
-		// the connector token explicitly does NOT carry Orva-mgmt
-		// authority. The system prompt is per-connector so the agent
+		// the channel token explicitly does NOT carry Orva-mgmt
+		// authority. The system prompt is per-channel so the agent
 		// sees the right tool catalog framing.
-		if principal != nil && principal.Kind == authpkg.KindConnector {
-			instr := buildConnectorInstructions(reqDeps.DB, principal.Connector)
+		if principal != nil && principal.Kind == authpkg.KindChannel {
+			instr := buildChannelInstructions(reqDeps.DB, principal.Channel)
 			s := mcpsdk.NewServer(
 				&mcpsdk.Implementation{
 					Name:    "orva",
 					Version: deps.Version,
-					Title:   "Orva — " + principal.Connector.Name,
+					Title:   "Orva — " + principal.Channel.Name,
 				},
 				&mcpsdk.ServerOptions{Instructions: instr},
 			)
 			s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal))
-			registerConnectorTools(s, reqDeps, principal.Connector)
+			registerChannelTools(s, reqDeps, principal.Channel)
 			return s
 		}
 
@@ -318,7 +318,7 @@ func originAllowed(_ string) bool { return true }
 // http.Handler would already have returned 401 in that case, but we
 // defend by still emitting an anonymous activity row). Otherwise its
 // Kind / ID / Label flow straight into ActorType / ActorID / ActorLabel
-// — which is how connector calls show up as `actor_type=connector`
+// — which is how channel calls show up as `actor_type=channel`
 // instead of being misattributed to api_key like the older synth-
 // APIKey hack used to do.
 func activityMiddleware(deps Deps, principal *authpkg.Principal) mcpsdk.Middleware {

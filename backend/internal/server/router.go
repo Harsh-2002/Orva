@@ -332,18 +332,18 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/oauth/connected-apps", oauthAppsHandler.List)
 	r.mux.HandleFunc("DELETE /api/v1/oauth/connected-apps/{id}", oauthAppsHandler.Revoke)
 
-	// Agent connectors: a named bundle of N functions + a static bearer
+	// Agent channels: a named bundle of N functions + a static bearer
 	// token. Presenting the token at /mcp exposes ONLY those functions
 	// as MCP tools (invoke-only) and nothing else. Operator-managed
-	// from the dashboard's Connectors page.
-	connectorHandler := &handlers.ConnectorHandler{DB: r.db}
-	r.mux.HandleFunc("GET /api/v1/connectors", connectorHandler.List)
-	r.mux.HandleFunc("POST /api/v1/connectors", connectorHandler.Create)
-	r.mux.HandleFunc("GET /api/v1/connectors/{id}", connectorHandler.Get)
-	r.mux.HandleFunc("PATCH /api/v1/connectors/{id}", connectorHandler.Update)
-	r.mux.HandleFunc("PUT /api/v1/connectors/{id}/functions", connectorHandler.SetFunctions)
-	r.mux.HandleFunc("POST /api/v1/connectors/{id}/rotate", connectorHandler.Rotate)
-	r.mux.HandleFunc("DELETE /api/v1/connectors/{id}", connectorHandler.Delete)
+	// from the dashboard's Channels page.
+	channelHandler := &handlers.ChannelHandler{DB: r.db}
+	r.mux.HandleFunc("GET /api/v1/channels", channelHandler.List)
+	r.mux.HandleFunc("POST /api/v1/channels", channelHandler.Create)
+	r.mux.HandleFunc("GET /api/v1/channels/{id}", channelHandler.Get)
+	r.mux.HandleFunc("PATCH /api/v1/channels/{id}", channelHandler.Update)
+	r.mux.HandleFunc("PUT /api/v1/channels/{id}/functions", channelHandler.SetFunctions)
+	r.mux.HandleFunc("POST /api/v1/channels/{id}/rotate", channelHandler.Rotate)
+	r.mux.HandleFunc("DELETE /api/v1/channels/{id}", channelHandler.Delete)
 
 	// Runtime routes.
 	runtimeHandler := &handlers.RuntimeHandler{}
@@ -436,7 +436,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /.well-known/openid-configuration/mcp", handlers.OpenIDConfigurationHandler)
 	// OAuth 2.1 endpoints — DCR (RFC 7591), authorize (consent SSR),
 	// token (authorization_code + refresh_token grants), revoke (RFC 7009).
-	// Lets claude.ai / ChatGPT add /mcp as a custom connector via OAuth
+	// Lets claude.ai / ChatGPT add /mcp as a custom channel via OAuth
 	// without the operator pasting a bearer token.
 	oauthHandler := &oauth.Handler{
 		DB:            r.db,

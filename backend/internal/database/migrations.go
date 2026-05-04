@@ -560,13 +560,22 @@ PRAGMA foreign_keys = ON;
 		// silences "duplicate column" so it's safe to re-run.
 		"ALTER TABLE oauth_access_tokens ADD COLUMN last_used_at DATETIME",
 
-		// Agent connectors (v2026.05.04): a named bundle of N functions
-		// + a static bearer token that exposes those functions as MCP
+		// Channels (v2026.05.04): a named bundle of N functions + a
+		// static bearer token that exposes those functions as MCP
 		// tools (invoke-only) and nothing else. Distinct from API keys
 		// (which grant full Orva management) and OAuth grants (which
 		// also grant full management to claude.ai/ChatGPT). Many-to-many
-		// via connector_functions — first M:M junction in the codebase.
-		`CREATE TABLE IF NOT EXISTS agent_connectors (
+		// via channel_functions — first M:M junction in the codebase.
+		//
+		// Renamed from agent_connectors / connector_functions in the
+		// v2026.05.04 dev cycle; the ALTER TABLE RENAMEs below pick up
+		// any pre-existing dev rows in place. Fresh installs error on
+		// the rename ("no such table"), which the loop swallows, and
+		// the CREATE IF NOT EXISTS below builds the new tables clean.
+		"ALTER TABLE agent_connectors RENAME TO channels",
+		"ALTER TABLE connector_functions RENAME TO channel_functions",
+		"ALTER TABLE channel_functions RENAME COLUMN connector_id TO channel_id",
+		`CREATE TABLE IF NOT EXISTS channels (
 			id           TEXT PRIMARY KEY,
 			name         TEXT NOT NULL UNIQUE,
 			description  TEXT,
@@ -579,28 +588,36 @@ PRAGMA foreign_keys = ON;
 			last_used_at DATETIME,
 			revoked_at   DATETIME
 		)`,
-		"CREATE INDEX IF NOT EXISTS idx_connectors_token_hash ON agent_connectors(token_hash)",
+		"CREATE INDEX IF NOT EXISTS idx_channels_token_hash ON channels(token_hash)",
 
-		`CREATE TABLE IF NOT EXISTS connector_functions (
-			connector_id      TEXT NOT NULL,
+		`CREATE TABLE IF NOT EXISTS channel_functions (
+			channel_id        TEXT NOT NULL,
 			function_id       TEXT NOT NULL,
 			description       TEXT,
 			added_by_actor_id TEXT,
 			added_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (connector_id, function_id),
-			FOREIGN KEY (connector_id) REFERENCES agent_connectors(id) ON DELETE CASCADE,
-			FOREIGN KEY (function_id)  REFERENCES functions(id)        ON DELETE CASCADE
+			PRIMARY KEY (channel_id, function_id),
+			FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+			FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
 		)`,
-		"CREATE INDEX IF NOT EXISTS idx_cf_function ON connector_functions(function_id)",
+		"CREATE INDEX IF NOT EXISTS idx_cf_function ON channel_functions(function_id)",
 
 		// description seed for functions — surfaces in list_functions /
-		// get_function and feeds the connector's MCP tool description
+		// get_function and feeds the channel's MCP tool description
 		// when the junction row doesn't have its own override.
 		"ALTER TABLE functions ADD COLUMN description TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
-			// "duplicate column name" is expected on boot after the first.
-			if !strings.Contains(err.Error(), "duplicate column") {
+			// Expected non-fatal errors:
+			//   - "duplicate column name" — additive ALTERs on a re-run
+			//   - "no such table" — RENAMEs on a fresh install (no
+			//     legacy data to migrate)
+			//   - "no such column" — RENAME COLUMN on a freshly-renamed
+			//     table whose new name happens to already exist
+			es := err.Error()
+			if !strings.Contains(es, "duplicate column") &&
+				!strings.Contains(es, "no such table") &&
+				!strings.Contains(es, "no such column") {
 				slog.Warn("schema alter failed", "stmt", stmt, "err", err)
 			}
 		}

@@ -169,20 +169,20 @@ export const listSessions = () => apiClient.get('/auth/sessions')
 
 export const revokeSession = (prefix) => apiClient.delete(`/auth/sessions/${prefix}`)
 
-// Agent connectors (function bundles exposed as MCP tools)
-export const listConnectors = () => apiClient.get('/connectors')
+// Agent channels (function bundles exposed as MCP tools)
+export const listChannels = () => apiClient.get('/channels')
 
-export const createConnector = (data) => apiClient.post('/connectors', data)
+export const createChannel = (data) => apiClient.post('/channels', data)
 
-export const getConnector = (id) => apiClient.get(`/connectors/${id}`)
+export const getChannel = (id) => apiClient.get(`/channels/${id}`)
 
-export const updateConnector = (id, data) => apiClient.patch(`/connectors/${id}`, data)
+export const updateChannel = (id, data) => apiClient.patch(`/channels/${id}`, data)
 
-export const setConnectorFunctions = (id, data) => apiClient.put(`/connectors/${id}/functions`, data)
+export const setChannelFunctions = (id, data) => apiClient.put(`/channels/${id}/functions`, data)
 
-export const rotateConnector = (id) => apiClient.post(`/connectors/${id}/rotate`)
+export const rotateChannel = (id) => apiClient.post(`/channels/${id}/rotate`)
 
-export const deleteConnector = (id) => apiClient.delete(`/connectors/${id}`)
+export const deleteChannel = (id) => apiClient.delete(`/channels/${id}`)
 
 // Runtimes
 export const listRuntimes = () => apiClient.get('/runtimes')

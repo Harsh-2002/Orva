@@ -40,7 +40,7 @@ func extractToken(r *http.Request) string {
 // Token-prefix constants for the prefix-first dispatch. Each branch
 // resolves a distinct credential type — see package auth's doc comment.
 const (
-	tokenPrefixConnector = "orva_aco_"
+	tokenPrefixChannel = "orva_chn_"
 	tokenPrefixOAuth     = "orva_oat_" // OAuth access token plaintext
 	// API keys are everything else starting with "orva_". OAuth refresh
 	// token plaintexts (`orva_ort_`) never reach /mcp directly — they
@@ -48,8 +48,8 @@ const (
 )
 
 // authenticateRequest resolves the inbound bearer token to a Principal.
-// Branches by token prefix BEFORE any DB lookup so an `orva_aco_*`
-// connector token never hits the API-key store, and an `orva_oat_*`
+// Branches by token prefix BEFORE any DB lookup so an `orva_chn_*`
+// channel token never hits the API-key store, and an `orva_oat_*`
 // OAuth token never gets misinterpreted as a (non-existent) API key.
 //
 // Returns nil + false on any failure: missing token, unknown token,
@@ -60,8 +60,8 @@ func authenticateRequest(db *database.Database, r *http.Request) (*auth.Principa
 		return nil, false
 	}
 	switch {
-	case strings.HasPrefix(tok, tokenPrefixConnector):
-		return resolveConnectorToken(db, tok)
+	case strings.HasPrefix(tok, tokenPrefixChannel):
+		return resolveChannelToken(db, tok)
 	case strings.HasPrefix(tok, tokenPrefixOAuth):
 		return resolveOAuthAccessToken(db, tok, r)
 	case strings.HasPrefix(tok, "orva_"):
@@ -106,30 +106,30 @@ func resolveAPIKey(db *database.Database, plaintext string) (*auth.Principal, bo
 	}, true
 }
 
-// resolveConnectorToken is the agent-connector branch. The token is
-// SHA-256 hashed; we look up the connector row and bind the function
+// resolveChannelToken is the agent-channel branch. The token is
+// SHA-256 hashed; we look up the channel row and bind the function
 // list onto the Principal so the MCP server can register exactly
 // those tools and nothing else.
-func resolveConnectorToken(db *database.Database, plaintext string) (*auth.Principal, bool) {
+func resolveChannelToken(db *database.Database, plaintext string) (*auth.Principal, bool) {
 	hash := sha256.Sum256([]byte(plaintext))
 	tokenHash := hex.EncodeToString(hash[:])
 
-	c, err := db.GetConnectorByTokenHash(tokenHash)
+	c, err := db.GetChannelByTokenHash(tokenHash)
 	if err != nil {
 		return nil, false
 	}
 	if !c.IsActive(time.Now()) {
 		return nil, false
 	}
-	db.Async(func() { _ = db.TouchConnectorLastUsed(c.ID) })
+	db.Async(func() { _ = db.TouchChannelLastUsed(c.ID) })
 
 	return &auth.Principal{
-		Kind:  auth.KindConnector,
+		Kind:  auth.KindChannel,
 		ID:    c.ID,
 		Label: c.Name,
-		// Perms intentionally empty — connector tokens have no Orva-
+		// Perms intentionally empty — channel tokens have no Orva-
 		// management permissions.
-		Connector: &auth.ConnectorRef{
+		Channel: &auth.ChannelRef{
 			ID:           c.ID,
 			Name:         c.Name,
 			Description:  c.Description,
@@ -219,8 +219,8 @@ func audienceMatches(tokenResource string, r *http.Request) bool {
 // resolvePermissions runs authenticateRequest and returns the principal's
 // permission set. Empty set if auth failed (callers should already
 // have rejected with 401 at that point — this is a belt-and-braces
-// fallback). Connector tokens always return an empty set, which is
-// intentional: connectors don't gate by permission, they gate by the
+// fallback). Channel tokens always return an empty set, which is
+// intentional: channels don't gate by permission, they gate by the
 // function list registered as tools.
 func resolvePermissions(db *database.Database, r *http.Request) permSet {
 	p, ok := authenticateRequest(db, r)

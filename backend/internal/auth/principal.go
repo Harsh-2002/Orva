@@ -3,7 +3,7 @@
 // REST API today:
 //
 //   - orva_<hex>      → operator API key, gates by permission set
-//   - orva_aco_<hex>  → agent connector, exposes a fixed function set
+//   - orva_chn_<hex>  → agent channel, exposes a fixed function set
 //                       as MCP tools; not accepted by /api/v1/*
 //   - orva_oat_<hex>  → OAuth-issued access token (claude.ai web,
 //                       ChatGPT web, etc.); operator-equivalent power
@@ -13,7 +13,7 @@
 // logging, MCP tool registration) doesn't have to care which path the
 // caller came in through. Replaces the older "synthesise a fake
 // *database.APIKey for OAuth grants" hack — that synth shape leaked
-// "everyone is an api_key" into the activity log, which broke connector
+// "everyone is an api_key" into the activity log, which broke channel
 // attribution before this refactor.
 package auth
 
@@ -25,38 +25,38 @@ import "time"
 const (
 	KindAPIKey    = "api_key"
 	KindOAuth     = "oauth"
-	KindConnector = "connector"
+	KindChannel = "channel"
 )
 
 // Principal is the resolved caller identity. Every auth path returns
 // one of these. Fields populated depend on Kind.
 type Principal struct {
-	// Kind is one of KindAPIKey / KindOAuth / KindConnector.
+	// Kind is one of KindAPIKey / KindOAuth / KindChannel.
 	Kind string
 
 	// ID is the storage row id (uuidv7) of the underlying credential —
-	// API key id, OAuth token storage id, or agent connector id.
+	// API key id, OAuth token storage id, or agent channel id.
 	// Stamped on activity rows so operators can trace who did what.
 	ID string
 
 	// Label is a human-friendly name. API key name, OAuth client name,
-	// or connector name. Surfaced in the dashboard's Activity feed.
+	// or channel name. Surfaced in the dashboard's Activity feed.
 	Label string
 
 	// Perms is the permission set for KindAPIKey and KindOAuth.
-	// Empty for KindConnector — connectors have no Orva-management
+	// Empty for KindChannel — channels have no Orva-management
 	// permissions; their access is bounded by the function set in
-	// Connector.FunctionIDs.
+	// Channel.FunctionIDs.
 	Perms PermSet
 
-	// Connector carries the per-token function bundle. Non-nil iff
-	// Kind == KindConnector. The MCP layer uses FunctionIDs to
+	// Channel carries the per-token function bundle. Non-nil iff
+	// Kind == KindChannel. The MCP layer uses FunctionIDs to
 	// register one tool per function and skips every other register*
 	// call.
-	Connector *ConnectorRef
+	Channel *ChannelRef
 
 	// Expires is when the credential becomes unusable (nil = never).
-	// API keys, connector tokens, and OAuth access tokens all have
+	// API keys, channel tokens, and OAuth access tokens all have
 	// expiry semantics; the resolver checks this before returning, so
 	// callers don't need to re-check — but it's available for
 	// telemetry / "expires in" rendering.
@@ -71,14 +71,14 @@ type PermSet map[string]bool
 // Has reports whether the permission set includes `name`.
 func (p PermSet) Has(name string) bool { return p != nil && p[name] }
 
-// ConnectorRef is the scoped data a connector token gives the MCP
-// server: which functions to register as tools, plus the connector's
-// own identity (used for the activity log + the per-connector
+// ChannelRef is the scoped data a channel token gives the MCP
+// server: which functions to register as tools, plus the channel's
+// own identity (used for the activity log + the per-channel
 // system prompt).
-type ConnectorRef struct {
+type ChannelRef struct {
 	ID           string
 	Name         string
 	Description  string
-	Instructions string   // optional per-connector serverInstructions override
-	FunctionIDs  []string // populated from connector_functions junction
+	Instructions string   // optional per-channel serverInstructions override
+	FunctionIDs  []string // populated from channel_functions junction
 }
