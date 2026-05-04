@@ -51,7 +51,9 @@ LABEL org.opencontainers.image.title="Orva" \
       org.opencontainers.image.version="${VERSION}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tini curl python3-pip nodejs npm \
+      ca-certificates tini curl \
+      nftables iproute2 \
+      python3-pip nodejs npm \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /var/lib/orva/functions
 
