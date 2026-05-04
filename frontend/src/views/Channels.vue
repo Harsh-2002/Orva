@@ -1,36 +1,46 @@
 <template>
   <div class="space-y-6">
+    <!-- Page header — matches ApiKeys.vue / FunctionsList.vue:
+         left-aligned title, right-aligned primary action. Subtitle
+         is terse: tells operators the *what*, the heads-up banner
+         below explains the *trust boundary*. -->
     <div class="flex items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Channels
         </h1>
         <p class="text-xs text-foreground-muted mt-1 max-w-prose">
-          Bundle deployed functions and expose them as MCP tools to an
-          agentic workflow. Each channel has its own bearer token;
-          presenting that token at <code class="text-[11px]">/mcp</code>
-          reveals only the bundled functions and nothing else from your Orva.
+          Bundle deployed functions and expose them as MCP tools to a
+          third-party agent. Each channel has its own bearer token.
         </p>
       </div>
       <Button @click="openCreate">
         <Plug class="w-4 h-4" />
-        New Channel
+        New channel
       </Button>
     </div>
 
-    <!-- Risk banner. The channel boundary covers the MCP surface,
-         not what bundled functions do at runtime. Tell operators so
-         they don't get surprised. -->
-    <div class="rounded-md border border-amber-700/30 bg-amber-950/15 px-4 py-3 text-xs text-amber-200/90 leading-relaxed">
-      <div class="font-semibold text-amber-200 mb-0.5">Heads up</div>
-      Channel tokens grant invoke-only MCP access to the bundled
-      functions. Bundled functions remain as powerful as you've
-      configured them — including any Orva REST SDK calls they make
-      from inside their sandbox. The channel boundary protects the
-      MCP surface, not the runtime blast radius.
+    <!-- Heads-up banner. Visual structure mirrors the Settings card
+         but in amber to flag the trust boundary. The dashboard uses
+         this same shape for any "this is permanent / consequential"
+         hint (see ApiKeys's one-time secret reveal). -->
+    <div class="rounded-md border border-amber-700/30 bg-amber-950/15 px-4 py-3 text-xs text-amber-200/90 leading-relaxed flex items-start gap-2.5">
+      <AlertTriangle class="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+      <div>
+        <div class="font-semibold text-amber-200 mb-0.5">Heads up — what a channel token can do</div>
+        <p>
+          Channel tokens grant invoke-only MCP access to the bundled
+          functions. The bundled functions remain as powerful as you've
+          configured them — including any in-sandbox SDK calls they
+          make. The channel boundary protects the MCP surface, not the
+          runtime blast radius.
+        </p>
+      </div>
     </div>
 
-    <!-- One-time token reveal after Create / Rotate. -->
+    <!-- One-time token reveal after Create / Rotate. Same amber-card
+         pattern as ApiKeys.vue, plus an extra URL/header hint row
+         since channels are usually configured in another tool. -->
     <div
       v-if="createdToken"
       class="bg-background border border-amber-700/40 rounded-lg p-4 space-y-3"
@@ -45,7 +55,7 @@
           </div>
         </div>
         <button
-          class="text-foreground-muted hover:text-white"
+          class="text-foreground-muted hover:text-white transition-colors"
           title="Dismiss"
           @click="createdToken = ''"
         >
@@ -69,13 +79,14 @@
           {{ createdCopied ? 'Copied' : 'Copy' }}
         </button>
       </div>
-      <div class="text-[11px] text-foreground-muted">
-        URL: <code class="text-foreground">{{ mcpURL }}</code>
-        &nbsp;·&nbsp; Header: <code class="text-foreground">Authorization: Bearer &lt;token&gt;</code>
+      <div class="text-[11px] text-foreground-muted flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>URL <code class="text-foreground bg-surface px-1.5 py-0.5 rounded">{{ mcpURL }}</code></span>
+        <span>Header <code class="text-foreground bg-surface px-1.5 py-0.5 rounded">Authorization: Bearer &lt;token&gt;</code></span>
       </div>
     </div>
 
-    <!-- Inline create form. -->
+    <!-- Inline create form. Card shape, focus-ring style, label
+         typography all mirror ApiKeys.vue's create form. -->
     <div
       v-if="creating"
       class="bg-background border border-border rounded-lg p-5 space-y-4"
@@ -89,14 +100,14 @@
           <input
             v-model="newChannel.name"
             placeholder="e.g. support-bot"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
           >
         </div>
         <div>
           <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Expires in</label>
           <select
             v-model="newChannel.expiresInDays"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
           >
             <option :value="0">
               Never
@@ -118,13 +129,17 @@
         <input
           v-model="newChannel.description"
           placeholder="What this channel is for"
-          class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+          class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
         >
       </div>
       <div>
-        <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">
-          Functions <span class="text-white">({{ newChannel.functionIds.length }} selected)</span>
-        </label>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide">Functions</label>
+          <span
+            v-if="newChannel.functionIds.length > 0"
+            class="text-[11px] text-foreground-muted"
+          >{{ newChannel.functionIds.length }} selected</span>
+        </div>
         <Button
           variant="secondary"
           @click="pickerOpen = true"
@@ -135,9 +150,10 @@
       </div>
       <div
         v-if="createError"
-        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200 flex items-start gap-2"
       >
-        {{ createError }}
+        <AlertCircle class="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <span>{{ createError }}</span>
       </div>
       <div class="flex gap-2 pt-1">
         <Button
@@ -156,17 +172,31 @@
       </div>
     </div>
 
-    <!-- Channels list. -->
+    <!-- Channels list — mirrors ApiKeys.vue table chrome exactly:
+         px-6 py-4 cells, `<th>` labels on own line, hover row tint,
+         IconButton actions, amber "Never used" / red "Expired" hints. -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
       <table class="w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-6 py-3 font-medium">Name</th>
-            <th class="px-6 py-3 font-medium">Functions</th>
-            <th class="px-6 py-3 font-medium hidden md:table-cell">Prefix</th>
-            <th class="px-6 py-3 font-medium hidden lg:table-cell">Last used</th>
-            <th class="px-6 py-3 font-medium hidden xl:table-cell">Expires</th>
-            <th class="px-6 py-3 font-medium text-right">Actions</th>
+            <th class="px-6 py-3 font-medium">
+              Name
+            </th>
+            <th class="px-6 py-3 font-medium">
+              Functions
+            </th>
+            <th class="px-6 py-3 font-medium hidden sm:table-cell">
+              Prefix
+            </th>
+            <th class="px-6 py-3 font-medium hidden md:table-cell">
+              Last used
+            </th>
+            <th class="px-6 py-3 font-medium hidden lg:table-cell">
+              Expires
+            </th>
+            <th class="px-6 py-3 font-medium text-right">
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -175,39 +205,63 @@
             :key="c.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-6 py-3">
-              <div class="font-medium text-white">{{ c.name }}</div>
+            <td class="px-6 py-4">
+              <div class="font-medium text-white">
+                {{ c.name }}
+              </div>
               <div
                 v-if="c.description"
-                class="text-xs text-foreground-muted mt-0.5 line-clamp-1"
-              >{{ c.description }}</div>
+                class="text-xs text-foreground-muted mt-0.5 line-clamp-1 max-w-md"
+              >
+                {{ c.description }}
+              </div>
             </td>
-            <td class="px-6 py-3 text-foreground-muted">{{ c.function_count }}</td>
-            <td class="px-6 py-3 hidden md:table-cell">
-              <code class="text-xs text-foreground-muted">{{ c.prefix }}…</code>
+            <td class="px-6 py-4">
+              <span class="inline-flex items-center gap-1.5 text-foreground-muted">
+                <Boxes class="w-3.5 h-3.5" />
+                <span class="tabular-nums">{{ c.function_count }}</span>
+              </span>
             </td>
-            <td class="px-6 py-3 hidden lg:table-cell text-foreground-muted text-xs">
-              {{ c.last_used_at ? formatRelative(c.last_used_at) : 'Never' }}
+            <td class="px-6 py-4 hidden sm:table-cell">
+              <code class="text-foreground-muted font-mono text-xs">{{ c.prefix }}…</code>
             </td>
-            <td class="px-6 py-3 hidden xl:table-cell text-foreground-muted text-xs">
-              {{ c.expires_at ? formatRelative(c.expires_at) : 'Never' }}
+            <td class="px-6 py-4 hidden md:table-cell">
+              <span
+                v-if="c.last_used_at"
+                class="text-foreground-muted"
+              >{{ formatRelative(c.last_used_at) }}</span>
+              <span
+                v-else
+                class="text-amber-400/70 text-xs"
+              >Never used</span>
             </td>
-            <td class="px-6 py-3">
-              <div class="flex justify-end gap-1">
-                <button
-                  class="text-xs text-foreground-muted hover:text-white px-2 py-1 rounded transition-colors"
+            <td class="px-6 py-4 hidden lg:table-cell">
+              <span
+                v-if="!c.expires_at"
+                class="text-foreground-muted"
+              >Never</span>
+              <span
+                v-else-if="isExpired(c.expires_at)"
+                class="text-red-400 text-xs"
+              >Expired {{ formatRelative(c.expires_at) }}</span>
+              <span
+                v-else
+                class="text-foreground-muted"
+              >{{ formatRelative(c.expires_at) }}</span>
+            </td>
+            <td class="px-6 py-4 text-right">
+              <div class="inline-flex justify-end gap-1">
+                <IconButton
+                  :icon="RotateCcw"
                   title="Rotate token"
                   @click="rotate(c)"
-                >
-                  <RotateCcw class="w-3.5 h-3.5" />
-                </button>
-                <button
-                  class="text-xs text-foreground-muted hover:text-red-400 px-2 py-1 rounded transition-colors"
+                />
+                <IconButton
+                  :icon="Trash2"
+                  variant="danger"
                   title="Delete channel"
                   @click="remove(c)"
-                >
-                  <Trash2 class="w-3.5 h-3.5" />
-                </button>
+                />
               </div>
             </td>
           </tr>
@@ -216,7 +270,7 @@
               colspan="6"
               class="px-6 py-8 text-center text-foreground-muted"
             >
-              No channels yet. Click <span class="text-white">New Channel</span> to bundle functions for an agent.
+              No channels yet. Click <span class="text-white">New channel</span> to bundle functions for an agent.
             </td>
           </tr>
         </tbody>
@@ -235,8 +289,9 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw } from 'lucide-vue-next'
+import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertTriangle, AlertCircle } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
+import IconButton from '@/components/common/IconButton.vue'
 import FunctionPickerModal from '@/components/channels/FunctionPickerModal.vue'
 import {
   listChannels,
@@ -245,7 +300,7 @@ import {
   deleteChannel,
 } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
-import { formatRelative } from '@/utils/time'
+import { formatRelative, isExpired } from '@/utils/time'
 import { useConfirmStore } from '@/stores/confirm'
 
 const confirmStore = useConfirmStore()
