@@ -162,23 +162,26 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ── 2. nsjail: per-arch build inside the runtime base image ──────────
+  # ── 2. nsjail: per-arch standalone binary (release asset only) ───────
+  # The container image's nsjail comes from inside the unified Dockerfile
+  # (its `FROM debian:bookworm-slim AS nsjail` stage), so this job is
+  # solely for producing the standalone `nsjail-linux-{amd64,arm64}`
+  # binary that ships as a GitHub release asset for bare-metal installs.
+  #
   # Why container: debian:bookworm-slim
   # ───────────────────────────────────
   # nsjail is a C++ binary that dynamically links against libprotobuf,
-  # libnl-route-3, libstdc++, libcap, libc. Earlier this job ran on the
-  # ubuntu-24.04 runner (glibc 2.39 / libstdc++ 14 / GLIBCXX_3.4.32+),
-  # while the runtime image in Dockerfile.release uses debian:bookworm-slim
-  # (glibc 2.36 / libstdc++ 12 / GLIBCXX_3.4.30). The dynlinked binary
-  # carried symbol references too new for the runtime base, and the
-  # released container exited at exec with errors like
+  # libnl-route-3, libstdc++, libcap, libc. Built on the ubuntu-24.04
+  # host runner (glibc 2.39 / libstdc++ 14 / GLIBCXX_3.4.32+), the
+  # binary carries symbol references too new for the bookworm-class
+  # runtime its install.sh seeds it into — at which point dynamic
+  # linking aborts at exec with
   #   "libprotobuf.so.32: cannot open shared object file"
-  # then, after that lib was added, with
+  # then, after that lib is added,
   #   "version `GLIBC_2.38' not found"
-  # Building inside debian:bookworm-slim guarantees the produced binary's
-  # symbol references match the runtime image, so the released container
-  # works on any host kernel that satisfies bookworm's own requirements
-  # (Linux ≥ 3.2, which covers every system anyone will deploy this on).
+  # Building inside debian:bookworm-slim matches the binary's symbol
+  # references to the install target on every supported kernel
+  # (Linux ≥ 3.2, which covers every system anyone deploys this on).
   build-nsjail:
     name: build nsjail (${{ matrix.goarch }})
     runs-on: ${{ matrix.runner }}
@@ -357,12 +360,17 @@ jobs:
           files: scripts/install.sh
 
   # ── 5. Per-arch Docker image, native runners (no QEMU) ────────────────
-  # Each arch builds on its native runner and pushes by digest only —
-  # NO named tags. The manifest job below combines the two digests into
-  # the single `:latest` tag, which is the only tag we publish.
+  # Single source of truth: the unified Dockerfile builds UI, Go binary,
+  # nsjail, and rootfs stages itself, all in matched debian:bookworm-slim
+  # environments. No artifact staging from sibling jobs; no second
+  # Dockerfile to drift. Each arch builds on its native runner so QEMU
+  # emulation stays out of the loop (UI + npm install was the original
+  # reason for splitting builds; native runners removed that pressure).
+  #
+  # Each arch pushes by digest only; the manifest job below stitches the
+  # two digests into both `:latest` and the immutable `:${tag}`.
   docker-image:
     name: docker image (${{ matrix.goarch }})
-    needs: [build-orva, build-nsjail, build-rootfs]
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -388,20 +396,6 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: "*-${{ matrix.goarch }}"
-          path: artifacts
-          merge-multiple: true
-
-      - name: stage artifacts for Dockerfile.release
-        run: |
-          set -e
-          mkdir -p dist
-          mv artifacts/orva-linux-${{ matrix.goarch }}    dist/orva-${{ matrix.goarch }}
-          mv artifacts/nsjail-linux-${{ matrix.goarch }}  dist/nsjail-${{ matrix.goarch }}
-          chmod +x dist/orva-${{ matrix.goarch }} dist/nsjail-${{ matrix.goarch }}
-
       - uses: docker/setup-buildx-action@v4
 
       - name: login to ghcr.io
@@ -413,13 +407,13 @@ jobs:
 
       # Push by digest only — no tag is created. The manifest job below
       # references the per-arch digests directly when stitching them
-      # into the multi-arch :latest tag.
+      # into the multi-arch :latest + :${tag} tags.
       - name: build + push by digest
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.release
+          file: Dockerfile
           platforms: ${{ matrix.platform }}
           # No layer cache — `no-cache: true` forces every layer to
           # rebuild, and `pull: true` re-pulls every base image. The
