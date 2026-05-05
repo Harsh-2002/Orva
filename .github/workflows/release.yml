@@ -162,10 +162,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ── 2. nsjail: static build per arch ──────────────────────────────────
+  # ── 2. nsjail: per-arch build inside the runtime base image ──────────
+  # Why container: debian:bookworm-slim
+  # ───────────────────────────────────
+  # nsjail is a C++ binary that dynamically links against libprotobuf,
+  # libnl-route-3, libstdc++, libcap, libc. Earlier this job ran on the
+  # ubuntu-24.04 runner (glibc 2.39 / libstdc++ 14 / GLIBCXX_3.4.32+),
+  # while the runtime image in Dockerfile.release uses debian:bookworm-slim
+  # (glibc 2.36 / libstdc++ 12 / GLIBCXX_3.4.30). The dynlinked binary
+  # carried symbol references too new for the runtime base, and the
+  # released container exited at exec with errors like
+  #   "libprotobuf.so.32: cannot open shared object file"
+  # then, after that lib was added, with
+  #   "version `GLIBC_2.38' not found"
+  # Building inside debian:bookworm-slim guarantees the produced binary's
+  # symbol references match the runtime image, so the released container
+  # works on any host kernel that satisfies bookworm's own requirements
+  # (Linux ≥ 3.2, which covers every system anyone will deploy this on).
   build-nsjail:
     name: build nsjail (${{ matrix.goarch }})
     runs-on: ${{ matrix.runner }}
+    container: debian:bookworm-slim
     strategy:
       matrix:
         include:
@@ -174,12 +191,13 @@ jobs:
           - goarch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v6
+      # No actions/checkout: the job clones nsjail upstream and produces
+      # one binary; no Orva repo files are read here.
 
       - name: install build deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             ca-certificates git make gcc g++ autoconf bison flex libtool pkg-config \
             libprotobuf-dev libnl-route-3-dev protobuf-compiler
 
@@ -189,14 +207,20 @@ jobs:
           cd /tmp/nsjail
           make -j"$(nproc)"
           strip nsjail
-          cp nsjail "$GITHUB_WORKSPACE/nsjail-linux-${{ matrix.goarch }}"
-          file "$GITHUB_WORKSPACE/nsjail-linux-${{ matrix.goarch }}"
+          file ./nsjail
+          # Confirm the binary's NEEDED dyn deps match what the runtime
+          # apt list installs (libprotobuf32, libnl-route-3-200,
+          # libcap2-bin, libstdc++6, libc6). If a future libprotobuf
+          # bookworm bump renames the .so version, this readlink + dump
+          # output will surface in the workflow log immediately.
+          objdump -p ./nsjail | grep NEEDED || true
+          cp ./nsjail nsjail-linux-${{ matrix.goarch }}
 
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: nsjail-${{ matrix.goarch }}
-          path: nsjail-linux-${{ matrix.goarch }}
+          path: /tmp/nsjail/nsjail-linux-${{ matrix.goarch }}
           if-no-files-found: error
           retention-days: 7
 
@@ -435,12 +459,26 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # ── 6. Stitch the two per-arch digests into a single `:latest` tag ───
+  # ── 6. Stitch the two per-arch digests into multi-arch manifest ──────
+  # Tags both `:latest` and the immutable `:${tag}` (e.g. v2026.05.05),
+  # so operators can pin to a known version while `:latest` continues
+  # to track the head of the release line.
   docker-manifest:
     name: docker multi-arch manifest
     needs: [docker-image]
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
     steps:
+      - name: resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/download-artifact@v8
         with:
           pattern: digest-*
@@ -456,11 +494,54 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: create + push manifest list as :latest
+      - name: create + push manifest list (:latest + :${tag})
         run: |
           cd /tmp/digests
-          docker buildx imagetools create -t ${{ env.IMAGE_NAME }}:latest \
-            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          DIGESTS=$(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          docker buildx imagetools create \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            -t ${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }} \
+            $DIGESTS
 
       - name: inspect
-        run: docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
+        run: |
+          docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
+          docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}
+
+  # ── 7. Trigger the production redeploy webhook ───────────────────────
+  # POSTs to a Portainer stack-redeploy webhook (or any equivalent CD
+  # endpoint) so the production host pulls the new `:latest` tag and
+  # recreates its container. The URL is held in the
+  # PORTAINER_REDEPLOY_WEBHOOK repository secret because it acts as a
+  # bearer-style credential — anyone who knows the URL can trigger a
+  # redeploy. Set with:
+  #   gh secret set PORTAINER_REDEPLOY_WEBHOOK \
+  #     --body 'https://portainer.example/api/stacks/webhooks/<uuid>'
+  # If the secret is not configured, this job no-ops cleanly so a fresh
+  # fork of the repo doesn't fail releases just because the webhook
+  # isn't wired up yet.
+  redeploy-production:
+    name: redeploy production
+    needs: [docker-manifest]
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    steps:
+      - name: trigger Portainer webhook
+        env:
+          WEBHOOK: ${{ secrets.PORTAINER_REDEPLOY_WEBHOOK }}
+          TAG: ${{ needs.docker-manifest.outputs.tag }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::PORTAINER_REDEPLOY_WEBHOOK secret not set; skipping redeploy."
+            exit 0
+          fi
+          # Most Portainer webhook endpoints accept POST with no body.
+          # -f makes curl fail the step on non-2xx so a webhook drift
+          # surfaces as a workflow failure (rather than a silent no-op
+          # that leaves production on the previous image).
+          status=$(curl -sS -o /dev/stderr -w '%{http_code}' -X POST "$WEBHOOK")
+          echo "::notice::Portainer webhook responded HTTP $status for tag $TAG"
+          case "$status" in
+            2*) ;;
+            *) echo "::error::redeploy webhook failed (HTTP $status)"; exit 1 ;;
+          esac
