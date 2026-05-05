@@ -7,8 +7,16 @@
 #   TARGETARCH — set automatically by buildx (amd64 | arm64)
 #
 # Build context expectations (set by release.yml docker job):
-#   ./dist/orva-${TARGETARCH}        the static Go binary
-#   ./dist/nsjail-${TARGETARCH}      the static-musl nsjail binary
+#   ./dist/orva-${TARGETARCH}        the static Go binary (CGO_ENABLED=0)
+#   ./dist/nsjail-${TARGETARCH}      nsjail binary, dynamically linked
+#                                     against libprotobuf + libnl-route-3
+#                                     (the .github/workflows/release.yml
+#                                     build-nsjail job uses default `make`
+#                                     which produces a dynlinked binary;
+#                                     the runtime apt list below installs
+#                                     the matching libprotobuf32,
+#                                     libnl-route-3-200, libcap2-bin so
+#                                     nsjail resolves its libs at runtime)
 #   ./runtimes/                      adapter.{js,py} per runtime
 #   ./scripts/entrypoint.sh          rootfs seeder
 
@@ -52,6 +60,7 @@ LABEL org.opencontainers.image.title="Orva" \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tini curl \
+      libprotobuf32 libnl-route-3-200 libcap2-bin \
       nftables iproute2 \
       python3-pip nodejs npm \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
