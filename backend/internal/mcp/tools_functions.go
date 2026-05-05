@@ -298,7 +298,8 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 			&mcpsdk.Tool{
 				Name: "create_function",
 				Title: "Create Function",
-				Description: "Create a new function shell (no code yet). The function starts in `created` status — call deploy_function_inline next to ship code and have it activate. " +
+				Description: "BEFORE calling this: if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract, SDK shape, and event envelope diverge from Lambda / Vercel / Cloudflare Workers; agents that skip the docs and rely on training-data defaults consistently produce code that fails at first invoke (`require('orva')` not `import orva`, `kv.put` not `kv.set`, `exports.handler` not `export default`, etc.). Reading the docs once costs ~3 KB and prevents 4-6 round-trips of trial-and-error.\n\n" +
+					"Create a new function shell (no code yet). The function starts in `created` status — call deploy_function_inline next to ship code and have it activate. " +
 					"Most fields are REQUIRED so the function record carries explicit intent rather than silent defaults. Specifically you MUST provide: " +
 					"`name` (URL-safe identifier), " +
 					"`description` (one-sentence summary of what the function does — visible in list_functions and the dashboard), " +
@@ -331,7 +332,8 @@ func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 			&mcpsdk.Tool{
 				Name:        "update_function",
 				Title:        "Update Function",
-				Description: "Patch a function's settings. Any field omitted is left unchanged. Flipping memory/cpus/env_vars/network_mode drains the warm pool so the next invocation respawns with the new config.",
+				Description: "BEFORE calling this with code-shape implications (entrypoint changes, runtime swaps, etc.): if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract diverges from Lambda / Vercel / Workers and skipping the docs is the leading cause of update_function calls that activate broken handlers.\n\n" +
+					"Patch a function's settings. Any field omitted is left unchanged. Flipping memory/cpus/env_vars/network_mode drains the warm pool so the next invocation respawns with the new config.",
 				Annotations: &mcpsdk.ToolAnnotations{
 					IdempotentHint: true,
 					OpenWorldHint:  ptrFalse(),

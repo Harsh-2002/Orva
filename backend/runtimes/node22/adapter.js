@@ -163,14 +163,26 @@ async function normaliseResponse(ret) {
 // Vercel/Next-style (req, res) detection: wrap to capture the response.
 function invokeVercelStyle(fn, event) {
   return new Promise((resolve, reject) => {
+    // Parse query string out of event.path. Vercel/Next handlers
+    // expect req.query to be populated; previously hardcoded {} so any
+    // ?k=v on the URL was invisible to the handler. URLSearchParams
+    // gives us decode + multi-value handling for free.
+    const rawPath = event.path || '/';
+    const qIdx = rawPath.indexOf('?');
+    const query = {};
+    if (qIdx >= 0) {
+      for (const [k, v] of new URLSearchParams(rawPath.slice(qIdx + 1))) {
+        query[k] = v;
+      }
+    }
     const req = {
       method: event.method || 'GET',
-      url: event.path || '/',
+      url: rawPath,
       headers: event.headers || {},
       body: (() => {
         try { return JSON.parse(event.body || 'null'); } catch { return event.body; }
       })(),
-      query: {},
+      query,
     };
     let statusCode = 200;
     const headers = {};
@@ -449,6 +461,21 @@ async function readFrame() {
     if (frame.type !== 'request') continue;
 
     const event = frame.event || { method: 'POST', path: '/', headers: {}, body: '' };
+    // Enrich event.query from event.path. The proxy now passes the raw
+    // path including ?foo=bar; both Lambda-style handlers (event.query)
+    // and Vercel/Worker-style handlers (req.query) expect this to be
+    // already parsed, so we do it once here at the frame boundary.
+    {
+      const _p = event.path || '/';
+      const _qIdx = _p.indexOf('?');
+      const _q = {};
+      if (_qIdx >= 0) {
+        for (const [k, v] of new URLSearchParams(_p.slice(_qIdx + 1))) {
+          _q[k] = v;
+        }
+      }
+      event.query = _q;
+    }
     // Propagate call depth into env so orva.invoke()'s SDK can forward
     // it on outbound nested calls. Otherwise the host's depth guard
     // never trips on recursion.

@@ -215,7 +215,8 @@ func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 			&mcpsdk.Tool{
 				Name: "deploy_function_inline",
 				Title: "Deploy Function Inline",
-				Description: "Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but the function's network_mode is 'none' (the SDK call would fail at runtime).",
+				Description: "BEFORE calling this: if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract, SDK shape, and event envelope diverge from Lambda / Vercel / Cloudflare Workers; agents that skip the docs and rely on training-data defaults consistently produce code that fails at first invoke (`require('orva')` not `import orva`, `kv.put` not `kv.set`, `exports.handler` not `export default`, no `event.query` parsing of arbitrary URLs, etc.). Reading the docs once costs ~3 KB and prevents 4-6 round-trips of trial-and-error rebuilds.\n\n" +
+					"Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but the function's network_mode is 'none' (the SDK call would fail at runtime).",
 				Annotations: &mcpsdk.ToolAnnotations{
 					DestructiveHint: ptrFalse(),
 					OpenWorldHint:   ptrFalse(),

@@ -200,6 +200,15 @@ func (p *Proxy) Forward(
 			}
 		}
 	}
+	// Preserve the query string. r.URL.Path excludes it by Go's URL
+	// parsing convention; the raw query lives in r.URL.RawQuery and was
+	// previously dropped on the floor before reaching the worker. The
+	// adapter (Node + Python) parses the query out of event.path, so
+	// re-attaching it here is enough to make req.query / event.query
+	// available to handler code.
+	if r.URL.RawQuery != "" {
+		path = path + "?" + r.URL.RawQuery
+	}
 
 	headers := make(map[string]string, len(r.Header))
 	for k, v := range r.Header {
