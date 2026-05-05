@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Traces
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Causal chains across HTTP, F2F invokes, jobs, cron, and inbound
           webhooks. One row per trace; click to see the full waterfall of
           spans.
@@ -23,40 +23,44 @@
       </Button>
     </div>
 
-    <!-- Filter strip — search + chip groups, mirrors Activity.vue. -->
-    <div class="flex items-center gap-2 flex-wrap">
-      <div class="relative flex-1 min-w-[260px] max-w-[420px]">
+    <!-- Filter strip — search + chip groups, mirrors Activity.vue.
+         Mobile (<sm): search on its own row, chips scroll horizontally. -->
+    <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:flex-wrap">
+      <div class="relative w-full sm:flex-1 sm:min-w-[260px] sm:max-w-[420px]">
         <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
         <input
           v-model="fnFilter"
           placeholder="Filter by function id or name…"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
           @keydown.enter="refresh"
         >
       </div>
+      <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0">
+        <Button
+          v-for="opt in statusOptions"
+          :key="opt.value"
+          variant="chip"
+          size="xs"
+          :active="statusFilter === opt.value"
+          class="shrink-0 snap-start"
+          @click="setStatusFilter(opt.value)"
+        >
+          {{ opt.label }}
+        </Button>
 
-      <Button
-        v-for="opt in statusOptions"
-        :key="opt.value"
-        variant="chip"
-        size="xs"
-        :active="statusFilter === opt.value"
-        @click="setStatusFilter(opt.value)"
-      >
-        {{ opt.label }}
-      </Button>
+        <span class="text-foreground-muted/40 shrink-0">·</span>
 
-      <span class="text-foreground-muted/40">·</span>
-
-      <Button
-        variant="chip"
-        size="xs"
-        :active="outlierOnly"
-        @click="toggleOutlier"
-      >
-        <Flag class="w-3 h-3" />
-        Outliers only
-      </Button>
+        <Button
+          variant="chip"
+          size="xs"
+          :active="outlierOnly"
+          class="shrink-0 snap-start"
+          @click="toggleOutlier"
+        >
+          <Flag class="w-3 h-3" />
+          Outliers only
+        </Button>
+      </div>
     </div>
 
     <!-- Error / empty / loading -->
@@ -113,11 +117,11 @@
             </td>
             <td class="px-4 py-2.5 hidden md:table-cell">
               <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-foreground-muted border-border lowercase">
-                {{ t.trigger || '—' }}
+                {{ t.trigger || EMPTY }}
               </span>
             </td>
             <td class="px-4 py-2.5 text-right font-mono text-xs text-foreground-muted hidden sm:table-cell">
-              {{ t.duration_ms != null ? `${t.duration_ms}ms` : '—' }}
+              {{ t.duration_ms != null ? `${t.duration_ms}ms` : EMPTY }}
             </td>
             <td class="px-4 py-2.5">
               <StatusBadge :status="t.status" />
@@ -143,6 +147,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { RefreshCw, Search, Flag, Network } from 'lucide-vue-next'
@@ -217,7 +222,7 @@ const openTrace = (traceID) => router.push(`/traces/${traceID}`)
 // (Invocations, Jobs) use full timestamps; high-volume live feeds like
 // this one keep the cell narrow.
 const formatTime = (iso) => {
-  if (!iso) return '—'
+  if (!iso) return EMPTY
   const d = new Date(iso)
   return d.toLocaleTimeString(undefined, { hour12: false })
 }

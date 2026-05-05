@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           KV Store
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Per-function key/value state for
           <router-link
             :to="`/functions/${fnName}`"
@@ -14,7 +14,7 @@
           >
             {{ fnName }}
           </router-link>
-          — values are JSON, optional TTL.
+          Values are JSON, optional TTL.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -64,7 +64,7 @@
         v-if="truncated"
         class="text-[11px] text-amber-400/80"
       >
-        Showing first {{ rows.length }} — narrow the prefix to see more.
+        Showing first {{ rows.length }}. Narrow the prefix to see more.
       </span>
     </div>
 
@@ -102,7 +102,7 @@
               >
                 {{ formatTTL(row.expires_at) }}
               </span>
-              <span v-else class="text-foreground-muted text-xs">—</span>
+              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-3 text-xs font-mono text-foreground-muted hidden lg:table-cell">
               {{ formatBytes(row.size_bytes) }}
@@ -129,7 +129,7 @@
                 <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">{{ prefix }}</code>.
               </template>
               <template v-else>
-                No keys yet — your function will write here when it calls
+                No keys yet. Your function will write here when it calls
                 <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">orva.kv.put(...)</code>.
               </template>
             </td>
@@ -303,6 +303,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onActivated, onDeactivated } from 'vue'
 import { useRoute } from 'vue-router'
 import { Search, RefreshCw, Plus, Trash2 } from 'lucide-vue-next'
@@ -527,7 +528,7 @@ const prettyJSON = (v) => {
 }
 
 const valuePreview = (val) => {
-  if (val === null || val === undefined) return '—'
+  if (val === null || val === undefined) return EMPTY
   const u = deepParse(val)
   if (typeof u === 'string') {
     // Wrap in quotes so it's visually distinct from objects/numbers.
@@ -543,14 +544,14 @@ const valuePreview = (val) => {
 }
 
 const formatBytes = (n) => {
-  if (n == null) return '—'
+  if (n == null) return EMPTY
   if (n < 1024) return n + ' B'
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
   return (n / 1024 / 1024).toFixed(1) + ' MB'
 }
 
 const formatRelative = (iso) => {
-  if (!iso) return '—'
+  if (!iso) return EMPTY
   const ms = Date.now() - new Date(iso).getTime()
   if (ms < 0) return 'just now'
   const s = Math.floor(ms / 1000)
@@ -562,7 +563,7 @@ const formatRelative = (iso) => {
   return Math.floor(h / 24) + 'd ago'
 }
 
-const formatFullTime = (iso) => (iso ? new Date(iso).toLocaleString() : '—')
+const formatFullTime = (iso) => (iso ? new Date(iso).toLocaleString() : EMPTY)
 
 const formatTTL = (iso) => {
   const ms = new Date(iso).getTime() - Date.now()

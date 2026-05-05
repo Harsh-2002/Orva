@@ -28,11 +28,11 @@ const badgeClasses = computed(() => {
   const variants = {
     default: 'bg-surface text-foreground-muted border border-border',
     primary: 'bg-primary/20 text-primary border border-primary/30',
-    success: 'bg-success/20 text-success border border-success/30',
-    warning: 'bg-warning/20 text-warning border border-warning/30',
-    error: 'bg-error/20 text-error border border-error/30',
-    info: 'bg-info/20 text-info border border-info/30',
-    gray: 'bg-surface text-foreground-muted border border-border',
+    success: 'bg-success-tint text-success-fg border border-success-ring',
+    warning: 'bg-warning-tint text-warning-fg border border-warning-ring',
+    error:   'bg-danger-tint text-danger-fg border border-danger-ring',
+    info:    'bg-info-tint text-info-fg border border-info-ring',
+    gray:    'bg-surface text-foreground-muted border border-border',
   }
 
   const sizes = {

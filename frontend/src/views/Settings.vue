@@ -4,7 +4,7 @@
       <h1 class="text-xl font-semibold text-white tracking-tight">
         Settings
       </h1>
-      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
         Operator-level controls for the running Orva instance.
       </p>
     </div>
@@ -467,6 +467,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import {
@@ -617,7 +618,7 @@ const askVacuum = async () => {
 }
 
 const formatBytes = (n) => {
-  if (n == null || isNaN(n)) return '—'
+  if (n == null || isNaN(n)) return EMPTY
   const k = 1024
   if (n < k) return `${n} B`
   const units = ['KB', 'MB', 'GB', 'TB']

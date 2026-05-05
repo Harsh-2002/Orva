@@ -9,14 +9,22 @@
   --color-surface: #1A1929; /* Slightly lighter than bg */
   --color-surface-hover: #252438;
   --color-border: #2D2B42;
-  
+
   --color-foreground: #FFFFFF;
+  /* foreground-strong: pure white reserved for text on saturated brand
+     surfaces (primary CTA labels, on-violet badges, etc.). This is
+     scaffolding for a deferred palette pass: when --color-foreground
+     shifts to a tinted off-white (target #F4F2FA, oklch(96% 0.01 290))
+     to satisfy DESIGN.md's "tint every neutral toward the brand hue"
+     rule, the high-contrast sites that genuinely need pure white on
+     coloured backgrounds keep working without per-site rewrites. */
+  --color-foreground-strong: #FFFFFF;
   --color-foreground-muted: #A3A3B3; /* Cool gray/purple tint */
-  
+
   --color-primary: #553F83;
   --color-primary-foreground: #FFFFFF;
   --color-primary-hover: #684D9E;
-  
+
   --color-secondary: #2D2B42;
   --color-secondary-foreground: #FFFFFF;
   --color-secondary-hover: #3E3B5A;
@@ -24,12 +32,106 @@
   --color-danger: #ef4444;
   --color-success: #22c55e;
   --color-warning: #eab308;
+  --color-info: #38bdf8;          /* sky-400-ish, info / neutral-blue role */
+
+  /* Semantic status tints + foregrounds, surfaced as Tailwind utilities
+     (bg-success-tint, text-success-fg, border-success-ring, etc.).
+     Replace the 125-site sprawl of raw bg-emerald-500/15, text-emerald-300,
+     bg-amber-500/15, text-sky-300 etc. across views. The convention:
+       bg-{role}-tint     fill, ~15% chroma against the backdrop
+       text-{role}-fg     foreground that reads on the tint
+       border-{role}-ring 30%-alpha stroke, used on chips and callouts
+     Future palette change becomes a 4-token edit instead of 125 sites. */
+  --color-success-tint: rgba(34, 197, 94, 0.15);
+  --color-success-fg:   #4ade80;
+  --color-success-ring: rgba(34, 197, 94, 0.30);
+
+  --color-warning-tint: rgba(234, 179, 8, 0.15);
+  --color-warning-fg:   #fbbf24;
+  --color-warning-ring: rgba(234, 179, 8, 0.30);
+
+  --color-danger-tint:  rgba(239, 68, 68, 0.15);
+  --color-danger-fg:    #f87171;
+  --color-danger-ring:  rgba(239, 68, 68, 0.30);
+
+  --color-info-tint:    rgba(56, 189, 248, 0.15);
+  --color-info-fg:      #7dd3fc;
+  --color-info-ring:    rgba(56, 189, 248, 0.30);
+
+  /* Spacing scale extensions surfaced as Tailwind utilities (p-page, gap-tight,
+     px-section, etc.). Names track DESIGN.md's rhythm: tight is sibling-within-
+     a-unit, comfortable is unit padding, section is unit-to-unit, page is the
+     outer page padding which clamps so phones get 16 px and desktops up to 32 px. */
+  --spacing-tight: 0.5rem;          /* 8px */
+  --spacing-snug: 0.75rem;           /* 12px */
+  --spacing-comfortable: 1rem;       /* 16px */
+  --spacing-section: clamp(1.25rem, 4vw, 2rem);
+  --spacing-page: clamp(1rem, 4vw, 2rem);
+
+  /* Type scale extensions. Surfaces as `text-h2` (15 px), filling the
+     gap between the page header (text-xl, 20 px) and the body (14 px)
+     so section captions promoted to real <h2> in the harden follow-up
+     get a typographically distinct register. The other scale steps
+     (xs/sm/base/lg/xl) come from Tailwind defaults and already match
+     DESIGN.md's hierarchy table. */
+  --text-h2: 0.9375rem;          /* 15 px */
+  --text-h2--line-height: 1.35;
+  --text-h2--font-weight: 600;
+  --text-h2--letter-spacing: -0.005em;
+
+  /* Custom letter-spacing tokens matching DESIGN.md's prescriptions per
+     hierarchy step (display, headline, title, label). Surface as Tailwind
+     utilities (tracking-display, tracking-headline, tracking-title,
+     tracking-label) so the values are named and consistent across views
+     instead of every site reaching for tracking-tight / tracking-wider
+     by feel. The label step is intentionally looser (0.08 em) than
+     Tailwind's default tracking-wider (0.05 em) so uppercase section
+     captions read as a deliberate caption register, not a typo. */
+  --tracking-display: -0.02em;
+  --tracking-headline: -0.015em;
+  --tracking-title: -0.01em;
+  --tracking-label: 0.08em;
+
+  /* Custom line-height tokens for the body/subhead register. The
+     project's recently-standardised page subhead uses leading-relaxed
+     (1.625) which reads loose at the operator-grade density. 1.55 is
+     DESIGN.md's prescription for body and is the right setting for
+     reading flow at 14 px on a violet-tinted dark surface. Surfaces
+     as Tailwind utility leading-body. */
+  --leading-body: 1.55;
 }
 
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+  /* Operator-grade tap discipline: kill the ghost-blue tap flash on every
+     element by default (we restore feedback via :active backgrounds on
+     buttons / links). Also opt the whole document into iOS momentum so
+     hidden-scrollbar containers still feel native on Safari. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-overflow-scrolling: touch;
+  /* Typographic discipline shipped on every page:
+     - antialiasing flag pair so weight=400/500 Inter doesn't render
+       chunky on Windows/Chrome's default subpixel-AA (this is the
+       Apple/Google-docs convention for product surfaces);
+     - kerning explicit so letterforms tighten where they should;
+     - OpenType ss01 (slashed zero) so a "0" never gets misread as
+       "O" in IDs / hashes / IP addresses, and cv11 (single-storey g
+       + curved l-bar) so lowercase reads more clearly at 11–14 px,
+       which is most of the dashboard's body register. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-kerning: normal;
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+/* Belt-and-braces: never let the body scroll horizontally. Tables and code
+   blocks may overflow inside their bounds, but the document itself never
+   does. Catches sloppy w-[xxxpx] arbitrary widths sneaking in. */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 /* Hide all scrollbars visually but keep them functional. The dashboard
@@ -85,4 +187,165 @@ select::-ms-expand {
   .fade-leave-active {
     transition: none;
   }
+}
+
+/* ============================================================
+   Safe-area inset utilities (env(safe-area-inset-*))
+   ------------------------------------------------------------
+   Used on every fixed-positioned element that sits against a
+   physical edge: mobile top bar, sidebar drawer, modal/drawer
+   floors, sticky bulk-action bar, toast region. The max(...,0)
+   form keeps non-notched hardware unaffected (browsers return 0
+   for the inset on those devices). Pair pt-safe with the
+   element's existing padding rather than replacing it; both
+   stack via custom-prop additions so we can keep design padding
+   constant across notched and non-notched devices.
+   ============================================================ */
+@utility pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+}
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+}
+@utility pl-safe {
+  padding-left: max(env(safe-area-inset-left, 0px), 0px);
+}
+@utility pr-safe {
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+/* Combined "pad against every physical edge". Drawers, modals
+   that fill the viewport on phones. */
+@utility p-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+  padding-left: max(env(safe-area-inset-left, 0px), 0px);
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+/* Inset variants — when an absolute / fixed element should be
+   inset from the safe area rather than padded inside it. */
+@utility inset-y-safe {
+  top: max(env(safe-area-inset-top, 0px), 0px);
+  bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+}
+
+/* ============================================================
+   Touch-target hit-area expansion for sub-44px controls
+   ------------------------------------------------------------
+   Visible button heights of 28 px (xs) and 32 px (sm) preserve
+   the dashboard's chip / drawer-icon density that operators
+   asked for, but WCAG 2.5.5 (and Apple HIG / Material) want a
+   44 px hit area. We expand the click region with a transparent
+   ::before that sits behind the button content and extends
+   vertically beyond the host's bounding box. Click events on
+   the ::before bubble to the host because a ::before pseudo
+   IS the host for hit-testing.
+
+   Horizontal expansion is intentionally OFF: chip rows place
+   chips with gap-2 (8 px) between them, and overlapping click
+   regions would create ambiguous hit zones at the gap centre.
+   Vertical-only expansion keeps siblings unambiguous.
+
+   Apply .touch-expand-xs to xs Buttons (28 -> 44 = +8 each side).
+   Apply .touch-expand-sm to sm Buttons (32 -> 44 = +6 each side).
+   Apply .touch-expand-iconbtn to IconButton (28 square -> 44 square,
+   horizontal expansion is fine here because icon buttons rarely
+   sit in tight rows; verify per-call site if they do).
+   ============================================================ */
+.touch-expand-xs {
+  position: relative;
+}
+.touch-expand-xs::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  inset-block: -8px;
+}
+.touch-expand-sm {
+  position: relative;
+}
+.touch-expand-sm::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  inset-block: -6px;
+}
+.touch-expand-iconbtn {
+  position: relative;
+}
+.touch-expand-iconbtn::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+/* ============================================================
+   Bounded scrollers — for code blocks, drawer/modal bodies,
+   wide tables that need horizontal scroll inside their bounds.
+   Restores momentum on iOS (the global hidden-scrollbar rule
+   above strips visual scrollbars; this restores feel) and
+   prevents body bounce when scrolling reaches the edge.
+   ============================================================ */
+.scrollable {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* ============================================================
+   Typographic discipline on monospace surfaces
+   ------------------------------------------------------------
+   JetBrains Mono is already proportional-equivalent (every
+   digit is the same width by construction), so tabular-nums on
+   <code>/<pre>/.font-mono is belt-and-braces. The real reason
+   for this rule is the OpenType `calt` programming-ligature
+   set — `=>`, `->`, `!=`, `>=`, `<=` render as their proper
+   ligature glyphs which the operator's eye reads as a single
+   unit. ss20 turns on the curved-bracket variant which scans
+   better against Orva's violet-tinted backgrounds.
+
+   Inter-rendered numbers in tables / counters / KPI tiles
+   still need an explicit `tabular-nums` Tailwind class on the
+   element where they live, because Inter's digits are
+   proportional by default and twitch when values update. The
+   one global rule below covers the monospace path; individual
+   views opt their Inter columns of digits into `tabular-nums`
+   per call site (Tailwind 4 ships the utility natively).
+   ============================================================ */
+.font-mono,
+code,
+kbd,
+samp,
+pre {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'calt' 1, 'ss20' 1;
+}
+
+/* Body line-height utility surfaced as leading-body (1.55) — wins
+   over Tailwind's leading-relaxed (1.625) for the dashboard's
+   subhead and operator-paragraph density. */
+.leading-body {
+  line-height: var(--leading-body);
+}
+
+/* The custom tracking utilities. Tailwind 4's @theme system
+   exposes --tracking-* automatically as `tracking-<name>`, but
+   only when consumed; spell them out as classes too so they
+   show up in CSS deduping correctly even before any view uses
+   them, and so a future view searching for "tracking-display"
+   finds the named utility instead of reaching for tracking-tight. */
+.tracking-display { letter-spacing: var(--tracking-display); }
+.tracking-headline { letter-spacing: var(--tracking-headline); }
+.tracking-title { letter-spacing: var(--tracking-title); }
+.tracking-label { letter-spacing: var(--tracking-label); }
+
+/* H2 utility — fills the typographic gap between text-xl (page
+   header, 20 px) and text-sm (body, 14 px). 15 px / weight 600 /
+   tight tracking. Use this on real <h2> markup when a section
+   inside a page needs heading semantics; styled <div>s with
+   uppercase tracked labels remain valid where the section is a
+   caption rather than a heading. */
+.text-h2 {
+  font-size: var(--text-h2);
+  line-height: var(--text-h2--line-height);
+  font-weight: var(--text-h2--font-weight);
+  letter-spacing: var(--text-h2--letter-spacing);
 }

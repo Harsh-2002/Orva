@@ -5,8 +5,8 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Scheduled Jobs
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
-          Cron-driven triggers that fire any deployed function on a schedule. Use them for periodic cleanup, daily reports, polling external APIs — anything you'd normally pin to a server's crontab. Orva runs the schedule, captures stdout/stderr, and surfaces failures in the activity feed.
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+          Cron-driven triggers that fire any deployed function on a schedule. Use them for periodic cleanup, daily reports, polling external APIs, anything you'd normally pin to a server's crontab. Orva runs the schedule, captures stdout/stderr, and surfaces failures in the activity feed.
         </p>
       </div>
       <Button @click="showCreateModal = true">
@@ -66,10 +66,10 @@
               </span>
             </td>
             <td class="px-6 py-4 text-foreground-muted text-xs hidden md:table-cell">
-              {{ job.last_run_at ? formatDate(job.last_run_at) : '—' }}
+              {{ job.last_run_at ? formatDate(job.last_run_at) : EMPTY }}
             </td>
             <td class="px-6 py-4 text-foreground-muted text-xs hidden lg:table-cell">
-              {{ job.next_run_at ? formatDate(job.next_run_at) : '—' }}
+              {{ job.next_run_at ? formatDate(job.next_run_at) : EMPTY }}
             </td>
             <td class="px-6 py-4 text-right">
               <div class="inline-flex items-center gap-1">
@@ -319,7 +319,7 @@
               </option>
             </select>
             <div class="text-xs text-foreground-muted mt-1.5">
-              The cron expression is interpreted in this zone — e.g.
+              The cron expression is interpreted in this zone (e.g.
               <code class="bg-surface px-1 rounded">0 9 * * *</code>
               with timezone
               <code class="bg-surface px-1 rounded">{{ form.timezone }}</code>
@@ -364,6 +364,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
 import { PlusCircle, Trash2, Clock, X, Edit, Play, Pause } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'

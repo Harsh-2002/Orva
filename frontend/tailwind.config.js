@@ -14,6 +14,10 @@ export default {
         border: 'var(--color-border)',
         
         foreground: 'var(--color-foreground)',
+        // foreground-strong: pure white for text on saturated brand
+        // surfaces. Reserved as scaffolding for the deferred white-tint
+        // pass when --color-foreground shifts to a tinted off-white.
+        'foreground-strong': 'var(--color-foreground-strong)',
         'foreground-muted': 'var(--color-foreground-muted)',
         
         primary: {
@@ -30,10 +34,32 @@ export default {
             hover: 'var(--color-secondary-hover)',
         },
 
-        success: 'var(--color-success)',
-        warning: 'var(--color-warning)',
+        success: {
+          DEFAULT: 'var(--color-success)',
+          tint: 'var(--color-success-tint)',
+          fg: 'var(--color-success-fg)',
+          ring: 'var(--color-success-ring)',
+        },
+        warning: {
+          DEFAULT: 'var(--color-warning)',
+          tint: 'var(--color-warning-tint)',
+          fg: 'var(--color-warning-fg)',
+          ring: 'var(--color-warning-ring)',
+        },
+        danger: {
+          DEFAULT: 'var(--color-danger)',
+          tint: 'var(--color-danger-tint)',
+          fg: 'var(--color-danger-fg)',
+          ring: 'var(--color-danger-ring)',
+        },
+        // Legacy `error` alias for any code still using bg-error / text-error.
         error: 'var(--color-danger)',
-        info: '#3b82f6',
+        info: {
+          DEFAULT: 'var(--color-info)',
+          tint: 'var(--color-info-tint)',
+          fg: 'var(--color-info-fg)',
+          ring: 'var(--color-info-ring)',
+        },
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],

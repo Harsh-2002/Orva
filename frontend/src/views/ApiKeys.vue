@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           API Keys
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Long-lived bearer tokens that authorise REST and MCP calls from CI, scripts, and external services. Plaintext is shown once at creation; the server keeps only a SHA-256 hash.
         </p>
       </div>
@@ -22,9 +22,9 @@
     >
       <div class="flex items-start justify-between gap-3">
         <div>
-          <div class="text-xs font-bold text-amber-300 uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-amber-300 uppercase tracking-wider">
             Copy this key now
-          </div>
+          </h2>
           <div class="text-xs text-foreground-muted mt-0.5">
             It will not be shown again. Anyone with this key can invoke your functions.
           </div>
@@ -119,7 +119,49 @@
 
     <!-- Keys list. -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-row list — name + prefix on the primary
+           line, last-used + expires as secondary metadata, delete on
+           the right. The desktop table returns at sm+. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="key in keys"
+          :key="key.id"
+          class="px-4 py-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium text-white truncate">{{ key.name || 'Unnamed' }}</span>
+                <code
+                  v-if="key.prefix"
+                  class="text-[11px] font-mono text-foreground-muted bg-surface px-1.5 py-0.5 rounded"
+                >{{ key.prefix }}…</code>
+              </div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                <span v-if="key.last_used_at">used {{ formatRelative(key.last_used_at) }}</span>
+                <span v-else class="text-amber-400/80">never used</span>
+                <span v-if="!key.expires_at">no expiry</span>
+                <span v-else-if="isExpired(key.expires_at)" class="text-red-400">expired {{ formatRelative(key.expires_at) }}</span>
+                <span v-else>expires {{ formatRelative(key.expires_at) }}</span>
+              </div>
+            </div>
+            <IconButton
+              :icon="Trash2"
+              variant="danger"
+              title="Delete key"
+              @click="removeKey(key)"
+            />
+          </div>
+        </li>
+        <li
+          v-if="keys.length === 0"
+          class="px-6 py-8 text-center text-sm text-foreground-muted"
+        >
+          No API keys yet. Tap <span class="text-white">New Key</span> to generate one.
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-6 py-3 font-medium">
@@ -152,7 +194,7 @@
               {{ key.name || 'Unnamed' }}
             </td>
             <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden sm:table-cell">
-              {{ key.prefix ? key.prefix + '…' : '—' }}
+              {{ key.prefix ? key.prefix + '…' : EMPTY }}
             </td>
             <td class="px-6 py-4 text-foreground-muted hidden xl:table-cell">
               {{ formatDate(key.created_at) }}
@@ -205,6 +247,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
 import { KeyRound, Copy, Check, X, Trash2 } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'

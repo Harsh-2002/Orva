@@ -14,27 +14,42 @@
           @click="close"
         />
         <Transition name="drawer-slide">
+          <!--
+            Mobile (<sm): bottom-sheet shape. inset-x-0 bottom-0, full
+            width minus 0 px (no inset; the sheet sits flush at the
+            bottom edge so the operator's thumb stays in reach), max-h
+            85dvh so a tall sheet doesn't shove the page header off
+            screen. pb-safe keeps content clear of the iOS home
+            indicator. Border lives on the top edge only.
+
+            Desktop (sm+): right-anchored side panel as before. The
+            CSS variable --drawer-w is consumed by sm:w-[var(...)] so
+            the parent can pass any width string the design wants.
+          -->
           <div
             v-if="modelValue"
-            class="absolute right-0 top-0 bottom-0 bg-background border-l border-border flex flex-col pointer-events-auto"
-            :style="{ width: width }"
+            class="absolute pointer-events-auto bg-background flex flex-col
+                   inset-x-0 bottom-0 max-h-[85dvh] border-t border-border rounded-t-lg pb-safe
+                   sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:border-t-0 sm:border-l sm:rounded-none sm:pb-0
+                   sm:w-[var(--drawer-w,560px)]"
+            :style="{ '--drawer-w': width }"
             @keydown.esc="close"
             tabindex="-1"
             ref="root"
           >
             <header class="px-5 py-3 border-b border-border flex items-center justify-between shrink-0">
-              <div class="text-sm font-medium text-white">
+              <div class="text-sm font-medium text-white truncate">
                 <slot name="title">{{ title }}</slot>
               </div>
               <button
-                class="text-foreground-muted hover:text-white transition-colors"
+                class="text-foreground-muted hover:text-white transition-colors touch-expand-iconbtn -mr-1"
                 @click="close"
                 aria-label="Close"
               >
                 <X class="w-4 h-4" />
               </button>
             </header>
-            <div class="flex-1 overflow-y-auto">
+            <div class="flex-1 overflow-y-auto scrollable">
               <slot />
             </div>
             <footer
@@ -90,12 +105,33 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   opacity: 0;
 }
 
+/* Mobile bottom-sheet slide: enters from below the viewport. */
 .drawer-slide-enter-active,
 .drawer-slide-leave-active {
   transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .drawer-slide-enter-from,
 .drawer-slide-leave-to {
-  transform: translateX(100%);
+  transform: translateY(100%);
+}
+
+/* Desktop side-panel slide: enters from the right edge. */
+@media (min-width: 640px) {
+  .drawer-slide-enter-from,
+  .drawer-slide-leave-to {
+    transform: translateX(100%);
+  }
+}
+
+/* Honour reduced-motion: drop the slide entirely; the fade still runs. */
+@media (prefers-reduced-motion: reduce) {
+  .drawer-slide-enter-active,
+  .drawer-slide-leave-active {
+    transition: none;
+  }
+  .drawer-slide-enter-from,
+  .drawer-slide-leave-to {
+    transform: none;
+  }
 }
 </style>

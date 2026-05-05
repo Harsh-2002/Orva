@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Invocation Logs
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Every function execution recorded across HTTP, MCP, cron, and job triggers. Click any row to drill into the captured request, response body, latency breakdown, and handler stderr; replay it against a different version when debugging regressions.
         </p>
       </div>
@@ -129,13 +129,13 @@
               >
                 cold
               </span>
-              <span v-else class="text-foreground-muted text-xs">—</span>
+              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden lg:table-cell">
-              {{ log.status_code ?? '—' }}
+              {{ log.status_code ?? EMPTY }}
             </td>
             <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden sm:table-cell">
-              {{ log.duration_ms != null ? log.duration_ms + 'ms' : '—' }}
+              {{ log.duration_ms != null ? log.duration_ms + 'ms' : EMPTY }}
             </td>
             <td class="px-4 py-3 hidden lg:table-cell">
               <button
@@ -147,7 +147,7 @@
                 <Network class="w-3 h-3" />
                 {{ log.trace_id.substring(0, 11) }}
               </button>
-              <span v-else class="text-foreground-muted">—</span>
+              <span v-else class="text-foreground-muted">{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-3 text-right text-foreground-muted font-mono text-xs hidden xl:table-cell">
               {{ log.id?.substring(0, 12) }}
@@ -240,17 +240,17 @@
 
         <!-- Stat grid -->
         <div class="grid grid-cols-2 gap-3 text-sm">
-          <Stat label="Duration" :value="drawerRow.duration_ms != null ? drawerRow.duration_ms + ' ms' : '—'" />
-          <Stat label="Response size" :value="drawerRow.response_size != null ? formatBytes(drawerRow.response_size) : '—'" />
+          <Stat label="Duration" :value="drawerRow.duration_ms != null ? drawerRow.duration_ms + ' ms' : EMPTY" />
+          <Stat label="Response size" :value="drawerRow.response_size != null ? formatBytes(drawerRow.response_size) : EMPTY" />
           <Stat label="Started" :value="formatTime(drawerRow.started_at)" />
-          <Stat label="Finished" :value="drawerRow.finished_at ? formatTime(drawerRow.finished_at) : '—'" />
+          <Stat label="Finished" :value="drawerRow.finished_at ? formatTime(drawerRow.finished_at) : EMPTY" />
           <Stat label="Function" :value="getFnName(drawerRow.function_id)" />
           <Stat label="Execution ID" :value="drawerRow.id" mono />
         </div>
 
         <!-- Error message -->
         <div v-if="drawerRow.error_message">
-          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Error</div>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Error</h3>
           <pre class="bg-red-950/30 border border-red-900/40 rounded p-3 text-xs text-red-300 font-mono whitespace-pre-wrap break-words">{{ drawerRow.error_message }}</pre>
         </div>
 
@@ -259,7 +259,7 @@
              land here as the literal "[REDACTED]" string from the
              backend — never the original credential. -->
         <div v-if="requestData">
-          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request</div>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request</h3>
           <div class="bg-surface border border-border rounded p-3 space-y-3">
             <div class="flex items-center gap-2 font-mono text-xs">
               <span class="px-2 py-0.5 rounded bg-background text-white border border-border">{{ requestData.method }}</span>
@@ -307,9 +307,9 @@
         <!-- Stderr tail -->
         <div>
           <div class="flex items-center justify-between mb-2">
-            <div class="text-xs uppercase tracking-wider text-foreground-muted">
-              Stderr <span class="text-[10px] normal-case text-foreground-muted/70">(stdout is the response body — not stored)</span>
-            </div>
+            <h3 class="text-xs uppercase tracking-wider text-foreground-muted">
+              Stderr <span class="text-[10px] normal-case text-foreground-muted/70">(stdout is the response body, not stored)</span>
+            </h3>
             <button
               v-if="stderrText"
               class="text-xs text-foreground-muted hover:text-white"
@@ -365,6 +365,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, computed, h, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles, Network } from 'lucide-vue-next'
@@ -585,7 +586,7 @@ const FilterChip = defineComponent({
   },
 })
 
-const formatTime = (ts) => (ts ? new Date(ts).toLocaleString() : '—')
+const formatTime = (ts) => (ts ? new Date(ts).toLocaleString() : EMPTY)
 
 const formatBytes = (n) => {
   if (n < 1024) return `${n} B`

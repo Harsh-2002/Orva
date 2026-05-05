@@ -1,93 +1,148 @@
 <template>
   <div class="flex flex-col h-full">
-    <!-- Top action bar: function name on the left, panel triggers in the
-         middle, deploy/reset on the right. Wraps cleanly on narrow widths. -->
-    <div class="flex flex-wrap items-center gap-2 pb-3 border-b border-border">
-      <div class="flex items-center gap-2 mr-auto min-w-0">
+    <!--
+      Visually-hidden semantic heading. The visible toolbar carries the
+      function name as an <input> for editability; screen readers need
+      a real <h1> to anchor the page in their heading-nav. The reactive
+      content keeps the AT cursor's "you are on" announcement aligned
+      with whatever the operator has typed in the name field.
+    -->
+    <h1 class="sr-only">{{ form.name || 'New function' }}</h1>
+    <!-- Top action bar — distilled. The 8 individual panel buttons that
+         used to live here (Settings, Env, Deps, Secrets, KV, Webhooks,
+         Versions, Docs) collapsed to two grouped dropdowns: Config and
+         Bindings. Everything still reachable in one extra click; the
+         most-used surface in the product no longer fails the cognitive
+         load check. Reset and Deploy stay as discrete CTAs. Click-outside
+         and Esc dismiss the menus.
+
+         Mobile (<sm): name + runtime label take a full first row; the
+         dropdowns + actions take a second row. Above sm, the original
+         single-row flex-wrap returns. -->
+    <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 pb-3 border-b border-border">
+      <div class="flex items-center gap-2 sm:mr-auto min-w-0 w-full sm:w-auto">
         <FileCode class="w-4 h-4 text-foreground-muted shrink-0" />
         <input
           v-model="form.name"
           placeholder="my-function"
           :disabled="isEditing"
-          class="bg-transparent border-0 text-sm font-medium text-white placeholder-foreground-muted focus:outline-none px-1 py-1 min-w-0 w-40"
+          class="bg-transparent border-0 text-base sm:text-sm font-medium text-white placeholder-foreground-muted focus:outline-none px-1 py-1 min-w-0 flex-1 sm:flex-none sm:w-40"
         >
         <button
           v-if="!isEditing && !fnId"
           type="button"
-          class="p-1 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors shrink-0"
+          class="p-1 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors shrink-0 touch-expand-iconbtn"
           title="Re-roll a fresh name"
+          aria-label="Re-roll a fresh name"
           @click="rerollName"
         >
           <Shuffle class="w-3.5 h-3.5" />
         </button>
-        <span class="text-[11px] text-foreground-muted font-medium tracking-tight">{{ runtimeShort(form.runtime) }}</span>
+        <span class="text-[11px] text-foreground-muted font-medium tracking-tight shrink-0">{{ runtimeShort(form.runtime) }}</span>
+      </div>
+      <!-- Wrapper for the dropdowns + actions on mobile so they sit on
+           one row (or wrap among themselves). On sm+ they merge back
+           into the parent flex-wrap. -->
+      <div class="flex flex-wrap items-center gap-2 sm:contents">
+
+      <!-- Config menu — Settings / Env / Deps / Secrets / Versions.
+           Versions is hidden until isEditing && versions.length so the
+           menu stays small for new-function flows. -->
+      <div class="relative" ref="configMenuRef">
+        <button
+          type="button"
+          class="panel-btn"
+          aria-haspopup="menu"
+          :aria-expanded="menus.config"
+          @click="toggleMenu('config')"
+        >
+          <Settings2 class="w-3.5 h-3.5" /> Config
+          <ChevronDown class="w-3 h-3 text-foreground-muted" />
+        </button>
+        <div
+          v-if="menus.config"
+          class="absolute right-0 mt-1 z-30 min-w-[210px] bg-background border border-border rounded-md shadow-xl overflow-hidden"
+          role="menu"
+        >
+          <button class="menu-item" role="menuitem" @click="openMenuItem('settings')">
+            <Settings2 class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">Settings</span>
+            <span class="text-[10px] text-foreground-muted">runtime · limits</span>
+          </button>
+          <button class="menu-item" role="menuitem" @click="openMenuItem('envVars')">
+            <Variable class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">Env</span>
+            <span v-if="envVarCount" class="text-[10px] text-foreground-muted tabular-nums">{{ envVarCount }}</span>
+          </button>
+          <button class="menu-item" role="menuitem" @click="openMenuItem('deps')">
+            <Package class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">Deps</span>
+            <span class="text-[10px] text-foreground-muted">package · requirements</span>
+          </button>
+          <button class="menu-item" role="menuitem" @click="openMenuItem('secrets')">
+            <KeyRound class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">Secrets</span>
+            <span v-if="totalSecretsCount" class="text-[10px] text-foreground-muted tabular-nums">{{ totalSecretsCount }}</span>
+          </button>
+          <button
+            v-if="isEditing && versions.length"
+            class="menu-item"
+            role="menuitem"
+            @click="openMenuItem('versions')"
+          >
+            <Layers class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">Versions</span>
+            <span class="text-[10px] text-foreground-muted tabular-nums">{{ versions.length }}</span>
+          </button>
+        </div>
       </div>
 
-      <button
-        class="panel-btn"
-        :title="`Configuration • runtime, memory, CPU`"
-        @click="modals.settings = true"
-      >
-        <Settings2 class="w-3.5 h-3.5" /> Settings
-      </button>
-      <button
-        class="panel-btn"
-        title="Environment variables"
-        @click="modals.envVars = true"
-      >
-        <Variable class="w-3.5 h-3.5" /> Env <span
-          v-if="envVarCount"
-          class="text-foreground-muted"
-        >{{ envVarCount }}</span>
-      </button>
-      <button
-        class="panel-btn"
-        title="Dependencies (requirements.txt / package.json)"
-        @click="modals.deps = true"
-      >
-        <Package class="w-3.5 h-3.5" /> Deps
-      </button>
-      <button
-        class="panel-btn"
-        title="Encrypted secrets"
-        @click="modals.secrets = true"
-      >
-        <KeyRound class="w-3.5 h-3.5" /> Secrets <span
-          v-if="totalSecretsCount"
-          class="text-foreground-muted"
-        >{{ totalSecretsCount }}</span>
-      </button>
-      <button
-        v-if="isEditing"
-        class="panel-btn"
-        title="KV store · per-function key/value state"
-        @click="router.push({ name: 'function-kv', params: { name: form.name } })"
-      >
-        <Database class="w-3.5 h-3.5" /> KV
-      </button>
-      <button
-        v-if="isEditing"
-        class="panel-btn"
-        title="Inbound webhooks · external services trigger this function via signed POST"
-        @click="router.push({ name: 'function-inbound-webhooks', params: { name: form.name } })"
-      >
-        <Webhook class="w-3.5 h-3.5" /> Webhooks
-      </button>
-      <button
-        v-if="isEditing && versions.length"
-        class="panel-btn"
-        title="Version history & rollback"
-        @click="modals.versions = true"
-      >
-        <Layers class="w-3.5 h-3.5" /> Versions <span class="text-foreground-muted">{{ versions.length }}</span>
-      </button>
-      <button
-        class="panel-btn"
-        title="Quick handler reference"
-        @click="modals.docs = true"
-      >
-        <BookOpen class="w-3.5 h-3.5" /> Docs
-      </button>
+      <!-- Bindings menu — KV / Webhooks / Docs. KV + Webhooks only
+           visible once the function is saved (they need an fnId).
+           Docs is always available. -->
+      <div class="relative" ref="bindingsMenuRef">
+        <button
+          type="button"
+          class="panel-btn"
+          aria-haspopup="menu"
+          :aria-expanded="menus.bindings"
+          @click="toggleMenu('bindings')"
+        >
+          <Plug class="w-3.5 h-3.5" /> Bindings
+          <ChevronDown class="w-3 h-3 text-foreground-muted" />
+        </button>
+        <div
+          v-if="menus.bindings"
+          class="absolute right-0 mt-1 z-30 min-w-[210px] bg-background border border-border rounded-md shadow-xl overflow-hidden"
+          role="menu"
+        >
+          <button
+            v-if="isEditing"
+            class="menu-item"
+            role="menuitem"
+            @click="navMenu({ name: 'function-kv', params: { name: form.name } })"
+          >
+            <Database class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">KV store</span>
+            <span class="text-[10px] text-foreground-muted">per-function state</span>
+          </button>
+          <button
+            v-if="isEditing"
+            class="menu-item"
+            role="menuitem"
+            @click="navMenu({ name: 'function-inbound-webhooks', params: { name: form.name } })"
+          >
+            <Webhook class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">Inbound webhooks</span>
+            <span class="text-[10px] text-foreground-muted">signed POST</span>
+          </button>
+          <button class="menu-item" role="menuitem" @click="openMenuItem('docs')">
+            <BookOpen class="w-3.5 h-3.5" />
+            <span class="flex-1 text-left">Docs</span>
+            <span class="text-[10px] text-foreground-muted">handler reference</span>
+          </button>
+        </div>
+      </div>
 
       <div class="w-px h-5 bg-border mx-1" />
 
@@ -106,6 +161,7 @@
         <UploadCloud class="w-4 h-4" />
         {{ isEditing ? 'Deploy New Version' : 'Deploy' }}
       </Button>
+      </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
 
     <!-- Optional: Invoke URL strip. Only visible after the function exists,
@@ -310,10 +366,17 @@
                     >
                       <span class="font-mono text-[10px] text-foreground-muted shrink-0">{{ fx.method }}</span>
                       <span class="truncate flex-1 text-foreground">{{ fx.name }}</span>
+                      <!--
+                        Below lg the delete affordance is permanently
+                        visible (touch devices have no hover state).
+                        From lg up it fades in on row hover so the
+                        fixtures list stays calm at rest on desktop.
+                      -->
                       <button
                         type="button"
-                        class="opacity-0 group-hover:opacity-100 text-foreground-muted hover:text-red-400 transition-colors"
+                        class="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 text-foreground-muted hover:text-red-400 transition-opacity"
                         :title="`Delete ${fx.name}`"
+                        :aria-label="`Delete ${fx.name}`"
                         @click.stop="removeFixture(fx)"
                       >
                         <Trash2 class="w-3 h-3" />
@@ -548,7 +611,7 @@
                 :key="tpl.id"
                 :value="tpl.id"
               >
-                {{ tpl.label }}{{ tpl.cron ? ' · scheduled' : '' }} — {{ tpl.description }}
+                {{ tpl.label }}{{ tpl.cron ? ' · scheduled' : '' }}: {{ tpl.description }}
               </option>
             </optgroup>
           </select>
@@ -636,7 +699,7 @@
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
             <option value="none">
-              Public — anyone can invoke
+              Public, anyone can invoke
             </option>
             <option value="platform_key">
               Require Orva API key (server-to-server)
@@ -646,7 +709,7 @@
             </option>
           </select>
           <p class="text-[11px] text-foreground-muted leading-snug">
-            Public is the default — matches Cloudflare Workers and Vercel
+            Public is the default, matches Cloudflare Workers and Vercel
             Functions. For end-user auth (JWT, session cookies), keep this on
             <span class="text-white">Public</span> and verify inside your
             handler. <span class="text-white">Signed</span> mode reads its key
@@ -682,7 +745,7 @@
             v-if="!fnId"
             class="text-[11px] text-foreground-muted leading-snug"
           >
-            Save the function first — custom routes need a target function id.
+            Save the function first. Custom routes need a target function id.
           </p>
 
           <div
@@ -747,7 +810,7 @@
               class="text-[11px] text-amber-400 leading-snug"
             >
               ⚠ <span class="font-mono">{{ newRouteCollision.path }}</span> already
-              maps to function <span class="font-mono">{{ newRouteCollision.currentFunctionId.slice(0, 8) }}…</span> —
+              maps to function <span class="font-mono">{{ newRouteCollision.currentFunctionId.slice(0, 8) }}…</span>;
               clicking Add will remap it to this one.
             </p>
             <p
@@ -991,7 +1054,7 @@
         <ul class="space-y-1 pl-4 list-disc marker:text-foreground-muted/50">
           <li><span class="text-white font-mono">event.body</span> is the raw request body (string or parsed JSON).</li>
           <li>Return <span class="text-white font-mono">{ statusCode, headers, body }</span>.</li>
-          <li>Add packages via the <span class="text-white">Deps</span> panel — installed at build time.</li>
+          <li>Add packages via the <span class="text-white">Deps</span> panel (installed at build time.</li>
         </ul>
         <router-link
           to="/docs"
@@ -1042,7 +1105,7 @@
             </button>
           </div>
           <p class="text-[11px] text-foreground-muted mt-1.5">
-            Lowercase, dash-separated. Used in the invoke URL — re-roll for a different combination.
+            Lowercase, dash-separated. Used in the invoke URL. Re-roll for a different combination.
           </p>
         </div>
         <div>
@@ -1100,13 +1163,46 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles, Webhook } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
-import CodeEditor from '@/components/common/CodeEditor.vue'
 import Modal from '@/components/common/Modal.vue'
+
+// CodeMirror is the largest single contributor to the Editor chunk
+// (~400 KB raw out of the 654 KB total before this split). The route
+// shell, panel buttons, test pane, and modals are useful before the
+// editor itself paints; loading CodeMirror eagerly forces every
+// Editor visit to ship the full editor library on the critical path.
+//
+// defineAsyncComponent splits CodeEditor.vue + its codemirror imports
+// into a separate chunk. The route's first paint lands fast (header,
+// tabs, test pane scaffolding); the code surface streams in immediately
+// after. delay: 0 + a skeleton loadingComponent prevents a flash of
+// empty space while the chunk fetches.
+const CodeEditorSkeleton = {
+  // Mirrors CodeEditor's outer shape (flex-1, min-h-0, full width)
+  // so the layout doesn't shift when the real component swaps in.
+  render() {
+    return h('div', {
+      class: 'flex-1 min-h-0 w-full bg-background flex items-start',
+      'aria-busy': 'true',
+      'aria-label': 'Loading code editor',
+    }, [
+      h('div', { class: 'p-4 space-y-2 w-full font-mono text-xs text-foreground-muted/40' }, [
+        h('div', { class: 'h-3 w-1/3 bg-surface-hover rounded animate-pulse' }),
+        h('div', { class: 'h-3 w-2/3 bg-surface-hover rounded animate-pulse' }),
+        h('div', { class: 'h-3 w-1/2 bg-surface-hover rounded animate-pulse' }),
+      ]),
+    ])
+  },
+}
+const CodeEditor = defineAsyncComponent({
+  loader: () => import('@/components/common/CodeEditor.vue'),
+  loadingComponent: CodeEditorSkeleton,
+  delay: 0,
+})
 import apiClient from '@/api/client'
 import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
@@ -1132,6 +1228,44 @@ const modals = ref({
 })
 
 const firstDeployNameInput = ref(null)
+
+// Distilled toolbar: two grouped dropdowns (Config, Bindings) replace
+// the old 8-button row. Menu state is mutually exclusive — opening one
+// closes the other so the toolbar can never sprout two adjacent panels.
+// Click-outside and Esc dismiss; navigating into a route closes both.
+const menus = ref({ config: false, bindings: false })
+const configMenuRef = ref(null)
+const bindingsMenuRef = ref(null)
+
+const closeMenus = () => { menus.value.config = false; menus.value.bindings = false }
+const toggleMenu = (which) => {
+  const next = !menus.value[which]
+  closeMenus()
+  menus.value[which] = next
+}
+// Click a Config-menu item → open its modal and close the menu in one step.
+const openMenuItem = (key) => {
+  closeMenus()
+  modals.value[key] = true
+}
+// Click a Bindings-menu item that navigates → push the route and close.
+const navMenu = (to) => {
+  closeMenus()
+  router.push(to)
+}
+
+// Click-outside listener: closes whichever menu is open if the click
+// landed outside both dropdown roots. Esc keydown does the same on the
+// global key handler. Mounted once via onMounted below.
+const onDocClick = (e) => {
+  if (!menus.value.config && !menus.value.bindings) return
+  const inConfig = configMenuRef.value?.contains(e.target)
+  const inBindings = bindingsMenuRef.value?.contains(e.target)
+  if (!inConfig && !inBindings) closeMenus()
+}
+const onDocKey = (e) => {
+  if (e.key === 'Escape' && (menus.value.config || menus.value.bindings)) closeMenus()
+}
 
 // Bottom terminal: two tabs only — Build (deploy progress) and Test
 // (payload + response + function logs all in one place). The terminal
@@ -1464,7 +1598,7 @@ watch(
 
 const saveNewRoute = async () => {
   if (!fnId.value) {
-    routesError.value = 'Save the function first — routes need a target function id.'
+    routesError.value = 'Save the function first. Routes need a target function id.'
     return
   }
   const path = (newRoute.value.path || '').trim()
@@ -1682,8 +1816,28 @@ const onWindowFocus = async () => {
   }
 }
 
-onMounted(() => window.addEventListener('focus', onWindowFocus))
-onBeforeUnmount(() => window.removeEventListener('focus', onWindowFocus))
+// Cmd-S → Deploy. The CommandPalette suppresses the browser save
+// dialog and dispatches `orva:deploy`; we listen here and fire the
+// existing deployFunction handler so the keybinding works whether
+// the palette is open or not. Suppress while a build is already in
+// flight to avoid double-clicks racing through cmd-S spam.
+const onDeployShortcut = () => {
+  if (deploying.value) return
+  deployFunction()
+}
+
+onMounted(() => {
+  window.addEventListener('focus', onWindowFocus)
+  document.addEventListener('mousedown', onDocClick)
+  document.addEventListener('keydown', onDocKey)
+  window.addEventListener('orva:deploy', onDeployShortcut)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', onWindowFocus)
+  document.removeEventListener('mousedown', onDocClick)
+  document.removeEventListener('keydown', onDocKey)
+  window.removeEventListener('orva:deploy', onDeployShortcut)
+})
 
 // applyPrefillFromQuery reads a base64-encoded JSON request envelope from
 // the `prefill` query param and populates the test pane. Used by the
@@ -2283,7 +2437,7 @@ const rollbackToVersion = async (v) => {
     if (snap && fn) {
       const lines = describeRollbackDiff(fn, snap)
       if (lines.length) {
-        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values — they aren't part of the rollback.`
+        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
       } else {
         diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}). Settings and env are already identical, so only the code changes.`
       }
@@ -2437,8 +2591,15 @@ const resetForm = async () => {
 </script>
 
 <style scoped>
-/* Compact panel-trigger button used in the editor's top action bar. */
+/* Compact panel-trigger button used in the editor's top action bar.
+   Visible height ~28 px keeps the toolbar dense for desktop operators;
+   the ::before pseudo extends the click region vertically to 44 px so
+   the WCAG 2.5.5 touch-target floor is met on phone-portrait without
+   reflowing the toolbar. Vertical-only expansion (no horizontal) so
+   adjacent buttons in the wrapping row don't get overlapping hit
+   regions; the gap-2 between siblings stays unambiguous. */
 .panel-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
@@ -2452,6 +2613,12 @@ const resetForm = async () => {
   white-space: nowrap;
   transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
 }
+.panel-btn::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  inset-block: -8px;
+}
 .panel-btn:hover {
   color: var(--color-foreground);
   border-color: var(--color-foreground-muted);
@@ -2459,6 +2626,37 @@ const resetForm = async () => {
 .panel-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Menu-row inside Config / Bindings dropdowns. Compact, single-line,
+   leading icon + label + secondary hint. Hover lifts the background to
+   surface-hover; no shadow, no glow, flat-by-default per DESIGN.md.
+
+   min-height is 44 px so the touch target meets WCAG 2.5.5; visible
+   font stays at 12 px for the operator-grade density the rest of the
+   editor toolbar uses. The vertical padding scales accordingly. */
+.menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  font-size: 12px;
+  color: var(--color-foreground);
+  background-color: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background-color: var(--color-surface-hover);
+  outline: none;
+}
+.menu-item + .menu-item {
+  border-top: 1px solid var(--color-border);
 }
 
 /* Compact Run button in the terminal-tab strip. Smaller than panel-btn

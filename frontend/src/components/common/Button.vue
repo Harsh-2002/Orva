@@ -78,9 +78,14 @@ const props = defineProps({
 })
 
 const sizeClasses = computed(() => {
+  // Visible heights stay as-is (xs=28, sm=32, md=40, lg=48). xs and sm
+  // ride below the 44×44 touch-target floor on their own, so we layer a
+  // transparent ::before via touch-expand-* that extends the click region
+  // vertically to 44 px without changing the rendered button bounds. md
+  // and lg are already at-or-above 44 px and don't need expansion.
   switch (props.size) {
-    case 'xs': return 'h-7 px-2.5 text-xs'
-    case 'sm': return 'h-8 px-3 text-xs'
+    case 'xs': return 'h-7 px-2.5 text-xs touch-expand-xs'
+    case 'sm': return 'h-8 px-3 text-xs touch-expand-sm'
     case 'lg': return 'h-12 px-6 text-base'
     default:   return 'h-10 px-4 text-sm'
   }

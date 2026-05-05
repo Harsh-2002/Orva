@@ -11,7 +11,7 @@
       </Button>
     </div>
 
-    <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+    <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
       System events fan out to operator-configured URLs. Subscriptions are
       global. Payloads are HMAC-SHA256 signed (header
       <code class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface border border-border text-white">X-Orva-Signature</code>);
@@ -81,7 +81,7 @@
               </span>
             </td>
             <td class="px-4 py-3 text-foreground-muted text-xs hidden lg:table-cell">
-              {{ sub.last_delivery_at ? formatDate(sub.last_delivery_at) : '—' }}
+              {{ sub.last_delivery_at ? formatDate(sub.last_delivery_at) : EMPTY }}
             </td>
             <td
               class="px-4 py-3 text-right"
@@ -323,6 +323,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import {
   Plus, Edit, Trash2, X, Webhook, CheckCircle, Copy, Check, Zap, RotateCcw,
@@ -406,7 +407,7 @@ const deliveryPill = (s) => {
 }
 
 const formatDate = (s) => {
-  if (!s) return '—'
+  if (!s) return EMPTY
   return new Date(s).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
   })

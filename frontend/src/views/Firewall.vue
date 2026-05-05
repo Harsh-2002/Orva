@@ -7,9 +7,9 @@
           <h1 class="text-xl font-semibold text-white tracking-tight">
             Firewall &amp; DNS
           </h1>
-          <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+          <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
             Decide what your functions are allowed to talk to. Each switch
-            below blocks one destination — turn one on and your functions
+            below blocks one destination; turn one on and your functions
             can no longer reach it; turn it off and they can. DNS settings
             below control how your functions look hostnames up.
           </p>
@@ -182,7 +182,7 @@
         <!-- Save bar -->
         <div class="dns-savebar">
           <span class="dns-hint">
-            Records win over upstream DNS — anything in the override list bypasses
+            Records win over upstream DNS. Anything in the override list bypasses
             resolution entirely. Existing warm workers keep their previous files;
             toggle the function's network off and on, or wait for idle TTL, to apply.
           </span>
@@ -275,7 +275,7 @@
     >
       <div class="space-y-4">
         <p class="text-xs text-foreground-muted leading-snug">
-          Pick what you're blocking — a single IP, a network range, or a hostname.
+          Pick what you're blocking: a single IP, a network range, or a hostname.
           Once added, your functions can no longer reach it.
         </p>
         <div>
@@ -314,7 +314,7 @@
           placeholder="e.g. our staging Postgres"
         />
         <p class="text-[11px] text-foreground-muted leading-snug">
-          Takes effect within seconds — warm functions are recycled so the
+          Takes effect within seconds. Warm functions are recycled so the
           new block applies on the very next call.
         </p>
       </div>
@@ -505,9 +505,9 @@ const countOf = (list) => list.length
 const friendlyMap = {
   '169.254.0.0/16':    { name: 'Cloud metadata service',  why: 'Blocks the special address AWS, Azure, and GCP use to expose VM credentials and instance settings. Leaving this open is a common credential-leak path.' },
   'fd00:ec2::254/128': { name: 'Cloud metadata (IPv6)',   why: 'Same as above, but the IPv6 path GCP uses. Recommended on.' },
-  '10.0.0.0/8':        { name: 'Private network — 10.x', why: 'Standard internal-network range. Turn on if your functions should not reach internal services on your LAN.' },
-  '172.16.0.0/12':     { name: 'Private network — 172.16.x', why: 'Another internal-network range (often used by Docker default bridge). Turn on for stricter isolation.' },
-  '192.168.0.0/16':    { name: 'Private network — 192.168.x', why: 'Common home/office network range. Turn on if functions should not reach your local LAN.' },
+  '10.0.0.0/8':        { name: 'Private network, 10.x', why: 'Standard internal-network range. Turn on if your functions should not reach internal services on your LAN.' },
+  '172.16.0.0/12':     { name: 'Private network, 172.16.x', why: 'Another internal-network range (often used by Docker default bridge). Turn on for stricter isolation.' },
+  '192.168.0.0/16':    { name: 'Private network, 192.168.x', why: 'Common home/office network range. Turn on if functions should not reach your local LAN.' },
   '100.64.0.0/10':     { name: 'CGNAT / Tailscale',       why: 'Used by Tailscale and large ISPs. Turn on to keep functions out of your tailnet.' },
 }
 
@@ -594,7 +594,7 @@ const statusIcon = computed(() => {
 const statusBannerText = computed(() => {
   if (status.value.last_error) return status.value.last_error
   if (!status.value.nftables_available) {
-    return 'nftables unavailable on this host — packet-level enforcement is disabled. Sandbox-level isolation still works.'
+    return 'nftables unavailable on this host. Packet-level enforcement is disabled. Sandbox-level isolation still works.'
   }
   return 'Active. Rules apply to every function with outbound network enabled.'
 })
@@ -897,9 +897,13 @@ const RuleCard = defineComponent({
   text-transform: uppercase;
   border: 1px solid;
 }
-.kind-recommended { color: #34d399; border-color: rgba(52, 211, 153, 0.35); background: rgba(52, 211, 153, 0.08); }
-.kind-optional    { color: #93c5fd; border-color: rgba(147, 197, 253, 0.35); background: rgba(147, 197, 253, 0.08); }
-.kind-yours       { color: #fcd34d; border-color: rgba(252, 211, 77, 0.35);  background: rgba(252, 211, 77, 0.08); }
+/* Recommended / optional / yours kind chips. Routed through the
+   semantic status tokens so a future palette change is a four-token
+   edit, not a six-site rewrite. recommended → success (green), optional
+   → info (blue), yours → warning (amber). */
+.kind-recommended { color: var(--color-success-fg); border-color: var(--color-success-ring); background: var(--color-success-tint); }
+.kind-optional    { color: var(--color-info-fg);    border-color: var(--color-info-ring);    background: var(--color-info-tint); }
+.kind-yours       { color: var(--color-warning-fg); border-color: var(--color-warning-ring); background: var(--color-warning-tint); }
 
 /* Pill toggle — distinct on/off colour states so the meaning is obvious. */
 .rule-toggle {
@@ -996,7 +1000,7 @@ const RuleCard = defineComponent({
   opacity: 1;
 }
 .rule-card-delete:hover {
-  color: #f87171;
+  color: var(--color-danger-fg);
   background: var(--color-background);
 }
 
@@ -1068,8 +1072,8 @@ const RuleCard = defineComponent({
   transition: color 150ms ease, background-color 150ms ease;
 }
 .dns-chip-x:hover {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.12);
+  color: var(--color-danger-fg);
+  background: var(--color-danger-tint);
 }
 
 .dns-form {

@@ -10,11 +10,11 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Channels
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Bundle deployed functions and expose them as MCP tools to a
           third-party agent. Each channel has its own bearer token that
           grants invoke-only access to its functions and nothing else
-          on Orva — but the bundled functions themselves remain as
+          on Orva, but the bundled functions themselves remain as
           powerful as you've configured them, including any in-sandbox
           SDK calls they make.
         </p>
@@ -34,9 +34,9 @@
     >
       <div class="flex items-start justify-between gap-3">
         <div>
-          <div class="text-xs font-bold text-amber-300 uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-amber-300 uppercase tracking-wider">
             Copy this token now
-          </div>
+          </h2>
           <div class="text-xs text-foreground-muted mt-0.5">
             It will not be shown again. Configure it in your agent's MCP client.
           </div>
@@ -163,7 +163,48 @@
          px-6 py-4 cells, `<th>` labels on own line, hover row tint,
          IconButton actions, amber "Never used" / red "Expired" hints. -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-row list. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="c in channels"
+          :key="c.id"
+          class="px-4 py-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium text-white truncate">{{ c.name }}</span>
+                <span class="inline-flex items-center gap-1 text-[11px] text-foreground-muted">
+                  <Boxes class="w-3 h-3" /> {{ c.function_count }}
+                </span>
+              </div>
+              <div
+                v-if="c.description"
+                class="mt-1 text-xs text-foreground-muted line-clamp-2"
+              >{{ c.description }}</div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                <code class="font-mono">{{ c.prefix }}…</code>
+                <span v-if="c.last_used_at">used {{ formatRelative(c.last_used_at) }}</span>
+                <span v-else class="text-amber-400/80">never used</span>
+                <span v-if="c.expires_at && isExpired(c.expires_at)" class="text-red-400">expired</span>
+                <span v-else-if="c.expires_at">expires {{ formatRelative(c.expires_at) }}</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <IconButton :icon="RotateCcw" title="Rotate token" @click="rotate(c)" />
+              <IconButton :icon="Trash2" variant="danger" title="Delete channel" @click="remove(c)" />
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="channels.length === 0"
+          class="px-6 py-8 text-center text-sm text-foreground-muted"
+        >
+          No channels yet.
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-6 py-3 font-medium">
@@ -370,7 +411,7 @@ const rotate = async (c) => {
     title: `Rotate ${c.name}?`,
     message:
       'A new token will be issued. The previous token stops working ' +
-      'immediately — agents using it will need the new value.',
+      'immediately. Agents using it will need the new value.',
     confirmLabel: 'Rotate',
     danger: true,
   })

@@ -2,7 +2,7 @@
   <div class="space-y-6">
     <div>
       <h1 class="text-xl font-semibold text-white tracking-tight">System Overview</h1>
-      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">Live snapshot of what your platform is doing right now.</p>
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">Live snapshot of what your platform is doing right now.</p>
     </div>
 
     <!-- Top-line numbers — every tile has a one-line "what does this mean" -->
@@ -38,9 +38,9 @@
       <!-- Latency -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-1">
         <div class="mb-3">
-          <div class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
             Response time
-          </div>
+          </h2>
           <div class="text-[11px] text-foreground-muted mt-1">
             How long calls take to come back. p99 is the worst-case 1-in-100.
           </div>
@@ -55,9 +55,9 @@
       <!-- Host resources — single stacked memory bar tells the whole story -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-2 space-y-5">
         <div>
-          <div class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
             Host machine
-          </div>
+          </h2>
           <div class="text-[11px] text-foreground-muted mt-1">
             The server Orva is running on, and how much of its RAM your warm sandboxes are holding.
           </div>
@@ -87,17 +87,17 @@
           <StackedBar
             :total="memTotal"
             :segments="[
-              { label: 'Reserved by warm pools', value: memReserved, color: 'bg-blue-500/70' },
-              { label: 'Free',                   value: memFree,     color: 'bg-emerald-500/40' },
+              { label: 'Reserved by warm pools', value: memReserved, color: 'bg-info/70' },
+              { label: 'Free',                   value: memFree,     color: 'bg-success/40' },
             ]"
           />
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-muted">
             <span class="flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-blue-500/70" />
+              <span class="w-2 h-2 rounded-full bg-info/70" />
               {{ formatMB(memReserved) }} held by warm sandboxes ready to serve
             </span>
             <span class="flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-500/40" />
+              <span class="w-2 h-2 rounded-full bg-success/40" />
               {{ formatMB(memFree) }} free for new pools or other workloads
             </span>
           </div>
@@ -110,9 +110,9 @@
       <!-- Build pipeline -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
         <div>
-          <div class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
             Builds
-          </div>
+          </h2>
           <div class="text-[11px] text-foreground-muted mt-1">
             Where deploys go: extracted, dependencies installed, then activated.
           </div>
@@ -146,9 +146,9 @@
       <!-- Sandbox -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
         <div>
-          <div class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
             Sandbox activity
-          </div>
+          </h2>
           <div class="text-[11px] text-foreground-muted mt-1">
             Each invocation runs inside an isolated nsjail sandbox process.
           </div>
@@ -177,9 +177,9 @@
     <div v-if="(m.pools || []).length">
       <div class="flex items-baseline justify-between mb-3">
         <div>
-          <div class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
             Warm pools ({{ m.pools.length }})
-          </div>
+          </h2>
           <div class="text-[11px] text-foreground-muted mt-1">
             One pool per active function. Sandboxes stay ready so the next call doesn't pay a cold start.
           </div>
@@ -245,14 +245,14 @@
             <div>
               <div class="text-foreground-muted">Avg memory</div>
               <div class="font-mono text-white" title="Average memory used per invocation vs allocated limit">
-                {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : '—' }}
+                {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : EMPTY }}
                 <span class="text-foreground-muted">/ {{ p.mem_limit_mb }} MB</span>
               </div>
             </div>
             <div>
               <div class="text-foreground-muted">Avg CPU</div>
               <div class="font-mono text-white" title="Average CPU cores consumed per invocation vs allocated">
-                {{ p.cpu_frac_avg > 0 && p.cpu_limit > 0 ? (p.cpu_frac_avg * p.cpu_limit).toFixed(2) : '—' }}
+                {{ p.cpu_frac_avg > 0 && p.cpu_limit > 0 ? (p.cpu_frac_avg * p.cpu_limit).toFixed(2) : EMPTY }}
                 <span v-if="p.cpu_limit > 0" class="text-foreground-muted">/ {{ p.cpu_limit }} CPU</span>
               </div>
             </div>
@@ -260,22 +260,40 @@
         </div>
       </div>
     </div>
+    <!--
+      Empty state for first-time visitors. Promotes the only meaningful
+      action (deploy a function) from muted body copy to a primary CTA.
+      Without this, an operator who has just spun up the container
+      lands on the Dashboard, sees four "0" tiles, and has no obvious
+      next step. The CTA routes straight to /functions/new.
+    -->
     <div
       v-else
-      class="bg-background border border-border rounded-lg p-8 text-center"
+      class="bg-background border border-border rounded-lg p-8 text-center space-y-4"
     >
-      <div class="text-sm text-white">No warm pools yet</div>
-      <div class="text-xs text-foreground-muted mt-1">
-        Deploy a function to see its live worker pool here.
+      <div>
+        <div class="text-sm text-white">No warm pools yet</div>
+        <div class="text-xs text-foreground-muted mt-1 max-w-prose mx-auto leading-body">
+          Deploy your first function to see live worker pools, latency,
+          and cold-start rate land in the tiles above.
+        </div>
+      </div>
+      <div>
+        <Button @click="$router.push('/functions/new')">
+          <Plus class="w-4 h-4" />
+          Deploy your first function
+        </Button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { computed, onMounted, onUnmounted, h } from 'vue'
-import { Activity, Boxes, TrendingUp, Snowflake } from 'lucide-vue-next'
+import { Activity, Boxes, TrendingUp, Snowflake, Plus } from 'lucide-vue-next'
 import { useSystemStore } from '@/stores/system'
+import Button from '@/components/common/Button.vue'
 
 const system = useSystemStore()
 
@@ -283,7 +301,7 @@ const m = computed(() => system.metrics || {})
 
 const poolHistoryFor = (fnId) => system.poolHistory[fnId] || []
 
-const formatPct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`)
+const formatPct = (v) => (v == null ? EMPTY : `${v.toFixed(1)}%`)
 const formatRate = (v) => (v == null ? '0' : v.toFixed(1))
 
 // Compact human-readable byte sizes. Server reports memory in MB; we show
@@ -341,10 +359,14 @@ const LatencyBars = {
   props: { p50: Number, p95: Number, p99: Number },
   setup(p) {
     return () => {
+      // Latency bars use semantic status tints — p50 = success (the
+      // happy-path baseline), p95 = warning (degraded but acceptable),
+      // p99 = danger (worst-case 1-in-100). Future palette change is
+      // a four-token edit, not a six-site rewrite.
       const rows = [
-        { label: 'p50', ms: p.p50, color: 'bg-emerald-500/70' },
-        { label: 'p95', ms: p.p95, color: 'bg-amber-500/70' },
-        { label: 'p99', ms: p.p99, color: 'bg-rose-500/70' },
+        { label: 'p50', ms: p.p50, color: 'bg-success/70' },
+        { label: 'p95', ms: p.p95, color: 'bg-warning/70' },
+        { label: 'p99', ms: p.p99, color: 'bg-danger/70' },
       ]
       // Anchor bar widths to the worst observed value so the relative
       // shape is obvious. If all three are ~equal the bars sit near full;
@@ -357,7 +379,7 @@ const LatencyBars = {
           return h('div', { class: 'space-y-1' }, [
             h('div', { class: 'flex items-baseline justify-between text-[11px]' }, [
               h('span', { class: 'font-mono uppercase text-foreground-muted tracking-wider' }, r.label),
-              h('span', { class: 'font-mono text-white' }, r.ms == null ? '—' : `${r.ms}ms`),
+              h('span', { class: 'font-mono text-white' }, r.ms == null ? EMPTY : `${r.ms}ms`),
             ]),
             h('div', { class: 'h-1.5 bg-surface rounded overflow-hidden' }, [
               h('div', {

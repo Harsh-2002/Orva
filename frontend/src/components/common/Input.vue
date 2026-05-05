@@ -10,10 +10,16 @@
       >*</span>
     </label>
     <div class="relative">
+      <!--
+        text-base sm:text-sm: 16 px on mobile (the smallest font-size
+        iOS Safari accepts without auto-zooming on focus), 14 px from
+        sm up where the dashboard's information density wins. Keeps
+        the operator on a stable viewport when they tap any field.
+      -->
       <input
         :type="type"
         :value="modelValue"
-        class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder-foreground-muted/50 focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors duration-200"
+        class="w-full bg-background border border-border rounded-md px-3 py-2 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors duration-200"
         :class="{'pl-9': icon}"
         :placeholder="placeholder"
         :disabled="disabled"

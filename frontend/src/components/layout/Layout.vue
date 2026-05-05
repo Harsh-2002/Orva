@@ -14,11 +14,16 @@
         <keep-alive :max="10">
           <component
             :is="Component"
-            class="flex-1 overflow-auto p-4 md:p-8"
+            class="flex-1 overflow-auto scrollable p-page"
           />
         </keep-alive>
       </router-view>
     </main>
+
+    <!-- Cmd/Ctrl-K command palette. Mounted globally so the keybinding
+         layer inside the component listens regardless of which view is
+         active. -->
+    <CommandPalette />
 
     <!-- Session-expiring-soon prompt. The store gates visibility on
          expires_at (set from /auth/me) and a 12-h threshold. -->
@@ -39,6 +44,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Sidebar from './Sidebar.vue'
 import Toast from '@/components/common/Toast.vue'
+import CommandPalette from '@/components/common/CommandPalette.vue'
 import { useSystemStore } from '@/stores/system'
 import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'

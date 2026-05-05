@@ -177,7 +177,7 @@
           </h2>
           <p class="doc-lede">
             The dashboard handles day-to-day work; these calls are for CI and
-            automation. Builds run async — poll
+            automation. Builds run async; poll
             <code class="doc-chip">/api/v1/deployments/&lt;id&gt;</code>
             or stream
             <code class="doc-chip">/api/v1/deployments/&lt;id&gt;/stream</code>
@@ -376,7 +376,7 @@
 
       <div class="space-y-2">
         <div class="doc-microlabel">
-          KV — get/put with TTL
+          KV: get/put with TTL
         </div>
         <TabbedCode
           :tabs="sdkKvTabs"
@@ -401,7 +401,7 @@
 
       <div class="space-y-2">
         <div class="doc-microlabel">
-          Function-to-function — invoke()
+          Function-to-function: invoke()
         </div>
         <TabbedCode
           :tabs="sdkInvokeTabs"
@@ -411,7 +411,7 @@
 
       <div class="space-y-2">
         <div class="doc-microlabel">
-          Background jobs — jobs.enqueue()
+          Background jobs: jobs.enqueue()
         </div>
         <TabbedCode
           :tabs="sdkJobsTabs"
@@ -447,7 +447,7 @@
           </h2>
           <p class="doc-lede">
             Fire any function on a cron expression. The scheduler runs as
-            part of the orvad process — no external service. Manage from
+            part of the orvad process; no external service. Manage from
             the
             <router-link
               to="/cron"
@@ -587,7 +587,7 @@
         <span class="doc-section-num">07</span>
         <div>
           <h2 class="doc-section-title">
-            MCP — Model Context Protocol
+            MCP: Model Context Protocol
           </h2>
           <p class="doc-lede">
             Same API surface the dashboard uses, exposed as 70 tools an agent
@@ -635,11 +635,11 @@
       >
         Either header works against the same API key store with identical
         permission gating. <code class="doc-chip">Authorization: Bearer</code>
-        is the MCP / OAuth 2 spec form — every MCP SDK (Claude Code,
+        is the MCP / OAuth 2 spec form; every MCP SDK (Claude Code,
         Claude Desktop, Cursor, mcp-remote, Python <code class="doc-chip">mcp</code>)
         configures it natively, so prefer it for new setups.
         <code class="doc-chip">X-Orva-API-Key</code> is the same header
-        the REST API accepts — useful when a tool reuses an existing
+        the REST API accepts; useful when a tool reuses an existing
         Orva REST integration. Internally both paths SHA-256-hash the
         token and look it up against the same
         <code class="doc-chip">api_keys</code> table.
@@ -663,7 +663,7 @@
           >
             Token minted:
             <code class="doc-chip">{{ mcpTokenPrefix }}…</code>
-            — shown once, copy now.
+            Shown once, copy now.
           </span>
         </div>
         <button
@@ -716,7 +716,7 @@
           <p class="doc-lede">
             Paste the prompt below into ChatGPT, Claude, Gemini, Cursor,
             Copilot, or any other AI tool to teach it Orva's full surface
-            — handler contract, runtimes, sandbox limits, the in-sandbox
+            Handler contract, runtimes, sandbox limits, the in-sandbox
             <code class="doc-chip">orva</code>
             SDK (kv / invoke / jobs), cron triggers, system-event
             webhooks, auth modes, and production patterns. The model
@@ -786,7 +786,7 @@
             Tracing
           </h2>
           <p class="doc-lede">
-            Every invocation chain is recorded as a causal trace —
+            Every invocation chain is recorded as a causal trace.
             automatically, with <strong>zero changes to your function code</strong>.
             HTTP requests, F2F invokes, jobs, cron, inbound webhooks, and replays
             all stitch into the same tree. The dashboard renders it as a
@@ -799,7 +799,7 @@
         Each execution row IS a span. Spans share a
         <code class="doc-chip">trace_id</code>; child spans point at their parent
         via <code class="doc-chip">parent_span_id</code>. You don't instantiate
-        spans, you don't import a tracer — you just write your handler and the
+        spans, you don't import a tracer; you just write your handler and the
         platform plumbs IDs through every internal hop.
       </p>
 
@@ -808,7 +808,7 @@
       <h3 class="doc-h3">What user code sees</h3>
       <p class="doc-prose">
         Two env vars are stamped per invocation. Read them only if you want to
-        log the trace_id alongside your own messages — they're optional.
+        log the trace_id alongside your own messages; they're optional.
       </p>
       <CodeBlock
         :code="traceEnvExample"
@@ -829,7 +829,7 @@
         Job enqueues work the same way: <code class="doc-chip">orva.jobs.enqueue()</code>
         records the trace context on the job row. When the scheduler picks the
         job up later, the resulting execution lands in the same trace as the
-        function that enqueued it — even if the gap is hours or days.
+        function that enqueued it, even if the gap is hours or days.
       </p>
 
       <h3 class="doc-h3">Triggers</h3>
@@ -880,10 +880,10 @@
 
       <h3 class="doc-h3">Where to look</h3>
       <ul class="doc-list">
-        <li><code class="doc-chip">/traces</code> — list of recent traces, filterable by function / status / outlier-only.</li>
-        <li><code class="doc-chip">/traces/:id</code> — waterfall + per-span detail. Click a span to jump to its execution in the Invocations log.</li>
-        <li><code class="doc-chip">GET /api/v1/traces/{id}</code> — full span tree as JSON. Pair with <code class="doc-chip">list_traces</code> / <code class="doc-chip">get_trace</code> MCP tools for AI agents.</li>
-        <li><code class="doc-chip">GET /api/v1/functions/{id}/baseline</code> — current P95/P99/mean for a function.</li>
+        <li><code class="doc-chip">/traces</code>: list of recent traces, filterable by function / status / outlier-only.</li>
+        <li><code class="doc-chip">/traces/:id</code>: waterfall + per-span detail. Click a span to jump to its execution in the Invocations log.</li>
+        <li><code class="doc-chip">GET /api/v1/traces/{id}</code>: full span tree as JSON. Pair with <code class="doc-chip">list_traces</code> / <code class="doc-chip">get_trace</code> MCP tools for AI agents.</li>
+        <li><code class="doc-chip">GET /api/v1/functions/{id}/baseline</code>: current P95/P99/mean for a function.</li>
       </ul>
     </section>
 
@@ -952,7 +952,7 @@
           <p class="doc-lede">
             <code class="doc-chip">orva</code> is a single static binary
             that talks to a remote (or local) Orva server over HTTPS.
-            Same binary as the daemon — <code class="doc-chip">orva serve</code>
+            Same binary as the daemon, <code class="doc-chip">orva serve</code>
             starts a server, every other subcommand is a CLI client.
             Drop it on operator laptops, CI runners, or anywhere bash
             runs.
@@ -1084,6 +1084,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { computed, h, ref, defineComponent, onMounted, onBeforeUnmount } from 'vue'
 import {
   Variable,
@@ -1224,6 +1225,11 @@ const PythonGlyph = defineComponent({
 
 const NodeGlyph = defineComponent({
   setup() {
+    // #3F873F is the official Node.js brand green from nodejs.org's
+    // visual identity. Intentionally hardcoded: this is a third-party
+    // logo fill, not a theme accent; routing it through a token would
+    // mean future palette changes alter the Node.js mark, which is
+    // wrong. Same exemption applies to any other vendor logo we ship.
     return () =>
       h('svg', { viewBox: '0 0 256 280', width: '14', height: '14', xmlns: 'http://www.w3.org/2000/svg' }, [
         h('path', {
@@ -1298,7 +1304,7 @@ const TraceTreeDiagram = defineComponent({
     const pct = (n) => (n / total) * 100
     return () =>
       h('figure', { class: 'doc-diagram' }, [
-        h('figcaption', { class: 'doc-diagram-cap' }, 'Causal trace — one HTTP request, three spans'),
+        h('figcaption', { class: 'doc-diagram-cap' }, 'Causal trace, one HTTP request and three spans'),
         h('div', { class: 'doc-trace' }, [
           // Header axis
           h('div', { class: 'doc-trace-axis' }, [
@@ -1636,7 +1642,7 @@ const webhookEvents = [
   { name: 'deployment.succeeded', when: 'A function build finished and the new version is active.' },
   { name: 'deployment.failed',    when: 'A build failed or was rejected.' },
   { name: 'function.created',     when: 'A new function row was created via POST /api/v1/functions.' },
-  { name: 'function.updated',     when: 'A function config was edited via PUT /api/v1/functions/{id} (status flips during a deploy do NOT fire this — see deployment.*).' },
+  { name: 'function.updated',     when: 'A function config was edited via PUT /api/v1/functions/{id} (status flips during a deploy do NOT fire this; see deployment.*).' },
   { name: 'function.deleted',     when: 'A function was removed.' },
   { name: 'execution.error',      when: 'An invocation finished with status=error or 5xx.' },
   { name: 'cron.failed',          when: 'A scheduled run failed (bad expr, missing fn, dispatch error, or 5xx).' },
@@ -1648,7 +1654,7 @@ const webhookVerifyTabs = [
   {
     label: 'Python',
     lang: 'python',
-    note: 'Run on the receiver. Reject anything that fails verification — the signature ensures the request really came from this Orva instance.',
+    note: 'Run on the receiver. Reject anything that fails verification. The signature ensures the request really came from this Orva instance.',
     code: `import hmac, hashlib, time
 
 def verify(secret: str, ts: str, body: bytes, sig_header: str) -> bool:
@@ -1746,7 +1752,7 @@ const errorCodes = [
   { code: 'VALIDATION',        when: 'Bad request body or path parameter.' },
   { code: 'UNAUTHORIZED',      when: 'Missing or invalid API key / session cookie.' },
   { code: 'NOT_FOUND',         when: 'Function, deployment, or secret doesn\'t exist.' },
-  { code: 'RATE_LIMITED',      when: 'Too many requests — check the Retry-After header.' },
+  { code: 'RATE_LIMITED',      when: 'Too many requests; check the Retry-After header.' },
   { code: 'VERSION_GCD',       when: 'Rollback target was garbage-collected.' },
   { code: 'INSUFFICIENT_DISK', when: 'Host is below min_free_disk_mb.' },
 ]
@@ -1758,8 +1764,8 @@ const errorCodes = [
 // shipped today by ./build/orva — keep in sync if subcommands change.
 
 const cliIndex = [
-  { cmd: 'login',      subs: '—',                                purpose: 'Save endpoint + API key to ~/.orva/config.yaml' },
-  { cmd: 'init',       subs: '—',                                purpose: 'Scaffold an orva.yaml in the current directory' },
+  { cmd: 'login',      subs: EMPTY,                                purpose: 'Save endpoint + API key to ~/.orva/config.yaml' },
+  { cmd: 'init',       subs: EMPTY,                                purpose: 'Scaffold an orva.yaml in the current directory' },
   { cmd: 'deploy',     subs: '[path]',                           purpose: 'Package a directory and deploy as a function' },
   { cmd: 'invoke',     subs: '[name|id]',                        purpose: 'POST to /fn/<id>/ and print the response' },
   { cmd: 'logs',       subs: '[name|id] [--tail]',               purpose: 'List recent executions; --tail follows live via SSE' },
@@ -1916,7 +1922,7 @@ const onMintMcpToken = async () => {
   try {
     const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
     const res = await apiClient.post('/keys', {
-      name: 'MCP — ' + stamp,
+      name: 'MCP: ' + stamp,
       permissions: ['invoke', 'read', 'write', 'admin'],
     })
     mcpToken.value = res.data.key
@@ -2036,7 +2042,7 @@ const mcpInstallTabsSecondary = computed(() => [
   {
     label: 'claude.ai web',
     lang: 'text',
-    note: 'UI-only flow. Settings → Connectors → Add custom connector. claude.ai opens an Orva login + consent popup and issues an OAuth 2.1 token automatically — no token paste required.',
+    note: 'UI-only flow. Settings → Connectors → Add custom connector. claude.ai opens an Orva login + consent popup and issues an OAuth 2.1 token automatically; no token paste required.',
     code: `URL:  ${origin.value}/mcp
 Auth: OAuth (auto-discovered)`,
   },
@@ -2311,7 +2317,7 @@ const Callout = defineComponent({
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.05;
-  color: #fff;
+  color: var(--color-foreground);
 }
 @media (min-width: 640px) {
   .docs-hero-title { font-size: 38px; }
@@ -2346,7 +2352,7 @@ const Callout = defineComponent({
   transition: color 120ms, border-color 120ms, background-color 120ms;
 }
 .docs-hero-copy-icon:hover {
-  color: #fff;
+  color: var(--color-foreground);
   border-color: var(--color-foreground-muted);
   background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
 }
@@ -2355,7 +2361,7 @@ const Callout = defineComponent({
   outline-offset: 2px;
 }
 .docs-hero-copy-icon.copied {
-  color: #4ade80;
+  color: var(--color-success-fg);
   border-color: rgba(76, 175, 80, 0.45);
   background: rgba(76, 175, 80, 0.08);
 }
@@ -2384,7 +2390,7 @@ const Callout = defineComponent({
 }
 .docs-hero-copy.copied {
   border-color: rgba(76, 175, 80, 0.4);
-  color: #4ade80;
+  color: var(--color-success-fg);
   background: rgba(76, 175, 80, 0.08);
 }
 
@@ -2421,11 +2427,11 @@ const Callout = defineComponent({
   transition: color 120ms, border-color 120ms, background-color 120ms;
 }
 .docs-hero-toc-link:hover {
-  color: #fff;
+  color: var(--color-foreground);
   border-color: var(--color-foreground-muted);
 }
 .docs-hero-toc-link.active {
-  color: #fff;
+  color: var(--color-foreground);
   border-color: var(--color-primary);
   background: rgba(85, 63, 131, 0.18);
 }
@@ -2503,7 +2509,7 @@ const Callout = defineComponent({
   border-radius: 0.4rem;
   background: rgba(85, 63, 131, 0.18);
   border: 1px solid rgba(85, 63, 131, 0.45);
-  color: #fff;
+  color: var(--color-foreground);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1;
@@ -2734,7 +2740,7 @@ const Callout = defineComponent({
   border-radius: 0.3rem;
   background: rgba(85, 63, 131, 0.25);
   border: 1px solid rgba(85, 63, 131, 0.55);
-  color: #fff;
+  color: var(--color-foreground);
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
@@ -2766,7 +2772,15 @@ const Callout = defineComponent({
    Section 08's CodeBlock is huge (~400 lines). Collapsed state
    clamps the visible area to ~5 lines worth and fades out the
    bottom; expanding removes the cap. Copy button on the prompt
-   keeps working either way because it reads the full source. */
+   keeps working either way because it reads the full source.
+
+   Why max-height and not the modern grid-template-rows: 0fr → 1fr
+   idiom: that pattern animates between zero and the natural row
+   height. Here the collapsed state isn't zero, it's 9.5rem (so
+   ~5 lines of preview show through the fade). max-height is the
+   correct primitive for "clamped → expanded" transitions. The
+   one-shot expand on a single user click doesn't generate enough
+   layout-thrash work to be a perceptible issue on real devices. */
 .prompt-collapse {
   position: relative;
   max-height: 9.5rem; /* ~5 lines + the codeblock's bar */
@@ -2806,7 +2820,7 @@ const Callout = defineComponent({
   transition: color 120ms, border-color 120ms, background-color 120ms;
 }
 .prompt-expand-btn:hover {
-  color: #fff;
+  color: var(--color-foreground);
   border-color: var(--color-foreground-muted);
 }
 .prompt-expand-btn:focus-visible {
@@ -3043,8 +3057,11 @@ const Callout = defineComponent({
     rgba(85, 63, 131, 0.02) 70%,
     transparent 100%
   ), var(--color-background);
+  /* Single-weight border around the whole callout: the left-edge
+     gradient tint already gives the eye a leading anchor without a
+     side-stripe. DESIGN.md absolute ban: no border-left greater than
+     1px as a coloured accent on cards / callouts / alerts. */
   border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-primary);
   border-radius: 0.6rem;
 }
 .doc-token-btn {
@@ -3154,7 +3171,7 @@ const Callout = defineComponent({
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.6;
-  color: #e6edf3;
+  color: var(--color-foreground-muted);
   background: var(--color-background);
 }
 .codeblock-pre code {
@@ -3235,8 +3252,9 @@ const Callout = defineComponent({
     rgba(85, 63, 131, 0.01) 60%,
     transparent 100%
   ), var(--color-background);
+  /* Same anti-side-stripe rule as .doc-callout above. The leading
+     gradient tint carries the visual emphasis. */
   border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-primary);
   border-radius: 0.6rem;
 }
 .callout-head {
@@ -3290,7 +3308,7 @@ const Callout = defineComponent({
   border-color: var(--color-foreground-muted);
 }
 .ai-copy-btn.copied {
-  color: #4ade80;
+  color: var(--color-success-fg);
   border-color: rgba(74, 222, 128, 0.4);
 }
 

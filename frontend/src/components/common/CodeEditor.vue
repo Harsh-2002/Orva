@@ -57,8 +57,16 @@ onMounted(() => {
       }),
       EditorView.theme({
         '&': {
-          fontSize: '14px',
+          // 16 px on phones (the smallest font-size iOS Safari accepts
+          // without auto-zooming on focus); back to 14 px from sm up
+          // where the dashboard's information density wins. The media
+          // query lives inside CodeMirror's own theme system so the
+          // change applies to .cm-content and propagates correctly.
+          fontSize: '16px',
           height: '100%',
+        },
+        '@media (min-width: 640px)': {
+          '&': { fontSize: '14px' },
         },
         '.cm-scroller': {
           fontFamily: 'JetBrains Mono, monospace',

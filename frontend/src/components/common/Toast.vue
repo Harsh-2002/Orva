@@ -1,9 +1,18 @@
 <template>
   <Teleport to="body">
     <Transition name="toast">
+      <!--
+        Mobile: bottom-centred with a comfortable 8 px gap from each
+        edge, pb-safe to clear the iOS home indicator. The 100% width
+        minus the inset-x is capped at max-w-sm so toasts on a wide
+        phone (414 px+) don't sprawl. Desktop (sm+): bottom-right
+        anchored as before, 24 px from each edge.
+      -->
       <div
         v-if="visible"
-        class="fixed bottom-6 right-6 z-50 max-w-sm bg-background border border-border shadow-2xl rounded-lg p-4 flex items-start gap-3"
+        class="fixed z-50 bg-background border border-border shadow-2xl rounded-lg p-4 flex items-start gap-3
+               inset-x-2 bottom-2 max-w-sm mx-auto pb-safe
+               sm:inset-x-auto sm:bottom-6 sm:right-6 sm:mx-0 sm:pb-4"
       >
         <div class="flex-1 min-w-0">
           <div v-if="title" class="text-sm font-medium text-white mb-0.5">{{ title }}</div>

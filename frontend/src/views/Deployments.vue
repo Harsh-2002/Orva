@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Deployments
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           History for
           <router-link
             :to="`/functions/${fnName}`"
@@ -58,7 +58,7 @@
           </span>
         </div>
         <div class="text-xs text-foreground-muted mt-1 font-mono truncate">
-          hash: {{ activeFn.code_hash || '—' }} · runtime: {{ activeFn.runtime }} · updated {{ formatTime(activeFn.updated_at) }}
+          hash: {{ activeFn.code_hash || EMPTY }} · runtime: {{ activeFn.runtime }} · updated {{ formatTime(activeFn.updated_at) }}
         </div>
       </div>
     </div>
@@ -71,7 +71,55 @@
     </div>
 
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-row list. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="d in deployments"
+          :key="d.id"
+          class="px-4 py-3 cursor-pointer active:bg-surface-hover/50 transition-colors"
+          :class="isActive(d) ? 'bg-success/5' : ''"
+          @click="open(d)"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span
+                  class="font-mono text-xs"
+                  :class="isActive(d) ? 'text-white font-semibold' : 'text-foreground-muted'"
+                >v{{ d.version }}</span>
+                <StatusBadge :status="d.status" />
+                <span
+                  v-if="isActive(d)"
+                  class="px-1.5 py-0.5 rounded text-[10px] bg-success/15 text-success border border-success/30"
+                >Active</span>
+              </div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                <span>{{ formatTime(d.submitted_at) }}</span>
+                <span v-if="d.duration_ms != null" class="font-mono">{{ d.duration_ms }} ms</span>
+                <span v-if="d.phase">{{ d.phase }}</span>
+              </div>
+            </div>
+            <Button
+              v-if="canRollback(d)"
+              size="xs"
+              variant="ghost"
+              class="shrink-0"
+              :disabled="rollingBack"
+              @click.stop="rollbackTo(d)"
+            >
+              <RotateCcw class="w-3 h-3" /> Rollback
+            </Button>
+          </div>
+        </li>
+        <li
+          v-if="!loading && deployments.length === 0"
+          class="px-6 py-8 text-center text-sm text-foreground-muted"
+        >
+          No deployments yet for this function.
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-6 py-3 font-medium">
@@ -124,10 +172,10 @@
               <StatusBadge :status="d.status" />
             </td>
             <td class="px-6 py-4 text-foreground-muted text-xs hidden md:table-cell">
-              {{ d.phase || '—' }}
+              {{ d.phase || EMPTY }}
             </td>
             <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden sm:table-cell">
-              {{ d.duration_ms != null ? d.duration_ms + 'ms' : '—' }}
+              {{ d.duration_ms != null ? d.duration_ms + 'ms' : EMPTY }}
             </td>
             <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden xl:table-cell">
               {{ d.id?.substring(0, 14) }}
@@ -152,7 +200,7 @@
               <span
                 v-else
                 class="text-foreground-muted/30"
-              >—</span>
+              >{{ EMPTY }}</span>
             </td>
           </tr>
           <tr v-if="!loading && deployments.length === 0">
@@ -182,19 +230,19 @@
 
         <div class="grid grid-cols-2 gap-3 text-sm">
           <Stat label="Version" :value="`v${selected.version}`" mono />
-          <Stat label="Duration" :value="selected.duration_ms != null ? selected.duration_ms + ' ms' : '—'" />
+          <Stat label="Duration" :value="selected.duration_ms != null ? selected.duration_ms + ' ms' : EMPTY" />
           <Stat label="Submitted" :value="formatTime(selected.submitted_at)" />
-          <Stat label="Finished" :value="selected.finished_at ? formatTime(selected.finished_at) : '—'" />
+          <Stat label="Finished" :value="selected.finished_at ? formatTime(selected.finished_at) : EMPTY" />
         </div>
 
         <div v-if="selected.error_message">
-          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Error</div>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Error</h3>
           <pre class="bg-red-950/30 border border-red-900/40 rounded p-3 text-xs text-red-300 font-mono whitespace-pre-wrap break-words">{{ selected.error_message }}</pre>
         </div>
 
         <div>
           <div class="flex items-center justify-between mb-2">
-            <div class="text-xs uppercase tracking-wider text-foreground-muted">Build log</div>
+            <h3 class="text-xs uppercase tracking-wider text-foreground-muted">Build log</h3>
             <span v-if="streamConnected" class="text-[10px] text-green-400">live</span>
           </div>
           <pre
@@ -207,6 +255,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onBeforeUnmount, watch, h } from 'vue'
 import { useEventsStore } from '@/stores/events'
 import { useRoute } from 'vue-router'
@@ -331,7 +380,7 @@ const drawerTitle = computed(() =>
 )
 const logText = computed(() => logLines.value.join('\n'))
 
-const formatTime = (ts) => (ts ? new Date(ts).toLocaleString() : '—')
+const formatTime = (ts) => (ts ? new Date(ts).toLocaleString() : EMPTY)
 
 const Stat = {
   props: { label: String, value: [String, Number], mono: Boolean },

@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Jobs
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Background work queued via <code class="font-mono text-[11px]">jobs.enqueue()</code> from the SDK or the <code class="font-mono text-[11px]">enqueue_job</code> MCP tool. Workers pick them up at the configured concurrency, retry on failure with exponential backoff, and surface here with their full lifecycle.
         </p>
       </div>
@@ -15,38 +15,46 @@
       </div>
     </div>
 
-    <!-- Status filter strip. -->
-    <div class="flex items-center gap-2 flex-wrap">
-      <Button
-        v-for="opt in statusOptions"
-        :key="opt.value"
-        variant="chip"
-        size="xs"
-        :active="statusFilter === opt.value"
-        @click="statusFilter = opt.value"
-      >
-        {{ opt.label }}
-        <span
-          v-if="counts[opt.value] !== undefined"
-          class="ml-1 opacity-70"
-        >{{ counts[opt.value] }}</span>
-      </Button>
-      <div class="flex-1" />
-      <Button
-        size="xs"
-        @click="openEnqueue"
-      >
-        <Plus class="w-3 h-3" />
-        Enqueue
-      </Button>
-      <Button
-        variant="secondary"
-        size="xs"
-        @click="loadJobs"
-      >
-        <RefreshCcw class="w-3 h-3" />
-        Refresh
-      </Button>
+    <!-- Status filter strip.
+         Mobile (<sm): chips scroll horizontally inside the strip with
+         scroll-snap so the active filter doesn't get lost; actions
+         (Enqueue, Refresh) anchor to the right and don't scroll.
+         Desktop (sm+): the chip container flex-wraps as before. -->
+    <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0 flex-1">
+        <Button
+          v-for="opt in statusOptions"
+          :key="opt.value"
+          variant="chip"
+          size="xs"
+          :active="statusFilter === opt.value"
+          class="shrink-0 snap-start"
+          @click="statusFilter = opt.value"
+        >
+          {{ opt.label }}
+          <span
+            v-if="counts[opt.value] !== undefined"
+            class="ml-1 opacity-70 tabular-nums"
+          >{{ counts[opt.value] }}</span>
+        </Button>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <Button
+          size="xs"
+          @click="openEnqueue"
+        >
+          <Plus class="w-3 h-3" />
+          Enqueue
+        </Button>
+        <Button
+          variant="secondary"
+          size="xs"
+          @click="loadJobs"
+        >
+          <RefreshCcw class="w-3 h-3" />
+          Refresh
+        </Button>
+      </div>
     </div>
 
     <!-- Enqueue drawer — minimal. The dashboard's job here is to be a
@@ -191,7 +199,7 @@
               {{ formatDate(job.scheduled_at) }}
             </td>
             <td class="px-4 py-3 text-foreground-muted text-xs hidden xl:table-cell">
-              {{ job.finished_at ? formatDate(job.finished_at) : '—' }}
+              {{ job.finished_at ? formatDate(job.finished_at) : EMPTY }}
             </td>
             <td class="px-4 py-3 text-right">
               <div class="inline-flex items-center gap-1">
@@ -233,6 +241,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus } from 'lucide-vue-next'
 import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
@@ -297,7 +306,7 @@ const statusPill = (s) => {
 }
 
 const formatDate = (s) => {
-  if (!s) return '—'
+  if (!s) return EMPTY
   return new Date(s).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
   })

@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-04T00:00:00Z",
+  "title": "Design System: Orva",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Inkwell Violet",
+        "canonical": "oklch(13% 0.029 277)",
+        "tonalRamp": [
+          "oklch(8% 0.020 277)",
+          "oklch(13% 0.029 277)",
+          "oklch(18% 0.035 277)",
+          "oklch(24% 0.042 277)",
+          "oklch(34% 0.040 277)",
+          "oklch(48% 0.035 277)",
+          "oklch(64% 0.025 277)",
+          "oklch(82% 0.012 277)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface Violet",
+        "canonical": "oklch(18% 0.035 277)",
+        "tonalRamp": [
+          "oklch(10% 0.025 277)",
+          "oklch(18% 0.035 277)",
+          "oklch(24% 0.042 277)",
+          "oklch(32% 0.045 277)",
+          "oklch(42% 0.045 277)",
+          "oklch(56% 0.040 277)",
+          "oklch(72% 0.025 277)",
+          "oklch(88% 0.010 277)"
+        ]
+      },
+      "surface-hover": {
+        "role": "neutral",
+        "displayName": "Active Violet",
+        "canonical": "oklch(24% 0.042 277)"
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border Violet",
+        "canonical": "oklch(28% 0.045 277)"
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Page Foreground",
+        "canonical": "oklch(96% 0.010 290)",
+        "tonalRamp": [
+          "oklch(20% 0.005 290)",
+          "oklch(34% 0.008 290)",
+          "oklch(50% 0.010 290)",
+          "oklch(64% 0.012 290)",
+          "oklch(78% 0.012 290)",
+          "oklch(86% 0.012 290)",
+          "oklch(92% 0.011 290)",
+          "oklch(96% 0.010 290)"
+        ]
+      },
+      "foreground-muted": {
+        "role": "neutral",
+        "displayName": "Cool Gray-Violet",
+        "canonical": "oklch(70% 0.018 280)"
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Muted Violet",
+        "canonical": "oklch(40% 0.105 295)",
+        "tonalRamp": [
+          "oklch(18% 0.060 295)",
+          "oklch(28% 0.085 295)",
+          "oklch(34% 0.095 295)",
+          "oklch(40% 0.105 295)",
+          "oklch(48% 0.115 295)",
+          "oklch(60% 0.115 295)",
+          "oklch(74% 0.090 295)",
+          "oklch(88% 0.045 295)"
+        ]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Lifted Violet",
+        "canonical": "oklch(48% 0.115 295)"
+      },
+      "secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Surface",
+        "canonical": "oklch(28% 0.045 277)"
+      },
+      "danger": {
+        "role": "danger",
+        "displayName": "Signal Red",
+        "canonical": "oklch(64% 0.230 25)",
+        "tonalRamp": [
+          "oklch(28% 0.10 25)",
+          "oklch(40% 0.16 25)",
+          "oklch(50% 0.20 25)",
+          "oklch(58% 0.22 25)",
+          "oklch(64% 0.230 25)",
+          "oklch(72% 0.20 25)",
+          "oklch(82% 0.14 25)",
+          "oklch(92% 0.06 25)"
+        ]
+      },
+      "warning": {
+        "role": "warning",
+        "displayName": "Signal Amber",
+        "canonical": "oklch(78% 0.16 86)",
+        "tonalRamp": [
+          "oklch(34% 0.08 86)",
+          "oklch(46% 0.12 86)",
+          "oklch(58% 0.15 86)",
+          "oklch(68% 0.16 86)",
+          "oklch(78% 0.16 86)",
+          "oklch(86% 0.14 86)",
+          "oklch(92% 0.10 86)",
+          "oklch(96% 0.05 86)"
+        ]
+      },
+      "success": {
+        "role": "success",
+        "displayName": "Signal Green",
+        "canonical": "oklch(73% 0.21 144)",
+        "tonalRamp": [
+          "oklch(30% 0.10 144)",
+          "oklch(42% 0.15 144)",
+          "oklch(54% 0.19 144)",
+          "oklch(64% 0.21 144)",
+          "oklch(73% 0.21 144)",
+          "oklch(82% 0.18 144)",
+          "oklch(90% 0.12 144)",
+          "oklch(96% 0.05 144)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Onboarding hero, 404 wordmark. Reserved for product-framing moments." },
+      "headline": { "displayName": "Page Header", "purpose": "Every dashboard view's H1. The single standardised heading style." },
+      "title": { "displayName": "Panel Title", "purpose": "Modal headers, drawer headers, editor panel titles." },
+      "body": { "displayName": "Operator Body", "purpose": "Page subheads, table cells, paragraph copy. The dashboard default." },
+      "label": { "displayName": "Section Caption", "purpose": "Uppercase tracked captions inside cards. Promote to h2/h3 in markup." },
+      "mono": { "displayName": "Operator Mono", "purpose": "Anything an operator compares digit-by-digit. UUIDs, MB, ports, methods." }
+    },
+    "shadows": [
+      { "name": "cta-glow",       "value": "0 4px 6px -1px rgba(85,63,131,0.20), 0 2px 4px -2px rgba(85,63,131,0.20)", "purpose": "Primary buttons. Hue-matched soft lift." },
+      { "name": "danger-glow",    "value": "0 4px 6px -1px rgba(239,68,68,0.30), 0 2px 4px -2px rgba(239,68,68,0.30)", "purpose": "Destructive buttons. Slightly stronger than CTA glow so the operator pauses." },
+      { "name": "sidebar-active", "value": "0 10px 15px -3px rgba(38,18,87,0.20)", "purpose": "Currently-routed nav item; anchors 'you are here'." },
+      { "name": "modal-drop",     "value": "0 25px 50px -12px rgba(0,0,0,0.50)", "purpose": "Modal containers. Separates dialog from dimmed page." }
+    ],
+    "motion": [
+      { "name": "transition-colors", "value": "color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out", "purpose": "Default state-change feel. Used across buttons, links, hover surfaces." },
+      { "name": "fade-150",          "value": "opacity 150ms cubic-bezier(0.16, 1, 0.3, 1)",                                   "purpose": "Modal/drawer/toast enter/leave." },
+      { "name": "fade-120",          "value": "opacity 120ms ease-out",                                                       "purpose": "Sidebar drawer backdrop fade. Short on purpose so rapid open/close clicks don't queue visible animations." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The page-level affirmative CTA. Deploy, Save, Confirm.",
+      "html": "<button class=\"ds-btn-primary\">Deploy function</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; background: var(--color-primary, #553F83); color: var(--color-primary-foreground, #FFFFFF); border: 1px solid transparent; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1; box-shadow: 0 4px 6px -1px rgba(85,63,131,0.20), 0 2px 4px -2px rgba(85,63,131,0.20); transition: background-color 150ms ease-out, box-shadow 150ms ease-out; cursor: pointer; } .ds-btn-primary:hover { background: var(--color-primary-hover, #684D9E); } .ds-btn-primary:focus-visible { outline: 2px solid var(--color-primary, #553F83); outline-offset: 2px; }"
+    },
+    {
+      "name": "Filter Chip (active)",
+      "kind": "chip",
+      "refersTo": "chip-active",
+      "description": "Currently-selected filter pill on Jobs / Webhooks / CronJobs status strips.",
+      "html": "<button class=\"ds-chip ds-chip-active\">Running</button>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; line-height: 1; background: var(--color-surface, #1A1929); color: var(--color-foreground-muted, #A3A3B3); border: 1px solid var(--color-border, #2D2B42); transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out; cursor: pointer; } .ds-chip:hover { color: #FFFFFF; border-color: var(--color-foreground-muted, #A3A3B3); } .ds-chip-active { background: var(--color-primary, #553F83); color: var(--color-primary-foreground, #FFFFFF); border-color: var(--color-primary, #553F83); }"
+    },
+    {
+      "name": "Status Pill (success)",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "Semantic status badge from Badge.vue. Use the matching variant (success / warning / error / info / primary) for the corresponding state.",
+      "html": "<span class=\"ds-status ds-status-success\"><span class=\"ds-status-dot\"></span>Active</span>",
+      "css": ".ds-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 9999px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; line-height: 1.4; } .ds-status-dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; } .ds-status-success { background: rgba(34,197,94,0.20); color: oklch(82% 0.18 144); border: 1px solid rgba(34,197,94,0.30); }"
+    },
+    {
+      "name": "Page Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Dashboard tile / panel. Sits one step deeper than the page surface to read as a content well.",
+      "html": "<section class=\"ds-card\"><div class=\"ds-card-caption\">Response time</div><div class=\"ds-card-hint\">How long calls take to come back. p99 is the worst-case 1-in-100.</div><div class=\"ds-card-value\">42 <span class=\"ds-card-unit\">ms</span></div></section>",
+      "css": ".ds-card { background: var(--color-background, #12111C); border: 1px solid var(--color-border, #2D2B42); border-radius: 8px; padding: 20px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; } .ds-card-caption { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #FFFFFF; } .ds-card-hint { margin-top: 4px; font-size: 0.6875rem; color: var(--color-foreground-muted, #A3A3B3); line-height: 1.55; } .ds-card-value { margin-top: 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.5rem; font-weight: 500; color: #FFFFFF; } .ds-card-unit { font-size: 0.875rem; color: var(--color-foreground-muted, #A3A3B3); margin-left: 4px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Default form field. Sits a step deeper than the surrounding card so the eye reads 'this is where you type'.",
+      "html": "<label class=\"ds-input-wrap\"><span class=\"ds-input-label\">Function name</span><input type=\"text\" class=\"ds-input\" placeholder=\"image-resizer\" /></label>",
+      "css": ".ds-input-wrap { display: flex; flex-direction: column; gap: 6px; } .ds-input-label { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-foreground-muted, #A3A3B3); } .ds-input { height: 36px; padding: 0 12px; background: var(--color-background, #12111C); color: #FFFFFF; border: 1px solid var(--color-border, #2D2B42); border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; outline: none; } .ds-input::placeholder { color: rgba(163,163,179,0.5); } .ds-input:focus { border-color: #FFFFFF; box-shadow: inset 0 0 0 1px #FFFFFF; }"
+    },
+    {
+      "name": "Sidebar Item (active)",
+      "kind": "nav",
+      "refersTo": "sidebar-item",
+      "description": "Currently-routed nav item in the dashboard sidebar. Anchors 'you are here' with hue-matched soft shadow.",
+      "html": "<a href=\"#\" class=\"ds-nav-item ds-nav-active\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"ds-nav-icon\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/><polyline points=\"3.27 6.96 12 12.01 20.73 6.96\"/><line x1=\"12\" y1=\"22.08\" x2=\"12\" y2=\"12\"/></svg><span>Functions</span></a>",
+      "css": ".ds-nav-item { display: inline-flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: var(--color-foreground-muted, #A3A3B3); text-decoration: none; transition: color 150ms ease-out, background-color 150ms ease-out; } .ds-nav-item:hover { color: #FFFFFF; background: var(--color-surface-hover, #252438); } .ds-nav-icon { width: 16px; height: 16px; } .ds-nav-active { color: #FFFFFF; background: var(--color-primary, #553F83); box-shadow: 0 10px 15px -3px rgba(38,18,87,0.20); } .ds-nav-active:hover { color: #FFFFFF; background: var(--color-primary, #553F83); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Late-Night Lab Notebook",
+    "overview": "Orva is the control plane for someone running a function platform on their own machine. Probably in a dim home office, often after-hours, more curious than time-pressured. The interface earns trust by behaving like a serious infrastructure tool: dense, unfussy, comfortable with code, willing to show numbers without dressing them up. The palette is the deep purple-tinted near-black of an editor at midnight, paired with a single muted violet accent that carries every CTA. JetBrains Mono runs alongside Inter so paths, IDs, byte counts, and CPU readings sit in their natural register without arguing for attention.",
+    "keyCharacteristics": [
+      "Deep violet-tinted dark surfaces; one muted purple accent carries identity.",
+      "Inter for prose, JetBrains Mono for any data the operator might compare digit-to-digit.",
+      "Standardised page heads: text-xl semibold tracking-tight over a one-line subhead in muted text, max-w-prose.",
+      "Hidden scrollbars by intent: nested overflow areas (modals, drawers, code blocks) feel calmer without 6px tracks in every region.",
+      "Status colour is semantic, never decorative.",
+      "No copy uses em dashes."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule",         "section": "colors",     "body": "Muted violet appears on roughly 5 to 10 percent of any given screen. Primary CTAs, the active sidebar item, the selected filter chip. Anywhere else, ask whether the page actually needs an accent or whether a border + foreground-muted will read more confidently." },
+      { "name": "The Tinted Neutral Rule",     "section": "colors",     "body": "Pure #000 and #FFF are forbidden. Every neutral carries the violet hue with chroma in the 0.005 to 0.045 band." },
+      { "name": "The Semantic Status Rule",    "section": "colors",     "body": "Status colour is reserved for status. Use the semantic tokens (success, warning, danger) and their /15 tint backgrounds and /30 borders. Reaching for raw Tailwind palette colours is forbidden." },
+      { "name": "The Operator's Mono Rule",    "section": "typography", "body": "If two characters at the same column should be visually compared (a UUID against another UUID, a memory reading against the limit), they are mono." },
+      { "name": "The No-Em-Dash Rule",         "section": "typography", "body": "Em dashes are forbidden in any user-facing string. Use periods, commas, colons, semicolons, or parentheses." },
+      { "name": "The Heading Hierarchy Rule",  "section": "typography", "body": "Every page has exactly one H1 (the standardised page header). Section captions inside the page must be real H2 / H3 in markup, even when styled as small uppercase tracked labels." },
+      { "name": "The Flat-By-Default Rule",    "section": "elevation",  "body": "Cards, list items, drawers, and inline panels carry no shadow at rest. Depth is read from borders and the background -> surface -> surface-hover ladder." },
+      { "name": "The Earned Blur Rule",        "section": "elevation",  "body": "backdrop-blur exists only on the dimmed background that sits behind a modal or drawer. It is not decoration." }
+    ],
+    "dos": [
+      "Do keep page heads to one line above one body subhead, both standardised: text-xl font-semibold text-white tracking-tight over text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed.",
+      "Do route every status colour through Badge.vue's variant system (success / warning / error / info).",
+      "Do use JetBrains Mono for any number or identifier the operator might want to compare against another.",
+      "Do promote section captions inside cards to real h2 / h3 while keeping the text-xs font-bold uppercase tracking-wider styling.",
+      "Do reach for bg-background border border-border for cards-on-page and bg-surface border border-border for cards-on-deeper-surface.",
+      "Do add aria-label to every icon-only button.",
+      "Do keep CTAs on roughly 5 to 10 percent of any screen."
+    ],
+    "donts": [
+      "Don't use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses.",
+      "Don't reach for raw Tailwind palette colours (bg-blue-500/70, text-emerald-300, bg-amber-500/15, text-sky-300) as a substitute for status meaning.",
+      "Don't hex-code colours inside a Vue component's scoped CSS.",
+      "Don't use #000 or #FFF. Foreground should tint toward the brand violet.",
+      "Don't apply gradient backgrounds to surface-level chrome.",
+      "Don't use backdrop-blur decoratively. Blur is reserved for 'the page underneath is no longer interactive'.",
+      "Don't lay out three or four identical icon-+-heading-+-paragraph cards in a feature grid.",
+      "Don't size button hit areas under 44x44 on mobile.",
+      "Don't style section captions as divs and skip the heading.",
+      "Don't introduce border-left-N or border-right-N colored stripes on cards, list items, or alerts.",
+      "Don't animate layout properties. Transforms and opacity only.",
+      "Don't ease with bounce or elastic. Exponential ease-out only."
+    ]
+  }
+}

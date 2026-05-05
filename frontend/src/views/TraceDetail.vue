@@ -15,7 +15,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Trace
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Causal tree of every span produced by this invocation chain.
           Click any span row to jump to its execution in the Invocations log.
         </p>
@@ -63,7 +63,7 @@
               Trigger
             </div>
             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-foreground-muted border-border lowercase">
-              {{ trace.trigger || '—' }}
+              {{ trace.trigger || EMPTY }}
             </span>
           </div>
           <div>
@@ -113,7 +113,7 @@
             <div class="col-span-3 truncate flex items-center gap-1.5">
               <span class="text-white">{{ s.function_name || s.function_id }}</span>
               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-foreground-muted border-border lowercase">
-                {{ s.trigger || '—' }}
+                {{ s.trigger || EMPTY }}
               </span>
               <Flag v-if="s.is_outlier" class="w-3 h-3 text-amber-400" />
             </div>
@@ -158,14 +158,14 @@
               @click="onSpanClick(s)"
             >
               <td class="px-4 py-2.5 font-mono text-xs text-foreground-muted">
-                {{ s.span_id?.slice(0, 11) || '—' }}
+                {{ s.span_id?.slice(0, 11) || EMPTY }}
               </td>
               <td class="px-4 py-2.5 text-white">
                 {{ s.function_name || s.function_id }}
               </td>
               <td class="px-4 py-2.5 hidden md:table-cell">
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-foreground-muted border-border lowercase">
-                  {{ s.trigger || '—' }}
+                  {{ s.trigger || EMPTY }}
                 </span>
               </td>
               <td class="px-4 py-2.5 text-right font-mono text-xs text-foreground-muted">
@@ -186,6 +186,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Copy, Flag } from 'lucide-vue-next'

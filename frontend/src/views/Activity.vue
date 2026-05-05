@@ -4,23 +4,27 @@
       <h1 class="text-xl font-semibold text-white tracking-tight">
         Activity
       </h1>
-      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
-        Live feed of every API call hitting Orva — UI clicks, REST/SDK,
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        Live feed of every API call hitting Orva: UI clicks, REST/SDK,
         MCP tools, webhook deliveries.
       </p>
     </div>
 
-    <!-- Filter strip -->
-    <div class="flex items-center gap-2 flex-wrap">
-      <div class="relative flex-1 min-w-[260px] max-w-[420px]">
+    <!-- Filter strip
+         Mobile (<sm): search takes the full row, chip groups scroll
+         horizontally with snap so the active filter stays in view.
+         Desktop (sm+): the original single-row flex-wrap returns. -->
+    <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:flex-wrap">
+      <div class="relative w-full sm:flex-1 sm:min-w-[260px] sm:max-w-[420px]">
         <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
         <input
           v-model="filters.q"
           placeholder="Search path, summary, actor…"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
           @input="onSearchInput"
         >
       </div>
+      <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0">
 
       <Button
         v-for="opt in sourceOptions"
@@ -28,16 +32,17 @@
         variant="chip"
         size="xs"
         :active="filters.source === opt.value"
+        class="shrink-0 snap-start"
         @click="filters.source = opt.value; reset()"
       >
         {{ opt.label }}
         <span
           v-if="counts[opt.value] != null && opt.value !== ''"
-          class="ml-1 opacity-60"
+          class="ml-1 opacity-60 tabular-nums"
         >{{ counts[opt.value] }}</span>
       </Button>
 
-      <span class="text-foreground-muted/40">·</span>
+      <span class="text-foreground-muted/40 shrink-0">·</span>
 
       <Button
         v-for="opt in statusOptions"
@@ -45,12 +50,13 @@
         variant="chip"
         size="xs"
         :active="filters.statusBucket === opt.value"
+        class="shrink-0 snap-start"
         @click="filters.statusBucket = opt.value; reset()"
       >
         {{ opt.label }}
       </Button>
 
-      <span class="text-foreground-muted/40">·</span>
+      <span class="text-foreground-muted/40 shrink-0">·</span>
 
       <Button
         v-for="opt in rangeOptions"
@@ -58,10 +64,12 @@
         variant="chip"
         size="xs"
         :active="filters.range === opt.value"
+        class="shrink-0 snap-start"
         @click="filters.range = opt.value; reset()"
       >
         {{ opt.label }}
       </Button>
+      </div>
     </div>
 
     <!-- Table -->
@@ -94,7 +102,7 @@
             </td>
             <td class="px-4 py-2.5 hidden md:table-cell">
               <div class="text-xs text-white truncate max-w-[200px]">
-                {{ row.actor_label || row.actor_id || '—' }}
+                {{ row.actor_label || row.actor_id || EMPTY }}
               </div>
               <div
                 v-if="row.actor_label && row.actor_id && row.actor_label !== row.actor_id"
@@ -104,17 +112,17 @@
               </div>
             </td>
             <td class="px-4 py-2.5 text-xs font-mono text-foreground-muted hidden sm:table-cell">
-              {{ row.method || '—' }}
+              {{ row.method || EMPTY }}
             </td>
             <td class="px-4 py-2.5 text-xs font-mono text-white truncate max-w-[440px]">
-              {{ row.path || '—' }}
+              {{ row.path || EMPTY }}
             </td>
             <td class="px-4 py-2.5 hidden sm:table-cell">
               <StatusBadge
                 v-if="row.status"
                 :status="statusLabel(row.status)"
               />
-              <span v-else class="text-foreground-muted text-xs">—</span>
+              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-2.5 text-xs font-mono text-foreground-muted hidden lg:table-cell">
               {{ formatDuration(row.duration_ms) }}
@@ -125,8 +133,8 @@
           </tr>
           <tr v-if="!rows.length">
             <td colspan="8" class="px-4 py-12 text-center text-foreground-muted text-sm">
-              No activity yet. Drive any action — open the dashboard,
-              call a function, fire an MCP tool — and rows will land here.
+              No activity yet. Drive any action (open the dashboard,
+              call a function, fire an MCP tool) and rows will land here.
             </td>
           </tr>
         </tbody>
@@ -191,20 +199,20 @@
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Actor</div>
-            <div class="text-sm text-white truncate">{{ drawerRow.actor_label || '—' }}</div>
+            <div class="text-sm text-white truncate">{{ drawerRow.actor_label || EMPTY }}</div>
             <div v-if="drawerRow.actor_id" class="text-[11px] text-foreground-muted font-mono truncate mt-0.5">{{ drawerRow.actor_id }}</div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Status</div>
             <div class="flex items-center gap-2">
               <StatusBadge v-if="drawerRow.status" :status="statusLabel(drawerRow.status)" />
-              <span v-else class="text-foreground-muted text-xs">—</span>
+              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
               <span v-if="drawerRow.status" class="text-xs text-foreground-muted font-mono">HTTP {{ drawerRow.status }}</span>
             </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Method</div>
-            <div class="text-xs text-white font-mono truncate">{{ drawerRow.method || '—' }}</div>
+            <div class="text-xs text-white font-mono truncate">{{ drawerRow.method || EMPTY }}</div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Duration</div>
@@ -214,25 +222,25 @@
 
         <!-- Path / tool — full-width -->
         <div>
-          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Path / Tool</div>
-          <pre class="bg-surface border border-border rounded p-3 text-xs text-white font-mono whitespace-pre-wrap break-all">{{ drawerRow.path || '—' }}</pre>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Path / Tool</h3>
+          <pre class="bg-surface border border-border rounded p-3 text-xs text-white font-mono whitespace-pre-wrap break-all">{{ drawerRow.path || EMPTY }}</pre>
         </div>
 
         <!-- Summary -->
         <div>
-          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Summary</div>
-          <div class="text-foreground break-words">{{ drawerRow.summary || '—' }}</div>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Summary</h3>
+          <div class="text-foreground break-words">{{ drawerRow.summary || EMPTY }}</div>
         </div>
 
         <!-- Request id -->
         <div v-if="drawerRow.request_id">
-          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request ID</div>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request ID</h3>
           <pre class="bg-surface border border-border rounded p-3 text-xs text-foreground-muted font-mono whitespace-pre-wrap break-all">{{ drawerRow.request_id }}</pre>
         </div>
 
         <!-- Metadata JSON -->
         <div v-if="prettyMetadata">
-          <div class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Metadata</div>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Metadata</h3>
           <pre class="bg-surface border border-border rounded p-3 text-xs text-foreground font-mono overflow-auto max-h-72 whitespace-pre-wrap break-words">{{ prettyMetadata }}</pre>
         </div>
       </div>
@@ -241,6 +249,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { Search, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
@@ -445,16 +454,16 @@ const prettyMetadata = computed(() => {
 
 // ── Helpers ────────────────────────────────────────────────────────
 const formatTime = (ms) => {
-  if (!ms) return '—'
+  if (!ms) return EMPTY
   const d = new Date(ms)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 const formatFullTime = (ms) => {
-  if (!ms) return '—'
+  if (!ms) return EMPTY
   return new Date(ms).toLocaleString()
 }
 const formatDuration = (ms) => {
-  if (ms == null) return '—'
+  if (ms == null) return EMPTY
   if (ms < 1) return '<1ms'
   if (ms < 1000) return ms + 'ms'
   return (ms / 1000).toFixed(2) + 's'

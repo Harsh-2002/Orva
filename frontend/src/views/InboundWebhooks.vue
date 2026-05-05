@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Inbound webhooks
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           External services POST to a signed URL to fire
           <router-link
             :to="`/functions/${fnName}`"
@@ -14,7 +14,7 @@
           >
             {{ fnName }}
           </router-link>
-          — set the secret here, configure it on the upstream service.
+          Set the secret here, configure it on the upstream service.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -49,7 +49,7 @@
     >
       <div class="flex items-center justify-between gap-4">
         <div class="text-sm text-amber-200 font-medium">
-          Trigger created — copy the secret now. It will not be shown again.
+          Trigger created. Copy the secret now. It will not be shown again.
         </div>
         <button
           class="text-xs text-amber-200/80 hover:text-white"
@@ -88,7 +88,45 @@
 
     <!-- Table -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-row list. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="row in rows"
+          :key="row.id"
+          class="px-4 py-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium text-white truncate">{{ row.name }}</span>
+                <span
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border"
+                  :class="row.active
+                    ? 'bg-success/10 text-success border-success/30'
+                    : 'bg-surface text-foreground-muted border-border'"
+                >{{ row.active ? 'active' : 'paused' }}</span>
+              </div>
+              <div class="mt-1 text-[11px] text-foreground-muted font-mono break-all">{{ origin }}/webhook/{{ row.id }}</div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                <span class="font-mono">{{ row.signature_format }}</span>
+                <span>created {{ formatDate(row.created_at) }}</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <IconButton :icon="Send" variant="success" title="Send a test payload" @click="openTest(row)" />
+              <IconButton :icon="Trash2" variant="danger" title="Delete" @click="confirmRemove(row)" />
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="!loading && !rows.length"
+          class="px-6 py-12 text-center text-sm text-foreground-muted"
+        >
+          No inbound triggers yet. Tap <strong>+ New trigger</strong> to mint one.
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-4 py-3">Name</th>
@@ -240,7 +278,7 @@
       >
         <p class="text-xs text-foreground-muted">
           Paste the plaintext secret you captured when you created this trigger.
-          Orva does not store the plaintext — it can only show the preview
+          Orva does not store the plaintext; it can only show the preview
           ({{ test.row.secret_preview }}).
         </p>
         <div>
@@ -300,6 +338,7 @@
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, Trash2, Send, RefreshCw } from 'lucide-vue-next'
@@ -338,7 +377,7 @@ const test = reactive({
 })
 
 const formatDate = (s) => {
-  if (!s) return '—'
+  if (!s) return EMPTY
   return new Date(s).toLocaleString()
 }
 

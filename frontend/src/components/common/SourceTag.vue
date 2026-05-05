@@ -3,11 +3,12 @@
     class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono uppercase tracking-wide"
     :class="tagClass"
   >
-    {{ source || '—' }}
+    {{ source || EMPTY }}
   </span>
 </template>
 
 <script setup>
+import { EMPTY } from '@/utils/format'
 import { computed } from 'vue'
 
 // SourceTag renders the coloured "where this call came from" pill on
