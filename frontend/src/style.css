@@ -101,6 +101,14 @@
   --leading-body: 1.55;
 }
 
+html {
+  /* Pull the rem base to 90 % of the browser default (16 px → 14.4 px).
+     Because every Tailwind spacing and typography utility is rem-relative,
+     this uniformly scales the whole UI down ~10 % without touching any
+     individual component — the correct single lever for overall density. */
+  font-size: 90%;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
