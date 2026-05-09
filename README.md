@@ -128,17 +128,94 @@ def handler(event):
 
 ---
 
-## How isolation works
+## Architecture & isolation
 
-Every invocation runs in a fresh **nsjail** sandbox:
+### How a function runs
 
-- **User namespace** — code thinks it's UID 0 but maps to `nobody` (65534) on the host with **zero Linux capabilities**
-- **Chroot** — only the function's own versioned code directory is visible at `/code`, read-only
-- **cgroup v2** — `memory.max`, `cpu.max`, `pids.max` enforced per-spawn; host rejects spawns past 80% reservation
-- **seccomp** — Kafel policy blocks ~150 dangerous syscalls (`mount`, `bpf`, `kexec_load`, etc.)
-- **Network namespace** — default `none` gives only loopback; flip to `egress` per-function for outbound HTTPS
+```
+  HTTP request
+       │
+       ▼
+  ┌─────────────────────────────────┐
+  │  Orva server (Go)               │
+  │  auth → route → warm pool       │
+  └────────────┬────────────────────┘
+               │  worker available?
+       ┌───────┴────────┐
+       │ yes (warm)     │ no (cold start)
+       │                ▼
+       │    ┌──────────────────────┐
+       │    │  Build queue         │
+       │    │  npm install /       │
+       │    │  pip install         │
+       │    └──────────┬───────────┘
+       │               │
+       ▼               ▼
+  ┌──────────────────────────────────────┐
+  │  nsjail sandbox process              │
+  │                                      │
+  │   adapter.js / adapter.py            │
+  │      └── your handler code           │
+  │                                      │
+  │   orva SDK (kv / invoke / jobs)      │
+  │      └── loopback only → Orva API    │
+  └──────────────────────────────────────┘
+       │
+       ▼
+  HTTP response (streamed back)
+```
 
-Full threat model and a verification recipe in [`docs/SECURITY.md`](docs/SECURITY.md).
+Warm workers stay alive between calls so back-to-back invocations skip the cold start entirely. Each function gets its own pool; pool size is configurable per function.
+
+### Isolation layers
+
+Orva uses **nsjail** — a battle-tested sandboxer from Google — to wrap every function process in five overlapping Linux kernel boundaries:
+
+```
+  Docker container  (SYS_ADMIN granted so nsjail can set up namespaces)
+  └── nsjail
+        ├── 1. User namespace
+        │      UID 0 inside → nobody (65534) on host
+        │      All 64 Linux capability bits cleared (verified in /proc/self/status)
+        │
+        ├── 2. Mount namespace + chroot
+        │      /code  → function's versioned directory (read-only bind mount)
+        │      /tmp   → private tmpfs (wiped after each invocation)
+        │      Nothing else is visible — no /proc of the host, no other functions
+        │
+        ├── 3. cgroup v2
+        │      memory.max   per-function memory ceiling
+        │      cpu.max      CPU quota (configurable)
+        │      pids.max     hard fork-bomb limit
+        │      Host refuses new spawns past 80% total reservation
+        │
+        ├── 4. Seccomp (Kafel policy)
+        │      ~150 syscalls blocked: mount, unshare, bpf,
+        │      kexec_load, init_module, ptrace, and more
+        │      Attempts log + kill the process, never silently fail
+        │
+        └── 5. Network namespace
+               network_mode: none  →  loopback only (default)
+               network_mode: egress →  outbound HTTPS via nftables allowlist
+               Inbound connections to the function are not possible either way
+```
+
+### Honest comparison with VMs and Firecracker
+
+| | Orva (nsjail) | Firecracker / VMs | Plain Docker |
+|---|---|---|---|
+| **Kernel** | Shared with host | Separate kernel per VM | Shared with host |
+| **Isolation primitive** | Linux namespaces + seccomp + cgroup | Hardware virtualisation (KVM) | Linux namespaces + cgroup |
+| **Syscall attack surface** | ~150 syscalls blocked via Kafel | Near-zero (VM boundary) | Unfiltered by default |
+| **Capability drop** | All 64 bits cleared | N/A (separate kernel) | Partial (Docker defaults) |
+| **Cold start** | ~50–200 ms (process spawn) | ~125 ms (Firecracker MicroVM) | N/A |
+| **Memory overhead** | ~30 MB per warm worker | ~5 MB per MicroVM | Varies |
+| **Kernel exploit escape** | Possible (shared kernel) | Very hard (hardware boundary) | Possible |
+| **Good for** | Homelabs, trusted code, side-projects | Multi-tenant cloud, untrusted code | General containers |
+
+**The honest summary:** Orva does not have VM-level isolation. A kernel exploit targeting a shared-kernel feature (e.g. a seccomp bypass or a namespaced-but-shared resource) could in principle escape. For a homelab running your own functions, or a team deploying internal tools, nsjail's five-layer model is more than sufficient and far stronger than plain Docker. If you need to run genuinely untrusted third-party code at scale, Firecracker or gVisor is the right tool.
+
+Full threat model + a verification recipe (reads `/proc/self/status` from inside a sandbox and confirms all capability bits are 0): [`docs/SECURITY.md`](docs/SECURITY.md)
 
 ---
 
