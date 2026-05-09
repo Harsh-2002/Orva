@@ -3,12 +3,19 @@
 **Self-hosted Functions-as-a-Service for your homelab or on-prem server.**
 
 Write a JavaScript or Python function, hit deploy — Orva runs it in an
-isolated nsjail sandbox and exposes it over HTTP. No AWS account. No per-invocation
-billing. No cold-start lottery. Just a single Docker container on hardware you
-already own.
+isolated nsjail sandbox and exposes it over HTTP. Everything runs on hardware
+you already own: no cloud account, no per-invocation billing, no external
+services required.
+
+Orva is not trying to replace AWS Lambda, Cloudflare Workers, or any
+managed FaaS platform. It's for people who want that kind of workflow — write
+a function, invoke it over HTTP, schedule it, chain it with other functions —
+on a server they control. A Raspberry Pi, a homelab box, a VPS, or a bare-metal
+machine. One Docker container, persistent SQLite storage, and a built-in
+dashboard is all it takes.
 
 > **Active development.** Stable enough for homelabs, side-projects, and
-> experiments. Not recommended for customer-facing production yet.
+> internal tools. Not recommended for customer-facing production yet.
 
 ---
 
@@ -76,20 +83,20 @@ docker compose up -d
 | Feature | Detail |
 |---|---|
 | **Runtimes** | Node.js 22, Node.js 24, Python 3.13, Python 3.14, TypeScript (via Node) |
-| **Isolation** | Every invocation in a fresh nsjail sandbox — user namespace, chroot, cgroup v2, seccomp |
-| **Warm pools** | One pool per function; idle workers stay ready so the next call skips the cold start |
-| **KV store** | `kv.put / kv.get / kv.delete / kv.list` — SQLite-backed, per-function, optional TTL |
-| **Background jobs** | `jobs.enqueue(name, payload)` — persisted queue with retries + exponential backoff |
-| **Cron schedules** | Fire any function on a cron expression; last/next run visible in the dashboard |
-| **Function-to-function** | `invoke('name', payload)` calls another function via the warm pool — no HTTP roundtrip |
-| **Tracing** | Automatic causal trace tree: HTTP → F2F → job spans linked by `trace_id`, zero code changes |
-| **Custom routes** | Map `/webhooks/stripe` → a function; external callers never need your function UUID |
-| **Secrets** | Encrypted at rest, injected as env vars at sandbox spawn; never logged |
-| **Inbound webhooks** | Signed trigger endpoints (GitHub, Stripe, Slack, generic HMAC) that fan into a function |
-| **Rollback** | Every deploy is content-hashed and archived; one click to revert |
-| **MCP server** | 70 tools at `/mcp` — Claude Code, Cursor, or any MCP client can manage everything |
-| **OAuth 2.1** | Add Orva as a custom connector in claude.ai or ChatGPT web UI — no API key copy-paste |
-| **16 templates** | Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener, and more |
+| **Isolation** | Every invocation runs in a fresh nsjail sandbox — user namespace, chroot, cgroup v2, seccomp filter |
+| **Warm pools** | One pool per function; idle workers stay resident between calls so repeated invocations skip the spawn cost entirely. Pool size is configurable per function. |
+| **KV store** | Per-function key-value storage backed by SQLite. Use it as a cache, a counter, a session store, or lightweight persistent state. `kv.put / kv.get / kv.delete / kv.list` with optional TTL. Browsable and editable from the dashboard. |
+| **Background jobs** | `jobs.enqueue(name, payload)` — persisted queue with configurable retries and exponential backoff. Visible in the dashboard with retry/cancel. |
+| **Cron schedules** | Fire any function on a cron expression. Dashboard shows last run, next run, and status. |
+| **Function-to-function** | `invoke('name', payload)` calls another function via the warm pool — no extra HTTP roundtrip, and the call becomes a child span in the same trace. |
+| **Distributed tracing** | Every invocation chain is recorded automatically. HTTP → F2F calls → background jobs all share one `trace_id`. Waterfall view in the dashboard; zero code changes needed. |
+| **Custom routes** | Map a path like `/webhooks/stripe` to a function so external callers use a clean URL instead of a function UUID. |
+| **Secrets** | Per-function encrypted secrets, injected as env vars at sandbox spawn time. Never logged or stored in plaintext. |
+| **Inbound webhooks** | Signed inbound trigger endpoints (GitHub, Stripe, Slack, generic HMAC) that fan into a function. |
+| **Rollback** | Every deploy is content-hashed and archived. Roll back to any prior version in one click or one CLI command. |
+| **MCP server** | 70 tools at `/mcp` — any MCP client (Claude Code, Cursor, etc.) can create functions, deploy code, manage secrets, browse KV, and read logs. |
+| **OAuth 2.1** | Add Orva as a custom connector in claude.ai or other OAuth-capable MCP clients — no API key copy-paste needed. |
+| **16 templates** | Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener, and more — pickable in the editor. |
 
 ---
 
@@ -200,22 +207,39 @@ Orva uses **nsjail** — a battle-tested sandboxer from Google — to wrap every
                Inbound connections to the function are not possible either way
 ```
 
-### Honest comparison with VMs and Firecracker
+### How it compares
 
 | | Orva (nsjail) | Firecracker / VMs | Plain Docker |
 |---|---|---|---|
 | **Kernel** | Shared with host | Separate kernel per VM | Shared with host |
-| **Isolation primitive** | Linux namespaces + seccomp + cgroup | Hardware virtualisation (KVM) | Linux namespaces + cgroup |
-| **Syscall attack surface** | ~150 syscalls blocked via Kafel | Near-zero (VM boundary) | Unfiltered by default |
-| **Capability drop** | All 64 bits cleared | N/A (separate kernel) | Partial (Docker defaults) |
+| **Isolation primitive** | Linux namespaces + seccomp + cgroup v2 | Hardware virtualisation (KVM) | Linux namespaces + cgroup |
+| **Syscall surface** | ~150 syscalls blocked via Kafel policy | Near-zero (hardware VM boundary) | Unfiltered by default |
+| **Capability drop** | All 64 Linux caps cleared | N/A (separate kernel) | Partial (Docker defaults) |
 | **Cold start** | ~50–200 ms (process spawn) | ~125 ms (Firecracker MicroVM) | N/A |
-| **Memory overhead** | ~30 MB per warm worker | ~5 MB per MicroVM | Varies |
-| **Kernel exploit escape** | Possible (shared kernel) | Very hard (hardware boundary) | Possible |
-| **Good for** | Homelabs, trusted code, side-projects | Multi-tenant cloud, untrusted code | General containers |
+| **Memory per worker** | ~30 MB | ~5 MB per MicroVM | Varies |
+| **Good for** | Homelabs, internal tools, trusted code | Multi-tenant cloud, untrusted third-party code | General app containers |
 
-**The honest summary:** Orva does not have VM-level isolation. A kernel exploit targeting a shared-kernel feature (e.g. a seccomp bypass or a namespaced-but-shared resource) could in principle escape. For a homelab running your own functions, or a team deploying internal tools, nsjail's five-layer model is more than sufficient and far stronger than plain Docker. If you need to run genuinely untrusted third-party code at scale, Firecracker or gVisor is the right tool.
+Orva's model sits between plain Docker and a full VM: the host kernel is shared, but each function runs in a heavily restricted process with no capabilities, a read-only filesystem view, hard resource ceilings, and a strict syscall allowlist. For homelab and internal use it's a solid baseline. If your use case involves running code from unknown third parties, adding gVisor as the Docker runtime provides a user-space kernel layer on top at minimal cost.
 
-Full threat model + a verification recipe (reads `/proc/self/status` from inside a sandbox and confirms all capability bits are 0): [`docs/SECURITY.md`](docs/SECURITY.md)
+**Optional: run Orva inside gVisor for deeper isolation**
+
+gVisor intercepts container syscalls in user space before they reach the host kernel. You can run the Orva container itself under gVisor's `runsc` runtime — nsjail still sandboxes each function inside it, giving two independent layers:
+
+```bash
+# Install gVisor once on the host: https://gvisor.dev/docs/user_guide/install/
+
+docker run -d --name orva \
+  --runtime=runsc \          # gVisor intercepts container syscalls
+  -p 8443:8443 \
+  --cap-add SYS_ADMIN \
+  --security-opt seccomp=unconfined \
+  -v orva-data:/var/lib/orva \
+  ghcr.io/harsh-2002/orva:latest
+```
+
+This is not the default setup and not required for most deployments, but it is a supported configuration for operators who want the extra boundary.
+
+Full threat model + a verification recipe: [`docs/SECURITY.md`](docs/SECURITY.md)
 
 ---
 

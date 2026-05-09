@@ -91,9 +91,12 @@ The umbrella covers:
 - `secrets-test.sh` — encrypt/decrypt, pool refresh on secret change
 - `routes-test.sh` — exact + prefix matching, method restriction
 - `heavy-deploy-test.sh` — `requirements.txt` / `package.json` deploys
-- `errors-test.sh` — every Round-F error code is reachable
+- `errors-test.sh` — every error code is reachable and returns the right slug
 - `rollback-test.sh` — deploy A, deploy B, rollback to A, roll forward
 - `onboarding-flow.sh` — first-run admin creation + login + refresh
+- `egress-test.sh` — outbound HTTPS reachable in egress mode, blocked in none
+- `auth-test.sh` — API key scopes, session expiry, OAuth flows
+- `tracing-test.sh` — trace IDs propagate across F2F invokes and job enqueues
 - `atscale.sh` — concurrent c=25 hammering for capacity confirmation
 
 ## Adding a new error code
@@ -149,16 +152,20 @@ A third runs on `v*` tag push:
 
 ## Releasing
 
-Tag the new version (CalVer: `vYYYY.MM.DD`):
+One active release at a time. Delete the existing one first, then tag HEAD:
 
 ```bash
-git tag -a v$(date -u +%Y.%m.%d) -m "Release v$(date -u +%Y.%m.%d)"
-git push origin v$(date -u +%Y.%m.%d)
+# Replace v2026.05.06 with the tag currently listed on the Releases page
+gh release delete v2026.05.06 --yes
+git tag -d v2026.05.06 && git push origin --delete v2026.05.06
+
+# Tag today's date (zero-padded)
+git tag v$(date -u +%Y.%m.%d) && git push origin v$(date -u +%Y.%m.%d)
 ```
 
-The release workflow handles everything else. Take ~15 minutes to
-finish (the slowest leg is the arm64 rootfs builds on `ubuntu-24.04-arm`
-runners).
+The release workflow builds the multi-arch Docker image, all CLI binaries,
+rootfs tarballs, and checksums automatically. Takes ~15 minutes; the arm64
+rootfs builds are the slowest leg.
 
 ## Filing issues
 
