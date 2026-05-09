@@ -212,8 +212,8 @@ to Prometheus for small deployments.
 ## Security checklist before exposing publicly
 
 - [ ] HTTPS terminator in front (caddy / nginx / traefik / cloudflared)
-- [ ] `network_mode: isolated` is the default — verify your functions
-      stayed on it (operator can opt into `bridge` for outbound)
+- [ ] `network_mode: none` is the default — verify your functions
+      stayed on it (operator can opt into `egress` per-function for outbound HTTPS)
 - [ ] Bootstrap admin key rotated — issue a new key via the dashboard
       and delete the bootstrap one (or move `.admin-key` out-of-band)
 - [ ] API keys for clients have only the permissions they need

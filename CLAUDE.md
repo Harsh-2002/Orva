@@ -42,8 +42,7 @@ scripts/          Docker entrypoint, bare-metal installer, systemd unit
 test/             Shell-based integration test suite (see test/CLAUDE.md)
 Makefile          All build/test/release targets
 docker-compose.yml  Single-node Docker deployment
-Dockerfile        Multi-stage production image
-Dockerfile.release  Release-variant image
+Dockerfile        Multi-stage image (dev and production — single file)
 ```
 
 ## Data & Configuration

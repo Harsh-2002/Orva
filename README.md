@@ -66,7 +66,7 @@ docker compose up -d
 ### Firewall & DNS — per-function egress rules, custom resolvers, blocklist
 ![Firewall and DNS](docs/screenshots/firewall-and-dns.jpeg)
 
-### Settings — storage, account, OAuth-connected apps (Claude, ChatWise, etc.)
+### Settings — storage, account, and OAuth-connected apps
 ![Settings and OAuth](docs/screenshots/settings-oauth.jpeg)
 
 ---
@@ -87,7 +87,7 @@ docker compose up -d
 | **Secrets** | Encrypted at rest, injected as env vars at sandbox spawn; never logged |
 | **Inbound webhooks** | Signed trigger endpoints (GitHub, Stripe, Slack, generic HMAC) that fan into a function |
 | **Rollback** | Every deploy is content-hashed and archived; one click to revert |
-| **MCP server** | 70 tools at `/mcp` — Claude Code, Cursor, ChatWise, or any MCP client can manage everything |
+| **MCP server** | 70 tools at `/mcp` — Claude Code, Cursor, or any MCP client can manage everything |
 | **OAuth 2.1** | Add Orva as a custom connector in claude.ai or ChatGPT web UI — no API key copy-paste |
 | **16 templates** | Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener, and more |
 
@@ -229,7 +229,7 @@ https://your-orva-instance/mcp
 
 From there an AI agent can create functions, deploy code, invoke them, read logs, manage secrets,
 browse KV state, and pull the full Orva reference docs — all without leaving the chat. Works
-with Claude Code, Cursor, ChatWise, and any OAuth-capable MCP client like the claude.ai web UI.
+with Claude Code, Cursor, and any OAuth-capable MCP client like the claude.ai web UI.
 
 ---
 
