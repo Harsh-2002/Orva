@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // RuntimeHandler handles runtime listing endpoints.

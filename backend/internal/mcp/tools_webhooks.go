@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )

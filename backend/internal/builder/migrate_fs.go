@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // MigrateLegacyCodeDirs is a one-shot, idempotent upgrade hook that

@@ -48,6 +48,15 @@ fi
 log "removing $PREFIX"
 rm -rf "$PREFIX"
 
+# Drop the /usr/local/bin/nsjail copy that install.sh placed for the
+# daemon's hardcoded default. Safe to remove unconditionally — if the
+# operator installed nsjail from their distro's package, that copy lives
+# elsewhere (apk: /usr/sbin/nsjail; dnf: /usr/bin/nsjail).
+if [ -f /usr/local/bin/nsjail ]; then
+    log "removing /usr/local/bin/nsjail"
+    rm -f /usr/local/bin/nsjail
+fi
+
 if [ "$PURGE" = "1" ]; then
     log "removing $DATA_DIR (--purge)"
     rm -rf "$DATA_DIR"

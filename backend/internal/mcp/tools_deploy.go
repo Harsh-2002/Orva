@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/builder"
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )

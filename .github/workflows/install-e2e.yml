@@ -1,0 +1,169 @@
+name: install-e2e
+
+# End-to-end install verification across the 6 supported distros.
+# Replaces install-test.yml (dryrun-only). Each leg runs install.sh for
+# real, brings up orvad, runs the API + CLI smoke flow, then verifies
+# uninstall preserves data and --purge wipes it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/install.sh"
+      - "scripts/uninstall.sh"
+      - "scripts/orva.service"
+      - "scripts/orva.openrc"
+      - "scripts/entrypoint.sh"
+      - "Dockerfile"
+      - "test/install/**"
+      - ".github/workflows/install-e2e.yml"
+  pull_request:
+    paths:
+      - "scripts/install.sh"
+      - "scripts/uninstall.sh"
+      - "test/install/**"
+      - ".github/workflows/install-e2e.yml"
+  workflow_dispatch: {}
+  schedule:
+    # Weekly run on Sunday 03:00 UTC catches rolling-release breakage (Arch).
+    - cron: "0 3 * * 0"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          # -S warning: skip style/info findings (intentional word-splits).
+          shellcheck -s sh -S warning scripts/install.sh scripts/uninstall.sh
+          shellcheck -S warning test/install/run-distro.sh \
+                                test/install/smoke-flow.sh \
+                                test/install/uninstall-flow.sh \
+                                test/install/gvisor-flow.sh \
+                                test/install/failure-modes.sh \
+                                test/install/lib/common.sh
+
+  matrix:
+    runs-on: ubuntu-24.04
+    needs: shellcheck
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - ubuntu24
+          - debian12
+          - alpine321
+          - rocky9
+          - fedora41
+          - arch
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq + curl
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq curl
+
+      - name: Run install + smoke + uninstall for ${{ matrix.distro }}
+        # ORVA_BROWSER_LEG=0 skips agent-browser in CI (no display, would
+        # need extra setup). HTTP route spot-checks still run.
+        env:
+          ORVA_BROWSER_LEG: "0"
+        run: |
+          bash test/install/run-distro.sh ${{ matrix.distro }}
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-e2e-${{ matrix.distro }}
+          path: |
+            test/install/logs/${{ matrix.distro }}-*.log
+            test/install/results-*.tsv
+          retention-days: 14
+
+  gvisor:
+    runs-on: ubuntu-24.04
+    needs: shellcheck
+    # Gated on a repo variable so the leg only runs when the operator has
+    # opted in. Default: skipped. Set `HAS_GVISOR=true` in repo variables
+    # to enable.
+    if: vars.HAS_GVISOR == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq + curl
+        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+
+      - name: Install gVisor (runsc)
+        run: |
+          # Official install: https://gvisor.dev/docs/user_guide/install/
+          (
+            set -e
+            ARCH=$(uname -m)
+            URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
+            wget -qO runsc "${URL}/runsc"
+            wget -qO runsc.sha512 "${URL}/runsc.sha512"
+            sha512sum -c runsc.sha512
+            chmod +x runsc
+            sudo mv runsc /usr/local/bin/
+          )
+          sudo /usr/local/bin/runsc install
+          sudo systemctl restart docker
+          docker info --format '{{json .Runtimes}}' | grep -q runsc
+
+      - name: Pull Orva image
+        run: docker pull ghcr.io/harsh-2002/orva:latest
+
+      - name: Run gvisor-flow
+        run: bash test/install/gvisor-flow.sh ghcr.io/harsh-2002/orva:latest
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-e2e-gvisor
+          path: test/install/logs/gvisor-result.txt
+          retention-days: 30
+
+  summary:
+    runs-on: ubuntu-24.04
+    needs: [matrix]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build summary
+        run: |
+          {
+            echo "## install-e2e summary"
+            echo ""
+            echo "| Distro | Result |"
+            echo "|---|---|"
+            for d in ubuntu24 debian12 alpine321 rocky9 fedora41 arch; do
+              if [ -d "artifacts/install-e2e-$d" ]; then
+                if grep -q "^$d\tpass" artifacts/install-e2e-$d/results-*.tsv 2>/dev/null; then
+                  echo "| $d | ✅ pass |"
+                else
+                  echo "| $d | ❌ fail |"
+                fi
+              else
+                echo "| $d | ⚠️ no artifact |"
+              fi
+            done
+            if [ -f artifacts/install-e2e-gvisor/gvisor-result.txt ]; then
+              echo ""
+              echo "**gVisor leg:**"
+              echo ""
+              echo '```'
+              cat artifacts/install-e2e-gvisor/gvisor-result.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

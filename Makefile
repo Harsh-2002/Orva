@@ -34,13 +34,13 @@ adapters-embed:
 
 build: adapters-embed docs-embed
 	@mkdir -p $(BUILD)
-	cd backend && go build -ldflags="-s -w -X main.Version=$(VERSION)" -o ../$(BUILD)/$(BINARY) ./cmd/orva
+	go build -ldflags="-s -w -X main.Version=$(VERSION)" -o $(BUILD)/$(BINARY) ./backend/cmd/orva
 
 test:
-	cd backend && go test -count=1 ./...
+	go test -count=1 ./...
 
 lint:
-	cd backend && go vet ./...
+	go vet ./...
 
 ui: docs-embed
 	cd frontend && npm install && npm run build
@@ -53,31 +53,37 @@ build-all: embed build
 
 dev:
 	cd frontend && npm run dev &
-	cd backend && go run ./cmd/orva serve
+	go run ./backend/cmd/orva serve
 
 # Standalone CLI binary. Same Go program as the daemon (orva and orva-cli
 # share `./cmd/orva`), but built without the embedded UI/rootfs assumptions
 # and named distinctly so release artifacts don't collide with the server.
 # CGO disabled + -trimpath + stripped symbols → fully static, ships anywhere.
-cli: adapters-embed docs-embed
+# Slim standalone CLI. Built from the dedicated ./cli/cmd/orva entry point
+# which imports only the cli/commands library — no server packages, no
+# embedded UI/adapters/docs/MCP. Targets ~6–9 MB vs the ~20 MB server.
+# CGO disabled + -trimpath + stripped symbols → fully static.
+cli:
 	@mkdir -p $(BUILD)
-	cd backend && CGO_ENABLED=0 go build \
+	CGO_ENABLED=0 go build \
 	  -trimpath \
 	  -ldflags='-s -w -X main.Version=$(VERSION)' \
-	  -o ../$(BUILD)/orva-cli ./cmd/orva
+	  -o $(BUILD)/orva ./cli/cmd/orva
 
-# Cross-compile the CLI for every target we ship as a release asset.
-# Output naming matches the GitHub release-asset convention so install.sh
+# Cross-compile the slim CLI for every release-asset target.
+# Output naming matches the GitHub release-asset convention so install-cli.sh
 # (and the README curl recipe) can point straight at /releases/latest/download/.
-cli-all: adapters-embed docs-embed
+# Windows targets get the .exe suffix.
+cli-all:
 	@mkdir -p $(BUILD)
-	@for target in linux/amd64 linux/arm64 darwin/arm64; do \
+	@for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do \
 	  os=$${target%/*}; arch=$${target#*/}; \
-	  echo ">> building orva-cli-$$os-$$arch"; \
-	  (cd backend && CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build \
+	  ext=""; [ "$$os" = "windows" ] && ext=".exe"; \
+	  echo ">> building orva-cli-$$os-$$arch$$ext"; \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build \
 	    -trimpath \
 	    -ldflags='-s -w -X main.Version=$(VERSION)' \
-	    -o ../$(BUILD)/orva-cli-$$os-$$arch ./cmd/orva) || exit 1; \
+	    -o $(BUILD)/orva-cli-$$os-$$arch$$ext ./cli/cmd/orva || exit 1; \
 	done
 
 clean:

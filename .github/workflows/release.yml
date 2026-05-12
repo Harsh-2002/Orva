@@ -79,18 +79,17 @@ jobs:
           fi
 
       - name: go build
-        working-directory: backend
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          mkdir -p ../dist
+          mkdir -p dist
           go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=${{ steps.v.outputs.tag }}" \
-            -o ../dist/orva-linux-${{ matrix.goarch }} \
-            ./cmd/orva
+            -o dist/orva-linux-${{ matrix.goarch }} \
+            ./backend/cmd/orva
 
       - name: upload artifact
         uses: actions/upload-artifact@v7
@@ -100,11 +99,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ── 1b. Standalone CLI binaries (linux + darwin) ──────────────────────
-  # Same Go program as the daemon — but built without the embedded UI
-  # bundle and named `orva-cli-<os>-<arch>` so operators on laptops /
-  # CI runners can curl-install just the client. Cross-compiled from a
-  # single ubuntu runner: pure Go, CGO disabled, fully static.
+  # ── 1b. Standalone CLI binaries (Linux + macOS + Windows × amd64/arm64) ──
+  # Slim CLI built from the dedicated ./cli/cmd/orva entry point — no
+  # server packages, no embedded UI/adapters/docs/MCP. Cross-compiled
+  # from a single ubuntu runner: pure Go, CGO disabled, fully static.
+  # Windows builds get the .exe suffix.
   build-cli:
     name: build orva-cli (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-24.04
@@ -116,7 +115,15 @@ jobs:
           - goos: linux
             goarch: arm64
           - goos: darwin
+            goarch: amd64
+          - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: ".exe"
+          - goos: windows
+            goarch: arm64
+            ext: ".exe"
     steps:
       - uses: actions/checkout@v6
 
@@ -127,9 +134,6 @@ jobs:
           # can't accidentally ship a stale toolchain artifact.
           cache: false
 
-      - name: embed adapters
-        run: make adapters-embed
-
       - name: resolve version
         id: v
         run: |
@@ -139,26 +143,27 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: go build (static cli)
-        working-directory: backend
+      - name: go build (slim cli)
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          mkdir -p ../dist
+          mkdir -p dist
+          OUT="dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
           go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=${{ steps.v.outputs.tag }}" \
-            -o ../dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }} \
-            ./cmd/orva
-          file ../dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }} || true
+            -o "$OUT" \
+            ./cli/cmd/orva
+          file "$OUT" || true
+          ls -lh "$OUT"
 
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           if-no-files-found: error
           retention-days: 7
 
@@ -302,9 +307,12 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           find artifacts -type f -exec cp -v {} dist/ \;
-          # Mark every binary executable. The cli covers linux + darwin;
-          # the daemon + nsjail are linux-only.
-          chmod +x dist/orva-linux-* dist/nsjail-linux-* dist/orva-cli-* 2>/dev/null || true
+          # Mark every Unix-style binary executable. Windows .exe doesn't
+          # need a chmod but the no-op is harmless.
+          chmod +x dist/orva-linux-* dist/nsjail-linux-* 2>/dev/null || true
+          for f in dist/orva-cli-*; do
+            case "$f" in *.exe) ;; *) chmod +x "$f" 2>/dev/null || true ;; esac
+          done
           ls -lh dist/
 
       - name: sha256 checksums
@@ -335,29 +343,43 @@ jobs:
               ghcr.io/harsh-2002/orva:${{ steps.v.outputs.tag }}
             ```
 
-            **Bare Linux (POSIX installer works on Debian/Ubuntu/Fedora/Alpine/Arch/openSUSE):**
+            **Bare Linux server (POSIX installer works on Debian/Ubuntu/Fedora/Alpine/Arch/openSUSE):**
             ```
             curl -fsSL https://github.com/Harsh-2002/Orva/releases/download/${{ steps.v.outputs.tag }}/install.sh | sh
-            # or always-latest:
-            # curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/scripts/install.sh | sh
+            ```
+
+            **Standalone CLI (Linux + macOS):**
+            ```
+            curl -fsSL https://github.com/Harsh-2002/Orva/releases/download/${{ steps.v.outputs.tag }}/install-cli.sh | sh
+            ```
+
+            **Standalone CLI (Windows, PowerShell):**
+            ```
+            irm https://github.com/Harsh-2002/Orva/releases/download/${{ steps.v.outputs.tag }}/install-cli.ps1 | iex
             ```
 
             ### Release assets
 
             | asset | description |
             |---|---|
-            | `orva-linux-amd64`, `orva-linux-arm64` | Static daemon binary (`orva serve`) |
-            | `orva-cli-linux-amd64`, `orva-cli-linux-arm64`, `orva-cli-darwin-arm64` | Standalone CLI client — drop in `/usr/local/bin/orva` and `orva login` to a remote server |
-            | `nsjail-linux-amd64`, `nsjail-linux-arm64` | Pre-built nsjail (downloaded by install.sh) |
-            | `rootfs-{node22,node24,python313,python314}-{amd64,arm64}.tar.zst` | Language rootfs; extracted by `orva setup --rootfs-url` |
+            | `orva-linux-amd64`, `orva-linux-arm64` | Daemon + CLI binary (server install via `install.sh`) |
+            | `orva-cli-linux-{amd64,arm64}` | Slim CLI (Linux) — used by `install-cli.sh` |
+            | `orva-cli-darwin-{amd64,arm64}` | Slim CLI (macOS Intel + Apple Silicon) |
+            | `orva-cli-windows-{amd64,arm64}.exe` | Slim CLI (Windows) — used by `install-cli.ps1` |
+            | `nsjail-linux-{amd64,arm64}` | Pre-built nsjail (downloaded by install.sh) |
+            | `rootfs-{node22,node24,python313,python314}-{amd64,arm64}.tar.zst` | Language rootfs |
+            | `install.sh`, `install-cli.sh`, `install-cli.ps1` | One-line installers |
             | `checksums.txt` | sha256 of every asset above |
 
-      # Upload install.sh alongside the release so the versioned URL works.
-      - name: attach install.sh
+      # Upload installer scripts alongside the release so versioned URLs work.
+      - name: attach installer scripts
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.v.outputs.tag }}
-          files: scripts/install.sh
+          files: |
+            scripts/install.sh
+            scripts/install-cli.sh
+            scripts/install-cli.ps1
 
   # ── 5. Per-arch Docker image, native runners (no QEMU) ────────────────
   # Single source of truth: the unified Dockerfile builds UI, Go binary,

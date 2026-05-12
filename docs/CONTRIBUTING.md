@@ -99,6 +99,33 @@ The umbrella covers:
 - `tracing-test.sh` — trace IDs propagate across F2F invokes and job enqueues
 - `atscale.sh` — concurrent c=25 hammering for capacity confirmation
 
+## Install + bare-metal lifecycle tests
+
+A separate harness under `test/install/` runs the install script
+end-to-end against a privileged systemd-in-docker container per distro,
+deploys + invokes a function through the API and the CLI, then verifies
+uninstall + reinstall preserves data. Replaces the old dryrun-only
+matrix.
+
+```bash
+# Single distro (Ubuntu 24, ~6 min including image pull):
+bash test/install/run-distro.sh ubuntu24
+
+# Full matrix (sequential, ~35 min):
+for d in ubuntu24 debian12 alpine321 rocky9 fedora41 arch; do
+  bash test/install/run-distro.sh "$d"
+done
+
+# Lighter follow-ups:
+bash test/install/failure-modes.sh        # --cli-only + reinstall idempotency
+bash test/install/gvisor-flow.sh          # gVisor (runsc) compat — skipped if runsc absent
+```
+
+Requires Docker with `--privileged` allowed and `/sys/fs/cgroup`
+mountable. Output goes to `test/install/logs/<distro>-*.log`.
+
+The same harness drives `.github/workflows/install-e2e.yml` in CI.
+
 ## Adding a new error code
 
 1. Define a sentinel in the package that produces the error

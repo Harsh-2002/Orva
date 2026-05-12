@@ -15,10 +15,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/internal/ids"
-	"github.com/Harsh-2002/Orva/internal/registry"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // fixtureBodyCap matches the KV operator surface: 64 KB body + a small

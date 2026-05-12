@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/backup"
-	"github.com/Harsh-2002/Orva/internal/config"
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/backup"
+	"github.com/Harsh-2002/Orva/backend/internal/config"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // BackupHandler exposes operator-facing snapshot + restore endpoints. The

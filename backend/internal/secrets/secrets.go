@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // Manager encrypts/decrypts function secrets and persists them in SQLite.

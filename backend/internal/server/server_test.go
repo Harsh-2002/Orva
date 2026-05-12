@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Harsh-2002/Orva/internal/config"
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/registry"
-	"github.com/Harsh-2002/Orva/internal/version"
+	"github.com/Harsh-2002/Orva/backend/internal/config"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/version"
 )
 
 // testContext holds a test server and a valid admin API key.

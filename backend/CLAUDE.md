@@ -1,17 +1,26 @@
 # Backend
 
-Go 1.25. Module: `github.com/Harsh-2002/Orva`. SQLite with no CGO (`modernc.org/sqlite`).
+Go 1.25. Module: `github.com/Harsh-2002/Orva` (rooted at the repo, not at
+`backend/`). SQLite with no CGO (`modernc.org/sqlite`).
+
+The server binary built from `backend/cmd/orva` is the daemon (`orva serve`)
+plus all CLI subcommands. The CLI subcommands live at `cli/commands/`
+(package `commands`) — `backend/cmd/orva/main.go` imports
+`cli/commands` and calls `commands.NewRoot()` then bolts on its own
+`serve` / `setup` / `init` constructors. Single source of truth for
+every client subcommand; the slim standalone CLI at `cli/cmd/orva`
+uses the same library.
 
 ## Build & Test
 
 ```bash
-# From repo root (recommended — handles adapters-embed):
-make build          # → build/orva
-make test           # cd backend && go test ./...
-make lint           # cd backend && go vet ./...
+# From repo root:
+make build          # → build/orva (server + CLI bundled)
+make test           # go test ./...
+make lint           # go vet ./...
 
-# From backend/ (only if adapters/ is already synced):
-go build ./cmd/orva
+# Direct invocations (also from repo root, since go.mod is here):
+go build ./backend/cmd/orva
 go test ./...
 go vet ./...
 ```

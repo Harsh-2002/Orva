@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/Harsh-2002/Orva/internal/config"
+	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -20,24 +20,26 @@ import (
 //go:embed all:adapters
 var embeddedAdapters embed.FS
 
-var setupCmd = &cobra.Command{
-	Use:   "setup",
-	Short: "Prepare the host so `orva serve` can run sandboxed functions",
-	Long: `Install nsjail (if missing), grant it the capabilities it needs,
+// newSetupCmd constructs the `orva setup` subcommand. Server binary only —
+// the slim CLI doesn't need to manage a local host's rootfs or nsjail
+// install.
+func newSetupCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Prepare the host so `orva serve` can run sandboxed functions",
+		Long: `Install nsjail (if missing), grant it the capabilities it needs,
 download or build the language rootfs directories, and create the data dir
 layout Orva expects. Idempotent — safe to run repeatedly.
 
 On hosts where nsjail is missing, this command uses docker to build the
 rootfs trees via scripts/build-rootfs.sh.`,
-	RunE: runSetup,
-}
-
-func init() {
-	setupCmd.Flags().String("data-dir", "", "override data directory (default: ~/.orva)")
-	setupCmd.Flags().Bool("skip-rootfs", false, "do not build/fetch language rootfs (you'll need to populate it manually)")
-	setupCmd.Flags().Bool("skip-nsjail", false, "do not install nsjail or run setcap")
-	setupCmd.Flags().String("rootfs-url", "", "base URL for downloadable rootfs tarballs (e.g. https://github.com/Harsh-2002/Orva/releases/latest/download)")
-	rootCmd.AddCommand(setupCmd)
+		RunE: runSetup,
+	}
+	cmd.Flags().String("data-dir", "", "override data directory (default: ~/.orva)")
+	cmd.Flags().Bool("skip-rootfs", false, "do not build/fetch language rootfs (you'll need to populate it manually)")
+	cmd.Flags().Bool("skip-nsjail", false, "do not install nsjail or run setcap")
+	cmd.Flags().String("rootfs-url", "", "base URL for downloadable rootfs tarballs (e.g. https://github.com/Harsh-2002/Orva/releases/latest/download)")
+	return cmd
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {

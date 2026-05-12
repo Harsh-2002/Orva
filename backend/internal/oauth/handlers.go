@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // Token / code lifetimes. Tuned for browser-based MCP connectors:

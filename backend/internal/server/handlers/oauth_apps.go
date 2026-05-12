@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // OAuthAppsHandler powers Settings → Connected applications. Read +

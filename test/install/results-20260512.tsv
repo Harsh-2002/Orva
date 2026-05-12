@@ -1,0 +1,2 @@
+distro	status	install_log	smoke_log	uninstall_log
+ubuntu24	pass	/home/dev/Orva/test/install/logs/ubuntu24-install.log	/home/dev/Orva/test/install/logs/ubuntu24-smoke.log	/home/dev/Orva/test/install/logs/ubuntu24-uninstall.log

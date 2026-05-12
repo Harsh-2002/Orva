@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/pool"
-	"github.com/Harsh-2002/Orva/internal/sandbox"
-	"github.com/Harsh-2002/Orva/internal/trace"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/trace"
 )
 
 // redactHeaders names the HTTP headers whose values must not be persisted

@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/Harsh-2002/Orva/internal/oauth"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/oauth"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // OAuthAuthServerMetadataHandler serves RFC 8414 metadata at

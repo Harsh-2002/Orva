@@ -1,0 +1,176 @@
+name: cli-e2e
+
+# End-to-end verification of the standalone Orva CLI:
+#   - Go unit tests for cli/commands (TestCommandTree, flag presence, etc.)
+#   - Cross-compile all 6 release targets, file/size/format sanity
+#   - Command-tree golden diff (slim CLI vs server binary, client surface
+#     must be identical)
+#   - Real install via scripts/install-cli.sh on Linux + macOS runners
+#   - Real install via scripts/install-cli.ps1 on a Windows runner
+#   - orva upgrade round-trip from a previous release to latest
+#
+# Triggers on changes to anything CLI-shaped, and on weekly schedule to
+# catch transitive-dep / GH-API drift.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - "internal/client/**"
+      - "internal/ids/**"
+      - "backend/cmd/orva/**"
+      - "scripts/install-cli.sh"
+      - "scripts/install-cli.ps1"
+      - "test/cli/**"
+      - ".github/workflows/cli-e2e.yml"
+  pull_request:
+    paths:
+      - "cli/**"
+      - "internal/client/**"
+      - "internal/ids/**"
+      - "scripts/install-cli.sh"
+      - "scripts/install-cli.ps1"
+      - "test/cli/**"
+      - ".github/workflows/cli-e2e.yml"
+  workflow_dispatch: {}
+  schedule:
+    # Weekly Sunday 04:00 UTC — catches GH-API/release-asset drift.
+    - cron: "0 4 * * 0"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  unit:
+    name: Go unit tests + shellcheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: shellcheck (POSIX user-facing)
+        run: shellcheck -s sh -S warning scripts/install.sh scripts/install-cli.sh scripts/uninstall.sh
+      - name: shellcheck (bash test scripts)
+        run: |
+          shellcheck -S warning test/cli/*.sh test/cli/lib/*.sh \
+                                 test/install/*.sh test/install/lib/*.sh
+      - name: go test ./cli/commands
+        run: go test ./cli/commands/ -count=1 -v
+      - name: go vet
+        run: go vet ./cli/... ./internal/...
+
+  cross-build:
+    name: cross-compile matrix
+    needs: unit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: false
+      - name: build matrix
+        run: bash test/cli/build-matrix.sh
+      - name: command-tree golden diff
+        run: bash test/cli/command-tree.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cli-cross-build
+          path: |
+            build/cli-matrix
+            test/cli/logs
+          retention-days: 7
+
+  install-linux:
+    name: install-cli.sh on Linux
+    needs: unit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: install jq + curl
+        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+      - name: run install-cli-test.sh
+        run: bash test/cli/install-cli-test.sh ubuntu24
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: install-linux-logs
+          path: test/cli/logs/
+          retention-days: 7
+
+  install-macos:
+    name: install-cli.sh on macOS
+    needs: unit
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - name: run installer against latest release
+        run: |
+          # macOS doesn't have a Docker harness, so we run install-cli.sh
+          # directly against the host. Sandboxed via /tmp prefix to avoid
+          # polluting /usr/local on the runner.
+          mkdir -p /tmp/orva-test-bin
+          export ORVA_CLI_PATH=/tmp/orva-test-bin/orva
+          export ORVA_INSTALL_COMPLETION=0
+          sh scripts/install-cli.sh
+          test -x /tmp/orva-test-bin/orva
+          /tmp/orva-test-bin/orva --version
+          /tmp/orva-test-bin/orva completion zsh > /tmp/orva-test-bin/_orva
+          test -s /tmp/orva-test-bin/_orva
+      - name: confirm slim CLI lacks serve
+        run: |
+          if /tmp/orva-test-bin/orva serve --help >/dev/null 2>&1; then
+            echo "ERROR: slim CLI on macOS unexpectedly has 'serve' subcommand" >&2
+            exit 1
+          fi
+          echo "OK: slim CLI on macOS correctly lacks 'serve'"
+
+  install-windows:
+    name: install-cli.ps1 on Windows
+    needs: unit
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - name: run installer
+        shell: pwsh
+        run: |
+          $env:ORVA_CLI_DIR = "$env:RUNNER_TEMP\orva-test-bin"
+          $env:ORVA_INSTALL_COMPLETION = "0"
+          pwsh -NoProfile -File scripts/install-cli.ps1
+          $exe = Join-Path $env:ORVA_CLI_DIR "orva.exe"
+          if (-not (Test-Path $exe)) { throw "orva.exe not installed at $exe" }
+          & $exe --version
+          # Confirm slim CLI lacks `serve`.
+          $serveOut = & $exe serve --help 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            throw "slim CLI on Windows unexpectedly has 'serve' subcommand"
+          }
+          Write-Host "OK: slim CLI on Windows correctly lacks 'serve'"
+          # Confirm completion script generation works.
+          & $exe completion powershell | Out-File -FilePath "$env:RUNNER_TEMP\orva-completion.ps1"
+          if ((Get-Item "$env:RUNNER_TEMP\orva-completion.ps1").Length -lt 100) {
+            throw "completion script too small — likely failed"
+          }
+
+  upgrade:
+    name: orva upgrade round-trip
+    needs: [install-linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: install jq + curl
+        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+      - name: run upgrade-test.sh
+        run: bash test/cli/upgrade-test.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: upgrade-logs
+          path: test/cli/logs/
+          retention-days: 7

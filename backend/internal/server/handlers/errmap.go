@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Harsh-2002/Orva/internal/builder"
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/pool"
-	"github.com/Harsh-2002/Orva/internal/sandbox"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // invokeError maps an error returned from the proxy/pool/worker stack to

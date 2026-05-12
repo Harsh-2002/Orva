@@ -9,15 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/builder"
-	"github.com/Harsh-2002/Orva/internal/config"
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/metrics"
-	"github.com/Harsh-2002/Orva/internal/pool"
-	"github.com/Harsh-2002/Orva/internal/registry"
-	"github.com/Harsh-2002/Orva/internal/sandbox"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
-	"github.com/Harsh-2002/Orva/internal/version"
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
+	"github.com/Harsh-2002/Orva/backend/internal/config"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/metrics"
+	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/version"
 )
 
 // SystemHandler handles system-level endpoints.

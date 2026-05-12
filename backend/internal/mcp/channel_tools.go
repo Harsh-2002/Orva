@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	authpkg "github.com/Harsh-2002/Orva/internal/auth"
-	"github.com/Harsh-2002/Orva/internal/database"
+	authpkg "github.com/Harsh-2002/Orva/backend/internal/auth"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

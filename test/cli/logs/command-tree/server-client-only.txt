@@ -1,0 +1,62 @@
+activity
+channels
+channels add-functions
+channels create
+channels delete
+channels list
+channels remove-functions
+channels rotate
+channels show
+completion
+cron
+cron create
+cron delete
+cron list
+cron update
+deploy
+functions
+functions create
+functions delete
+functions get
+functions list
+invoke
+jobs
+jobs delete
+jobs enqueue
+jobs list
+jobs retry
+keys
+keys create
+keys list
+keys revoke
+kv
+kv delete
+kv get
+kv list
+kv put
+login
+logs
+routes
+routes delete
+routes list
+routes set
+secrets
+secrets delete
+secrets list
+secrets set
+system
+system db-stats
+system health
+system metrics
+system vacuum
+upgrade
+webhooks
+webhooks create
+webhooks delete
+webhooks inbound
+webhooks inbound create
+webhooks inbound delete
+webhooks inbound list
+webhooks inbound test
+webhooks list
+webhooks test

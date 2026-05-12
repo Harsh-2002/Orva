@@ -18,10 +18,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/metrics"
-	"github.com/Harsh-2002/Orva/internal/registry"
-	"github.com/Harsh-2002/Orva/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/metrics"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
 // ManagerConfig controls global pool behaviour. All values optional — sane

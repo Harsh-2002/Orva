@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // signRequest is a small helper that produces the right header value for

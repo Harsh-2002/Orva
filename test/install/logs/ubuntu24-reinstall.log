@@ -1,0 +1,270 @@
+[1;36m==>[0m detected: Ubuntu 24.04.4 LTS
+[1;36m==>[0m architecture: amd64
+[1;36m==>[0m installing prerequisites: ca-certificates curl tar zstd libprotobuf32t64 libnl-route-3-200 libnl-3-200
+Reading package lists...
+Building dependency tree...
+Reading state information...
+ca-certificates is already the newest version (20240203).
+curl is already the newest version (8.5.0-2ubuntu10.9).
+tar is already the newest version (1.35+dfsg-3build1).
+zstd is already the newest version (1.5.5+dfsg2-2build1.1).
+libprotobuf32t64 is already the newest version (3.21.12-8.2ubuntu0.3).
+libnl-route-3-200 is already the newest version (3.7.0-0.3build1.1).
+libnl-3-200 is already the newest version (3.7.0-0.3build1.1).
+0 upgraded, 0 newly installed, 0 to remove and 3 not upgraded.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+nftables is already the newest version (1.0.9-1ubuntu0.1).
+0 upgraded, 0 newly installed, 0 to remove and 3 not upgraded.
+[1;36m==>[0m checking kernel features
+[1;36m==>[0m kernel features: OK
+[1;36m==>[0m nftables OK — egress firewall will be enforced
+[1;36m==>[0m fetching latest release tag from GitHub
+[1;36m==>[0m version: v2026.05.06
+[1;36m==>[0m downloading orva + nsjail (linux-amd64)
+[1;36m==>[0m verifying SHA-256
+orva: OK
+nsjail: OK
+[1;36m==>[0m installing binaries to /opt/orva/bin
+[1;36m==>[0m user orva already exists
+[1;36m==>[0m rootfs/node22 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/node24 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/python313 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/python314 already at v2026.05.06 (skipping)
+[1;36m==>[0m installing language adapters into rootfs
+Orva host setup
+  data dir: /var/lib/orva
+  rootfs:   /var/lib/orva/rootfs
+
+[skip] nsjail install/setcap (--skip-nsjail)
+[ok] node22 rootfs already at /var/lib/orva/rootfs/node22
+[ok] installed node22 adapter at /var/lib/orva/rootfs/node22/opt/orva/adapter.js
+[ok] node24 rootfs already at /var/lib/orva/rootfs/node24
+[ok] installed node24 adapter at /var/lib/orva/rootfs/node24/opt/orva/adapter.js
+[ok] python313 rootfs already at /var/lib/orva/rootfs/python313
+[ok] installed python313 adapter at /var/lib/orva/rootfs/python313/opt/orva/adapter.py
+[ok] python314 rootfs already at /var/lib/orva/rootfs/python314
+[ok] installed python314 adapter at /var/lib/orva/rootfs/python314/opt/orva/adapter.py
+
+Setup complete. Next: orva serve
+[1;36m==>[0m installing systemd unit
+[1;36m==>[0m   enable + start with: systemctl enable --now orva
+[1;36m==>[0m downloading orva CLI (linux-amd64) → /usr/local/bin/orva
+[1;36m==>[0m CLI installed: orva v2026.05.06
+
+══════════════════════════════════════════════════════════════════════
+  orva v2026.05.06 installed to /opt/orva
+══════════════════════════════════════════════════════════════════════
+
+  Data directory:  /var/lib/orva
+  Service user:    orva
+  Binary:          /opt/orva/bin/orva
+  CLI shortcut:    /usr/local/bin/orva (same binary on $PATH for ad-hoc use)
+  nsjail:          /opt/orva/bin/nsjail (also at /usr/local/bin/nsjail; needs libprotobuf + libnl3 — installed above)
+  Egress firewall: enabled
+
+  Next:
+    1. Start the service (if installed):
+         systemctl enable --now orva           # systemd hosts
+         rc-update add orva default && service orva start    # OpenRC (Alpine)
+       or run in foreground:
+         /opt/orva/bin/orva serve
+
+    2. Read the bootstrap admin key (printed once at startup):
+         journalctl -u orva | grep -A1 BOOTSTRAP    # systemd
+         cat /var/lib/orva/.admin-key                   # always available after first boot
+
+    3. Open http://<host>:8443 — onboard admin user, deploy first function.
+
+  Front the service with TLS (caddy / nginx / traefik) before exposing
+  it publicly: the UI's clipboard buttons require HTTPS or localhost.
+
+  Egress firewall is active. orvad manages 'inet orva_firewall' only
+  and leaves any other nftables tables alone. Manage rules from the UI
+  at /web/firewall, or curl /api/v1/firewall/rules. Inspect live state:
+    sudo nft list table inet orva_firewall
+
+  Uninstall:
+    sh /opt/orva/share/orva/scripts/uninstall.sh
+
+[1;36m==>[0m detected: Ubuntu 24.04.4 LTS
+[1;36m==>[0m architecture: amd64
+[1;36m==>[0m installing prerequisites: ca-certificates curl tar zstd libprotobuf32t64 libnl-route-3-200 libnl-3-200
+Reading package lists...
+Building dependency tree...
+Reading state information...
+ca-certificates is already the newest version (20240203).
+curl is already the newest version (8.5.0-2ubuntu10.9).
+tar is already the newest version (1.35+dfsg-3build1).
+zstd is already the newest version (1.5.5+dfsg2-2build1.1).
+libprotobuf32t64 is already the newest version (3.21.12-8.2ubuntu0.3).
+libnl-route-3-200 is already the newest version (3.7.0-0.3build1.1).
+libnl-3-200 is already the newest version (3.7.0-0.3build1.1).
+0 upgraded, 0 newly installed, 0 to remove and 3 not upgraded.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+nftables is already the newest version (1.0.9-1ubuntu0.1).
+0 upgraded, 0 newly installed, 0 to remove and 3 not upgraded.
+[1;36m==>[0m checking kernel features
+[1;36m==>[0m kernel features: OK
+[1;36m==>[0m nftables OK — egress firewall will be enforced
+[1;36m==>[0m fetching latest release tag from GitHub
+[1;36m==>[0m version: v2026.05.06
+[1;36m==>[0m downloading orva + nsjail (linux-amd64)
+[1;36m==>[0m verifying SHA-256
+orva: OK
+nsjail: OK
+[1;36m==>[0m installing binaries to /opt/orva/bin
+[1;36m==>[0m user orva already exists
+[1;36m==>[0m rootfs/node22 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/node24 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/python313 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/python314 already at v2026.05.06 (skipping)
+[1;36m==>[0m installing language adapters into rootfs
+Orva host setup
+  data dir: /var/lib/orva
+  rootfs:   /var/lib/orva/rootfs
+
+[skip] nsjail install/setcap (--skip-nsjail)
+[ok] node22 rootfs already at /var/lib/orva/rootfs/node22
+[ok] installed node22 adapter at /var/lib/orva/rootfs/node22/opt/orva/adapter.js
+[ok] node24 rootfs already at /var/lib/orva/rootfs/node24
+[ok] installed node24 adapter at /var/lib/orva/rootfs/node24/opt/orva/adapter.js
+[ok] python313 rootfs already at /var/lib/orva/rootfs/python313
+[ok] installed python313 adapter at /var/lib/orva/rootfs/python313/opt/orva/adapter.py
+[ok] python314 rootfs already at /var/lib/orva/rootfs/python314
+[ok] installed python314 adapter at /var/lib/orva/rootfs/python314/opt/orva/adapter.py
+
+Setup complete. Next: orva serve
+[1;36m==>[0m installing systemd unit
+[1;36m==>[0m   enable + start with: systemctl enable --now orva
+[1;36m==>[0m downloading orva CLI (linux-amd64) → /usr/local/bin/orva
+[1;36m==>[0m CLI installed: orva v2026.05.06
+
+══════════════════════════════════════════════════════════════════════
+  orva v2026.05.06 installed to /opt/orva
+══════════════════════════════════════════════════════════════════════
+
+  Data directory:  /var/lib/orva
+  Service user:    orva
+  Binary:          /opt/orva/bin/orva
+  CLI shortcut:    /usr/local/bin/orva (same binary on $PATH for ad-hoc use)
+  nsjail:          /opt/orva/bin/nsjail (also at /usr/local/bin/nsjail; needs libprotobuf + libnl3 — installed above)
+  Egress firewall: enabled
+
+  Next:
+    1. Start the service (if installed):
+         systemctl enable --now orva           # systemd hosts
+         rc-update add orva default && service orva start    # OpenRC (Alpine)
+       or run in foreground:
+         /opt/orva/bin/orva serve
+
+    2. Read the bootstrap admin key (printed once at startup):
+         journalctl -u orva | grep -A1 BOOTSTRAP    # systemd
+         cat /var/lib/orva/.admin-key                   # always available after first boot
+
+    3. Open http://<host>:8443 — onboard admin user, deploy first function.
+
+  Front the service with TLS (caddy / nginx / traefik) before exposing
+  it publicly: the UI's clipboard buttons require HTTPS or localhost.
+
+  Egress firewall is active. orvad manages 'inet orva_firewall' only
+  and leaves any other nftables tables alone. Manage rules from the UI
+  at /web/firewall, or curl /api/v1/firewall/rules. Inspect live state:
+    sudo nft list table inet orva_firewall
+
+  Uninstall:
+    sh /opt/orva/share/orva/scripts/uninstall.sh
+
+[1;36m==>[0m detected: Ubuntu 24.04.4 LTS
+[1;36m==>[0m architecture: amd64
+[1;36m==>[0m installing prerequisites: ca-certificates curl tar zstd libprotobuf32t64 libnl-route-3-200 libnl-3-200
+Reading package lists...
+Building dependency tree...
+Reading state information...
+ca-certificates is already the newest version (20240203).
+curl is already the newest version (8.5.0-2ubuntu10.9).
+tar is already the newest version (1.35+dfsg-3build1).
+zstd is already the newest version (1.5.5+dfsg2-2build1.1).
+libprotobuf32t64 is already the newest version (3.21.12-8.2ubuntu0.3).
+libnl-route-3-200 is already the newest version (3.7.0-0.3build1.1).
+libnl-3-200 is already the newest version (3.7.0-0.3build1.1).
+0 upgraded, 0 newly installed, 0 to remove and 3 not upgraded.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+nftables is already the newest version (1.0.9-1ubuntu0.1).
+0 upgraded, 0 newly installed, 0 to remove and 3 not upgraded.
+[1;36m==>[0m checking kernel features
+[1;36m==>[0m kernel features: OK
+[1;36m==>[0m nftables OK — egress firewall will be enforced
+[1;36m==>[0m fetching latest release tag from GitHub
+[1;36m==>[0m version: v2026.05.06
+[1;36m==>[0m downloading orva + nsjail (linux-amd64)
+[1;36m==>[0m verifying SHA-256
+orva: OK
+nsjail: OK
+[1;36m==>[0m installing binaries to /opt/orva/bin
+[1;36m==>[0m user orva already exists
+[1;36m==>[0m rootfs/node22 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/node24 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/python313 already at v2026.05.06 (skipping)
+[1;36m==>[0m rootfs/python314 already at v2026.05.06 (skipping)
+[1;36m==>[0m installing language adapters into rootfs
+Orva host setup
+  data dir: /var/lib/orva
+  rootfs:   /var/lib/orva/rootfs
+
+[skip] nsjail install/setcap (--skip-nsjail)
+[ok] node22 rootfs already at /var/lib/orva/rootfs/node22
+[ok] installed node22 adapter at /var/lib/orva/rootfs/node22/opt/orva/adapter.js
+[ok] node24 rootfs already at /var/lib/orva/rootfs/node24
+[ok] installed node24 adapter at /var/lib/orva/rootfs/node24/opt/orva/adapter.js
+[ok] python313 rootfs already at /var/lib/orva/rootfs/python313
+[ok] installed python313 adapter at /var/lib/orva/rootfs/python313/opt/orva/adapter.py
+[ok] python314 rootfs already at /var/lib/orva/rootfs/python314
+[ok] installed python314 adapter at /var/lib/orva/rootfs/python314/opt/orva/adapter.py
+
+Setup complete. Next: orva serve
+[1;36m==>[0m installing systemd unit
+[1;36m==>[0m   enable + start with: systemctl enable --now orva
+[1;36m==>[0m downloading orva CLI (linux-amd64) → /usr/local/bin/orva
+[1;36m==>[0m CLI installed: orva v2026.05.06
+
+══════════════════════════════════════════════════════════════════════
+  orva v2026.05.06 installed to /opt/orva
+══════════════════════════════════════════════════════════════════════
+
+  Data directory:  /var/lib/orva
+  Service user:    orva
+  Binary:          /opt/orva/bin/orva
+  CLI shortcut:    /usr/local/bin/orva (same binary on $PATH for ad-hoc use)
+  nsjail:          /opt/orva/bin/nsjail (also at /usr/local/bin/nsjail; needs libprotobuf + libnl3 — installed above)
+  Egress firewall: enabled
+
+  Next:
+    1. Start the service (if installed):
+         systemctl enable --now orva           # systemd hosts
+         rc-update add orva default && service orva start    # OpenRC (Alpine)
+       or run in foreground:
+         /opt/orva/bin/orva serve
+
+    2. Read the bootstrap admin key (printed once at startup):
+         journalctl -u orva | grep -A1 BOOTSTRAP    # systemd
+         cat /var/lib/orva/.admin-key                   # always available after first boot
+
+    3. Open http://<host>:8443 — onboard admin user, deploy first function.
+
+  Front the service with TLS (caddy / nginx / traefik) before exposing
+  it publicly: the UI's clipboard buttons require HTTPS or localhost.
+
+  Egress firewall is active. orvad manages 'inet orva_firewall' only
+  and leaves any other nftables tables alone. Manage rules from the UI
+  at /web/firewall, or curl /api/v1/firewall/rules. Inspect live state:
+    sudo nft list table inet orva_firewall
+
+  Uninstall:
+    sh /opt/orva/share/orva/scripts/uninstall.sh
+

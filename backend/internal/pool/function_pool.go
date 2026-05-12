@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
 // functionPool holds the idle workers and live counters for one function.

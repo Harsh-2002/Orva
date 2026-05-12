@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // authorizeInvoke applies the per-function auth_mode policy. Returns "" on

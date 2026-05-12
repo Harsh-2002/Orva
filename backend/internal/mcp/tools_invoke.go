@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/internal/ids"
-	"github.com/Harsh-2002/Orva/internal/sandbox"
-	"github.com/Harsh-2002/Orva/internal/trace"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/trace"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

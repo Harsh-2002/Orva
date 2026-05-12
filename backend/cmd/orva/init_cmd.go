@@ -7,15 +7,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize a new Orva project",
-	Long:  "Create an orva.yaml template in the current directory with example configuration.",
-	Run:   runInit,
-}
-
-func init() {
-	rootCmd.AddCommand(initCmd)
+// newInitCmd constructs the `orva init` subcommand. Server binary only.
+// Writes a host orva.yaml config template; remote CLI users never need this.
+func newInitCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Initialize a new Orva project",
+		Long:  "Create an orva.yaml template in the current directory with example configuration.",
+		Run:   runInit,
+	}
 }
 
 const orvaYAMLTemplate = `# Orva configuration

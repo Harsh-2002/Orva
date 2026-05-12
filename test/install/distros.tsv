@@ -1,0 +1,10 @@
+# distro<TAB>base_image<TAB>init<TAB>extra_flags
+# Used by run-distro.sh to spin up a privileged container per distro.
+# init=systemd → start with /sbin/init; init=openrc → start with /sbin/init
+# (OpenRC's `init` shim) on Alpine.
+ubuntu24	jrei/systemd-ubuntu:24.04	systemd
+debian12	jrei/systemd-debian:12	systemd
+rocky9	geerlingguy/docker-rockylinux9-ansible:latest	systemd
+fedora41	jrei/systemd-fedora:41	systemd
+arch	agners/archlinuxarm-systemd:latest	systemd
+alpine321	alpine:3.21	openrc

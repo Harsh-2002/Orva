@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // BuildResult holds the output of a successful build.

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // GC prunes archived version directories beyond a configurable retention

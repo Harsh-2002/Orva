@@ -32,14 +32,25 @@ make clean          # remove build/ and embedded artefacts
 ## Repo Layout
 
 ```
-backend/          Go server + CLI (same binary — see backend/CLAUDE.md)
-  cmd/orva/       Cobra entry point and all CLI/server commands
-  internal/       Go packages (config, database, pool, proxy, mcp, …)
+go.mod, go.sum    Single Go module rooted at the repo (covers backend/ + cli/ + internal/)
+backend/          Go server (see backend/CLAUDE.md)
+  cmd/orva/       Server entry: registers commands.NewRoot() + serve/setup/init
+  internal/       Server packages (config, database, pool, proxy, mcp, …)
   runtimes/       Runtime adapter source: node22, node24, python313, python314
+cli/              Slim standalone CLI codebase (see cli/CLAUDE.md)
+  cmd/orva/       Slim CLI entry point (no server packages — ~12 MB binary)
+  commands/       Cobra subcommand library — single source of truth for
+                  both binaries (server imports it for its CLI surface)
+internal/         Shared utilities accessible to both backend/ and cli/
+  client/         HTTP client + ~/.orva/config.yaml loader
+  ids/            UUIDv7 generator
 frontend/         Vue 3 dashboard (see frontend/CLAUDE.md)
 docs/             Operator and developer documentation (see docs/CLAUDE.md)
-scripts/          Docker entrypoint, bare-metal installer, systemd unit
+scripts/          Installers (install.sh = server, install-cli.{sh,ps1} = CLI),
+                  Docker entrypoint, systemd unit, OpenRC unit
 test/             Shell-based integration test suite (see test/CLAUDE.md)
+  cli/            CLI-specific tests (build matrix, install-cli, upgrade, command-tree)
+  install/        Server-install e2e harness (privileged systemd-in-docker)
 Makefile          All build/test/release targets
 docker-compose.yml  Single-node Docker deployment
 Dockerfile        Multi-stage image (dev and production — single file)

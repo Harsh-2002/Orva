@@ -6,9 +6,9 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/metrics"
-	"github.com/Harsh-2002/Orva/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/metrics"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 )
 
 // SpanRow is the per-span shape returned by get_trace. Mirrors the REST

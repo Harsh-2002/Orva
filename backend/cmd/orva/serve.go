@@ -8,23 +8,23 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Harsh-2002/Orva/internal/builder"
-	"github.com/Harsh-2002/Orva/internal/config"
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/server"
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
+	"github.com/Harsh-2002/Orva/backend/internal/config"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/server"
 	"github.com/spf13/cobra"
 )
 
-var serveCmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Start the Orva server",
-	Long:  "Start the Orva API server and begin accepting requests.",
-	Run:   runServe,
-}
-
-func init() {
-	serveCmd.Flags().Int("port", 0, "listen port (overrides ORVA_PORT)")
-	rootCmd.AddCommand(serveCmd)
+// newServeCmd constructs the `orva serve` subcommand. Server binary only.
+func newServeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the Orva server",
+		Long:  "Start the Orva API server and begin accepting requests.",
+		Run:   runServe,
+	}
+	cmd.Flags().Int("port", 0, "listen port (overrides ORVA_PORT)")
+	return cmd
 }
 
 func runServe(cmd *cobra.Command, args []string) {

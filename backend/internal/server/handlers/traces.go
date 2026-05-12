@@ -5,10 +5,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/metrics"
-	"github.com/Harsh-2002/Orva/internal/registry"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/metrics"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // TracesHandler exposes the trace REST surface. A trace is a set of

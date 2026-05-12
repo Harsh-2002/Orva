@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
-	"github.com/Harsh-2002/Orva/internal/registry"
-	"github.com/Harsh-2002/Orva/internal/scheduler"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/scheduler"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // CronHandler exposes CRUD over per-function cron schedules. The scheduler

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // helper: create a temp database for testing

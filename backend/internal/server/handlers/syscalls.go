@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/Harsh-2002/Orva/internal/sandbox"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // SyscallHandler serves the syscall reference endpoint.

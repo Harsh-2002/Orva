@@ -6,6 +6,7 @@
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![Node](https://img.shields.io/badge/Node.js-22%20%7C%2024-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/Python-3.13%20%7C%203.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Tested on](https://img.shields.io/badge/tested%20on-Ubuntu%20%7C%20Debian%20%7C%20Alpine%20%7C%20Rocky%20%7C%20Fedora%20%7C%20Arch-blue?style=flat-square)](docs/SUPPORT.md)
 
 **Self-hosted Functions-as-a-Service for your homelab or on-prem server.**
 
@@ -48,6 +49,38 @@ and you have a fully operational FaaS platform.
 curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
+
+---
+
+## Install just the CLI
+
+If you only need to talk to a remote Orva server (operator laptop, CI
+runner, etc.), grab the ~12 MB standalone CLI. No Docker required, no
+server install. Ships for Linux + macOS + Windows × amd64 + arm64.
+
+**Linux + macOS:**
+
+```bash
+curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.ps1 | iex
+```
+
+Then:
+
+```bash
+orva login --endpoint https://your-orva.example.com --api-key orva_...
+orva functions list
+orva upgrade            # in-place self-update from GitHub
+```
+
+Full CLI docs at [docs/CLI.md](docs/CLI.md) — covers manual download,
+shell autocompletion (bash / zsh / fish / powershell), first-run
+security prompts, and `orva upgrade` mechanics.
 
 ---
 

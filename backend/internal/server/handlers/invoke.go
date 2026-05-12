@@ -8,15 +8,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/internal/ids"
-	"github.com/Harsh-2002/Orva/internal/metrics"
-	"github.com/Harsh-2002/Orva/internal/proxy"
-	"github.com/Harsh-2002/Orva/internal/registry"
-	"github.com/Harsh-2002/Orva/internal/sandbox"
-	"github.com/Harsh-2002/Orva/internal/secrets"
-	"github.com/Harsh-2002/Orva/internal/server/handlers/respond"
-	"github.com/Harsh-2002/Orva/internal/trace"
+	"github.com/Harsh-2002/Orva/backend/internal/metrics"
+	"github.com/Harsh-2002/Orva/backend/internal/proxy"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/secrets"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/trace"
 )
 
 // InvokeHandler handles function invocation requests.

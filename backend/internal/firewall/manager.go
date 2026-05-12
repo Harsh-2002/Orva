@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // Manager owns the firewall lifecycle. One instance per orvad process.

@@ -3,7 +3,7 @@ package oauth
 import (
 	"net/http"
 
-	"github.com/Harsh-2002/Orva/internal/urlhint"
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 )
 
 // IssuerURL infers the canonical "https://host" identifier for this

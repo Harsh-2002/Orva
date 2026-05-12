@@ -77,7 +77,23 @@ install_prereqs() {
     fi
 
     # Required packages — install must succeed for orva to run at all.
-    pkgs="ca-certificates curl tar zstd"
+    # The nsjail runtime needs libprotobuf + libnl (we ship dynamically-
+    # linked binaries, not static), and we set the package names per-
+    # distro because the suffix matrix is messy (libprotobuf32 on Debian
+    # 12, libprotobuf32t64 on Ubuntu 24's 64-bit-time_t universe).
+    case "$DISTRO_ID" in
+        ubuntu)        nsjail_deps="libprotobuf32t64 libnl-route-3-200 libnl-3-200" ;;
+        debian)        nsjail_deps="libprotobuf32 libnl-route-3-200 libnl-3-200" ;;
+        alpine)        nsjail_deps="protobuf libnl3" ;;
+        fedora|rhel|centos|rocky|almalinux|amzn)
+                       nsjail_deps="protobuf libnl3" ;;
+        arch|manjaro|endeavouros)
+                       nsjail_deps="protobuf libnl" ;;
+        opensuse-leap|opensuse-tumbleweed|sles)
+                       nsjail_deps="libprotobuf-lite libnl3-200" ;;
+        *)             nsjail_deps="" ;;
+    esac
+    pkgs="ca-certificates curl tar zstd $nsjail_deps"
     # Optional — needed only by the egress firewall feature. If install
     # fails or the host can't load nf_tables we degrade gracefully and
     # the operator still gets a working orvad with the firewall feature
@@ -256,6 +272,13 @@ download_and_install_binaries() {
     install -d -m 0755 "$PREFIX/bin" "$PREFIX/share/orva/scripts" "$PREFIX/share/orva/runtimes"
     install -m 0755 "$tmp/orva"   "$PREFIX/bin/orva"
     install -m 0755 "$tmp/nsjail" "$PREFIX/bin/nsjail"
+
+    # The daemon defaults to nsjail at /usr/local/bin/nsjail (matches the
+    # official Docker image; see backend/internal/config/defaults.go:42).
+    # Install a copy there so a bare-metal serve works out of the box without
+    # a config.yaml override.
+    install -d -m 0755 /usr/local/bin
+    install -m 0755 "$tmp/nsjail" /usr/local/bin/nsjail
 }
 
 install_cli() {
@@ -334,6 +357,10 @@ KillSignal=SIGTERM
 AmbientCapabilities=CAP_SYS_ADMIN
 CapabilityBoundingSet=CAP_SYS_ADMIN
 NoNewPrivileges=false
+# Delegate the service's cgroup so nsjail can create NSJAIL.<pid> child
+# cgroups under it (per-sandbox memory/cpu/pids limits). Without this,
+# nsjail's --use_cgroupv2 fails with EACCES at runChild().
+Delegate=yes
 ReadWritePaths=/var/lib/orva
 ProtectSystem=strict
 ProtectHome=true
@@ -403,6 +430,7 @@ if [ -f /etc/init.d/orva ]; then
 fi
 
 rm -rf "$PREFIX"
+rm -f /usr/local/bin/nsjail
 
 if [ "$PURGE" = "1" ]; then
     rm -rf "$DATA_DIR"
@@ -485,7 +513,7 @@ print_followup() {
   Service user:    $SERVICE_USER
   Binary:          $PREFIX/bin/orva
   CLI shortcut:    $CLI_INSTALL_PATH (same binary on \$PATH for ad-hoc use)
-  nsjail:          $PREFIX/bin/nsjail (static, no glibc/libstdc++ deps)
+  nsjail:          $PREFIX/bin/nsjail (also at /usr/local/bin/nsjail; needs libprotobuf + libnl3 — installed above)
   Egress firewall: $NFTABLES_STATUS${NFTABLES_HINT:+ ($NFTABLES_HINT)}
 
   Next:
@@ -570,9 +598,37 @@ main() {
     install_runtime_assets
     create_user
     download_rootfs
+    install_adapters
     install_service
     install_cli
     print_followup
+}
+
+# install_adapters populates each downloaded rootfs with the language
+# adapter shim (/opt/orva/adapter.js or adapter.py). The orva binary
+# embeds these via //go:embed; `orva setup --skip-nsjail --skip-rootfs`
+# writes them out. Without this step nsjail starts the child but the
+# adapter file is missing, so reads of the response frame return EOF
+# and orvad reports WORKER_CRASHED on every invocation.
+install_adapters() {
+    if [ "$DRYRUN" = "1" ]; then
+        log "(dryrun) skipping adapter install"
+        return
+    fi
+    log "installing language adapters into rootfs"
+    # `--skip-rootfs` would skip BOTH the rootfs *and* the adapter install
+    # (adapter is gated on the rootfs branch), so pass only --skip-nsjail
+    # here. The rootfs-already-present check inside `orva setup` is
+    # idempotent, so this won't redownload anything.
+    ORVA_DATA_DIR="$DATA_DIR" "$PREFIX/bin/orva" setup \
+        --skip-nsjail --data-dir "$DATA_DIR" \
+        || warn "orva setup failed — adapters may be missing; invocations may crash"
+    # Adapters live under each rootfs at /opt/orva/... and need to be
+    # readable by the service user when nsjail runs as it.
+    if id -u "$SERVICE_USER" >/dev/null 2>&1; then
+        primary_group=$(id -gn "$SERVICE_USER" 2>/dev/null || echo "$SERVICE_USER")
+        chown -R "$SERVICE_USER:$primary_group" "$DATA_DIR/rootfs" 2>/dev/null || true
+    fi
 }
 
 main "$@"

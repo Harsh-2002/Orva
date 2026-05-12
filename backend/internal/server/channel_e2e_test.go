@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Harsh-2002/Orva/internal/auth"
-	"github.com/Harsh-2002/Orva/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
