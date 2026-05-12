@@ -1,10 +1,12 @@
-# distro<TAB>base_image<TAB>init<TAB>extra_flags
+# distro<TAB>base_image<TAB>init<TAB>init_cmd (optional)
 # Used by run-distro.sh to spin up a privileged container per distro.
-# init=systemd → start with /sbin/init; init=openrc → start with /sbin/init
-# (OpenRC's `init` shim) on Alpine.
-ubuntu24	jrei/systemd-ubuntu:24.04	systemd
-debian12	jrei/systemd-debian:12	systemd
-rocky9	geerlingguy/docker-rockylinux9-ansible:latest	systemd
-fedora41	jrei/systemd-fedora:41	systemd
-arch	agners/archlinuxarm-systemd:latest	systemd
-alpine321	alpine:3.21	openrc
+# init=systemd → started with init_cmd (default /sbin/init); some Arch
+#                images ship systemd at /lib/systemd/systemd instead.
+# init=openrc  → Alpine; container is kept alive with `tail -f /dev/null`
+#                and OpenRC runlevels are brought up inside.
+ubuntu24	jrei/systemd-ubuntu:24.04	systemd	/sbin/init
+debian12	jrei/systemd-debian:12	systemd	/sbin/init
+rocky9	geerlingguy/docker-rockylinux9-ansible:latest	systemd	/sbin/init
+fedora41	jrei/systemd-fedora:41	systemd	/sbin/init
+arch	lopsided/archlinux:devel	systemd	/lib/systemd/systemd
+alpine321	alpine:3.21	openrc	-

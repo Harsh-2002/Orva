@@ -24,17 +24,21 @@ fail() { printf "${c_red}✗${c_reset} %s\n" "$*" >&2; }
 die()  { fail "$*"; exit 1; }
 dim()  { printf "${c_dim}%s${c_reset}\n" "$*"; }
 
-# Lookup distro row from distros.tsv. Sets DISTRO_IMAGE + DISTRO_INIT.
+# Lookup distro row from distros.tsv. Sets DISTRO_IMAGE + DISTRO_INIT +
+# DISTRO_INIT_CMD. init_cmd defaults to /sbin/init when omitted.
 lookup_distro() {
     local distro="$1"
-    local row image init
+    local row image init init_cmd
     row=$(grep -E "^${distro}\b" "$DISTROS_TSV" | head -n1) \
         || die "distro '$distro' not found in $DISTROS_TSV"
     image=$(awk -F '\t' '{print $2}' <<< "$row")
     init=$(awk -F '\t' '{print $3}' <<< "$row")
+    init_cmd=$(awk -F '\t' '{print $4}' <<< "$row")
     [[ -n "$image" && -n "$init" ]] || die "malformed row for '$distro': $row"
+    [[ -z "$init_cmd" || "$init_cmd" == "-" ]] && init_cmd="/sbin/init"
     DISTRO_IMAGE="$image"
     DISTRO_INIT="$init"
+    DISTRO_INIT_CMD="$init_cmd"
 }
 
 # Spin up a privileged container running PID 1 init for the given distro.
@@ -59,8 +63,11 @@ start_distro_container() {
     )
 
     if [[ "$DISTRO_INIT" == "systemd" ]]; then
-        # systemd-enabled images expect /sbin/init as entrypoint.
-        docker run -d "${args[@]}" "$DISTRO_IMAGE" /sbin/init >/dev/null \
+        # systemd-enabled images: init binary path varies. jrei/* and rocky
+        # images ship /sbin/init; lopsided/archlinux ships systemd at
+        # /lib/systemd/systemd only. Per-distro DISTRO_INIT_CMD picks the
+        # right one.
+        docker run -d "${args[@]}" "$DISTRO_IMAGE" "$DISTRO_INIT_CMD" >/dev/null \
             || die "container start failed for $distro"
     else
         # Alpine: start with `tail -f /dev/null` so the container stays alive,

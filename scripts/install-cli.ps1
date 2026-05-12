@@ -59,7 +59,12 @@ Invoke-WebRequest -Uri "$Base/$Asset" -OutFile $TmpExe -UseBasicParsing
 
 Log "verifying SHA-256"
 $ChecksumsRaw = (Invoke-WebRequest -Uri "$Base/checksums.txt" -UseBasicParsing).Content
-$WantLine = ($ChecksumsRaw -split "`n") | Where-Object { $_ -match [regex]::Escape($Asset) + '$' } | Select-Object -First 1
+# checksums.txt format: "<hash><two spaces><filename>", LF-only. Be
+# defensive about line endings and don't anchor to end-of-line — a
+# stray trailing CR or whitespace would otherwise hide the match.
+$WantLine = ($ChecksumsRaw -split "[\r\n]+") | Where-Object {
+    $_ -match ('\s' + [regex]::Escape($Asset) + '\s*$')
+} | Select-Object -First 1
 if (-not $WantLine) { Die "checksum entry for $Asset missing from checksums.txt" }
 $Want = ($WantLine -split '\s+')[0].ToLower()
 $Got = (Get-FileHash -Algorithm SHA256 $TmpExe).Hash.ToLower()

@@ -386,6 +386,13 @@ pidfile="/run/orva.pid"
 output_log="/var/log/orva.log"
 error_log="/var/log/orva.log"
 
+# Match the systemd unit's environment so orvad finds the data dir
+# regardless of init system. Without this on Alpine, orvad falls back
+# to $HOME (which the orva system user can't always create), and the
+# daemon fails to open its SQLite db at startup.
+export ORVA_DATA_DIR="/var/lib/orva"
+export ORVA_ROOTFS_DIR="/var/lib/orva/rootfs"
+
 depend() {
     need net
     after firewall

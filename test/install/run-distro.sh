@@ -59,7 +59,7 @@ wait_for_init "$CONTAINER" 60 || die "init failed"
 
 # ── 2. Copy install.sh and run it for real (not dryrun) ───────────────────
 log "copying install.sh into $CONTAINER"
-docker cp "$REPO_ROOT/scripts/install.sh" "$CONTAINER:/tmp/install.sh"
+docker cp "$REPO_ROOT/scripts/install.sh" "$CONTAINER:/root/install.sh"
 
 log "running install.sh inside $CONTAINER (log → $INSTALL_LOG)"
 INSTALL_ENV=()
@@ -68,7 +68,7 @@ INSTALL_ENV=()
 # One retry on failure — apt/dnf mirrors flake (HTTP 520, transient
 # DNS, etc.). A second attempt with a small backoff usually clears it.
 install_attempt() {
-    docker exec "${INSTALL_ENV[@]}" "$CONTAINER" sh /tmp/install.sh >"$INSTALL_LOG" 2>&1
+    docker exec "${INSTALL_ENV[@]}" "$CONTAINER" sh /root/install.sh >"$INSTALL_LOG" 2>&1
 }
 
 if ! install_attempt; then

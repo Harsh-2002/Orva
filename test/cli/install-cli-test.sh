@@ -105,8 +105,13 @@ else
 fi
 
 # The slim CLI must NOT have `serve` or `setup` (server-only).
+# Capture into a variable first — `set -o pipefail` (set above) would
+# make the entire pipeline inherit `orva …`'s non-zero exit code (it
+# returns 1 when the subcommand is unknown), which would mask the
+# grep's success and incorrectly trigger the else branch.
 for forbidden in serve setup; do
-    if docker exec "$CONTAINER" /usr/local/bin/orva "$forbidden" --help 2>&1 | grep -q 'unknown command'; then
+    out=$(docker exec "$CONTAINER" /usr/local/bin/orva "$forbidden" --help 2>&1 || true)
+    if echo "$out" | grep -q 'unknown command'; then
         ok "slim CLI correctly lacks 'orva $forbidden'"; PASS=$((PASS+1))
     else
         fail "slim CLI unexpectedly has 'orva $forbidden' subcommand"; FAIL=$((FAIL+1))

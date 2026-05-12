@@ -63,7 +63,7 @@ esac
 log "reinstalling to verify /var/lib/orva data survives"
 INSTALL_ENV=()
 [[ -n "${ORVA_VERSION:-}" ]] && INSTALL_ENV=(-e "ORVA_VERSION=$ORVA_VERSION")
-if ! docker exec "${INSTALL_ENV[@]}" "$CONTAINER" sh /tmp/install.sh >>"$LOGS_DIR/${DISTRO}-reinstall.log" 2>&1; then
+if ! docker exec "${INSTALL_ENV[@]}" "$CONTAINER" sh /root/install.sh >>"$LOGS_DIR/${DISTRO}-reinstall.log" 2>&1; then
     fail "reinstall failed — see $LOGS_DIR/${DISTRO}-reinstall.log"
     FAIL=$((FAIL+1))
 else

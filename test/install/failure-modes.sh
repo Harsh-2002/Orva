@@ -43,9 +43,9 @@ log "── Test 1: --cli-only install (no daemon / no unit / no user)"
 start_distro_container "$DISTRO" "$PORT" >/dev/null
 wait_for_init "$CONTAINER" 60 || die "init failed"
 
-docker cp "$REPO_ROOT/scripts/install.sh" "$CONTAINER:/tmp/install.sh"
+docker cp "$REPO_ROOT/scripts/install.sh" "$CONTAINER:/root/install.sh"
 
-if docker exec "$CONTAINER" sh /tmp/install.sh --cli-only >"$LOGS_DIR/failmodes-cli-only.log" 2>&1; then
+if docker exec "$CONTAINER" sh /root/install.sh --cli-only >"$LOGS_DIR/failmodes-cli-only.log" 2>&1; then
     ok "install.sh --cli-only exited 0"; PASS=$((PASS+1))
 else
     fail "install.sh --cli-only failed — see $LOGS_DIR/failmodes-cli-only.log"
@@ -76,10 +76,10 @@ log "── Test 2: reinstall idempotency (data preserved across overwrite)"
 start_distro_container "$DISTRO" "$PORT" >/dev/null
 wait_for_init "$CONTAINER" 60 || die "init failed"
 
-docker cp "$REPO_ROOT/scripts/install.sh" "$CONTAINER:/tmp/install.sh"
+docker cp "$REPO_ROOT/scripts/install.sh" "$CONTAINER:/root/install.sh"
 
 # First install.
-docker exec "$CONTAINER" sh /tmp/install.sh >"$LOGS_DIR/failmodes-install1.log" 2>&1 \
+docker exec "$CONTAINER" sh /root/install.sh >"$LOGS_DIR/failmodes-install1.log" 2>&1 \
     || die "first install failed"
 docker exec "$CONTAINER" systemctl enable --now orva
 wait_for_health "$BASE" 90 || die "first orva did not come up"
@@ -100,7 +100,7 @@ ok "created marker function fail-idem ($fid)"
 
 # Stop the daemon, run install.sh again on top of the populated data dir.
 docker exec "$CONTAINER" systemctl stop orva
-docker exec "$CONTAINER" sh /tmp/install.sh >"$LOGS_DIR/failmodes-install2.log" 2>&1 \
+docker exec "$CONTAINER" sh /root/install.sh >"$LOGS_DIR/failmodes-install2.log" 2>&1 \
     || { fail "reinstall failed"; FAIL=$((FAIL+1)); }
 
 docker exec "$CONTAINER" systemctl start orva
