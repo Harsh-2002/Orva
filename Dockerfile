@@ -10,15 +10,19 @@ RUN npm run build
 
 FROM golang:1.25-bookworm AS go
 WORKDIR /src
-COPY backend/go.mod backend/go.sum ./
+# go.mod / go.sum live at the repo root since the v2026.05.12 CLI split.
+COPY go.mod go.sum ./
 RUN go mod download
-COPY backend/ ./
-COPY --from=ui /ui/dist ./internal/server/ui_dist
+# Copy every Go tree the build needs: backend/, cli/, internal/.
+COPY backend/ ./backend/
+COPY cli/ ./cli/
+COPY internal/ ./internal/
+COPY --from=ui /ui/dist ./backend/internal/server/ui_dist
 ARG VERSION
 RUN CGO_ENABLED=0 go build \
       -trimpath \
       -ldflags="-s -w -X main.Version=${VERSION}" \
-      -o /out/orva ./cmd/orva
+      -o /out/orva ./backend/cmd/orva
 
 FROM debian:bookworm-slim AS nsjail
 RUN apt-get update && apt-get install -y --no-install-recommends \
