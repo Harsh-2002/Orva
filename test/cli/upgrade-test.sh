@@ -26,13 +26,23 @@ CONTAINER="orva-cli-upgrade-${DISTRO}"
 cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-# Resolve old version from GitHub if not pinned: take the 2nd-latest tag.
+# Resolve old version from GitHub if not pinned: take the 2nd-latest
+# tag. If only one release exists (typical for a fresh release where
+# the old tag was deleted per the single-active-release policy), there
+# IS no previous version — skip the round-trip gracefully.
 if [[ -z "$OLD_VERSION" ]]; then
     log "resolving previous release tag from GitHub"
     OLD_VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=2" \
         | grep -E '"tag_name":' | sed -n 's/.*"\([^"]*\)".*/\1/p' \
-        | sed -n '2p')
-    [[ -n "$OLD_VERSION" ]] || die "could not resolve previous release tag"
+        | sed -n '2p' || true)
+    if [[ -z "$OLD_VERSION" ]]; then
+        warn "no previous release to upgrade FROM (only one active release exists)."
+        warn "this is expected under Orva's single-active-release policy."
+        warn "skipping the round-trip — exits 0 by design."
+        echo
+        echo "=== upgrade-test [$DISTRO]: skipped (no previous release) ==="
+        exit 0
+    fi
 fi
 log "old version under test: $OLD_VERSION"
 

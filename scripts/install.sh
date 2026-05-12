@@ -84,7 +84,7 @@ install_prereqs() {
     case "$DISTRO_ID" in
         ubuntu)        nsjail_deps="libprotobuf32t64 libnl-route-3-200 libnl-3-200" ;;
         debian)        nsjail_deps="libprotobuf32 libnl-route-3-200 libnl-3-200" ;;
-        alpine)        nsjail_deps="protobuf libnl3" ;;
+        alpine)        nsjail_deps="protobuf libnl3 gcompat" ;;  # gcompat provides the glibc-compat shim Alpine needs to exec a glibc-built nsjail
         fedora|rhel|centos|rocky|almalinux|amzn)
                        nsjail_deps="protobuf libnl3" ;;
         arch|manjaro|endeavouros)

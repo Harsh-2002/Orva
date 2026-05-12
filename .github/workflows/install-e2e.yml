@@ -51,6 +51,11 @@ jobs:
   matrix:
     runs-on: ubuntu-24.04
     needs: shellcheck
+    # Arch is a rolling release — its package mirrors drift between runs
+    # and occasionally serve stale signatures or 404 individual versions.
+    # The other five distros are gating; Arch is informational so a
+    # transient pacman-mirror failure doesn't block a release.
+    continue-on-error: ${{ matrix.distro == 'arch' }}
     strategy:
       fail-fast: false
       matrix:

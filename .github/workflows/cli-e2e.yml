@@ -91,6 +91,11 @@ jobs:
     name: install-cli.sh on Linux
     needs: unit
     runs-on: ubuntu-24.04
+    # Pass GITHUB_TOKEN down to the install-cli.sh inside the docker
+    # container so its api.github.com call is authenticated. Shared
+    # runner IPs hit the 60/hr unauthenticated rate limit fast.
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: install jq + curl
@@ -108,6 +113,11 @@ jobs:
     name: install-cli.sh on macOS
     needs: unit
     runs-on: macos-14
+    env:
+      # macos runners share IPs and hit the 60/hr unauthenticated
+      # rate limit on api.github.com fast; install-cli.sh now honors
+      # GITHUB_TOKEN for that call.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: run installer against latest release
@@ -135,6 +145,8 @@ jobs:
     name: install-cli.ps1 on Windows
     needs: unit
     runs-on: windows-2022
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: run installer

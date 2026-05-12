@@ -39,14 +39,34 @@ esac
 log "detected: $OS/$ARCH"
 
 # ── Resolve version ─────────────────────────────────────────────────────
+# Honor a $GITHUB_TOKEN or $GH_TOKEN if present (CI/operator-supplied) to
+# bypass the unauthenticated 60/hr/IP rate limit on api.github.com — the
+# macOS / windows runners share IPs across heavy traffic, and a 403 from
+# the API is the most common cause of "installer suddenly broken" in CI.
+api_auth_header() {
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        printf 'Authorization: Bearer %s' "$GITHUB_TOKEN"
+    elif [ -n "${GH_TOKEN:-}" ]; then
+        printf 'Authorization: Bearer %s' "$GH_TOKEN"
+    fi
+}
+
 if [ -n "${ORVA_VERSION:-}" ]; then
     VERSION="$ORVA_VERSION"
 else
     log "fetching latest release tag from GitHub"
-    VERSION=$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
-        "https://api.github.com/repos/${REPO}/releases/latest" \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
-    [ -n "$VERSION" ] || die "could not resolve latest tag (set ORVA_VERSION explicitly)"
+    auth=$(api_auth_header)
+    if [ -n "$auth" ]; then
+        VERSION=$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            -H "$auth" \
+            "https://api.github.com/repos/${REPO}/releases/latest" \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
+    else
+        VERSION=$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            "https://api.github.com/repos/${REPO}/releases/latest" \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
+    fi
+    [ -n "$VERSION" ] || die "could not resolve latest tag (set ORVA_VERSION explicitly, or supply GITHUB_TOKEN for rate-limit relief)"
 fi
 log "version: $VERSION"
 

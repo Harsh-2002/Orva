@@ -29,13 +29,20 @@ switch ($env:PROCESSOR_ARCHITECTURE) {
 Log "detected: windows/$Arch"
 
 # ── Resolve version ─────────────────────────────────────────────────────
+# Honor GITHUB_TOKEN / GH_TOKEN to bypass the 60/hr unauthenticated
+# rate limit on api.github.com. Shared-IP runners (windows-2022,
+# macos-14) hit this surprisingly often in CI.
+$ApiHeaders = @{}
+if ($env:GITHUB_TOKEN) { $ApiHeaders.Authorization = "Bearer $($env:GITHUB_TOKEN)" }
+elseif ($env:GH_TOKEN) { $ApiHeaders.Authorization = "Bearer $($env:GH_TOKEN)" }
+
 if ($env:ORVA_VERSION) {
     $Version = $env:ORVA_VERSION
 } else {
     Log "fetching latest release tag from GitHub"
-    $latest = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest"
+    $latest = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -Headers $ApiHeaders
     $Version = $latest.tag_name
-    if (-not $Version) { Die "could not resolve latest tag (set ORVA_VERSION explicitly)" }
+    if (-not $Version) { Die "could not resolve latest tag (set ORVA_VERSION explicitly, or supply GITHUB_TOKEN for rate-limit relief)" }
 }
 Log "version: $Version"
 
@@ -59,14 +66,20 @@ Invoke-WebRequest -Uri "$Base/$Asset" -OutFile $TmpExe -UseBasicParsing
 
 Log "verifying SHA-256"
 $ChecksumsRaw = (Invoke-WebRequest -Uri "$Base/checksums.txt" -UseBasicParsing).Content
-# checksums.txt format: "<hash><two spaces><filename>", LF-only. Be
-# defensive about line endings and don't anchor to end-of-line — a
-# stray trailing CR or whitespace would otherwise hide the match.
-$WantLine = ($ChecksumsRaw -split "[\r\n]+") | Where-Object {
-    $_ -match ('\s' + [regex]::Escape($Asset) + '\s*$')
-} | Select-Object -First 1
-if (-not $WantLine) { Die "checksum entry for $Asset missing from checksums.txt" }
-$Want = ($WantLine -split '\s+')[0].ToLower()
+# checksums.txt format: "<hash><two spaces><filename>", LF-only. Don't
+# trust regex line-end anchors across PowerShell versions / CRLF
+# conversions — tokenize each line explicitly and compare the last
+# field to the asset name. Robust against trailing whitespace, CR, etc.
+$Want = $null
+foreach ($line in ($ChecksumsRaw -split "[\r\n]+")) {
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    $parts = $line.Trim() -split '\s+'
+    if ($parts.Length -ge 2 -and $parts[-1] -eq $Asset) {
+        $Want = $parts[0].ToLower()
+        break
+    }
+}
+if (-not $Want) { Die "checksum entry for $Asset missing from checksums.txt" }
 $Got = (Get-FileHash -Algorithm SHA256 $TmpExe).Hash.ToLower()
 if ($Want -ne $Got) { Die "checksum mismatch: want=$Want got=$Got" }
 Log "checksum OK"

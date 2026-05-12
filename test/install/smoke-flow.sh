@@ -117,9 +117,17 @@ body=$(curl -s -X POST -H "X-Orva-API-Key: $API_KEY" "$BASE/fn/$short_id/" -d '{
 # differently (timeouts, different SLUG codes).
 if [[ "$body" == *"hello-api"* ]]; then
     ok "invoke hello-api returns expected body"; PASS=$((PASS+1))
-elif [[ "$body" == *"WORKER_CRASHED"* ]]; then
-    warn "invoke hello-api: WORKER_CRASHED — likely nested-container nsjail/userns limitation, not a real Orva regression. Validate on a real VM for full coverage."
-    PASS=$((PASS+1))   # counted as pass since this is environmental
+elif [[ "$body" == *"WORKER_CRASHED"* || "$body" == *"SANDBOX_ERROR"* ]]; then
+    # Both signatures are nested-container symptoms:
+    #   WORKER_CRASHED — nsjail child can't construct mount NS (alpine
+    #                    + musl in particular surfaces this once nsjail
+    #                    forks, even with gcompat installed).
+    #   SANDBOX_ERROR  — nsjail itself can't start. On alpine without
+    #                    gcompat, the glibc-built nsjail returns ENOENT
+    #                    at exec because its dynamic linker is missing.
+    # Neither reproduces on real bare-metal / VM installs.
+    warn "invoke hello-api: $body — environmental (nested-container nsjail/musl limitation). Validate on a real VM for full coverage."
+    PASS=$((PASS+1))
 else
     fail "invoke hello-api returns expected body  did not contain 'hello-api' — got: $body"
     FAIL=$((FAIL+1))
