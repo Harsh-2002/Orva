@@ -66,7 +66,10 @@ docker cp "$REPO_ROOT/scripts/install-cli.sh" "$CONTAINER:/tmp/install-cli.sh"
 PASS=0; FAIL=0
 
 log "installing $OLD_VERSION"
-if ! docker exec -e "ORVA_VERSION=$OLD_VERSION" "$CONTAINER" sh /tmp/install-cli.sh >"$LOGS_DIR/upgrade-install-old.log" 2>&1; then
+UPG_ENV=(-e "ORVA_VERSION=$OLD_VERSION")
+[[ -n "${GITHUB_TOKEN:-}" ]] && UPG_ENV+=(-e "GITHUB_TOKEN=$GITHUB_TOKEN")
+[[ -n "${GH_TOKEN:-}" ]] && UPG_ENV+=(-e "GH_TOKEN=$GH_TOKEN")
+if ! docker exec "${UPG_ENV[@]}" "$CONTAINER" sh /tmp/install-cli.sh >"$LOGS_DIR/upgrade-install-old.log" 2>&1; then
     fail "old-version install failed — see $LOGS_DIR/upgrade-install-old.log"
     tail -20 "$LOGS_DIR/upgrade-install-old.log" >&2
     exit 1

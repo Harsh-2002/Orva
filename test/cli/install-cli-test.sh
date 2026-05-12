@@ -70,6 +70,10 @@ log "running install-cli.sh inside $CONTAINER (log → $INSTALL_LOG)"
 
 ENV_FLAGS=()
 [[ -n "$TEST_VERSION" ]] && ENV_FLAGS+=(-e "ORVA_VERSION=$TEST_VERSION")
+# Forward a GITHUB_TOKEN if the harness is running in CI so install-cli.sh's
+# api.github.com call doesn't hit the 60/hr unauthenticated rate limit.
+[[ -n "${GITHUB_TOKEN:-}" ]] && ENV_FLAGS+=(-e "GITHUB_TOKEN=$GITHUB_TOKEN")
+[[ -n "${GH_TOKEN:-}" ]] && ENV_FLAGS+=(-e "GH_TOKEN=$GH_TOKEN")
 
 PASS=0; FAIL=0
 
