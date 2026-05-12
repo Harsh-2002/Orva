@@ -65,13 +65,15 @@ Log "downloading $Asset"
 Invoke-WebRequest -Uri "$Base/$Asset" -OutFile $TmpExe -UseBasicParsing
 
 Log "verifying SHA-256"
-$ChecksumsRaw = (Invoke-WebRequest -Uri "$Base/checksums.txt" -UseBasicParsing).Content
-# checksums.txt format: "<hash><two spaces><filename>", LF-only. Don't
-# trust regex line-end anchors across PowerShell versions / CRLF
-# conversions — tokenize each line explicitly and compare the last
-# field to the asset name. Robust against trailing whitespace, CR, etc.
+# Write checksums.txt to a temp file and read with Get-Content so we
+# always work with a real string[] regardless of how Invoke-WebRequest
+# typed .Content (string on PS Core text/plain, byte[] in some edge
+# cases). Get-Content also normalises line endings, which sidesteps a
+# whole class of CRLF / regex-anchor surprises.
+$ChecksumsTmp = New-TemporaryFile
+Invoke-WebRequest -Uri "$Base/checksums.txt" -OutFile $ChecksumsTmp -UseBasicParsing -Headers $ApiHeaders
 $Want = $null
-foreach ($line in ($ChecksumsRaw -split "[\r\n]+")) {
+foreach ($line in (Get-Content -LiteralPath $ChecksumsTmp)) {
     if ([string]::IsNullOrWhiteSpace($line)) { continue }
     $parts = $line.Trim() -split '\s+'
     if ($parts.Length -ge 2 -and $parts[-1] -eq $Asset) {
@@ -79,7 +81,10 @@ foreach ($line in ($ChecksumsRaw -split "[\r\n]+")) {
         break
     }
 }
-if (-not $Want) { Die "checksum entry for $Asset missing from checksums.txt" }
+Remove-Item -Force $ChecksumsTmp -ErrorAction SilentlyContinue
+if (-not $Want) {
+    Die "checksum entry for $Asset missing from checksums.txt (first 5 lines were:`n$((Get-Content -LiteralPath $ChecksumsTmp -TotalCount 5 -ErrorAction SilentlyContinue) -join "`n"))"
+}
 $Got = (Get-FileHash -Algorithm SHA256 $TmpExe).Hash.ToLower()
 if ($Want -ne $Got) { Die "checksum mismatch: want=$Want got=$Got" }
 Log "checksum OK"
