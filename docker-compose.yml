@@ -1,6 +1,7 @@
 services:
   orva:
     image: ${ORVA_IMAGE:-orva:local}
+    runtime: kata-clh
     build:
       context: .
       args:
