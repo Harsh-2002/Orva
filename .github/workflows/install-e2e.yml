@@ -1,9 +1,9 @@
 name: install-e2e
 
-# End-to-end install verification across the 6 supported distros.
-# Replaces install-test.yml (dryrun-only). Each leg runs install.sh for
-# real, brings up orvad, runs the API + CLI smoke flow, then verifies
-# uninstall preserves data and --purge wipes it.
+# Real install + smoke + uninstall across 6 distros, in privileged
+# systemd-in-docker containers. The cheap stuff (shellcheck on the
+# install scripts themselves) lives in ci.yml — this workflow assumes
+# the scripts pass lint and focuses on actually running them.
 
 on:
   push:
@@ -25,31 +25,12 @@ on:
       - ".github/workflows/install-e2e.yml"
   workflow_dispatch: {}
   schedule:
-    # Weekly run on Sunday 03:00 UTC catches rolling-release breakage (Arch).
+    # Weekly Sunday 03:00 UTC catches rolling-release breakage (Arch).
     - cron: "0 3 * * 0"
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
-  shellcheck:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y shellcheck
-          # -S warning: skip style/info findings (intentional word-splits).
-          shellcheck -s sh -S warning scripts/install.sh scripts/uninstall.sh
-          shellcheck -S warning test/install/run-distro.sh \
-                                test/install/smoke-flow.sh \
-                                test/install/uninstall-flow.sh \
-                                test/install/failure-modes.sh \
-                                test/install/lib/common.sh
-
   matrix:
     runs-on: ubuntu-24.04
-    needs: shellcheck
     # Two distros are advisory rather than gating:
     #   arch   — rolling release; pacman mirrors drift between runs and
     #            occasionally serve stale signatures or 404 individual
@@ -72,7 +53,7 @@ jobs:
           - fedora41
           - arch
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install jq + curl
         run: |
@@ -80,16 +61,15 @@ jobs:
           sudo apt-get install -y jq curl
 
       - name: Run install + smoke + uninstall for ${{ matrix.distro }}
-        # ORVA_BROWSER_LEG=0 skips agent-browser in CI (no display, would
-        # need extra setup). HTTP route spot-checks still run.
+        # ORVA_BROWSER_LEG=0 skips agent-browser in CI (no display).
+        # HTTP route spot-checks still run.
         env:
           ORVA_BROWSER_LEG: "0"
-        run: |
-          bash test/install/run-distro.sh ${{ matrix.distro }}
+        run: bash test/install/run-distro.sh ${{ matrix.distro }}
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: install-e2e-${{ matrix.distro }}
           path: |
@@ -100,16 +80,15 @@ jobs:
   # gVisor (runsc) CI leg removed 2026-05-13 after end-to-end testing
   # confirmed Orva does not run under gVisor — nsjail's nested-namespace
   # clone() is rejected by gVisor's sentry on every invocation. See
-  # docs/GVISOR.md for the full writeup. No point burning CI minutes
-  # re-verifying a known architectural mismatch.
+  # docs/GVISOR.md for the full writeup.
 
   summary:
     runs-on: ubuntu-24.04
     needs: [matrix]
     if: always()
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Build summary

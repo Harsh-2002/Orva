@@ -1,9 +1,23 @@
 name: CI
 
+# Fast PR / push gate. Owns ALL shell linting for the repo so the heavier
+# install-e2e + cli-e2e workflows don't have to re-lint the same scripts.
+# Path-filtered: docs-only / screenshot-only commits skip CI entirely.
+
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/screenshots/**'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/screenshots/**'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -12,44 +26,74 @@ concurrency:
 permissions:
   contents: read
 
-# Opt every job into Node.js 24 for actions/* steps that still ship as
-# Node 20 wrappers (deprecated June 2026). One env var beats bumping
-# each action to a v24-native release; the actions themselves still
-# work either way, this just silences the deprecation warning.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
+  lint:
+    name: shellcheck (all)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends dash shellcheck
+
+      # POSIX scripts (install.sh, install-cli.sh, uninstall.sh) MUST run
+      # under any POSIX sh on user systems. dash -n catches bashisms that
+      # shellcheck -s sh would also catch; running both keeps the gate
+      # tight.
+      - name: POSIX user-facing scripts
+        run: |
+          dash -n scripts/install.sh
+          dash -n scripts/install-cli.sh
+          dash -n scripts/uninstall.sh
+          shellcheck -s sh -S warning \
+            scripts/install.sh \
+            scripts/install-cli.sh \
+            scripts/uninstall.sh
+
+      # bash scripts — entrypoint + test/install/* + test/cli/*. Failing
+      # builds here gate the install-e2e + cli-e2e workflows downstream.
+      - name: bash scripts
+        run: |
+          bash -n scripts/entrypoint.sh
+          bash -n scripts/build-rootfs.sh
+          shellcheck -S warning \
+            scripts/entrypoint.sh \
+            scripts/build-rootfs.sh \
+            test/install/*.sh \
+            test/install/lib/*.sh \
+            test/cli/*.sh \
+            test/cli/lib/*.sh
+
   go:
     name: go ${{ matrix.go }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: backend
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04]
         go: ["1.25.x"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
+          # No npm cache — every CI run starts from scratch so we
+          # never pick up a stale lockfile or dependency tree.
+          cache: ""
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
+          # No build cache for the same reason.
+          cache: false
 
       - name: build ui + embed adapters
-        # //go:embed all:ui_dist needs the directory populated before
-        # vet/test/build. `make embed` does the npm ci + vite build +
-        # cp into backend/internal/server/ui_dist.
+        # //go:embed all:ui_dist needs the dir populated before vet/test/
+        # build. `make embed` does the npm ci + vite build + cp into
+        # backend/internal/server/ui_dist.
         run: |
           make embed
           make adapters-embed
-        working-directory: ${{ github.workspace }}
 
       - name: go vet
         run: go vet ./...
@@ -57,42 +101,25 @@ jobs:
       - name: go test
         run: go test -count=1 -race ./...
 
-      - name: go build (binary)
+      - name: go build (server binary)
         run: |
-          mkdir -p ../build
+          mkdir -p build
           CGO_ENABLED=0 go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=ci-${GITHUB_SHA::7}" \
-            -o ../build/orva ./cmd/orva
-          ../build/orva --help >/dev/null
-
-  shell:
-    name: shell lint
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dash shellcheck
-
-      - run: dash -n scripts/install.sh
-
-      - run: shellcheck -s sh -S warning scripts/install.sh
-
-      - name: bash scripts
-        run: |
-          bash -n scripts/entrypoint.sh
-          bash -n scripts/build-rootfs.sh
-          shellcheck -s bash -S warning scripts/entrypoint.sh scripts/build-rootfs.sh || true
+            -o build/orva ./backend/cmd/orva
+          ./build/orva --help >/dev/null
 
   ui:
     name: ui build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
+          cache: ""
 
       - name: npm ci
         working-directory: frontend
@@ -106,15 +133,17 @@ jobs:
     name: docker image smoke
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: build image (no push, no cache)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
           load: false
           platforms: linux/amd64
           tags: orva:ci
+          no-cache: true
+          pull: true

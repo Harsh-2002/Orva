@@ -1,16 +1,12 @@
 name: cli-e2e
 
-# End-to-end verification of the standalone Orva CLI:
-#   - Go unit tests for cli/commands (TestCommandTree, flag presence, etc.)
-#   - Cross-compile all 6 release targets, file/size/format sanity
-#   - Command-tree golden diff (slim CLI vs server binary, client surface
-#     must be identical)
-#   - Real install via scripts/install-cli.sh on Linux + macOS runners
-#   - Real install via scripts/install-cli.ps1 on a Windows runner
-#   - orva upgrade round-trip from a previous release to latest
+# End-to-end verification of the standalone Orva CLI.
 #
-# Triggers on changes to anything CLI-shaped, and on weekly schedule to
-# catch transitive-dep / GH-API drift.
+# Shell linting lives in ci.yml (one source of truth across the repo).
+# Go unit tests + cross-build + Linux installer test run on every CLI
+# push. The expensive runners (macOS + Windows) only fire when the
+# installer scripts themselves change, or on schedule, or on manual
+# dispatch — they no longer run on every CLI code change.
 
 on:
   push:
@@ -35,15 +31,32 @@ on:
       - ".github/workflows/cli-e2e.yml"
   workflow_dispatch: {}
   schedule:
-    # Weekly Sunday 04:00 UTC — catches GH-API/release-asset drift.
+    # Weekly Sunday 04:00 UTC — catches GH-API / release-asset drift,
+    # and gives the expensive macOS/Windows jobs a guaranteed run.
     - cron: "0 4 * * 0"
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
+  # Detect whether this run actually touched the installer scripts.
+  # Used to gate the macOS + Windows jobs so they don't burn paid
+  # minutes on every CLI code change.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      installers: ${{ steps.filter.outputs.installers }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            installers:
+              - 'scripts/install-cli.sh'
+              - 'scripts/install-cli.ps1'
+              - 'test/cli/install-cli-test.sh'
+              - 'test/cli/upgrade-test.sh'
+
   unit:
-    name: Go unit tests + shellcheck
+    name: Go unit tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -51,18 +64,10 @@ jobs:
         with:
           go-version: "1.25.x"
           cache: false
-      - name: install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
-      - name: shellcheck (POSIX user-facing)
-        run: shellcheck -s sh -S warning scripts/install.sh scripts/install-cli.sh scripts/uninstall.sh
-      - name: shellcheck (bash test scripts)
-        run: |
-          shellcheck -S warning test/cli/*.sh test/cli/lib/*.sh \
-                                 test/install/*.sh test/install/lib/*.sh
+      - name: go vet (cli + internal)
+        run: go vet ./cli/... ./internal/...
       - name: go test ./cli/commands
         run: go test ./cli/commands/ -count=1 -v
-      - name: go vet
-        run: go vet ./cli/... ./internal/...
 
   cross-build:
     name: cross-compile matrix
@@ -111,20 +116,24 @@ jobs:
 
   install-macos:
     name: install-cli.sh on macOS
-    needs: unit
+    needs: [unit, changes]
     runs-on: macos-14
+    # Only run when the installer scripts actually changed, OR on
+    # schedule, OR on manual dispatch. macOS runners are 10× the cost
+    # of Linux; we don't want one on every CLI code change.
+    if: |
+      needs.changes.outputs.installers == 'true'
+      || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
     env:
-      # macos runners share IPs and hit the 60/hr unauthenticated
-      # rate limit on api.github.com fast; install-cli.sh now honors
-      # GITHUB_TOKEN for that call.
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: run installer against latest release
         run: |
           # macOS doesn't have a Docker harness, so we run install-cli.sh
-          # directly against the host. Sandboxed via /tmp prefix to avoid
-          # polluting /usr/local on the runner.
+          # directly against the host. Sandboxed via /tmp prefix to
+          # avoid polluting /usr/local on the runner.
           mkdir -p /tmp/orva-test-bin
           export ORVA_CLI_PATH=/tmp/orva-test-bin/orva
           export ORVA_INSTALL_COMPLETION=0
@@ -143,8 +152,13 @@ jobs:
 
   install-windows:
     name: install-cli.ps1 on Windows
-    needs: unit
+    needs: [unit, changes]
     runs-on: windows-2022
+    # Same gating as install-macos. Windows runners are 2× Linux cost.
+    if: |
+      needs.changes.outputs.installers == 'true'
+      || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -174,6 +188,8 @@ jobs:
     name: orva upgrade round-trip
     needs: [install-linux]
     runs-on: ubuntu-24.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: install jq + curl
