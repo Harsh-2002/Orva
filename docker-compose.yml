@@ -1,13 +1,5 @@
 services:
   orva:
-    # Default: local build, tagged orva:local. Override via env var:
-    #   ORVA_IMAGE=ghcr.io/harsh-2002/orva:latest docker compose up -d
-    # to skip the build and pull the remote release image instead.
-    #
-    # Per-host customisation (alternative container runtime, extra
-    # mounts, dev ports) belongs in `docker-compose.override.yml`,
-    # which compose auto-merges and which is gitignored. See
-    # docs/DEPLOYMENT.md "Runtime selection" for the kata-clh example.
     image: ${ORVA_IMAGE:-orva:local}
     build:
       context: .
@@ -18,62 +10,40 @@ services:
     container_name: orva
     restart: unless-stopped
 
-    # Local dev: host :3000 → container :8443. Keep the container side
-    # at 8443 so the in-container healthcheck and ORVA_PORT default
-    # don't need overriding.
     ports:
       - "3000:8443"
 
-    # Share the host cgroup namespace and bind-mount the cgroupfs rw so
-    # nsjail can create NSJAIL.<pid> child cgroups with memory.max and
-    # cpu.max limits applied by the kernel. Without this, /sys/fs/cgroup
-    # is a read-only private view and resource limits fall back to rlimit_as
-    # only (address-space soft cap, no CPU throttling). The entrypoint
-    # creates /sys/fs/cgroup/orva-sandboxes and enables +memory+cpu+pids
-    # there so nsjail has a writable, properly-delegated mount point.
+    # nsjail needs a writable, properly-delegated cgroupfs to set memory.max
+    # and cpu.max per function. Read-only private cgroup view falls back to
+    # rlimit_as (address-space soft cap, no CPU throttling).
     cgroup: host
 
     volumes:
       - orva-data:/var/lib/orva
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
 
-    # Capabilities required by orvad's components:
-    #   SYS_ADMIN  — nsjail uses this to set up user namespaces, mounts,
-    #                and cgroup v2 delegations for each function spawn.
-    #                Also required to write to the cgroupfs for the
-    #                orva-sandboxes cgroup (see cgroupns: host above).
-    #   NET_ADMIN  — the egress firewall manager applies nftables rules
-    #                via `nft`. Without this, the firewall page shows
-    #                an amber "nftables unavailable" banner and IP
-    #                blocking is disabled (sandbox isolation still works).
+    # SYS_ADMIN: nsjail creates user namespaces / mounts / cgroup delegations.
+    # NET_ADMIN: egress firewall manager applies nftables rules via `nft`.
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
 
-    # Sandbox isolation requires lifting these container-level
-    # restrictions so nsjail can build its own. Functions still run
-    # under nsjail's seccomp filter + namespaces.
+    # Lifted so nsjail can apply its own per-function seccomp + namespaces.
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
       - systempaths=unconfined
 
-    # Per-function `network_mode: egress` uses nsjail's --user_net
-    # (bundled nstun backend), which open()s /dev/net/tun. The
-    # entrypoint mknods this if missing, but mounting the host's TUN
-    # device is the cleanest path on most distros and avoids the
-    # mknod-needs-root quirk on rootless setups. The "/dev/net/tun:rw"
-    # form works on Linux hosts where the device exists; if it
-    # doesn't, the entrypoint falls back to mknod and continues.
+    # Per-function `network_mode: egress` uses nsjail's --user_net (open()s /dev/net/tun).
     devices:
       - /dev/net/tun:/dev/net/tun
 
     environment:
-      ORVA_DEFAULT_MEMORY_MB: "128"    # default is 64; 11.7 GB host can afford more per fn
-      ORVA_WRITE_TIMEOUT_SEC: "90"     # default is 60; headroom above 30 s function timeout
-      ORVA_SESSION_DAYS: "30"          # default is 7; single-operator instance
-      ORVA_LOG_RETENTION_DAYS: "30"    # default is 7
-      ORVA_SECURE_COOKIES: "true"      # behind HTTPS reverse proxy / public tunnel — required for OAuth consent cookie
+      ORVA_DEFAULT_MEMORY_MB: "128"
+      ORVA_WRITE_TIMEOUT_SEC: "90"
+      ORVA_SESSION_DAYS: "30"
+      ORVA_LOG_RETENTION_DAYS: "30"
+      ORVA_SECURE_COOKIES: "true"
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8443/api/v1/system/health"]
@@ -96,10 +66,8 @@ services:
           memory: 512M
 
 volumes:
-  # Use the project-unprefixed name "orva-data" so the volume survives
-  # bare-docker-run ↔ docker-compose transitions. Without `name:`,
-  # compose would create "orva_orva-data" (project prefix) and orphan
-  # any pre-existing volume an operator created via `docker run`.
+  # `name:` avoids the project prefix so a pre-existing `orva-data` volume
+  # created via bare `docker run` is reused.
   orva-data:
     name: orva-data
     driver: local

@@ -20,23 +20,22 @@ For a single-host deploy, **2 CPU + 4 GB RAM** is plenty for ~50
 functions of mixed traffic. Bigger if your functions hold significant
 memory each.
 
-## Runtime selection (Docker compose)
+## Runtime selection
 
 The shipped `docker-compose.yml` uses Docker's default container
-runtime (`runc`) — fine for homelab and trusted-code use. To run Orva
-under a stricter, hypervisor-class runtime (Kata Containers, with
-either QEMU or Cloud Hypervisor underneath), use a per-host
-`docker-compose.override.yml`:
+runtime (`runc`) — the right choice for homelab and trusted-code
+use. To run Orva under a stricter, hypervisor-class runtime (Kata
+Containers with Cloud Hypervisor underneath), add one line to the
+`orva` service in your local `docker-compose.yml`:
 
 ```yaml
-# docker-compose.override.yml — auto-merged on top of docker-compose.yml.
-# Gitignored; this lives on your host only.
 services:
   orva:
     runtime: kata-clh   # or: kata    (QEMU hypervisor)
+    # ...rest unchanged
 ```
 
-Then:
+Then recreate:
 
 ```bash
 docker compose down && docker compose up -d
@@ -44,15 +43,11 @@ docker inspect orva --format 'runtime={{.HostConfig.Runtime}}'
 # → runtime=kata-clh
 ```
 
-Prerequisites and the measured perf cost (~75–80% throughput tax,
-~14 s slower container-start for QEMU vs CLH) are in
-[`docs/KATA.md`](KATA.md). Kata-CLH is the recommended choice when
+Prerequisites (Kata installed + the runtime registered in
+`/etc/docker/daemon.json`) and the measured perf cost (~75–80 %
+throughput tax, ~14 s slower container-start for QEMU vs CLH) are in
+[`docs/KATA.md`](KATA.md). Kata-CLH is the recommended Kata path when
 you want hypervisor-class isolation around Orva.
-
-The override pattern is the right place for any per-host tweak: dev
-port remapping, extra bind mounts, alternative runtimes. Keeping it
-out of `docker-compose.yml` means other operators cloning the repo
-get the plain defaults.
 
 ## TLS
 
