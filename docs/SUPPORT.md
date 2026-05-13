@@ -47,15 +47,19 @@ Without them, nsjail's isolation degrades:
 
 ## gVisor (runsc) compatibility
 
-Orva can run inside a gVisor-runtime Docker container for an extra layer
-of kernel-syscall isolation around the whole platform (`docker run
---runtime=runsc ...`). The `gvisor` CI leg verifies this works
-end-to-end; it is gated on the `HAS_GVISOR` repo variable.
+**Not supported.** End-to-end testing on 2026-05-13 (gVisor
+`release-20260504.0`, both `ptrace` and `kvm` platforms) confirmed
+that Orva's daemon starts under runsc but function invocation fails
+with `WORKER_CRASHED`. nsjail's per-function sandbox setup needs
+nested-namespace `clone(CLONE_NEW…)` which gVisor's user-space kernel
+rejects with `EINVAL`. This is architectural, not a bug.
 
-**Current status:** not yet verified in CI (repo variable not set).
-Operators have reported it works on standard `runsc --platform=ptrace`
-configurations. If you're running under runsc and hit a sandbox error,
-please open an issue with the daemon log and your gVisor version.
+Full reproduction + alternatives: [`docs/GVISOR.md`](GVISOR.md).
+
+The `gvisor` CI leg (`HAS_GVISOR` repo variable) and the
+`test/install/gvisor-flow.sh` script still exist so we can re-verify
+on every gVisor release. Flip `HAS_GVISOR=true` once gVisor publishes
+nested-namespace support and this verdict gets a fresh data point.
 
 ## Architecture support
 

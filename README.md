@@ -259,27 +259,13 @@ Orva uses **nsjail** — a battle-tested sandboxer from Google — to wrap every
 | **Memory per worker** | ~30 MB | ~5 MB per MicroVM | Varies |
 | **Good for** | Homelabs, internal tools, trusted code | Multi-tenant cloud, untrusted third-party code | General app containers |
 
-Orva's model sits between plain Docker and a full VM: the host kernel is shared, but each function runs in a heavily restricted process with no capabilities, a read-only filesystem view, hard resource ceilings, and a strict syscall allowlist. For homelab and internal use it's a solid baseline. If your use case involves running code from unknown third parties, adding gVisor as the Docker runtime provides a user-space kernel layer on top at minimal cost.
+Orva's model sits between plain Docker and a full VM: the host kernel is shared, but each function runs in a heavily restricted process with no capabilities, a read-only filesystem view, hard resource ceilings, and a strict syscall allowlist. For homelab and internal use it's a solid baseline.
 
-**Optional: run Orva inside gVisor for deeper isolation**
+**Note on gVisor (`runsc`)** — end-to-end testing on 2026-05-13 (gVisor `release-20260504.0`, both `ptrace` and `kvm` platforms) found that **Orva does not run under gVisor**. The Orva daemon starts and the HTTP API is reachable, but function invocation fails: nsjail's per-function sandbox setup needs `clone(CLONE_NEWNS|CLONE_NEWUSER|CLONE_NEWPID|CLONE_NEWNET|…)` which gVisor's user-space kernel rejects with `EINVAL`. This is a fundamental incompatibility between nsjail's design and gVisor's nested-namespace support, not a bug in either project — gVisor explicitly declines to expose the host's namespace primitives, and nsjail can't run without them.
 
-gVisor intercepts container syscalls in user space before they reach the host kernel. You can run the Orva container itself under gVisor's `runsc` runtime — nsjail still sandboxes each function inside it, giving two independent layers:
+Full writeup, reproduction steps, and recommendations: [`docs/GVISOR.md`](docs/GVISOR.md).
 
-```bash
-# Install gVisor once on the host: https://gvisor.dev/docs/user_guide/install/
-
-docker run -d --name orva \
-  --runtime=runsc \          # gVisor intercepts container syscalls
-  -p 8443:8443 \
-  --cap-add SYS_ADMIN \
-  --security-opt seccomp=unconfined \
-  -v orva-data:/var/lib/orva \
-  ghcr.io/harsh-2002/orva:latest
-```
-
-This is not the default setup and not required for most deployments, but it is a supported configuration for operators who want the extra boundary.
-
-Full threat model + a verification recipe: [`docs/SECURITY.md`](docs/SECURITY.md)
+Full threat model: [`docs/SECURITY.md`](docs/SECURITY.md)
 
 ---
 

@@ -297,6 +297,30 @@ also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see
 `internal/pool/hostmem.go`).
 
+## Layered isolation: what does and doesn't compose
+
+Orva already gives you defense in depth on a single host: a Docker
+container around orvad, nsjail-per-function inside it, seccomp + cgroup
+limits inside nsjail. Operators sometimes ask about wrapping the whole
+stack in another isolation layer.
+
+**Hypervisor-class (Firecracker, Kata, full VMs).** Compose cleanly
+with Orva — they put a real Linux kernel under the entire orvad
+container, so nsjail's namespace API works unchanged inside the guest.
+Cost is a guest kernel per Orva instance. Sensible for genuinely
+untrusted multi-tenant workloads.
+
+**gVisor (`runsc`) — does NOT work.** End-to-end testing on 2026-05-13
+(gVisor `release-20260504.0`, both `ptrace` and `kvm` platforms)
+confirmed that nsjail's per-function sandbox setup needs
+`clone(CLONE_NEW…)` for seven namespaces, and gVisor's user-space
+kernel rejects the combination with `EINVAL`. The Orva daemon starts
+under runsc and the HTTP API is reachable, but every function
+invocation fails with `WORKER_CRASHED`. This is architectural, not a
+bug — gVisor doesn't expose nested-namespace primitives, and nsjail
+can't run without them. Full reproduction + alternatives in
+[`docs/GVISOR.md`](GVISOR.md).
+
 ## Reading further in the code
 
 - `internal/sandbox/sandbox.go` — nsjail invocation
