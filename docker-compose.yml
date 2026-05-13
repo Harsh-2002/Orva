@@ -3,6 +3,11 @@ services:
     # Default: local build, tagged orva:local. Override via env var:
     #   ORVA_IMAGE=ghcr.io/harsh-2002/orva:latest docker compose up -d
     # to skip the build and pull the remote release image instead.
+    #
+    # Per-host customisation (alternative container runtime, extra
+    # mounts, dev ports) belongs in `docker-compose.override.yml`,
+    # which compose auto-merges and which is gitignored. See
+    # docs/DEPLOYMENT.md "Runtime selection" for the kata-clh example.
     image: ${ORVA_IMAGE:-orva:local}
     build:
       context: .

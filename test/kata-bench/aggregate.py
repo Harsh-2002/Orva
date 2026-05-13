@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Aggregate per-runtime bench outputs into a side-by-side summary.md.
+
+Reads:
+  <root>/<runtime>/startup.txt       container_start_ms=<int>
+  <root>/<runtime>/cold-start.csv    iter,ms
+  <root>/<runtime>/ceiling.csv       label,c,n_requests,rps,p50,p95,p99,err_pct,mem_mb,peak_busy,peak_idle
+
+Writes to stdout: a Markdown summary with delta columns vs the runc
+baseline. Missing data is rendered as `—` rather than failing the run.
+"""
+
+import csv
+import os
+import sys
+import statistics
+from pathlib import Path
+
+if len(sys.argv) < 2:
+    print("usage: aggregate.py <root>", file=sys.stderr)
+    sys.exit(2)
+
+root = Path(sys.argv[1])
+runtimes = ["runc", "kata", "kata-clh"]
+
+
+def read_startup(rt: str) -> int | None:
+    p = root / rt / "startup.txt"
+    if not p.exists():
+        return None
+    for line in p.read_text().splitlines():
+        if line.startswith("container_start_ms="):
+            try:
+                return int(line.split("=", 1)[1])
+            except ValueError:
+                return None
+    return None
+
+
+def read_cold_start_median_ms(rt: str) -> int | None:
+    p = root / rt / "cold-start.csv"
+    if not p.exists():
+        return None
+    vals = []
+    with p.open() as f:
+        for row in csv.DictReader(f):
+            try:
+                vals.append(int(row["ms"]))
+            except (ValueError, KeyError):
+                continue
+    if not vals:
+        return None
+    return int(statistics.median(vals))
+
+
+def read_ceiling_rows(rt: str) -> list[dict]:
+    p = root / rt / "ceiling.csv"
+    if not p.exists():
+        return []
+    with p.open() as f:
+        # Skip lines that aren't CSV (comments prefixed with #).
+        lines = [ln for ln in f if ln.strip() and not ln.strip().startswith("#")]
+    if not lines:
+        return []
+    reader = csv.DictReader(lines)
+    return list(reader)
+
+
+def ms_from_seconds(v: str) -> float | None:
+    """ceiling.sh writes p50/p95/p99 in seconds (e.g. "0.0123")."""
+    try:
+        return float(v) * 1000.0
+    except (TypeError, ValueError):
+        return None
+
+
+def at_concurrency(rows: list[dict], c: int, field: str) -> float | None:
+    for r in rows:
+        try:
+            if int(r.get("c", "0")) == c:
+                v = r.get(field)
+                if field in ("p50_ms", "p95_ms", "p99_ms"):
+                    return ms_from_seconds(v)
+                if v in (None, ""):
+                    return None
+                try:
+                    return float(v)
+                except ValueError:
+                    return None
+        except ValueError:
+            continue
+    return None
+
+
+def find_row(rows: list[dict], c_match: int) -> dict | None:
+    for r in rows:
+        try:
+            if int(r.get("c", "0")) == c_match:
+                return r
+        except ValueError:
+            continue
+    return None
+
+
+def find_peak_rps(rows: list[dict]) -> tuple[float | None, int | None]:
+    """Look for the ceiling.sh 'max,c,...' summary row, fall back to scanning."""
+    for r in rows:
+        if r.get("label", "").strip() == "max":
+            try:
+                return float(r["rps"]), int(r["c"])
+            except (ValueError, KeyError):
+                pass
+    # Fallback: scan rate-step rows.
+    best = (None, None)
+    for r in rows:
+        try:
+            rps = float(r.get("rps", ""))
+            c = int(r.get("c", "0"))
+            if best[0] is None or rps > best[0]:
+                best = (rps, c)
+        except (ValueError, KeyError):
+            continue
+    return best
+
+
+def find_knee(rows: list[dict]) -> int | None:
+    for r in rows:
+        if r.get("label", "").strip() == "knee":
+            try:
+                return int(r["c"])
+            except (ValueError, KeyError):
+                return None
+    return None
+
+
+def fmt(v, suffix: str = "") -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, float):
+        if abs(v) >= 100:
+            return f"{v:.0f}{suffix}"
+        return f"{v:.1f}{suffix}"
+    return f"{v}{suffix}"
+
+
+def delta(curr, baseline, *, percent: bool = True, lower_is_better: bool = True) -> str:
+    if curr is None or baseline is None or baseline == 0:
+        return "—"
+    if percent:
+        pct = (curr - baseline) / baseline * 100.0
+        sign = "+" if pct >= 0 else ""
+        arrow = ""
+        if lower_is_better and pct > 0:
+            arrow = ""  # already shows +pct (worse)
+        return f"{sign}{pct:.1f}%"
+    diff = curr - baseline
+    sign = "+" if diff >= 0 else ""
+    return f"{sign}{diff:.0f}"
+
+
+# Collect per-runtime data.
+data = {}
+for rt in runtimes:
+    data[rt] = {
+        "container_start_ms": read_startup(rt),
+        "cold_start_ms": read_cold_start_median_ms(rt),
+        "rows": read_ceiling_rows(rt),
+    }
+
+print("# Orva runtime benchmark — runc vs Kata Containers")
+print()
+print(f"Generated by `test/kata-bench/run.sh + aggregate.py`.")
+print()
+print("Host: Ubuntu 24.04, kernel 6.8, 2 CPU, 11.68 GiB.")
+print("Image: `ghcr.io/harsh-2002/orva:v2026.05.12`.")
+print("Methodology: each runtime measured sequentially in isolation. Pool")
+print("pre-warmed with a single invoke before bench. ceiling.sh ramp")
+print("c = 1, 5, 10, 25, 50, 100, 200, 500, 1000, 2000, 5000 with 120 s")
+print("at each step + 60 s warmup. cold-start probe is 10 fresh invokes")
+print("(~8 s idle gap each); median reported.")
+print()
+
+# Build the comparison table.
+def row(label: str, getter, *, fmt_suffix: str = "", lower_is_better: bool = True, percent_delta: bool = True):
+    base = getter("runc")
+    kata = getter("kata")
+    clh = getter("kata-clh")
+    cells = [
+        f"| {label}",
+        fmt(base, fmt_suffix),
+        fmt(kata, fmt_suffix),
+        delta(kata, base, percent=percent_delta, lower_is_better=lower_is_better),
+        fmt(clh, fmt_suffix),
+        delta(clh, base, percent=percent_delta, lower_is_better=lower_is_better),
+        "|",
+    ]
+    print(" | ".join(cells))
+
+
+print("| Metric | runc | kata-qemu | Δ qemu | kata-clh | Δ clh |")
+print("|---|---|---|---|---|---|")
+
+row("Container-start latency",
+    lambda rt: data[rt]["container_start_ms"],
+    fmt_suffix=" ms")
+
+row("Cold-start median (10 probes)",
+    lambda rt: data[rt]["cold_start_ms"],
+    fmt_suffix=" ms")
+
+for c in (25, 100, 500):
+    row(f"p50 @ c={c}", lambda rt, c=c: at_concurrency(data[rt]["rows"], c, "p50_ms"), fmt_suffix=" ms")
+    row(f"p99 @ c={c}", lambda rt, c=c: at_concurrency(data[rt]["rows"], c, "p99_ms"), fmt_suffix=" ms")
+    row(f"Throughput @ c={c}", lambda rt, c=c: at_concurrency(data[rt]["rows"], c, "rps"),
+        fmt_suffix=" rps", lower_is_better=False)
+
+# Peak rps + knee.
+def peak_rps(rt: str): return find_peak_rps(data[rt]["rows"])[0]
+def peak_rps_c(rt: str): return find_peak_rps(data[rt]["rows"])[1]
+def knee(rt: str): return find_knee(data[rt]["rows"])
+
+row("Peak rps (any c)",
+    peak_rps, fmt_suffix=" rps", lower_is_better=False)
+row("Concurrency at peak rps",
+    peak_rps_c, fmt_suffix="", lower_is_better=False, percent_delta=False)
+row("Knee concurrency (p99 > 3×p50)",
+    knee, fmt_suffix="", lower_is_better=False, percent_delta=False)
+
+print()
+print("**Interpretation**")
+print()
+print("- **Container-start latency** is the cost of `docker run` returning a healthy orvad. Kata pays a one-time VM-boot tax here vs runc; this is amortised across all subsequent invocations.")
+print("- **Cold-start median** is the per-invocation cost when the worker pool is empty. Inside Kata's already-warm guest, this measures only the nsjail spawn + Node boot — same as runc.")
+print("- **Throughput / p99** show the steady-state cost of running nsjail under a hypervisor's virtual I/O vs bare metal.")
+print()
+print("Per-feature functional results (from extended-functional.sh):")
+print()
+print("| Feature | runc | kata-qemu | kata-clh |")
+print("|---|---|---|---|")
+for feat in ("baseline", "egress", "secrets"):
+    cells = ["| " + feat]
+    for rt in runtimes:
+        p = root / "logs" / f"extended-{rt}.tsv"
+        verdict = "—"
+        if p.exists():
+            for line in p.read_text().splitlines():
+                parts = line.split("\t")
+                if parts and parts[0] == feat:
+                    verdict = "✅" if (len(parts) > 1 and parts[1] == "pass") else "❌"
+                    break
+        cells.append(verdict)
+    cells.append("|")
+    print(" | ".join(cells))
+
+print()
+print("Raw data: `test/kata-bench/<runtime>/{ceiling.csv,cold-start.csv,stats.csv,startup.txt}`.")

@@ -9,6 +9,12 @@
 .claude/
 *.session-transcript.txt
 [0-9][0-9][0-9][0-9]-*-request-interrupted-by-user.txt
+# Dated session-dump transcripts (e.g. 2026-04-23-144458-...txt)
+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.txt
+
+# Per-host docker-compose overrides (kata-clh runtime, local ports, etc.)
+docker-compose.override.yml
+docker-compose.override.yaml
 
 # Go
 *.test
@@ -38,6 +44,7 @@ data/
 test/*.tsv
 test/*.log
 test/*-results.tsv
+test/kata-bench/__pycache__/
 .playwright-mcp/
 
 # Editor / IDE

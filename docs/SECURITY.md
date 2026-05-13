@@ -304,11 +304,17 @@ container around orvad, nsjail-per-function inside it, seccomp + cgroup
 limits inside nsjail. Operators sometimes ask about wrapping the whole
 stack in another isolation layer.
 
-**Hypervisor-class (Firecracker, Kata, full VMs).** Compose cleanly
-with Orva — they put a real Linux kernel under the entire orvad
-container, so nsjail's namespace API works unchanged inside the guest.
-Cost is a guest kernel per Orva instance. Sensible for genuinely
-untrusted multi-tenant workloads.
+**Hypervisor-class (Kata Containers, Firecracker, full VMs).** Compose
+cleanly with Orva — they put a real Linux kernel under the entire
+orvad container, so nsjail's namespace API works unchanged inside the
+guest. Cost is a guest kernel per Orva instance.
+
+Kata is the configuration we've verified end-to-end (2026-05-13, Kata
+3.30.0). Both QEMU and Cloud Hypervisor work; recommend
+`docker run --runtime=kata-clh …` (smaller Rust-based hypervisor TCB,
+~14 s faster container-start, throughput identical to QEMU within
+noise). Orva itself is unchanged underneath. Full operator guide
+including measured performance cost: [`docs/KATA.md`](KATA.md).
 
 **gVisor (`runsc`) — does NOT work.** End-to-end testing on 2026-05-13
 (gVisor `release-20260504.0`, both `ptrace` and `kvm` platforms)
