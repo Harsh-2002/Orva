@@ -575,12 +575,22 @@ jobs:
 
           while IFS='|' read -r id sha tags; do
             keep_reason=""
-            # 1. Skip if version's sha256 is part of the current manifest tree.
-            if grep -qx "$sha" /tmp/keep_digests.txt; then
-              keep_reason="part of current $TAG manifest"
-            # 2. Skip if version carries the current tag or 'latest'.
-            elif echo ",$tags," | grep -qE ",($TAG|latest),"; then
+            # 1. Keep if version carries the current tag or 'latest'.
+            if echo ",$tags," | grep -qE ",($TAG|latest),"; then
               keep_reason="tag=$tags"
+            # 2. Keep if version's sha256 is in the current manifest tree
+            #    (per-arch sub-manifests pulled in via the multi-arch index).
+            elif grep -qx "$sha" /tmp/keep_digests.txt; then
+              keep_reason="part of current $TAG manifest"
+            # 3. Keep all untagged versions. A multi-arch manifest references
+            #    its per-architecture sub-images by digest only — they appear
+            #    untagged in the GHCR versions API. Deleting them breaks
+            #    `docker pull` on the parent manifest. The keep_digests
+            #    extraction above is best-effort and may miss some sub-image
+            #    digests (e.g. attestation manifests); this branch is the
+            #    safety net. Small storage cost; large reliability win.
+            elif [ -z "$tags" ]; then
+              keep_reason="untagged (likely a sub-image manifest)"
             fi
 
             if [ -n "$keep_reason" ]; then
@@ -595,7 +605,7 @@ jobs:
               || echo "::warning::failed to delete version $id (continuing)"
           done < /tmp/versions.txt
 
-          echo "::notice::GHCR cleanup complete — only $TAG + :latest + their sub-images remain."
+          echo "::notice::GHCR cleanup complete — only $TAG + :latest + sub-images + untagged versions remain."
 
   # ── 8. Trigger the production redeploy webhook ───────────────────────
   # POSTs to a Portainer stack-redeploy webhook (or any equivalent CD

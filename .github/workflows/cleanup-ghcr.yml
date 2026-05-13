@@ -86,10 +86,19 @@ jobs:
 
           while IFS='|' read -r id sha tags; do
             keep_reason=""
-            if grep -qx "$sha" /tmp/keep_digests.txt; then
-              keep_reason="part of current $TAG manifest"
-            elif echo ",$tags," | grep -qE ",($TAG|latest),"; then
+            # 1. Keep if version carries the current tag or 'latest'.
+            if echo ",$tags," | grep -qE ",($TAG|latest),"; then
               keep_reason="tag=$tags"
+            # 2. Keep if version's sha is referenced by the current manifest tree.
+            elif grep -qx "$sha" /tmp/keep_digests.txt; then
+              keep_reason="part of current $TAG manifest"
+            # 3. Keep all untagged versions. Multi-arch manifests reference
+            #    their per-arch sub-images by digest only — those show up as
+            #    untagged in the GHCR versions API. Deleting them breaks
+            #    `docker pull` on the parent manifest. The keep_digests
+            #    extraction is best-effort; this branch is the safety net.
+            elif [ -z "$tags" ]; then
+              keep_reason="untagged (likely a sub-image manifest)"
             fi
 
             if [ -n "$keep_reason" ]; then
