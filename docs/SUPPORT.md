@@ -52,14 +52,10 @@ Without them, nsjail's isolation degrades:
 that Orva's daemon starts under runsc but function invocation fails
 with `WORKER_CRASHED`. nsjail's per-function sandbox setup needs
 nested-namespace `clone(CLONE_NEW…)` which gVisor's user-space kernel
-rejects with `EINVAL`. This is architectural, not a bug.
+rejects with `EINVAL`. This is architectural, not a bug — gVisor
+intentionally doesn't expose nested-namespace primitives.
 
 Full reproduction + alternatives: [`docs/GVISOR.md`](GVISOR.md).
-
-The `gvisor` CI leg (`HAS_GVISOR` repo variable) and the
-`test/install/gvisor-flow.sh` script still exist so we can re-verify
-on every gVisor release. Flip `HAS_GVISOR=true` once gVisor publishes
-nested-namespace support and this verdict gets a fresh data point.
 
 ## Architecture support
 

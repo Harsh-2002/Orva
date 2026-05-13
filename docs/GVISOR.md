@@ -163,40 +163,60 @@ the inner sandbox entirely.
 ## Reproduce
 
 Anyone with gVisor installed and registered as a Docker runtime can
-reproduce this in ~3 minutes:
+reproduce this in ~3 minutes. The check is intentionally a hand-run
+docker invocation rather than a checked-in test script — there's no
+point automating a verification of a known architectural mismatch.
 
 ```bash
 # 1. Confirm runsc is registered:
 docker info --format '{{json .Runtimes}}' | grep -q runsc || \
     echo "install gVisor first: https://gvisor.dev/docs/user_guide/install/"
 
-# 2. Run the existing harness:
-bash test/install/gvisor-flow.sh ghcr.io/harsh-2002/orva:v2026.05.12
+# 2. Bring up Orva under runsc:
+docker run -d --name orva-gvisor-test \
+    --runtime=runsc \
+    -p 28443:8443 \
+    --cap-add SYS_ADMIN \
+    --security-opt seccomp=unconfined \
+    --security-opt apparmor=unconfined \
+    --security-opt systempaths=unconfined \
+    -v orva-gvisor-data:/var/lib/orva \
+    ghcr.io/harsh-2002/orva:latest
 
-# 3. The script writes a verdict to test/install/logs/gvisor-result.txt:
-cat test/install/logs/gvisor-result.txt
-# status: failed
-# reason: invocation did not return expected body
-# http_code: 502
-# body: {"error":{"code":"WORKER_CRASHED",...}}
+# 3. Wait for the API:
+until curl -fsS http://localhost:28443/api/v1/system/health >/dev/null; do sleep 1; done
+
+# 4. Reproduce the clone() rejection directly with nsjail:
+docker exec orva-gvisor-test \
+    /usr/local/bin/nsjail -v -Mo \
+        --chroot /var/lib/orva/rootfs/node24 \
+        -T /tmp -- /usr/local/bin/node --version 2>&1 | tail -5
+# Expected:
+# clone(flags=CLONE_NEWNS|CLONE_NEWCGROUP|CLONE_NEWUTS|CLONE_NEWIPC|
+#             CLONE_NEWUSER|CLONE_NEWPID|CLONE_NEWNET) failed: Invalid argument
+# Couldn't launch the child process
+# main():404 Returning with 255
+
+# 5. Cleanup:
+docker rm -f orva-gvisor-test && docker volume rm orva-gvisor-data
 ```
 
-To re-test if gVisor adds nested-namespace support in a future release,
-the same script is the canonical check. CI can be opted-in via the
-`HAS_GVISOR` repo variable on `.github/workflows/install-e2e.yml`'s
-`gvisor` job (it installs runsc from the official Google release URL
-and runs `gvisor-flow.sh`).
+To re-test if gVisor publishes nested-namespace support in a future
+release, this same invocation is the canonical check. There's nothing
+Orva-specific about the failure — any tool that needs
+`clone(CLONE_NEWUSER|CLONE_NEW…)` will see the same `EINVAL`.
 
 ---
 
 ## Status
 
-- README's "supported configuration" claim has been removed (commit on
-  2026-05-13). The README now points here instead.
+- README's "supported configuration" claim has been removed
+  (2026-05-13). The README now points here instead.
 - `docs/SECURITY.md` cross-references this document under "layered
-  isolation options."
-- `test/install/gvisor-flow.sh` continues to exist and pass cleanly
-  (it correctly returns `status: failed` with a captured reason).
-- The CI gate `vars.HAS_GVISOR` is the way to re-test on every release
-  — flip it to `true` once gVisor publishes nested-namespace support
-  and this document gets a fresh verdict.
+  isolation: what does and doesn't compose."
+- The previous CI harness (`test/install/gvisor-flow.sh`,
+  `.github/workflows/install-e2e.yml`'s `gvisor` job, gated on
+  `HAS_GVISOR`) was removed alongside this writeup. There's no value
+  in burning CI minutes re-verifying an architectural incompatibility
+  on every release. If gVisor's behavior changes, follow the
+  "Reproduce" section above by hand.

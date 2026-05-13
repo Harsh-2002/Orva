@@ -44,7 +44,6 @@ jobs:
           shellcheck -S warning test/install/run-distro.sh \
                                 test/install/smoke-flow.sh \
                                 test/install/uninstall-flow.sh \
-                                test/install/gvisor-flow.sh \
                                 test/install/failure-modes.sh \
                                 test/install/lib/common.sh
 
@@ -98,49 +97,11 @@ jobs:
             test/install/results-*.tsv
           retention-days: 14
 
-  gvisor:
-    runs-on: ubuntu-24.04
-    needs: shellcheck
-    # Gated on a repo variable so the leg only runs when the operator has
-    # opted in. Default: skipped. Set `HAS_GVISOR=true` in repo variables
-    # to enable.
-    if: vars.HAS_GVISOR == 'true'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install jq + curl
-        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
-
-      - name: Install gVisor (runsc)
-        run: |
-          # Official install: https://gvisor.dev/docs/user_guide/install/
-          (
-            set -e
-            ARCH=$(uname -m)
-            URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
-            wget -qO runsc "${URL}/runsc"
-            wget -qO runsc.sha512 "${URL}/runsc.sha512"
-            sha512sum -c runsc.sha512
-            chmod +x runsc
-            sudo mv runsc /usr/local/bin/
-          )
-          sudo /usr/local/bin/runsc install
-          sudo systemctl restart docker
-          docker info --format '{{json .Runtimes}}' | grep -q runsc
-
-      - name: Pull Orva image
-        run: docker pull ghcr.io/harsh-2002/orva:latest
-
-      - name: Run gvisor-flow
-        run: bash test/install/gvisor-flow.sh ghcr.io/harsh-2002/orva:latest
-
-      - name: Upload result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: install-e2e-gvisor
-          path: test/install/logs/gvisor-result.txt
-          retention-days: 30
+  # gVisor (runsc) CI leg removed 2026-05-13 after end-to-end testing
+  # confirmed Orva does not run under gVisor — nsjail's nested-namespace
+  # clone() is rejected by gVisor's sentry on every invocation. See
+  # docs/GVISOR.md for the full writeup. No point burning CI minutes
+  # re-verifying a known architectural mismatch.
 
   summary:
     runs-on: ubuntu-24.04
@@ -169,12 +130,4 @@ jobs:
                 echo "| $d | ⚠️ no artifact |"
               fi
             done
-            if [ -f artifacts/install-e2e-gvisor/gvisor-result.txt ]; then
-              echo ""
-              echo "**gVisor leg:**"
-              echo ""
-              echo '```'
-              cat artifacts/install-e2e-gvisor/gvisor-result.txt
-              echo '```'
-            fi
           } >> "$GITHUB_STEP_SUMMARY"

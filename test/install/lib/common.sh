@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared helpers for the install-harness scripts in test/install/.
-# Sourced by run-distro.sh, smoke-flow.sh, gvisor-flow.sh, etc.
+# Sourced by run-distro.sh, smoke-flow.sh, uninstall-flow.sh, etc.
 # Bash-only (uses arrays, [[ ]] guards) — not POSIX sh.
 
 set -uo pipefail
