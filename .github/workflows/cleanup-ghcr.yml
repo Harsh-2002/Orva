@@ -1,0 +1,119 @@
+name: cleanup-ghcr
+
+# Manual one-shot prune of accumulated old versions in
+# ghcr.io/harsh-2002/orva. The release workflow's cleanup-ghcr job
+# already does this automatically on every tag push — this standalone
+# workflow exists so an operator can prune NOW without re-running the
+# full ~15-min release pipeline (when, for example, prior releases
+# left orphan versions behind before the cleanup job existed).
+#
+# Trigger from the Actions tab → "cleanup-ghcr" → "Run workflow".
+# Optional `tag` input picks which release's manifest to preserve;
+# defaults to whatever ghcr's :latest currently points at.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag to preserve (default: whatever :latest resolves to)"
+        required: false
+        default: ""
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    name: prune old ghcr versions
+    runs-on: ubuntu-24.04
+    steps:
+      - name: resolve target tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Resolve :latest → digest → find the tag that shares that digest.
+          latest_digest=$(docker buildx imagetools inspect ghcr.io/harsh-2002/orva:latest --raw \
+            | sha256sum | awk '{print "sha256:"$1}')
+          # The :latest manifest itself is a multi-arch manifest list. Find
+          # which version row in the API has 'latest' in its tags — that
+          # row's adjacent tag (vYYYY.MM.DD) is what we preserve.
+          tag=$(gh api -H 'Accept: application/vnd.github+json' \
+            "/users/Harsh-2002/packages/container/orva/versions?per_page=100" \
+            --paginate \
+            --jq '.[] | select(.metadata.container.tags // [] | index("latest")) | .metadata.container.tags[] | select(. != "latest")' \
+            | head -n1)
+          if [ -z "$tag" ]; then
+            echo "::error::could not resolve a non-latest tag from the current :latest manifest"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "::notice::resolved current release tag: $tag"
+
+      - name: prune everything that isn't $TAG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PKG_OWNER: Harsh-2002
+          PKG_NAME: orva
+        run: |
+          set -eu
+
+          # Same logic as release.yml's cleanup-ghcr job. Resolve the
+          # digest tree of the current manifest, then delete anything
+          # not in that tree and not tagged with $TAG or 'latest'.
+          docker buildx imagetools inspect "ghcr.io/${PKG_OWNER}/${PKG_NAME}:${TAG}" --raw \
+            | jq -r '..|.digest? // empty' \
+            | sort -u > /tmp/keep_digests.txt
+          echo "Digests to keep:"
+          cat /tmp/keep_digests.txt
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "/users/${PKG_OWNER}/packages/container/${PKG_NAME}/versions?per_page=100" \
+            --paginate \
+            --jq '.[] | "\(.id)|\(.name)|\((.metadata.container.tags // []) | join(","))"' \
+            > /tmp/versions.txt
+
+          total=$(wc -l </tmp/versions.txt)
+          deleted=0
+          kept=0
+          echo "Inspecting $total total package versions:"
+
+          while IFS='|' read -r id sha tags; do
+            keep_reason=""
+            if grep -qx "$sha" /tmp/keep_digests.txt; then
+              keep_reason="part of current $TAG manifest"
+            elif echo ",$tags," | grep -qE ",($TAG|latest),"; then
+              keep_reason="tag=$tags"
+            fi
+
+            if [ -n "$keep_reason" ]; then
+              echo "  keep   id=$id tags=$tags ($keep_reason)"
+              kept=$((kept+1))
+              continue
+            fi
+
+            echo "  delete id=$id tags=$tags"
+            if gh api -X DELETE \
+                -H 'Accept: application/vnd.github+json' \
+                "/users/${PKG_OWNER}/packages/container/${PKG_NAME}/versions/${id}" 2>/tmp/delete-err; then
+              deleted=$((deleted+1))
+            else
+              echo "::warning::failed to delete version $id: $(cat /tmp/delete-err)"
+            fi
+          done < /tmp/versions.txt
+
+          echo "::notice::cleanup-ghcr done — kept=$kept, deleted=$deleted, of $total total."
+          {
+            echo "## cleanup-ghcr summary"
+            echo ""
+            echo "- preserved tag: \`$TAG\` (+ \`latest\` + sub-images)"
+            echo "- kept: $kept versions"
+            echo "- deleted: $deleted versions"
+            echo "- total inspected: $total"
+          } >> "$GITHUB_STEP_SUMMARY"

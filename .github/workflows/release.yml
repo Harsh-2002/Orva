@@ -522,7 +522,82 @@ jobs:
           docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
           docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}
 
-  # ── 7. Trigger the production redeploy webhook ───────────────────────
+  # ── 7. Prune old GHCR versions ───────────────────────────────────────
+  # The single-active-release policy applies to GitHub Releases AND the
+  # OCI registry: only the current :<tag> + :latest should remain. GHCR
+  # accumulates one tagged manifest per past release plus per-arch sub-
+  # images, all of which are garbage once the GitHub Release is gone.
+  # This job deletes everything in ghcr.io/harsh-2002/orva that isn't
+  # part of the just-published manifest.
+  #
+  # Runs after docker-manifest so the new :latest + :${tag} are pinned
+  # before we start deleting things. Skips on workflow_dispatch when
+  # the tag input doesn't match an actual release (defensive).
+  cleanup-ghcr:
+    name: prune old ghcr versions
+    needs: [docker-manifest]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: prune everything that isn't the current release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.docker-manifest.outputs.tag }}
+          # Package is user-owned (Harsh-2002), not org-owned. If the
+          # repo moves to an org later, change /users/ → /orgs/ and the
+          # delete URL similarly.
+          PKG_OWNER: Harsh-2002
+          PKG_NAME: orva
+        run: |
+          set -eu
+
+          # Resolve the digests that make up the current :latest manifest.
+          # docker buildx imagetools inspect emits the multi-arch manifest
+          # with each platform's digest; we keep those + the manifest's
+          # own digest. Everything else is fair game.
+          docker buildx imagetools inspect "ghcr.io/${PKG_OWNER}/${PKG_NAME}:${TAG}" --raw \
+            | jq -r '..|.digest? // empty' \
+            | sort -u > /tmp/keep_digests.txt
+          echo "Digests to keep (current $TAG manifest + sub-images):"
+          cat /tmp/keep_digests.txt
+
+          # List all versions in the package, filter to those that are
+          # NOT in the keep-list AND don't carry the current tag or
+          # 'latest'. Delete each one.
+          gh api -H 'Accept: application/vnd.github+json' \
+            "/users/${PKG_OWNER}/packages/container/${PKG_NAME}/versions?per_page=100" \
+            --paginate \
+            --jq '.[] | "\(.id)|\(.name)|\((.metadata.container.tags // []) | join(","))"' \
+            > /tmp/versions.txt
+
+          echo "Inspecting $(wc -l </tmp/versions.txt) total package versions:"
+
+          while IFS='|' read -r id sha tags; do
+            keep_reason=""
+            # 1. Skip if version's sha256 is part of the current manifest tree.
+            if grep -qx "$sha" /tmp/keep_digests.txt; then
+              keep_reason="part of current $TAG manifest"
+            # 2. Skip if version carries the current tag or 'latest'.
+            elif echo ",$tags," | grep -qE ",($TAG|latest),"; then
+              keep_reason="tag=$tags"
+            fi
+
+            if [ -n "$keep_reason" ]; then
+              echo "  keep   id=$id tags=$tags ($keep_reason)"
+              continue
+            fi
+
+            echo "  delete id=$id tags=$tags"
+            gh api -X DELETE \
+              -H 'Accept: application/vnd.github+json' \
+              "/users/${PKG_OWNER}/packages/container/${PKG_NAME}/versions/${id}" \
+              || echo "::warning::failed to delete version $id (continuing)"
+          done < /tmp/versions.txt
+
+          echo "::notice::GHCR cleanup complete — only $TAG + :latest + their sub-images remain."
+
+  # ── 8. Trigger the production redeploy webhook ───────────────────────
   # POSTs to a Portainer stack-redeploy webhook (or any equivalent CD
   # endpoint) so the production host pulls the new `:latest` tag and
   # recreates its container. The URL is held in the
