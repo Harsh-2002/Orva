@@ -6,7 +6,6 @@
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![Node](https://img.shields.io/badge/Node.js-22%20%7C%2024-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/Python-3.13%20%7C%203.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Tested on](https://img.shields.io/badge/tested%20on-Ubuntu%20%7C%20Debian%20%7C%20Alpine%20%7C%20Rocky%20%7C%20Fedora%20%7C%20Arch-blue?style=flat-square)](docs/SUPPORT.md)
 
 **Self-hosted Functions-as-a-Service for your homelab or on-prem server.**
 
