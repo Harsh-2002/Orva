@@ -71,9 +71,9 @@ guest. There's no syscall translation layer to trip over.
 Measured 2026-05-13 on Ubuntu 24.04 / kernel 6.8 / 2 CPU / 11.68 GiB.
 Workload: Node 24 noop handler (`async () => ({statusCode:200,body:"ok"})`).
 Each runtime measured sequentially in isolation against the same
-reference function. Full raw data at
-[`test/kata-bench/summary.md`](../test/kata-bench/summary.md) and the
-per-runtime CSVs under `test/kata-bench/<runtime>/`.
+reference function. To reproduce on your host, run `bash
+test/kata-bench/run.sh` — it writes per-runtime CSVs under
+`test/kata-bench/<runtime>/` and a `summary.md` (both gitignored).
 
 | Metric                          | runc    | kata (QEMU)     | kata-clh (Cloud Hypervisor) |
 |---|---|---|---|

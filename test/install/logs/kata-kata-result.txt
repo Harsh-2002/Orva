@@ -1,5 +1,0 @@
-status: pass
-reason: end-to-end deploy + invoke succeeded
-runtime: kata
-image: ghcr.io/harsh-2002/orva:v2026.05.12
-container_start_ms: 3868

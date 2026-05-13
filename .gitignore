@@ -36,10 +36,20 @@ internal/server/ui_dist/
 data/
 /var/lib/orva/
 
-# Test artifacts
+# Test artifacts (point-in-time outputs from running harnesses — regenerable)
 test/*.tsv
 test/*.log
 test/*-results.tsv
+test/install/results-*.tsv
+test/install/logs/*.log
+test/install/logs/*.txt
+test/install/logs/*.json
+test/kata-bench/runc/
+test/kata-bench/kata/
+test/kata-bench/kata-clh/
+test/kata-bench/logs/
+test/kata-bench/run.log
+test/kata-bench/summary.md
 test/kata-bench/__pycache__/
 .playwright-mcp/
 

@@ -1,3 +1,0 @@
-baseline	pass	body=baseline
-egress	pass	egress-status-200
-secrets	pass	FOO=bar
