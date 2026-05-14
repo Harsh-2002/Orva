@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Self-hosted Functions-as-a-Service. Write a JavaScript, Python, or TypeScript function — Orva runs it in an isolated nsjail sandbox on hardware you own. No cloud account, no per-invocation billing." />
+  <meta property="og:title"       content="Orva — Self-hosted FaaS" />
+  <meta property="og:description" content="Write a function, hit deploy. Orva runs it in an isolated nsjail sandbox on your own hardware." />
+  <meta property="og:image"       content="docs/screenshots/system-overview-dashboard.jpeg" />
+  <meta property="og:type"        content="website" />
+  <meta name="theme-color"        content="#12111C" />
+
+  <title>Orva — Self-hosted Functions-as-a-Service</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<main>
+
+  <!-- ═══════════════════════════════════════════════════
+       § 1  HERO
+       ═══════════════════════════════════════════════════ -->
+  <section id="hero">
+    <div class="inner">
+      <div class="hero-grid">
+
+        <div class="hero-text">
+          <span class="hero-eyebrow">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Self-hosted FaaS
+          </span>
+
+          <h1 class="hero-title">Orva</h1>
+
+          <p class="hero-tagline">
+            Write a function, hit deploy.
+          </p>
+
+          <p class="hero-body">
+            Orva runs your JavaScript, Python, or TypeScript code in an isolated
+            nsjail sandbox and exposes it over HTTP — on hardware you own.
+            No cloud account, no per-invocation billing, no external dependencies.
+            One Docker container. Persistent SQLite storage. Built-in dashboard.
+          </p>
+
+          <div class="hero-actions">
+            <a href="#install" class="btn btn-primary">
+              Get started
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            </a>
+            <a href="https://github.com/Harsh-2002/Orva" target="_blank" rel="noopener" class="btn btn-ghost">
+              GitHub
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </a>
+          </div>
+        </div>
+
+        <div class="hero-code-wrap">
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">bash — one-command install</span>
+              <button class="copy-btn" data-target="hero-snippet">Copy</button>
+            </div>
+            <pre id="hero-snippet"><code>docker run -d --name orva \
+  -p 8443:8443 \
+  --cap-add SYS_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined \
+  -v orva-data:/var/lib/orva \
+  ghcr.io/harsh-2002/orva:latest</code></pre>
+          </div>
+          <p class="hero-code-note">
+            Open <code>http://localhost:8443</code> — onboarding takes ~30 seconds.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       § 2  FEATURES
+       ═══════════════════════════════════════════════════ -->
+  <section id="features">
+    <div class="inner">
+
+      <div class="section-header">
+        <span class="eyebrow">Capabilities</span>
+        <h2>What's included</h2>
+        <p>14 capabilities. One container, one port, zero external dependencies.</p>
+      </div>
+
+      <div class="features-grid">
+
+        <!-- 1 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          </div>
+          <h3>Multi-runtime</h3>
+          <p>Node.js 22, Node.js 24, Python 3.13, Python 3.14, TypeScript — all in one binary.</p>
+        </div>
+
+        <!-- 2 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>nsjail isolation</h3>
+          <p>Every invocation runs in a fresh nsjail sandbox — five overlapping Linux kernel boundaries per function.</p>
+        </div>
+
+        <!-- 3 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <h3>Warm pools</h3>
+          <p>Idle workers stay resident between calls. Back-to-back invocations skip the spawn cost entirely. Pool size is configurable per function.</p>
+        </div>
+
+        <!-- 4 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </div>
+          <h3>KV store</h3>
+          <p>Per-function key-value storage backed by SQLite with optional TTL. <code>kv.put / kv.get / kv.delete / kv.list</code> — browsable from the dashboard.</p>
+        </div>
+
+        <!-- 5 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+          </div>
+          <h3>Background jobs</h3>
+          <p><code>jobs.enqueue(name, payload)</code> — persisted queue with configurable retries and exponential backoff. Visible in the dashboard with retry and cancel.</p>
+        </div>
+
+        <!-- 6 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3>Cron schedules</h3>
+          <p>Fire any function on a cron expression. The dashboard shows last run, next run, and current status.</p>
+        </div>
+
+        <!-- 7 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+          </div>
+          <h3>Function-to-function</h3>
+          <p><code>invoke('name', payload)</code> calls another function via the warm pool. The call becomes a child span in the same distributed trace — no HTTP roundtrip.</p>
+        </div>
+
+        <!-- 8 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <h3>Distributed tracing</h3>
+          <p>Every invocation chain is recorded automatically. HTTP, F2F calls, and background jobs all share one <code>trace_id</code>. Waterfall view in the dashboard; zero code changes needed.</p>
+        </div>
+
+        <!-- 9 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          </div>
+          <h3>Custom routes</h3>
+          <p>Map a path like <code>/webhooks/stripe</code> to a function so external callers use a clean URL instead of a function UUID.</p>
+        </div>
+
+        <!-- 10 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h3>Secrets</h3>
+          <p>Per-function encrypted secrets, injected as env vars at sandbox spawn time. Never logged or stored in plaintext.</p>
+        </div>
+
+        <!-- 11 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 2 11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </div>
+          <h3>Inbound webhooks</h3>
+          <p>Signed inbound trigger endpoints — GitHub, Stripe, Slack, and generic HMAC — that fan into a function.</p>
+        </div>
+
+        <!-- 12 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>
+          </div>
+          <h3>Rollback</h3>
+          <p>Every deploy is content-hashed and archived. Roll back to any prior version in one click or one CLI command.</p>
+        </div>
+
+        <!-- 13 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          </div>
+          <h3>MCP server</h3>
+          <p>70 tools at <code>/mcp</code> — Claude Code, Cursor, claude.ai, and any OAuth-capable MCP client can create functions, deploy code, manage secrets, and read logs without leaving the chat.</p>
+        </div>
+
+        <!-- 14 -->
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          </div>
+          <h3>16 templates</h3>
+          <p>Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener — all pickable in the editor, ready to customise.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       § 3  SCREENSHOTS
+       ═══════════════════════════════════════════════════ -->
+  <section id="screenshots">
+    <div class="inner">
+
+      <div class="section-header">
+        <span class="eyebrow">Dashboard</span>
+        <h2>Everything the operator needs</h2>
+        <p>Nothing they don't. Click any screenshot to view full size.</p>
+      </div>
+
+      <div class="screenshots-grid">
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/system-overview-dashboard.jpeg"
+              alt="System Overview Dashboard"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/system-overview-dashboard.jpeg"
+              data-caption="System Overview — live metrics, warm pools, response-time percentiles"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>System Overview</strong>
+            <span>Live metrics, warm pools, response-time percentiles</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/functions-list.jpeg"
+              alt="Functions List"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/functions-list.jpeg"
+              data-caption="Functions — every deployed handler, runtime, resources, last deploy date"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Functions</strong>
+            <span>Every deployed handler, runtime, resources, last deploy date</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/function-editor.jpeg"
+              alt="Function Editor"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/function-editor.jpeg"
+              data-caption="Editor — write and deploy code directly in the browser, with build logs and test pane"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Editor</strong>
+            <span>Write and deploy code directly in the browser, with build logs and test pane</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/distributed-traces.jpeg"
+              alt="Distributed Traces"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/distributed-traces.jpeg"
+              data-caption="Traces — automatic causal waterfall across HTTP, F2F invokes, and background jobs"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Traces</strong>
+            <span>Automatic causal waterfall across HTTP, F2F invokes, and background jobs</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/activity-live-feed.jpeg"
+              alt="Activity Live Feed"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/activity-live-feed.jpeg"
+              data-caption="Activity — live feed of every API call, CLI command, MCP tool, and webhook delivery"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Activity</strong>
+            <span>Live feed of every API call, CLI command, MCP tool, and webhook delivery</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/invocation-logs.jpeg"
+              alt="Invocation Logs"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/invocation-logs.jpeg"
+              data-caption="Invocation Logs — every execution captured with request, response, duration, and trace link"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Invocation Logs</strong>
+            <span>Every execution captured with request, response, duration, and trace link</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/api-keys.jpeg"
+              alt="API Keys"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/api-keys.jpeg"
+              data-caption="API Keys — long-lived bearer tokens for CI, scripts, and AI agents"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>API Keys</strong>
+            <span>Long-lived bearer tokens for CI, scripts, and AI agents</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/built-in-docs.jpeg"
+              alt="Built-in Docs"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/built-in-docs.jpeg"
+              data-caption="Built-in Docs — full reference always at /web/docs, no tab-switching"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Built-in Docs</strong>
+            <span>Full reference always at <code>/web/docs</code>, no tab-switching</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/firewall-and-dns.jpeg"
+              alt="Firewall and DNS"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/firewall-and-dns.jpeg"
+              data-caption="Firewall and DNS — per-function egress rules, custom resolvers, blocklist"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Firewall &amp; DNS</strong>
+            <span>Per-function egress rules, custom resolvers, blocklist</span>
+          </figcaption>
+        </figure>
+
+        <figure class="screenshot-card" data-reveal>
+          <div class="screenshot-thumb-wrap">
+            <img
+              src="docs/screenshots/settings-oauth.jpeg"
+              alt="Settings and OAuth"
+              loading="lazy"
+              decoding="async"
+              class="screenshot-thumb"
+              data-lightbox="docs/screenshots/settings-oauth.jpeg"
+              data-caption="Settings — storage, account, and OAuth-connected apps"
+              role="button"
+              tabindex="0"
+            />
+            <div class="screenshot-overlay">
+              <span class="screenshot-expand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                View
+              </span>
+            </div>
+          </div>
+          <figcaption>
+            <strong>Settings</strong>
+            <span>Storage, account, and OAuth-connected apps</span>
+          </figcaption>
+        </figure>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       § 4  SECURITY
+       ═══════════════════════════════════════════════════ -->
+  <section id="security">
+    <div class="inner">
+
+      <div class="section-header">
+        <span class="eyebrow">Isolation model</span>
+        <h2>Five overlapping Linux kernel boundaries</h2>
+        <p>Each layer is enforced by the kernel, not by Orva code. Orva configures the boundaries; the kernel holds them.</p>
+      </div>
+
+      <div class="security-grid">
+
+        <div>
+          <div class="isolation-layers">
+
+            <div class="iso-layer" data-reveal>
+              <div class="iso-layer-title">
+                <span class="layer-num">1</span>
+                <strong>User namespace</strong>
+              </div>
+              <p class="iso-layer-body">
+                UID 0 inside the sandbox is mapped to UID 65534 (<code>nobody</code>) on the host.
+                All 64 Linux capability bits are cleared — verified in <code>/proc/self/status</code>.
+                The function cannot escalate to host root.
+              </p>
+            </div>
+
+            <div class="iso-layer" data-reveal>
+              <div class="iso-layer-title">
+                <span class="layer-num">2</span>
+                <strong>Mount namespace + chroot</strong>
+              </div>
+              <p class="iso-layer-body">
+                <code>/code</code> is a read-only bind mount of the function's versioned directory.
+                <code>/tmp</code> is a private tmpfs, wiped after each worker exits.
+                No host filesystem, no other functions' code, no <code>/proc</code> of the host.
+              </p>
+            </div>
+
+            <div class="iso-layer" data-reveal>
+              <div class="iso-layer-title">
+                <span class="layer-num">3</span>
+                <strong>cgroup v2</strong>
+              </div>
+              <p class="iso-layer-body">
+                Hard limits per function: <code>memory.max</code>, <code>cpu.max</code>,
+                <code>pids.max</code>. The host refuses new spawns past 80% total memory reservation.
+              </p>
+            </div>
+
+            <div class="iso-layer" data-reveal>
+              <div class="iso-layer-title">
+                <span class="layer-num">4</span>
+                <strong>Seccomp (Kafel policy)</strong>
+              </div>
+              <p class="iso-layer-body">
+                ~150 syscalls blocked: <code>mount</code>, <code>unshare</code>, <code>bpf</code>,
+                <code>kexec_load</code>, <code>init_module</code>, <code>ptrace</code>, and more.
+                Blocked attempts log and kill the process — never silently fail.
+              </p>
+            </div>
+
+            <div class="iso-layer" data-reveal>
+              <div class="iso-layer-title">
+                <span class="layer-num">5</span>
+                <strong>Network namespace</strong>
+              </div>
+              <p class="iso-layer-body">
+                Default <code>network_mode: none</code> — loopback only, no inbound possible.
+                Functions opt in to <code>network_mode: egress</code> for outbound HTTPS via
+                an nftables allowlist.
+              </p>
+            </div>
+
+          </div>
+        </div>
+
+        <div>
+          <div class="security-claims">
+
+            <div class="claim" data-reveal>
+              <div class="claim-check">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="claim-body">
+                <strong>All 64 capability bits cleared</strong>
+                <p>Verified via <code>/proc/self/status</code> — <code>CapEff</code> reads 0 inside every sandbox. Apparent root inside is nobody on the host.</p>
+              </div>
+            </div>
+
+            <div class="claim" data-reveal>
+              <div class="claim-check">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="claim-body">
+                <strong>Read-only code, private tmp</strong>
+                <p>Functions cannot mutate their own source tree. A fresh tmpfs per invocation means one function's tmp is never visible to another.</p>
+              </div>
+            </div>
+
+            <div class="claim" data-reveal>
+              <div class="claim-check">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="claim-body">
+                <strong>Hard resource ceilings</strong>
+                <p>Memory, CPU, and pid limits enforced by cgroup v2. A runaway function cannot exhaust host resources or fork-bomb the system.</p>
+              </div>
+            </div>
+
+            <div class="claim" data-reveal>
+              <div class="claim-check">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="claim-body">
+                <strong>Default network isolation</strong>
+                <p>Loopback only by default. Outbound HTTPS requires explicit opt-in per function. Inbound connections from outside the sandbox are not possible in either mode.</p>
+              </div>
+            </div>
+
+            <div class="claim" data-reveal>
+              <div class="claim-check">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="claim-body">
+                <strong>Verified under Kata Containers</strong>
+                <p>Kata 3.30.0 (QEMU + Cloud Hypervisor) tested end-to-end on 2026-05-13. Kata puts a real Linux kernel under the orvad container — nsjail keeps working unchanged.</p>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="security-note">
+            Full threat model, audit trail, and a self-verification recipe:
+            <a href="https://github.com/Harsh-2002/Orva/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">docs/SECURITY.md</a>.
+            gVisor is architecturally incompatible (nsjail's nested-namespace <code>clone()</code> is rejected by gVisor's user-space kernel).
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Comparison table -->
+      <table class="compare-table" style="margin-top:40px">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Orva (nsjail)</th>
+            <th>Firecracker / VMs</th>
+            <th>Plain Docker</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="highlight">Kernel</td>
+            <td>Shared with host</td>
+            <td>Separate kernel per VM</td>
+            <td>Shared with host</td>
+          </tr>
+          <tr>
+            <td class="highlight">Isolation primitive</td>
+            <td class="highlight">Linux namespaces + seccomp + cgroup v2</td>
+            <td>Hardware virtualisation (KVM)</td>
+            <td>Linux namespaces + cgroup</td>
+          </tr>
+          <tr>
+            <td class="highlight">Syscall surface</td>
+            <td class="highlight">~150 syscalls blocked via Kafel policy</td>
+            <td>Near-zero (hardware VM boundary)</td>
+            <td>Unfiltered by default</td>
+          </tr>
+          <tr>
+            <td class="highlight">Capability drop</td>
+            <td class="highlight">All 64 Linux caps cleared</td>
+            <td>N/A (separate kernel)</td>
+            <td>Partial (Docker defaults)</td>
+          </tr>
+          <tr>
+            <td class="highlight">Cold start</td>
+            <td>~50–200 ms</td>
+            <td>~125 ms (Firecracker MicroVM)</td>
+            <td>N/A</td>
+          </tr>
+          <tr>
+            <td class="highlight">Memory per worker</td>
+            <td>~30 MB</td>
+            <td>~5 MB per MicroVM</td>
+            <td>Varies</td>
+          </tr>
+          <tr>
+            <td class="highlight">Good for</td>
+            <td class="highlight">Homelabs, internal tools, trusted code</td>
+            <td>Multi-tenant cloud, untrusted third-party code</td>
+            <td>General app containers</td>
+          </tr>
+        </tbody>
+      </table>
+
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       § 5  INSTALL
+       ═══════════════════════════════════════════════════ -->
+  <section id="install">
+    <div class="inner">
+
+      <div class="section-header">
+        <span class="eyebrow">Installation</span>
+        <h2>Three ways to run Orva</h2>
+        <p>Pick the one that fits your setup. All three use the same image.</p>
+      </div>
+
+      <div class="install-wrap">
+        <div class="tab-list" role="tablist" aria-label="Installation methods">
+          <button class="tab-btn active" role="tab" aria-selected="true"  data-tab="docker"  id="tab-btn-docker"  aria-controls="tab-docker">Docker</button>
+          <button class="tab-btn"        role="tab" aria-selected="false" data-tab="compose" id="tab-btn-compose" aria-controls="tab-compose">Docker Compose</button>
+          <button class="tab-btn"        role="tab" aria-selected="false" data-tab="cli"     id="tab-btn-cli"     aria-controls="tab-cli">Standalone CLI</button>
+        </div>
+
+        <!-- Docker tab -->
+        <div class="tab-panel active" id="tab-docker" role="tabpanel" aria-labelledby="tab-btn-docker">
+          <p class="install-note">
+            The quickest way to get Orva running. One command, then open the dashboard.
+          </p>
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">bash</span>
+              <button class="copy-btn" data-target="snap-docker">Copy</button>
+            </div>
+            <pre id="snap-docker"><code>docker run -d --name orva \
+  -p 8443:8443 \
+  --cap-add SYS_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined \
+  -v orva-data:/var/lib/orva \
+  ghcr.io/harsh-2002/orva:latest</code></pre>
+          </div>
+          <p class="install-note" style="margin-top:14px;">
+            Then open <code>http://localhost:8443</code> — onboarding takes ~30 seconds.
+          </p>
+        </div>
+
+        <!-- Docker Compose tab -->
+        <div class="tab-panel" id="tab-compose" role="tabpanel" aria-labelledby="tab-btn-compose">
+          <p class="install-note">
+            Recommended for persistent setups. Includes volumes, restart policy, resource limits, and health checks.
+          </p>
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">bash</span>
+              <button class="copy-btn" data-target="snap-compose">Copy</button>
+            </div>
+            <pre id="snap-compose"><code>curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml \
+  -o docker-compose.yml
+docker compose up -d</code></pre>
+          </div>
+        </div>
+
+        <!-- CLI tab -->
+        <div class="tab-panel" id="tab-cli" role="tabpanel" aria-labelledby="tab-btn-cli">
+          <p class="install-note">
+            ~12 MB standalone binary. No Docker required. Use it to talk to a remote Orva server from your laptop, CI runner, or any machine.
+            Ships for Linux, macOS, and Windows on amd64 + arm64.
+          </p>
+          <div class="code-stack">
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-lang">bash — Linux + macOS</span>
+                <button class="copy-btn" data-target="snap-cli-unix">Copy</button>
+              </div>
+              <pre id="snap-cli-unix"><code>curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh</code></pre>
+            </div>
+
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-lang">powershell — Windows</span>
+                <button class="copy-btn" data-target="snap-cli-win">Copy</button>
+              </div>
+              <pre id="snap-cli-win"><code>irm https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.ps1 | iex</code></pre>
+            </div>
+
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-lang">bash — then</span>
+                <button class="copy-btn" data-target="snap-cli-use">Copy</button>
+              </div>
+              <pre id="snap-cli-use"><code>orva login --endpoint https://your-orva.example.com --api-key orva_...
+orva functions list
+orva deploy my-fn ./src
+orva invoke my-fn --body '{"name":"world"}'
+orva logs my-fn --follow</code></pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       § 6  RUNTIMES
+       ═══════════════════════════════════════════════════ -->
+  <section id="runtimes">
+    <div class="inner">
+
+      <div class="section-header">
+        <span class="eyebrow">Runtimes</span>
+        <h2>Same protocol. Four runtimes.</h2>
+        <p>Every function exports a single <code>handler</code>. The adapter handles the rest.</p>
+      </div>
+
+      <div class="runtimes-grid">
+
+        <div class="runtime-card" data-reveal>
+          <div class="runtime-header">
+            <span class="runtime-badge">Node.js 22 / 24</span>
+            <span class="runtime-file">handler.js</span>
+          </div>
+          <div class="code-block">
+            <pre><code>const { kv, invoke, jobs } = require('orva')
+
+exports.handler = async (event) => {
+  const count = (await kv.get('n') || 0) + 1
+  await kv.put('n', count)
+  return { statusCode: 200, body: { count } }
+}</code></pre>
+          </div>
+        </div>
+
+        <div class="runtime-card" data-reveal>
+          <div class="runtime-header">
+            <span class="runtime-badge">Python 3.13 / 3.14</span>
+            <span class="runtime-file">handler.py</span>
+          </div>
+          <div class="code-block">
+            <pre><code>from orva import kv, invoke, jobs
+
+def handler(event):
+    count = (kv.get("n") or 0) + 1
+    kv.put("n", count)
+    return {"statusCode": 200, "body": {"count": count}}</code></pre>
+          </div>
+        </div>
+
+        <div class="runtime-card" data-reveal>
+          <div class="runtime-header">
+            <span class="runtime-badge">TypeScript</span>
+            <span class="runtime-file">handler.ts</span>
+          </div>
+          <div class="code-block">
+            <pre><code>import { kv, invoke, jobs } from 'orva'
+
+export const handler = async (event: any) => {
+  const count = ((await kv.get('n')) ?? 0) + 1
+  await kv.put('n', count)
+  return { statusCode: 200, body: { count } }
+}</code></pre>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="sdk-note">
+        <div class="sdk-note-text">
+          <h4>SDK pre-installed in every sandbox</h4>
+          <p>
+            The <code>orva</code> module is available in every function with no install step.
+            It reaches back to the Orva API over loopback only — no network access required.
+          </p>
+        </div>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">SDK surface</span>
+          </div>
+          <pre><code>kv.put(key, value, { ttl? })   // persist state
+kv.get(key)                    // read back
+kv.delete(key)
+kv.list(prefix?)               // scan keys
+
+invoke('fn-name', payload)     // call another function
+                               // child span in the same trace
+
+jobs.enqueue('fn-name', data)  // background + retries</code></pre>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════
+       § 7  CLOSING CTA
+       ═══════════════════════════════════════════════════ -->
+  <section id="cta-end">
+    <div class="cta-end-inner">
+      <h2>Deploy in minutes.</h2>
+      <p>One container. Your hardware. No cloud account, no billing, no lock-in.</p>
+      <div class="cta-actions">
+        <a href="#install" class="btn btn-primary">
+          Get started
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </a>
+        <a href="https://github.com/Harsh-2002/Orva" target="_blank" rel="noopener" class="btn btn-ghost">
+          GitHub
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
+        <a href="https://github.com/Harsh-2002/Orva/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noopener" class="btn btn-ghost">
+          Architecture docs
+        </a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+
+<!-- ── Lightbox overlay ──────────────────────────────────── -->
+<div id="lightbox" class="lightbox" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Screenshot viewer">
+  <button id="lb-close" class="lb-close" aria-label="Close lightbox">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+  <div id="lb-backdrop" class="lb-backdrop"></div>
+  <div class="lb-stage">
+    <img id="lb-img" src="" alt="" class="lb-img" />
+    <p id="lb-caption" class="lb-caption"></p>
+  </div>
+</div>
+
+
+<!-- ── Back to top ──────────────────────────────────────── -->
+<button id="btt" class="btt-btn" aria-label="Back to top">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>
+</button>
+
+<script src="app.js"></script>
+</body>
+</html>
