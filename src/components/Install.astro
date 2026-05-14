@@ -1,0 +1,113 @@
+---
+---
+
+<section id="install">
+  <div class="inner">
+    <div class="hd" data-reveal>
+      <span class="eyebrow">Installation</span>
+      <h2 class="section-title">Three ways to run Orva</h2>
+      <p class="section-sub">Pick the one that fits your setup. All three use the same image.</p>
+    </div>
+
+    <div class="tabs-wrap">
+      <div class="tab-list" role="tablist" aria-label="Installation methods">
+        <button class="tab-btn active" role="tab" aria-selected="true"  data-tab="docker"  id="tb-docker"  aria-controls="tab-docker">Docker</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" data-tab="compose" id="tb-compose" aria-controls="tab-compose">Docker Compose</button>
+        <button class="tab-btn"        role="tab" aria-selected="false" data-tab="cli"     id="tb-cli"     aria-controls="tab-cli">Standalone CLI</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-docker" role="tabpanel" aria-labelledby="tb-docker">
+        <p class="note">The quickest way to get Orva running. One command, then open the dashboard.</p>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">bash</span>
+            <button class="copy-btn" data-target="inst-docker">Copy</button>
+          </div>
+          <pre id="inst-docker"><code>docker run -d --name orva \
+  -p 8443:8443 \
+  --cap-add SYS_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined \
+  -v orva-data:/var/lib/orva \
+  ghcr.io/harsh-2002/orva:latest</code></pre>
+        </div>
+        <p class="note note-mt">Then open <code>http://localhost:8443</code> -- onboarding takes ~30 seconds.</p>
+      </div>
+
+      <div class="tab-panel" id="tab-compose" role="tabpanel" aria-labelledby="tb-compose">
+        <p class="note">Recommended for persistent setups. Includes volumes, restart policy, resource limits, and health checks.</p>
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">bash</span>
+            <button class="copy-btn" data-target="inst-compose">Copy</button>
+          </div>
+          <pre id="inst-compose"><code>curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml \
+  -o docker-compose.yml
+docker compose up -d</code></pre>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-cli" role="tabpanel" aria-labelledby="tb-cli">
+        <p class="note">~12 MB standalone binary. No Docker required. Ships for Linux, macOS, and Windows on amd64 + arm64.</p>
+        <div class="stack">
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">bash -- Linux + macOS</span>
+              <button class="copy-btn" data-target="inst-unix">Copy</button>
+            </div>
+            <pre id="inst-unix"><code>curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">powershell -- Windows</span>
+              <button class="copy-btn" data-target="inst-win">Copy</button>
+            </div>
+            <pre id="inst-win"><code>irm https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.ps1 | iex</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">bash -- then</span>
+              <button class="copy-btn" data-target="inst-use">Copy</button>
+            </div>
+            <pre id="inst-use"><code>orva login --endpoint https://your-orva.example.com --api-key orva_XXXX
+orva functions list
+orva deploy my-fn ./src
+orva invoke my-fn --body &#39;&#123;"name":"world"&#125;&#39;
+orva logs my-fn --follow</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  #install { padding: clamp(72px, 9vw, 104px) 0; }
+  .hd { margin-bottom: 36px; }
+  .tabs-wrap { max-width: 760px; }
+  .tab-list { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    padding: 10px 18px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    margin-bottom: -1px;
+    transition: color 120ms, border-color 120ms;
+  }
+  .tab-btn:hover { color: var(--fg); }
+  .tab-btn.active { color: var(--fg); border-bottom-color: var(--accent-hi); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .note { font-size: 0.875rem; color: var(--muted); margin-bottom: 16px; line-height: 1.6; }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .note-mt { margin-top: 12px; }
+
+  @media (max-width: 580px) {
+    .tab-btn { padding: 10px 12px; font-size: 0.8125rem; }
+  }
+</style>

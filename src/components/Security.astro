@@ -1,0 +1,189 @@
+---
+const layers = [
+  { n: 1, title: 'User namespace', body: 'UID 0 inside the sandbox maps to UID 65534 (nobody) on the host. All 64 Linux capability bits are cleared — verified via /proc/self/status. The function cannot escalate to host root.' },
+  { n: 2, title: 'Mount namespace + chroot', body: '/code is a read-only bind mount of the function\'s versioned directory. /tmp is a private tmpfs wiped after each worker exits. No host filesystem visible.' },
+  { n: 3, title: 'cgroup v2', body: 'Hard limits per function: memory.max, cpu.max, pids.max. The host refuses new spawns past 80% total memory reservation.' },
+  { n: 4, title: 'Seccomp (Kafel policy)', body: '~150 syscalls blocked: mount, unshare, bpf, kexec_load, init_module, ptrace, and more. Blocked attempts log and kill the process — never silently fail.' },
+  { n: 5, title: 'Network namespace', body: 'Default network_mode: none — loopback only, no inbound possible. Functions opt in to network_mode: egress for outbound HTTPS via an nftables allowlist.' },
+];
+
+const claims = [
+  { title: 'All 64 capability bits cleared', body: 'Verified via /proc/self/status — CapEff reads 0 inside every sandbox. Apparent root inside is nobody on the host.' },
+  { title: 'Read-only code, private tmp', body: 'Functions cannot mutate their own source tree. A fresh tmpfs per invocation means one function\'s tmp is never visible to another.' },
+  { title: 'Hard resource ceilings', body: 'Memory, CPU, and pid limits enforced by cgroup v2. A runaway function cannot exhaust host resources or fork-bomb the system.' },
+  { title: 'Default network isolation', body: 'Loopback only by default. Outbound HTTPS requires explicit opt-in per function. Inbound connections from outside are not possible in either mode.' },
+  { title: 'Verified under Kata Containers', body: 'Kata 3.30.0 (QEMU + Cloud Hypervisor) tested end-to-end. Kata puts a real Linux kernel under the container — nsjail keeps working unchanged.' },
+];
+---
+
+<section id="security">
+  <div class="inner">
+    <div class="hd" data-reveal>
+      <span class="eyebrow">Isolation model</span>
+      <h2 class="section-title">Five overlapping Linux kernel boundaries</h2>
+      <p class="section-sub">Each layer is enforced by the kernel, not by Orva code. Orva configures the boundaries; the kernel holds them.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="layers-wrap" data-reveal>
+        {layers.map((l) => (
+          <div class="layer">
+            <div class="layer-head">
+              <span class="num">{l.n}</span>
+              <strong>{l.title}</strong>
+            </div>
+            <p class="layer-body">{l.body}</p>
+          </div>
+        ))}
+      </div>
+
+      <div class="claims-wrap">
+        {claims.map((c, i) => (
+          <div class="claim" data-reveal style={`--si:${i}`}>
+            <div class="check" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <strong>{c.title}</strong>
+              <p>{c.body}</p>
+            </div>
+          </div>
+        ))}
+        <div class="sec-note" data-reveal>
+          Full threat model and self-verification recipe:
+          <a href="https://github.com/Harsh-2002/Orva/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">docs/SECURITY.md</a>.
+          gVisor is architecturally incompatible — nsjail's nested-namespace clone() is rejected by gVisor's user-space kernel.
+        </div>
+      </div>
+    </div>
+
+    <table class="compare" data-reveal>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Orva (nsjail)</th>
+          <th>Firecracker / VMs</th>
+          <th>Plain Docker</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="hl">Kernel</td><td>Shared with host</td><td>Separate per VM</td><td>Shared with host</td></tr>
+        <tr><td class="hl">Isolation primitive</td><td class="hl">Linux namespaces + seccomp + cgroup v2</td><td>Hardware virtualisation (KVM)</td><td>Linux namespaces + cgroup</td></tr>
+        <tr><td class="hl">Syscall surface</td><td class="hl">~150 syscalls blocked via Kafel policy</td><td>Near-zero (hardware boundary)</td><td>Unfiltered by default</td></tr>
+        <tr><td class="hl">Capability drop</td><td class="hl">All 64 Linux caps cleared</td><td>N/A (separate kernel)</td><td>Partial (Docker defaults)</td></tr>
+        <tr><td class="hl">Cold start</td><td>~50–200 ms</td><td>~125 ms (Firecracker MicroVM)</td><td>N/A</td></tr>
+        <tr><td class="hl">Memory per worker</td><td>~30 MB</td><td>~5 MB per MicroVM</td><td>Varies</td></tr>
+        <tr><td class="hl">Good for</td><td class="hl">Homelabs, internal tools, trusted code</td><td>Multi-tenant cloud, untrusted code</td><td>General app containers</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<style>
+  #security { padding: clamp(64px, 8vw, 88px) 0; }
+  .hd { margin-bottom: 40px; }
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: start;
+    margin-bottom: 40px;
+  }
+
+  /* Layers */
+  .layers-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+  .layer {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    transition: background 140ms;
+  }
+  .layer:last-child { border-bottom: none; }
+  .layer:hover { background: var(--hover); }
+  .layer-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: rgba(114,85,176,0.15);
+    border: 1px solid rgba(114,85,176,0.35);
+    border-radius: 50%;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--accent-hi);
+    flex-shrink: 0;
+    font-family: var(--mono);
+  }
+  .layer-head strong { font-size: 0.875rem; font-weight: 600; color: var(--fg); }
+  .layer-body { font-size: 0.8125rem; color: var(--muted); line-height: 1.55; padding-left: 28px; }
+
+  /* Claims */
+  .claims-wrap { display: flex; flex-direction: column; gap: 0; }
+  .claim {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .claim:last-of-type { border-bottom: none; }
+  .check {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--green-bg);
+    border: 1px solid var(--green-bd);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .check svg { width: 11px; height: 11px; color: var(--green); }
+  .claim strong { display: block; font-size: 0.875rem; font-weight: 600; color: var(--fg); margin-bottom: 3px; }
+  .claim p { font-size: 0.8125rem; color: var(--muted); line-height: 1.5; }
+  .sec-note {
+    margin-top: 20px;
+    padding: 13px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    font-size: 0.8125rem;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .sec-note a { color: var(--accent-hi); text-decoration: underline; text-underline-offset: 2px; }
+
+  /* Table */
+  .compare { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+  .compare th {
+    text-align: left;
+    padding: 10px 14px;
+    font-weight: 600;
+    color: var(--fg);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+  }
+  .compare th:first-child { border-radius: var(--r-md) 0 0 0; }
+  .compare th:last-child  { border-radius: 0 var(--r-md) 0 0; }
+  .compare td { padding: 10px 14px; color: var(--muted); border-bottom: 1px solid var(--border); vertical-align: top; }
+  .compare tr:last-child td { border-bottom: none; }
+  .compare tr:hover td { background: var(--surface); }
+  .compare .hl { color: var(--fg); font-weight: 500; }
+
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; gap: 32px; } }
+  @media (max-width: 580px) { .compare { font-size: 0.75rem; } .compare th, .compare td { padding: 8px 10px; } }
+</style>

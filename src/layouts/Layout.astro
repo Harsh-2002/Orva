@@ -1,0 +1,161 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  ogImage?: string;
+}
+
+const {
+  title = 'Orva — Self-hosted Functions-as-a-Service',
+  description = 'Write a JavaScript, Python, or TypeScript function — Orva runs it in an isolated nsjail sandbox on hardware you own. No cloud account, no per-invocation billing.',
+  ogImage = `${import.meta.env.BASE_URL}/screenshots/system-overview-dashboard.jpeg`,
+} = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content={description} />
+  <meta property="og:title"       content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:image"       content={ogImage} />
+  <meta property="og:type"        content="website" />
+  <meta name="theme-color"        content="#111019" />
+  <title>{title}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+</head>
+<body>
+  <slot />
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Screenshot viewer">
+    <button id="lb-close" class="lb-close" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div id="lb-backdrop" class="lb-backdrop"></div>
+    <div class="lb-stage">
+      <img id="lb-img" src="" alt="" class="lb-img" />
+      <p id="lb-caption" class="lb-caption"></p>
+    </div>
+  </div>
+
+  <!-- Back to top -->
+  <button id="btt" class="btt" aria-label="Back to top">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg>
+  </button>
+</body>
+</html>
+
+<style is:global>
+/* Lightbox */
+.lightbox { display: none; position: fixed; inset: 0; z-index: 9000; align-items: center; justify-content: center; }
+.lightbox.open { display: flex; }
+.lb-backdrop { position: absolute; inset: 0; background: rgba(11,10,20,0.92); backdrop-filter: blur(6px); cursor: pointer; }
+.lb-stage { position: relative; z-index: 1; max-width: min(92vw,1280px); display: flex; flex-direction: column; gap: 14px; align-items: center; }
+.lb-img { max-width: 100%; max-height: 82vh; object-fit: contain; border-radius: var(--r-lg); border: 1px solid var(--border); box-shadow: 0 32px 80px rgba(0,0,0,0.7); }
+.lb-caption { color: var(--muted); font-size: 0.8125rem; text-align: center; max-width: 640px; }
+.lb-close { position: fixed; top: 16px; right: 16px; z-index: 2; background: var(--surface); border: 1px solid var(--border); color: var(--muted); width: 36px; height: 36px; border-radius: var(--r-md); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 120ms; }
+.lb-close:hover { background: var(--hover); color: var(--fg); }
+
+/* Back to top */
+.btt { position: fixed; bottom: 24px; right: 24px; z-index: 500; width: 38px; height: 38px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 200ms, background 120ms; }
+.btt.on { opacity: 1; pointer-events: auto; }
+.btt:hover { background: var(--hover); color: var(--fg); }
+</style>
+
+<script>
+// ── Reveal on scroll ─────────────────────────────────────
+const ro = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (e.isIntersecting) { e.target.classList.add('in'); ro.unobserve(e.target); }
+  });
+}, { threshold: 0.08 });
+document.querySelectorAll('[data-reveal]').forEach((el, i) => {
+  (el as HTMLElement).style.setProperty('--si', String(i % 4));
+  ro.observe(el);
+});
+
+// ── Copy buttons ─────────────────────────────────────────
+document.querySelectorAll<HTMLButtonElement>('.copy-btn[data-target]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const target = document.getElementById(btn.dataset.target!);
+    if (!target) return;
+    const text = target.innerText;
+    try { await navigator.clipboard.writeText(text); }
+    catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+    btn.classList.add('copied');
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 2000);
+  });
+});
+
+// ── Tab switcher ─────────────────────────────────────────
+document.querySelectorAll<HTMLElement>('.tab-list').forEach((list) => {
+  const buttons = list.querySelectorAll<HTMLButtonElement>('.tab-btn');
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab!;
+      const parent = list.closest('.tabs-wrap')!;
+      parent.querySelectorAll<HTMLElement>('.tab-btn').forEach((b) => {
+        b.classList.toggle('active', b === btn);
+        b.setAttribute('aria-selected', String(b === btn));
+      });
+      parent.querySelectorAll<HTMLElement>('.tab-panel').forEach((p) => {
+        p.classList.toggle('active', p.id === `tab-${tab}`);
+      });
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        const btns = Array.from(buttons);
+        const idx = btns.indexOf(btn);
+        const next = e.key === 'ArrowRight' ? btns[(idx + 1) % btns.length] : btns[(idx - 1 + btns.length) % btns.length];
+        next.click(); next.focus();
+      }
+    });
+  });
+});
+
+// ── Lightbox ─────────────────────────────────────────────
+const lb = document.getElementById('lightbox')!;
+const lbImg = document.getElementById('lb-img') as HTMLImageElement;
+const lbCap = document.getElementById('lb-caption')!;
+let lbTrigger: HTMLElement | null = null;
+
+function openLb(src: string, caption: string, trigger: HTMLElement) {
+  lbImg.src = src; lbCap.textContent = caption;
+  lb.classList.add('open'); lb.setAttribute('aria-hidden', 'false');
+  lbTrigger = trigger;
+  document.getElementById('lb-close')!.focus();
+}
+function closeLb() {
+  lb.classList.remove('open'); lb.setAttribute('aria-hidden', 'true');
+  lbTrigger?.focus(); lbTrigger = null;
+}
+
+document.querySelectorAll<HTMLElement>('[data-lightbox]').forEach((el) => {
+  el.addEventListener('click', () => openLb(el.dataset.lightbox!, el.dataset.caption ?? '', el));
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLb(el.dataset.lightbox!, el.dataset.caption ?? '', el); } });
+});
+document.getElementById('lb-close')!.addEventListener('click', closeLb);
+document.getElementById('lb-backdrop')!.addEventListener('click', closeLb);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && lb.classList.contains('open')) closeLb(); });
+
+// ── Back to top ──────────────────────────────────────────
+const btt = document.getElementById('btt')!;
+window.addEventListener('scroll', () => { btt.classList.toggle('on', scrollY > 400); }, { passive: true });
+btt.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+
+// ── Anchor offset ────────────────────────────────────────
+document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]').forEach((a) => {
+  a.addEventListener('click', (e) => {
+    const target = document.querySelector(a.getAttribute('href')!);
+    if (target) { e.preventDefault(); const y = target.getBoundingClientRect().top + scrollY - 32; window.scrollTo({ top: y, behavior: 'smooth' }); }
+  });
+});
+</script>

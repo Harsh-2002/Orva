@@ -1,0 +1,134 @@
+---
+---
+
+<section id="hero">
+  <div class="inner">
+    <div class="hero-grid">
+
+      <div class="hero-text">
+        <span class="badge">Self-hosted FaaS</span>
+        <h1>Orva</h1>
+        <p class="tagline">Write a function, hit deploy.</p>
+        <p class="body">
+          Orva runs your JavaScript, Python, or TypeScript code in an isolated
+          nsjail sandbox and exposes it over HTTP — on hardware you own.
+          No cloud account, no per-invocation billing, no external dependencies.
+        </p>
+        <div class="actions">
+          <a href="#install" class="btn btn-primary">
+            Get started
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </a>
+          <a href="https://github.com/Harsh-2002/Orva" target="_blank" rel="noopener" class="btn btn-ghost">
+            GitHub
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <div class="hero-code">
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">bash — one-command install</span>
+            <button class="copy-btn" data-target="hero-cmd">Copy</button>
+          </div>
+          <pre id="hero-cmd"><code>docker run -d --name orva \
+  -p 8443:8443 \
+  --cap-add SYS_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined \
+  -v orva-data:/var/lib/orva \
+  ghcr.io/harsh-2002/orva:latest</code></pre>
+        </div>
+        <p class="note">
+          Open <code>http://localhost:8443</code> — onboarding takes ~30 seconds.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<style>
+  #hero {
+    padding: clamp(88px, 11vw, 120px) 0 clamp(72px, 9vw, 100px);
+    position: relative;
+    background-image: radial-gradient(circle, rgba(45,43,66,0.55) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  #hero::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: var(--border);
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(40px, 5vw, 60px);
+    align-items: center;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(114,85,176,0.15);
+    border: 1px solid rgba(114,85,176,0.35);
+    color: var(--accent-hi);
+    padding: 4px 12px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 24px;
+  }
+  h1 {
+    font-size: clamp(3.5rem, 8vw, 5.5rem);
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: var(--fg);
+    margin-bottom: 20px;
+  }
+  .tagline {
+    font-size: 1.125rem;
+    font-weight: 500;
+    color: var(--muted);
+    line-height: 1.4;
+    margin-bottom: 12px;
+    letter-spacing: -0.01em;
+  }
+  .body {
+    color: var(--muted);
+    line-height: 1.7;
+    max-width: 460px;
+    margin-bottom: 36px;
+  }
+  .actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .hero-code {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .note {
+    font-size: 0.8125rem;
+    color: var(--subtle);
+    padding: 0 2px;
+  }
+
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+    .body { max-width: 100%; }
+  }
+  @media (max-width: 580px) {
+    h1 { font-size: clamp(2.75rem, 12vw, 3.75rem); }
+    .actions { flex-direction: column; }
+    .actions .btn { width: 100%; justify-content: center; }
+  }
+</style>

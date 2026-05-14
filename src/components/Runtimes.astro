@@ -1,0 +1,138 @@
+---
+const runtimes = [
+  {
+    badge: 'Node.js 22 / 24',
+    file: 'handler.js',
+    code: `const { kv, invoke, jobs } = require('orva')
+
+exports.handler = async (event) => {
+  const count = (await kv.get('n') || 0) + 1
+  await kv.put('n', count)
+  return { statusCode: 200, body: { count } }
+}`,
+  },
+  {
+    badge: 'Python 3.13 / 3.14',
+    file: 'handler.py',
+    code: `from orva import kv, invoke, jobs
+
+def handler(event):
+    count = (kv.get("n") or 0) + 1
+    kv.put("n", count)
+    return {"statusCode": 200, "body": {"count": count}}`,
+  },
+  {
+    badge: 'TypeScript',
+    file: 'handler.ts',
+    code: `import { kv, invoke, jobs } from 'orva'
+
+export const handler = async (event: any) => {
+  const count = ((await kv.get('n')) ?? 0) + 1
+  await kv.put('n', count)
+  return { statusCode: 200, body: { count } }
+}`,
+  },
+];
+
+const sdkSurface = `kv.put(key, value, { ttl? })   // persist state
+kv.get(key)                    // read back
+kv.delete(key)
+kv.list(prefix?)               // scan keys
+
+invoke('fn-name', payload)     // call another function
+                               // child span in same trace
+
+jobs.enqueue('fn-name', data)  // background + retries`;
+---
+
+<section id="runtimes">
+  <div class="inner">
+    <div class="hd" data-reveal>
+      <span class="eyebrow">Runtimes</span>
+      <h2 class="section-title">Same protocol. Four runtimes.</h2>
+      <p class="section-sub">Every function exports a single <code>handler</code>. The adapter handles the rest.</p>
+    </div>
+
+    <div class="grid">
+      {runtimes.map((r, i) => (
+        <div class="card" data-reveal style={`--si:${i}`}>
+          <div class="card-head">
+            <span class="badge">{r.badge}</span>
+            <span class="file">{r.file}</span>
+          </div>
+          <div class="code-block" style="border:none;border-radius:0;flex:1">
+            <pre><code>{r.code}</code></pre>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div class="sdk" data-reveal>
+      <div class="sdk-text">
+        <h4>SDK pre-installed in every sandbox</h4>
+        <p>The <code>orva</code> module is available in every function with no install step. It reaches back to the Orva API over loopback — no network access required.</p>
+      </div>
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-lang">SDK surface</span>
+        </div>
+        <pre><code>{sdkSurface}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  #runtimes { padding: clamp(64px, 8vw, 88px) 0; }
+  .hd { margin-bottom: 36px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent-hi);
+    background: rgba(114,85,176,0.15);
+    border: 1px solid rgba(114,85,176,0.3);
+    padding: 2px 8px;
+    border-radius: var(--r-sm);
+  }
+  .file { font-family: var(--mono); font-size: 0.6875rem; color: var(--subtle); }
+  .card .code-block pre { padding: 14px 16px; font-size: 0.75rem; }
+
+  .sdk {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 20px 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+  .sdk-text h4 { font-size: 0.9375rem; font-weight: 600; color: var(--fg); margin-bottom: 8px; }
+  .sdk-text p { font-size: 0.875rem; color: var(--muted); line-height: 1.6; }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr; }
+    .sdk { grid-template-columns: 1fr; }
+  }
+</style>
