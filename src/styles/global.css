@@ -21,8 +21,8 @@
   --r-lg: 10px;
   --r-xl: 14px;
 
-  --max: 1120px;
-  --pad: 24px;
+  --max: 1440px;
+  --pad: clamp(20px, 3.5vw, 60px);
 }
 
 @supports (color: oklch(0% 0 0)) {

@@ -1,23 +1,23 @@
 ---
-const left = [
-  { icon: `<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>`, name: 'Multi-runtime', desc: 'Node.js 22/24, Python 3.13/3.14, TypeScript — all in one binary.' },
-  { icon: `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>`, name: 'nsjail isolation', desc: 'Five overlapping Linux kernel boundaries per invocation — user NS, mount NS, cgroup v2, seccomp, network NS.' },
-  { icon: `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`, name: 'Warm pools', desc: 'Idle workers stay resident between calls. Pool size configurable per function; back-to-back invocations skip spawn.' },
-  { icon: `<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>`, name: 'KV store', desc: 'Per-function SQLite-backed KV with optional TTL. kv.put / kv.get / kv.list — browsable from the dashboard.' },
-  { icon: `<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>`, name: 'Background jobs', desc: 'jobs.enqueue(name, payload) — persisted queue with configurable retries and exponential backoff.' },
-  { icon: `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`, name: 'Cron schedules', desc: 'Fire any function on a cron expression. Dashboard shows last run, next run, and status.' },
-  { icon: `<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>`, name: 'Function-to-function', desc: 'invoke("name", payload) calls another function via the warm pool, creating a child span in the same trace.' },
+const features = [
+  { icon: `<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>`,                                                                                              name: 'Multi-runtime',        desc: 'Node.js 22/24, Python 3.13/3.14, TypeScript — all in one binary.' },
+  { icon: `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>`,                                                                                                         name: 'nsjail isolation',     desc: 'Five overlapping Linux kernel boundaries per invocation — user NS, mount NS, cgroup v2, seccomp, network NS.' },
+  { icon: `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,                                                                                                       name: 'Warm pools',           desc: 'Idle workers stay resident between calls. Pool size configurable per function; back-to-back invocations skip spawn entirely.' },
+  { icon: `<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>`,                           name: 'KV store',             desc: 'Per-function SQLite-backed KV with optional TTL. kv.put / kv.get / kv.list — browsable from the dashboard.' },
+  { icon: `<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>`, name: 'Background jobs',      desc: 'jobs.enqueue(name, payload) — persisted queue with configurable retries and exponential backoff.' },
+  { icon: `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`,                                                                                            name: 'Cron schedules',       desc: 'Fire any function on a cron expression. Dashboard shows last run, next run, and current status.' },
+  { icon: `<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>`,                               name: 'Function-to-function', desc: 'invoke("name", payload) calls another function via the warm pool as a child span in the same trace.' },
+  { icon: `<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>`,                                                                                                             name: 'Distributed tracing',  desc: 'HTTP, F2F calls, and background jobs all share one trace_id. Waterfall view in dashboard; zero code changes.' },
+  { icon: `<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>`, name: 'Custom routes',        desc: 'Map a path like /webhooks/stripe to a function so callers use a clean URL instead of a UUID.' },
+  { icon: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,                                                                   name: 'Secrets',              desc: 'Encrypted per-function secrets injected as env vars at sandbox spawn time. Never logged or stored in plaintext.' },
+  { icon: `<polyline points="22 2 11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>`,                                                                                     name: 'Inbound webhooks',     desc: 'Signed inbound trigger endpoints — GitHub, Stripe, Slack, and generic HMAC — that fan into a function.' },
+  { icon: `<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/>`,                                                                                       name: 'Rollback',             desc: 'Every deploy is content-hashed and archived. Roll back to any prior version in one click.' },
+  { icon: `<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>`,                                                                                      name: 'MCP server',           desc: '70 tools at /mcp — Claude Code, Cursor, and any OAuth MCP client can deploy and manage functions from chat.' },
+  { icon: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>`,                               name: '16 templates',         desc: 'Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener — pickable in the editor.' },
 ];
 
-const right = [
-  { icon: `<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>`, name: 'Distributed tracing', desc: 'HTTP, F2F calls, and background jobs all share one trace_id. Waterfall view in dashboard; zero code changes.' },
-  { icon: `<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>`, name: 'Custom routes', desc: 'Map a path like /webhooks/stripe to a function so callers use a clean URL instead of a UUID.' },
-  { icon: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`, name: 'Secrets', desc: 'Encrypted per-function secrets injected as env vars at spawn time. Never logged or stored in plaintext.' },
-  { icon: `<polyline points="22 2 11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>`, name: 'Inbound webhooks', desc: 'Signed inbound trigger endpoints — GitHub, Stripe, Slack, and generic HMAC — that fan into a function.' },
-  { icon: `<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/>`, name: 'Rollback', desc: 'Every deploy is content-hashed and archived. Roll back to any prior version in one click.' },
-  { icon: `<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>`, name: 'MCP server', desc: '70 tools at /mcp — Claude Code, Cursor, and any OAuth MCP client can deploy and manage functions from chat.' },
-  { icon: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>`, name: '16 templates', desc: 'Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener — pickable in the editor.' },
-];
+// Split into 7 rows × 2 features
+const rows = Array.from({ length: 7 }, (_, i) => [features[i], features[i + 7]]);
 ---
 
 <section id="features">
@@ -28,92 +28,158 @@ const right = [
       <p class="section-sub">14 capabilities. One port. Zero external dependencies.</p>
     </div>
 
-    <div class="grid">
-      <div class="col">
-        {left.map((f, i) => (
-          <div class="row" data-reveal style={`--si:${i}`}>
-            <div class="lead">
-              <span class="icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={f.icon} />
-              </span>
-              <span class="name">{f.name}</span>
-            </div>
-            <p class="desc">{f.desc}</p>
-          </div>
-        ))}
-      </div>
-      <div class="col">
-        {right.map((f, i) => (
-          <div class="row" data-reveal style={`--si:${i}`}>
-            <div class="lead">
-              <span class="icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={f.icon} />
-              </span>
-              <span class="name">{f.name}</span>
-            </div>
-            <p class="desc">{f.desc}</p>
-          </div>
-        ))}
-      </div>
+    <div class="table-wrap">
+      <table class="feat-table">
+        <tbody>
+          {rows.map((pair, i) => (
+            <tr data-reveal style={`--si:${i}`}>
+              {/* Left feature */}
+              <td class="name-cell">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={pair[0].icon} />
+                </span>
+                <span class="fname">{pair[0].name}</span>
+              </td>
+              <td class="desc-cell">{pair[0].desc}</td>
+              {/* Divider */}
+              <td class="div-col" aria-hidden="true"></td>
+              {/* Right feature */}
+              <td class="name-cell">
+                <span class="icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={pair[1].icon} />
+                </span>
+                <span class="fname">{pair[1].name}</span>
+              </td>
+              <td class="desc-cell last">{pair[1].desc}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   </div>
 </section>
 
 <style>
   #features { padding: clamp(52px, 6vw, 72px) 0; }
+
   .hd { margin-bottom: 36px; }
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+
+  /* Rounded wrapper — border-collapse collapses well inside this */
+  .table-wrap {
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
     overflow: hidden;
   }
-  .col:first-child { border-right: 1px solid var(--border); }
-  .row {
-    display: grid;
-    grid-template-columns: 176px 1fr;
-    gap: 0 14px;
-    padding: 13px 20px;
+
+  .feat-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  /* Row hover + separator */
+  .feat-table tbody tr {
     border-bottom: 1px solid var(--border);
     background: var(--bg);
-    align-items: start;
     transition: background 140ms;
   }
-  .row:last-child { border-bottom: none; }
-  .row:hover { background: var(--hover); }
-  .lead {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-top: 1px;
+  .feat-table tbody tr:last-child { border-bottom: none; }
+  .feat-table tbody tr:hover { background: var(--hover); }
+
+  /* Column widths — fixed layout so all rows align identically */
+  .name-cell { width: 210px; }
+  .desc-cell  { width: auto; }
+  .div-col    { width: 1px; padding: 0; background: var(--border); }
+
+  /* Name cell */
+  .name-cell {
+    padding: 15px 12px 15px 22px;
+    white-space: nowrap;
+    vertical-align: middle;
   }
+  .name-cell {
+    display: table-cell; /* explicit for clarity */
+  }
+  /* Inner flex for icon + label */
+  .name-cell > span { display: inline; }
+  .name-cell {
+    /* flex trick: use display:table-cell + inline-flex child isn't possible;
+       use a wrapper */
+  }
+
+  /* Icon + name inline */
   .icon {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
     color: var(--accent-hi);
+    margin-right: 8px;
     flex-shrink: 0;
-    width: 15px;
-    height: 15px;
   }
-  .icon svg { width: 15px; height: 15px; }
-  .name {
+  .icon svg { width: 14px; height: 14px; display: block; }
+
+  .fname {
     font-size: 0.8125rem;
     font-weight: 600;
     color: var(--fg);
     letter-spacing: -0.01em;
-    white-space: nowrap;
+    vertical-align: middle;
   }
-  .desc {
+
+  /* Description cell */
+  .desc-cell {
+    padding: 15px 22px 15px 14px;
     font-size: 0.8125rem;
     color: var(--muted);
     line-height: 1.55;
+    vertical-align: middle;
+  }
+  .desc-cell.last { padding-right: 22px; }
+
+  /* Responsive */
+  @media (max-width: 1024px) {
+    .name-cell { width: 190px; }
   }
 
-  @media (max-width: 900px) {
-    .grid { grid-template-columns: 1fr; }
-    .col:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+  @media (max-width: 860px) {
+    /* Stack to single column: hide divider, make each row show one feature */
+    .feat-table { display: block; }
+    .feat-table tbody { display: block; }
+
+    .feat-table tbody tr {
+      display: grid;
+      grid-template-columns: 190px 1fr;
+      grid-template-rows: auto auto;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Left feature stays as columns 1-2 row 1 */
+    .feat-table tbody tr > td:nth-child(1) { grid-column: 1; grid-row: 1; }
+    .feat-table tbody tr > td:nth-child(2) { grid-column: 2; grid-row: 1; }
+
+    /* Hide divider */
+    .div-col { display: none !important; }
+
+    /* Right feature becomes row 2 */
+    .feat-table tbody tr > td:nth-child(4) { grid-column: 1; grid-row: 2; border-top: 1px solid var(--border); }
+    .feat-table tbody tr > td:nth-child(5) { grid-column: 2; grid-row: 2; border-top: 1px solid var(--border); }
   }
-  @media (max-width: 580px) {
-    .row { grid-template-columns: 1fr; gap: 4px; }
-    .name { white-space: normal; }
+
+  @media (max-width: 560px) {
+    .feat-table tbody tr {
+      grid-template-columns: 1fr;
+    }
+    .feat-table tbody tr > td:nth-child(1),
+    .feat-table tbody tr > td:nth-child(4) {
+      grid-column: 1;
+      padding-bottom: 4px;
+    }
+    .feat-table tbody tr > td:nth-child(2),
+    .feat-table tbody tr > td:nth-child(5) {
+      grid-column: 1;
+      padding-top: 0;
+      border-top: none !important;
+    }
+    .name-cell { white-space: normal; }
   }
 </style>
