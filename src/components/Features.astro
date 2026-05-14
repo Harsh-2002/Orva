@@ -35,20 +35,20 @@ const rows = Array.from({ length: 7 }, (_, i) => [features[i], features[i + 7]])
             <tr data-reveal style={`--si:${i}`}>
               {/* Left feature */}
               <td class="name-cell">
-                <span class="icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={pair[0].icon} />
-                </span>
-                <span class="fname">{pair[0].name}</span>
+                <div class="name-inner">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={pair[0].icon} />
+                  <span class="fname">{pair[0].name}</span>
+                </div>
               </td>
               <td class="desc-cell">{pair[0].desc}</td>
               {/* Divider */}
               <td class="div-col" aria-hidden="true"></td>
               {/* Right feature */}
               <td class="name-cell">
-                <span class="icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={pair[1].icon} />
-                </span>
-                <span class="fname">{pair[1].name}</span>
+                <div class="name-inner">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={pair[1].icon} />
+                  <span class="fname">{pair[1].name}</span>
+                </div>
               </td>
               <td class="desc-cell last">{pair[1].desc}</td>
             </tr>
@@ -93,37 +93,30 @@ const rows = Array.from({ length: 7 }, (_, i) => [features[i], features[i + 7]])
 
   /* Name cell */
   .name-cell {
-    padding: 15px 12px 15px 22px;
+    padding: 0 12px 0 20px;
     white-space: nowrap;
     vertical-align: middle;
   }
-  .name-cell {
-    display: table-cell; /* explicit for clarity */
-  }
-  /* Inner flex for icon + label */
-  .name-cell > span { display: inline; }
-  .name-cell {
-    /* flex trick: use display:table-cell + inline-flex child isn't possible;
-       use a wrapper */
+
+  /* Flex wrapper keeps icon + label perfectly centered on one axis */
+  .name-inner {
+    display: flex;
+    align-items: center;
+    gap: 9px;
   }
 
-  /* Icon + name inline */
   .icon {
-    display: inline-flex;
-    align-items: center;
-    vertical-align: middle;
-    color: var(--accent-hi);
-    margin-right: 8px;
+    width: 15px;
+    height: 15px;
     flex-shrink: 0;
+    color: var(--accent-hi);
   }
-  .icon svg { width: 14px; height: 14px; display: block; }
 
   .fname {
     font-size: 0.8125rem;
     font-weight: 600;
     color: var(--fg);
     letter-spacing: -0.01em;
-    vertical-align: middle;
   }
 
   /* Description cell */
