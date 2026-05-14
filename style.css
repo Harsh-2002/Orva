@@ -6,23 +6,24 @@
 
 /* ── Custom properties ─────────────────────────────────── */
 :root {
-  --bg:            oklch(13.2% 0.028 277);
-  --surface:       oklch(17.8% 0.034 277);
-  --surface-hover: oklch(22.5% 0.038 277);
-  --border:        oklch(27.8% 0.044 277);
-  --fg:            oklch(96.0% 0.010 290);
-  --fg-muted:      oklch(68.0% 0.018 285);
-  --fg-dim:        oklch(49.0% 0.022 285);
-  --primary:       oklch(40.0% 0.100 295);
-  --primary-hover: oklch(46.0% 0.115 295);
-  --primary-dim:   oklch(40.0% 0.100 295 / 0.15);
-  --primary-ring:  oklch(40.0% 0.100 295 / 0.30);
-  --success:       oklch(72.0% 0.165 155);
-  --success-dim:   oklch(72.0% 0.165 155 / 0.10);
-  --success-ring:  oklch(72.0% 0.165 155 / 0.25);
-  --warning:       oklch(82.0% 0.175 87);
-  --danger:        oklch(65.0% 0.220 25);
-  --info:          oklch(78.0% 0.130 210);
+  /* Hex fallbacks — used by browsers without oklch() support */
+  --bg:            #12111C;
+  --surface:       #1A1929;
+  --surface-hover: #252438;
+  --border:        #2D2B42;
+  --fg:            #EEEAF6;
+  --fg-muted:      #C2BFD6;
+  --fg-dim:        #8F8DA6;
+  --primary:       #553F83;
+  --primary-hover: #A882E0;
+  --primary-dim:   rgba(85, 63, 131, 0.15);
+  --primary-ring:  rgba(85, 63, 131, 0.35);
+  --success:       #22C55E;
+  --success-dim:   rgba(34, 197, 94, 0.10);
+  --success-ring:  rgba(34, 197, 94, 0.28);
+  --warning:       #EAB308;
+  --danger:        #EF4444;
+  --info:          #38BDF8;
 
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -34,6 +35,34 @@
 
   --inner-max:  1120px;
   --inner-pad:   24px;
+}
+
+/* OKLCH overrides — richer colours for browsers that support it.
+   Key contrast fixes vs the hex layer:
+     --fg-muted  76 % L  (~7.5:1 on --bg) — comfortable body-text reading
+     --fg-dim    62 % L  (~5.0:1)          — secondary labels and notes
+     --primary-hover 67 % L (~5.5:1)       — accent text (eyebrows, badges)
+*/
+@supports (color: oklch(0% 0 0)) {
+  :root {
+    --bg:            oklch(13.2% 0.028 277);
+    --surface:       oklch(17.8% 0.034 277);
+    --surface-hover: oklch(22.5% 0.038 277);
+    --border:        oklch(27.8% 0.044 277);
+    --fg:            oklch(95.0% 0.010 290);
+    --fg-muted:      oklch(76.0% 0.016 285);
+    --fg-dim:        oklch(62.0% 0.018 285);
+    --primary:       oklch(40.0% 0.100 295);
+    --primary-hover: oklch(67.0% 0.130 295);
+    --primary-dim:   oklch(40.0% 0.100 295 / 0.15);
+    --primary-ring:  oklch(40.0% 0.100 295 / 0.35);
+    --success:       oklch(72.0% 0.165 155);
+    --success-dim:   oklch(72.0% 0.165 155 / 0.10);
+    --success-ring:  oklch(72.0% 0.165 155 / 0.28);
+    --warning:       oklch(82.0% 0.175 87);
+    --danger:        oklch(65.0% 0.220 25);
+    --info:          oklch(78.0% 0.130 210);
+  }
 }
 
 /* ── Reset ──────────────────────────────────────────────── */
@@ -228,6 +257,7 @@ p code, li code, td code {
 /* ── Hero section ───────────────────────────────────────── */
 #hero {
   position: relative;
+  background-image: radial-gradient(circle, rgba(45,43,66,0.6) 1px, transparent 1px);
   background-image: radial-gradient(circle, oklch(27.8% 0.044 277 / 0.6) 1px, transparent 1px);
   background-size: 28px 28px;
 }
@@ -408,6 +438,7 @@ p code, li code, td code {
   align-items: center;
   justify-content: center;
   opacity: 0;
+  background: rgba(18,17,28,0.6);
   background: oklch(13.2% 0.028 277 / 0.6);
   transition: opacity 160ms ease;
 }
@@ -421,7 +452,9 @@ p code, li code, td code {
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--fg);
+  border: 1px solid rgba(238,234,246,0.25);
   border: 1px solid oklch(96.0% 0.010 290 / 0.25);
+  background: rgba(26,25,41,0.75);
   background: oklch(17.8% 0.034 277 / 0.75);
   padding: 5px 12px;
   border-radius: var(--radius-md);
@@ -828,6 +861,7 @@ p code, li code, td code {
 .lb-backdrop {
   position: absolute;
   inset: 0;
+  background: rgba(14,13,24,0.92);
   background: oklch(12% 0.020 277 / 0.92);
   backdrop-filter: blur(6px);
   cursor: pointer;
@@ -849,6 +883,7 @@ p code, li code, td code {
   object-fit: contain;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
+  box-shadow: 0 32px 64px rgba(0,0,0,0.6);
   box-shadow: 0 32px 64px oklch(0% 0 0 / 0.6);
 }
 
