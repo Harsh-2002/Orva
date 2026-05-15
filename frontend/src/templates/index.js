@@ -1293,6 +1293,47 @@ const ts_hello_tsconfig = `{
 //  above. The Editor reads this list directly.
 // ─────────────────────────────────────────────────────────────────────
 
+// v0.6 SDK showcase: structured logs, user-defined spans, atomic counters,
+// idempotent jobs — every new primitive in one inline handler so users
+// can see the dashboard waterfall + logs lane after one click.
+const py_traced_pipeline = `"""v0.6 SDK showcase: trace.span + log.* + kv.incr + jobs.enqueue.
+Open this trace in the dashboard after invoking — you'll see system
+spans, your two child spans ('parse' / 'transform'), and the
+level-tagged log lines all interleaved by timestamp."""
+
+import json
+from orva import trace, log, kv, jobs
+
+
+def handler(event):
+    log.info("incoming", fields={"path": event.get("path", "/")})
+
+    with trace.span("parse"):
+        body = event.get("body") or "{}"
+        if isinstance(body, str):
+            body = json.loads(body)
+        rows = body.get("rows", [])
+
+    with trace.span("transform", attributes={"input_rows": len(rows)}):
+        out = [{"id": r.get("id"), "norm": str(r.get("v", "")).lower()} for r in rows]
+
+    # Atomic counter — safe under concurrent invocations.
+    n_total = kv.incr("pipeline:total_rows", len(out))
+
+    # Idempotent follow-up job — replays from a flaky webhook don't
+    # re-enqueue the same notification.
+    job_key = body.get("idempotency_key") or f"pipeline:{n_total}"
+    job = jobs.enqueue(
+        "notify-downstream",  # safe even if this fn doesn't exist yet
+        {"rows": out, "ran_at": n_total},
+        idempotency_key=job_key,
+        idempotency_window_seconds=3600,
+    ) if body.get("notify") else {"id": "skipped", "replayed": False}
+
+    log.info("done", fields={"rows": len(out), "job": job["id"]})
+    return {"statusCode": 200, "body": {"rows": out, "total": n_total, "job": job}}
+`
+
 const pythonTemplates = [
   { id: 'py-http-hello',     category: 'Starter',   label: 'HTTP Hello',
     description: 'Minimal POST /. Echoes a name from the JSON body.',
@@ -1333,7 +1374,52 @@ const pythonTemplates = [
   { id: 'py-stream-llm',     category: 'Showcase',  label: 'Streaming LLM tokens',
     description: 'Generator that yields one word every 100ms. Demonstrates v0.4 chunked streaming end-to-end.',
     code: py_stream_llm, deps: '' },
+
+  { id: 'py-traced-pipeline', category: 'Showcase',  label: 'v0.6 SDK pipeline',
+    description: 'trace.span + log.info + kv.incr + idempotent jobs.enqueue. After invoking, open the new trace — child spans and structured logs render inline in the waterfall.',
+    code: py_traced_pipeline, deps: '' },
 ]
+
+// v0.6 SDK showcase (Node): atomic incr, compare-and-swap loop,
+// structured logging. The dashboard's Logs lane on the resulting
+// invocation will show every log.* call interleaved with the spans.
+const node_counter_cas = `// v0.6 SDK showcase: kv.incr + kv.cas + log.info.
+// Demonstrates the recommended pattern for race-safe state mutation
+// from inside an Orva function.
+
+const { kv, log, OrvaCASMismatch } = require('orva')
+
+exports.handler = async (event) => {
+  const body = typeof event.body === 'string'
+    ? JSON.parse(event.body || '{}')
+    : (event.body || {})
+
+  // Path A: simple atomic counter — no loop needed.
+  const hits = await kv.incr('hits', 1)
+  log.info('counter incremented', { hits })
+
+  // Path B: compare-and-swap loop — when you need to mutate a richer
+  // structure than just an integer.
+  let stats
+  for (let i = 0; i < 8; i++) {
+    stats = await kv.get('stats', { count: 0, last: null })
+    const next = {
+      count: stats.count + 1,
+      last: new Date().toISOString(),
+    }
+    try {
+      await kv.cas('stats', stats, next)
+      stats = next
+      break
+    } catch (e) {
+      if (!(e instanceof OrvaCASMismatch)) throw e
+      log.warn('cas retry', { attempt: i + 1 })
+    }
+  }
+
+  return { statusCode: 200, body: JSON.stringify({ hits, stats }) }
+}
+`
 
 const nodeTemplates = [
   { id: 'node-http-hello',      category: 'Starter',   label: 'HTTP Hello',
@@ -1367,6 +1453,10 @@ const nodeTemplates = [
   { id: 'node-url-shortener',   category: 'Utility',   label: 'URL shortener',
     description: 'POST creates a slug, GET redirects. Uses Orva KV.',
     code: node_url_shortener, deps: '' },
+
+  { id: 'node-counter-cas',     category: 'Showcase',  label: 'v0.6 SDK counter (kv.incr + kv.cas)',
+    description: 'Atomic counter and a CAS-retry loop for richer state. Demonstrates v0.6 race-safe primitives and structured logging end-to-end.',
+    code: node_counter_cas, deps: '' },
 
   // TypeScript starter — the builder's tsc step picks this up via the
   // companion tsconfig.json. The `extras` field carries auxiliary files

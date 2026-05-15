@@ -54,6 +54,11 @@ func init() {
 	jobsEnqueueCmd.Flags().String("at", "",
 		"RFC3339 timestamp to fire the job at (e.g. 2026-05-15T09:00:00Z). "+
 			"Omit to run on the next scheduler tick (~5s).")
+	jobsEnqueueCmd.Flags().String("idempotency-key", "",
+		"dedupe key — repeated enqueues with the same key inside the window "+
+			"return the same job id without enqueuing again")
+	jobsEnqueueCmd.Flags().Int("idempotency-window", 0,
+		"seconds within which the idempotency key dedupes (default 86400 = 24h)")
 	jobsEnqueueCmd.MarkFlagRequired("fn")
 
 	jobsCmd.AddCommand(jobsListCmd)
@@ -161,6 +166,12 @@ func runJobsEnqueue(cmd *cobra.Command, args []string) {
 			exitError("enqueue: --at must be RFC3339 (e.g. 2026-05-15T09:00:00Z): %v", err)
 		}
 		body["scheduled_at"] = t.UTC().Format(time.RFC3339)
+	}
+	if idemKey, _ := cmd.Flags().GetString("idempotency-key"); idemKey != "" {
+		body["idempotency_key"] = idemKey
+	}
+	if idemWindow, _ := cmd.Flags().GetInt("idempotency-window"); idemWindow > 0 {
+		body["idempotency_window_seconds"] = idemWindow
 	}
 
 	resp, err := client.Post("/api/v1/jobs", body)

@@ -606,6 +606,66 @@ PRAGMA foreign_keys = ON;
 		// get_function and feeds the channel's MCP tool description
 		// when the junction row doesn't have its own override.
 		"ALTER TABLE functions ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+
+		// v0.6 SDK upgrade: optional label on cron schedules so the SDK
+		// `orva.crons.upsert(name, ...)` can idempotently address a
+		// function's existing schedules by name. Empty for legacy rows
+		// — the unique partial index only fires when name is non-empty.
+		"ALTER TABLE cron_schedules ADD COLUMN name TEXT NOT NULL DEFAULT ''",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_function_name
+			ON cron_schedules(function_id, name)
+			WHERE name <> ''`,
+
+		// v0.6 SDK upgrade: job-level idempotency. When the SDK sets an
+		// idempotency_key on enqueue, the handler dedupes against any
+		// existing row with the same (function_id, key) created within
+		// the window. The partial-unique index serialises concurrent
+		// writers cleanly without affecting rows that don't set a key.
+		"ALTER TABLE jobs ADD COLUMN idempotency_key TEXT",
+		"ALTER TABLE jobs ADD COLUMN idempotency_window_seconds INTEGER NOT NULL DEFAULT 0",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency
+			ON jobs(function_id, idempotency_key)
+			WHERE idempotency_key IS NOT NULL`,
+
+		// v0.6 SDK upgrade: user-defined spans. The existing invariant
+		// "one execution = one row in executions" stays — user_spans is
+		// strictly additional per-execution detail recorded by
+		// orva.trace.span() calls inside a handler. offset_ms is
+		// pre-computed relative to the execution's started_at so the
+		// frontend waterfall can render without a join.
+		`CREATE TABLE IF NOT EXISTS user_spans (
+			id              TEXT PRIMARY KEY,
+			trace_id        TEXT NOT NULL,
+			parent_span_id  TEXT NOT NULL,
+			execution_id    TEXT NOT NULL,
+			name            TEXT NOT NULL,
+			started_at      DATETIME NOT NULL,
+			duration_ms     INTEGER NOT NULL,
+			attributes      TEXT,
+			status          TEXT NOT NULL DEFAULT 'ok',
+			error_message   TEXT,
+			offset_ms       INTEGER NOT NULL DEFAULT 0
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_user_spans_trace ON user_spans(trace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_user_spans_parent ON user_spans(parent_span_id)",
+		"CREATE INDEX IF NOT EXISTS idx_user_spans_exec ON user_spans(execution_id)",
+
+		// v0.6 SDK upgrade: structured log entries from orva.log.*.
+		// The runtime SDK emits __ORVA_LOG_JSON__<json> lines to stderr;
+		// proxy.Forward parses these into rows here while the unstructured
+		// remainder of stderr stays in execution_logs.stderr unchanged.
+		`CREATE TABLE IF NOT EXISTS execution_log_entries (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			execution_id    TEXT NOT NULL,
+			trace_id        TEXT,
+			span_id         TEXT,
+			ts              DATETIME NOT NULL,
+			level           TEXT NOT NULL,
+			message         TEXT NOT NULL,
+			fields          TEXT
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_log_entries_exec ON execution_log_entries(execution_id, ts)",
+		"CREATE INDEX IF NOT EXISTS idx_log_entries_trace ON execution_log_entries(trace_id, ts)",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// Expected non-fatal errors:

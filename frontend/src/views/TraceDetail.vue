@@ -98,41 +98,101 @@
       <!-- Waterfall card. Each span is a row with offset bar; bar
            position/width is computed in JS from offset_ms/duration_ms.
            Bar colors align with the broader dashboard palette: primary
-           for warm successes, amber for outliers, red for errors. -->
+           for warm successes, amber for outliers, red for errors.
+           User-defined spans (orva.trace.span) interleave under their
+           parent system span and render with --accent-muted so the
+           operator can distinguish "Orva ran X" from "your code did Y". -->
       <div class="bg-background border border-border rounded-lg p-5">
         <div class="text-xs text-foreground-muted uppercase tracking-wide mb-4">
           Waterfall
         </div>
         <div class="space-y-1.5">
+          <template v-for="(s, i) in trace.spans" :key="s.span_id || `s${i}`">
+            <div
+              class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1.5 rounded cursor-pointer transition-colors"
+              @click="onSpanClick(s)"
+            >
+              <div class="col-span-3 truncate flex items-center gap-1.5">
+                <span class="text-white">{{ s.function_name || s.function_id }}</span>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-foreground-muted border-border lowercase">
+                  {{ s.trigger || EMPTY }}
+                </span>
+                <Flag v-if="s.is_outlier" class="w-3 h-3 text-amber-400" />
+              </div>
+
+              <div class="col-span-7 relative h-4">
+                <div
+                  class="absolute h-2 top-1 rounded-sm"
+                  :class="barClass(s)"
+                  :style="barStyle(s)"
+                  :title="`+${s.offset_ms}ms · ${s.duration_ms}ms`"
+                />
+              </div>
+
+              <div class="col-span-2 text-right font-mono">
+                <span class="text-white">{{ s.duration_ms }}ms</span>
+                <span v-if="s.baseline_p95_ms" class="block text-[10px] text-foreground-muted">
+                  p95 {{ s.baseline_p95_ms }}ms
+                </span>
+              </div>
+            </div>
+
+            <!-- User-defined sub-spans nested beneath their parent. -->
+            <div
+              v-for="us in userSpansFor(s)"
+              :key="`us-${us.id}`"
+              class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1 rounded transition-colors"
+            >
+              <div class="col-span-3 truncate flex items-center gap-1.5 pl-5">
+                <span class="text-foreground-muted text-[10px]">└</span>
+                <span class="text-foreground-muted">{{ us.name }}</span>
+                <span v-if="us.status === 'error'"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-red-950/40 text-red-200 border border-red-700/40">
+                  error
+                </span>
+              </div>
+              <div class="col-span-7 relative h-3">
+                <div
+                  class="absolute h-1.5 top-1 rounded-sm bg-accent-muted/70"
+                  :style="userSpanBarStyle(us)"
+                  :title="`+${us.offset_ms}ms · ${us.duration_ms}ms`"
+                />
+              </div>
+              <div class="col-span-2 text-right font-mono text-foreground-muted">
+                {{ us.duration_ms }}ms
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Log lane. Structured entries from orva.log.* across every
+           span in the trace, sorted by ts. Empty when the user didn't
+           emit any structured logs (so old traces stay clean). -->
+      <div
+        v-if="trace.log_entries && trace.log_entries.length"
+        class="bg-background border border-border rounded-lg p-5"
+      >
+        <div class="text-xs text-foreground-muted uppercase tracking-wide mb-3">
+          Logs ({{ trace.log_entries.length }})
+        </div>
+        <div class="space-y-1 font-mono text-xs">
           <div
-            v-for="(s, i) in trace.spans"
-            :key="s.span_id || `s${i}`"
-            class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1.5 rounded cursor-pointer transition-colors"
-            @click="onSpanClick(s)"
+            v-for="entry in trace.log_entries"
+            :key="`log-${entry.id}`"
+            class="flex items-baseline gap-2 px-2 py-1 rounded hover:bg-surface/40 transition-colors"
+            :class="logRowClass(entry)"
           >
-            <div class="col-span-3 truncate flex items-center gap-1.5">
-              <span class="text-white">{{ s.function_name || s.function_id }}</span>
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-foreground-muted border-border lowercase">
-                {{ s.trigger || EMPTY }}
-              </span>
-              <Flag v-if="s.is_outlier" class="w-3 h-3 text-amber-400" />
-            </div>
-
-            <div class="col-span-7 relative h-4">
-              <div
-                class="absolute h-2 top-1 rounded-sm"
-                :class="barClass(s)"
-                :style="barStyle(s)"
-                :title="`+${s.offset_ms}ms · ${s.duration_ms}ms`"
-              />
-            </div>
-
-            <div class="col-span-2 text-right font-mono">
-              <span class="text-white">{{ s.duration_ms }}ms</span>
-              <span v-if="s.baseline_p95_ms" class="block text-[10px] text-foreground-muted">
-                p95 {{ s.baseline_p95_ms }}ms
-              </span>
-            </div>
+            <span class="text-foreground-muted text-[10px] tabular-nums">
+              {{ formatLogTime(entry.ts) }}
+            </span>
+            <span class="text-[10px] uppercase tracking-wide" :class="logLevelClass(entry.level)">
+              {{ entry.level }}
+            </span>
+            <span class="text-white truncate">{{ entry.message }}</span>
+            <code v-if="entry.fields" class="text-[10px] text-foreground-muted truncate">
+              {{ entry.fields }}
+            </code>
           </div>
         </div>
       </div>
@@ -230,6 +290,43 @@ const barClass = (s) => {
   if (s.status === 'error') return 'bg-red-500/70'
   if (s.is_outlier) return 'bg-amber-500/80'
   return 'bg-primary/80'
+}
+
+// User-defined spans are scoped to a parent system span via parent_span_id
+// (which matches one of trace.spans[i].span_id). We compute the children
+// on demand so the template stays declarative.
+const userSpansFor = (parent) => {
+  if (!trace.value?.user_spans || !parent?.span_id) return []
+  return trace.value.user_spans
+    .filter((u) => u.parent_span_id === parent.span_id)
+    .sort((a, b) => (a.offset_ms || 0) - (b.offset_ms || 0))
+}
+
+const userSpanBarStyle = (us) => {
+  const left = ((us.offset_ms || 0) / total.value) * 100
+  const width = Math.max(0.5, ((us.duration_ms || 0) / total.value) * 100)
+  return { left: `${left}%`, width: `${width}%` }
+}
+
+const logLevelClass = (level) => {
+  switch (level) {
+    case 'error': return 'text-red-300'
+    case 'warn':  return 'text-amber-300'
+    case 'debug': return 'text-foreground-muted'
+    default:      return 'text-primary-light'
+  }
+}
+const logRowClass = (entry) => entry.level === 'error' ? 'bg-red-950/20' : ''
+
+const formatLogTime = (ts) => {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    return d.toLocaleTimeString(undefined, { hour12: false }) + '.' +
+           String(d.getMilliseconds()).padStart(3, '0')
+  } catch {
+    return ts
+  }
 }
 
 const onSpanClick = (s) => {

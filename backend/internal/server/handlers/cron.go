@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,8 +19,9 @@ import (
 // handler doesn't need a back-channel to notify it because the goroutine
 // re-queries every tick.
 type CronHandler struct {
-	DB       *database.Database
-	Registry *registry.Registry
+	DB            *database.Database
+	Registry      *registry.Registry
+	InternalToken string // accepted by UpsertInternal for SDK-driven crons.upsert
 }
 
 // cronRequest is the shape of POST/PUT bodies. Payload is optional and
@@ -228,6 +230,98 @@ func (h *CronHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		rows = []*database.CronScheduleWithFunction{}
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{"schedules": rows})
+}
+
+// upsertInternalRequest carries the body for the SDK's crons.upsert call.
+// The function ID is derived from the caller's X-Orva-Function-Id header
+// (set by the proxy when the function was spawned) rather than the URL.
+type upsertInternalRequest struct {
+	Name     string `json:"name"`
+	Schedule string `json:"schedule"`
+	Timezone string `json:"timezone,omitempty"`
+	Enabled  *bool  `json:"enabled,omitempty"`
+	Payload  any    `json:"payload,omitempty"`
+}
+
+// UpsertInternal handles POST /api/v1/_internal/crons. SDK-only path
+// guarded by X-Orva-Internal-Token; the function being scheduled is the
+// caller's own function (read from X-Orva-Function-Id) so the SDK doesn't
+// need to know its own UUID.
+func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	got := r.Header.Get("X-Orva-Internal-Token")
+	if h.InternalToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) != 1 {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
+			"missing or invalid internal token", reqID)
+		return
+	}
+	fnID := r.Header.Get("X-Orva-Function-Id")
+	if fnID == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"missing X-Orva-Function-Id header", reqID)
+		return
+	}
+
+	var req upsertInternalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Schedule = strings.TrimSpace(req.Schedule)
+	if req.Name == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "name is required", reqID)
+		return
+	}
+	if req.Schedule == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "schedule is required", reqID)
+		return
+	}
+	sched, err := scheduler.ParseCronExpr(req.Schedule)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "invalid schedule: "+err.Error(), reqID)
+		return
+	}
+	loc, tzName, err := resolveTZ(req.Timezone)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	payload, err := encodePayload(req.Payload)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
+	}
+	row := &database.CronSchedule{
+		FunctionID: fnID,
+		Name:       req.Name,
+		CronExpr:   req.Schedule,
+		Timezone:   tzName,
+		Enabled:    enabled,
+		Payload:    payload,
+	}
+	if enabled {
+		next := sched.Next(time.Now().In(loc)).UTC()
+		row.NextRunAt = &next
+	}
+	id, err := h.DB.UpsertCronScheduleByName(row)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL",
+			"upsert failed: "+err.Error(), reqID)
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{
+		"id":          id,
+		"function_id": fnID,
+		"name":        req.Name,
+		"schedule":    req.Schedule,
+		"timezone":    tzName,
+		"enabled":     enabled,
+	})
 }
 
 // encodePayload normalizes a JSON value to a string for storage. Accepts

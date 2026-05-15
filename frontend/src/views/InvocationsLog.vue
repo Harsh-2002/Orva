@@ -304,6 +304,33 @@
           </div>
         </div>
 
+        <!-- Structured logs (orva.log.*) — emitted via the SDK and
+             parsed server-side out of stderr. Empty when the handler
+             didn't use the SDK's log helper. -->
+        <div v-if="structuredLogs.length > 0">
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
+            Logs ({{ structuredLogs.length }})
+          </h3>
+          <div class="bg-surface border border-border rounded p-3 text-xs font-mono space-y-1 max-h-72 overflow-auto">
+            <div
+              v-for="entry in structuredLogs"
+              :key="`exec-log-${entry.id}`"
+              class="flex items-baseline gap-2"
+            >
+              <span class="text-foreground-muted text-[10px] tabular-nums">
+                {{ formatLogTime(entry.ts) }}
+              </span>
+              <span class="text-[10px] uppercase" :class="logLevelClass(entry.level)">
+                {{ entry.level }}
+              </span>
+              <span class="text-white truncate">{{ entry.message }}</span>
+              <code v-if="entry.fields" class="text-[10px] text-foreground-muted truncate">
+                {{ entry.fields }}
+              </code>
+            </div>
+          </div>
+        </div>
+
         <!-- Stderr tail -->
         <div>
           <div class="flex items-center justify-between mb-2">
@@ -391,6 +418,29 @@ const detailLoading = ref(false)
 const drawerRow = ref(null)
 const selected = ref(new Set())  // bulk-select set of execution IDs
 const stderrText = ref('')
+// v0.6 SDK upgrade: structured log entries emitted from orva.log.*.
+// Rendered above raw stderr so the operator sees the level-tagged stream
+// first, then can fall back to free-form output below.
+const structuredLogs = ref([])
+
+const logLevelClass = (level) => {
+  switch (level) {
+    case 'error': return 'text-red-300'
+    case 'warn':  return 'text-amber-300'
+    case 'debug': return 'text-foreground-muted'
+    default:      return 'text-primary-light'
+  }
+}
+const formatLogTime = (ts) => {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    return d.toLocaleTimeString(undefined, { hour12: false }) + '.' +
+           String(d.getMilliseconds()).padStart(3, '0')
+  } catch {
+    return ts
+  }
+}
 const copied = ref(false)
 const fnMap = ref({})
 // v0.4 A3 — captured request envelope for the open drawer. null while
@@ -694,6 +744,7 @@ const openDetail = async (log) => {
     }
     if (logsRes.status === 'fulfilled') {
       stderrText.value = logsRes.value.data.stderr || ''
+      structuredLogs.value = logsRes.value.data.log_entries || []
     }
     if (reqRes.status === 'fulfilled') {
       requestData.value = reqRes.value.data

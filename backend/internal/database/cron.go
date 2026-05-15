@@ -25,8 +25,12 @@ type CronSchedule struct {
 	LastStatus string     `json:"last_status,omitempty"`
 	LastError  string     `json:"last_error,omitempty"`
 	Payload    string     `json:"payload"` // JSON string sent as the invoke body
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// Name is an optional label that lets the SDK's crons.upsert(name, ...)
+	// idempotently identify a schedule across deploys. Empty for legacy
+	// dashboard-created rows; non-empty for SDK-created rows.
+	Name      string    `json:"name,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // NewCronID returns a fresh UUIDv7. Replaces the legacy cron_<hex> form.
@@ -47,14 +51,83 @@ func (db *Database) InsertCronSchedule(s *CronSchedule) error {
 	s.UpdatedAt = now
 	_, err := db.write.Exec(`
 		INSERT INTO cron_schedules
-			(id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.ID, s.FunctionID, s.CronExpr, s.Timezone, boolToInt(s.Enabled),
 		nullTime(s.LastRunAt), nullTime(s.NextRunAt),
 		nullString(s.LastStatus), nullString(s.LastError),
-		s.Payload, s.CreatedAt, s.UpdatedAt,
+		s.Payload, s.Name, s.CreatedAt, s.UpdatedAt,
 	)
 	return err
+}
+
+// UpsertCronScheduleByName creates a schedule or updates an existing one
+// for (function_id, name). Name must be non-empty — the unique partial
+// index on (function_id, name) is what makes this atomic. On update we
+// preserve last_run_at / last_status from the existing row. Returns the
+// final ID (newly generated on insert, preserved on update).
+func (db *Database) UpsertCronScheduleByName(s *CronSchedule) (string, error) {
+	if s.Name == "" {
+		return "", sql.ErrNoRows // caller validates; this is a guard
+	}
+	if s.Payload == "" {
+		s.Payload = "{}"
+	}
+	if s.Timezone == "" {
+		s.Timezone = "UTC"
+	}
+	now := time.Now().UTC()
+
+	// Look up the existing row first. Two paths:
+	//   - exists: UPDATE in place; return the existing id
+	//   - absent: INSERT a new row
+	var existingID string
+	err := db.read.QueryRow(
+		`SELECT id FROM cron_schedules WHERE function_id = ? AND name = ?`,
+		s.FunctionID, s.Name,
+	).Scan(&existingID)
+	if err == sql.ErrNoRows {
+		if s.ID == "" {
+			s.ID = NewCronID()
+		}
+		s.CreatedAt = now
+		s.UpdatedAt = now
+		_, err = db.write.Exec(`
+			INSERT INTO cron_schedules
+				(id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, name, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.ID, s.FunctionID, s.CronExpr, s.Timezone, boolToInt(s.Enabled),
+			nullTime(s.LastRunAt), nullTime(s.NextRunAt),
+			nullString(s.LastStatus), nullString(s.LastError),
+			s.Payload, s.Name, s.CreatedAt, s.UpdatedAt,
+		)
+		if err != nil {
+			return "", err
+		}
+		return s.ID, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	// Update path. Preserve last_run_at / last_status — those are
+	// scheduler-owned and shouldn't be reset by a re-upsert.
+	s.ID = existingID
+	s.UpdatedAt = now
+	_, err = db.write.Exec(`
+		UPDATE cron_schedules
+		   SET cron_expr   = ?,
+		       timezone    = ?,
+		       enabled     = ?,
+		       next_run_at = ?,
+		       payload     = ?,
+		       updated_at  = ?
+		 WHERE id = ?`,
+		s.CronExpr, s.Timezone, boolToInt(s.Enabled),
+		nullTime(s.NextRunAt), s.Payload, s.UpdatedAt, existingID)
+	if err != nil {
+		return "", err
+	}
+	return existingID, nil
 }
 
 func (db *Database) GetCronSchedule(id string) (*CronSchedule, error) {

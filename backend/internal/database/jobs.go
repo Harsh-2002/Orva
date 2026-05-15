@@ -38,12 +38,24 @@ type Job struct {
 	TraceID                 string `json:"trace_id,omitempty"`
 	ParentSpanID            string `json:"parent_span_id,omitempty"`
 	EnqueuedByFunctionID    string `json:"enqueued_by_function_id,omitempty"`
+
+	// v0.6 idempotency: when set, the enqueue path dedupes against any
+	// row with the same (function_id, idempotency_key) created within the
+	// window. Cleared on the resulting Job rows for already-replayed
+	// requests so callers can branch on Replayed.
+	IdempotencyKey            string `json:"idempotency_key,omitempty"`
+	IdempotencyWindowSeconds  int    `json:"idempotency_window_seconds,omitempty"`
+	Replayed                  bool   `json:"replayed,omitempty"`
 }
 
 // NewJobID returns a fresh UUIDv7. Replaces the legacy job_<hex> form.
 func NewJobID() string { return ids.New() }
 
 // EnqueueJob inserts a pending job. scheduledAt zero defaults to "now".
+// When j.IdempotencyKey is set, dedupes against any existing row with the
+// same (function_id, idempotency_key) created within the window. On a
+// hit, j is mutated to mirror the existing row (ID, ScheduledAt, etc.)
+// and Replayed is set to true.
 func (db *Database) EnqueueJob(j *Job) error {
 	if j.ID == "" {
 		j.ID = NewJobID()
@@ -59,16 +71,95 @@ func (db *Database) EnqueueJob(j *Job) error {
 	}
 	now := time.Now().UTC()
 	j.CreatedAt = now
+
+	// Idempotency: if the key is set and we already have a non-expired
+	// row, return that row's ID instead of inserting. The unique partial
+	// index also protects against concurrent inserts racing past this
+	// SELECT — that case falls through to a constraint-violation retry
+	// below.
+	if j.IdempotencyKey != "" {
+		window := j.IdempotencyWindowSeconds
+		if window <= 0 {
+			window = 86400 // 24h default
+		}
+		cutoff := now.Add(-time.Duration(window) * time.Second)
+		if hit, err := db.getJobByIdempotency(j.FunctionID, j.IdempotencyKey, cutoff); err != nil {
+			return err
+		} else if hit != nil {
+			*j = *hit
+			j.Replayed = true
+			return nil
+		}
+	}
+
 	_, err := db.write.Exec(`
 		INSERT INTO jobs (id, function_id, payload, status, scheduled_at,
 		                  attempts, max_attempts, last_error, created_at,
-		                  trace_id, parent_span_id, enqueued_by_function_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                  trace_id, parent_span_id, enqueued_by_function_id,
+		                  idempotency_key, idempotency_window_seconds)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.ID, j.FunctionID, j.Payload, j.Status, j.ScheduledAt,
 		j.Attempts, j.MaxAttempts, j.LastError, j.CreatedAt,
 		nullableString(j.TraceID), nullableString(j.ParentSpanID),
-		nullableString(j.EnqueuedByFunctionID))
+		nullableString(j.EnqueuedByFunctionID),
+		nullableString(j.IdempotencyKey), j.IdempotencyWindowSeconds)
+
+	// Race recovery: another writer landed the same idempotency_key
+	// between our SELECT and INSERT. The partial-unique index threw a
+	// constraint error; fetch the row that won and pretend we replayed.
+	if err != nil && j.IdempotencyKey != "" {
+		cutoff := now.Add(-time.Duration(86400) * time.Second)
+		if hit, herr := db.getJobByIdempotency(j.FunctionID, j.IdempotencyKey, cutoff); herr == nil && hit != nil {
+			*j = *hit
+			j.Replayed = true
+			return nil
+		}
+	}
 	return err
+}
+
+// getJobByIdempotency returns the most recent non-cancelled row matching
+// (function_id, idempotency_key) created at-or-after cutoff. Returns
+// (nil, nil) when no row matches.
+func (db *Database) getJobByIdempotency(functionID, key string, cutoff time.Time) (*Job, error) {
+	var j Job
+	var started, finished sql.NullTime
+	var lastErr, traceID, parentSpanID, enqBy, idemKey sql.NullString
+	var idemWindow sql.NullInt64
+	err := db.read.QueryRow(`
+		SELECT id, function_id, payload, status, scheduled_at, started_at, finished_at,
+		       attempts, max_attempts, last_error, created_at,
+		       trace_id, parent_span_id, enqueued_by_function_id,
+		       idempotency_key, idempotency_window_seconds
+		FROM jobs
+		WHERE function_id = ? AND idempotency_key = ? AND created_at >= ?
+		ORDER BY created_at DESC
+		LIMIT 1`,
+		functionID, key, cutoff,
+	).Scan(&j.ID, &j.FunctionID, &j.Payload, &j.Status, &j.ScheduledAt,
+		&started, &finished, &j.Attempts, &j.MaxAttempts, &lastErr, &j.CreatedAt,
+		&traceID, &parentSpanID, &enqBy, &idemKey, &idemWindow)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if started.Valid {
+		t := started.Time
+		j.StartedAt = &t
+	}
+	if finished.Valid {
+		t := finished.Time
+		j.FinishedAt = &t
+	}
+	j.LastError = lastErr.String
+	j.TraceID = traceID.String
+	j.ParentSpanID = parentSpanID.String
+	j.EnqueuedByFunctionID = enqBy.String
+	j.IdempotencyKey = idemKey.String
+	j.IdempotencyWindowSeconds = int(idemWindow.Int64)
+	return &j, nil
 }
 
 // GetJob returns a single job by id (without function_name JOIN).

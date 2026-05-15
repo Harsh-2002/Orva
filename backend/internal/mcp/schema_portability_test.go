@@ -245,6 +245,12 @@ func isOpenObjectAllowed(path string) bool {
 		".value.properties.object",
 		".items.properties.value.properties.object",
 		".entry.properties.value.properties.object",
+		// kv_cas: expected/new are KVValue envelopes — the object slot
+		// inside each is the caller's free-form JSON, same contract as
+		// kv_put.value. current is the response shape for a failed CAS.
+		".expected.properties.object",
+		".new.properties.object",
+		".current.properties.object",
 	}
 	for _, suffix := range allowed {
 		if strings.HasSuffix(path, suffix) {

@@ -40,11 +40,13 @@ func (h *JobsHandler) authorize(r *http.Request) bool {
 }
 
 type enqueueRequest struct {
-	FunctionID    string          `json:"function_id"`
-	FunctionName  string          `json:"function_name"`
-	Payload       json.RawMessage `json:"payload"`
-	ScheduledAt   *time.Time      `json:"scheduled_at,omitempty"`
-	MaxAttempts   int             `json:"max_attempts,omitempty"`
+	FunctionID               string          `json:"function_id"`
+	FunctionName             string          `json:"function_name"`
+	Payload                  json.RawMessage `json:"payload"`
+	ScheduledAt              *time.Time      `json:"scheduled_at,omitempty"`
+	MaxAttempts              int             `json:"max_attempts,omitempty"`
+	IdempotencyKey           string          `json:"idempotency_key,omitempty"`
+	IdempotencyWindowSeconds int             `json:"idempotency_window_seconds,omitempty"`
 }
 
 // Enqueue handles POST /api/v1/jobs.
@@ -86,9 +88,11 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 		payload = []byte("{}")
 	}
 	job := &database.Job{
-		FunctionID:  fnID,
-		Payload:     payload,
-		MaxAttempts: req.MaxAttempts,
+		FunctionID:               fnID,
+		Payload:                  payload,
+		MaxAttempts:              req.MaxAttempts,
+		IdempotencyKey:           req.IdempotencyKey,
+		IdempotencyWindowSeconds: req.IdempotencyWindowSeconds,
 	}
 	if req.ScheduledAt != nil {
 		job.ScheduledAt = req.ScheduledAt.UTC()
@@ -104,6 +108,9 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 	if err := h.DB.EnqueueJob(job); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "enqueue failed: "+err.Error(), reqID)
 		return
+	}
+	if job.Replayed {
+		w.Header().Set("X-Idempotency-Replayed", "true")
 	}
 	respond.JSON(w, http.StatusCreated, job)
 }

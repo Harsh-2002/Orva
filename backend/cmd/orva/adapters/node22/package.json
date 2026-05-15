@@ -1,0 +1,8 @@
+{
+  "name": "orva",
+  "version": "0.6.0",
+  "main": "./orva.js",
+  "types": "./orva.d.ts",
+  "private": true,
+  "description": "Orva runtime SDK (in-sandbox). Shipped with the Node 24 adapter — not published to npm."
+}

@@ -129,6 +129,21 @@ type ProxyConfig struct {
 	RootfsDir string
 }
 
+// finalizeStderr separates structured log lines (those starting with
+// __ORVA_LOG_JSON__) from the raw stderr blob. The structured lines are
+// queued into execution_log_entries via the async writer; the returned
+// []byte is the original blob with those lines stripped so they don't
+// double-render in the dashboard. Safe to call with nil DB or empty
+// stderr — falls through with the input unchanged.
+func (p *Proxy) finalizeStderr(r *http.Request, execID string, raw []byte) []byte {
+	if p.DB == nil || len(raw) == 0 {
+		return raw
+	}
+	tID := trace.TraceID(r.Context())
+	sID := trace.SpanID(r.Context())
+	return extractStructuredLogs(p.DB, raw, execID, tID, sID)
+}
+
 // New creates a new Proxy.
 func New() *Proxy {
 	return &Proxy{}
@@ -309,7 +324,7 @@ func (p *Proxy) Forward(
 	p.Pool.RecordLatency(fnID, time.Since(dispatchStart))
 	var stderr []byte
 	if dres != nil {
-		stderr = dres.Stderr()
+		stderr = p.finalizeStderr(r, execID, dres.Stderr())
 	}
 	result := &Result{Stderr: stderr, ColdStart: acq.ColdStart}
 	if err != nil {
@@ -427,7 +442,7 @@ func (p *Proxy) Forward(
 			// execution row as failed but DO NOT try to emit a JSON
 			// envelope (Wrote=true tells invoke.go we're done).
 			result.Wrote = true
-			result.Stderr = dres.Stderr()
+			result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
 			return result, fmt.Errorf("stream: %w", err)
 		}
 		if kind == "end" {
@@ -455,7 +470,7 @@ func (p *Proxy) Forward(
 			result.StatusCode = sc
 			result.ResponseSize = totalBytes
 			result.Wrote = true
-			result.Stderr = dres.Stderr()
+			result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
 			return result, fmt.Errorf("stream write: %w", werr)
 		}
 		if flusher != nil {
@@ -466,7 +481,7 @@ func (p *Proxy) Forward(
 	result.StatusCode = sc
 	result.ResponseSize = totalBytes
 	result.Wrote = true
-	result.Stderr = dres.Stderr()
+	result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
 	return result, nil
 }
 

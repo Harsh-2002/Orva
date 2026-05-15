@@ -82,7 +82,37 @@ func (h *ExecutionHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.JSON(w, http.StatusOK, logs)
+	// v0.6 SDK upgrade: also surface structured log entries (orva.log.*).
+	// Empty for any execution that didn't emit them, which keeps legacy
+	// rows behaving identically.
+	type wireEntry struct {
+		ID      int64  `json:"id"`
+		SpanID  string `json:"span_id,omitempty"`
+		TS      string `json:"ts"`
+		Level   string `json:"level"`
+		Message string `json:"message"`
+		Fields  string `json:"fields,omitempty"`
+	}
+	entries := []wireEntry{}
+	if rows, err := h.DB.ListLogEntriesByExecution(execID); err == nil {
+		for _, e := range rows {
+			entries = append(entries, wireEntry{
+				ID:      e.ID,
+				SpanID:  e.SpanID,
+				TS:      e.TS.Format("2006-01-02T15:04:05.999999999Z"),
+				Level:   e.Level,
+				Message: e.Message,
+				Fields:  e.Fields,
+			})
+		}
+	}
+
+	respond.JSON(w, http.StatusOK, map[string]any{
+		"execution_id":   logs.ExecutionID,
+		"stdout":         logs.Stdout,
+		"stderr":         logs.Stderr,
+		"log_entries":    entries,
+	})
 }
 
 // GetRequest handles GET /api/v1/executions/{exec_id}/request — the

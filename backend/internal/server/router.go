@@ -233,7 +233,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Delete)
 
 	// Cron schedules (per-function, fired by internal/scheduler).
-	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry}
+	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry, InternalToken: r.internalToken}
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/cron",         cronHandler.List)
 	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/cron",         cronHandler.Create)
 	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/cron/{id}",    cronHandler.Update)
@@ -251,12 +251,23 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}/{key}", kvHandler.Get)
 	r.mux.HandleFunc("DELETE /api/v1/_kv/{fn_id}/{key}", kvHandler.Delete)
 	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}",       kvHandler.List)
+	// v0.6 SDK upgrade: batch / atomic increment / compare-and-swap.
+	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/batch",         kvHandler.Batch)
+	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/incr",    kvHandler.Incr)
+	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/cas",     kvHandler.CAS)
 
 	// Function-to-function calls (Phase 4). Path uses the friendly name.
 	f2fHandler := &handlers.InternalInvokeHandler{
 		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics, InternalToken: internalToken,
 	}
-	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}", f2fHandler.Invoke)
+	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}",        f2fHandler.Invoke)
+	// v0.6 SDK upgrade: chunked-transfer streaming variant for invokeStream.
+	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}/stream", f2fHandler.InvokeStream)
+
+	// v0.6 SDK upgrade: user-defined spans + SDK-driven cron upsert.
+	spansHandler := &handlers.SpansHandler{DB: r.db, InternalToken: internalToken}
+	r.mux.HandleFunc("POST /api/v1/_internal/spans", spansHandler.Create)
+	r.mux.HandleFunc("POST /api/v1/_internal/crons", cronHandler.UpsertInternal)
 
 	// Background job queue (Phase 5). Public + internal token both work.
 	jobsHandler := &handlers.JobsHandler{

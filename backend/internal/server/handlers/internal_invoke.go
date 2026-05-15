@@ -214,3 +214,214 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respJSON)
 }
+
+// InvokeStream handles POST /api/v1/_internal/invoke/{name}/stream. Behaves
+// like Invoke but streams the response body bytes back to the SDK in
+// chunked-transfer order. The inner envelope's statusCode lands as the
+// outer HTTP status; the inner headers ride as `X-Orva-Inner-<Name>:
+// <value>` header pairs so the SDK can surface them if needed. The body
+// itself is raw — the SDK's async iterator yields each Uint8Array chunk.
+//
+// Errors before any chunk is written produce a normal JSON error
+// response. Errors mid-stream cut the connection (no trailer) — the SDK
+// surfaces them as an `Aborted` exception on the iterator.
+func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+
+	got := r.Header.Get("X-Orva-Internal-Token")
+	if h.InternalToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) != 1 {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
+			"missing or invalid internal token", reqID)
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "function name is required", reqID)
+		return
+	}
+
+	depth := 0
+	if v := r.Header.Get("X-Orva-Call-Depth"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			depth = n
+		}
+	}
+	maxDepth := h.MaxCallDepth
+	if maxDepth <= 0 {
+		maxDepth = defaultMaxCallDepth
+	}
+	if depth+1 > maxDepth {
+		respond.Error(w, http.StatusInsufficientStorage, "MAX_CALL_DEPTH",
+			"call depth exceeds max ("+strconv.Itoa(maxDepth)+")", reqID)
+		return
+	}
+
+	fn, err := h.DB.GetFunctionByName(name)
+	if err != nil {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND",
+			"function not found: "+name, reqID)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return
+	}
+
+	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	traceID := r.Header.Get("X-Orva-Trace-Id")
+	parentSpanID := r.Header.Get("X-Orva-Span-Id")
+	if traceID == "" {
+		traceID = trace.NewTraceID()
+	}
+	spanID := trace.NewSpanID()
+	callerFnID := r.Header.Get("X-Orva-Caller-Function")
+
+	acq, err := h.Pool.Acquire(ctx, fn.ID)
+	if err != nil {
+		respond.Error(w, http.StatusServiceUnavailable, "POOL_ERROR",
+			"pool acquire: "+err.Error(), reqID)
+		return
+	}
+	var reqErr error
+	defer func() { h.Pool.Release(fn.ID, acq.Worker, reqErr) }()
+
+	execID := ids.New()
+	event := map[string]any{
+		"method": "POST",
+		"path":   "/",
+		"headers": map[string]string{
+			"content-type":        "application/json",
+			"x-orva-trigger":      "f2f",
+			"x-orva-call-depth":   strconv.Itoa(depth + 1),
+			"x-orva-function-id":  fn.ID,
+			"x-orva-execution-id": execID,
+			"x-orva-trace-id":     traceID,
+			"x-orva-span-id":      spanID,
+			"x-orva-stream":       "1",
+		},
+		"body": string(body),
+	}
+	eventJSON, _ := json.Marshal(event)
+
+	start := time.Now()
+	dres, err := acq.Worker.DispatchEx(ctx, eventJSON)
+	if err != nil {
+		reqErr = err
+		errMsg := err.Error()
+		if errors.Is(err, context.DeadlineExceeded) {
+			errMsg = "function timed out"
+		}
+		h.DB.AsyncInsertExecutionFinal(
+			&database.Execution{
+				ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: acq.ColdStart,
+				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
+				Trigger: "f2f", ParentFunctionID: callerFnID,
+				StartedAt: start,
+			},
+			time.Since(start).Milliseconds(), http.StatusBadGateway, errMsg, 0,
+		)
+		respond.Error(w, http.StatusBadGateway, "INVOKE_FAILED", errMsg, reqID)
+		return
+	}
+
+	// Single-frame (non-streaming) response: write headers + body in one go.
+	if !dres.Streaming {
+		statusCode := dres.StatusCode
+		if statusCode == 0 {
+			statusCode = 200
+		}
+		for k, v := range dres.Headers {
+			w.Header().Set("X-Orva-Inner-"+k, v)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(statusCode)
+		_, _ = w.Write([]byte(dres.Body))
+		durationMS := time.Since(start).Milliseconds()
+		execStatus := "success"
+		if statusCode >= 500 {
+			execStatus = "error"
+		}
+		h.DB.AsyncInsertExecutionFinal(
+			&database.Execution{
+				ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: acq.ColdStart,
+				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
+				Trigger: "f2f", ParentFunctionID: callerFnID,
+				StartedAt: start,
+			},
+			durationMS, statusCode, "", len(dres.Body),
+		)
+		if h.Metrics != nil {
+			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
+		}
+		return
+	}
+
+	// Streaming path. Write the inner statusCode + headers first, then
+	// stream chunks straight from NextFrame to the wire. The ResponseWriter
+	// is flushed after each chunk so SDK clients see progress (the http
+	// pipeline handles chunked-transfer encoding automatically).
+	statusCode := dres.StatusCode
+	if statusCode == 0 {
+		statusCode = 200
+	}
+	for k, v := range dres.Headers {
+		w.Header().Set("X-Orva-Inner-"+k, v)
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("X-Orva-Streamed", "1")
+	w.WriteHeader(statusCode)
+	flusher, _ := w.(http.Flusher)
+
+	totalBytes := 0
+	for {
+		kind, chunk, ferr := dres.NextFrame(ctx)
+		if ferr != nil {
+			reqErr = ferr
+			break
+		}
+		if kind == "end" {
+			break
+		}
+		if len(chunk) > 0 {
+			if _, werr := w.Write(chunk); werr != nil {
+				reqErr = werr
+				break
+			}
+			totalBytes += len(chunk)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	durationMS := time.Since(start).Milliseconds()
+	execStatus := "success"
+	if reqErr != nil || statusCode >= 500 {
+		execStatus = "error"
+	}
+	errMsg := ""
+	if reqErr != nil {
+		errMsg = reqErr.Error()
+	}
+	h.DB.AsyncInsertExecutionFinal(
+		&database.Execution{
+			ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: acq.ColdStart,
+			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
+			Trigger: "f2f", ParentFunctionID: callerFnID,
+			StartedAt: start,
+		},
+		durationMS, statusCode, errMsg, totalBytes,
+	)
+	if h.Metrics != nil {
+		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
+	}
+}

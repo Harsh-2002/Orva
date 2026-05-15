@@ -44,18 +44,47 @@ type SpanView struct {
 	OffsetMS         int64   `json:"offset_ms"` // ms since trace.started_at
 }
 
+// UserSpanView is one orva.trace.span() entry surfaced into the trace
+// response. parent_span_id refers to a row in `spans` (the system span
+// that ran the user code that called .span()).
+type UserSpanView struct {
+	ID           string `json:"id"`
+	ExecutionID  string `json:"execution_id"`
+	ParentSpanID string `json:"parent_span_id"`
+	Name         string `json:"name"`
+	StartedAt    string `json:"started_at"`
+	DurationMS   int64  `json:"duration_ms"`
+	OffsetMS     int64  `json:"offset_ms"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	Attributes   string `json:"attributes,omitempty"` // JSON-encoded
+}
+
+// LogEntryView is one structured log line from orva.log.*.
+type LogEntryView struct {
+	ID          int64  `json:"id"`
+	ExecutionID string `json:"execution_id"`
+	SpanID      string `json:"span_id,omitempty"`
+	TS          string `json:"ts"`
+	Level       string `json:"level"`
+	Message     string `json:"message"`
+	Fields      string `json:"fields,omitempty"` // JSON-encoded
+}
+
 // TraceView is the response for GET /api/v1/traces/{id}.
 type TraceView struct {
-	TraceID         string     `json:"trace_id"`
-	RootSpanID      string     `json:"root_span_id,omitempty"`
-	RootFunctionID  string     `json:"root_function_id,omitempty"`
-	Trigger         string     `json:"trigger,omitempty"`
-	StartedAt       string     `json:"started_at"`
-	TotalDurationMS int64      `json:"total_duration_ms"`
-	Status          string     `json:"status"`
-	HasOutlier      bool       `json:"has_outlier"`
-	SpanCount       int        `json:"span_count"`
-	Spans           []SpanView `json:"spans"`
+	TraceID         string         `json:"trace_id"`
+	RootSpanID      string         `json:"root_span_id,omitempty"`
+	RootFunctionID  string         `json:"root_function_id,omitempty"`
+	Trigger         string         `json:"trigger,omitempty"`
+	StartedAt       string         `json:"started_at"`
+	TotalDurationMS int64          `json:"total_duration_ms"`
+	Status          string         `json:"status"`
+	HasOutlier      bool           `json:"has_outlier"`
+	SpanCount       int            `json:"span_count"`
+	Spans           []SpanView     `json:"spans"`
+	UserSpans       []UserSpanView `json:"user_spans"`
+	LogEntries      []LogEntryView `json:"log_entries"`
 }
 
 // GetTrace handles GET /api/v1/traces/{trace_id}. Pulls every execution
@@ -82,6 +111,49 @@ func (h *TracesHandler) GetTrace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := buildTraceView(traceID, execs, h.Registry)
+
+	// User-defined spans + structured log entries — both keyed by
+	// trace_id. Missing/empty tables (older traces predating v0.6) leave
+	// the slices empty.
+	if userSpans, err := h.DB.ListUserSpansByTrace(traceID); err == nil {
+		uvs := make([]UserSpanView, 0, len(userSpans))
+		for _, s := range userSpans {
+			uvs = append(uvs, UserSpanView{
+				ID:           s.ID,
+				ExecutionID:  s.ExecutionID,
+				ParentSpanID: s.ParentSpanID,
+				Name:         s.Name,
+				StartedAt:    s.StartedAt.Format(time.RFC3339Nano),
+				DurationMS:   s.DurationMS,
+				OffsetMS:     s.OffsetMS,
+				Status:       s.Status,
+				ErrorMessage: s.ErrorMessage,
+				Attributes:   s.Attributes,
+			})
+		}
+		out.UserSpans = uvs
+	}
+	if entries, err := h.DB.ListLogEntriesByTrace(traceID); err == nil {
+		lvs := make([]LogEntryView, 0, len(entries))
+		for _, e := range entries {
+			lvs = append(lvs, LogEntryView{
+				ID:          e.ID,
+				ExecutionID: e.ExecutionID,
+				SpanID:      e.SpanID,
+				TS:          e.TS.Format(time.RFC3339Nano),
+				Level:       e.Level,
+				Message:     e.Message,
+				Fields:      e.Fields,
+			})
+		}
+		out.LogEntries = lvs
+	}
+	if out.UserSpans == nil {
+		out.UserSpans = []UserSpanView{}
+	}
+	if out.LogEntries == nil {
+		out.LogEntries = []LogEntryView{}
+	}
 	respond.JSON(w, http.StatusOK, out)
 }
 
@@ -296,5 +368,7 @@ func buildTraceView(traceID string, execs []*database.Execution, reg *registry.R
 		HasOutlier:      hasOutlier,
 		SpanCount:       len(spans),
 		Spans:           spans,
+		UserSpans:       []UserSpanView{},
+		LogEntries:      []LogEntryView{},
 	}
 }

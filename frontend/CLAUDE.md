@@ -39,6 +39,8 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 | `src/views/InvocationsLog.vue` | Execution history drawer + request panel + replay button + suggest-fix |
 | `src/views/Settings.vue` | System settings, backup/restore card, storage card |
 | `src/views/InboundWebhooks.vue` | Inbound webhook trigger management |
+| `src/views/Traces.vue` | Trace list with filters + outlier badges |
+| `src/views/TraceDetail.vue` | Single-trace waterfall + span detail |
 | `src/utils/aiPrompts.js` | `buildPromptText()` (code gen) + `buildFixSuggestionPrompt()` (debug) |
 | `src/templates/index.js` | Built-in function templates (including `ts_hello`, `py_stream_llm`) |
 

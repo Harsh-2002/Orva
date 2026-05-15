@@ -259,6 +259,43 @@ func installAdapter(rootfs, runtime string) error {
 		return fmt.Errorf("write adapter %s: %w", dst, err)
 	}
 	fmt.Printf("[ok] installed %s adapter at %s\n", runtime, dst)
+
+	// v0.6: the runtime SDK ships alongside the adapter. Without these
+	// files, `require('orva')` / `from orva import …` raise inside a
+	// sandbox. Python places orva.py + py.typed directly under
+	// /opt/orva/; Node places orva.js + orva.d.ts + package.json under
+	// /opt/orva/node_modules/orva/ so Node's resolver finds it.
+	return installSDK(rootfs, runtime)
+}
+
+func installSDK(rootfs, runtime string) error {
+	var files []string
+	var destSub string
+	switch runtime {
+	case "node22", "node24":
+		files = []string{"orva.js", "orva.d.ts", "package.json"}
+		destSub = "opt/orva/node_modules/orva"
+	case "python313", "python314":
+		files = []string{"orva.py", "py.typed"}
+		destSub = "opt/orva"
+	default:
+		return nil
+	}
+	dstDir := filepath.Join(rootfs, destSub)
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dstDir, err)
+	}
+	for _, f := range files {
+		data, err := embeddedAdapters.ReadFile("adapters/" + runtime + "/" + f)
+		if err != nil {
+			// Some files (.d.ts, py.typed) are optional on older builds.
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dstDir, f), data, 0o644); err != nil {
+			return fmt.Errorf("write sdk %s: %w", f, err)
+		}
+	}
+	fmt.Printf("[ok] installed %s SDK at %s\n", runtime, dstDir)
 	return nil
 }
 

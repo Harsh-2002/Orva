@@ -19,12 +19,17 @@ var invokeCmd = &cobra.Command{
 
 func init() {
 	invokeCmd.Flags().String("data", "{}", "JSON payload to send")
+	invokeCmd.Flags().Int("timeout-ms", 0,
+		"per-call HTTP timeout in ms (0 = client default of 120s)")
 }
 
 func runInvoke(cmd *cobra.Command, args []string) {
 	client, err := getClient(cmd)
 	if err != nil {
 		exitError("%v", err)
+	}
+	if t, _ := cmd.Flags().GetInt("timeout-ms"); t > 0 {
+		client.HTTP.Timeout = time.Duration(t) * time.Millisecond
 	}
 
 	nameOrID := args[0]

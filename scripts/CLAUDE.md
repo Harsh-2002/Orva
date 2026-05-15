@@ -6,6 +6,8 @@ Support scripts for deployment and installation. None of these are called by the
 |---|---|
 | `entrypoint.sh` | Docker container init: seeds rootfs from image on first start, refreshes adapters on every start, polls for bootstrap API key and writes `~/.orva/config.yaml`, then execs `orva serve` |
 | `install.sh` | Bare-metal installer (POSIX sh, idempotent). Detects distro, installs system deps, downloads release binary, sets up service user, installs systemd/OpenRC unit. |
+| `install-cli.sh` | POSIX sh installer that **only** installs the slim `orva` CLI to `/usr/local/bin/orva`. No service user, no systemd unit, no rootfs. Same intent as `install.sh --cli-only` but a smaller standalone script (linked directly from the README CLI-install instructions). |
+| `install-cli.ps1` | Windows PowerShell CLI installer. Installs `orva.exe` to `%LOCALAPPDATA%\Programs\orva\` and adds it to the user PATH. |
 | `build-rootfs.sh` | Builds nsjail root filesystem bundle for each runtime from a base container image. Requires Docker. Output tarballs go into the release image. |
 | `orva.service` | systemd unit file for `orva serve` on bare-metal Linux |
 | `orva.openrc` | OpenRC unit file for Alpine Linux |

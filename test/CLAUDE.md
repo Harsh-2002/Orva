@@ -50,7 +50,15 @@ If neither is set, tests fall back to `~/.orva/config.yaml`.
 | `onboarding-flow.sh` | Login → deploy → invoke → KV → clean up end-to-end |
 | `heavy-deploy-test.sh` | 5 MB+ deploy + streaming chunked response validation |
 | `ceiling.sh` | Confirms max-concurrent sandbox limit is enforced |
+| `tracing-test.sh` | Causal-trace propagation across HTTP / cron / jobs / F2F |
 | `fixtures/` | Saved JSON payloads used as test inputs by some suites |
+
+## Subdirectories
+
+- `cli/` — CLI-only harnesses: build matrix, install-cli, upgrade round-trip, command-tree golden diff.
+- `install/` — Server-install e2e (privileged systemd-in-docker across distros + Kata flow).
+- `kata-bench/` — Measures Kata-runtime overhead vs runc baseline.
+- `fixtures/` — Reusable function bodies (Node + Python) consumed by the test suites.
 
 ## Notes
 

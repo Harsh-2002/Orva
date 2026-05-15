@@ -28,6 +28,7 @@ type JobView struct {
 	MaxAttempts  int    `json:"max_attempts"`
 	LastError    string `json:"last_error,omitempty"`
 	CreatedAt    string `json:"created_at"`
+	Replayed     bool   `json:"replayed,omitempty" jsonschema:"true when an idempotent enqueue matched an existing row instead of creating a new one"`
 }
 
 func toJobView(j *database.Job) JobView {
@@ -41,6 +42,7 @@ func toJobView(j *database.Job) JobView {
 		MaxAttempts:  j.MaxAttempts,
 		LastError:    j.LastError,
 		CreatedAt:    j.CreatedAt.UTC().Format(time.RFC3339),
+		Replayed:     j.Replayed,
 	}
 	if j.StartedAt != nil {
 		v.StartedAt = j.StartedAt.UTC().Format(time.RFC3339)
@@ -66,10 +68,12 @@ func toJobView(j *database.Job) JobView {
 }
 
 type EnqueueJobInput struct {
-	FunctionID  string `json:"function_id" jsonschema:"function id (UUID) or name to run when the job fires"`
-	Payload     map[string]any `json:"payload,omitempty" jsonschema:"JSON object delivered as the invoke body; default {}"`
-	ScheduledAt string `json:"scheduled_at,omitempty" jsonschema:"RFC3339 timestamp; omit to run as soon as the scheduler picks it up (~5s)"`
-	MaxAttempts int    `json:"max_attempts,omitempty" jsonschema:"retry budget; default 3, exponential backoff between attempts"`
+	FunctionID               string         `json:"function_id" jsonschema:"function id (UUID) or name to run when the job fires"`
+	Payload                  map[string]any `json:"payload,omitempty" jsonschema:"JSON object delivered as the invoke body; default {}"`
+	ScheduledAt              string         `json:"scheduled_at,omitempty" jsonschema:"RFC3339 timestamp; omit to run as soon as the scheduler picks it up (~5s)"`
+	MaxAttempts              int            `json:"max_attempts,omitempty" jsonschema:"retry budget; default 3, exponential backoff between attempts"`
+	IdempotencyKey           string         `json:"idempotency_key,omitempty" jsonschema:"dedupe key — repeated enqueues with the same key inside the window return the existing job instead of creating a new row"`
+	IdempotencyWindowSeconds int            `json:"idempotency_window_seconds,omitempty" jsonschema:"how long the idempotency key dedupes; default 86400 (24h)"`
 }
 
 type ListJobsInput struct {
@@ -117,9 +121,11 @@ func registerJobTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 					payload = b
 				}
 				job := &database.Job{
-					FunctionID:  fn.ID,
-					Payload:     payload,
-					MaxAttempts: in.MaxAttempts,
+					FunctionID:               fn.ID,
+					Payload:                  payload,
+					MaxAttempts:              in.MaxAttempts,
+					IdempotencyKey:           in.IdempotencyKey,
+					IdempotencyWindowSeconds: in.IdempotencyWindowSeconds,
 				}
 				if in.ScheduledAt != "" {
 					t, err := time.Parse(time.RFC3339, in.ScheduledAt)

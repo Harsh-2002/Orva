@@ -175,14 +175,25 @@ curl -X POST {{ORIGIN}}/fn/<function_id> \
 
 ## SDK from inside a function
 
-The bundled `orva` module exposes three primitives every function can
-use without extra dependencies: a per-function key/value store,
-in-process calls to other Orva functions, and a fire-and-forget
-background job queue.
+The bundled `orva` module is a stdlib-only wrapper over Orva's loopback
+API. It ships beside the runtime adapter — `require('orva')` (Node) and
+`from orva import …` (Python) work without `npm install` / `pip
+install`. The Node SDK ships TypeScript declarations (`orva.d.ts`); the
+Python SDK ships a `py.typed` marker so IDEs surface full type hints.
 
-- **`orva.kv`** — `put` / `get` / `delete` / `list`. Per-function namespace on SQLite, optional TTL.
-- **`orva.invoke`** — `invoke(name, payload)`. In-process call to another function. 8-deep call cap.
-- **`orva.jobs`** — `jobs.enqueue(name, payload)`. Fire-and-forget; persisted; retried with exp backoff.
+Surface, as of v0.6:
+
+- **`kv`** — `get` / `put` / `delete` / `list(cursor)` / `getMany` / `putMany` / `deleteMany` / `incr` / `cas`. Per-function namespace, optional TTL, single-RTT batch ops, atomic counter & CAS.
+- **`invoke(name, payload, {timeoutMs})`** — synchronous F2F call with `{statusCode, headers, body}` envelope. 8-deep call cap.
+- **`invokeStream(name, payload, {timeoutMs})`** — same, but yields `Uint8Array` chunks via `for await`.
+- **`jobs.enqueue(name, payload, {idempotencyKey, maxAttempts, scheduledAt})`** — durable background queue with built-in dedup.
+- **`crons.upsert(name, schedule, {payload, timezone, enabled})`** — declare a cron schedule from the function body itself.
+- **`trace.span(name, fn, attrs?)`** — wrap a code block as a child span; durations land in the trace waterfall.
+- **`log.{debug,info,warn,error}(msg, fields?)`** — structured logs surfaced in the dashboard Logs lane.
+- **`context`** — frozen view of `functionId`, `executionId`, `traceId`, `spanId`, `callDepth`, `timeoutMs`, `memoryMb`, `sdkVersion`.
+- **`secrets.get(name)`** — explicit accessor over the secret environment vars.
+- **`webhook.parse(event)`** — extract source / verified / payload from an inbound-webhook event without re-parsing headers.
+- **`__test_mode__(impl)`** — swap the transport for tests so handlers run without a live server.
 
 ### KV — get/put with TTL
 
@@ -304,6 +315,187 @@ exports.handler = async (event) => {
 > host gateway, so the function needs `network_mode: "egress"`. On
 > the default `"none"` the SDK throws `OrvaUnavailableError` with a
 > clear hint.
+
+### KV — batch ops, atomic counter, compare-and-swap
+
+```python
+from orva import kv, OrvaCASMismatch
+
+def handler(event):
+    # Hydrate a dashboard view in a single round trip.
+    users = kv.get_many(["user:1", "user:2", "user:3"])
+
+    # Atomic counter — safe under concurrent writers.
+    visits = kv.incr("visits", 1)
+
+    # Compare-and-swap loop. Idiomatic safe read-modify-write.
+    while True:
+        cur = kv.get("counter", default=0)
+        try:
+            kv.cas("counter", cur, cur + 1)
+            break
+        except OrvaCASMismatch:
+            continue
+
+    # Cursor-based pagination over the entire namespace.
+    cursor, walked = "", []
+    while True:
+        page = kv.list(prefix="post:", limit=100, cursor=cursor)
+        walked.extend(page["keys"])
+        cursor = page["next_cursor"]
+        if not cursor:
+            break
+
+    return {"statusCode": 200, "body": {"visits": visits, "n": len(walked)}}
+```
+
+```js
+const { kv, OrvaCASMismatch } = require('orva')
+
+exports.handler = async () => {
+  const users = await kv.getMany(['user:1', 'user:2', 'user:3'])
+  const visits = await kv.incr('visits')
+
+  while (true) {
+    const cur = await kv.get('counter', 0)
+    try {
+      await kv.cas('counter', cur, cur + 1)
+      break
+    } catch (e) {
+      if (e instanceof OrvaCASMismatch) continue
+      throw e
+    }
+  }
+
+  return { statusCode: 200, body: JSON.stringify({ visits }) }
+}
+```
+
+### Jobs — idempotency
+
+```python
+from orva import jobs
+
+def handler(event):
+    body = event["body"] or {}
+    # Same idempotency_key inside the window returns the existing job
+    # id instead of enqueuing again. Useful for webhook handlers that
+    # may be retried by the source.
+    res = jobs.enqueue(
+        "send-welcome-email",
+        {"to": body["email"]},
+        idempotency_key=f"welcome:{body['email']}",
+        idempotency_window_seconds=3600,
+    )
+    return {"statusCode": 202, "body": res}  # {"id": "...", "replayed": false}
+```
+
+### Custom spans and structured logs
+
+```python
+from orva import trace, log
+
+def handler(event):
+    log.info("incoming", fields={"path": event.get("path")})
+
+    with trace.span("parse"):
+        parsed = parse_body(event["body"])
+
+    with trace.span("transform", attributes={"rows": len(parsed)}):
+        result = transform(parsed)
+
+    log.info("done", fields={"rows": len(result)})
+    return {"statusCode": 200, "body": result}
+```
+
+```js
+const { trace, log } = require('orva')
+
+exports.handler = async (event) => {
+  log.info('incoming', { path: event.path })
+
+  const parsed = await trace.span('parse', () => parseBody(event.body))
+  const result = await trace.span('transform', () => transform(parsed),
+    { rows: parsed.length })
+
+  log.info('done', { rows: result.length })
+  return { statusCode: 200, body: JSON.stringify(result) }
+}
+```
+
+User spans and log entries render inline in the dashboard's trace
+waterfall — `parse` and `transform` show as bars nested under the
+function's main span, and the level-tagged log lines appear in the
+Logs lane below.
+
+### Streaming F2F
+
+```js
+const { invokeStream } = require('orva')
+
+exports.handler = async () => {
+  let total = 0
+  for await (const chunk of invokeStream('big-report', {})) {
+    total += chunk.length
+  }
+  return { statusCode: 200, body: JSON.stringify({ bytes: total }) }
+}
+```
+
+```python
+from orva import invoke_stream
+
+def handler(event):
+    total = 0
+    for chunk in invoke_stream("big-report", {}):
+        total += len(chunk)
+    return {"statusCode": 200, "body": {"bytes": total}}
+```
+
+### Cron-from-code, context, secrets, webhook helper
+
+```js
+const { crons, context, secrets, webhook } = require('orva')
+
+exports.handler = async (event) => {
+  // Register a daily sweep — idempotent by (function, name).
+  await crons.upsert('daily-cleanup', '0 3 * * *', {
+    timezone: 'UTC',
+    payload: { source: 'self' },
+  })
+
+  // Frozen view of the execution context.
+  if (context.callDepth >= 6) return { statusCode: 507, body: 'too deep' }
+
+  // Explicit secret accessor (env-var passthrough today; reserved for
+  // per-secret access auditing later).
+  const token = secrets.get('STRIPE_KEY')
+
+  // Parse an inbound-webhook event: HMAC was already verified
+  // server-side before this handler ran.
+  const w = webhook.parse(event)
+  if (!w.verified) return { statusCode: 401, body: 'unverified' }
+
+  return { statusCode: 200, body: JSON.stringify({ src: w.source }) }
+}
+```
+
+### Testing handlers without a server
+
+```js
+const orva = require('orva')
+
+const memKV = new Map()
+orva.__test_mode__({
+  async request(method, path, opts) {
+    // Implement just enough of the wire protocol for your tests.
+    // Returns { status, body } the same shape the real transport does.
+    return { status: 200, body: '{}' }
+  },
+})
+
+// then exercise your handler ...
+```
 
 ---
 

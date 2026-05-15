@@ -24,7 +24,8 @@ type KVHandler struct {
 
 // authorize confirms the request bears the matching X-Orva-Internal-Token
 // header. Constant-time comparison so timing leaks can't help guess the
-// token. Returns false (and writes a 401) when invalid.
+// token. Returns false (and writes a 401) when invalid. Also opportunistically
+// records the SDK version for operator visibility.
 func (h *KVHandler) authorize(w http.ResponseWriter, r *http.Request) bool {
 	got := r.Header.Get("X-Orva-Internal-Token")
 	if h.InternalToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) != 1 {
@@ -32,6 +33,7 @@ func (h *KVHandler) authorize(w http.ResponseWriter, r *http.Request) bool {
 			"missing or invalid internal token", r.Header.Get("X-Request-ID"))
 		return false
 	}
+	observeSDKVersion(r)
 	return true
 }
 
@@ -120,23 +122,25 @@ func (h *KVHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "key": key})
 }
 
-// List handles GET /api/v1/_kv/{fn_id}?prefix=foo&limit=100. Projects
-// each row's []byte value into json.RawMessage so the wire payload is
-// the original JSON the user PUT, not a base64 wrapper of it.
+// List handles GET /api/v1/_kv/{fn_id}?prefix=foo&limit=100&cursor=k. The
+// cursor is the last key from the previous page (exclusive); response
+// includes next_cursor when more rows remain.
 func (h *KVHandler) List(w http.ResponseWriter, r *http.Request) {
 	if !h.authorize(w, r) {
 		return
 	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID := r.PathValue("fn_id")
-	prefix := r.URL.Query().Get("prefix")
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	cursor := q.Get("cursor")
 	limit := 100
-	if v := r.URL.Query().Get("limit"); v != "" {
+	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			limit = n
 		}
 	}
-	entries, err := h.DB.KVList(fnID, prefix, limit)
+	page, err := h.DB.KVListWithCursor(fnID, prefix, cursor, limit)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv list failed: "+err.Error(), reqID)
 		return
@@ -146,8 +150,8 @@ func (h *KVHandler) List(w http.ResponseWriter, r *http.Request) {
 		Value     json.RawMessage `json:"value"`
 		ExpiresAt *string         `json:"expires_at,omitempty"`
 	}
-	out := make([]wireEntry, 0, len(entries))
-	for _, e := range entries {
+	out := make([]wireEntry, 0, len(page.Entries))
+	for _, e := range page.Entries {
 		var exp *string
 		if e.ExpiresAt != nil {
 			s := e.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z")
@@ -155,5 +159,165 @@ func (h *KVHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, wireEntry{Key: e.Key, Value: json.RawMessage(e.Value), ExpiresAt: exp})
 	}
-	respond.JSON(w, http.StatusOK, map[string]any{"keys": out})
+	resp := map[string]any{"keys": out}
+	if page.NextCursor != "" {
+		resp["next_cursor"] = page.NextCursor
+	}
+	respond.JSON(w, http.StatusOK, resp)
+}
+
+// kvBatchRequest carries up to N operations executed in a single SQLite
+// write transaction. Order is preserved in the response.
+type kvBatchRequest struct {
+	Ops []struct {
+		Op         string          `json:"op"`
+		Key        string          `json:"key"`
+		Value      json.RawMessage `json:"value,omitempty"`
+		TTLSeconds int             `json:"ttl_seconds,omitempty"`
+	} `json:"ops"`
+}
+
+// Batch handles POST /api/v1/_kv/{fn_id}/batch. A single batch is capped
+// at 100 ops to keep the SQLite write transaction bounded.
+func (h *KVHandler) Batch(w http.ResponseWriter, r *http.Request) {
+	if !h.authorize(w, r) {
+		return
+	}
+	reqID := r.Header.Get("X-Request-ID")
+	fnID := r.PathValue("fn_id")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20)) // 8 MB cap per batch
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return
+	}
+	var req kvBatchRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+		return
+	}
+	if len(req.Ops) == 0 {
+		respond.JSON(w, http.StatusOK, map[string]any{"results": []any{}})
+		return
+	}
+	if len(req.Ops) > 100 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "batch capped at 100 ops", reqID)
+		return
+	}
+	dbOps := make([]database.KVBatchOp, len(req.Ops))
+	for i, op := range req.Ops {
+		dbOps[i] = database.KVBatchOp{
+			Op:         op.Op,
+			Key:        op.Key,
+			Value:      []byte(op.Value),
+			TTLSeconds: op.TTLSeconds,
+		}
+	}
+	results, err := h.DB.KVBatch(fnID, dbOps)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv batch failed: "+err.Error(), reqID)
+		return
+	}
+	type wireResult struct {
+		Op        string          `json:"op"`
+		Key       string          `json:"key"`
+		Found     bool            `json:"found"`
+		Value     json.RawMessage `json:"value,omitempty"`
+		ExpiresAt *string         `json:"expires_at,omitempty"`
+		Err       string          `json:"error,omitempty"`
+	}
+	wire := make([]wireResult, len(results))
+	for i, r := range results {
+		ent := wireResult{Op: r.Op, Key: r.Key, Found: r.Found, Err: r.Err}
+		if r.Value != nil {
+			ent.Value = json.RawMessage(r.Value)
+		}
+		if r.ExpiresAt != nil {
+			s := r.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z")
+			ent.ExpiresAt = &s
+		}
+		wire[i] = ent
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"results": wire})
+}
+
+// kvIncrRequest carries the delta and optional TTL refresh.
+type kvIncrRequest struct {
+	Delta      int64 `json:"delta"`
+	TTLSeconds int   `json:"ttl_seconds,omitempty"`
+}
+
+// Incr handles POST /api/v1/_kv/{fn_id}/{key}/incr. Atomically updates
+// an integer value and returns the new value.
+func (h *KVHandler) Incr(w http.ResponseWriter, r *http.Request) {
+	if !h.authorize(w, r) {
+		return
+	}
+	reqID := r.Header.Get("X-Request-ID")
+	fnID := r.PathValue("fn_id")
+	key := r.PathValue("key")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return
+	}
+	req := kvIncrRequest{Delta: 1}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+			return
+		}
+	}
+	next, err := h.DB.KVIncr(fnID, key, req.Delta, req.TTLSeconds)
+	if err != nil {
+		respond.Error(w, http.StatusConflict, "KV_INCR_FAILED", err.Error(), reqID)
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"value": next})
+}
+
+// kvCASRequest expresses "swap from Expected to New, only if Expected
+// matches the current value". A null Expected means "the key must not
+// currently exist" (insert-if-absent).
+type kvCASRequest struct {
+	Expected   *json.RawMessage `json:"expected"`
+	New        json.RawMessage  `json:"new"`
+	TTLSeconds int              `json:"ttl_seconds,omitempty"`
+}
+
+// CAS handles POST /api/v1/_kv/{fn_id}/{key}/cas.
+func (h *KVHandler) CAS(w http.ResponseWriter, r *http.Request) {
+	if !h.authorize(w, r) {
+		return
+	}
+	reqID := r.Header.Get("X-Request-ID")
+	fnID := r.PathValue("fn_id")
+	key := r.PathValue("key")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return
+	}
+	var req kvCASRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+		return
+	}
+	if len(req.New) == 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "new value is required", reqID)
+		return
+	}
+	var expectedBytes []byte
+	if req.Expected != nil {
+		expectedBytes = []byte(*req.Expected)
+	}
+	ok, current, err := h.DB.KVCAS(fnID, key, expectedBytes, []byte(req.New), req.TTLSeconds)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv cas failed: "+err.Error(), reqID)
+		return
+	}
+	resp := map[string]any{"ok": ok}
+	if !ok && current != nil {
+		resp["current"] = json.RawMessage(current)
+	}
+	respond.JSON(w, http.StatusOK, resp)
 }

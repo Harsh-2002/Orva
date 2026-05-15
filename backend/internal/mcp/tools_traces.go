@@ -37,17 +37,46 @@ type GetTraceInput struct {
 	TraceID string `json:"trace_id" jsonschema:"the trace_id (e.g. tr_abc...)"`
 }
 
+// UserSpanRow is a user-defined orva.trace.span() entry attached to one
+// of the system spans in the trace.
+type UserSpanRow struct {
+	ID           string `json:"id"`
+	ExecutionID  string `json:"execution_id"`
+	ParentSpanID string `json:"parent_span_id"`
+	Name         string `json:"name"`
+	StartedAt    string `json:"started_at"`
+	DurationMS   int64  `json:"duration_ms"`
+	OffsetMS     int64  `json:"offset_ms"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	Attributes   string `json:"attributes,omitempty"`
+}
+
+// LogEntryRow is a structured log line emitted from orva.log.* during
+// any execution inside the trace.
+type LogEntryRow struct {
+	ID          int64  `json:"id"`
+	ExecutionID string `json:"execution_id"`
+	SpanID      string `json:"span_id,omitempty"`
+	TS          string `json:"ts"`
+	Level       string `json:"level"`
+	Message     string `json:"message"`
+	Fields      string `json:"fields,omitempty"`
+}
+
 type GetTraceOutput struct {
-	TraceID         string    `json:"trace_id"`
-	RootSpanID      string    `json:"root_span_id,omitempty"`
-	RootFunctionID  string    `json:"root_function_id,omitempty"`
-	Trigger         string    `json:"trigger,omitempty"`
-	StartedAt       string    `json:"started_at"`
-	TotalDurationMS int64     `json:"total_duration_ms"`
-	Status          string    `json:"status"`
-	HasOutlier      bool      `json:"has_outlier"`
-	SpanCount       int       `json:"span_count"`
-	Spans           []SpanRow `json:"spans"`
+	TraceID         string         `json:"trace_id"`
+	RootSpanID      string         `json:"root_span_id,omitempty"`
+	RootFunctionID  string         `json:"root_function_id,omitempty"`
+	Trigger         string         `json:"trigger,omitempty"`
+	StartedAt       string         `json:"started_at"`
+	TotalDurationMS int64          `json:"total_duration_ms"`
+	Status          string         `json:"status"`
+	HasOutlier      bool           `json:"has_outlier"`
+	SpanCount       int            `json:"span_count"`
+	Spans           []SpanRow      `json:"spans"`
+	UserSpans       []UserSpanRow  `json:"user_spans"`
+	LogEntries      []LogEntryRow  `json:"log_entries"`
 }
 
 type ListTracesInput struct {
@@ -132,6 +161,40 @@ func registerTraceTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 						DurationMS:       sp.DurationMS,
 						OffsetMS:         sp.OffsetMS,
 						ErrorMessage:     sp.ErrorMessage,
+					}
+				}
+				// v0.6 SDK upgrade: include user-defined spans + structured
+				// log entries so MCP clients see the full picture, not
+				// just the system spans.
+				out.UserSpans = []UserSpanRow{}
+				if userSpans, err := deps.DB.ListUserSpansByTrace(in.TraceID); err == nil {
+					for _, us := range userSpans {
+						out.UserSpans = append(out.UserSpans, UserSpanRow{
+							ID:           us.ID,
+							ExecutionID:  us.ExecutionID,
+							ParentSpanID: us.ParentSpanID,
+							Name:         us.Name,
+							StartedAt:    us.StartedAt.Format("2006-01-02T15:04:05.999999999Z"),
+							DurationMS:   us.DurationMS,
+							OffsetMS:     us.OffsetMS,
+							Status:       us.Status,
+							ErrorMessage: us.ErrorMessage,
+							Attributes:   us.Attributes,
+						})
+					}
+				}
+				out.LogEntries = []LogEntryRow{}
+				if entries, err := deps.DB.ListLogEntriesByTrace(in.TraceID); err == nil {
+					for _, le := range entries {
+						out.LogEntries = append(out.LogEntries, LogEntryRow{
+							ID:          le.ID,
+							ExecutionID: le.ExecutionID,
+							SpanID:      le.SpanID,
+							TS:          le.TS.Format("2006-01-02T15:04:05.999999999Z"),
+							Level:       le.Level,
+							Message:     le.Message,
+							Fields:      le.Fields,
+						})
 					}
 				}
 				return nil, out, nil

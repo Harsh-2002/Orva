@@ -143,9 +143,36 @@ type KVListInput struct {
 	FunctionID string `json:"function_id"`
 	Prefix     string `json:"prefix,omitempty" jsonschema:"only return keys starting with this prefix"`
 	Limit      int    `json:"limit,omitempty"  jsonschema:"max keys to return; defaults to 100, capped at 1000"`
+	Cursor     string `json:"cursor,omitempty" jsonschema:"resume after this key (last key from the previous page's next_cursor); empty starts a new walk"`
 }
 type KVListOutput struct {
-	Entries []KVView `json:"entries"`
+	Entries    []KVView `json:"entries"`
+	NextCursor string   `json:"next_cursor,omitempty" jsonschema:"pass back as cursor in the next call when more rows remain; empty when the walk is complete"`
+}
+
+// KVIncrInput / KVIncrOutput drive the atomic counter primitive.
+type KVIncrInput struct {
+	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name owning this key"`
+	Key        string `json:"key"`
+	Delta      int64  `json:"delta,omitempty" jsonschema:"increment amount; default 1; negative decrements"`
+	TTLSeconds int    `json:"ttl_seconds,omitempty" jsonschema:"0 = preserve existing TTL; positive = refresh expiry"`
+}
+type KVIncrOutput struct {
+	Value int64 `json:"value"`
+}
+
+// KVCASInput / KVCASOutput express atomic compare-and-swap. Use a null
+// Expected to assert "key must not currently exist" (insert-if-absent).
+type KVCASInput struct {
+	FunctionID string  `json:"function_id"`
+	Key        string  `json:"key"`
+	Expected   KVValue `json:"expected" jsonschema:"current value to match before swapping; populate exactly one typed field"`
+	New        KVValue `json:"new" jsonschema:"value to install when Expected matches"`
+	TTLSeconds int     `json:"ttl_seconds,omitempty"`
+}
+type KVCASOutput struct {
+	OK      bool      `json:"ok"`
+	Current *KVValue  `json:"current,omitempty" jsonschema:"on !ok, the value currently stored so callers can retry with a fresh expectation"`
 }
 
 func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
@@ -242,13 +269,87 @@ func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
 				if err != nil {
 					return nil, KVListOutput{}, err
 				}
-				rows, err := deps.DB.KVList(fn.ID, in.Prefix, in.Limit)
+				page, err := deps.DB.KVListWithCursor(fn.ID, in.Prefix, in.Cursor, in.Limit)
 				if err != nil {
 					return nil, KVListOutput{}, err
 				}
-				out := KVListOutput{Entries: make([]KVView, 0, len(rows))}
-				for _, e := range rows {
+				out := KVListOutput{
+					Entries:    make([]KVView, 0, len(page.Entries)),
+					NextCursor: page.NextCursor,
+				}
+				for _, e := range page.Entries {
 					out.Entries = append(out.Entries, toKVView(e))
+				}
+				return nil, out, nil
+			},
+		)
+	})
+
+	gatedAdd(perms, permWrite, func() {
+		mcpsdk.AddTool(s,
+			&mcpsdk.Tool{
+				Name:        "kv_incr",
+				Title:       "KV Increment",
+				Description: "Atomically increment an integer counter. Missing keys are treated as 0; pass a negative delta to decrement. Use this instead of read+put when multiple writers can update the same counter concurrently.",
+				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
+			},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVIncrInput) (*mcpsdk.CallToolResult, KVIncrOutput, error) {
+				fn, err := resolveFunction(deps, in.FunctionID)
+				if err != nil {
+					return nil, KVIncrOutput{}, err
+				}
+				key := strings.TrimSpace(in.Key)
+				if key == "" {
+					return nil, KVIncrOutput{}, errors.New("key is required")
+				}
+				delta := in.Delta
+				if delta == 0 {
+					delta = 1
+				}
+				next, err := deps.DB.KVIncr(fn.ID, key, delta, in.TTLSeconds)
+				if err != nil {
+					return nil, KVIncrOutput{}, err
+				}
+				return nil, KVIncrOutput{Value: next}, nil
+			},
+		)
+	})
+
+	gatedAdd(perms, permWrite, func() {
+		mcpsdk.AddTool(s,
+			&mcpsdk.Tool{
+				Name:        "kv_cas",
+				Title:       "KV Compare-and-swap",
+				Description: "Atomically swap a key's value only if the current value matches Expected. Useful for safe read-modify-write loops where multiple writers could otherwise overwrite each other. Returns ok=false plus the current value when the precondition fails.",
+				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
+			},
+			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVCASInput) (*mcpsdk.CallToolResult, KVCASOutput, error) {
+				fn, err := resolveFunction(deps, in.FunctionID)
+				if err != nil {
+					return nil, KVCASOutput{}, err
+				}
+				key := strings.TrimSpace(in.Key)
+				if key == "" {
+					return nil, KVCASOutput{}, errors.New("key is required")
+				}
+				expected, err := encodeKVValue(in.Expected)
+				if err != nil {
+					return nil, KVCASOutput{}, err
+				}
+				next, err := encodeKVValue(in.New)
+				if err != nil {
+					return nil, KVCASOutput{}, err
+				}
+				ok, current, err := deps.DB.KVCAS(fn.ID, key, expected, next, in.TTLSeconds)
+				if err != nil {
+					return nil, KVCASOutput{}, err
+				}
+				out := KVCASOutput{OK: ok}
+				if !ok && current != nil {
+					// Surface the raw bytes back through KVValue so the
+					// schema stays self-describing for MCP clients.
+					decoded := decodeKVValue(current)
+					out.Current = &decoded
 				}
 				return nil, out, nil
 			},
