@@ -575,9 +575,7 @@ export default handler;`}</code></pre>
     position: sticky;
     top: 0;
     z-index: 50;
-    background: color-mix(in oklab, var(--bg) 88%, transparent);
-    backdrop-filter: saturate(140%) blur(8px);
-    border-bottom: 1px solid var(--border);
+    background: transparent;
   }
   .mast-inner {
     display: flex;
@@ -595,12 +593,7 @@ export default handler;`}</code></pre>
     align-items: center;
     gap: 12px;
     color: var(--brand);
-    transition:
-      color 140ms,
-      transform 200ms ease;
-  }
-  .brand:hover {
-    color: var(--accent-hi);
+    transition: transform 200ms ease;
   }
   .brand:active {
     transform: scale(0.97);
