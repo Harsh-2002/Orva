@@ -153,8 +153,9 @@ const {
         position: fixed;
         inset: 0;
         z-index: 100;
-        background: color-mix(in oklab, var(--bg-deep) 92%, transparent);
-        backdrop-filter: blur(6px);
+        background: color-mix(in oklab, var(--bg-deep) 70%, transparent);
+        backdrop-filter: blur(14px) saturate(140%);
+        -webkit-backdrop-filter: blur(14px) saturate(140%);
         display: none;
         align-items: center;
         justify-content: center;
@@ -164,54 +165,49 @@ const {
       #lightbox figure {
         max-width: 1280px;
         width: 100%;
-        background: var(--surface);
-        border: 1px solid var(--border-hi);
-        border-radius: 8px;
-        padding: clamp(12px, 1.6vw, 18px);
-        box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+        background: transparent;
+        border: none;
+        padding: 0;
       }
       #lightbox img {
         width: 100%;
-        max-height: 72vh;
+        max-height: 78vh;
         object-fit: contain;
-        border: 1px solid var(--border);
-        border-radius: 4px;
+        border: none;
+        border-radius: 10px;
         display: block;
-        background: var(--bg-deep);
+        background: transparent;
       }
       #lightbox figcaption {
-        margin-top: 14px;
-        padding: 0 4px;
-        color: var(--muted);
-        font-size: 0.8125rem;
+        margin-top: 18px;
+        color: var(--fg);
+        font-size: 0.875rem;
         text-align: center;
         font-family: var(--mono);
         letter-spacing: 0.02em;
-        line-height: 1.5;
+        line-height: 1.55;
       }
       #lightbox-close {
         position: absolute;
-        top: clamp(16px, 2.5vw, 26px);
-        right: clamp(16px, 2.5vw, 26px);
+        top: clamp(14px, 2vw, 24px);
+        right: clamp(14px, 2vw, 24px);
         font-size: 22px;
-        color: var(--fg);
+        color: var(--muted);
         width: 40px;
         height: 40px;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: var(--surface);
-        border: 1px solid var(--border-hi);
-        border-radius: 6px;
+        background: transparent;
+        border: none;
         line-height: 1;
         font-family: var(--mono);
-        transition: background 120ms, border-color 120ms, transform 120ms;
+        transition: color 120ms, transform 120ms;
       }
-      #lightbox-close:hover { background: var(--hover); border-color: var(--fg); }
-      #lightbox-close:active { transform: scale(0.94); }
+      #lightbox-close:hover { color: var(--fg); }
+      #lightbox-close:active { transform: scale(0.92); }
       @media (max-width: 560px) {
-        #lightbox figure { padding: 10px; border-radius: 6px; }
-        #lightbox img { max-height: 68vh; }
+        #lightbox img { border-radius: 8px; max-height: 70vh; }
       }
     </style>
   </body>
