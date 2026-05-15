@@ -71,3 +71,4 @@ modelcontextprotocol-sdk-*.tgz
 *.tar.gz
 orva-backup-*
 reddit.md
+**/__pycache__/
