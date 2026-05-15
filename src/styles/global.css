@@ -83,12 +83,12 @@ body {
    non-reduced-motion devices only. */
 body {
   background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
     radial-gradient(
-      720px circle at var(--cx, -9999px) var(--cy, -9999px),
-      rgba(179, 148, 232, 0.2),
-      rgba(179, 148, 232, 0.06) 32%,
-      transparent 58%
+      640px circle at var(--cx, -9999px) var(--cy, -9999px),
+      rgba(179, 148, 232, 0.09),
+      rgba(179, 148, 232, 0.025) 34%,
+      transparent 60%
     );
   background-blend-mode: overlay, normal;
   background-attachment: fixed, fixed;
@@ -100,12 +100,12 @@ body {
 @supports (color: oklch(0% 0 0)) {
   body {
     background-image:
-      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
       radial-gradient(
-        720px circle at var(--cx, -9999px) var(--cy, -9999px),
-        oklch(72% 0.13 295 / 0.2),
-        oklch(72% 0.13 295 / 0.06) 32%,
-        transparent 58%
+        640px circle at var(--cx, -9999px) var(--cy, -9999px),
+        oklch(72% 0.13 295 / 0.09),
+        oklch(72% 0.13 295 / 0.025) 34%,
+        transparent 60%
       );
   }
 }
