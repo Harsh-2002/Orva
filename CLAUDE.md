@@ -76,6 +76,18 @@ git tag v2026.05.03 && git push origin v2026.05.03
 
 The release workflow builds `ghcr.io/harsh-2002/orva:<tag>` + `:latest` (multi-arch), all CLI binaries, rootfs tarballs, and checksums automatically on any `v*` tag push.
 
+### Build-time identity
+
+Every server binary stamps three variables via `-X` ldflags at link time. They flow Makefile → Dockerfile → release.yml and surface at `/api/v1/system/health` + Settings → Build info in the dashboard.
+
+| Variable | Source | Example |
+|---|---|---|
+| `internal/version.Version`   | git tag on release; `git describe` in dev   | `v2026.05.15` |
+| `internal/version.Commit`    | `git rev-parse --short HEAD` (CI: `${GITHUB_SHA::7}`) | `1be3399` |
+| `internal/version.BuildTime` | `date -u +%Y-%m-%dT%H:%M:%SZ` at link time   | `2026-05-15T14:20:34Z` |
+
+Go silently ignores unknown `-X` targets, so renaming the version package or any of its variables MUST be done in lock-step across `Makefile`, `Dockerfile`, and `.github/workflows/release.yml` — otherwise the binary ships with defaults (`"dev"` / `"unknown"`) and the dashboard's Build info card lights up red flags.
+
 ## Non-obvious Gotchas
 
 - **`adapters-embed` must run before any `go build`** — it copies `runtimes/` into `backend/cmd/orva/adapters/` for `//go:embed`. `make build` calls it automatically; bare `go build` does not.

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { listFunctions, listInvocations, getMetricsJSON } from '@/api/endpoints'
+import { listFunctions, listInvocations, getMetricsJSON, getHealth } from '@/api/endpoints'
 import { useEventsStore } from '@/stores/events'
 
 // poolHistorySize is how many ticks of per-pool rate_ewma we retain for
@@ -21,6 +21,11 @@ export const useSystemStore = defineStore('system', () => {
 
   // poolHistory[fn_id] = ring of recent rate_ewma values for sparkline.
   const poolHistory = ref({})
+
+  // buildInfo: one-shot snapshot of /api/v1/system/health's build identity
+  // fields. Populated on seed(); the values don't change while the binary
+  // is running so there's no SSE channel for them.
+  const buildInfo = ref(null)
 
   let unsubMetrics = null
   let unsubExecution = null
@@ -50,14 +55,24 @@ export const useSystemStore = defineStore('system', () => {
   // load (until the first metrics tick).
   const seed = async () => {
     try {
-      const [metricsRes, fnRes, invRes] = await Promise.all([
+      const [metricsRes, fnRes, invRes, healthRes] = await Promise.all([
         getMetricsJSON(),
         listFunctions().catch(() => ({ data: { functions: [], total: 0 } })),
         listInvocations({ limit: 20 }).catch(() => ({ data: { executions: [] } })),
+        getHealth().catch(() => ({ data: null })),
       ])
       applyMetrics(metricsRes.data)
       functionsCount.value = fnRes.data.total ?? (fnRes.data.functions || []).length
       recentInvocations.value = invRes.data.executions || []
+      if (healthRes.data) {
+        buildInfo.value = {
+          version: healthRes.data.version,
+          commit: healthRes.data.commit,
+          buildTime: healthRes.data.build_time,
+          image: healthRes.data.image,
+          uptimeSeconds: healthRes.data.uptime_seconds,
+        }
+      }
       isConnected.value = true
     } catch (err) {
       console.error('seed fetch error:', err)
@@ -109,6 +124,7 @@ export const useSystemStore = defineStore('system', () => {
     functionsCount,
     recentInvocations,
     poolHistory,
+    buildInfo,
     connect,
     disconnect,
   }

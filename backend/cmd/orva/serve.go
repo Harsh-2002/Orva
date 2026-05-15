@@ -12,6 +12,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server"
+	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +51,10 @@ func runServe(cmd *cobra.Command, args []string) {
 			"note", "all defaults")
 	}
 
-	slog.Info("starting orva", "version", Version)
+	slog.Info("starting orva",
+		"version", version.Version,
+		"commit", version.Commit,
+		"build_time", version.BuildTime)
 
 	db, err := database.New(cfg.Database.Path)
 	if err != nil {

@@ -1,6 +1,26 @@
-VERSION ?= 0.1.0
-BINARY  = orva
-BUILD   = build
+# Build identity — stamped into the binary via -X ldflags and surfaced
+# at /api/v1/system/health + Settings → Build info in the dashboard. The
+# three values flow Makefile → Dockerfile → release.yml so a single
+# source of truth feeds bare-metal, Docker, and CI builds alike.
+#
+# VERSION:    git tag when tagged, otherwise `git describe` (e.g.
+#             "v2026.05.15-3-g1be3399-dirty"). Default "dev" if no git.
+# COMMIT:     short SHA of the build's HEAD commit.
+# BUILD_TIME: wall-clock at build moment (RFC3339 UTC) — useful for
+#             telling "is this image the one CI just produced?".
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BINARY      = orva
+BUILD       = build
+
+# The version package lives at backend/internal/version. Go's ldflags
+# fail silently when the target path is wrong — keep these three lines
+# the only place this string appears so renames stay in sync.
+LDFLAGS = -s -w \
+  -X github.com/Harsh-2002/Orva/backend/internal/version.Version=$(VERSION) \
+  -X github.com/Harsh-2002/Orva/backend/internal/version.Commit=$(COMMIT) \
+  -X github.com/Harsh-2002/Orva/backend/internal/version.BuildTime=$(BUILD_TIME)
 
 .PHONY: build test lint clean ui embed build-all dev adapters-embed docs-embed cli cli-all
 
@@ -42,7 +62,7 @@ adapters-embed:
 
 build: adapters-embed docs-embed
 	@mkdir -p $(BUILD)
-	go build -ldflags="-s -w -X main.Version=$(VERSION)" -o $(BUILD)/$(BINARY) ./backend/cmd/orva
+	go build -ldflags="$(LDFLAGS)" -o $(BUILD)/$(BINARY) ./backend/cmd/orva
 
 test:
 	go test -count=1 ./...
@@ -75,7 +95,7 @@ cli:
 	@mkdir -p $(BUILD)
 	CGO_ENABLED=0 go build \
 	  -trimpath \
-	  -ldflags='-s -w -X main.Version=$(VERSION)' \
+	  -ldflags="$(LDFLAGS)" \
 	  -o $(BUILD)/orva ./cli/cmd/orva
 
 # Cross-compile the slim CLI for every release-asset target.
@@ -90,7 +110,7 @@ cli-all:
 	  echo ">> building orva-cli-$$os-$$arch$$ext"; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build \
 	    -trimpath \
-	    -ldflags='-s -w -X main.Version=$(VERSION)' \
+	    -ldflags="$(LDFLAGS)" \
 	    -o $(BUILD)/orva-cli-$$os-$$arch$$ext ./cli/cmd/orva || exit 1; \
 	done
 

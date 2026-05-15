@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1.6
-ARG VERSION=0.1.0
+# Build identity — wired through to internal/version via -X ldflags AND
+# stamped as OCI image labels for `docker inspect`. The release workflow
+# supplies all three; bare `docker build` falls back to safe defaults.
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
 
 FROM node:22-alpine AS ui
 WORKDIR /ui
@@ -19,9 +24,14 @@ COPY cli/ ./cli/
 COPY internal/ ./internal/
 COPY --from=ui /ui/dist ./backend/internal/server/ui_dist
 ARG VERSION
+ARG COMMIT
+ARG BUILD_TIME
 RUN CGO_ENABLED=0 go build \
       -trimpath \
-      -ldflags="-s -w -X main.Version=${VERSION}" \
+      -ldflags="-s -w \
+        -X github.com/Harsh-2002/Orva/backend/internal/version.Version=${VERSION} \
+        -X github.com/Harsh-2002/Orva/backend/internal/version.Commit=${COMMIT} \
+        -X github.com/Harsh-2002/Orva/backend/internal/version.BuildTime=${BUILD_TIME}" \
       -o /out/orva ./backend/cmd/orva
 
 FROM debian:bookworm-slim AS nsjail
@@ -68,12 +78,16 @@ COPY backend/runtimes/python314/orva.py    /opt/orva/orva.py
 
 FROM debian:bookworm-slim
 ARG VERSION
+ARG COMMIT
+ARG BUILD_TIME
 
 LABEL org.opencontainers.image.title="Orva" \
       org.opencontainers.image.description="Self-hosted serverless function platform — Node.js + Python on nsjail" \
       org.opencontainers.image.source="https://github.com/Harsh-2002/Orva" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.version="${VERSION}"
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_TIME}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tini curl libprotobuf32 libnl-route-3-200 libcap2-bin \

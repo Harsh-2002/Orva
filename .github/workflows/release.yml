@@ -67,7 +67,7 @@ jobs:
           cp -r frontend/dist backend/internal/server/ui_dist
           make adapters-embed
 
-      - name: resolve version
+      - name: resolve build identity
         id: v
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
@@ -75,6 +75,8 @@ jobs:
           else
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
+          echo "commit=${GITHUB_SHA::7}"               >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: go build
         env:
@@ -85,7 +87,10 @@ jobs:
           mkdir -p dist
           go build \
             -trimpath \
-            -ldflags="-s -w -X main.Version=${{ steps.v.outputs.tag }}" \
+            -ldflags="-s -w \
+              -X github.com/Harsh-2002/Orva/backend/internal/version.Version=${{ steps.v.outputs.tag }} \
+              -X github.com/Harsh-2002/Orva/backend/internal/version.Commit=${{ steps.v.outputs.commit }} \
+              -X github.com/Harsh-2002/Orva/backend/internal/version.BuildTime=${{ steps.v.outputs.build_time }}" \
             -o dist/orva-linux-${{ matrix.goarch }} \
             ./backend/cmd/orva
 
@@ -132,7 +137,7 @@ jobs:
           # can't accidentally ship a stale toolchain artifact.
           cache: false
 
-      - name: resolve version
+      - name: resolve build identity
         id: v
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
@@ -140,6 +145,8 @@ jobs:
           else
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
+          echo "commit=${GITHUB_SHA::7}"               >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: go build (slim cli)
         env:
@@ -149,6 +156,8 @@ jobs:
         run: |
           mkdir -p dist
           OUT="dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          # Slim CLI imports only cli/commands — main.Version is the right
+          # ldflags target here (it forwards into commands.Version).
           go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=${{ steps.v.outputs.tag }}" \
@@ -407,7 +416,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: resolve version
+      - name: resolve build identity
         id: v
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
@@ -415,6 +424,8 @@ jobs:
           else
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
+          echo "commit=${GITHUB_SHA::7}"               >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -448,8 +459,12 @@ jobs:
             org.opencontainers.image.source=https://github.com/Harsh-2002/Orva
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.version=${{ steps.v.outputs.tag }}
+            org.opencontainers.image.revision=${{ steps.v.outputs.commit }}
+            org.opencontainers.image.created=${{ steps.v.outputs.build_time }}
           build-args: |
             VERSION=${{ steps.v.outputs.tag }}
+            COMMIT=${{ steps.v.outputs.commit }}
+            BUILD_TIME=${{ steps.v.outputs.build_time }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: export digest for manifest job

@@ -8,19 +8,15 @@ package main
 import (
 	"os"
 
+	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/Harsh-2002/Orva/cli/commands"
 )
 
-// Version is overridden at build time via:
-//
-//	go build -ldflags='-X main.Version=vYYYY.MM.DD' ./backend/cmd/orva
-//
-// It is forwarded into commands.Version so the CLI subcommands (including
-// `orva --version` and any future `orva upgrade`) see the same string.
-var Version = "0.1.0"
-
 func main() {
-	commands.Version = Version
+	// internal/version.* is the single source of truth, stamped at link
+	// time. Forward it into the Cobra root so `orva --version` reports
+	// the same identity as /api/v1/system/health.
+	commands.Version = version.Version
 	root := commands.NewRoot()
 	root.AddCommand(newServeCmd(), newSetupCmd(), newInitCmd())
 	if err := root.Execute(); err != nil {

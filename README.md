@@ -112,8 +112,10 @@ security prompts, and `orva upgrade` mechanics.
 ### Firewall & DNS — per-function egress rules, custom resolvers, blocklist
 ![Firewall and DNS](docs/screenshots/firewall-and-dns.jpeg)
 
-### Settings — storage, account, and OAuth-connected apps
+### Settings — storage, account, OAuth-connected apps, **build info**
 ![Settings and OAuth](docs/screenshots/settings-oauth.jpeg)
+
+The Build info card at the top of Settings shows the running release's version, short commit SHA, build timestamp, and the exact `ghcr.io` image tag — copy it with one click to share with support or paste into a `docker pull`.
 
 ---
 

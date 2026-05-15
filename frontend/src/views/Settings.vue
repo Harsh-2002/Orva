@@ -9,6 +9,41 @@
       </p>
     </div>
 
+    <!-- Build info card. The first thing an operator needs when
+         troubleshooting: "what release am I actually running?"
+         Sourced from /api/v1/system/health (one-shot at page mount;
+         these values don't change while the binary is running). -->
+    <div class="bg-background border border-border rounded-lg p-5 space-y-3">
+      <div class="text-sm font-semibold text-white flex items-center gap-2">
+        <Info class="w-4 h-4 text-foreground-muted" />
+        Build info
+      </div>
+      <dl class="grid grid-cols-[max-content,1fr] gap-x-6 gap-y-2 text-xs">
+        <dt class="text-foreground-muted">Version</dt>
+        <dd class="font-mono text-white">{{ buildInfo?.version || EMPTY }}</dd>
+
+        <dt class="text-foreground-muted">Commit</dt>
+        <dd class="font-mono text-white">{{ buildInfo?.commit || EMPTY }}</dd>
+
+        <dt class="text-foreground-muted">Built</dt>
+        <dd class="font-mono text-white">{{ formatBuildTime(buildInfo?.buildTime) }}</dd>
+
+        <dt class="text-foreground-muted">Image</dt>
+        <dd class="font-mono text-white flex items-center gap-2 min-w-0">
+          <span class="truncate">{{ buildInfo?.image || EMPTY }}</span>
+          <button
+            v-if="buildInfo?.image"
+            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors shrink-0"
+            title="Copy image reference"
+            @click="copyImage"
+          >
+            <Copy class="w-3.5 h-3.5" />
+          </button>
+          <span v-if="imageCopied" class="text-[10px] text-primary-light shrink-0">copied</span>
+        </dd>
+      </dl>
+    </div>
+
     <!-- Storage card. Shows orva.db / functions tree / WAL sizes plus
          a "Compact" affordance that runs SQLite VACUUM via the
          admin-gated POST /api/v1/system/vacuum endpoint. -->
@@ -481,10 +516,14 @@ import {
   Plug,
   Monitor,
   Trash2,
+  Info,
+  Copy,
 } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import { useConfirmStore } from '@/stores/confirm'
 import { useAuthStore } from '@/stores/auth'
+import { useSystemStore } from '@/stores/system'
+import { copyText } from '@/utils/clipboard'
 import {
   uploadRestore,
   getStorage,
@@ -500,6 +539,30 @@ import { iconForClient } from '@/utils/connectorIcons'
 const confirmStore = useConfirmStore()
 const auth = useAuthStore()
 const router = useRouter()
+const systemStore = useSystemStore()
+
+// Build info card — sourced from /api/v1/system/health via the system
+// store's seed(). The store may or may not have run by the time this
+// view mounts (e.g. when Settings is the first-loaded route), so the
+// computed gracefully renders "—" until the snapshot arrives.
+const buildInfo = computed(() => systemStore.buildInfo)
+const imageCopied = ref(false)
+const copyImage = async () => {
+  if (!buildInfo.value?.image) return
+  if (await copyText(buildInfo.value.image)) {
+    imageCopied.value = true
+    setTimeout(() => { imageCopied.value = false }, 1500)
+  }
+}
+const formatBuildTime = (ts) => {
+  if (!ts || ts === 'unknown') return EMPTY
+  try {
+    const d = new Date(ts)
+    return d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
+  } catch {
+    return ts
+  }
+}
 
 // Account card state.
 const pwForm = ref({ current: '', next: '', confirm: '' })

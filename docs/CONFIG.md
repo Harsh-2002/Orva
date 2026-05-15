@@ -80,3 +80,26 @@ curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \
   http://localhost:8443/api/v1/pool/config \
   -d '{"function_id":"019df200-7b00-7e00-9c00-aab1cd2e3f40","min_warm":2,"max_warm":32,"idle_ttl_seconds":60}'
 ```
+
+---
+
+## Build identity
+
+The server binary stamps three values at link time and exposes them at `GET /api/v1/system/health` + Settings → Build info in the dashboard.
+
+| Field | Source | Example |
+|---|---|---|
+| `version`    | git tag (release) or `git describe` (dev)       | `v2026.05.15` |
+| `commit`     | short git SHA at build time                     | `1be3399` |
+| `build_time` | wall-clock RFC3339 UTC at link time             | `2026-05-15T14:20:34Z` |
+| `image`      | derived: `ghcr.io/harsh-2002/orva:` + version   | `ghcr.io/harsh-2002/orva:v2026.05.15` |
+
+Override at build time:
+
+```bash
+make build VERSION=v2026.05.15 \
+           COMMIT=$(git rev-parse --short HEAD) \
+           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+```
+
+Container images carry the same identity as OCI labels (`org.opencontainers.image.{version,revision,created}`) so `docker inspect` agrees with the running server's `/api/v1/system/health` response. Unstamped binaries report `"dev"` / `"unknown"` — an intentional signal that the build chain wasn't wired through.
