@@ -203,6 +203,41 @@ const ldJson = {
         if (e.key === 'Escape' && lb.getAttribute('aria-hidden') === 'false') closeLb();
       });
 
+      // Auto-hide masthead: slides up on scroll-down past a threshold,
+      // slides back in on scroll-up or at the top of the page. rAF-throttled.
+      {
+        const masthead = document.querySelector<HTMLElement>('.masthead');
+        if (masthead) {
+          let lastY = window.scrollY;
+          let scrollTicking = false;
+          const SHOW_BELOW = 80;
+          const DELTA = 6;
+          const onScroll = () => {
+            const y = window.scrollY;
+            const delta = y - lastY;
+            if (y < SHOW_BELOW) {
+              masthead.classList.remove('is-hidden');
+            } else if (delta > DELTA) {
+              masthead.classList.add('is-hidden');
+            } else if (delta < -DELTA) {
+              masthead.classList.remove('is-hidden');
+            }
+            lastY = y;
+            scrollTicking = false;
+          };
+          window.addEventListener(
+            'scroll',
+            () => {
+              if (!scrollTicking) {
+                scrollTicking = true;
+                requestAnimationFrame(onScroll);
+              }
+            },
+            { passive: true }
+          );
+        }
+      }
+
       // Smooth-scroll for anchor links with sticky-nav offset
       document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]').forEach((link) => {
         link.addEventListener('click', (e) => {
