@@ -72,28 +72,41 @@ body {
   padding-right: env(safe-area-inset-right, 0);
 }
 
-/* ── Cursor spotlight — viewport-anchored radial layered on body bg.
-   --cx/--cy default off-screen so the glow is invisible until JS sets
-   them. JS only attaches the pointermove listener on hover-capable,
-   non-reduced-motion devices, so touch devices stay clean. ── */
+/* ── Cursor spotlight + film grain ─────────────────────────
+   Two viewport-fixed background layers on <body>:
+     1. SVG fractal noise tile (always on, very low opacity)
+     2. Radial purple glow that follows the pointer via --cx/--cy
+   The noise gets blended over the glow with `overlay`, so the grain
+   intensifies where the spotlight brightens the surface — feels
+   tactile under the cursor, near-invisible elsewhere.
+   --cx/--cy default off-screen; JS sets them on hover-capable,
+   non-reduced-motion devices only. */
 body {
-  background-image: radial-gradient(
-    720px circle at var(--cx, -9999px) var(--cy, -9999px),
-    rgba(179, 148, 232, 0.18),
-    rgba(179, 148, 232, 0.05) 32%,
-    transparent 58%
-  );
-  background-attachment: fixed;
-  background-repeat: no-repeat;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+    radial-gradient(
+      720px circle at var(--cx, -9999px) var(--cy, -9999px),
+      rgba(179, 148, 232, 0.2),
+      rgba(179, 148, 232, 0.06) 32%,
+      transparent 58%
+    );
+  background-blend-mode: overlay, normal;
+  background-attachment: fixed, fixed;
+  background-repeat: repeat, no-repeat;
+  background-size:
+    220px 220px,
+    auto;
 }
 @supports (color: oklch(0% 0 0)) {
   body {
-    background-image: radial-gradient(
-      720px circle at var(--cx, -9999px) var(--cy, -9999px),
-      oklch(72% 0.13 295 / 0.18),
-      oklch(72% 0.13 295 / 0.06) 32%,
-      transparent 58%
-    );
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+      radial-gradient(
+        720px circle at var(--cx, -9999px) var(--cy, -9999px),
+        oklch(72% 0.13 295 / 0.2),
+        oklch(72% 0.13 295 / 0.06) 32%,
+        transparent 58%
+      );
   }
 }
 img,

@@ -147,28 +147,46 @@ const {
         });
       });
 
-      // Cursor spotlight — updates --cx/--cy on <body>, throttled via rAF.
-      // CSS gates this with @media (hover: hover) so touch devices skip the work entirely.
+      // Cursor spotlight — eased lerp toward target pointer position.
+      // Lower `ease` = slower / dreamier trail; 0.10 lands at ~99% in ~500ms.
+      // The first pointermove snaps the spotlight in (no zoom-in from -9999px),
+      // then rAF interpolates each subsequent target.
       const supportsHover = matchMedia('(hover: hover) and (pointer: fine)').matches;
       const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
       if (supportsHover && !reduceMotion) {
-        let pendingX = 0;
-        let pendingY = 0;
-        let scheduled = false;
-        const apply = () => {
-          document.body.style.setProperty('--cx', pendingX + 'px');
-          document.body.style.setProperty('--cy', pendingY + 'px');
-          scheduled = false;
+        let targetX = 0;
+        let targetY = 0;
+        let currentX = -1;
+        let currentY = -1;
+        let rafId = 0;
+        const ease = 0.1;
+        const tick = () => {
+          const dx = targetX - currentX;
+          const dy = targetY - currentY;
+          currentX += dx * ease;
+          currentY += dy * ease;
+          document.body.style.setProperty('--cx', currentX.toFixed(1) + 'px');
+          document.body.style.setProperty('--cy', currentY.toFixed(1) + 'px');
+          if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) {
+            rafId = requestAnimationFrame(tick);
+          } else {
+            // Snap to final on convergence so the value matches the cursor exactly.
+            document.body.style.setProperty('--cx', targetX + 'px');
+            document.body.style.setProperty('--cy', targetY + 'px');
+            rafId = 0;
+          }
         };
         document.addEventListener(
           'pointermove',
           (e: PointerEvent) => {
-            pendingX = e.clientX;
-            pendingY = e.clientY;
-            if (!scheduled) {
-              scheduled = true;
-              requestAnimationFrame(apply);
+            targetX = e.clientX;
+            targetY = e.clientY;
+            if (currentX < 0) {
+              // First move — seed at cursor position so we don't trail in from off-screen.
+              currentX = e.clientX;
+              currentY = e.clientY;
             }
+            if (!rafId) rafId = requestAnimationFrame(tick);
           },
           { passive: true }
         );
