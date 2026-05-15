@@ -52,6 +52,7 @@ func newRootEmpty() *cobra.Command {
 func RegisterClient(root *cobra.Command) {
 	root.AddCommand(
 		activityCmd,
+		backupCmd,
 		channelsCmd,
 		completionCmd,
 		cronCmd,

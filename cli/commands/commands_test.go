@@ -23,6 +23,7 @@ func TestCommandTree(t *testing.T) {
 		{"routes"}, {"routes", "list"},
 		{"system"}, {"system", "health"},
 		{"activity"},
+		{"backup"}, {"backup", "download"}, {"backup", "restore"},
 		{"login"},
 		{"completion"},
 		{"upgrade"},
