@@ -1,28 +1,52 @@
-// Package backup implements consistent snapshot + restore of an Orva data
-// directory. The two on-disk things to capture are the SQLite database
-// (orva.db, with WAL on the side) and the per-function deployed code
-// (functions/<id>/versions/<hash>/...). The `current` symlink that points
-// at the active version isn't archived — restore reconstructs it from
-// each function row's code_hash, so a restored install is always coherent
-// with what the database says is "active".
+// Package backup implements consistent point-in-time snapshot + restore
+// of an Orva data directory. The snapshot is the entire operator-visible
+// state: SQLite database, per-function deployed code, encryption keys.
+// One file on disk → one file in the archive; restore is byte-faithful.
 //
-// SQLite is in WAL mode, so a naïve `cp orva.db` could capture a torn
-// read while a writer is mid-transaction. The fix is `VACUUM INTO`: it
-// runs in a transaction, copies pages to a fresh single-file database,
-// and produces a checkpoint-clean snapshot with no WAL sidecar to ship.
+// On-disk things that get captured:
 //
-// The package exposes three pure functions so tests can roundtrip without
-// the full HTTP stack:
+//	orva.db                                   the SQLite database (VACUUM INTO'd)
+//	keys/master.key                           AES key that decrypts function secrets
+//	keys/admin.key                            bootstrap admin API key
+//	functions/<id>/versions/<hash>/...        deployed code for every function
 //
-//   SnapshotDB(srcDB, outPath)        — VACUUM INTO outPath
-//   ArchiveTo(w, dataDir, snapshot)   — gzip-tar to w
-//   RestoreFrom(r, dataDir)           — extract + activate, atomic on success
+// On-disk things deliberately omitted:
+//
+//	functions/<id>/current                    symlink — rebuilt on restore from
+//	                                          each function row's code_hash so DB
+//	                                          and disk can never disagree
+//	-wal / -shm                               WAL sidecars — the snapshot is fully
+//	                                          checkpointed and a stale WAL on
+//	                                          restore would corrupt the new DB
+//
+// SQLite is in WAL mode, so a naïve `cp orva.db` could capture a torn read
+// while a writer is mid-transaction. `VACUUM INTO` runs in a transaction,
+// copies pages to a fresh single-file database, and produces a
+// checkpoint-clean snapshot with no WAL sidecar to ship.
+//
+// Format
+//
+// Every archive carries a `manifest.json` at the root listing format_version,
+// the producing Orva binary's version, created_at (RFC3339 UTC), and a
+// sha256 + size per file. Restore validates every file's checksum against
+// the manifest BEFORE touching live state — a half-uploaded or
+// bit-rotted archive is rejected, not partially applied.
+//
+// The package exposes pure functions so tests can roundtrip without the
+// full HTTP stack:
+//
+//	SnapshotDB(srcDB, outPath)        — VACUUM INTO outPath
+//	ArchiveTo(w, dataDir, snapshot)   — gzip-tar to w with manifest
+//	RestoreFrom(r, dataDir)           — extract + verify + activate atomic
 package backup
 
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,13 +54,49 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Harsh-2002/Orva/backend/internal/version"
 )
 
+// FormatVersion is the on-disk archive layout version. Bump on any
+// breaking change (new required field, layout change). The restore path
+// REFUSES to restore an archive whose format_version is greater than this
+// constant — that's the "newer Orva produced a snapshot you can't read"
+// guard. Older format_versions are still accepted (backward-compatible
+// reads).
+const FormatVersion = 1
+
 // ErrBadArchive is returned by RestoreFrom when the supplied bytes are
-// not a valid gzip-tarball produced by ArchiveTo. The HTTP layer maps
-// this to 400 BAD_ARCHIVE so the client knows the request body — not
-// the server — is at fault.
+// not a valid manifest-bearing tar.gz produced by ArchiveTo. The HTTP
+// layer maps this to 400 BAD_ARCHIVE so the client knows the request
+// body — not the server — is at fault.
 var ErrBadArchive = errors.New("malformed archive")
+
+// ErrIncompatibleFormat is returned when the archive's format_version is
+// newer than this binary's FormatVersion. Operators see this when they
+// try to restore a newer snapshot on an older binary.
+var ErrIncompatibleFormat = errors.New("archive format newer than this binary supports")
+
+// Manifest describes the snapshot's contents. Embedded as manifest.json
+// at the root of the tarball. Restore parses + validates this before
+// touching any live state, so a corrupt or truncated archive can't
+// half-overwrite the running system.
+type Manifest struct {
+	FormatVersion int                   `json:"format_version"`
+	OrvaVersion   string                `json:"orva_version"`
+	CreatedAt     string                `json:"created_at"` // RFC3339 UTC
+	FunctionCount int                   `json:"function_count"`
+	ContainsKeys  bool                  `json:"contains_keys"`
+	Files         map[string]FileDigest `json:"files"`
+}
+
+// FileDigest records the size and sha256 of one archived file. The
+// manifest's Files map is keyed by archive-relative path (e.g.
+// "orva.db", "keys/master.key", "functions/fn_abc/versions/h1/handler.js").
+type FileDigest struct {
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"` // hex
+}
 
 // SnapshotDB writes a consistent point-in-time copy of the live SQLite
 // database to outPath. Uses `VACUUM INTO`, which holds a shared lock for
@@ -62,44 +122,128 @@ func SnapshotDB(srcDB *sql.DB, outPath string) error {
 	return nil
 }
 
-// ArchiveTo writes a gzip-compressed tar containing:
+// ArchiveTo writes a gzip-compressed, manifest-bearing tar containing:
 //
-//   orva.db                                  (the snapshot file)
-//   functions/<id>/versions/<hash>/...       (every deployed version)
+//	manifest.json                            (sha256 inventory + metadata)
+//	orva.db                                  (the snapshot file)
+//	keys/master.key                          (if present at dataDir/.master.key)
+//	keys/admin.key                           (if present at dataDir/.admin-key)
+//	functions/<id>/versions/<hash>/...       (every deployed version)
 //
-// The `current` symlink under each function dir is intentionally NOT
-// included — restore rebuilds it from the function row's code_hash. This
-// guarantees the symlink and the DB never disagree after restore.
-//
-// Archive paths are relative (no leading slash), so `tar -xzf` expands
-// into the cwd cleanly. snapshotPath is the file written by SnapshotDB;
-// it is read and added to the archive as `orva.db`.
+// Strategy: two-pass. First pass walks the dataDir collecting paths +
+// sizes + sha256s into a manifest. Second pass streams the manifest
+// followed by every file. This costs one extra read of every file but
+// guarantees the manifest's checksums match exactly what got archived
+// (a single-pass approach where we compute checksums while streaming
+// would put the manifest at the END of the tar, forcing restore to read
+// the whole archive before validating it).
 func ArchiveTo(w io.Writer, dataDir, snapshotPath string) error {
+	plan, err := planArchive(dataDir, snapshotPath)
+	if err != nil {
+		return err
+	}
+
 	gz := gzip.NewWriter(w)
 	defer gz.Close()
 	tw := tar.NewWriter(gz)
 	defer tw.Close()
 
-	// 1. orva.db (the snapshot).
-	if err := addFileToTar(tw, snapshotPath, "orva.db"); err != nil {
-		return fmt.Errorf("archive orva.db: %w", err)
+	// Stream manifest.json first so restore can read it without
+	// scanning the whole archive.
+	manifestBytes, err := json.MarshalIndent(plan.manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+	if err := writeTarBytes(tw, "manifest.json", manifestBytes, time.Now().UTC()); err != nil {
+		return fmt.Errorf("write manifest: %w", err)
 	}
 
-	// 2. functions/<id>/versions/<hash>/... — walk the dataDir and pick
-	// only the versions trees. Skip the `current` symlinks (they are
-	// re-derived on restore) and any other top-level junk operators may
-	// have left behind.
-	//
-	// We additionally filter to function ids that exist in the snapshot's
-	// `functions` table. Without this, deleted functions whose on-disk
-	// content hasn't been GC'd yet ride along in the archive — wasted
-	// bytes that would also re-create orphans on restore. Reading the IDs
-	// from the snapshot (not the live DB) keeps the archive self-consistent
-	// with the orva.db we're about to ship.
+	// Then stream every planned file in deterministic order.
+	for _, item := range plan.items {
+		if item.isDir {
+			hdr := &tar.Header{
+				Name:     item.archivePath + "/",
+				Mode:     0o755,
+				ModTime:  item.modTime,
+				Typeflag: tar.TypeDir,
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := addFileToTar(tw, item.srcPath, item.archivePath); err != nil {
+			return fmt.Errorf("archive %s: %w", item.archivePath, err)
+		}
+	}
+	return nil
+}
+
+// archiveItem is one entry in the archive plan. Directories ride along
+// for `tar t` readability; the actual extraction does MkdirAll regardless.
+type archiveItem struct {
+	srcPath     string    // absolute path on disk
+	archivePath string    // tar-relative path (no leading slash, forward slashes)
+	isDir       bool
+	modTime     time.Time
+}
+
+// archivePlan is the result of the first archive pass. items is the
+// ordered file list to stream; manifest is the metadata to write at the
+// top of the tarball.
+type archivePlan struct {
+	items    []archiveItem
+	manifest Manifest
+}
+
+// planArchive walks the data dir and produces an ordered list of files
+// to stream, plus a manifest with sha256 of every file. The single-pass
+// would be cheaper but would put the manifest at the END of the tar; we
+// pay the re-read cost to put it at the FRONT so restore can validate
+// before unpacking.
+func planArchive(dataDir, snapshotPath string) (*archivePlan, error) {
+	plan := &archivePlan{
+		manifest: Manifest{
+			FormatVersion: FormatVersion,
+			OrvaVersion:   version.Version,
+			CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+			Files:         map[string]FileDigest{},
+		},
+	}
+
+	// 1. orva.db — always present.
+	if err := planFile(plan, snapshotPath, "orva.db"); err != nil {
+		return nil, fmt.Errorf("plan orva.db: %w", err)
+	}
+
+	// 2. Encryption + admin keys — both optional but should normally
+	// exist on a running install. Skipping silently is correct for
+	// migration scenarios (e.g. backup taken on a host that lost its
+	// .admin-key for some reason).
+	masterKeyPath := filepath.Join(dataDir, ".master.key")
+	if _, err := os.Stat(masterKeyPath); err == nil {
+		if err := planFile(plan, masterKeyPath, "keys/master.key"); err != nil {
+			return nil, fmt.Errorf("plan master.key: %w", err)
+		}
+	}
+	adminKeyPath := filepath.Join(dataDir, ".admin-key")
+	if _, err := os.Stat(adminKeyPath); err == nil {
+		if err := planFile(plan, adminKeyPath, "keys/admin.key"); err != nil {
+			return nil, fmt.Errorf("plan admin.key: %w", err)
+		}
+	}
+	if _, hasKey := plan.manifest.Files["keys/master.key"]; hasKey {
+		plan.manifest.ContainsKeys = true
+	}
+
+	// 3. functions/<id>/versions/<hash>/... — filtered to the IDs
+	// present in the snapshot so orphaned on-disk trees don't ride
+	// along (saves bytes and avoids re-creating orphans on restore).
 	liveIDs, err := loadLiveFunctionIDs(snapshotPath)
 	if err != nil {
-		return fmt.Errorf("load live fn ids: %w", err)
+		return nil, fmt.Errorf("load live fn ids: %w", err)
 	}
+	plan.manifest.FunctionCount = len(liveIDs)
 	functionsDir := filepath.Join(dataDir, "functions")
 	if _, err := os.Stat(functionsDir); err == nil {
 		err := filepath.Walk(functionsDir, func(path string, info os.FileInfo, err error) error {
@@ -110,25 +254,13 @@ func ArchiveTo(w io.Writer, dataDir, snapshotPath string) error {
 			if err != nil {
 				return err
 			}
-			// Skip the `current` symlink at functions/<id>/current.
 			if info.Mode()&os.ModeSymlink != 0 {
 				return nil
 			}
-			// Only include things under versions/. Anything else under
-			// functions/<id>/ (e.g. an old `code/` from pre-Round-G
-			// installs) gets archived too because it might be in use,
-			// but skip dotfiles.
 			base := filepath.Base(path)
 			if strings.HasPrefix(base, ".") && path != functionsDir {
 				return nil
 			}
-			// Orphan filter: paths under functions/<id>/ where <id> is
-			// not in the snapshot's `functions` table get pruned. The
-			// functionsDir itself and the per-function root dir are
-			// matched by the rel == "functions" / rel == "functions/<id>"
-			// checks below — the per-function root is allowed through
-			// only when <id> is live, which means orphan dirs never get
-			// a header in the tar.
 			if id, ok := fnIDFromRel(rel); ok {
 				if _, live := liveIDs[id]; !live {
 					if info.IsDir() {
@@ -138,26 +270,78 @@ func ArchiveTo(w io.Writer, dataDir, snapshotPath string) error {
 				}
 			}
 			if info.IsDir() {
-				// Emit a directory header so `tar t` shows the tree;
-				// extraction does MkdirAll regardless.
-				hdr := &tar.Header{
-					Name:     filepath.ToSlash(rel) + "/",
-					Mode:     0o755,
-					ModTime:  info.ModTime(),
-					Typeflag: tar.TypeDir,
-				}
-				return tw.WriteHeader(hdr)
+				plan.items = append(plan.items, archiveItem{
+					srcPath:     path,
+					archivePath: filepath.ToSlash(rel),
+					isDir:       true,
+					modTime:     info.ModTime(),
+				})
+				return nil
 			}
 			if !info.Mode().IsRegular() {
 				return nil
 			}
-			return addFileToTar(tw, path, filepath.ToSlash(rel))
+			return planFile(plan, path, filepath.ToSlash(rel))
 		})
 		if err != nil {
-			return fmt.Errorf("walk functions: %w", err)
+			return nil, fmt.Errorf("walk functions: %w", err)
 		}
 	}
+	return plan, nil
+}
+
+// planFile reads the file's size + sha256 and appends both an items
+// entry and a manifest entry. Used for orva.db, the keys, and every
+// regular file under functions/.
+func planFile(plan *archivePlan, srcPath, archivePath string) error {
+	st, err := os.Stat(srcPath)
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("not a regular file: %s", srcPath)
+	}
+	digest, err := sha256File(srcPath)
+	if err != nil {
+		return err
+	}
+	plan.items = append(plan.items, archiveItem{
+		srcPath:     srcPath,
+		archivePath: archivePath,
+		modTime:     st.ModTime(),
+	})
+	plan.manifest.Files[archivePath] = FileDigest{
+		Size:   st.Size(),
+		SHA256: digest,
+	}
 	return nil
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func writeTarBytes(tw *tar.Writer, name string, data []byte, modTime time.Time) error {
+	hdr := &tar.Header{
+		Name:    name,
+		Mode:    0o644,
+		Size:    int64(len(data)),
+		ModTime: modTime,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err := tw.Write(data)
+	return err
 }
 
 // fnIDFromRel extracts the function ID component from an archive-relative
@@ -233,16 +417,17 @@ func addFileToTar(tw *tar.Writer, srcPath, archivePath string) error {
 // activates it atomically:
 //
 //  1. Extract the archive into a staging dir under dataDir.
-//  2. Open the staged orva.db; bail if it isn't a valid SQLite file.
-//  3. Move the live orva.db aside as orva.db.before-restore-<unix>.
-//  4. Rename the staged orva.db into place; move the staged functions/
-//     tree on top of the existing one (per-function rename so old
-//     functions not in the backup are left alone).
-//  5. Walk the new functions table; for every row with a code_hash,
+//  2. Parse + validate manifest.json: format compatibility, every file's
+//     sha256 matches what's on staging-disk after extraction.
+//  3. Open the staged orva.db; bail if it isn't a valid SQLite file.
+//  4. Move the live orva.db aside as orva.db.before-restore-<unix>.
+//  5. Rename the staged orva.db into place; move the staged keys + functions/
+//     trees on top of the existing ones.
+//  6. Walk the new functions table; for every row with a code_hash,
 //     recreate the `current` symlink → versions/<hash>.
 //
-// On any failure before step 3, no live state has changed; the staging
-// dir is removed and the original error is returned. After step 3 a
+// On any failure before step 4, no live state has changed; the staging
+// dir is removed and the original error is returned. After step 4 a
 // failure rolls back by moving the .before-restore file back into place.
 //
 // IMPORTANT: the caller must have closed (or be ready to close + reopen)
@@ -269,14 +454,19 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 		return fmt.Errorf("restore: extract: %w", err)
 	}
 
+	manifest, err := readAndVerifyManifest(stage)
+	if err != nil {
+		return err
+	}
+
 	stagedDB := filepath.Join(stage, "orva.db")
 	if _, err := os.Stat(stagedDB); err != nil {
 		return fmt.Errorf("%w: archive missing orva.db", ErrBadArchive)
 	}
-	// Validate by opening + running migrations. If the file is
-	// corrupted or wasn't actually SQLite this fails loudly here, before
-	// we touch the live DB. Validation failures point at the supplied
-	// file, not the server, so flag them as bad-archive too.
+	// Validate by opening + integrity-check. If the file is corrupted
+	// or wasn't actually SQLite this fails loudly here, before we touch
+	// the live DB. Validation failures point at the supplied file, not
+	// the server, so flag them as bad-archive too.
 	if err := validateStagedDB(stagedDB); err != nil {
 		return fmt.Errorf("%w: validate staged db: %v", ErrBadArchive, err)
 	}
@@ -310,6 +500,27 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 
 	if err := os.Rename(stagedDB, livePath); err != nil {
 		return rollback(fmt.Errorf("install staged db: %w", err))
+	}
+
+	// Move keys into place (if the archive shipped them). Keys are
+	// per-host and overwriting is the right thing — the operator
+	// asked for a snapshot-faithful restore.
+	stagedKeys := filepath.Join(stage, "keys")
+	if _, err := os.Stat(stagedKeys); err == nil {
+		moves := []struct{ src, dst string }{
+			{filepath.Join(stagedKeys, "master.key"), filepath.Join(dataDir, ".master.key")},
+			{filepath.Join(stagedKeys, "admin.key"), filepath.Join(dataDir, ".admin-key")},
+		}
+		for _, m := range moves {
+			if _, err := os.Stat(m.src); err != nil {
+				continue
+			}
+			// Tight perms — these files are secrets.
+			if err := os.Rename(m.src, m.dst); err != nil {
+				return rollback(fmt.Errorf("install %s: %w", filepath.Base(m.dst), err))
+			}
+			_ = os.Chmod(m.dst, 0o600)
+		}
 	}
 
 	// Move staged functions tree into place. We do per-function
@@ -347,7 +558,63 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 		// error so they know to investigate, but don't roll back.
 		return fmt.Errorf("restore: rebuild symlinks (data installed; symlinks broken): %w", err)
 	}
+
+	_ = manifest // keep available in case we surface stats later
 	return nil
+}
+
+// readAndVerifyManifest reads manifest.json from the staging dir and
+// verifies every file's sha256 against the extracted bytes. Returns the
+// parsed manifest on success. Failures (missing manifest, hash mismatch,
+// format too new) are wrapped as ErrBadArchive / ErrIncompatibleFormat
+// so the HTTP layer maps them to 400 cleanly.
+//
+// Legacy archives without a manifest.json are tolerated: this is the
+// path a v1-format-aware binary takes when restoring a snapshot from
+// before manifests existed. The cost is no checksum verification on
+// those old archives — but they were the only contract at the time, so
+// rejecting them outright would break operators mid-upgrade.
+func readAndVerifyManifest(stage string) (*Manifest, error) {
+	manifestPath := filepath.Join(stage, "manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Legacy archive — proceed without verification.
+			return &Manifest{FormatVersion: 0, Files: map[string]FileDigest{}}, nil
+		}
+		return nil, fmt.Errorf("%w: read manifest: %v", ErrBadArchive, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("%w: parse manifest: %v", ErrBadArchive, err)
+	}
+	if m.FormatVersion > FormatVersion {
+		return nil, fmt.Errorf("%w: archive format_version=%d, this binary supports up to %d",
+			ErrIncompatibleFormat, m.FormatVersion, FormatVersion)
+	}
+	// Verify every file in the manifest exists on staged disk and its
+	// sha256 + size match. Files in the tar that AREN'T in the
+	// manifest are tolerated (forward-compat: a future format might
+	// add files the older binary doesn't know about).
+	for archivePath, want := range m.Files {
+		stagedFile := filepath.Join(stage, filepath.FromSlash(archivePath))
+		st, err := os.Stat(stagedFile)
+		if err != nil {
+			return nil, fmt.Errorf("%w: manifest lists %s but file missing", ErrBadArchive, archivePath)
+		}
+		if st.Size() != want.Size {
+			return nil, fmt.Errorf("%w: %s size mismatch (manifest=%d on-disk=%d)",
+				ErrBadArchive, archivePath, want.Size, st.Size())
+		}
+		got, err := sha256File(stagedFile)
+		if err != nil {
+			return nil, fmt.Errorf("%w: hash %s: %v", ErrBadArchive, archivePath, err)
+		}
+		if got != want.SHA256 {
+			return nil, fmt.Errorf("%w: %s sha256 mismatch", ErrBadArchive, archivePath)
+		}
+	}
+	return &m, nil
 }
 
 // extractTarGz reads a gzip tar from r and writes it under destDir.

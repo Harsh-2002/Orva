@@ -86,9 +86,13 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 // dashboard shouldn't be able to nuke production. The frontend modal
 // provides the confirm signal explicitly.
 //
-// On success the response body is `{"status":"restored","next":"reload"}`
-// — the operator is expected to restart the orvad process so all open
-// *sql.DB handles re-open against the new file.
+// After a successful swap the handler **exits the process** so the
+// supervisor (systemd / docker `restart: unless-stopped`) restarts
+// orvad against the new files. Without this, the in-process *sql.DB
+// handle keeps reading/writing the moved-aside orva.db.before-restore-*
+// file and writes get silently lost on the next restart. The exit
+// happens in a goroutine on a short timer so the HTTP response has time
+// to flush back to the client first.
 func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	if h.DB == nil || h.Cfg == nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "backup handler not wired", "")
@@ -115,12 +119,16 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	if err := backup.RestoreFrom(file, h.Cfg.Data.Dir); err != nil {
-		// Bad gzip / non-orva tarball / corrupt-db etc are the *client's*
-		// problem, not ours — surface them as 400 BAD_ARCHIVE so callers
-		// don't page on a malformed upload. Anything else (disk I/O,
-		// rename failure, …) stays 500 RESTORE_FAILED.
+		// Bad gzip / non-orva tarball / corrupt-db / wrong format
+		// version / sha256 mismatch are the *client's* problem — surface
+		// them as 400 so callers don't page on a malformed upload.
+		// Anything else (disk I/O, rename failure) stays 500.
 		if errors.Is(err, backup.ErrBadArchive) {
 			respond.Error(w, http.StatusBadRequest, "BAD_ARCHIVE", err.Error(), "")
+			return
+		}
+		if errors.Is(err, backup.ErrIncompatibleFormat) {
+			respond.Error(w, http.StatusBadRequest, "INCOMPATIBLE_FORMAT", err.Error(), "")
 			return
 		}
 		respond.Error(w, http.StatusInternalServerError, "RESTORE_FAILED", err.Error(), "")
@@ -130,5 +138,15 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, map[string]any{
 		"status": "restored",
 		"next":   "reload",
+		"hint":   "server is restarting to pick up the restored files; reload in a few seconds",
 	})
+
+	// Restart cleanly so the supervisor reopens the new DB. The 1s
+	// timer is enough for the response to flush over a local socket;
+	// remote browsers will already have received it by the time the
+	// connection drops because we close the response above.
+	go func() {
+		time.Sleep(1 * time.Second)
+		os.Exit(0)
+	}()
 }

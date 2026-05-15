@@ -443,10 +443,18 @@
             Backup &amp; Restore
           </div>
           <p class="text-xs text-foreground-muted mt-1 max-w-prose">
-            Download a single tarball with the full SQLite database and every deployed
-            function version. Restore on a fresh machine to migrate or recover from disk
-            loss. Backups are produced with <code class="text-[11px]">VACUUM&nbsp;INTO</code>
-            so they are point-in-time consistent even under load.
+            One self-contained snapshot: the SQLite database
+            (<code class="text-[11px]">VACUUM&nbsp;INTO</code> — fully checkpointed),
+            every deployed function version, the secrets master key, and the bootstrap
+            admin key. Carries a <code class="text-[11px]">manifest.json</code> with
+            sha256 of every file so restore can detect tampering or truncation before
+            touching live state. Restore on a fresh host and the install boots back up
+            byte-faithful — secrets decrypt, the admin login still works.
+          </p>
+          <p class="text-[11px] text-amber-300/80 mt-2 max-w-prose">
+            Treat the file as sensitive — it contains your secrets master key. Store
+            it like you would a password manager export (encrypted disk, S3 + SSE,
+            etc.).
           </p>
         </div>
       </div>
@@ -489,7 +497,8 @@
         v-if="restoreOk"
         class="rounded-md border border-emerald-700/40 bg-emerald-950/30 p-3 text-xs text-emerald-200"
       >
-        Restore complete. Reload the page to pick up the new data.
+        Restore complete. The server is restarting to load the new data — reload in
+        a few seconds.
         <button
           class="underline ml-1"
           @click="reload"
