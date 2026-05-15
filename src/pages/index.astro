@@ -26,49 +26,115 @@ try {
 
 const capabilities: [string, string][] = [
   ['Multi-runtime', 'Node.js 22/24, Python 3.13/3.14, TypeScript — all in one binary.'],
-  ['nsjail isolation', 'Five overlapping Linux kernel boundaries per call — user NS, mount NS, cgroup v2, seccomp, network NS.'],
-  ['Warm pools', 'Idle workers stay resident between invocations. Pool size configurable per function; back-to-back calls skip spawn entirely.'],
-  ['KV store', 'Per-function SQLite-backed KV with optional TTL. kv.put / kv.get / kv.list — browsable from the dashboard.'],
-  ['Background jobs', 'jobs.enqueue(name, payload). Persisted queue with configurable retries and exponential backoff.'],
-  ['Cron schedules', 'Fire any function on a cron expression. Dashboard shows last run, next run, current status.'],
-  ['Function-to-function', 'invoke("name", payload) calls another function via the warm pool as a child span in the same trace.'],
-  ['Distributed tracing', 'HTTP, F2F calls, and background jobs share one trace_id. Waterfall view in dashboard; zero code changes.'],
-  ['Custom routes', 'Map a path like /webhooks/stripe to a function so callers use a clean URL instead of a UUID.'],
-  ['Secrets', 'Encrypted per-function secrets injected as env vars at sandbox spawn time. Never logged, never plaintext on disk.'],
-  ['Inbound webhooks', 'Signed external trigger endpoints — GitHub, Stripe, Slack, and generic HMAC — fanning into a function.'],
+  [
+    'nsjail isolation',
+    'Five overlapping Linux kernel boundaries per call — user NS, mount NS, cgroup v2, seccomp, network NS.',
+  ],
+  [
+    'Warm pools',
+    'Idle workers stay resident between invocations. Pool size configurable per function; back-to-back calls skip spawn entirely.',
+  ],
+  [
+    'KV store',
+    'Per-function SQLite-backed KV with optional TTL. kv.put / kv.get / kv.list — browsable from the dashboard.',
+  ],
+  [
+    'Background jobs',
+    'jobs.enqueue(name, payload). Persisted queue with configurable retries and exponential backoff.',
+  ],
+  [
+    'Cron schedules',
+    'Fire any function on a cron expression. Dashboard shows last run, next run, current status.',
+  ],
+  [
+    'Function-to-function',
+    'invoke("name", payload) calls another function via the warm pool as a child span in the same trace.',
+  ],
+  [
+    'Distributed tracing',
+    'HTTP, F2F calls, and background jobs share one trace_id. Waterfall view in dashboard; zero code changes.',
+  ],
+  [
+    'Custom routes',
+    'Map a path like /webhooks/stripe to a function so callers use a clean URL instead of a UUID.',
+  ],
+  [
+    'Secrets',
+    'Encrypted per-function secrets injected as env vars at sandbox spawn time. Never logged, never plaintext on disk.',
+  ],
+  [
+    'Inbound webhooks',
+    'Signed external trigger endpoints — GitHub, Stripe, Slack, and generic HMAC — fanning into a function.',
+  ],
   ['Rollback', 'Every deploy is content-hashed and archived. Roll back to any prior version in one click.'],
-  ['MCP server', '70 tools at /mcp. Claude Code, Cursor, and any OAuth MCP client can deploy and manage functions from chat.'],
-  ['16 templates', 'Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener — pickable in the editor.'],
+  [
+    'MCP server',
+    '70 tools at /mcp. Claude Code, Cursor, and any OAuth MCP client can deploy and manage functions from chat.',
+  ],
+  [
+    '16 templates',
+    'Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener — pickable in the editor.',
+  ],
 ];
 
 const layers: [string, string][] = [
-  ['User namespace', 'UID 0 inside the sandbox maps to UID 65534 (nobody) on the host. All 64 Linux capability bits cleared — verified via /proc/self/status. The function cannot escalate to host root.'],
-  ['Mount namespace + chroot', "/code is a read-only bind mount of the function's versioned directory. /tmp is a private tmpfs wiped after each worker exits. No host filesystem visible."],
-  ['cgroup v2', 'Hard limits per function: memory.max, cpu.max, pids.max. The host refuses new spawns past 80% total memory reservation.'],
-  ['Seccomp (Kafel policy)', '~150 syscalls blocked: mount, unshare, bpf, kexec_load, init_module, ptrace, and more. Blocked attempts log and kill the process — never silently fail.'],
-  ['Network namespace', 'Default network_mode: none — loopback only, no inbound possible. Functions opt in to network_mode: egress for outbound HTTPS via an nftables allowlist.'],
+  [
+    'User namespace',
+    'UID 0 inside the sandbox maps to UID 65534 (nobody) on the host. All 64 Linux capability bits cleared — verified via /proc/self/status. The function cannot escalate to host root.',
+  ],
+  [
+    'Mount namespace + chroot',
+    "/code is a read-only bind mount of the function's versioned directory. /tmp is a private tmpfs wiped after each worker exits. No host filesystem visible.",
+  ],
+  [
+    'cgroup v2',
+    'Hard limits per function: memory.max, cpu.max, pids.max. The host refuses new spawns past 80% total memory reservation.',
+  ],
+  [
+    'Seccomp (Kafel policy)',
+    '~150 syscalls blocked: mount, unshare, bpf, kexec_load, init_module, ptrace, and more. Blocked attempts log and kill the process — never silently fail.',
+  ],
+  [
+    'Network namespace',
+    'Default network_mode: none — loopback only, no inbound possible. Functions opt in to network_mode: egress for outbound HTTPS via an nftables allowlist.',
+  ],
 ];
 
 const compareRows: [string, string, string, string][] = [
-  ['Kernel',              'Shared with host',                          'Separate per VM',                'Shared with host'],
-  ['Isolation primitive', 'Linux namespaces + seccomp + cgroup v2',    'Hardware virtualisation (KVM)',  'Linux namespaces + cgroup'],
-  ['Syscall surface',     '~150 syscalls blocked via Kafel policy',    'Near-zero (hardware boundary)',  'Unfiltered by default'],
-  ['Capability drop',     'All 64 Linux caps cleared',                 'N/A (separate kernel)',          'Partial (Docker defaults)'],
-  ['Cold start',          '~50–200 ms',                                '~125 ms (Firecracker MicroVM)',  'N/A'],
-  ['Memory / worker',     '~30 MB',                                    '~5 MB per MicroVM',              'Varies'],
-  ['Suited for',          'Homelabs, internal tools, trusted code',    'Multi-tenant cloud, untrusted code', 'General app containers'],
+  ['Kernel', 'Shared with host', 'Separate per VM', 'Shared with host'],
+  [
+    'Isolation primitive',
+    'Linux namespaces + seccomp + cgroup v2',
+    'Hardware virtualisation (KVM)',
+    'Linux namespaces + cgroup',
+  ],
+  [
+    'Syscall surface',
+    '~150 syscalls blocked via Kafel policy',
+    'Near-zero (hardware boundary)',
+    'Unfiltered by default',
+  ],
+  ['Capability drop', 'All 64 Linux caps cleared', 'N/A (separate kernel)', 'Partial (Docker defaults)'],
+  ['Cold start', '~50–200 ms', '~125 ms (Firecracker MicroVM)', 'N/A'],
+  ['Memory / worker', '~30 MB', '~5 MB per MicroVM', 'Varies'],
+  [
+    'Suited for',
+    'Homelabs, internal tools, trusted code',
+    'Multi-tenant cloud, untrusted code',
+    'General app containers',
+  ],
 ];
 
 const shots: [string, string, string][] = [
   ['system-overview-dashboard', 'System overview', 'Live metrics, warm pools, response-time percentiles'],
-  ['functions-list',            'Functions',       'Every deployed handler, runtime, resources, last deploy date'],
-  ['function-editor',           'Editor',          'Write and deploy code directly in the browser'],
-  ['distributed-traces',        'Traces',          'Automatic causal waterfall across HTTP, F2F, and background jobs'],
-  ['activity-live-feed',        'Activity',        'Live feed of every API call, CLI command, and webhook delivery'],
-  ['invocation-logs',           'Invocation logs', 'Every execution with request, response, duration, trace link'],
-  ['built-in-docs',             'Docs',            'Full reference always at /web/docs — no tab-switching'],
-  ['firewall-and-dns',          'Firewall & DNS',  'Per-function egress rules, custom resolvers, blocklist'],
-  ['settings-oauth',            'Settings',        'Storage, account, and OAuth-connected apps'],
+  ['functions-list', 'Functions', 'Every deployed handler, runtime, resources, last deploy date'],
+  ['function-editor', 'Editor', 'Write and deploy code directly in the browser'],
+  ['distributed-traces', 'Traces', 'Automatic causal waterfall across HTTP, F2F, and background jobs'],
+  ['activity-live-feed', 'Activity', 'Live feed of every API call, CLI command, and webhook delivery'],
+  ['invocation-logs', 'Invocation logs', 'Every execution with request, response, duration, trace link'],
+  ['built-in-docs', 'Docs', 'Full reference always at /web/docs — no tab-switching'],
+  ['firewall-and-dns', 'Firewall & DNS', 'Per-function egress rules, custom resolvers, blocklist'],
+  ['settings-oauth', 'Settings', 'Storage, account, and OAuth-connected apps'],
 ];
 ---
 
@@ -78,8 +144,17 @@ const shots: [string, string, string][] = [
     <div class="inner mast-inner">
       <a class="brand" href="#top" aria-label="Orva — home">
         <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="currentColor" />
-          <text x="16" y="21" font-family="Inter, system-ui, sans-serif" font-size="13" font-weight="700" fill="#fff" text-anchor="middle" letter-spacing="-0.5">f(x)</text>
+          <rect width="32" height="32" rx="8" fill="currentColor"></rect>
+          <text
+            x="16"
+            y="21"
+            font-family="Inter, system-ui, sans-serif"
+            font-size="13"
+            font-weight="700"
+            fill="#fff"
+            text-anchor="middle"
+            letter-spacing="-0.5">f(x)</text
+          >
         </svg>
         <span class="brand-name">Orva</span>
       </a>
@@ -99,7 +174,13 @@ const shots: [string, string, string][] = [
   <section class="hero" id="top">
     <div class="inner hero-inner">
       <div class="hero-meta">
-        <a class="overline ver-pill" href={latestUrl} target="_blank" rel="noopener" aria-label={`Latest release ${latestVersion} on GitHub`}>
+        <a
+          class="overline ver-pill"
+          href={latestUrl}
+          target="_blank"
+          rel="noopener"
+          aria-label={`Latest release ${latestVersion} on GitHub`}
+        >
           <span class="ver-dot" aria-hidden="true"></span>
           {latestVersion} · latest
         </a>
@@ -113,8 +194,8 @@ const shots: [string, string, string][] = [
       </h1>
 
       <p class="hero-lede">
-        Node, Python, and TypeScript. Five kernel-enforced boundaries per call.
-        One binary, one port, zero external dependencies.
+        Node, Python, and TypeScript. Five kernel-enforced boundaries per call. One binary, one port, zero
+        external dependencies.
       </p>
 
       <div class="hero-actions">
@@ -129,7 +210,8 @@ const shots: [string, string, string][] = [
           <span>~ /</span>
           <button class="copy" data-copy="#hero-cmd-text">Copy</button>
         </div>
-        <pre id="hero-cmd-text"><code>docker run -d --name orva -p 8443:8443 ghcr.io/harsh-2002/orva:latest</code></pre>
+        <pre
+          id="hero-cmd-text"><code>docker run -d --name orva -p 8443:8443 ghcr.io/harsh-2002/orva:latest</code></pre>
       </div>
 
       <p class="hero-foot">
@@ -151,16 +233,19 @@ const shots: [string, string, string][] = [
 
       <h2>Fourteen things.<br />One container.</h2>
       <p class="sec-sub">
-        Everything an operator needs to run untrusted code — observed, reversible, no external dependencies, no add-on services.
+        Everything an operator needs to run untrusted code — observed, reversible, no external dependencies,
+        no add-on services.
       </p>
 
       <dl class="caps">
-        {capabilities.map(([name, desc]) => (
-          <div class="cap">
-            <dt>{name}</dt>
-            <dd>{desc}</dd>
-          </div>
-        ))}
+        {
+          capabilities.map(([name, desc]) => (
+            <div class="cap">
+              <dt>{name}</dt>
+              <dd>{desc}</dd>
+            </div>
+          ))
+        }
       </dl>
     </div>
   </section>
@@ -178,19 +263,22 @@ const shots: [string, string, string][] = [
 
       <h2>Five overlapping<br />kernel boundaries.</h2>
       <p class="sec-sub">
-        Each layer is enforced by the kernel, not by Orva. Orva configures the boundaries; the kernel holds them.
+        Each layer is enforced by the kernel, not by Orva. Orva configures the boundaries; the kernel holds
+        them.
       </p>
 
       <ol class="layers">
-        {layers.map(([title, body], i) => (
-          <li class="layer">
-            <span class="layer-num">{String(i + 1).padStart(2, '0')}</span>
-            <div class="layer-body">
-              <h3>{title}</h3>
-              <p>{body}</p>
-            </div>
-          </li>
-        ))}
+        {
+          layers.map(([title, body], i) => (
+            <li class="layer">
+              <span class="layer-num">{String(i + 1).padStart(2, '0')}</span>
+              <div class="layer-body">
+                <h3>{title}</h3>
+                <p>{body}</p>
+              </div>
+            </li>
+          ))
+        }
       </ol>
 
       <div class="compare-wrap">
@@ -204,23 +292,30 @@ const shots: [string, string, string][] = [
             </tr>
           </thead>
           <tbody>
-            {compareRows.map(([k, a, b, c]) => (
-              <tr>
-                <th scope="row">{k}</th>
-                <td class="hl">{a}</td>
-                <td>{b}</td>
-                <td>{c}</td>
-              </tr>
-            ))}
+            {
+              compareRows.map(([k, a, b, c]) => (
+                <tr>
+                  <th scope="row">{k}</th>
+                  <td class="hl">{a}</td>
+                  <td>{b}</td>
+                  <td>{c}</td>
+                </tr>
+              ))
+            }
           </tbody>
         </table>
       </div>
 
       <p class="sec-foot">
         Full threat model and self-verification recipe:&nbsp;
-        <a href="https://github.com/Harsh-2002/Orva/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">
+        <a
+          href="https://github.com/Harsh-2002/Orva/blob/main/docs/SECURITY.md"
+          target="_blank"
+          rel="noopener"
+        >
           docs/SECURITY.md
-        </a>. Verified end-to-end under Kata Containers 3.30 (QEMU + Cloud Hypervisor); the nsjail boundary holds unchanged with a real Linux kernel underneath.
+        </a>. Verified end-to-end under Kata Containers 3.30 (QEMU + Cloud Hypervisor); the nsjail boundary
+        holds unchanged with a real Linux kernel underneath.
       </p>
     </div>
   </section>
@@ -240,28 +335,30 @@ const shots: [string, string, string][] = [
       <p class="sec-sub">Click any screenshot for full size.</p>
 
       <div class="shots">
-        {shots.map(([file, title, desc]) => {
-          const src = `${baseTrim}/screenshots/${file}.jpeg`;
-          const cap = `${title} — ${desc}`;
-          return (
-            <figure class="shot">
-              <div
-                class="shot-thumb"
-                role="button"
-                tabindex="0"
-                data-lightbox={src}
-                data-caption={cap}
-                aria-label={`View ${title} full size`}
-              >
-                <img src={src} alt={title} loading="lazy" decoding="async" width="800" height="500" />
-              </div>
-              <figcaption>
-                <strong>{title}</strong>
-                <span>{desc}</span>
-              </figcaption>
-            </figure>
-          );
-        })}
+        {
+          shots.map(([file, title, desc]) => {
+            const src = `${baseTrim}/screenshots/${file}.jpeg`;
+            const cap = `${title} — ${desc}`;
+            return (
+              <figure class="shot">
+                <div
+                  class="shot-thumb"
+                  role="button"
+                  tabindex="0"
+                  data-lightbox={src}
+                  data-caption={cap}
+                  aria-label={`View ${title} full size`}
+                >
+                  <img src={src} alt={title} loading="lazy" decoding="async" width="800" height="500" />
+                </div>
+                <figcaption>
+                  <strong>{title}</strong>
+                  <span>{desc}</span>
+                </figcaption>
+              </figure>
+            );
+          })
+        }
       </div>
     </div>
   </section>
@@ -293,7 +390,8 @@ const shots: [string, string, string][] = [
               <span>shell</span>
               <button class="copy" data-copy="#install-docker">Copy</button>
             </div>
-            <pre id="install-docker"><code>{`docker run -d \\
+            <pre
+              id="install-docker"><code>{`docker run -d \\
   --name orva \\
   -p 8443:8443 \\
   -v orva-data:/var/lib/orva \\
@@ -314,7 +412,8 @@ const shots: [string, string, string][] = [
               <span>compose.yml</span>
               <button class="copy" data-copy="#install-compose">Copy</button>
             </div>
-            <pre id="install-compose"><code>{`services:
+            <pre
+              id="install-compose"><code>{`services:
   orva:
     image: ghcr.io/harsh-2002/orva:latest
     restart: unless-stopped
@@ -341,7 +440,8 @@ volumes:
               <span>shell</span>
               <button class="copy" data-copy="#install-cli">Copy</button>
             </div>
-            <pre id="install-cli"><code>{`curl -fsSL https://orva.dev/install.sh | sh
+            <pre
+              id="install-cli"><code>{`curl -fsSL https://orva.dev/install.sh | sh
 sudo systemctl enable --now orva`}</code></pre>
           </div>
         </article>
@@ -362,8 +462,8 @@ sudo systemctl enable --now orva`}</code></pre>
 
       <h2>Write a function.<br />Get a URL.</h2>
       <p class="sec-sub">
-        Every handler is a default export. <code>kv</code>, <code>invoke</code>, and <code>jobs</code> are pre-installed —
-        no <code>npm install</code>, no <code>pip install</code>.
+        Every handler is a default export. <code>kv</code>, <code>invoke</code>, and <code>jobs</code> are pre-installed
+        — no <code>npm install</code>, no <code>pip install</code>.
       </p>
 
       <div class="install-stack">
@@ -372,7 +472,9 @@ sudo systemctl enable --now orva`}</code></pre>
             <span class="opt-letter" aria-hidden="true">A</span>
             <div>
               <h3>Node.js <span class="opt-meta">22 · 24</span></h3>
-              <p>Default export an async handler. <code>ctx.kv</code> backed by per-function SQLite; no install needed.</p>
+              <p>
+                Default export an async handler. <code>ctx.kv</code> backed by per-function SQLite; no install needed.
+              </p>
             </div>
           </header>
           <div class="code">
@@ -380,7 +482,8 @@ sudo systemctl enable --now orva`}</code></pre>
               <span>handler.js</span>
               <button class="copy" data-copy="#rt-node">Copy</button>
             </div>
-            <pre id="rt-node"><code>{`export default async function (req, ctx) {
+            <pre
+              id="rt-node"><code>{`export default async function (req, ctx) {
   const seen = (await ctx.kv.get('count')) ?? 0;
   await ctx.kv.put('count', seen + 1);
   return { ok: true, seen: seen + 1 };
@@ -393,7 +496,9 @@ sudo systemctl enable --now orva`}</code></pre>
             <span class="opt-letter" aria-hidden="true">B</span>
             <div>
               <h3>Python <span class="opt-meta">3.13 · 3.14</span></h3>
-              <p>Plain <code>async def handler(req, ctx)</code>. Async SDK on <code>ctx</code> — no FastAPI, no boilerplate.</p>
+              <p>
+                Plain <code>async def handler(req, ctx)</code>. Async SDK on <code>ctx</code> — no FastAPI, no boilerplate.
+              </p>
             </div>
           </header>
           <div class="code">
@@ -401,7 +506,8 @@ sudo systemctl enable --now orva`}</code></pre>
               <span>handler.py</span>
               <button class="copy" data-copy="#rt-py">Copy</button>
             </div>
-            <pre id="rt-py"><code>{`async def handler(req, ctx):
+            <pre
+              id="rt-py"><code>{`async def handler(req, ctx):
     seen = await ctx.kv.get('count') or 0
     await ctx.kv.put('count', seen + 1)
     return {'ok': True, 'seen': seen + 1}`}</code></pre>
@@ -413,7 +519,10 @@ sudo systemctl enable --now orva`}</code></pre>
             <span class="opt-letter" aria-hidden="true">C</span>
             <div>
               <h3>TypeScript <span class="opt-meta">native</span></h3>
-              <p>Types ship with the runtime — <code>import type &#123; OrvaHandler &#125; from 'orva'</code> and you're set.</p>
+              <p>
+                Types ship with the runtime — <code>import type &#123; OrvaHandler &#125; from 'orva'</code> and
+                you're set.
+              </p>
             </div>
           </header>
           <div class="code">
@@ -421,7 +530,8 @@ sudo systemctl enable --now orva`}</code></pre>
               <span>handler.ts</span>
               <button class="copy" data-copy="#rt-ts">Copy</button>
             </div>
-            <pre id="rt-ts"><code>{`import type { OrvaHandler } from 'orva';
+            <pre
+              id="rt-ts"><code>{`import type { OrvaHandler } from 'orva';
 
 const handler: OrvaHandler = async (req, ctx) => {
   await ctx.jobs.enqueue('thumbnail', { url: req.body.url });
@@ -434,7 +544,9 @@ export default handler;`}</code></pre>
 
       <p class="sec-foot">
         Full SDK surface on <code>ctx</code>: <code>kv</code>, <code>invoke</code>, <code>jobs</code>,
-        <code>logger</code>, <code>trace</code>, <code>secrets</code>. Reference docs ship in-product at <code>/web/docs</code>.
+        <code>logger</code>, <code>trace</code>, <code>secrets</code>. Reference docs ship in-product at <code
+          >/web/docs</code
+        >.
       </p>
     </div>
   </section>
@@ -455,7 +567,6 @@ export default handler;`}</code></pre>
       </div>
     </div>
   </section>
-
 </Layout>
 
 <style>
@@ -475,17 +586,25 @@ export default handler;`}</code></pre>
     height: 72px;
   }
   @media (max-width: 480px) {
-    .mast-inner { height: 64px; }
+    .mast-inner {
+      height: 64px;
+    }
   }
   .brand {
     display: inline-flex;
     align-items: center;
     gap: 12px;
-    color: var(--accent-hi);
-    transition: color 140ms, transform 200ms ease;
+    color: var(--brand);
+    transition:
+      color 140ms,
+      transform 200ms ease;
   }
-  .brand:hover { color: var(--fg); }
-  .brand:active { transform: scale(0.97); }
+  .brand:hover {
+    color: var(--accent-hi);
+  }
+  .brand:active {
+    transform: scale(0.97);
+  }
   .brand-mark {
     width: 34px;
     height: 34px;
@@ -501,9 +620,16 @@ export default handler;`}</code></pre>
     line-height: 1;
   }
   @media (max-width: 480px) {
-    .brand { gap: 10px; }
-    .brand-mark { width: 30px; height: 30px; }
-    .brand-name { font-size: 1.1875rem; }
+    .brand {
+      gap: 10px;
+    }
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+    }
+    .brand-name {
+      font-size: 1.1875rem;
+    }
   }
 
   .nav-primary {
@@ -518,13 +644,24 @@ export default handler;`}</code></pre>
     color: var(--muted);
     transition: color 120ms;
   }
-  .nav-primary a:hover { color: var(--fg); }
-  .nav-primary .nav-ext { color: var(--accent-hi); }
-  .nav-primary .nav-ext:hover { color: var(--fg); }
+  .nav-primary a:hover {
+    color: var(--fg);
+  }
+  .nav-primary .nav-ext {
+    color: var(--accent-hi);
+  }
+  .nav-primary .nav-ext:hover {
+    color: var(--fg);
+  }
 
   @media (max-width: 720px) {
-    .nav-primary { gap: 16px; font-size: 0.75rem; }
-    .nav-primary a:not(.nav-ext) { display: none; }
+    .nav-primary {
+      gap: 16px;
+      font-size: 0.75rem;
+    }
+    .nav-primary a:not(.nav-ext) {
+      display: none;
+    }
   }
 
   /* ── Hero ─────────────────────────────────────────────── */
@@ -532,7 +669,9 @@ export default handler;`}</code></pre>
     padding: clamp(80px, 13vw, 150px) 0 clamp(72px, 11vw, 120px);
     border-top: none;
   }
-  .hero-inner { max-width: var(--max); }
+  .hero-inner {
+    max-width: var(--max);
+  }
 
   .hero-meta {
     display: flex;
@@ -544,8 +683,12 @@ export default handler;`}</code></pre>
     letter-spacing: 0.16em;
     text-transform: uppercase;
   }
-  .hero-meta-sep { color: var(--faint); }
-  .hero-meta-build { color: var(--subtle); }
+  .hero-meta-sep {
+    color: var(--faint);
+  }
+  .hero-meta-build {
+    color: var(--subtle);
+  }
 
   .ver-pill {
     display: inline-flex;
@@ -554,9 +697,16 @@ export default handler;`}</code></pre>
     color: var(--accent-hi);
     border: 1px solid var(--border-hi);
     padding: 4px 10px;
-    transition: background 140ms, border-color 140ms, color 140ms;
+    transition:
+      background 140ms,
+      border-color 140ms,
+      color 140ms;
   }
-  .ver-pill:hover { background: var(--surface); color: var(--fg); border-color: var(--fg); }
+  .ver-pill:hover {
+    background: var(--surface);
+    color: var(--fg);
+    border-color: var(--fg);
+  }
   .ver-dot {
     width: 6px;
     height: 6px;
@@ -567,16 +717,30 @@ export default handler;`}</code></pre>
     flex-shrink: 0;
   }
   @keyframes ver-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.55; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
   }
   @media (max-width: 480px) {
-    .hero-meta { flex-wrap: wrap; gap: 10px; }
-    .hero-meta-sep { display: none; }
+    .hero-meta {
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .hero-meta-sep {
+      display: none;
+    }
   }
 
-  .hero h1 { margin-bottom: 30px; }
-  .h1-em { color: var(--muted); }
+  .hero h1 {
+    margin-bottom: 30px;
+  }
+  .h1-em {
+    color: var(--muted);
+  }
 
   .hero-lede {
     font-size: clamp(1.0625rem, 1.6vw, 1.25rem);
@@ -593,8 +757,13 @@ export default handler;`}</code></pre>
     margin-bottom: 56px;
   }
 
-  .hero-cmd { max-width: 820px; }
-  .hero-cmd pre { white-space: pre-wrap; word-break: break-word; }
+  .hero-cmd {
+    max-width: 820px;
+  }
+  .hero-cmd pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
   .hero-foot {
     margin-top: 16px;
     color: var(--subtle);
@@ -602,7 +771,13 @@ export default handler;`}</code></pre>
     font-family: var(--mono);
     letter-spacing: 0.02em;
   }
-  .hero-foot code { font-family: var(--mono); background: transparent; border: none; padding: 0; color: var(--fg); }
+  .hero-foot code {
+    font-family: var(--mono);
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--fg);
+  }
 
   /* ── 01 · Capabilities ────────────────────────────────── */
   .caps {
@@ -616,7 +791,9 @@ export default handler;`}</code></pre>
     border-bottom: 1px solid var(--border);
     transition: background 120ms;
   }
-  .cap:hover { background: var(--surface); }
+  .cap:hover {
+    background: var(--surface);
+  }
   .cap dt {
     font-size: 0.9375rem;
     font-weight: 500;
@@ -629,7 +806,11 @@ export default handler;`}</code></pre>
     line-height: 1.55;
   }
   @media (max-width: 760px) {
-    .cap { grid-template-columns: 1fr; gap: 6px; padding: 18px 4px; }
+    .cap {
+      grid-template-columns: 1fr;
+      gap: 6px;
+      padding: 18px 4px;
+    }
   }
 
   /* ── 02 · Isolation ───────────────────────────────────── */
@@ -646,7 +827,9 @@ export default handler;`}</code></pre>
     border-bottom: 1px solid var(--border);
     transition: background 120ms;
   }
-  .layer:hover { background: var(--surface); }
+  .layer:hover {
+    background: var(--surface);
+  }
   .layer-num {
     font-family: var(--mono);
     font-size: 0.875rem;
@@ -655,7 +838,10 @@ export default handler;`}</code></pre>
     letter-spacing: 0.1em;
     padding-top: 4px;
   }
-  .layer-body h3 { margin-bottom: 10px; font-size: 1.0625rem; }
+  .layer-body h3 {
+    margin-bottom: 10px;
+    font-size: 1.0625rem;
+  }
   .layer-body p {
     color: var(--muted);
     font-size: 0.9375rem;
@@ -663,10 +849,16 @@ export default handler;`}</code></pre>
     max-width: 78ch;
   }
   @media (max-width: 560px) {
-    .layer { grid-template-columns: 1fr; gap: 8px; padding: 22px 4px; }
+    .layer {
+      grid-template-columns: 1fr;
+      gap: 8px;
+      padding: 22px 4px;
+    }
   }
 
-  .compare-wrap { overflow-x: auto; }
+  .compare-wrap {
+    overflow-x: auto;
+  }
   .compare {
     width: 100%;
     border-collapse: collapse;
@@ -687,7 +879,9 @@ export default handler;`}</code></pre>
     font-size: 0.6875rem;
     text-transform: uppercase;
   }
-  .compare thead th:last-child { border-right: none; }
+  .compare thead th:last-child {
+    border-right: none;
+  }
   .compare tbody th {
     text-align: left;
     padding: 12px 14px;
@@ -709,12 +903,22 @@ export default handler;`}</code></pre>
     vertical-align: top;
     line-height: 1.55;
   }
-  .compare tbody td:last-child { border-right: none; }
+  .compare tbody td:last-child {
+    border-right: none;
+  }
   .compare tbody tr:last-child th,
-  .compare tbody tr:last-child td { border-bottom: none; }
-  .compare tbody td.hl { color: var(--fg); }
-  .compare tbody tr:hover td { background: var(--surface); }
-  .compare tbody tr:hover th { background: var(--surface); }
+  .compare tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .compare tbody td.hl {
+    color: var(--fg);
+  }
+  .compare tbody tr:hover td {
+    background: var(--surface);
+  }
+  .compare tbody tr:hover th {
+    background: var(--surface);
+  }
 
   /* ── 03 · Dashboard ───────────────────────────────────── */
   .shots {
@@ -722,7 +926,11 @@ export default handler;`}</code></pre>
     grid-template-columns: repeat(3, 1fr);
     gap: 18px;
   }
-  .shot { display: flex; flex-direction: column; gap: 10px; }
+  .shot {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
   .shot-thumb {
     aspect-ratio: 16 / 10;
     overflow: hidden;
@@ -731,17 +939,25 @@ export default handler;`}</code></pre>
     background: var(--surface);
     cursor: pointer;
     position: relative;
-    transition: border-color 140ms, transform 200ms ease;
+    transition:
+      border-color 140ms,
+      transform 200ms ease;
   }
-  .shot-thumb:hover { border-color: var(--border-hi); }
-  .shot-thumb:active { transform: scale(0.99); }
+  .shot-thumb:hover {
+    border-color: var(--border-hi);
+  }
+  .shot-thumb:active {
+    transform: scale(0.99);
+  }
   .shot-thumb img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     transition: transform 280ms ease;
   }
-  .shot-thumb:hover img { transform: scale(1.025); }
+  .shot-thumb:hover img {
+    transform: scale(1.025);
+  }
   .shot-thumb::after {
     content: '⤢';
     position: absolute;
@@ -761,13 +977,37 @@ export default handler;`}</code></pre>
     transition: opacity 160ms;
   }
   .shot-thumb:hover::after,
-  .shot-thumb:focus-visible::after { opacity: 1; }
-  .shot figcaption { display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
-  .shot strong { font-size: 0.875rem; font-weight: 500; color: var(--fg); }
-  .shot span { font-size: 0.8125rem; color: var(--subtle); line-height: 1.5; }
+  .shot-thumb:focus-visible::after {
+    opacity: 1;
+  }
+  .shot figcaption {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-top: 2px;
+  }
+  .shot strong {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .shot span {
+    font-size: 0.8125rem;
+    color: var(--subtle);
+    line-height: 1.5;
+  }
 
-  @media (max-width: 940px) { .shots { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 560px) { .shots { grid-template-columns: 1fr; gap: 16px; } }
+  @media (max-width: 940px) {
+    .shots {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (max-width: 560px) {
+    .shots {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+  }
 
   /* ── 04 · Install ─────────────────────────────────────── */
   .install-stack {
@@ -794,8 +1034,15 @@ export default handler;`}</code></pre>
     align-items: center;
     justify-content: center;
   }
-  .install-opt h3 { margin-bottom: 6px; }
-  .install-opt p { color: var(--muted); font-size: 0.9375rem; line-height: 1.55; max-width: 64ch; }
+  .install-opt h3 {
+    margin-bottom: 6px;
+  }
+  .install-opt p {
+    color: var(--muted);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    max-width: 64ch;
+  }
   .opt-meta {
     margin-left: 8px;
     font-family: var(--mono);
@@ -809,14 +1056,33 @@ export default handler;`}</code></pre>
     vertical-align: middle;
   }
   @media (max-width: 560px) {
-    .install-opt header { grid-template-columns: 1fr; gap: 12px; }
-    .install-opt h3 { line-height: 1.6; }
-    .opt-meta { margin-left: 0; display: inline-block; margin-top: 6px; }
+    .install-opt header {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .install-opt h3 {
+      line-height: 1.6;
+    }
+    .opt-meta {
+      margin-left: 0;
+      display: inline-block;
+      margin-top: 6px;
+    }
   }
 
   /* ── Closing ──────────────────────────────────────────── */
-  .close { padding: clamp(90px, 13vw, 150px) 0 clamp(120px, 16vw, 200px); }
-  .close .overline-block { display: block; margin-bottom: 28px; }
-  .close h2 { margin-bottom: 22px; max-width: 14ch; }
-  .close-lede { max-width: 54ch; }
+  .close {
+    padding: clamp(90px, 13vw, 150px) 0 clamp(120px, 16vw, 200px);
+  }
+  .close .overline-block {
+    display: block;
+    margin-bottom: 28px;
+  }
+  .close h2 {
+    margin-bottom: 22px;
+    max-width: 14ch;
+  }
+  .close-lede {
+    max-width: 54ch;
+  }
 </style>

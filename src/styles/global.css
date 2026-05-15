@@ -1,19 +1,20 @@
 /* ── Design tokens ─────────────────────────────────────── */
 :root {
-  --bg:        #0E0D17;
-  --bg-deep:   #090813;
-  --surface:   #16152A;
-  --surface-2: #1C1A33;
-  --hover:     #211F3D;
-  --border:    #2A2843;
-  --border-hi: #3C3A5A;
-  --fg:        #F0EDFA;
-  --muted:     #B7B4CF;
-  --subtle:    #7E7B9A;
-  --faint:     #50506E;
-  --accent:    #8A6BC8;
-  --accent-hi: #B394E8;
-  --green:     #4ADE80;
+  --bg: #0e0d17;
+  --bg-deep: #090813;
+  --surface: #16152a;
+  --surface-2: #1c1a33;
+  --hover: #211f3d;
+  --border: #2a2843;
+  --border-hi: #3c3a5a;
+  --fg: #f0edfa;
+  --muted: #b7b4cf;
+  --subtle: #7e7b9a;
+  --faint: #50506e;
+  --accent: #8a6bc8;
+  --accent-hi: #b394e8;
+  --brand: #7c3aed;
+  --green: #4ade80;
 
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -24,25 +25,32 @@
 
 @supports (color: oklch(0% 0 0)) {
   :root {
-    --bg:        oklch(12.5% 0.030 280);
-    --bg-deep:   oklch(8.5%  0.025 280);
-    --surface:   oklch(16.5% 0.038 280);
-    --surface-2: oklch(20.0% 0.042 280);
-    --hover:     oklch(22.5% 0.045 280);
-    --border:    oklch(27.5% 0.045 280);
-    --border-hi: oklch(38.0% 0.050 280);
-    --fg:        oklch(95.5% 0.012 290);
-    --muted:     oklch(78.0% 0.018 285);
-    --subtle:    oklch(58.0% 0.022 285);
-    --faint:     oklch(40.0% 0.025 285);
-    --accent:    oklch(57.0% 0.135 295);
-    --accent-hi: oklch(72.0% 0.130 295);
-    --green:     oklch(78.0% 0.180 145);
+    --bg: oklch(12.5% 0.03 280);
+    --bg-deep: oklch(8.5% 0.025 280);
+    --surface: oklch(16.5% 0.038 280);
+    --surface-2: oklch(20% 0.042 280);
+    --hover: oklch(22.5% 0.045 280);
+    --border: oklch(27.5% 0.045 280);
+    --border-hi: oklch(38% 0.05 280);
+    --fg: oklch(95.5% 0.012 290);
+    --muted: oklch(78% 0.018 285);
+    --subtle: oklch(58% 0.022 285);
+    --faint: oklch(40% 0.025 285);
+    --accent: oklch(57% 0.135 295);
+    --accent-hi: oklch(72% 0.13 295);
+    --brand: oklch(53% 0.255 295);
+    --green: oklch(78% 0.18 145);
   }
 }
 
 /* ── Reset ──────────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
@@ -50,7 +58,7 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 body {
-  background: var(--bg);
+  background-color: var(--bg);
   color: var(--fg);
   font-family: var(--sans);
   font-size: 16px;
@@ -63,23 +71,97 @@ body {
   padding-left: env(safe-area-inset-left, 0);
   padding-right: env(safe-area-inset-right, 0);
 }
-img, svg { display: block; max-width: 100%; }
-a { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-button { font-family: inherit; cursor: pointer; background: none; border: none; color: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-code, pre, kbd, samp { font-family: var(--mono); }
-input, textarea, select, button { font: inherit; }
+
+/* ── Cursor spotlight — viewport-anchored radial layered on body bg.
+   --cx/--cy default off-screen so the glow is invisible until JS sets
+   them. JS only attaches the pointermove listener on hover-capable,
+   non-reduced-motion devices, so touch devices stay clean. ── */
+body {
+  background-image: radial-gradient(
+    720px circle at var(--cx, -9999px) var(--cy, -9999px),
+    rgba(179, 148, 232, 0.18),
+    rgba(179, 148, 232, 0.05) 32%,
+    transparent 58%
+  );
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+@supports (color: oklch(0% 0 0)) {
+  body {
+    background-image: radial-gradient(
+      720px circle at var(--cx, -9999px) var(--cy, -9999px),
+      oklch(72% 0.13 295 / 0.18),
+      oklch(72% 0.13 295 / 0.06) 32%,
+      transparent 58%
+    );
+  }
+}
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+button {
+  font-family: inherit;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--mono);
+}
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
-  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
-::selection { background: var(--accent); color: var(--fg); }
-:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: 2px; }
+::selection {
+  background: var(--accent);
+  color: var(--fg);
+}
+:focus-visible {
+  outline: 2px solid var(--accent-hi);
+  outline-offset: 2px;
+}
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); }
-::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hi);
+}
 
 /* ── Inner container ────────────────────────────────────── */
 .inner {
@@ -102,7 +184,7 @@ h1 {
   font-size: clamp(2.5rem, 7.2vw, 5.5rem);
   font-weight: 500;
   letter-spacing: -0.04em;
-  line-height: 1.0;
+  line-height: 1;
   color: var(--fg);
 }
 
@@ -121,8 +203,13 @@ h3 {
   color: var(--fg);
 }
 
-p { color: var(--muted); }
-strong { color: var(--fg); font-weight: 600; }
+p {
+  color: var(--muted);
+}
+strong {
+  color: var(--fg);
+  font-weight: 600;
+}
 
 /* ── Section scaffolding ────────────────────────────────── */
 .sec {
@@ -141,18 +228,29 @@ strong { color: var(--fg); font-weight: 600; }
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
-.sec-head .num { color: var(--accent-hi); }
-.sec-head .slash { color: var(--faint); }
-.sec-head .label { color: var(--muted); }
+.sec-head .num {
+  color: var(--accent-hi);
+}
+.sec-head .slash {
+  color: var(--faint);
+}
+.sec-head .label {
+  color: var(--muted);
+}
 .sec-head .bar {
   flex: 1;
   height: 1px;
   background: var(--border);
   margin: 0 4px;
 }
-.sec-head .count { color: var(--subtle); }
+.sec-head .count {
+  color: var(--subtle);
+}
 
-.sec h2 { margin-bottom: 22px; max-width: 18ch; }
+.sec h2 {
+  margin-bottom: 22px;
+  max-width: 18ch;
+}
 .sec-sub {
   max-width: 64ch;
   color: var(--muted);
@@ -167,8 +265,17 @@ strong { color: var(--fg); font-weight: 600; }
   line-height: 1.7;
   max-width: 64ch;
 }
-.sec-foot a { color: var(--accent-hi); border-bottom: 1px solid var(--border-hi); transition: color 120ms, border-color 120ms; }
-.sec-foot a:hover { color: var(--fg); border-color: var(--fg); }
+.sec-foot a {
+  color: var(--accent-hi);
+  border-bottom: 1px solid var(--border-hi);
+  transition:
+    color 120ms,
+    border-color 120ms;
+}
+.sec-foot a:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
 
 /* ── Buttons ────────────────────────────────────────────── */
 .btn {
@@ -182,19 +289,22 @@ strong { color: var(--fg); font-weight: 600; }
   font-weight: 500;
   font-family: var(--sans);
   letter-spacing: -0.005em;
-  transition: background 140ms, border-color 140ms, color 140ms;
+  transition:
+    background 140ms,
+    border-color 140ms,
+    color 140ms;
   line-height: 1;
   white-space: nowrap;
 }
 .btn-primary {
   background: var(--fg);
-  color: #0A0913;
+  color: #0a0913;
   border-color: var(--fg);
 }
 .btn-primary:hover {
   background: var(--accent-hi);
   border-color: var(--accent-hi);
-  color: #0A0913;
+  color: #0a0913;
 }
 .btn-ghost {
   background: transparent;
@@ -209,7 +319,7 @@ strong { color: var(--fg); font-weight: 600; }
 
 /* ── Code blocks ────────────────────────────────────────── */
 .code {
-  background: #0A0913;
+  background: #0a0913;
   border: 1px solid var(--border);
   font-family: var(--mono);
   font-size: 0.8125rem;
@@ -239,13 +349,26 @@ strong { color: var(--fg); font-weight: 600; }
   color: var(--subtle);
   padding: 4px 9px;
   border: 1px solid var(--border);
-  transition: color 120ms, border-color 120ms;
+  transition:
+    color 120ms,
+    border-color 120ms;
 }
-.copy:hover { color: var(--fg); border-color: var(--border-hi); }
-.copy.copied { color: var(--green); border-color: var(--green); }
+.copy:hover {
+  color: var(--fg);
+  border-color: var(--border-hi);
+}
+.copy.copied {
+  color: var(--green);
+  border-color: var(--green);
+}
 
 /* inline code */
-p code, li code, td code, dd code, .sec-foot code, .lede code {
+p code,
+li code,
+td code,
+dd code,
+.sec-foot code,
+.lede code {
   font-size: 0.85em;
   color: var(--fg);
   padding: 1px 6px;

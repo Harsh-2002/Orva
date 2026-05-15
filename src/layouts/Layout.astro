@@ -146,6 +146,33 @@ const {
           window.scrollTo({ top, behavior: 'smooth' });
         });
       });
+
+      // Cursor spotlight — updates --cx/--cy on <body>, throttled via rAF.
+      // CSS gates this with @media (hover: hover) so touch devices skip the work entirely.
+      const supportsHover = matchMedia('(hover: hover) and (pointer: fine)').matches;
+      const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (supportsHover && !reduceMotion) {
+        let pendingX = 0;
+        let pendingY = 0;
+        let scheduled = false;
+        const apply = () => {
+          document.body.style.setProperty('--cx', pendingX + 'px');
+          document.body.style.setProperty('--cy', pendingY + 'px');
+          scheduled = false;
+        };
+        document.addEventListener(
+          'pointermove',
+          (e: PointerEvent) => {
+            pendingX = e.clientX;
+            pendingY = e.clientY;
+            if (!scheduled) {
+              scheduled = true;
+              requestAnimationFrame(apply);
+            }
+          },
+          { passive: true }
+        );
+      }
     </script>
 
     <style is:global>
@@ -161,7 +188,9 @@ const {
         justify-content: center;
         padding: clamp(20px, 4vw, 56px);
       }
-      #lightbox[aria-hidden='false'] { display: flex; }
+      #lightbox[aria-hidden='false'] {
+        display: flex;
+      }
       #lightbox figure {
         max-width: 1280px;
         width: 100%;
@@ -202,12 +231,21 @@ const {
         border: none;
         line-height: 1;
         font-family: var(--mono);
-        transition: color 120ms, transform 120ms;
+        transition:
+          color 120ms,
+          transform 120ms;
       }
-      #lightbox-close:hover { color: var(--fg); }
-      #lightbox-close:active { transform: scale(0.92); }
+      #lightbox-close:hover {
+        color: var(--fg);
+      }
+      #lightbox-close:active {
+        transform: scale(0.92);
+      }
       @media (max-width: 560px) {
-        #lightbox img { border-radius: 12px; max-height: 70vh; }
+        #lightbox img {
+          border-radius: 12px;
+          max-height: 70vh;
+        }
       }
     </style>
   </body>

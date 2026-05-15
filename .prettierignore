@@ -1,0 +1,8 @@
+dist
+node_modules
+.astro
+public/screenshots
+*.png
+*.jpeg
+*.jpg
+package-lock.json
