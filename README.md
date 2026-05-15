@@ -77,9 +77,11 @@ orva functions list
 orva upgrade            # in-place self-update from GitHub
 ```
 
-Full CLI docs at [docs/CLI.md](docs/CLI.md) — covers manual download,
-shell autocompletion (bash / zsh / fish / powershell), first-run
-security prompts, and `orva upgrade` mechanics.
+Full CLI docs at [docs/CLI.md](docs/CLI.md) — configuration (flag /
+env / config-file precedence), command reference, common workflows
+(deploy / invoke / backup / cron / channels), best practices for
+CI scripting, shell autocompletion, `orva upgrade` mechanics, and
+first-run security prompts.
 
 ---
 
