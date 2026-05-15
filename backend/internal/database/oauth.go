@@ -358,6 +358,28 @@ type ConnectedApp struct {
 }
 
 func (db *Database) ListActiveOAuthAccessTokens(userID int64) ([]*ConnectedApp, error) {
+	// "Connected applications" answers a *grant*-level question — "does
+	// this app still have working credentials with us?" — not an
+	// access-token-level one. Access tokens are short-lived (1h) by
+	// design and are silently refreshed by claude.ai / ChatGPT via the
+	// refresh_token grant; gating the list on access_expires_at made
+	// every connector appear to disappear ~1h after authorization, then
+	// reappear after the next MCP call.
+	//
+	// A row represents an *active* grant when:
+	//   - the operator hasn't explicitly revoked it (revoked_at IS NULL), AND
+	//   - either the access token is still within its lifetime, OR a
+	//     non-expired refresh token is on file (so claude.ai can mint a
+	//     new access token without re-authenticating the user)
+	//
+	// After RotateOAuthRefreshToken runs, the *old* row gets
+	// refresh_token_hash=NULL and revoked_at=NOW, so this filter
+	// naturally returns the single most-recent row per client — no
+	// dedup needed in application code.
+	//
+	// Pattern matches RFC 6749 §1.3–1.5, the MCP authorization spec
+	// (silent on access-token expiry vs. UI), and the Google / GitHub /
+	// Microsoft "Connected apps" conventions.
 	rows, err := db.read.Query(`
 		SELECT t.id, t.client_id, COALESCE(c.client_name, t.client_id),
 		       t.scope, t.issued_at, t.access_expires_at,
@@ -366,7 +388,13 @@ func (db *Database) ListActiveOAuthAccessTokens(userID int64) ([]*ConnectedApp, 
 		LEFT JOIN oauth_clients c ON c.client_id = t.client_id
 		WHERE t.user_id = ?
 		  AND t.revoked_at IS NULL
-		  AND t.access_expires_at > CURRENT_TIMESTAMP
+		  AND (
+		    t.access_expires_at > CURRENT_TIMESTAMP
+		    OR (
+		      t.refresh_token_hash IS NOT NULL
+		      AND (t.refresh_expires_at IS NULL OR t.refresh_expires_at > CURRENT_TIMESTAMP)
+		    )
+		  )
 		ORDER BY t.issued_at DESC`, userID)
 	if err != nil {
 		return nil, err

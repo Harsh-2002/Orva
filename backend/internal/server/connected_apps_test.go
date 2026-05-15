@@ -96,6 +96,66 @@ func TestConnectedAppsListAndRevoke(t *testing.T) {
 	}
 }
 
+// TestConnectedAppsListSurvivesAccessTokenExpiry is the regression test
+// for the bug where the Settings → Connected applications list would
+// hide grants ~1h after authorization (when the access token expired)
+// even though the refresh token was still valid. claude.ai and ChatGPT
+// silently refresh access tokens via the refresh_token grant, so the
+// UI should treat the row as still connected.
+func TestConnectedAppsListSurvivesAccessTokenExpiry(t *testing.T) {
+	tc := newTestServer(t)
+	cookie := onboardAndLogin(t, tc, "alice", "supersecret123")
+	_ = mintOAuthGrant(t, tc, cookie, "claude.ai")
+
+	// Backdate the access_expires_at past so the row's *access* token
+	// is expired but its *refresh* token is still fresh — exactly the
+	// state a connector lands in 1h after authorization.
+	_, err := tc.srv.db.WriteDB().Exec(`
+		UPDATE oauth_access_tokens
+		SET access_expires_at = datetime('now', '-2 hours')
+		WHERE user_id = (SELECT id FROM users WHERE username = 'alice')`)
+	if err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/oauth/connected-apps", nil)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var listResp struct {
+		Apps []map[string]any `json:"apps"`
+	}
+	_ = json.NewDecoder(w.Body).Decode(&listResp)
+	if len(listResp.Apps) != 1 {
+		t.Fatalf("expected 1 app despite expired access token; got %d: %+v",
+			len(listResp.Apps), listResp.Apps)
+	}
+	if listResp.Apps[0]["client_name"] != "claude.ai" {
+		t.Errorf("client_name = %v, want claude.ai", listResp.Apps[0]["client_name"])
+	}
+
+	// Now also expire the refresh token — the row SHOULD disappear,
+	// because there's nothing left to refresh from.
+	if _, err := tc.srv.db.WriteDB().Exec(`
+		UPDATE oauth_access_tokens
+		SET refresh_expires_at = datetime('now', '-1 day')
+		WHERE user_id = (SELECT id FROM users WHERE username = 'alice')`); err != nil {
+		t.Fatalf("expire refresh: %v", err)
+	}
+
+	req = httptest.NewRequest("GET", "/api/v1/oauth/connected-apps", nil)
+	req.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	tc.srv.router.ServeHTTP(w, req)
+	_ = json.NewDecoder(w.Body).Decode(&listResp)
+	if len(listResp.Apps) != 0 {
+		t.Errorf("after both tokens expired, list should be empty; got %d", len(listResp.Apps))
+	}
+}
+
 // mintOAuthGrant runs the full DCR + authorize + token flow and
 // returns the issued access-token plaintext.
 func mintOAuthGrant(t *testing.T, tc *testContext, cookie *http.Cookie, clientName string) string {
