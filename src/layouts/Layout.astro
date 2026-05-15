@@ -174,9 +174,10 @@ const {
         max-height: 78vh;
         object-fit: contain;
         border: none;
-        border-radius: 10px;
+        border-radius: 16px;
         display: block;
         background: transparent;
+        overflow: hidden;
       }
       #lightbox figcaption {
         margin-top: 18px;
@@ -207,7 +208,7 @@ const {
       #lightbox-close:hover { color: var(--fg); }
       #lightbox-close:active { transform: scale(0.92); }
       @media (max-width: 560px) {
-        #lightbox img { border-radius: 8px; max-height: 70vh; }
+        #lightbox img { border-radius: 12px; max-height: 70vh; }
       }
     </style>
   </body>
