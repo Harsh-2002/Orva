@@ -2,6 +2,27 @@
 import Layout from '../layouts/Layout.astro';
 
 const base = import.meta.env.BASE_URL;
+const baseTrim = base.replace(/\/$/, '');
+
+// Fetch latest release tag at build time (best-effort; falls back gracefully)
+let latestVersion = 'v2026.05.13';
+let latestUrl = 'https://github.com/Harsh-2002/Orva/releases/latest';
+try {
+  const r = await fetch('https://api.github.com/repos/Harsh-2002/Orva/releases/latest', {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'orva-site-build',
+      ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
+    },
+  });
+  if (r.ok) {
+    const j: { tag_name?: string; html_url?: string } = await r.json();
+    if (j.tag_name) latestVersion = j.tag_name;
+    if (j.html_url) latestUrl = j.html_url;
+  }
+} catch {
+  /* offline build or rate-limit — keep fallback */
+}
 
 const capabilities: [string, string][] = [
   ['Multi-runtime', 'Node.js 22/24, Python 3.13/3.14, TypeScript — all in one binary.'],
@@ -55,8 +76,12 @@ const shots: [string, string, string][] = [
   <!-- ── Masthead ─────────────────────────────────────── -->
   <header class="masthead">
     <div class="inner mast-inner">
-      <a class="wordmark" href="#top" aria-label="Orva — home">
-        orva<span class="dot">.</span>
+      <a class="brand" href="#top" aria-label="Orva — home">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="currentColor" />
+          <text x="16" y="21" font-family="Inter, system-ui, sans-serif" font-size="13" font-weight="700" fill="#fff" text-anchor="middle" letter-spacing="-0.5">f(x)</text>
+        </svg>
+        <span class="brand-name">orva<span class="dot">.</span></span>
       </a>
       <nav class="nav-primary" aria-label="Primary">
         <a href="#capabilities">Capabilities</a>
@@ -74,9 +99,12 @@ const shots: [string, string, string][] = [
   <section class="hero" id="top">
     <div class="inner hero-inner">
       <div class="hero-meta">
-        <span class="overline">v0.4 · self-hosted</span>
+        <a class="overline ver-pill" href={latestUrl} target="_blank" rel="noopener" aria-label={`Latest release ${latestVersion} on GitHub`}>
+          <span class="ver-dot" aria-hidden="true"></span>
+          {latestVersion} · latest
+        </a>
         <span class="hero-meta-sep" aria-hidden="true">/</span>
-        <span class="hero-meta-build">build: stable</span>
+        <span class="hero-meta-build">self-hosted · MIT</span>
       </div>
 
       <h1>
@@ -213,7 +241,7 @@ const shots: [string, string, string][] = [
 
       <div class="shots">
         {shots.map(([file, title, desc]) => {
-          const src = `${base}screenshots/${file}.jpeg`;
+          const src = `${baseTrim}/screenshots/${file}.jpeg`;
           const cap = `${title} — ${desc}`;
           return (
             <figure class="shot">
@@ -338,11 +366,14 @@ sudo systemctl enable --now orva`}</code></pre>
         no <code>npm install</code>, no <code>pip install</code>.
       </p>
 
-      <div class="runtimes">
-        <article class="rt">
+      <div class="install-stack">
+        <article class="install-opt">
           <header>
-            <span class="rt-tag">node</span>
-            <h3>Node.js 22 · 24</h3>
+            <span class="opt-letter" aria-hidden="true">A</span>
+            <div>
+              <h3>Node.js <span class="opt-meta">22 · 24</span></h3>
+              <p>Default export an async handler. <code>ctx.kv</code> backed by per-function SQLite; no install needed.</p>
+            </div>
           </header>
           <div class="code">
             <div class="code-bar">
@@ -357,10 +388,13 @@ sudo systemctl enable --now orva`}</code></pre>
           </div>
         </article>
 
-        <article class="rt">
+        <article class="install-opt">
           <header>
-            <span class="rt-tag">py</span>
-            <h3>Python 3.13 · 3.14</h3>
+            <span class="opt-letter" aria-hidden="true">B</span>
+            <div>
+              <h3>Python <span class="opt-meta">3.13 · 3.14</span></h3>
+              <p>Plain <code>async def handler(req, ctx)</code>. Async SDK on <code>ctx</code> — no FastAPI, no boilerplate.</p>
+            </div>
           </header>
           <div class="code">
             <div class="code-bar">
@@ -374,10 +408,13 @@ sudo systemctl enable --now orva`}</code></pre>
           </div>
         </article>
 
-        <article class="rt">
+        <article class="install-opt">
           <header>
-            <span class="rt-tag">ts</span>
-            <h3>TypeScript</h3>
+            <span class="opt-letter" aria-hidden="true">C</span>
+            <div>
+              <h3>TypeScript <span class="opt-meta">native</span></h3>
+              <p>Types ship with the runtime — <code>import type &#123; OrvaHandler &#125; from 'orva'</code> and you're set.</p>
+            </div>
           </header>
           <div class="code">
             <div class="code-bar">
@@ -419,19 +456,6 @@ export default handler;`}</code></pre>
     </div>
   </section>
 
-  <!-- ── Footer ───────────────────────────────────────── -->
-  <footer class="foot">
-    <div class="inner foot-inner">
-      <span class="foot-mark">orva<span class="dot">.</span></span>
-      <nav class="foot-nav" aria-label="Footer">
-        <a href="https://github.com/Harsh-2002/Orva" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/Harsh-2002/Orva/blob/main/docs/SECURITY.md" target="_blank" rel="noopener">Security</a>
-        <a href="https://github.com/Harsh-2002/Orva/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
-        <a href="https://github.com/Harsh-2002/Orva/releases" target="_blank" rel="noopener">Releases</a>
-      </nav>
-      <span class="foot-meta">MIT · self-hosted</span>
-    </div>
-  </footer>
 </Layout>
 
 <style>
@@ -450,14 +474,32 @@ export default handler;`}</code></pre>
     justify-content: space-between;
     height: 64px;
   }
-  .wordmark {
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--accent);
+    transition: color 140ms;
+  }
+  .brand:hover { color: var(--accent-hi); }
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    display: block;
+    flex-shrink: 0;
+  }
+  .brand-name {
     font-family: var(--mono);
     font-size: 1.0625rem;
     font-weight: 500;
     letter-spacing: -0.02em;
     color: var(--fg);
   }
-  .wordmark .dot { color: var(--accent-hi); }
+  .brand-name .dot { color: var(--accent-hi); }
+  @media (max-width: 480px) {
+    .brand-mark { width: 22px; height: 22px; }
+    .brand-name { font-size: 1rem; }
+  }
 
   .nav-primary {
     display: flex;
@@ -497,9 +539,36 @@ export default handler;`}</code></pre>
     letter-spacing: 0.16em;
     text-transform: uppercase;
   }
-  .hero-meta .overline { color: var(--accent-hi); }
   .hero-meta-sep { color: var(--faint); }
   .hero-meta-build { color: var(--subtle); }
+
+  .ver-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-hi);
+    border: 1px solid var(--border-hi);
+    padding: 4px 10px;
+    transition: background 140ms, border-color 140ms, color 140ms;
+  }
+  .ver-pill:hover { background: var(--surface); color: var(--fg); border-color: var(--fg); }
+  .ver-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--green) 22%, transparent);
+    animation: ver-pulse 2.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes ver-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+  }
+  @media (max-width: 480px) {
+    .hero-meta { flex-wrap: wrap; gap: 10px; }
+    .hero-meta-sep { display: none; }
+  }
 
   .hero h1 { margin-bottom: 30px; }
   .h1-em { color: var(--muted); }
@@ -720,68 +789,27 @@ export default handler;`}</code></pre>
   }
   .install-opt h3 { margin-bottom: 6px; }
   .install-opt p { color: var(--muted); font-size: 0.9375rem; line-height: 1.55; max-width: 64ch; }
-  @media (max-width: 560px) {
-    .install-opt header { grid-template-columns: 1fr; gap: 12px; }
-  }
-
-  /* ── 05 · Runtimes ────────────────────────────────────── */
-  .runtimes {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-  }
-  .rt header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-  .rt-tag {
+  .opt-meta {
+    margin-left: 8px;
     font-family: var(--mono);
     font-size: 0.6875rem;
+    font-weight: 500;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--accent-hi);
-    padding: 3px 8px;
+    padding: 2px 8px;
     border: 1px solid var(--border-hi);
+    vertical-align: middle;
   }
-  .rt h3 { font-size: 0.9375rem; font-weight: 500; }
-  .rt .code { font-size: 0.75rem; }
-  .rt .code pre { padding: 14px; line-height: 1.65; }
-
-  @media (max-width: 980px) { .runtimes { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) {
+    .install-opt header { grid-template-columns: 1fr; gap: 12px; }
+    .install-opt h3 { line-height: 1.6; }
+    .opt-meta { margin-left: 0; display: inline-block; margin-top: 6px; }
+  }
 
   /* ── Closing ──────────────────────────────────────────── */
-  .close { padding: clamp(90px, 13vw, 150px) 0 clamp(110px, 15vw, 170px); }
+  .close { padding: clamp(90px, 13vw, 150px) 0 clamp(120px, 16vw, 200px); }
   .close .overline-block { display: block; margin-bottom: 28px; }
   .close h2 { margin-bottom: 22px; max-width: 14ch; }
   .close-lede { max-width: 54ch; }
-
-  /* ── Footer ───────────────────────────────────────────── */
-  .foot {
-    border-top: 1px solid var(--border);
-    padding: 28px 0;
-    background: var(--bg);
-  }
-  .foot-inner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    flex-wrap: wrap;
-  }
-  .foot-mark {
-    font-family: var(--mono);
-    font-size: 0.9375rem;
-    color: var(--fg);
-  }
-  .foot-mark .dot { color: var(--accent-hi); }
-  .foot-nav { display: flex; gap: 22px; font-family: var(--mono); font-size: 0.8125rem; }
-  .foot-nav a { color: var(--muted); transition: color 120ms; }
-  .foot-nav a:hover { color: var(--fg); }
-  .foot-meta { font-family: var(--mono); font-size: 0.75rem; color: var(--subtle); letter-spacing: 0.04em; }
-
-  @media (max-width: 560px) {
-    .foot-inner { flex-direction: column; align-items: flex-start; gap: 14px; }
-  }
 </style>

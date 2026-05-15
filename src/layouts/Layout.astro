@@ -2,6 +2,7 @@
 import '../styles/global.css';
 
 const base = import.meta.env.BASE_URL;
+const baseTrim = base.replace(/\/$/, '');
 
 interface Props {
   title: string;
@@ -17,10 +18,24 @@ const {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content={description} />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0E0D17" />
+
+    <!-- iOS Safari -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Orva" />
+    <meta name="format-detection" content="telephone=no" />
+    <!-- Android Chrome -->
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- OpenGraph -->
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
 
     <title>{title}</title>
 
@@ -31,7 +46,8 @@ const {
       rel="stylesheet"
     />
 
-    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+    <link rel="icon" type="image/svg+xml" href={`${baseTrim}/favicon.svg`} />
+    <link rel="apple-touch-icon" href={`${baseTrim}/favicon.svg`} />
   </head>
 
   <body>
