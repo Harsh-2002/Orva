@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://harsh-2002.github.io/Orva/sitemap-index.xml

@@ -10,8 +10,48 @@ interface Props {
 }
 const {
   title,
-  description = 'Self-hosted serverless runtime. Functions on your own metal — five kernel-enforced boundaries per call.',
+  description = 'Self-hosted serverless runtime. Functions on your own metal — five kernel-enforced boundaries per call. Node, Python, TypeScript. One binary, one port, zero external dependencies.',
 } = Astro.props;
+
+const site = Astro.site ?? new URL('https://harsh-2002.github.io/');
+const canonical = new URL(Astro.url.pathname, site).href;
+const ogImage = new URL(`${baseTrim}/og.png`, site).href;
+
+const ldJson = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebSite',
+      '@id': `${canonical}#website`,
+      url: canonical,
+      name: 'Orva',
+      description,
+      inLanguage: 'en',
+      publisher: { '@id': `${canonical}#person` },
+    },
+    {
+      '@type': 'Person',
+      '@id': `${canonical}#person`,
+      name: 'Harsh',
+      url: 'https://github.com/Harsh-2002',
+    },
+    {
+      '@type': 'SoftwareApplication',
+      name: 'Orva',
+      description,
+      url: canonical,
+      image: ogImage,
+      applicationCategory: 'DeveloperApplication',
+      applicationSubCategory: 'Serverless Runtime',
+      operatingSystem: 'Linux',
+      license: 'https://opensource.org/licenses/MIT',
+      author: { '@id': `${canonical}#person` },
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      programmingLanguage: ['JavaScript', 'TypeScript', 'Python'],
+      codeRepository: 'https://github.com/Harsh-2002/Orva',
+    },
+  ],
+};
 ---
 
 <!doctype html>
@@ -22,6 +62,16 @@ const {
     <meta name="description" content={description} />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0E0D17" />
+    <meta name="generator" content={Astro.generator} />
+    <meta
+      name="keywords"
+      content="self-hosted, serverless, runtime, function-as-a-service, faas, nsjail, sandbox, kata containers, node.js, python, typescript, homelab, docker, kubernetes alternative"
+    />
+    <meta name="author" content="Harsh" />
+    <meta
+      name="robots"
+      content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1"
+    />
 
     <!-- iOS Safari -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -31,11 +81,27 @@ const {
     <!-- Android Chrome -->
     <meta name="mobile-web-app-capable" content="yes" />
 
+    <!-- Canonical -->
+    <link rel="canonical" href={canonical} />
+
     <!-- OpenGraph -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:site_name" content="Orva" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Orva — self-hosted serverless runtime" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content="Orva — self-hosted serverless runtime" />
 
     <title>{title}</title>
 
@@ -48,6 +114,9 @@ const {
 
     <link rel="icon" type="image/svg+xml" href={`${baseTrim}/favicon.svg`} />
     <link rel="apple-touch-icon" href={`${baseTrim}/favicon.svg`} />
+
+    <!-- Structured data (schema.org) -->
+    <script type="application/ld+json" set:html={JSON.stringify(ldJson)} />
   </head>
 
   <body>
