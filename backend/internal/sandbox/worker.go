@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -95,6 +96,8 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		return nil, err
 	}
 	args := buildArgs(cfg, rootfs, entrypoint)
+
+	slog.Debug("nsjail spawn", "bin", cfg.NsjailBin, "args", args)
 
 	cmd := exec.Command(cfg.NsjailBin, args...)
 

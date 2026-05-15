@@ -490,6 +490,11 @@ async function readFrame() {
     if (_tID) process.env.ORVA_TRACE_ID = _tID; else delete process.env.ORVA_TRACE_ID;
     if (_sID) process.env.ORVA_SPAN_ID  = _sID; else delete process.env.ORVA_SPAN_ID;
 
+    // v0.6 SDK: trace.span() / log.* need the execution id.
+    const _eID = _hdrs['x-orva-execution-id'] || _hdrs['X-Orva-Execution-Id'] || '';
+    if (_eID) process.env.ORVA_EXECUTION_ID = _eID;
+    else delete process.env.ORVA_EXECUTION_ID;
+
     // v0.4 C1: streaming flag + heartbeat interval ride on per-request
     // headers so the proxy can flip them at runtime without redeploying
     // the worker. Defaults match the system_config seed values.

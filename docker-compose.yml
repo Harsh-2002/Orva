@@ -18,6 +18,10 @@ services:
     # and cpu.max per function. Read-only private cgroup view falls back to
     # rlimit_as (address-space soft cap, no CPU throttling).
     cgroup: host
+    # cgroup writes (NSJAIL.<pid>/cgroup.procs) reference PIDs in the host's
+    # namespace. Without pid: host, every sandbox spawn fails with
+    # "No such file or directory" when nsjail tries to enroll the PID.
+    pid: host
 
     volumes:
       - orva-data:/var/lib/orva

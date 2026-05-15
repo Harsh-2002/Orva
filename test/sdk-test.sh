@@ -63,6 +63,31 @@ wait_active() {
     return 1
 }
 
+# ── No-op target used by the idempotent-enqueue test ─────────────────
+#
+# jobs.enqueue requires the target function to exist (the handler resolves
+# the name against the DB before inserting). We pre-deploy a tiny no-op
+# named `sdk-test-noop`; the test function then enqueues to it twice with
+# the same idempotency key and asserts dedup. Re-uses the noop across
+# runs (UPSERT-by-name: if it already exists the create returns 409 and
+# the script falls back to looking up its id).
+
+NOOP_FN_NAME="sdk-test-noop"
+noop_create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
+    -H "Content-Type: application/json" \
+    -d "{\"name\":\"$NOOP_FN_NAME\",\"runtime\":\"python314\",\"network_mode\":\"none\",\"entrypoint\":\"handler.py\"}" 2>/dev/null || true)
+noop_id=$(echo "$noop_create" | jq -r '.id // empty')
+if [ -z "$noop_id" ]; then
+    noop_id=$(curl -s -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/functions?limit=200" \
+        | jq -r ".functions[] | select(.name==\"$NOOP_FN_NAME\") | .id" | head -1)
+fi
+if [ -n "$noop_id" ]; then
+    "${CURL[@]}" -X POST "$BASE/api/v1/functions/$noop_id/deploy-inline" \
+        -H "Content-Type: application/json" \
+        -d '{"code":"def handler(event):\n    return {\"statusCode\": 200, \"body\": \"ok\"}","filename":"handler.py"}' > /dev/null
+    wait_active "$noop_id" || true
+fi
+
 # ── Python function exercising kv.incr / kv.cas / trace.span / log ──
 
 PY_FN="sdk-test-py-$$"
@@ -169,11 +194,12 @@ exports.handler = async (event) => {
   const many = await kv.getMany(['b:1', 'b:3', 'b:9999'])
 
   // Idempotent enqueue — same key twice should return the same job id.
-  const j1 = await jobs.enqueue('does-not-exist', {}, {
+  // Target the noop helper function the test script pre-deploys.
+  const j1 = await jobs.enqueue('sdk-test-noop', {}, {
     idempotencyKey: 'demo-idem',
     idempotencyWindowSeconds: 60,
   })
-  const j2 = await jobs.enqueue('does-not-exist', {}, {
+  const j2 = await jobs.enqueue('sdk-test-noop', {}, {
     idempotencyKey: 'demo-idem',
     idempotencyWindowSeconds: 60,
   })

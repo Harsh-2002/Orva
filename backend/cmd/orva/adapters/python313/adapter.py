@@ -658,6 +658,11 @@ try:
         if _sid: os.environ["ORVA_SPAN_ID"] = _sid
         else:    os.environ.pop("ORVA_SPAN_ID", None)
 
+        # v0.6 SDK: trace.span() / log.* need the execution id.
+        _eid = _hdrs.get("x-orva-execution-id") or _hdrs.get("X-Orva-Execution-Id") or ""
+        if _eid: os.environ["ORVA_EXECUTION_ID"] = _eid
+        else:    os.environ.pop("ORVA_EXECUTION_ID", None)
+
         # v0.4 C1: streaming flag + heartbeat interval ride on per-request
         # headers so the proxy can flip them at runtime without redeploying
         # the worker. Defaults match the system_config seed values.
