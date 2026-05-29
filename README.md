@@ -9,7 +9,7 @@
 
 **Self-hosted Functions-as-a-Service for your homelab or on-prem server.**
 
-Write a JavaScript or Python function, hit deploy — Orva runs it in an
+Write a JavaScript, TypeScript, or Python function, hit deploy — Orva runs it in an
 isolated nsjail sandbox and exposes it over HTTP. Everything runs on hardware
 you already own: no cloud account, no per-invocation billing, no external
 services required.
@@ -48,6 +48,24 @@ and you have a fully operational FaaS platform.
 curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
+
+---
+
+## Install on a VM or bare-metal server
+
+No Docker? Install the daemon directly. The POSIX installer drops the binary
+at `/opt/orva`, registers a service (systemd or OpenRC), creates the `orva`
+service user, and pulls nsjail plus the language runtimes automatically. Data
+lives in `/var/lib/orva`. Works on Debian/Ubuntu, Fedora/RHEL/Rocky/Alma,
+Alpine, Arch, and openSUSE:
+
+```bash
+curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh
+```
+
+The installer is idempotent — re-running upgrades the binary and preserves the
+data dir. Pin a version with `ORVA_VERSION=vYYYY.MM.DD`, or pass `--cli-only`
+to install just the client. Then open **http://localhost:8443**.
 
 ---
 
@@ -137,6 +155,7 @@ The Build info card at the top of Settings shows the running release's version, 
 | **Secrets** | Per-function encrypted secrets, injected as env vars at sandbox spawn time. Never logged or stored in plaintext. |
 | **Inbound webhooks** | Signed inbound trigger endpoints (GitHub, Stripe, Slack, generic HMAC) that fan into a function. |
 | **Rollback** | Every deploy is content-hashed and archived. Roll back to any prior version in one click or one CLI command. |
+| **Version diff** | Side-by-side source diff between any two past deployments — in the dashboard (CodeMirror merge view) or `orva diff <fn>` for git-style unified output in the terminal. |
 | **MCP server** | 70 tools at `/mcp` — any MCP client (Claude Code, Cursor, etc.) can create functions, deploy code, manage secrets, browse KV, and read logs. |
 | **OAuth 2.1** | Add Orva as a custom connector in claude.ai or other OAuth-capable MCP clients — no API key copy-paste needed. |
 | **16 templates** | Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener, and more — pickable in the editor. |
@@ -346,6 +365,7 @@ Requires Go 1.25+, Node 22+, and nsjail on Linux for sandbox invocations.
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model, sandbox isolation, verification recipe |
 | [`docs/RUNTIMES.md`](docs/RUNTIMES.md) | Handler contract, event shape, streaming |
 | [`docs/API.md`](docs/API.md) | Full REST API reference |
+| [`docs/CLI.md`](docs/CLI.md) | CLI config precedence, command reference, workflows |
 | [`docs/CONFIG.md`](docs/CONFIG.md) | All config knobs |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | TLS, reverse proxy, backups, upgrades |
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Monitoring, troubleshooting, common errors |

@@ -27,6 +27,9 @@ func newTestServer(t *testing.T) *testContext {
 	dir := t.TempDir()
 	cfg := config.Defaults()
 	cfg.Database.Path = filepath.Join(dir, "test.db")
+	// Hermetic: keep version trees, .admin-key, and any other per-server
+	// state inside the test's tempdir instead of bleeding to ~/.orva.
+	cfg.Data.Dir = dir
 
 	db, err := database.New(cfg.Database.Path)
 	if err != nil {

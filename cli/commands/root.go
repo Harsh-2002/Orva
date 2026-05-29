@@ -57,6 +57,7 @@ func RegisterClient(root *cobra.Command) {
 		completionCmd,
 		cronCmd,
 		deployCmd,
+		diffCmd,
 		functionsCmd,
 		invokeCmd,
 		jobsCmd,

@@ -1505,7 +1505,11 @@ flag icon next to the span.
 
 Every error response uses the same envelope so log scrapers and
 retries can match on `code`. Deploys are content-addressed; rollback
-retargets the active version pointer and refreshes warm workers.
+retargets the active version pointer and refreshes warm workers. To
+review what's about to change *before* rolling back, use the dashboard's
+**Compare versions** view (link from each row in the Versions modal /
+Deployments page) or `orva diff <fn> --from <dep_id> --to <dep_id>` for
+a unified-diff in the terminal.
 
 ```json
 {
@@ -1523,7 +1527,8 @@ retargets the active version pointer and refreshes warm workers.
 | `UNAUTHORIZED` | Missing or invalid API key / session cookie. |
 | `NOT_FOUND` | Function, deployment, or secret doesn't exist. |
 | `RATE_LIMITED` | Too many requests — check the Retry-After header. |
-| `VERSION_GCD` | Rollback target was garbage-collected. |
+| `VERSION_GCD` | Rollback / diff target was garbage-collected. |
+| `VERSION_NOT_FOUND` | Diff endpoint received an unknown deployment ID. |
 | `INSUFFICIENT_DISK` | Host is below min_free_disk_mb. |
 
 ---

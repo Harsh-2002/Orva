@@ -257,6 +257,34 @@ signal. Reconnect in ~5 seconds.
 > sensitive (encrypted disk, S3 + SSE, etc.). Same posture as a password
 > manager export.
 
+### Compare past versions
+
+`orva diff` produces a git-style unified diff between two past
+**succeeded** deployments. Without `--from` / `--to`, defaults pick the
+currently-active deployment as the *to* side and the most recent earlier
+deployment with a different `code_hash` as the *from* side — so a
+no-arg invocation almost always shows the last meaningful code change.
+
+```bash
+# Default: previous distinct version → active. ANSI-colored on TTY.
+orva diff greeter
+
+# Pin both sides explicitly (deployment IDs come from the dashboard's
+# Versions modal or `orva functions get greeter` deployment history).
+orva diff greeter --from dep_…01 --to dep_…07
+
+# Strip color for log capture or pipe to `less -R` for paging.
+orva diff greeter --no-color | tee greeter.diff
+orva diff greeter | less -R
+
+# Structured output for scripting (file list + raw before/after blobs).
+orva diff greeter --from dep_…01 --to dep_…07 --json | jq '.files[].path'
+```
+
+The unified output skips `node_modules` / `__pycache__` and TypeScript
+compiled output — only the handler source + dependency manifest
+(`package.json` or `requirements.txt`) are diffed.
+
 ### Routes (custom URLs)
 
 ```bash
@@ -331,6 +359,7 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | `orva webhooks create / list / test / delete` | Outbound system-event subscriptions |
 | `orva webhooks inbound …` | Inbound signed-POST triggers (GitHub, Stripe, etc.) |
 | `orva backup download / restore` | Point-in-time snapshot + restore |
+| `orva diff <name> [--from --to] [--json] [--no-color]` | Git-style unified diff between two past deployments |
 | `orva activity [--tail \| --source X]` | Audit log: every API call, CLI command, MCP invoke |
 | `orva system health / metrics / db-stats / vacuum` | Diagnostics + maintenance |
 | `orva upgrade` | Self-update from the latest GitHub release |

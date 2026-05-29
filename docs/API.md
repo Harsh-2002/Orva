@@ -135,6 +135,27 @@ Returns 410 `VERSION_GCD` if the target version was pruned by the GC.
 Returns the function's current code + dependencies as JSON. Used by
 the Editor view.
 
+### `GET /api/v1/functions/{id}/diff?from=<dep_id>&to=<dep_id>&format=json|unified`
+Compares the handler source + dependency manifest between two past
+**succeeded** deployments. Both `from` and `to` must be deployment IDs
+(`dep_…`) belonging to this function.
+
+- `format=json` (default — dashboard `Compare versions` view) returns
+  `{from, to, files: [{path, kind:"handler"|"manifest", before, after,
+  added, removed}]}`. `before` / `after` carry the raw file bytes so
+  the browser-side merge viewer can compute its own hunks.
+- `format=unified` returns `text/x-diff` with git-style hunks per file
+  (`--- a/path` / `+++ b/path` / `@@ …`). Consumed by `orva diff`.
+
+Errors:
+- 400 `VALIDATION` if `from` and `to` are equal, belong to different
+  functions, or aren't in status `succeeded`.
+- 404 `VERSION_NOT_FOUND` if either deployment ID is unknown; details
+  include the requested ID.
+- 410 `VERSION_GCD` if either version's source tree was pruned by the
+  GC. `details.available_hashes` lists the surviving on-disk versions
+  so the caller can retry against a still-archived target.
+
 ### `GET /api/v1/functions/{id}/deployments`
 Deployment history for a function. Optional `?limit=N` (default 50).
 

@@ -1019,14 +1019,27 @@
             <span class="text-foreground-muted shrink-0">·</span>
             <span class="text-foreground-muted shrink-0">{{ new Date(v.created_at).toLocaleDateString() }}</span>
           </div>
-          <button
+          <div
             v-if="!v.is_active"
-            :disabled="rollingBack"
-            class="text-foreground-muted hover:text-white disabled:opacity-50 shrink-0 flex items-center gap-1"
-            @click="rollbackToVersion(v)"
+            class="shrink-0 flex items-center gap-2"
           >
-            <RotateCcw class="w-3 h-3" /> Rollback
-          </button>
+            <router-link
+              v-if="activeVersionDeploymentId"
+              :to="{ name: 'function-diff', params: { name: route.params.name }, query: { from: v.deployment_id, to: activeVersionDeploymentId } }"
+              class="text-foreground-muted hover:text-white flex items-center gap-1"
+              title="Compare with active version"
+              @click="modals.versions = false"
+            >
+              <GitCompare class="w-3 h-3" /> Compare
+            </router-link>
+            <button
+              :disabled="rollingBack"
+              class="text-foreground-muted hover:text-white disabled:opacity-50 flex items-center gap-1"
+              @click="rollbackToVersion(v)"
+            >
+              <RotateCcw class="w-3 h-3" /> Rollback
+            </button>
+          </div>
         </div>
       </div>
       <template #footer>
@@ -1165,7 +1178,7 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
@@ -1211,6 +1224,7 @@ import { templates, defaultCode, categoryOrder } from '@/templates'
 import { rollbackFunction, listFixtures, createFixture, updateFixture, deleteFixture, invokeFunctionFull, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
 import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
+import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 
 const route = useRoute()
 const router = useRouter()
@@ -1877,6 +1891,15 @@ const rerollName = () => {
   form.value.name = generateFunctionName()
 }
 
+// activeVersionDeploymentId: the deployment_id of the row marked active
+// in the version list. Used to pre-fill the "from" side of every Compare
+// link in the Versions modal (operators almost always want "this old
+// version vs what's running now").
+const activeVersionDeploymentId = computed(() => {
+  const a = versions.value.find((v) => v.is_active)
+  return a?.deployment_id || null
+})
+
 // loadVersions builds the Versions card data from the deployments table.
 // We deduplicate by code_hash (keep the most recent succeeded deployment
 // for each unique hash) so a redeploy of identical content doesn't pad
@@ -2383,41 +2406,6 @@ watch(fnId, async (id) => {
   else fixtures.value = []
 })
 
-// describeRollbackDiff compares the current function record against a
-// deployment snapshot and returns human lines describing what's about to
-// change. Used by the confirm dialog so the operator sees the blast
-// radius before clicking Rollback. Format prioritises legibility over
-// completeness — env vars are shown by name; numeric fields by old →
-// new; identical fields are omitted.
-const describeRollbackDiff = (fn, snap) => {
-  const lines = []
-
-  // Env vars: classify into added / removed / changed.
-  const cur = fn.env_vars || {}
-  const next = snap.env_vars || {}
-  const added = Object.keys(next).filter((k) => !(k in cur))
-  const removed = Object.keys(cur).filter((k) => !(k in next))
-  const changed = Object.keys(next).filter((k) => k in cur && cur[k] !== next[k])
-  if (added.length)   lines.push(`+ Add env: ${added.join(', ')}`)
-  if (removed.length) lines.push(`- Remove env: ${removed.join(', ')}`)
-  if (changed.length) lines.push(`~ Change env: ${changed.join(', ')}`)
-
-  // Spawn config — only mention what differs.
-  const num = (label, a, b, suffix = '') => {
-    if (a !== b) lines.push(`~ ${label}: ${a}${suffix} → ${b}${suffix}`)
-  }
-  num('Memory', fn.memory_mb, snap.memory_mb, ' MB')
-  num('CPUs', fn.cpus, snap.cpus)
-  num('Timeout', fn.timeout_ms, snap.timeout_ms, ' ms')
-  num('Network', fn.network_mode || 'none', snap.network_mode || 'none')
-  num('Auth gate', fn.auth_mode || 'none', snap.auth_mode || 'none')
-  num('Rate limit', fn.rate_limit_per_min || 0, snap.rate_limit_per_min || 0, '/min')
-  num('Max concurrency', fn.max_concurrency || 0, snap.max_concurrency || 0)
-  num('Concurrency policy', fn.concurrency_policy || 'queue', snap.concurrency_policy || 'queue')
-
-  return lines
-}
-
 const rollingBack = ref(false)
 const rollbackToVersion = async (v) => {
   if (!fnId.value || !v?.deployment_id || rollingBack.value) return
@@ -2435,7 +2423,7 @@ const rollbackToVersion = async (v) => {
     const snap = depRes.data?.snapshot
     const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
     if (snap && fn) {
-      const lines = describeRollbackDiff(fn, snap)
+      const lines = describeSnapshotDiff(fn, snap)
       if (lines.length) {
         diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
       } else {
@@ -2444,6 +2432,13 @@ const rollbackToVersion = async (v) => {
     }
   } catch (e) {
     // fall through to default message
+  }
+
+  // Surface a deep-link to the side-by-side source diff so the operator
+  // can review code changes before confirming. The confirm store renders
+  // plain text — the URL stays copy-pasteable even without rich content.
+  if (activeVersionDeploymentId.value && activeVersionDeploymentId.value !== v.deployment_id && route.params.name) {
+    diffMessage += `\n\nFull source diff: ${window.location.origin}/web/functions/${route.params.name}/diff?from=${v.deployment_id}&to=${activeVersionDeploymentId.value}`
   }
 
   const ok = await confirmStore.ask({

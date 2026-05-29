@@ -17,6 +17,7 @@ cli/
     ├── completion.go     # `orva completion {bash|zsh|fish|powershell}`
     ├── cron.go           # `orva cron …`
     ├── deploy.go         # `orva deploy <path>`
+    ├── diff.go           # `orva diff <function>` (unified diff between deployments)
     ├── functions.go      # `orva functions …`
     ├── invoke.go         # `orva invoke <name>`
     ├── jobs.go           # `orva jobs …`

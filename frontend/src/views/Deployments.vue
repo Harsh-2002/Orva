@@ -99,16 +99,28 @@
                 <span v-if="d.phase">{{ d.phase }}</span>
               </div>
             </div>
-            <Button
-              v-if="canRollback(d)"
-              size="xs"
-              variant="ghost"
-              class="shrink-0"
-              :disabled="rollingBack"
-              @click.stop="rollbackTo(d)"
+            <div
+              class="shrink-0 flex items-center gap-1"
+              @click.stop
             >
-              <RotateCcw class="w-3 h-3" /> Rollback
-            </Button>
+              <router-link
+                v-if="canCompare(d)"
+                :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
+                class="text-foreground-muted hover:text-white text-xs flex items-center gap-1 px-2 py-1"
+                title="Compare with active version"
+              >
+                <GitCompare class="w-3 h-3" /> Compare
+              </router-link>
+              <Button
+                v-if="canRollback(d)"
+                size="xs"
+                variant="ghost"
+                :disabled="rollingBack"
+                @click="rollbackTo(d)"
+              >
+                <RotateCcw class="w-3 h-3" /> Rollback
+              </Button>
+            </div>
           </div>
         </li>
         <li
@@ -184,23 +196,33 @@
               class="px-6 py-4 text-right text-xs"
               @click.stop
             >
-              <Button
-                v-if="canRollback(d)"
-                size="xs"
-                variant="ghost"
-                :disabled="rollingBack"
-                @click="rollbackTo(d)"
-              >
-                <RotateCcw class="w-3 h-3" /> Rollback
-              </Button>
-              <span
-                v-else-if="d.source === 'rollback'"
-                class="text-foreground-muted/50"
-              >via rollback</span>
-              <span
-                v-else
-                class="text-foreground-muted/30"
-              >{{ EMPTY }}</span>
+              <div class="inline-flex items-center gap-2 justify-end">
+                <router-link
+                  v-if="canCompare(d)"
+                  :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
+                  class="text-foreground-muted hover:text-white flex items-center gap-1"
+                  title="Compare with active version"
+                >
+                  <GitCompare class="w-3 h-3" /> Compare
+                </router-link>
+                <Button
+                  v-if="canRollback(d)"
+                  size="xs"
+                  variant="ghost"
+                  :disabled="rollingBack"
+                  @click="rollbackTo(d)"
+                >
+                  <RotateCcw class="w-3 h-3" /> Rollback
+                </Button>
+                <span
+                  v-if="!canRollback(d) && d.source === 'rollback'"
+                  class="text-foreground-muted/50"
+                >via rollback</span>
+                <span
+                  v-else-if="!canCompare(d) && !canRollback(d)"
+                  class="text-foreground-muted/30"
+                >{{ EMPTY }}</span>
+              </div>
             </td>
           </tr>
           <tr v-if="!loading && deployments.length === 0">
@@ -259,12 +281,13 @@ import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onBeforeUnmount, watch, h } from 'vue'
 import { useEventsStore } from '@/stores/events'
 import { useRoute } from 'vue-router'
-import { RefreshCw, UploadCloud, CheckCircle2, RotateCcw } from 'lucide-vue-next'
+import { RefreshCw, UploadCloud, CheckCircle2, RotateCcw, GitCompare } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import { listDeployments, getDeployment, getDeploymentLogs, listFunctions, rollbackFunction } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
+import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 
 const confirmStore = useConfirmStore()
 
@@ -287,32 +310,24 @@ const canRollback = (d) =>
   d.code_hash &&
   !isActive(d)
 
-// describeRollbackDiff: compare current function vs target deployment
-// snapshot and return human-readable diff lines. Mirror of the helper in
-// Editor.vue so users see the same blast-radius preview from either page.
-const describeRollbackDiff = (fn, snap) => {
-  const lines = []
-  const cur = fn.env_vars || {}
-  const next = snap.env_vars || {}
-  const added = Object.keys(next).filter((k) => !(k in cur))
-  const removed = Object.keys(cur).filter((k) => !(k in next))
-  const changed = Object.keys(next).filter((k) => k in cur && cur[k] !== next[k])
-  if (added.length)   lines.push(`+ Add env: ${added.join(', ')}`)
-  if (removed.length) lines.push(`- Remove env: ${removed.join(', ')}`)
-  if (changed.length) lines.push(`~ Change env: ${changed.join(', ')}`)
-  const num = (label, a, b, suffix = '') => {
-    if (a !== b) lines.push(`~ ${label}: ${a}${suffix} → ${b}${suffix}`)
-  }
-  num('Memory', fn.memory_mb, snap.memory_mb, ' MB')
-  num('CPUs', fn.cpus, snap.cpus)
-  num('Timeout', fn.timeout_ms, snap.timeout_ms, ' ms')
-  num('Network', fn.network_mode || 'none', snap.network_mode || 'none')
-  num('Auth gate', fn.auth_mode || 'none', snap.auth_mode || 'none')
-  num('Rate limit', fn.rate_limit_per_min || 0, snap.rate_limit_per_min || 0, '/min')
-  num('Max concurrency', fn.max_concurrency || 0, snap.max_concurrency || 0)
-  num('Concurrency policy', fn.concurrency_policy || 'queue', snap.concurrency_policy || 'queue')
-  return lines
-}
+// activeDeploymentId: the row that's currently serving. Used as the
+// implicit "compare against" target for every Compare link in the list.
+// Null until refresh() lands the deployments + activeFn pair.
+const activeDeploymentId = computed(() => {
+  const row = deployments.value.find((d) => isActive(d))
+  return row?.id || null
+})
+
+// canCompare: any succeeded non-active row whose source is still on disk
+// — we have an active version to compare against AND the row points at
+// a real code_hash. Mirrors canRollback but stays available even when
+// rollingBack is in flight (compare is read-only).
+const canCompare = (d) =>
+  d &&
+  d.status === 'succeeded' &&
+  d.code_hash &&
+  !isActive(d) &&
+  activeDeploymentId.value
 
 // rollbackTo posts to the rollback endpoint and refreshes the table on
 // success. Re-uses the deployment_id (not the hash) so the audit trail
@@ -327,7 +342,7 @@ const rollbackTo = async (d) => {
     const fullDep = await getDeployment(d.id)
     const snap = fullDep?.data?.snapshot
     if (snap && activeFn.value) {
-      const lines = describeRollbackDiff(activeFn.value, snap)
+      const lines = describeSnapshotDiff(activeFn.value, snap)
       if (lines.length) {
         diffMessage = `Rolling back to v${d.version} (code ${shortHash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values — they aren't part of the rollback.`
       } else {
@@ -336,6 +351,14 @@ const rollbackTo = async (d) => {
     }
   } catch (e) {
     // fall through to default message
+  }
+
+  // Append a copy-pasteable link to the full source diff so the operator
+  // can eyeball the code change before clicking Rollback. The confirm
+  // store only renders plain text — a router-link would be nicer, but a
+  // URL still works as a manual paste.
+  if (activeDeploymentId.value && activeDeploymentId.value !== d.id) {
+    diffMessage += `\n\nFull source diff: ${window.location.origin}/web/functions/${fnName.value}/diff?from=${d.id}&to=${activeDeploymentId.value}`
   }
 
   const ok = await confirmStore.ask({

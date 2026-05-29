@@ -5,11 +5,13 @@ go 1.25.0
 require (
 	github.com/creativeprojects/go-selfupdate v1.5.2
 	github.com/google/uuid v1.6.0
+	github.com/hexops/gotextdiff v1.0.3
 	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.50.0
+	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.47.0
 )

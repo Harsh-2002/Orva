@@ -215,6 +215,17 @@ export const getDeploymentLogs = (id, fromSeq = 0, limit = 200) =>
 export const listDeployments = (fnId, limit = 50) =>
   apiClient.get(`/functions/${fnId}/deployments`, { params: { limit } })
 
+// compareDeployments returns a side-by-side diff between two past
+// successful deployments of one function. `format=json` (default —
+// dashboard) ships raw before/after blobs so @codemirror/merge can
+// compute its own hunks; `format=unified` returns text/x-diff bytes for
+// the CLI. Caller maps VERSION_GCD (410) into the empty-state UI.
+export const compareDeployments = (fnId, fromId, toId, format = 'json') =>
+  apiClient.get(`/functions/${encodeURIComponent(fnId)}/diff`, {
+    params: { from: fromId, to: toId, format },
+    responseType: format === 'unified' ? 'text' : 'json',
+  })
+
 // SSE — returns a native EventSource. Caller is responsible for `.close()`.
 // We can't use the axios client for SSE; the browser's EventSource sends
 // the session cookie automatically (same-origin), and API-key auth is not

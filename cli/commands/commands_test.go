@@ -24,6 +24,7 @@ func TestCommandTree(t *testing.T) {
 		{"system"}, {"system", "health"},
 		{"activity"},
 		{"backup"}, {"backup", "download"}, {"backup", "restore"},
+		{"diff"},
 		{"login"},
 		{"completion"},
 		{"upgrade"},
@@ -72,6 +73,9 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"webhooks", "create"}, "url"},
 		{[]string{"channels", "create"}, "functions"},
 		{[]string{"secrets", "set"}, "value"},
+		{[]string{"diff"}, "from"},
+		{[]string{"diff"}, "to"},
+		{[]string{"diff"}, "json"},
 	}
 	root := NewRoot()
 	for _, c := range cases {

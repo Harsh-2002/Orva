@@ -141,6 +141,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy-inline", fnHandler.DeployInline)
 	r.mux.HandleFunc("POST /api/v1/functions/{fn_id}/rollback", fnHandler.Rollback)
 	r.mux.HandleFunc("GET /api/v1/functions/{fn_id}/source", fnHandler.GetSource)
+	r.mux.HandleFunc("GET /api/v1/functions/{fn_id}/diff", fnHandler.Diff)
 
 	// Deployments — async build state + log streaming.
 	depHandler := &handlers.DeploymentHandler{DB: r.db}

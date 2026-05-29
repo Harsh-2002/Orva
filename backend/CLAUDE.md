@@ -60,7 +60,7 @@ The canonical UUIDv7 generator (`ids`) and HTTP client (`client`) live at **repo
 
 All Cobra subcommands share one binary with the server. `orva serve` starts the daemon; every other command is a CLI client that reads `~/.orva/config.yaml`.
 
-Key files: `deploy.go`, `functions.go`, `invoke.go`, `logs.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `keys.go`, `system.go`, `activity.go`, `completion.go`.
+Key files: `deploy.go`, `diff.go`, `functions.go`, `invoke.go`, `logs.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `keys.go`, `system.go`, `activity.go`, `completion.go`.
 
 ## Key Patterns
 

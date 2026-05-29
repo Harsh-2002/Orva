@@ -31,6 +31,9 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 | `UNAUTHORIZED` | 401 | missing or invalid API key / session | no — re-auth |
 | `FORBIDDEN` | 403 | authenticated but lacks the required permission | no |
 | `NOT_FOUND` | 404 | function or route doesn't exist | no |
+| `FUNCTION_NOT_FOUND` | 404 | function lookup miss on a name-or-ID path (diff endpoint) | no |
+| `VERSION_NOT_FOUND` | 404 | deployment row not in DB (e.g. `orva diff` with a bad `--from`/`--to`) | no |
+| `VERSION_GCD` | 410 | rollback / diff target's version tree was pruned by the GC; `details.available_hashes` lists survivors | no — pick a still-archived hash |
 | `METHOD_NOT_ALLOWED` | 405 | method not in the route's allowed list | no |
 | `NOT_ACTIVE` | 409 | function status is `error` or `inactive` | no — redeploy or activate |
 | `PAYLOAD_TOO_LARGE` | 413 | body exceeds `cfg.Server.MaxBodyBytes` (default 6 MB) | no — split or raise the cap |

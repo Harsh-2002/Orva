@@ -26,6 +26,7 @@ const router = createRouter({
         { path: 'functions', name: 'functions', component: () => import('@/views/FunctionsList.vue') },
         { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue') },
         { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue') },
+        { path: 'functions/:name/diff', name: 'function-diff', component: () => import('@/views/FunctionDiff.vue') },
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
         { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue') },
         // Canonical create route. The Editor watches `route.params.name`

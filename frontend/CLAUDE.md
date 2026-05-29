@@ -20,7 +20,7 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 - **Pinia** for global state
 - **Vue Router 4** — routes defined in `src/router/`
 - **Tailwind CSS 4** (PostCSS plugin)
-- **CodeMirror 6** — `@codemirror/lang-javascript`, `@codemirror/lang-python`, `@codemirror/theme-one-dark`
+- **CodeMirror 6** — `@codemirror/lang-javascript`, `@codemirror/lang-python`, `@codemirror/lang-json`, `@codemirror/theme-one-dark`, `@codemirror/merge` (side-by-side / unified diff in FunctionDiff.vue)
 - **lucide-vue-next** icons (tree-shaken per-import)
 - **axios** for HTTP
 
@@ -41,7 +41,9 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 | `src/views/InboundWebhooks.vue` | Inbound webhook trigger management |
 | `src/views/Traces.vue` | Trace list with filters + outlier badges |
 | `src/views/TraceDetail.vue` | Single-trace waterfall + span detail |
+| `src/views/FunctionDiff.vue` | Side-by-side / unified source diff between two deployments (CodeMirror merge) + rollback CTA |
 | `src/utils/aiPrompts.js` | `buildPromptText()` (code gen) + `buildFixSuggestionPrompt()` (debug) |
+| `src/utils/rollbackDiff.js` | `describeSnapshotDiff()` — shared settings/env diff lines (Editor, Deployments, FunctionDiff) |
 | `src/templates/index.js` | Built-in function templates (including `ts_hello`, `py_stream_llm`) |
 
 ## Non-obvious
