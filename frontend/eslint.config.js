@@ -25,6 +25,8 @@ export default [
         File: 'readonly',
         TextDecoder: 'readonly',
         EventSource: 'readonly',
+        atob: 'readonly',
+        btoa: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
@@ -36,6 +38,10 @@ export default [
         ignores: ['Badge', 'Button', 'Card', 'Input', 'Header', 'Layout', 'Sidebar', 'Dashboard', 'Docs', 'Editor', 'Login', 'Onboarding']
       }],
       'vue/no-v-html': 'off',
+      // Best-effort cleanup in catch is intentional across the app (e.g.
+      // closing an SSE stream that may already be closed). Still flags
+      // empty if/for/while blocks.
+      'no-empty': ['error', { allowEmptyCatch: true }],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
     }
