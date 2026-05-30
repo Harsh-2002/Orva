@@ -211,8 +211,18 @@ decide_interactive() {
     INTERACTIVE=0
     [ "$ASSUME_YES" = "1" ] && return
     [ "$DRYRUN" = "1" ] && return
-    if [ -e /dev/tty ] && { [ -t 0 ] || [ -t 1 ] || true; } 2>/dev/null; then
-        if [ -r /dev/tty ]; then INTERACTIVE=1; fi
+    # A /dev/tty device node merely EXISTING with rw permission bits is NOT a
+    # reliable signal — under CI / `docker exec` (no -t) it is present and
+    # readable yet has no controlling terminal, so opening it for a prompt
+    # fails with ENXIO and, under `set -e`, aborts the whole installer.
+    # Probe for a REAL terminal instead: stdin is a TTY (covers
+    # `sh install.sh` from a shell), or /dev/tty behaves as one (covers
+    # `curl | sh` from an interactive shell, where stdin is the pipe but a
+    # controlling terminal is still attached). Both correctly read false in CI.
+    if [ -t 0 ]; then
+        INTERACTIVE=1
+    elif [ -e /dev/tty ] && tty -s </dev/tty 2>/dev/null; then
+        INTERACTIVE=1
     fi
 }
 
