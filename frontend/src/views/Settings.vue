@@ -23,7 +23,7 @@
         <dd class="font-mono text-white">{{ buildInfo?.version || EMPTY }}</dd>
 
         <dt class="text-foreground-muted">Commit</dt>
-        <dd class="font-mono text-white">{{ buildInfo?.commit || EMPTY }}</dd>
+        <dd class="font-mono text-white">{{ buildInfo?.commit && buildInfo.commit !== 'unknown' ? buildInfo.commit : 'dev build' }}</dd>
 
         <dt class="text-foreground-muted">Built</dt>
         <dd class="font-mono text-white">{{ formatBuildTime(buildInfo?.buildTime) }}</dd>

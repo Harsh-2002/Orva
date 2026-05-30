@@ -102,11 +102,14 @@
 }
 
 html {
-  /* Pull the rem base to 90 % of the browser default (16 px → 14.4 px).
+  /* Pull the rem base to 95 % of the browser default (16 px → 15.2 px).
      Because every Tailwind spacing and typography utility is rem-relative,
-     this uniformly scales the whole UI down ~10 % without touching any
-     individual component — the correct single lever for overall density. */
-  font-size: 90%;
+     this uniformly scales the whole UI down ~5 % without touching any
+     individual component — the correct single lever for overall density.
+     Was 90 % (14.4 px), which dropped body to ~12.6 px and uppercase labels
+     to ~10.8 px, below the readable floor; 95 % lifts body to ~13.3 px and
+     labels to ~11.4 px while keeping the operator-grade density. */
+  font-size: 95%;
 }
 
 body {
