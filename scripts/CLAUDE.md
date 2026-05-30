@@ -5,17 +5,17 @@ Support scripts for deployment and installation. None of these are called by the
 | File | Purpose |
 |---|---|
 | `entrypoint.sh` | Docker container init: seeds rootfs from image on first start, refreshes adapters on every start, polls for bootstrap API key and writes `~/.orva/config.yaml`, then execs `orva serve` |
-| `install.sh` | Bare-metal installer (POSIX sh, idempotent). Detects distro, installs system deps, downloads release binary, sets up service user, installs systemd/OpenRC unit. |
-| `install-cli.sh` | POSIX sh installer that **only** installs the slim `orva` CLI to `/usr/local/bin/orva`. No service user, no systemd unit, no rootfs. Same intent as `install.sh --cli-only` but a smaller standalone script (linked directly from the README CLI-install instructions). |
+| `install.sh` | Universal installer (POSIX sh, idempotent). One script, three modes: `--docker` (writes a compose file + `up -d`), `--bare-metal` (distro deps → verified binary download → service user → systemd/OpenRC unit), `--cli-only`. Auto-detects Docker, the host distro, an existing install (offers upgrade), and the Docker runtime (refuses gVisor, accepts Kata). Interactive over `/dev/tty` with a TTY; flag/env-driven when piped. **Self-contained:** it embeds the systemd unit, OpenRC unit, and the generated `uninstall.sh` as heredocs (it ships as a single `curl \| sh` release asset, so it cannot read sibling files). Those embedded copies are the single source of truth — there are deliberately no standalone `orva.service` / `orva.openrc` / `uninstall.sh` files to drift against. |
+| `install-cli.sh` | POSIX sh installer that **only** installs the slim `orva` CLI to `/usr/local/bin/orva`. No service user, no systemd unit, no rootfs. Same intent as `install.sh --cli-only` but a smaller standalone script (linked directly from the README CLI-install instructions). Also supports macOS + shell completion, which `install.sh --cli-only` does not. |
 | `install-cli.ps1` | Windows PowerShell CLI installer. Installs `orva.exe` to `%LOCALAPPDATA%\Programs\orva\` and adds it to the user PATH. |
 | `build-rootfs.sh` | Builds nsjail root filesystem bundle for each runtime from a base container image. Requires Docker. Output tarballs go into the release image. |
-| `orva.service` | systemd unit file for `orva serve` on bare-metal Linux |
-| `orva.openrc` | OpenRC unit file for Alpine Linux |
-| `uninstall.sh` | Removes binary, service, and (optionally) data directory |
 
 ## Gotchas
 
 - `entrypoint.sh` **always overwrites** `adapter.js` / `adapter.py` from the image on every container start — this ensures runtime upgrades roll out even when the user mounts a persistent `orva_data` volume.
+- `install.sh` embeds the systemd/OpenRC units and `uninstall.sh`; the bare-metal install writes them to `$PREFIX/share/orva/scripts/` and the generated uninstaller to the same path. Edit the heredocs in `install.sh` — there is no separate unit file.
 - `install.sh --cli-only` installs only the `orva` CLI binary to `/usr/local/bin/orva` — no systemd unit, no rootfs, no service user. Use this on operator laptops or CI runners that talk to a remote Orva over HTTPS.
-- `install.sh` accepts `ORVA_VERSION=vX.Y.Z` to pin a specific release, `ORVA_INSTALL_DRYRUN=1` to detect without installing, and `ORVA_NO_PKG=1` to skip system package installation.
+- Mode/option precedence is flag > env > interactive prompt > default. Key knobs: `--version`/`ORVA_VERSION` (pin a release), `--dry-run`/`ORVA_INSTALL_DRYRUN=1` (detect only), `--no-pkg`/`ORVA_NO_PKG=1` (skip system packages), `--runtime`/`ORVA_DOCKER_RUNTIME` (force the Docker runtime), `ORVA_SKIP_VERIFY=1` (bypass checksum verification — air-gapped mirrors only; verification is fail-closed otherwise).
+- Downloaded assets (orva, nsjail, rootfs, CLI) are SHA-256 verified against `checksums.txt`; a missing checksum **aborts** the install unless `ORVA_SKIP_VERIFY=1`.
 - `build-rootfs.sh` produces large tarballs (~hundreds of MB); run only when updating the rootfs base image or adding system libraries.
+- Cross-distro installer tests: `test/install/matrix.sh` (fast, unprivileged — shellcheck + POSIX parse + dry-run + real CLI install across 6 distros) and the privileged systemd-in-docker harness under `test/install/`. CI: `.github/workflows/install-e2e.yml`.
