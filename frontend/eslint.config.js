@@ -27,6 +27,7 @@ export default [
         EventSource: 'readonly',
         atob: 'readonly',
         btoa: 'readonly',
+        navigator: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
