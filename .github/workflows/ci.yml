@@ -35,19 +35,18 @@ jobs:
 
       - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends dash shellcheck
 
-      # POSIX scripts (install.sh, install-cli.sh, uninstall.sh) MUST run
-      # under any POSIX sh on user systems. dash -n catches bashisms that
-      # shellcheck -s sh would also catch; running both keeps the gate
-      # tight.
+      # POSIX scripts (install.sh, install-cli.sh) MUST run under any POSIX sh
+      # on user systems. dash -n catches bashisms that shellcheck -s sh would
+      # also catch; running both keeps the gate tight. install.sh embeds the
+      # systemd/OpenRC units + uninstall.sh as heredocs, so there is no
+      # standalone uninstall.sh to lint here.
       - name: POSIX user-facing scripts
         run: |
           dash -n scripts/install.sh
           dash -n scripts/install-cli.sh
-          dash -n scripts/uninstall.sh
           shellcheck -s sh -S warning \
             scripts/install.sh \
-            scripts/install-cli.sh \
-            scripts/uninstall.sh
+            scripts/install-cli.sh
 
       # bash scripts — entrypoint + test/install/* + test/cli/*. Failing
       # builds here gate the install-e2e + cli-e2e workflows downstream.
