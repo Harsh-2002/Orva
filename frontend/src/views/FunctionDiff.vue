@@ -4,7 +4,7 @@
          one-line subhead, max-w-prose, no icon. -->
     <div class="flex items-end justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-white tracking-tight text-balance">
           Compare versions
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -19,8 +19,9 @@
       </div>
       <div class="flex items-center gap-2">
         <button
-          class="text-xs text-foreground-muted hover:text-white hover:bg-surface-hover rounded-md flex items-center justify-center gap-1.5 px-2 py-1.5 transition-colors min-w-[6rem]"
+          class="text-xs text-foreground-muted hover:text-white hover:bg-surface-hover rounded-md flex items-center justify-center gap-1.5 px-2 py-1.5 transition-colors min-w-[6rem] focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
           title="Copy share link"
+          aria-label="Copy share link"
           @click="copyShareLink"
         >
           <Copy class="w-3.5 h-3.5" />
@@ -44,7 +45,7 @@
     <div class="pb-5 border-b border-border">
       <div class="grid gap-3 sm:gap-4 sm:grid-cols-[1fr_auto_1fr] items-end">
         <div class="space-y-1.5">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.08em] text-foreground-muted">
+          <label class="block text-[10px] font-bold uppercase tracking-label text-foreground-muted">
             From
             <span class="ml-1 text-foreground-muted/60 normal-case font-medium tracking-normal">(older)</span>
           </label>
@@ -79,7 +80,7 @@
           <ArrowLeftRight class="w-4 h-4 rotate-90 sm:rotate-0 motion-reduce:transition-none transition-transform" />
         </button>
         <div class="space-y-1.5">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.08em] text-foreground-muted">
+          <label class="block text-[10px] font-bold uppercase tracking-label text-foreground-muted">
             To
             <span class="ml-1 text-foreground-muted/60 normal-case font-medium tracking-normal">(newer)</span>
           </label>
@@ -294,7 +295,7 @@
             >removed</span>
           </h2>
           <button
-            class="text-[10px] font-medium uppercase tracking-[0.08em] text-foreground-muted hover:text-white hover:bg-surface-hover rounded px-2 py-1 transition-colors"
+            class="text-[10px] font-medium uppercase tracking-label text-foreground-muted hover:text-white hover:bg-surface-hover rounded px-2 py-1 transition-colors"
             :title="sideBySide ? 'Switch to unified inline view' : 'Switch to side-by-side view'"
             :aria-pressed="sideBySide"
             @click="toggleSideBySide"
