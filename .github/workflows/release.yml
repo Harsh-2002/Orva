@@ -7,13 +7,18 @@ name: Release
 #                                    (extracted from official Docker slim
 #                                    images + adapter pre-installed)
 #   - checksums.txt                  (sha256 of every asset)
-#   - ghcr.io/harsh-2002/orva:<tag>, :latest  (multi-arch OCI image)
+#   - ghcr.io/harsh-2002/orva:latest (multi-arch OCI image, amd64 + arm64)
+#
+# Versioning lives in the GitHub Release (binaries, installers, changelog).
+# The Docker image carries exactly one tag, :latest; there is no per-version
+# image tag. `docker pull ghcr.io/harsh-2002/orva:latest` resolves the right
+# architecture automatically.
 #
 # All release assets are attached to the GitHub Release and linked from
 # install.sh via https://github.com/Harsh-2002/Orva/releases/latest/download/...
 #
-# Manual trigger (workflow_dispatch) is allowed for rc builds — they get
-# published to the Release draft but the Docker image uses the tag name.
+# Manual trigger (workflow_dispatch) is allowed for rc builds — they publish
+# to the Release draft; the Docker image is still only :latest.
 
 on:
   push:
@@ -347,7 +352,7 @@ jobs:
             docker run -p 8443:8443 --cap-add SYS_ADMIN \
               --security-opt seccomp=unconfined \
               -v orva-data:/var/lib/orva \
-              ghcr.io/harsh-2002/orva:${{ steps.v.outputs.tag }}
+              ghcr.io/harsh-2002/orva:latest
             ```
 
             **Bare Linux server (POSIX installer works on Debian/Ubuntu/Fedora/Alpine/Arch/openSUSE):**
@@ -489,9 +494,11 @@ jobs:
           retention-days: 1
 
   # ── 6. Stitch the two per-arch digests into multi-arch manifest ──────
-  # Tags both `:latest` and the immutable `:${tag}` (e.g. v2026.05.05),
-  # so operators can pin to a known version while `:latest` continues
-  # to track the head of the release line.
+  # The Docker image carries exactly ONE tag: `:latest`. It is a multi-arch
+  # manifest (linux/amd64 + linux/arm64); `docker pull` resolves the right
+  # arch automatically. Versioning lives in the GitHub Release (binaries,
+  # installers, changelog), NOT in image tags — we intentionally do not push
+  # a per-version `:vYYYY.MM.DD` image tag.
   docker-manifest:
     name: docker multi-arch manifest
     needs: [docker-image]
@@ -523,31 +530,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: create + push manifest list (:latest + :${tag})
+      - name: create + push multi-arch manifest (:latest only)
         run: |
           cd /tmp/digests
           DIGESTS=$(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
           docker buildx imagetools create \
             -t ${{ env.IMAGE_NAME }}:latest \
-            -t ${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }} \
             $DIGESTS
 
       - name: inspect
         run: |
           docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
-          docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:${{ steps.v.outputs.tag }}
 
   # ── 7. Prune old GHCR versions ───────────────────────────────────────
-  # The single-active-release policy applies to GitHub Releases AND the
-  # OCI registry: only the current :<tag> + :latest should remain. GHCR
-  # accumulates one tagged manifest per past release plus per-arch sub-
-  # images, all of which are garbage once the GitHub Release is gone.
-  # This job deletes everything in ghcr.io/harsh-2002/orva that isn't
-  # part of the just-published manifest.
+  # The Docker image carries exactly one tag, `:latest`. Everything in the
+  # registry that isn't the current `:latest` manifest (or one of its
+  # per-arch sub-images) is garbage: stale per-version tags from older
+  # workflow versions, orphaned digests from previous `:latest` pushes.
+  # This job deletes all of it, leaving only the live `:latest` tree.
   #
-  # Runs after docker-manifest so the new :latest + :${tag} are pinned
-  # before we start deleting things. Skips on workflow_dispatch when
-  # the tag input doesn't match an actual release (defensive).
+  # Runs after docker-manifest so the new :latest is pinned before we
+  # start deleting things.
   cleanup-ghcr:
     name: prune old ghcr versions
     needs: [docker-manifest]
@@ -571,10 +574,10 @@ jobs:
           # docker buildx imagetools inspect emits the multi-arch manifest
           # with each platform's digest; we keep those + the manifest's
           # own digest. Everything else is fair game.
-          docker buildx imagetools inspect "ghcr.io/${PKG_OWNER}/${PKG_NAME}:${TAG}" --raw \
+          docker buildx imagetools inspect "ghcr.io/${PKG_OWNER}/${PKG_NAME}:latest" --raw \
             | jq -r '..|.digest? // empty' \
             | sort -u > /tmp/keep_digests.txt
-          echo "Digests to keep (current $TAG manifest + sub-images):"
+          echo "Digests to keep (current :latest manifest + sub-images):"
           cat /tmp/keep_digests.txt
 
           # List all versions in the package, filter to those that are
@@ -590,13 +593,14 @@ jobs:
 
           while IFS='|' read -r id sha tags; do
             keep_reason=""
-            # 1. Keep if version carries the current tag or 'latest'.
-            if echo ",$tags," | grep -qE ",($TAG|latest),"; then
+            # 1. Keep only the 'latest' tag. Any other tag (e.g. a stale
+            #    per-version vYYYY.MM.DD from an older workflow) is deleted.
+            if echo ",$tags," | grep -q ",latest,"; then
               keep_reason="tag=$tags"
             # 2. Keep if version's sha256 is in the current manifest tree
             #    (per-arch sub-manifests pulled in via the multi-arch index).
             elif grep -qx "$sha" /tmp/keep_digests.txt; then
-              keep_reason="part of current $TAG manifest"
+              keep_reason="part of current :latest manifest"
             # 3. Keep all untagged versions. A multi-arch manifest references
             #    its per-architecture sub-images by digest only — they appear
             #    untagged in the GHCR versions API. Deleting them breaks
@@ -620,7 +624,7 @@ jobs:
               || echo "::warning::failed to delete version $id (continuing)"
           done < /tmp/versions.txt
 
-          echo "::notice::GHCR cleanup complete — only $TAG + :latest + sub-images + untagged versions remain."
+          echo "::notice::GHCR cleanup complete — only :latest + its sub-images + untagged versions remain."
 
   # ── 8. Trigger the production redeploy webhook ───────────────────────
   # POSTs to a Portainer stack-redeploy webhook (or any equivalent CD
