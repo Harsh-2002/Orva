@@ -14,7 +14,7 @@ End-to-end means the workflow does, per distro:
 3. Start the service and wait for the health endpoint.
 4. Run the API + CLI smoke flow against the live daemon.
 5. Verify uninstall preserves data; reinstall recovers state.
-6. Verify `uninstall.sh --purge` wipes the data dir and service user.
+6. Verify the generated uninstaller (`$PREFIX/share/orva/scripts/uninstall.sh --purge`) wipes the data dir and service user.
 
 ## Distro matrix
 
