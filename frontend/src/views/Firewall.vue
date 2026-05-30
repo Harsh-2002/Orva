@@ -52,7 +52,7 @@
     </header>
 
     <!-- DNS — resolvers + host overrides for sandboxed functions. -->
-    <Section
+    <PanelSection
       title="DNS"
       :subtitle="dnsSubtitle"
     >
@@ -203,10 +203,10 @@
           </Button>
         </div>
       </div>
-    </Section>
+    </PanelSection>
 
     <!-- Unified blocklist — one section, filter tabs, friendly cards. -->
-    <Section
+    <PanelSection
       title="Blocklist"
       :subtitle="blocklistSubtitle"
     >
@@ -264,7 +264,7 @@
           @delete="deleteRule(rule)"
         />
       </div>
-    </Section>
+    </PanelSection>
 
     <!-- Add-rule modal -->
     <Modal
@@ -687,9 +687,11 @@ const loadAll = async () => { await Promise.all([load(), loadDNS()]) }
 onMounted(loadAll)
 onActivated(loadAll)
 
-// ── Section component (matches Docs page aesthetic) ──────────────────
-const Section = defineComponent({
-  name: 'Section',
+// ── PanelSection component (matches Docs page aesthetic) ─────────────
+// Named PanelSection, not Section: a bare "Section" collides with the
+// reserved HTML <section> element name (vue/no-reserved-component-names).
+const PanelSection = defineComponent({
+  name: 'PanelSection',
   props: { title: String, subtitle: String },
   setup(p, { slots }) {
     return () =>
