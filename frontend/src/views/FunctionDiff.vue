@@ -431,32 +431,24 @@ const githubDiffTheme = EditorView.theme({
   '&.cm-merge-b .cm-changedLine': {
     backgroundColor: 'rgba(63, 185, 80, 0.15)',
   },
-  // Changed tokens: visible background highlight instead of 2px underline
-  '&light .cm-merge-a .cm-changedText': {
+  // Changed tokens: visible background highlight instead of 2px underline.
+  // The dashboard is always dark, and EditorView.theme() does NOT support
+  // the &light/&dark markers (those are baseTheme-only — passing them here
+  // throws "Unsupported selector: &light" and blanks the whole page). Use
+  // plain &.cm-merge-{a,b} selectors matching the changedLine rules above.
+  '&.cm-merge-a .cm-changedText': {
     background: 'none',
     backgroundColor: 'rgba(248, 81, 73, 0.35)',
     borderRadius: '2px',
   },
-  '&dark .cm-merge-a .cm-changedText': {
-    background: 'none',
-    backgroundColor: 'rgba(248, 81, 73, 0.35)',
-    borderRadius: '2px',
-  },
-  '&light .cm-merge-b .cm-changedText': {
-    background: 'none',
-    backgroundColor: 'rgba(63, 185, 80, 0.30)',
-    borderRadius: '2px',
-  },
-  '&dark .cm-merge-b .cm-changedText': {
+  '&.cm-merge-b .cm-changedText': {
     background: 'none',
     backgroundColor: 'rgba(63, 185, 80, 0.30)',
     borderRadius: '2px',
   },
   // Gutter markers: GitHub red/green
-  '&light .cm-merge-a .cm-changedLineGutter': { color: '#cc1122' },
-  '&dark .cm-merge-a .cm-changedLineGutter': { color: '#f85149' },
-  '&light .cm-merge-b .cm-changedLineGutter': { color: '#1a7f37' },
-  '&dark .cm-merge-b .cm-changedLineGutter': { color: '#3fb950' },
+  '&.cm-merge-a .cm-changedLineGutter': { color: '#f85149' },
+  '&.cm-merge-b .cm-changedLineGutter': { color: '#3fb950' },
 
   // Unified inline view (unifiedMergeView, the phone default) renders into
   // a single editor with NO cm-merge-a / cm-merge-b wrappers, so every rule
