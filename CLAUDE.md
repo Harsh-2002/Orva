@@ -64,17 +64,19 @@ Dockerfile        Multi-stage image (dev and production — single file)
 
 ## Release Policy
 
-**One active release at a time.** When cutting a release:
-1. Delete the existing GitHub release and its tag first
-2. Tag as `vYYYY.MM.DD` (today's date, zero-padded) and push — the workflow does the rest
+**One active release at a time** — and **validate first, release last**. Order matters: never delete the old release *before* the new one is live (that opens a window where `install.sh`/`install-cli.sh` resolve "latest" → 404). The flow:
 
-```bash
-gh release delete v<old-tag> --yes
-git tag -d v<old-tag> && git push origin --delete v<old-tag>
-git tag v2026.05.03 && git push origin v2026.05.03
-```
-
-The release workflow builds `ghcr.io/harsh-2002/orva:<tag>` + `:latest` (multi-arch), all CLI binaries, rootfs tarballs, and checksums automatically on any `v*` tag push.
+1. **Merge to `main`** and wait for **CI** + **e2e** to go green on the merge commit (these build from source — no release needed).
+2. **Tag today's date and push** (zero-padded `vYYYY.MM.DD`):
+   ```bash
+   git tag -a v2026.05.03 -m "Orva v2026.05.03" && git push origin v2026.05.03
+   ```
+   The Release workflow then **validates** (`go vet` + race tests) and *only on success* builds + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs, checksums, and the GitHub Release. Nothing is built or published if validation fails (every build job `needs: validate`).
+3. **On release publish**, `install-e2e` and `cli-e2e` run automatically against the freshly-published artifacts (they no longer trigger on main-push, which used to race the release cut).
+4. **After** the new release is confirmed live, prune the previous one — last, not first:
+   ```bash
+   gh release delete v<old-tag> --yes --cleanup-tag   # removes the release + its tag
+   ```
 
 ### Build-time identity
 
