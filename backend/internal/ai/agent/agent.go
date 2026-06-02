@@ -12,7 +12,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/ai/llm"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -158,6 +160,12 @@ func (r *Runner) Resume(ctx context.Context, sink Sink, convID, toolCallID strin
 
 func (r *Runner) advance(ctx context.Context, sink Sink, convID, principalID string) error {
 	for iter := 0; iter < r.cfg.MaxIterations; iter++ {
+		// Bail if the client disconnected (or the request was cancelled).
+		// Otherwise the loop would keep calling the billed provider and
+		// dispatching auto-approved tools against a dead connection.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		history, err := r.loadHistory(convID)
 		if err != nil {
 			return err
@@ -277,6 +285,8 @@ func (r *Runner) processToolCalls(ctx context.Context, sink Sink, convID, msgID 
 // runToolCall dispatches one (approved or auto) tool call, persists the
 // result, records a tool message for the model, and emits tool_result.
 func (r *Runner) runToolCall(ctx context.Context, sink Sink, convID string, row *database.AIToolCall) {
+	started := time.Now().UTC()
+	row.StartedAt = &started
 	row.Status = "running"
 	_ = r.store.UpdateToolCall(row)
 
@@ -292,6 +302,10 @@ func (r *Runner) runToolCall(ctx context.Context, sink Sink, convID string, row 
 		}
 		row.Status = "succeeded"
 	}
+	finished := time.Now().UTC()
+	durMS := finished.Sub(started).Milliseconds()
+	row.FinishedAt = &finished
+	row.DurationMS = &durMS
 	row.Result = resultJSON
 	_ = r.store.UpdateToolCall(row)
 	r.persistToolResult(convID, row, resultJSON)
@@ -319,7 +333,11 @@ func (r *Runner) finalizeAssistant(m *database.AIMessage, text, thinking string,
 	if usage != nil {
 		usageJSON = mustJSON(usage)
 	}
-	_ = r.store.UpdateMessage(m.ID, text, mustJSON(parts), usageJSON)
+	if err := r.store.UpdateMessage(m.ID, text, mustJSON(parts), usageJSON); err != nil {
+		// If we can't persist the assistant turn, the next loadHistory will be
+		// missing it and the model loses context — surface it rather than hide it.
+		slog.Warn("ai: persist assistant message failed", "conversation", m.ConversationID, "message", m.ID, "error", err)
+	}
 }
 
 // persistToolResult writes a role=tool message so the model sees the result on
@@ -377,7 +395,10 @@ func (r *Runner) loadHistory(convID string) ([]llm.Message, error) {
 func (r *Runner) hasPendingForMessage(convID, msgID string) bool {
 	rows, err := r.store.ListToolCalls(convID)
 	if err != nil {
-		return false
+		// On a read failure, assume still-pending and keep waiting rather than
+		// advancing the turn (which could run past an unresolved approval gate).
+		slog.Warn("ai: list tool calls failed; treating turn as still pending", "conversation", convID, "error", err)
+		return true
 	}
 	for _, tc := range rows {
 		if tc.MessageID == msgID && tc.Status == "pending_approval" {

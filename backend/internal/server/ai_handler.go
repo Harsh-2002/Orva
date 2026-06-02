@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -138,14 +141,25 @@ func (h *AIHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer heartbeat(sink)()
 	// Errors are streamed as SSE `error` frames by the ai layer (it owns the
-	// sink); the returned error is for server-side awareness only.
-	_, _ = h.Manager.Chat(r.Context(), sink, h.principal(r), ai.ChatParams{
+	// sink); the returned error is logged for operator visibility.
+	_, err := h.Manager.Chat(r.Context(), sink, h.principal(r), ai.ChatParams{
 		ConversationID: body.ConversationID,
 		Content:        body.Content,
 		Provider:       body.Provider,
 		Model:          body.Model,
 		Thinking:       body.Thinking,
 	})
+	logAIError(r, "chat", err)
+}
+
+// logAIError surfaces a manager-returned error in the server log. Expected,
+// non-actionable conditions (client disconnect, conversation-busy) are skipped
+// so the log stays signal.
+func logAIError(r *http.Request, op string, err error) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, ai.ErrConversationBusy) {
+		return
+	}
+	slog.Warn("ai "+op+" failed", "error", err, "request_id", RequestID(r.Context()))
 }
 
 // ─── tool approval (SSE — resumes the paused turn) ───────────────────────────
@@ -167,7 +181,7 @@ func (h *AIHandler) resume(w http.ResponseWriter, r *http.Request, approved bool
 	}
 	defer heartbeat(sink)()
 	// As with chat, the ai layer streams any error as an SSE `error` frame.
-	_ = h.Manager.Resume(r.Context(), sink, h.principal(r), tc.ConversationID, id, approved)
+	logAIError(r, "resume", h.Manager.Resume(r.Context(), sink, h.principal(r), tc.ConversationID, id, approved))
 }
 
 // ─── conversations (JSON) ────────────────────────────────────────────────────
@@ -257,8 +271,8 @@ func (h *AIHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer heartbeat(sink)()
-	_ = h.Manager.RegenerateLast(r.Context(), sink, h.principal(r), r.PathValue("id"),
-		ai.ChatOverrides{Provider: body.Provider, Model: body.Model, Thinking: body.Thinking})
+	logAIError(r, "regenerate", h.Manager.RegenerateLast(r.Context(), sink, h.principal(r), r.PathValue("id"),
+		ai.ChatOverrides{Provider: body.Provider, Model: body.Model, Thinking: body.Thinking}))
 }
 
 // EditMessage (SSE) rewrites a user message, truncates from it, and re-runs.
@@ -279,13 +293,17 @@ func (h *AIHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer heartbeat(sink)()
-	_ = h.Manager.EditAndResend(r.Context(), sink, h.principal(r), r.PathValue("id"), r.PathValue("mid"), body.Content,
-		ai.ChatOverrides{Provider: body.Provider, Model: body.Model, Thinking: body.Thinking})
+	logAIError(r, "edit", h.Manager.EditAndResend(r.Context(), sink, h.principal(r), r.PathValue("id"), r.PathValue("mid"), body.Content,
+		ai.ChatOverrides{Provider: body.Provider, Model: body.Model, Thinking: body.Thinking}))
 }
 
 // DeleteMessage truncates a conversation from a message onward (JSON, no re-run).
 func (h *AIHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 	if err := h.Manager.DeleteMessageFrom(r.PathValue("id"), r.PathValue("mid")); err != nil {
+		if errors.Is(err, ai.ErrConversationBusy) {
+			respond.Error(w, http.StatusConflict, "CONVERSATION_BUSY", err.Error(), RequestID(r.Context()))
+			return
+		}
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", err.Error(), RequestID(r.Context()))
 		return
 	}

@@ -189,6 +189,12 @@ func requiredPermission(method, path string) string {
 	if strings.HasPrefix(path, "/api/v1/keys") {
 		return "admin"
 	}
+	// The in-product AI assistant operates the whole instance via tool calls
+	// and stores provider keys; the entire surface is admin-only (the dashboard
+	// session resolves to admin). Conversations are a shared operator space.
+	if strings.HasPrefix(path, "/api/v1/ai/") {
+		return "admin"
+	}
 	if path == "/api/v1/pool/config" && (method == http.MethodPut || method == http.MethodPost) {
 		return "admin"
 	}

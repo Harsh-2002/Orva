@@ -233,7 +233,7 @@ def start_mock(port=MOCK_PORT):
     return httpd
 
 
-def configure_mock_provider(client, port=MOCK_PORT, model="gpt-4o", approval="all_writes", thinking="off"):
+def configure_mock_provider(client, port=MOCK_PORT, model="gpt-4o", approval="all_writes", thinking="off", api_key="test"):
     """Point an Orva 'openai' provider at the mock and select it. Uses MOCK_HOST
     so the instance (possibly in a container) can reach the host's mock. Snapshots
     the existing settings so remove_mock_provider can restore them — this keeps
@@ -250,7 +250,7 @@ def configure_mock_provider(client, port=MOCK_PORT, model="gpt-4o", approval="al
         except Exception:
             client._saved_settings = None
     client.post("/api/v1/ai/providers", {
-        "provider": "openai", "label": "e2e-mock", "api_key": "test",
+        "provider": "openai", "label": "e2e-mock", "api_key": api_key,
         "base_url": f"http://{MOCK_HOST}:{port}/v1", "enabled": True,
     })
     client.put("/api/v1/ai/settings", {

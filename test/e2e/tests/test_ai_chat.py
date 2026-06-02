@@ -7,12 +7,17 @@ the mock LLM (no real provider key). Exercises the full chain:
 Run:  ORVA_API_KEY=$(sudo cat /var/lib/orva/.admin-key) python3 test/ai/test_chat.py
 (or set ORVA_URL/ORVA_API_KEY for any instance).
 """
+import json
 import sys
 
 from harness import (
     OrvaClient, start_mock, configure_mock_provider, remove_mock_provider,
     section, check, summary, events_of, has_event, first_tool_call,
 )
+
+# A distinctive provider key so a substring search for it in any chat output is
+# unambiguous (unlike the default "test").
+LEAK_SENTINEL = "sk-e2e-SENTINEL-do-not-leak-7c1f9a2b"
 
 TEST_FN = "e2e-mock-fn"
 
@@ -93,6 +98,20 @@ def main():
             rframes = c.reject(row_id)
             rresults = events_of(rframes, "tool_result")
             check("reject recorded as rejected", any(r.get("status") == "rejected" for r in rresults), str(rresults))
+
+        # ── 4. provider API key never leaks through the chat path ─────────
+        section("provider key is not exposed via chat SSE or conversation detail")
+        # Re-point the same provider (upsert by provider+label) at a sentinel key.
+        configure_mock_provider(c, approval="all_writes", api_key=LEAK_SENTINEL)
+        frames, lconv = c.chat("CALL list_functions {}")
+        check("key absent from chat SSE frames", LEAK_SENTINEL not in json.dumps(frames),
+              "sentinel leaked into the chat stream")
+        if lconv:
+            d = c.get(f"/api/v1/ai/conversations/{lconv}") or {}
+            check("key absent from conversation detail", LEAK_SENTINEL not in json.dumps(d),
+                  "sentinel leaked into persisted conversation")
+        provs = c.get("/api/v1/ai/providers") or {}
+        check("key absent from providers list", LEAK_SENTINEL not in json.dumps(provs))
 
     finally:
         cleanup_fn(c)

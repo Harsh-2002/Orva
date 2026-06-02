@@ -234,16 +234,22 @@ func (db *Database) InsertMessage(m *AIMessage) error {
 	if m.Parts == "" {
 		m.Parts = "[]"
 	}
-	if m.Seq == 0 {
-		var maxSeq sql.NullInt64
-		if err := db.write.QueryRow(
-			`SELECT MAX(seq) FROM ai_messages WHERE conversation_id = ?`, m.ConversationID,
-		).Scan(&maxSeq); err != nil {
-			return err
-		}
-		m.Seq = int(maxSeq.Int64) + 1
-	}
 	m.CreatedAt = time.Now().UTC()
+	if m.Seq == 0 {
+		// Atomic seq assignment: derive MAX(seq)+1 inside the INSERT so the
+		// read-and-write is a single statement. The write pool is a single
+		// connection (SetMaxOpenConns(1)), so one statement cannot interleave
+		// with another writer — making concurrent inserts on the same
+		// conversation race-free. (A prior SELECT-MAX-then-INSERT was two
+		// round-trips and could hand two messages the same seq.)
+		_, err := db.write.Exec(`
+			INSERT INTO ai_messages (id, conversation_id, role, content, parts, token_usage, seq, created_at)
+			VALUES (?, ?, ?, ?, ?, ?,
+			        (SELECT COALESCE(MAX(seq), 0) + 1 FROM ai_messages WHERE conversation_id = ?), ?)`,
+			m.ID, m.ConversationID, m.Role, m.Content, m.Parts, nullStr(m.TokenUsage), m.ConversationID, m.CreatedAt,
+		)
+		return err
+	}
 	_, err := db.write.Exec(`
 		INSERT INTO ai_messages (id, conversation_id, role, content, parts, token_usage, seq, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

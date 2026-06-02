@@ -138,8 +138,8 @@ function onEditKey(e) {
       <template v-else>
         <div class="rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
           <MessagePart
-            v-for="p in parts"
-            :key="p.type"
+            v-for="(p, i) in parts"
+            :key="`${p.type}-${i}`"
             :part="p"
           />
         </div>
@@ -175,7 +175,7 @@ function onEditKey(e) {
     >
       <MessagePart
         v-for="(p, index) in parts"
-        :key="p.type"
+        :key="`${p.type}-${index}`"
         :part="p"
         :class="index > 0 ? 'mt-3' : ''"
       />

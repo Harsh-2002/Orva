@@ -74,16 +74,6 @@ export const useAIStore = defineStore('ai', () => {
     timeline.value = timeline.value.filter((it) => it.kind !== 'error')
   }
 
-  // Total token count from a stored token_usage object (shape varies by provider).
-  function tokenCount(usage) {
-    let u = usage
-    if (typeof u === 'string') { try { u = JSON.parse(u) } catch { return null } }
-    if (!u || typeof u !== 'object') return null
-    const total = u.total_tokens ?? u.total ??
-      ((u.prompt_tokens ?? u.input_tokens ?? 0) + (u.completion_tokens ?? u.output_tokens ?? 0))
-    return total > 0 ? total : null
-  }
-
   // Re-fetch the active conversation from the server, replacing the optimistic
   // timeline with server truth (correct ids + created_at + token_usage). Run
   // after a turn so regenerate/edit re-sync ids and metadata appears.
@@ -428,6 +418,10 @@ export const useAIStore = defineStore('ai', () => {
   }
 
   async function openConversation(id) {
+    // Abort any in-flight stream first: it writes tokens into timeline[curIdx],
+    // and replacing the timeline below would leave it patching the wrong thread.
+    stop()
+    curIdx = -1
     const { data } = await apiClient.get(`/ai/conversations/${id}`)
     activeId.value = id
     timeline.value = buildTimeline(data)
@@ -436,6 +430,8 @@ export const useAIStore = defineStore('ai', () => {
   }
 
   function newConversation() {
+    stop()
+    curIdx = -1
     activeId.value = null
     timeline.value = []
     awaitingApproval.value = false

@@ -8,8 +8,10 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -43,6 +45,38 @@ type Manager struct {
 	mu     sync.Mutex
 	client *llm.Client
 	dirty  bool // rebuild the gateway on next use (provider configs changed)
+
+	// convMu guards convBusy, the set of conversations with a turn in flight.
+	// One turn per conversation: overlapping turns (double-send, or chat while
+	// an approval is being decided) are rejected rather than interleaved, which
+	// would corrupt message ordering.
+	convMu   sync.Mutex
+	convBusy map[string]bool
+}
+
+// ErrConversationBusy is returned when a turn is already running for a
+// conversation. Streaming entry points surface it as an SSE error; the JSON
+// delete path maps it to 409 Conflict.
+var ErrConversationBusy = errors.New("a turn is already in progress for this conversation")
+
+// tryLockConv marks a conversation busy, returning false if it already is.
+func (m *Manager) tryLockConv(id string) bool {
+	m.convMu.Lock()
+	defer m.convMu.Unlock()
+	if m.convBusy[id] {
+		return false
+	}
+	if m.convBusy == nil {
+		m.convBusy = map[string]bool{}
+	}
+	m.convBusy[id] = true
+	return true
+}
+
+func (m *Manager) unlockConv(id string) {
+	m.convMu.Lock()
+	delete(m.convBusy, id)
+	m.convMu.Unlock()
 }
 
 // New constructs the Manager. The LLM gateway is built lazily on first chat
@@ -163,6 +197,12 @@ func (m *Manager) Chat(ctx context.Context, sink Sink, p Principal, params ChatP
 		_ = sink.Send("conversation", map[string]any{"id": c.ID, "title": c.Title})
 	}
 
+	if !m.tryLockConv(convID) {
+		_ = sink.Send("error", map[string]any{"message": ErrConversationBusy.Error()})
+		return convID, ErrConversationBusy
+	}
+	defer m.unlockConv(convID)
+
 	runner, err := m.buildRunner(p.Perms, cfg)
 	if err != nil {
 		_ = sink.Send("error", map[string]any{"message": err.Error()})
@@ -173,6 +213,11 @@ func (m *Manager) Chat(ctx context.Context, sink Sink, p Principal, params ChatP
 
 // Resume continues a paused turn after an approve/reject decision.
 func (m *Manager) Resume(ctx context.Context, sink Sink, p Principal, convID, toolCallID string, approved bool) error {
+	if !m.tryLockConv(convID) {
+		_ = sink.Send("error", map[string]any{"message": ErrConversationBusy.Error()})
+		return ErrConversationBusy
+	}
+	defer m.unlockConv(convID)
 	settings := m.resolvedSettings()
 	cfg := agent.Config{
 		Provider:       settings.Provider,
@@ -233,6 +278,11 @@ func (m *Manager) runTurn(ctx context.Context, sink Sink, p Principal, convID, c
 // RegenerateLast drops the last assistant turn and re-runs the last user message
 // for a fresh answer.
 func (m *Manager) RegenerateLast(ctx context.Context, sink Sink, p Principal, convID string, ov ChatOverrides) error {
+	if !m.tryLockConv(convID) {
+		_ = sink.Send("error", map[string]any{"message": ErrConversationBusy.Error()})
+		return ErrConversationBusy
+	}
+	defer m.unlockConv(convID)
 	msgs, err := m.db.ListMessages(convID, 0)
 	if err != nil {
 		_ = sink.Send("error", map[string]any{"message": err.Error()})
@@ -260,6 +310,11 @@ func (m *Manager) RegenerateLast(ctx context.Context, sink Sink, p Principal, co
 // EditAndResend rewrites a user message, drops it and everything after, and
 // re-runs the turn with the new content.
 func (m *Manager) EditAndResend(ctx context.Context, sink Sink, p Principal, convID, messageID, content string, ov ChatOverrides) error {
+	if !m.tryLockConv(convID) {
+		_ = sink.Send("error", map[string]any{"message": ErrConversationBusy.Error()})
+		return ErrConversationBusy
+	}
+	defer m.unlockConv(convID)
 	msg, err := m.db.GetMessage(messageID)
 	if err != nil || msg.ConversationID != convID {
 		e := fmt.Errorf("message not found")
@@ -281,6 +336,10 @@ func (m *Manager) EditAndResend(ctx context.Context, sink Sink, p Principal, con
 // DeleteMessageFrom truncates a conversation from a message onward (that message
 // and everything after it), keeping the remaining history coherent. No re-run.
 func (m *Manager) DeleteMessageFrom(convID, messageID string) error {
+	if !m.tryLockConv(convID) {
+		return ErrConversationBusy
+	}
+	defer m.unlockConv(convID)
 	msg, err := m.db.GetMessage(messageID)
 	if err != nil || msg.ConversationID != convID {
 		return fmt.Errorf("message not found")
@@ -425,7 +484,11 @@ instance on the user's behalf through tools.
 // resolvedSettings returns the stored settings with built-in defaults filled
 // in for any missing field.
 func (m *Manager) resolvedSettings() database.AISettings {
-	s, ok, _ := m.db.GetSettings("default")
+	s, ok, err := m.db.GetSettings("default")
+	if err != nil {
+		// Don't mask DB corruption behind silent defaults — log, then fall back.
+		slog.Warn("ai: load settings failed; using defaults", "error", err)
+	}
 	if s == nil {
 		s = &database.AISettings{ID: "default"}
 	}

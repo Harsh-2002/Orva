@@ -333,6 +333,13 @@ perms, so the two fronts never drift. Served by
 `backend/internal/server/ai_handler.go`; the dashboard surface is the
 `AI` sidebar section (`frontend/src/views/AI.vue`).
 
+Concurrency + lifecycle invariants: every `/api/v1/ai/*` route requires
+the `admin` permission; conversations are a shared operator space (not
+isolated per credential). The manager serializes turns with a
+per-conversation try-lock (overlapping turns are rejected, not
+interleaved), `ai_messages.seq` is assigned atomically inside the
+INSERT, and the LLM gateway is closed on `Server.Shutdown`.
+
 ### `backend/runtimes/`
 
 Per-runtime adapter scripts. The adapter is the entrypoint nsjail
