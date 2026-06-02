@@ -33,9 +33,10 @@
         @export="store.exportActive"
       />
 
-      <!-- No provider configured banner -->
+      <!-- No provider configured banner — only after the first provider fetch
+           settles, so it never flashes during the initial load. -->
       <div
-        v-if="!store.providers.length"
+        v-if="store.providersLoaded && !store.providers.length"
         class="flex shrink-0 items-center justify-between gap-3 border-b border-warning-ring bg-warning-tint px-4 py-2.5 text-xs text-warning-fg"
       >
         <span>No AI provider configured. Add a provider API key to start chatting.</span>
@@ -60,7 +61,7 @@
             class="mt-6"
             :docked="false"
             :streaming="store.streaming"
-            :disabled="!store.providers.length"
+            :disabled="store.providersLoaded && !store.providers.length"
             :model-ready="!!store.selectedModel"
             @send="store.sendMessage"
             @stop="store.stop"
@@ -101,7 +102,7 @@
         </div>
         <Composer
           :streaming="store.streaming"
-          :disabled="!store.providers.length"
+          :disabled="store.providersLoaded && !store.providers.length"
           :model-ready="!!store.selectedModel"
           @send="store.sendMessage"
           @stop="store.stop"

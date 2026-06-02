@@ -23,6 +23,11 @@ export const useAIStore = defineStore('ai', () => {
 
   const settings = ref(null)
   const providers = ref([])
+  // Has the first provider fetch settled? Until it has, `providers` is an empty
+  // array indistinguishable from "genuinely none configured" — gating the
+  // no-provider banner / disabled composer on this flag stops that warning state
+  // from flashing for a frame on every page load. See loadProviders().
+  const providersLoaded = ref(false)
 
   // Active provider/model/thinking selection lives in the CHAT (not settings):
   // the user switches provider + model + thinking inline. Models are fetched
@@ -491,17 +496,23 @@ export const useAIStore = defineStore('ai', () => {
   }
 
   async function loadProviders() {
-    const { data } = await apiClient.get('/ai/providers')
-    providers.value = data.providers || []
-    // Auto-select a provider on first load so the chat is usable immediately.
-    if (!selectedProviderId.value) {
-      const first = providers.value.find((p) => p.enabled) || providers.value[0]
-      if (first) await selectProvider(first.id)
-    } else if (!providers.value.find((p) => p.id === selectedProviderId.value)) {
-      // The selected provider was removed — fall back.
-      const first = providers.value[0]
-      if (first) await selectProvider(first.id)
-      else { selectedProviderId.value = null; selectedProvider.value = ''; selectedModel.value = ''; models.value = [] }
+    try {
+      const { data } = await apiClient.get('/ai/providers')
+      providers.value = data.providers || []
+      // Auto-select a provider on first load so the chat is usable immediately.
+      if (!selectedProviderId.value) {
+        const first = providers.value.find((p) => p.enabled) || providers.value[0]
+        if (first) await selectProvider(first.id)
+      } else if (!providers.value.find((p) => p.id === selectedProviderId.value)) {
+        // The selected provider was removed — fall back.
+        const first = providers.value[0]
+        if (first) await selectProvider(first.id)
+        else { selectedProviderId.value = null; selectedProvider.value = ''; selectedModel.value = ''; models.value = [] }
+      }
+    } finally {
+      // Mark settled even on failure so the UI lands on a definite state rather
+      // than holding the neutral pre-load state forever.
+      providersLoaded.value = true
     }
   }
 
@@ -551,7 +562,7 @@ export const useAIStore = defineStore('ai', () => {
 
   return {
     conversations, activeId, timeline, streaming, awaitingApproval, error,
-    settings, providers,
+    settings, providers, providersLoaded,
     selectedProviderId, selectedProvider, selectedModel, thinking, models, modelsError, modelsLoading,
     sendMessage, approveTool, rejectTool, stop,
     regenerate, editAndResend, deleteMessageFrom, retry, dismissError,
