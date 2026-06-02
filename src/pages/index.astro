@@ -5,7 +5,7 @@ const base = import.meta.env.BASE_URL;
 const baseTrim = base.replace(/\/$/, '');
 
 // Fetch latest release tag at build time (best-effort; falls back gracefully)
-let latestVersion = 'v2026.05.13';
+let latestVersion = 'v2026.06.02';
 let latestUrl = 'https://github.com/Harsh-2002/Orva/releases/latest';
 try {
   const r = await fetch('https://api.github.com/repos/Harsh-2002/Orva/releases/latest', {
@@ -70,6 +70,10 @@ const capabilities: [string, string][] = [
   [
     'MCP server',
     '70 tools at /mcp. Claude Code, Cursor, and any OAuth MCP client can deploy and manage functions from chat.',
+  ],
+  [
+    'Built-in AI assistant',
+    'In-product agentic chat that operates the instance end-to-end through the same tools — bring your own provider key, approve writes inline.',
   ],
   [
     '16 templates',
@@ -228,10 +232,10 @@ const shots: [string, string, string][] = [
         <span class="slash">/</span>
         <span class="label">Capabilities</span>
         <span class="bar"></span>
-        <span class="count">14 items</span>
+        <span class="count">15 items</span>
       </header>
 
-      <h2>Fourteen things.<br />One container.</h2>
+      <h2>Fifteen things.<br />One container.</h2>
       <p class="sec-sub">
         Everything an operator needs to run untrusted code — observed, reversible, no external dependencies,
         no add-on services.
@@ -371,10 +375,10 @@ const shots: [string, string, string][] = [
         <span class="slash">/</span>
         <span class="label">Install</span>
         <span class="bar"></span>
-        <span class="count">3 paths</span>
+        <span class="count">4 paths</span>
       </header>
 
-      <h2>Three ways in.<br />Pick the one you trust.</h2>
+      <h2>Four ways in.<br />Pick the one you trust.</h2>
 
       <div class="install-stack">
         <article class="install-opt">
@@ -431,8 +435,32 @@ volumes:
           <header>
             <span class="opt-letter" aria-hidden="true">C</span>
             <div>
+              <h3>Bare-metal</h3>
+              <p>
+                No Docker. The universal installer lays down the binary, a service user, a systemd unit, and
+                native nsjail — then starts it.
+              </p>
+            </div>
+          </header>
+          <div class="code">
+            <div class="code-bar">
+              <span>shell</span>
+              <button class="copy" data-copy="#install-bare">Copy</button>
+            </div>
+            <pre
+              id="install-bare"><code>{`curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh -s -- --bare-metal`}</code></pre>
+          </div>
+        </article>
+
+        <article class="install-opt">
+          <header>
+            <span class="opt-letter" aria-hidden="true">D</span>
+            <div>
               <h3>Standalone CLI</h3>
-              <p>No daemon, no Docker. Single binary, systemd unit, native nsjail.</p>
+              <p>
+                Just the client — drive a remote Orva from your laptop or CI. No server, no root, single
+                binary.
+              </p>
             </div>
           </header>
           <div class="code">
@@ -441,11 +469,17 @@ volumes:
               <button class="copy" data-copy="#install-cli">Copy</button>
             </div>
             <pre
-              id="install-cli"><code>{`curl -fsSL https://orva.dev/install.sh | sh
-sudo systemctl enable --now orva`}</code></pre>
+              id="install-cli"><code>{`curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh`}</code></pre>
           </div>
         </article>
       </div>
+
+      <p class="sec-foot">
+        Prefer one command for everything? The universal installer auto-detects your host —
+        <code>curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh</code>
+        picks Docker when it's present, bare-metal otherwise. Add <code>--docker</code>,
+        <code>--bare-metal</code>, or <code>--cli-only</code> to force a mode.
+      </p>
     </div>
   </section>
 
