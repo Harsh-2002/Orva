@@ -25,7 +25,7 @@ try {
 }
 
 const capabilities: [string, string][] = [
-  ['Multi-runtime', 'Node.js 22/24, Python 3.13/3.14, TypeScript — all in one binary.'],
+  ['Multi-runtime', 'Node.js 22/24, Python 3.13/3.14, and TypeScript — pick a runtime per function.'],
   [
     'nsjail isolation',
     'Five overlapping Linux kernel boundaries per call — user NS, mount NS, cgroup v2, seccomp, network NS.',
@@ -186,7 +186,7 @@ const shots: [string, string, string][] = [
           aria-label={`Latest release ${latestVersion} on GitHub`}
         >
           <span class="ver-dot" aria-hidden="true"></span>
-          {latestVersion} · latest
+          <span class="ver-text">{latestVersion} · latest</span>
         </a>
         <span class="hero-meta-sep" aria-hidden="true">/</span>
         <span class="hero-meta-build">self-hosted · MIT</span>
@@ -198,8 +198,8 @@ const shots: [string, string, string][] = [
       </h1>
 
       <p class="hero-lede">
-        Node, Python, and TypeScript. Five kernel-enforced boundaries per call. One binary, one port, zero
-        external dependencies.
+        Node, Python, and TypeScript. Five kernel-enforced boundaries per call. Self-hosted, with no external
+        database, control plane, or services to run.
       </p>
 
       <div class="hero-actions">
@@ -437,7 +437,7 @@ volumes:
             <div>
               <h3>Bare-metal</h3>
               <p>
-                No Docker. The universal installer lays down the binary, a service user, a systemd unit, and
+                No Docker. The universal installer lays down the server, a service user, a systemd unit, and
                 native nsjail — then starts it.
               </p>
             </div>
@@ -458,8 +458,7 @@ volumes:
             <div>
               <h3>Standalone CLI</h3>
               <p>
-                Just the client — drive a remote Orva from your laptop or CI. No server, no root, single
-                binary.
+                Just the client — drive a remote Orva from your laptop or CI. No server, no root, no daemon.
               </p>
             </div>
           </header>
@@ -589,7 +588,7 @@ export default handler;`}</code></pre>
   <section class="sec close">
     <div class="inner">
       <p class="overline overline-block">— Last word</p>
-      <h2>One binary.<br />Boring on purpose.</h2>
+      <h2>No moving parts.<br />Boring on purpose.</h2>
       <p class="hero-lede close-lede">
         No control plane. No telemetry. No vendor account. Your hardware, your code, your kernel boundaries.
       </p>
@@ -601,6 +600,32 @@ export default handler;`}</code></pre>
       </div>
     </div>
   </section>
+
+  <script>
+    // Keep the release pill current without a site rebuild. The build-time
+    // fetch (frontmatter) gives the initial value; this refreshes it live on
+    // every visit from the GitHub Releases API, so cutting a release updates
+    // the site with no redeploy. Silently keeps the build-time value on
+    // rate-limit / offline.
+    (async () => {
+      const pill = document.querySelector('.ver-pill');
+      const text = pill?.querySelector('.ver-text');
+      if (!pill || !text) return;
+      try {
+        const res = await fetch('https://api.github.com/repos/Harsh-2002/Orva/releases/latest', {
+          headers: { Accept: 'application/vnd.github+json' },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.tag_name) return;
+        text.textContent = `${data.tag_name} · latest`;
+        if (data.html_url) pill.setAttribute('href', data.html_url);
+        pill.setAttribute('aria-label', `Latest release ${data.tag_name} on GitHub`);
+      } catch {
+        /* offline or rate-limited — keep the build-time value */
+      }
+    })();
+  </script>
 </Layout>
 
 <style>
