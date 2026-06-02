@@ -285,6 +285,11 @@ func (r *Runner) processToolCalls(ctx context.Context, sink Sink, convID, msgID 
 // runToolCall dispatches one (approved or auto) tool call, persists the
 // result, records a tool message for the model, and emits tool_result.
 func (r *Runner) runToolCall(ctx context.Context, sink Sink, convID string, row *database.AIToolCall) {
+	// Don't dispatch if the client already disconnected — covers the case where
+	// a single turn auto-runs several tools and the connection drops mid-batch.
+	if ctx.Err() != nil {
+		return
+	}
 	started := time.Now().UTC()
 	row.StartedAt = &started
 	row.Status = "running"

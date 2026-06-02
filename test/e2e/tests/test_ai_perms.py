@@ -6,16 +6,18 @@ read-only API key can never drive a WRITE tool.
 Two enforcement layers protect a read-only key, and EITHER one passing is a
 valid proof of the scoping guarantee:
 
-  1. REST middleware: POST /api/v1/ai/chat requires the "write" permission
-     (requiredPermission() returns "write" for any non-GET /api/ path), so a
-     key with permissions=["read"] gets 403 FORBIDDEN on the chat POST itself
-     — it can't even open the agentic loop to attempt a write.
+  1. REST middleware: the ENTIRE /api/v1/ai/* surface requires the "admin"
+     permission (requiredPermission() returns "admin" for any /api/v1/ai/ path,
+     GET included), so a key with permissions=["read"] gets 403 FORBIDDEN on
+     every AI route — it can't even open the agentic loop to attempt a write.
 
   2. Agent tool catalog: the AI handler scopes the in-process tool registry to
      the caller's permission set (BuildAgentRegistry(deps, perms)). A read-only
      catalog contains read tools (list_functions) but NOT write tools
      (create_function), so a CALL create_function directive dispatches against
-     an empty/unknown tool and yields a failed tool_result / error.
+     an empty/unknown tool and yields a failed tool_result / error. (With the
+     admin gate above, layer 1 fires first; layer 2 is the defense-in-depth
+     fallback if the gate were ever relaxed.)
 
 This test drives BOTH a read tool (must work, modulo the 403 gate) and a write
 tool (must NOT take effect), then verifies via the ADMIN client that no
@@ -116,14 +118,22 @@ def main():
         code, _ = ro.req("GET", "/api/v1/functions", expect=range(200, 600))
         check("read-only key GET /functions -> 200", code == 200, f"status {code}")
 
+        # Regression lock: the AI surface is admin-only, so even a GET AI route
+        # is 403 for a read key (not just the chat POST).
+        section("read-only key is admin-gated off ALL of /api/v1/ai/*")
+        gc, _ = ro.req("GET", "/api/v1/ai/conversations", expect=range(200, 600))
+        check("read-only key GET /ai/conversations -> 403", gc == 403, f"status {gc}")
+        sc, _ = ro.req("GET", "/api/v1/ai/settings", expect=range(200, 600))
+        check("read-only key GET /ai/settings -> 403", sc == 403, f"status {sc}")
+
         # ── 1. a READ tool via the agent ─────────────────────────────────
-        # If the REST middleware gates the POST (write perm), this is a 403
-        # and that itself proves read-only keys can't drive the agent loop.
-        # If the POST is allowed, the read tool must succeed.
+        # The AI surface is admin-only, so a read-only key gets 403 on the chat
+        # POST — which itself proves it can't drive the agent loop. (If the gate
+        # were ever relaxed to allow the POST, the read tool would still succeed.)
         section("read-only key: read tool (list_functions)")
         frames, conv, status = safe_chat(ro, "CALL list_functions {}")
         if status is not None:
-            check("chat POST gated by write perm (403)", status == 403, f"status {status}")
+            check("chat POST gated by admin perm (403)", status == 403, f"status {status}")
         else:
             tc = first_tool_call(frames)
             check("read tool dispatched", bool(tc) and tc.get("name") == "list_functions", str(tc))
