@@ -23,6 +23,7 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 - **CodeMirror 6** — `@codemirror/lang-javascript`, `@codemirror/lang-python`, `@codemirror/lang-json`, `@codemirror/theme-one-dark`, `@codemirror/merge` (side-by-side / unified diff in FunctionDiff.vue)
 - **lucide-vue-next** icons (tree-shaken per-import)
 - **axios** for HTTP
+- **markdown-it** + **highlight.js** — render assistant chat messages (markdown + fenced-code highlight) in the AI view
 
 ## Key Files
 
@@ -34,6 +35,8 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 | `src/stores/auth.js` | Auth state + login/logout |
 | `src/stores/confirm.js` | Global confirmation modal store |
 | `src/stores/events.js` | Persistent SSE connection to `/api/v1/events` |
+| `src/stores/ai.js` | AI chat store: conversations, timeline, streaming client (fetch + ReadableStream, NOT EventSource — the chat POST carries a body), provider/model/settings, + message actions (regenerate / editAndResend / deleteMessageFrom / retry / stop / renameConversation / exportActive) |
+| `src/views/AI.vue` + `src/components/ai/*` | Native Vue agentic chat UI; talks to `/api/v1/ai/*`. Components: `ConversationRail`, `ChatHeader`, `EmptyState` (greeting + click-to-fill starter prompts), `Composer` (textarea + `ReasoningMenu` + `ModelMenu` + Send/Stop), `MessageList`, `Message`, `MessagePart` (markdown-it + fenced → `CodeBlock`, thinking → `ThinkingBlock`), `ToolCallCard`, `TypingIndicator`, `ScrollToBottom`, `ErrorCard`, `ProvidersSettings` |
 | `src/stores/system.js` | System info (version, runtime stats) |
 | `src/views/Editor.vue` | Function editor + test pane (method/path/headers/body) + saved fixtures + suggest-fix |
 | `src/views/InvocationsLog.vue` | Execution history drawer + request panel + replay button + suggest-fix |
@@ -52,3 +55,5 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 - `src/stores/events.js` opens a persistent SSE connection on mount and reconnects automatically on drop. Dashboard widgets subscribe to this store — they do not open their own connections.
 - All AI prompt and clipboard operations (`aiPrompts.js`) are purely client-side — no source code is sent over the network.
 - The `Editor.vue` test pane sends requests through the backend (`POST /api/v1/functions/{id}/invoke`) rather than directly to `/fn/` — this ensures auth and capture still apply.
+- **AI streaming reactivity (load-bearing):** `stores/ai.js` tracks the streaming assistant message by **index** (`curIdx`) and writes every delta back through the reactive array via `patchAssistant()` (rebuilds `parts` immutably, then `timeline.value[curIdx] = next`). Never hold a raw object reference and mutate `parts[i].text +=` — Vue 3 tracks the array proxy, not the raw ref, so per-token mutations silently fail to re-render. The same index-write rule applies to `tool_result` frames.
+- **AI markdown rendering:** `MessagePart.vue` splits markdown into ordered segments so top-level fenced code becomes a real `<CodeBlock>` while prose stays HTML; parsing is throttled to ~12/s (leading + trailing edge) during streaming. Tables inherit the body font size (no shrink) so tabular output matches prose; the system prompt steers the model toward prose/bullets and reserves tables for genuinely tabular data.

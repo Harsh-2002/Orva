@@ -432,6 +432,84 @@ INSERT OR IGNORE INTO egress_blocklist (kind, rule_type, value, label, enabled) 
     ('suggested', 'cidr', '192.168.0.0/16', 'Private network (RFC1918)', 0),
     ('suggested', 'cidr', '100.64.0.0/10',  'CGNAT / Tailscale', 0);
 
+-- ─── AI chat agent (in-product assistant) ──────────────────────────────
+-- Conversations, messages, tool calls, provider credentials, and settings
+-- for the dashboard's AI chat. Internal tool calls reuse the MCP impl
+-- functions in-process; provider API keys are encrypted at rest with the
+-- same AES-256-GCM cipher as function_secrets (see secrets.Manager).
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT,                                   -- principal id (session user / api key id); null on single-user installs
+    title       TEXT NOT NULL DEFAULT 'New conversation',
+    provider    TEXT,                                   -- provider snapshot at creation (e.g. 'anthropic')
+    model       TEXT,                                   -- model snapshot
+    archived    INTEGER NOT NULL DEFAULT 0,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_user    ON ai_conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_updated ON ai_conversations(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_messages (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role            TEXT NOT NULL,                       -- user | assistant | tool | system
+    content         TEXT NOT NULL DEFAULT '',            -- flattened text (fast render / search)
+    parts           TEXT NOT NULL DEFAULT '[]',          -- JSON array: [{type:text|code|thinking|tool_call, …}]
+    token_usage     TEXT,                                -- JSON {prompt, completion, reasoning}
+    seq             INTEGER NOT NULL,                    -- monotonic per-conversation ordering
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ai_msg_conv ON ai_messages(conversation_id, seq);
+
+CREATE TABLE IF NOT EXISTS ai_tool_calls (
+    id                TEXT PRIMARY KEY,
+    conversation_id   TEXT NOT NULL,
+    message_id        TEXT,                              -- assistant message that requested it
+    call_id           TEXT,                              -- provider-assigned tool_call id (for result correlation)
+    tool_name         TEXT NOT NULL,
+    tool_group        TEXT NOT NULL DEFAULT '',          -- functions | deploy | secrets | …
+    args              TEXT NOT NULL DEFAULT '{}',
+    result            TEXT,                              -- JSON output or error string
+    status            TEXT NOT NULL DEFAULT 'pending_approval',
+                      -- pending_approval | approved | rejected | running | succeeded | failed
+    requires_approval INTEGER NOT NULL DEFAULT 0,
+    destructive       INTEGER NOT NULL DEFAULT 0,
+    approved_by       TEXT,                              -- principal id who approved
+    started_at        DATETIME,
+    finished_at       DATETIME,
+    duration_ms       INTEGER,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ai_tc_conv   ON ai_tool_calls(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_ai_tc_status ON ai_tool_calls(status);
+
+CREATE TABLE IF NOT EXISTS ai_provider_configs (
+    id                TEXT PRIMARY KEY,
+    provider          TEXT NOT NULL,                     -- openai | anthropic | bedrock | gemini | groq | ollama | …
+    label             TEXT NOT NULL DEFAULT '',
+    api_key_encrypted TEXT,                              -- base64(nonce||ciphertext), AES-256-GCM via secrets.Manager
+    base_url          TEXT,                              -- optional override (Azure / Ollama / self-host)
+    extra_config      TEXT,                              -- JSON (e.g. AWS region for Bedrock)
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider, label)
+);
+
+CREATE TABLE IF NOT EXISTS ai_settings (
+    id                  TEXT PRIMARY KEY,                -- 'default' or user_id
+    provider            TEXT NOT NULL DEFAULT 'anthropic',
+    model               TEXT NOT NULL DEFAULT 'claude-opus-4-8',
+    thinking_level      TEXT NOT NULL DEFAULT 'standard', -- off | standard | deep
+    system_prompt       TEXT,                            -- nullable; falls back to the built-in operator prompt
+    approval_policy     TEXT NOT NULL DEFAULT 'all_writes', -- all_writes | destructive_only | auto
+    max_tool_iterations INTEGER NOT NULL DEFAULT 25,     -- agentic loop cap
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 PRAGMA foreign_keys = ON;
 `
 	if _, err := db.write.Exec(schema); err != nil {

@@ -24,7 +24,7 @@
 
     <div
       v-if="error"
-      class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+      class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
     >
       {{ error }}
     </div>
@@ -86,7 +86,7 @@
               <StatusBadge :status="trace.status" />
               <span
                 v-if="trace.has_outlier"
-                class="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-300"
+                class="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-warning-fg"
               >
                 <Flag class="w-3 h-3" /> Outlier
               </span>
@@ -117,7 +117,16 @@
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-foreground-muted border-border lowercase">
                   {{ s.trigger || EMPTY }}
                 </span>
-                <Flag v-if="s.is_outlier" class="w-3 h-3 text-amber-400" />
+                <AlertCircle
+                  v-if="s.status === 'error'"
+                  class="w-3 h-3 shrink-0 text-danger-fg"
+                  aria-label="error"
+                />
+                <Flag
+                  v-if="s.is_outlier"
+                  class="w-3 h-3 shrink-0 text-warning-fg"
+                  aria-label="outlier"
+                />
               </div>
 
               <div class="col-span-7 relative h-4">
@@ -147,7 +156,7 @@
                 <span class="text-foreground-muted text-[10px]">└</span>
                 <span class="text-foreground-muted">{{ us.name }}</span>
                 <span v-if="us.status === 'error'"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-red-950/40 text-red-200 border border-red-700/40">
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-danger-tint text-danger-fg border border-danger-ring">
                   error
                 </span>
               </div>
@@ -249,7 +258,7 @@
 import { EMPTY } from '@/utils/format'
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Copy, Flag } from 'lucide-vue-next'
+import { ArrowLeft, Copy, Flag, AlertCircle } from 'lucide-vue-next'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import { getTrace } from '@/api/endpoints'
 
@@ -287,8 +296,8 @@ const barStyle = (s) => {
 }
 
 const barClass = (s) => {
-  if (s.status === 'error') return 'bg-red-500/70'
-  if (s.is_outlier) return 'bg-amber-500/80'
+  if (s.status === 'error') return 'bg-danger/70'
+  if (s.is_outlier) return 'bg-warning/80'
   return 'bg-primary/80'
 }
 
@@ -310,13 +319,13 @@ const userSpanBarStyle = (us) => {
 
 const logLevelClass = (level) => {
   switch (level) {
-    case 'error': return 'text-red-300'
-    case 'warn':  return 'text-amber-300'
+    case 'error': return 'text-danger-fg'
+    case 'warn':  return 'text-warning-fg'
     case 'debug': return 'text-foreground-muted'
     default:      return 'text-primary-light'
   }
 }
-const logRowClass = (entry) => entry.level === 'error' ? 'bg-red-950/20' : ''
+const logRowClass = (entry) => entry.level === 'error' ? 'bg-danger-tint' : ''
 
 const formatLogTime = (ts) => {
   if (!ts) return ''

@@ -56,7 +56,7 @@
         <div>
           <label class="block text-sm font-medium text-foreground-muted mb-2">Source File</label>
           <div
-            class="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-foreground-muted transition-colors"
+            class="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-foreground-muted transition-colors focus-within:ring-2 focus-within:ring-primary"
             :class="{ 'border-primary bg-primary/5': fileDropActive }"
             @dragover.prevent="fileDropActive = true"
             @dragleave.prevent="fileDropActive = false"
@@ -69,7 +69,7 @@
                 browse
                 <input
                   type="file"
-                  class="hidden"
+                  class="sr-only"
                   :accept="getFileExtensions"
                   @change="handleFileSelect"
                 >

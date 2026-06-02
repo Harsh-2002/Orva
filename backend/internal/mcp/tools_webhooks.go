@@ -146,213 +146,201 @@ type ListDeliveriesOutput struct {
 	Deliveries []DeliveryView `json:"deliveries"`
 }
 
-func registerWebhookTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_webhooks",
-				Title:        "List Webhooks",
-				Description: "List every operator-configured webhook subscription. The plaintext secret is never returned (only the preview); use create_webhook to mint a new one if you've lost it.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, ListWebhooksOutput, error) {
-				rows, err := deps.DB.ListEventSubscriptions()
-				if err != nil {
-					return nil, ListWebhooksOutput{}, err
-				}
-				out := ListWebhooksOutput{Subscriptions: make([]SubscriptionView, 0, len(rows))}
-				for _, r := range rows {
-					out.Subscriptions = append(out.Subscriptions, toSubscriptionView(r))
-				}
-				return nil, out, nil
-			},
-		)
-	})
+func registerWebhookTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "webhooks"
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_webhooks",
+			Title:       "List Webhooks",
+			Description: "List every operator-configured webhook subscription. The plaintext secret is never returned (only the preview); use create_webhook to mint a new one if you've lost it.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, ListWebhooksOutput, error) {
+			rows, err := deps.DB.ListEventSubscriptions()
+			if err != nil {
+				return nil, ListWebhooksOutput{}, err
+			}
+			out := ListWebhooksOutput{Subscriptions: make([]SubscriptionView, 0, len(rows))}
+			for _, r := range rows {
+				out.Subscriptions = append(out.Subscriptions, toSubscriptionView(r))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "create_webhook",
-				Title:        "Create Webhook",
-				Description: "Create a new webhook subscription. Returns the subscription record AND the plaintext HMAC secret — the secret is shown ONLY once; capture it now and configure your receiver to verify X-Orva-Signature.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateWebhookInput) (*mcpsdk.CallToolResult, CreateWebhookOutput, error) {
-				name := strings.TrimSpace(in.Name)
-				if name == "" {
-					return nil, CreateWebhookOutput{}, errors.New("name is required")
-				}
-				if err := validateURL(in.URL); err != nil {
-					return nil, CreateWebhookOutput{}, err
-				}
-				events := normalizeAgentEvents(in.Events)
-				if err := validateAgentEvents(events); err != nil {
-					return nil, CreateWebhookOutput{}, err
-				}
-				enabled := true
-				if in.Enabled != nil {
-					enabled = *in.Enabled
-				}
-				secret := database.NewWebhookSecret()
-				sub := &database.EventSubscription{
-					Name:    name,
-					URL:     strings.TrimSpace(in.URL),
-					Secret:  secret,
-					Events:  events,
-					Enabled: enabled,
-				}
-				if err := deps.DB.InsertEventSubscription(sub); err != nil {
-					return nil, CreateWebhookOutput{}, err
-				}
-				sub.SecretPreview = secret[:8] + "…"
-				return nil, CreateWebhookOutput{Subscription: toSubscriptionView(sub), Secret: secret}, nil
-			},
-		)
-	})
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "create_webhook",
+			Title:       "Create Webhook",
+			Description: "Create a new webhook subscription. Returns the subscription record AND the plaintext HMAC secret — the secret is shown ONLY once; capture it now and configure your receiver to verify X-Orva-Signature.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateWebhookInput) (*mcpsdk.CallToolResult, CreateWebhookOutput, error) {
+			name := strings.TrimSpace(in.Name)
+			if name == "" {
+				return nil, CreateWebhookOutput{}, errors.New("name is required")
+			}
+			if err := validateURL(in.URL); err != nil {
+				return nil, CreateWebhookOutput{}, err
+			}
+			events := normalizeAgentEvents(in.Events)
+			if err := validateAgentEvents(events); err != nil {
+				return nil, CreateWebhookOutput{}, err
+			}
+			enabled := true
+			if in.Enabled != nil {
+				enabled = *in.Enabled
+			}
+			secret := database.NewWebhookSecret()
+			sub := &database.EventSubscription{
+				Name:    name,
+				URL:     strings.TrimSpace(in.URL),
+				Secret:  secret,
+				Events:  events,
+				Enabled: enabled,
+			}
+			if err := deps.DB.InsertEventSubscription(sub); err != nil {
+				return nil, CreateWebhookOutput{}, err
+			}
+			sub.SecretPreview = secret[:8] + "…"
+			return nil, CreateWebhookOutput{Subscription: toSubscriptionView(sub), Secret: secret}, nil
+		},
+	)
 
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "update_webhook",
-				Title:        "Update Webhook",
-				Description: "Edit an existing subscription. Any of name / url / events / enabled may be supplied; omitted fields keep their previous values. Secret cannot be rotated through this path — delete and re-create to rotate.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in UpdateWebhookInput) (*mcpsdk.CallToolResult, SubscriptionView, error) {
-				sub, err := deps.DB.GetEventSubscription(in.ID)
-				if err != nil {
-					return nil, SubscriptionView{}, errors.New("webhook not found")
-				}
-				if name := strings.TrimSpace(in.Name); name != "" {
-					sub.Name = name
-				}
-				if u := strings.TrimSpace(in.URL); u != "" {
-					if err := validateURL(u); err != nil {
-						return nil, SubscriptionView{}, err
-					}
-					sub.URL = u
-				}
-				if in.Events != nil {
-					events := normalizeAgentEvents(in.Events)
-					if err := validateAgentEvents(events); err != nil {
-						return nil, SubscriptionView{}, err
-					}
-					sub.Events = events
-				}
-				if in.Enabled != nil {
-					sub.Enabled = *in.Enabled
-				}
-				if err := deps.DB.UpdateEventSubscription(sub); err != nil {
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "update_webhook",
+			Title:       "Update Webhook",
+			Description: "Edit an existing subscription. Any of name / url / events / enabled may be supplied; omitted fields keep their previous values. Secret cannot be rotated through this path — delete and re-create to rotate.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in UpdateWebhookInput) (*mcpsdk.CallToolResult, SubscriptionView, error) {
+			sub, err := deps.DB.GetEventSubscription(in.ID)
+			if err != nil {
+				return nil, SubscriptionView{}, errors.New("webhook not found")
+			}
+			if name := strings.TrimSpace(in.Name); name != "" {
+				sub.Name = name
+			}
+			if u := strings.TrimSpace(in.URL); u != "" {
+				if err := validateURL(u); err != nil {
 					return nil, SubscriptionView{}, err
 				}
-				return nil, toSubscriptionView(sub), nil
-			},
-		)
-	})
+				sub.URL = u
+			}
+			if in.Events != nil {
+				events := normalizeAgentEvents(in.Events)
+				if err := validateAgentEvents(events); err != nil {
+					return nil, SubscriptionView{}, err
+				}
+				sub.Events = events
+			}
+			if in.Enabled != nil {
+				sub.Enabled = *in.Enabled
+			}
+			if err := deps.DB.UpdateEventSubscription(sub); err != nil {
+				return nil, SubscriptionView{}, err
+			}
+			return nil, toSubscriptionView(sub), nil
+		},
+	)
 
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "delete_webhook",
-				Title:        "Delete Webhook",
-				Description: "Remove a webhook subscription. Pass confirm=true. All in-flight deliveries are removed via FK cascade.",
-				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in WebhookDeleteInput) (*mcpsdk.CallToolResult, WebhookOpOutput, error) {
-				if !in.Confirm {
-					return nil, WebhookOpOutput{}, errors.New("delete refused: pass confirm=true")
-				}
-				if _, err := deps.DB.GetEventSubscription(in.ID); err != nil {
-					return nil, WebhookOpOutput{}, errors.New("webhook not found")
-				}
-				if err := deps.DB.DeleteEventSubscription(in.ID); err != nil {
-					return nil, WebhookOpOutput{}, err
-				}
-				return nil, WebhookOpOutput{ID: in.ID, Status: "deleted"}, nil
-			},
-		)
-	})
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "delete_webhook",
+			Title:       "Delete Webhook",
+			Description: "Remove a webhook subscription. Pass confirm=true. All in-flight deliveries are removed via FK cascade.",
+			Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in WebhookDeleteInput) (*mcpsdk.CallToolResult, WebhookOpOutput, error) {
+			if !in.Confirm {
+				return nil, WebhookOpOutput{}, errors.New("delete refused: pass confirm=true")
+			}
+			if _, err := deps.DB.GetEventSubscription(in.ID); err != nil {
+				return nil, WebhookOpOutput{}, errors.New("webhook not found")
+			}
+			if err := deps.DB.DeleteEventSubscription(in.ID); err != nil {
+				return nil, WebhookOpOutput{}, err
+			}
+			return nil, WebhookOpOutput{ID: in.ID, Status: "deleted"}, nil
+		},
+	)
 
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "test_webhook",
-				Title:        "Test Webhook",
-				Description: "Queue a synthetic 'webhook.test' delivery against a subscription's URL so you can validate signature handling without waiting for a real event. Picked up on the next 5s scheduler tick.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in WebhookIDInput) (*mcpsdk.CallToolResult, WebhookOpOutput, error) {
-				sub, err := deps.DB.GetEventSubscription(in.ID)
-				if err != nil {
-					return nil, WebhookOpOutput{}, errors.New("webhook not found")
-				}
-				envelope := map[string]any{
-					"id":       "evt_test_" + database.NewSubscriptionID()[4:],
-					"type":     "webhook.test",
-					"fired_at": time.Now().UTC().Format(time.RFC3339Nano),
-					"data": map[string]any{
-						"subscription_id": sub.ID,
-						"name":            sub.Name,
-						"message":         "synthetic test event from MCP test_webhook",
-					},
-				}
-				body, _ := json.Marshal(envelope)
-				d := &database.WebhookDelivery{
-					SubscriptionID: sub.ID,
-					EventName:      "webhook.test",
-					Payload:        body,
-					Status:         "pending",
-					MaxAttempts:    1,
-				}
-				if err := deps.DB.InsertDelivery(d); err != nil {
-					return nil, WebhookOpOutput{}, err
-				}
-				return nil, WebhookOpOutput{ID: d.ID, Status: "queued"}, nil
-			},
-		)
-	})
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "test_webhook",
+			Title:       "Test Webhook",
+			Description: "Queue a synthetic 'webhook.test' delivery against a subscription's URL so you can validate signature handling without waiting for a real event. Picked up on the next 5s scheduler tick.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in WebhookIDInput) (*mcpsdk.CallToolResult, WebhookOpOutput, error) {
+			sub, err := deps.DB.GetEventSubscription(in.ID)
+			if err != nil {
+				return nil, WebhookOpOutput{}, errors.New("webhook not found")
+			}
+			envelope := map[string]any{
+				"id":       "evt_test_" + database.NewSubscriptionID()[4:],
+				"type":     "webhook.test",
+				"fired_at": time.Now().UTC().Format(time.RFC3339Nano),
+				"data": map[string]any{
+					"subscription_id": sub.ID,
+					"name":            sub.Name,
+					"message":         "synthetic test event from MCP test_webhook",
+				},
+			}
+			body, _ := json.Marshal(envelope)
+			d := &database.WebhookDelivery{
+				SubscriptionID: sub.ID,
+				EventName:      "webhook.test",
+				Payload:        body,
+				Status:         "pending",
+				MaxAttempts:    1,
+			}
+			if err := deps.DB.InsertDelivery(d); err != nil {
+				return nil, WebhookOpOutput{}, err
+			}
+			return nil, WebhookOpOutput{ID: d.ID, Status: "queued"}, nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_webhook_deliveries",
-				Title:        "List Webhook Deliveries",
-				Description: "List recent deliveries for a webhook subscription. Useful for diagnosing stuck retries or confirming a fire happened.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListDeliveriesInput) (*mcpsdk.CallToolResult, ListDeliveriesOutput, error) {
-				rows, err := deps.DB.ListDeliveriesForSubscription(in.ID, in.Limit)
-				if err != nil {
-					return nil, ListDeliveriesOutput{}, err
-				}
-				out := ListDeliveriesOutput{Deliveries: make([]DeliveryView, 0, len(rows))}
-				for _, d := range rows {
-					out.Deliveries = append(out.Deliveries, toDeliveryView(d))
-				}
-				return nil, out, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_webhook_deliveries",
+			Title:       "List Webhook Deliveries",
+			Description: "List recent deliveries for a webhook subscription. Useful for diagnosing stuck retries or confirming a fire happened.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListDeliveriesInput) (*mcpsdk.CallToolResult, ListDeliveriesOutput, error) {
+			rows, err := deps.DB.ListDeliveriesForSubscription(in.ID, in.Limit)
+			if err != nil {
+				return nil, ListDeliveriesOutput{}, err
+			}
+			out := ListDeliveriesOutput{Deliveries: make([]DeliveryView, 0, len(rows))}
+			for _, d := range rows {
+				out.Deliveries = append(out.Deliveries, toDeliveryView(d))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "retry_webhook_delivery",
-				Title:        "Retry Webhook Delivery",
-				Description: "Reset a terminal (failed) delivery back to pending so the scheduler will re-attempt it. attempts is reset to 0.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in WebhookIDInput) (*mcpsdk.CallToolResult, WebhookOpOutput, error) {
-				if _, err := deps.DB.GetDelivery(in.ID); err != nil {
-					return nil, WebhookOpOutput{}, errors.New("delivery not found")
-				}
-				if err := deps.DB.RetryDelivery(in.ID); err != nil {
-					return nil, WebhookOpOutput{}, err
-				}
-				return nil, WebhookOpOutput{ID: in.ID, Status: "pending"}, nil
-			},
-		)
-	})
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "retry_webhook_delivery",
+			Title:       "Retry Webhook Delivery",
+			Description: "Reset a terminal (failed) delivery back to pending so the scheduler will re-attempt it. attempts is reset to 0.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in WebhookIDInput) (*mcpsdk.CallToolResult, WebhookOpOutput, error) {
+			if _, err := deps.DB.GetDelivery(in.ID); err != nil {
+				return nil, WebhookOpOutput{}, errors.New("delivery not found")
+			}
+			if err := deps.DB.RetryDelivery(in.ID); err != nil {
+				return nil, WebhookOpOutput{}, err
+			}
+			return nil, WebhookOpOutput{ID: in.ID, Status: "pending"}, nil
+		},
+	)
 }
 
 // ── helpers ────────────────────────────────────────────────────────

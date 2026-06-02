@@ -10,7 +10,7 @@
       -->
       <div
         v-if="visible"
-        class="fixed z-50 bg-background border border-border shadow-2xl rounded-lg p-4 flex items-start gap-3
+        class="fixed z-50 bg-background border border-border shadow-lg rounded-lg p-4 flex items-start gap-3
                inset-x-2 bottom-2 max-w-sm mx-auto pb-safe
                sm:inset-x-auto sm:bottom-6 sm:right-6 sm:mx-0 sm:pb-4"
       >

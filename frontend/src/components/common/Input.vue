@@ -6,7 +6,7 @@
     >
       {{ label }} <span
         v-if="required"
-        class="text-red-500"
+        class="text-danger-fg"
       >*</span>
     </label>
     <div class="relative">

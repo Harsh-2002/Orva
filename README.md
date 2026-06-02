@@ -158,6 +158,7 @@ The Build info card at the top of Settings shows the running release's version, 
 | **Version diff** | Side-by-side source diff between any two past deployments — in the dashboard (CodeMirror merge view) or `orva diff <fn>` for git-style unified output in the terminal. |
 | **MCP server** | 70 tools at `/mcp` — any MCP client (Claude Code, Cursor, etc.) can create functions, deploy code, manage secrets, browse KV, and read logs. |
 | **OAuth 2.1** | Add Orva as a custom connector in claude.ai or other OAuth-capable MCP clients — no API key copy-paste needed. |
+| **Built-in AI assistant** | An in-product agentic chat (the dashboard's **AI** section) that operates your instance end-to-end — create and deploy functions, read logs, manage secrets and routes — using the same tools as the MCP server, in-process. Bring your own provider key (OpenAI, Anthropic, or any OpenAI-compatible endpoint); writes can be gated behind per-conversation approval. |
 | **16 templates** | Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener, and more — pickable in the editor. |
 
 ---
@@ -302,6 +303,11 @@ https://your-orva-instance/mcp
 From there an AI agent can create functions, deploy code, invoke them, read logs, manage secrets,
 browse KV state, and pull the full Orva reference docs — all without leaving the chat. Works
 with Claude Code, Cursor, and any OAuth-capable MCP client like the claude.ai web UI.
+
+Prefer not to wire up an external client? The dashboard has a **built-in AI assistant** (the
+**AI** section) that does the same thing in-product: bring your own provider key (OpenAI,
+Anthropic, or any OpenAI-compatible endpoint) and chat with an agent that operates your instance
+through the same tools, with optional human approval before any write.
 
 ---
 

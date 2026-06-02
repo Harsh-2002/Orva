@@ -124,6 +124,20 @@ func (m *Manager) decrypt(b64 string) (string, error) {
 	return string(pt), nil
 }
 
+// EncryptValue encrypts an arbitrary string with the same master key and
+// AES-256-GCM cipher used for function secrets, returning base64(nonce ||
+// ciphertext). It exists so other subsystems (e.g. the AI chat agent's
+// provider API keys in ai_provider_configs) can reuse the existing
+// at-rest crypto without piggy-backing on the per-function secrets table.
+func (m *Manager) EncryptValue(plaintext string) (string, error) {
+	return m.encrypt(plaintext)
+}
+
+// DecryptValue reverses EncryptValue.
+func (m *Manager) DecryptValue(b64 string) (string, error) {
+	return m.decrypt(b64)
+}
+
 // Upsert stores (or overwrites) a secret for a function.
 func (m *Manager) Upsert(functionID, key, value string) error {
 	if key == "" {

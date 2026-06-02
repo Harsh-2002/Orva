@@ -43,7 +43,7 @@
           <input
             v-model="search"
             placeholder="Search by name, runtime, or function id…"
-            class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
+            class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
         </div>
         <span class="text-[11px] text-foreground-muted shrink-0 tabular-nums">
@@ -128,7 +128,7 @@
                 type="checkbox"
                 :checked="allChecked"
                 :indeterminate.prop="someChecked && !allChecked"
-                class="w-3.5 h-3.5 rounded border-border bg-background"
+                class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
                 @change="toggleAll"
               >
             </th>
@@ -163,7 +163,7 @@
               <input
                 :checked="selected.has(fn.id)"
                 type="checkbox"
-                class="w-3.5 h-3.5 rounded border-border bg-background"
+                class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
                 @change="toggleOne(fn.id)"
               >
             </td>
@@ -324,7 +324,7 @@
     <transition name="fade">
       <div
         v-if="selected.size"
-        class="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-2xl rounded-full pl-4 pr-2 py-2"
+        class="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-lg rounded-full pl-4 pr-2 py-2"
       >
         <span class="text-xs text-white">
           {{ selected.size }} selected

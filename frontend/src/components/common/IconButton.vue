@@ -58,7 +58,7 @@ const props = defineProps({
 const variantClasses = computed(() => {
   switch (props.variant) {
     case 'danger':
-      return 'text-foreground-muted hover:text-error hover:bg-surface-hover focus:ring-red-500'
+      return 'text-foreground-muted hover:text-danger-fg hover:bg-surface-hover focus:ring-red-500'
     case 'success':
       return 'text-foreground-muted hover:text-success hover:bg-surface-hover focus:ring-green-500'
     // Brand-accent variant: violet instead of green for "this just

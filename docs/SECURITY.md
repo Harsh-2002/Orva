@@ -297,6 +297,33 @@ also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see
 `internal/pool/hostmem.go`).
 
+> "What can the in-product AI assistant do, and where do its provider
+> keys live?"
+
+The assistant (the dashboard's **AI** section) is gated behind the
+`admin` permission — every `/api/v1/ai/*` route requires it (the
+dashboard session resolves to admin; a non-admin API key gets 401/403).
+It operates the instance through the **same** operator tools the MCP
+server exposes, so it can do anything an admin can do via the API, and
+nothing more. Two gates sit in front of every mutation: the
+per-conversation **approval policy** (`all_writes` / `destructive_only`
+/ `auto`), which can pause a write for human approval before it runs,
+and a code-enforced `confirm=true` requirement on destructive tools.
+
+Conversations are a **shared operator space**: because the feature is
+single-operator and admin-only, all admin credentials see the same
+conversation list (they are not isolated per credential). BYO provider
+API keys are encrypted at rest with the same AES-256-GCM cipher as
+function secrets, are decrypted only in orvad at request time, and are
+never returned by the API or echoed into the chat (asserted by the e2e
+suite). The system prompt also instructs the model never to print
+secret/key/token values it encounters while operating the instance.
+
+A provider's `base_url` is intentionally unrestricted (it may point at a
+local endpoint such as Ollama or LM Studio — a first-class homelab use
+case). Since configuring a provider is admin-only, the SSRF surface this
+opens is an admin-only one and is accepted by design.
+
 ## Layered isolation: what does and doesn't compose
 
 Orva already gives you defense in depth on a single host: a Docker

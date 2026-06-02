@@ -73,7 +73,7 @@
         :key="item.path"
         :to="item.path"
         :class="[
-          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium',
+          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
           isActive(item.path)
             ? 'text-white bg-primary/15'
             : 'text-foreground-muted hover:text-white hover:bg-surface-hover'
@@ -97,6 +97,7 @@ import { useRoute } from 'vue-router'
 import OrvaLogo from '../OrvaLogo.vue'
 import {
   Gauge,
+  MessagesSquare,
   Boxes,
   CalendarClock,
   ListChecks,
@@ -180,6 +181,7 @@ const onTouchEnd = () => {
 // is recognizable at a glance instead of a row of similar shields.
 const navItems = [
   { path: '/',            label: 'Overview',    icon: Gauge },
+  { path: '/ai',          label: 'Chat',        icon: MessagesSquare },
   { path: '/functions',   label: 'Functions',   icon: Boxes },
   { path: '/cron',        label: 'Schedules',   icon: CalendarClock },
   { path: '/jobs',        label: 'Jobs',        icon: ListChecks },

@@ -96,7 +96,7 @@ const variantClasses = computed(() => {
     case 'secondary':
       return 'bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border shadow-sm'
     case 'danger':
-      return 'bg-red-600 text-white border border-red-500 hover:bg-red-500 focus:ring-red-500 shadow-md shadow-red-600/30'
+      return 'bg-red-600 text-white border border-red-500 hover:bg-red-500 focus:ring-red-500 shadow-sm'
     case 'ghost':
       return 'bg-transparent text-foreground-muted hover:text-foreground hover:bg-surface-hover'
     case 'chip':
@@ -108,7 +108,7 @@ const variantClasses = computed(() => {
         ? 'bg-primary text-primary-foreground border border-primary'
         : 'bg-surface text-foreground-muted border border-border hover:text-white hover:border-foreground-muted'
     default: // primary
-      return 'bg-primary text-primary-foreground hover:bg-primary/90 focus:ring-primary shadow-md shadow-primary/20 border border-transparent'
+      return 'bg-primary text-primary-foreground hover:bg-primary/90 focus:ring-primary shadow-sm border border-transparent'
   }
 })
 </script>

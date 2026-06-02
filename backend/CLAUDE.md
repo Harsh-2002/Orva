@@ -1,6 +1,6 @@
 # Backend
 
-Go 1.25. Module: `github.com/Harsh-2002/Orva` (rooted at the repo, not at
+Go 1.26 (bumped from 1.25 — the embedded Bifrost AI gateway requires go ≥1.26; the Dockerfile + all CI workflows pin golang 1.26 in lock-step). Module: `github.com/Harsh-2002/Orva` (rooted at the repo, not at
 `backend/`). SQLite with no CGO (`modernc.org/sqlite`).
 
 The server binary built from `backend/cmd/orva` is the daemon (`orva serve`)
@@ -53,6 +53,9 @@ go vet ./...
 | `cli` | Shared `Client` + `Config` for CLI subcommands |
 | `backup` | `SnapshotDB` / `ArchiveTo` / `RestoreFrom` helpers |
 | `version` | Single source of truth for the version string |
+| `ai` | In-product AI chat assistant. `Manager` (service layer) wires the SQLite store, the secrets cipher (provider-key encryption), the in-process tool registry, the embedded Bifrost LLM gateway (`ai/llm`), and the agentic loop (`ai/agent`). Served at `/api/v1/ai/*` by `server/ai_handler.go` (SSE for chat/approval). The agent's `defaultSystemPrompt` const lives in `ai/manager.go` — it's a Go **raw string, so it must stay backtick-free** (escape any fenced-code examples by description, not literal ```). |
+| `ai/llm` | Wraps the embedded Bifrost gateway (`github.com/maximhq/bifrost/core`) behind neutral types + a normalized event stream. `Account` resolves BYO keys from `ai_provider_configs` live. Thinking levels → `ChatReasoning`. |
+| `ai/agent` | Agentic loop (≈25-iteration budget): stream model turn → emit SSE deltas → detect tool calls → approval-gate writes → in-process dispatch → feed results back. Decoupled from `mcp` (takes tools + a dispatcher). Two independent gates: the per-conversation **approval policy** (`all_writes` / `destructive_only` / `auto`, checked in `approvalNeeded`) and a separate code-enforced `confirm=true` requirement on destructive tools. |
 
 The canonical UUIDv7 generator (`ids`) and HTTP client (`client`) live at **repo-root** `internal/ids/` and `internal/client/` — shared with the slim CLI codebase, not under `backend/internal/`.
 
@@ -74,6 +77,8 @@ Key files: `deploy.go`, `diff.go`, `functions.go`, `invoke.go`, `logs.go`, `cron
 
 **Streaming wire protocol**: `response_start` → `chunk` (base64 body data) → `response_end` frames over the worker's stdin/stdout pipe. `proxy.Forward()` owns the write-loop.
 
+**Shared tool registry (single source of truth)**: every operator tool is declared once via `regAddTool` (`mcp/agent_registry.go`). That call registers the tool with BOTH the external MCP server (`server.go`, unchanged behavior) AND the in-process agent registry (`mcp.BuildAgentRegistry(deps, perms)`, gated to the principal's perms). The internal AI agent dispatches these tools directly as Go calls — no MCP transport, no HTTP. Same name/description/schema/destructive-hint feed both fronts, so they never drift. When adding a tool, use `regAddTool(rc, perm, def, handler)` inside a `register*Tools(rc *regCtx)` function — never bare `mcpsdk.AddTool`.
+
 ## Middleware Chain
 
 `CORS → BodySizeLimit → Auth → RequestID → Logger → Handler`
@@ -90,4 +95,7 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 - `execution_requests` has **no FK** to `executions` (intentionally dropped to fix async insert ordering); manual cascade runs in `DeleteExecution`.
 - TypeScript deploys: after a successful `tsc`, the function's `Entrypoint` is updated to `dist/handler.js` in the DB. The validator on re-deploy checks for the source `.ts` file, not the compiled output.
 - Zombie nsjail fix: `cmd.Wait()` is centralized in `Spawn` via `waitDone chan struct{}`; never call `Wait()` on the sandbox `cmd` anywhere else.
+- **AI conversation editing is destructive-tail:** editing or deleting a chat message (`EditMessage` / `DeleteMessage` in `server/ai_handler.go`, backed by `database.DeleteMessagesFromSeq`) truncates the conversation at that message's `seq` — it deletes that message and every message + tool call after it, then (for edit) re-runs the turn. There is no branching history; the tail is gone. `Regenerate` is the same truncate-then-rerun on the last assistant turn.
+- **AI turns are one-per-conversation:** the `ai.Manager` holds a keyed try-lock (`tryLockConv`/`unlockConv`) acquired by every mutating entry point (Chat, Resume, RegenerateLast, EditAndResend, DeleteMessageFrom). An overlapping turn on the same conversation is rejected — SSE `error` for streaming paths, `ai.ErrConversationBusy` → 409 for the JSON delete. `database.InsertMessage` assigns `seq` atomically inside the INSERT (`MAX(seq)+1` subquery); never split it back into a SELECT-then-INSERT.
+- **AI gateway lifecycle:** `ai.Manager.Close()` releases the embedded Bifrost pools and is called from `Server.Shutdown` (via `s.router.ai`). The gateway is built lazily and rebuilt on provider-config change (`invalidateClient`).
 - **Docs single source:** `docs/reference.md` is the canonical Orva reference markdown (~53 KB). `make docs-embed` syncs it to `backend/internal/mcp/reference.md` (embedded by the `get_orva_docs` MCP tool) and `frontend/public/docs.md` (served at `/docs.md` for the dashboard's Copy as Markdown button). Edit the canonical file then run `make docs-embed`; the Vue Docs page is the rendered version (separate templates) and must be updated alongside if content changes.

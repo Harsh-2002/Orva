@@ -19,8 +19,9 @@
         <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
         <input
           v-model="filters.q"
+          aria-label="Search activity by path, summary, or actor"
           placeholder="Search path, summary, actor…"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           @input="onSearchInput"
         >
       </div>
@@ -74,7 +75,50 @@
 
     <!-- Table -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-row list. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="row in rows"
+          :key="rowKey(row)"
+          class="px-4 py-3 cursor-pointer hover:bg-surface-hover transition-colors"
+          @click="openDrawer(row)"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <SourceTag :source="row.source" />
+                <StatusBadge
+                  v-if="row.status"
+                  :status="statusLabel(row.status)"
+                />
+              </div>
+              <div class="mt-1 text-xs font-mono text-white break-all">
+                {{ row.method ? row.method + ' ' : '' }}{{ row.path || EMPTY }}
+              </div>
+              <div
+                v-if="row.summary"
+                class="mt-1 text-[11px] text-foreground-muted break-words"
+              >
+                {{ row.summary }}
+              </div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted font-mono">
+                <span>{{ formatTime(row.ts) }}</span>
+                <span v-if="row.duration_ms != null">{{ formatDuration(row.duration_ms) }}</span>
+                <span v-if="row.actor_label || row.actor_id" class="break-all">{{ row.actor_label || row.actor_id }}</span>
+              </div>
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="!rows.length"
+          class="px-6 py-12 text-center text-sm text-foreground-muted"
+        >
+          No activity yet. Drive any action (open the dashboard,
+          call a function, fire an MCP tool) and rows will land here.
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-4 py-3 w-32">Time</th>
@@ -91,7 +135,7 @@
           <tr
             v-for="row in rows"
             :key="rowKey(row)"
-            class="hover:bg-surface/40 cursor-pointer transition-colors"
+            class="hover:bg-surface-hover cursor-pointer transition-colors"
             @click="openDrawer(row)"
           >
             <td class="px-4 py-2.5 font-mono text-xs text-foreground-muted">

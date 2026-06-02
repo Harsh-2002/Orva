@@ -37,112 +37,104 @@ type SystemHealthOutput struct {
 // to keep the wire-up surface small.
 var startTime = time.Now()
 
-func registerSystemTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "system_health",
-				Title:        "System Health",
-				Description: "Health check for the Orva instance. Returns version, uptime, sandbox counters, and host resources. Use this to confirm an Orva instance is reachable before doing anything else.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemHealthOutput, error) {
-				var active, total int64
-				if deps.Proxy != nil && deps.Proxy.Sandbox != nil {
-					active, total = deps.Proxy.Sandbox.Stats()
-				}
-				return nil, SystemHealthOutput{
-					Status:            "healthy",
-					Version:           orDefault(deps.Version, "0.1.0"),
-					UptimeSeconds:     int64(time.Since(startTime).Seconds()),
-					SandboxActive:     active,
-					SandboxLifetime:   total,
-					HostNumCPU:        runtime.NumCPU(),
-					HostNumGoroutines: runtime.NumGoroutine(),
-				}, nil
-			},
-		)
-	})
+func registerSystemTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "system"
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "system_health",
+			Title:       "System Health",
+			Description: "Health check for the Orva instance. Returns version, uptime, sandbox counters, and host resources. Use this to confirm an Orva instance is reachable before doing anything else.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemHealthOutput, error) {
+			var active, total int64
+			if deps.Proxy != nil && deps.Proxy.Sandbox != nil {
+				active, total = deps.Proxy.Sandbox.Stats()
+			}
+			return nil, SystemHealthOutput{
+				Status:            "healthy",
+				Version:           orDefault(deps.Version, "0.1.0"),
+				UptimeSeconds:     int64(time.Since(startTime).Seconds()),
+				SandboxActive:     active,
+				SandboxLifetime:   total,
+				HostNumCPU:        runtime.NumCPU(),
+				HostNumGoroutines: runtime.NumGoroutine(),
+			}, nil
+		},
+	)
 
 	// ─── system_metrics ──────────────────────────────────────────────
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "system_metrics",
-				Title:        "System Metrics",
-				Description: "Return a snapshot of Orva's invocation/build/latency counters and per-function pool stats. Useful for an agent that wants to see how loaded the platform is or which functions are hot.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemMetricsOutput, error) {
-				return nil, buildSystemMetrics(deps), nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "system_metrics",
+			Title:       "System Metrics",
+			Description: "Return a snapshot of Orva's invocation/build/latency counters and per-function pool stats. Useful for an agent that wants to see how loaded the platform is or which functions are hot.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemMetricsOutput, error) {
+			return nil, buildSystemMetrics(deps), nil
+		},
+	)
 
 	// ─── system_storage ──────────────────────────────────────────────
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "system_storage",
-				Title:        "System Storage",
-				Description: "Return on-disk sizes for orva.db, the WAL sidecar, and the functions/ tree. Useful before deciding to run system_vacuum — db_free_pages × db_page_size is the upper bound on reclaimable bytes.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemStorageOutput, error) {
-				return nil, buildSystemStorage(deps), nil
-			},
-		)
-	})
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "system_storage",
+			Title:       "System Storage",
+			Description: "Return on-disk sizes for orva.db, the WAL sidecar, and the functions/ tree. Useful before deciding to run system_vacuum — db_free_pages × db_page_size is the upper bound on reclaimable bytes.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemStorageOutput, error) {
+			return nil, buildSystemStorage(deps), nil
+		},
+	)
 
 	// ─── system_vacuum ──────────────────────────────────────────────
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "system_vacuum",
-				Title:        "System Vacuum",
-				Description: "Run PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM on orva.db. DESTRUCTIVE: holds an exclusive lock and rewrites the database; every other writer blocks until it returns. Pass confirm=true to actually run; without confirm the tool returns the would-be reclaimable bytes without touching the DB.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in SystemVacuumInput) (*mcpsdk.CallToolResult, SystemVacuumOutput, error) {
-				if !in.Confirm {
-					info := buildSystemStorage(deps)
-					return nil, SystemVacuumOutput{
-						DryRun:           true,
-						BeforeBytes:      info.DBBytes,
-						ReclaimableBytes: info.DBFreePages * info.DBPageSize,
-					}, nil
-				}
-				return runMCPVacuum(deps)
-			},
-		)
-	})
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "system_vacuum",
+			Title:       "System Vacuum",
+			Description: "Run PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM on orva.db. DESTRUCTIVE: holds an exclusive lock and rewrites the database; every other writer blocks until it returns. Pass confirm=true to actually run; without confirm the tool returns the would-be reclaimable bytes without touching the DB.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in SystemVacuumInput) (*mcpsdk.CallToolResult, SystemVacuumOutput, error) {
+			if !in.Confirm {
+				info := buildSystemStorage(deps)
+				return nil, SystemVacuumOutput{
+					DryRun:           true,
+					BeforeBytes:      info.DBBytes,
+					ReclaimableBytes: info.DBFreePages * info.DBPageSize,
+				}, nil
+			}
+			return runMCPVacuum(deps)
+		},
+	)
 
 	// ─── list_runtimes ──────────────────────────────────────────────
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_runtimes",
-				Title:        "List Runtimes",
-				Description: "List the language runtimes Orva supports (Node.js, Python — specific minor versions). Each entry includes its id (use as the `runtime` field on create_function), display name, default entrypoint filename, and accepted file extensions.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, ListRuntimesOutput, error) {
-				return nil, ListRuntimesOutput{Runtimes: supportedRuntimes()}, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_runtimes",
+			Title:       "List Runtimes",
+			Description: "List the language runtimes Orva supports (Node.js, Python — specific minor versions). Each entry includes its id (use as the `runtime` field on create_function), display name, default entrypoint filename, and accepted file extensions.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, ListRuntimesOutput, error) {
+			return nil, ListRuntimesOutput{Runtimes: supportedRuntimes()}, nil
+		},
+	)
 }
 
 // ─── shared types ──────────────────────────────────────────────────
 
 type SystemMetricsOutput struct {
-	UptimeSeconds  int64           `json:"uptime_seconds"`
-	Totals         MetricsTotals   `json:"totals"`
-	LatencyMS      MetricsLatency  `json:"latency_ms"`
-	ActiveRequests int64           `json:"active_requests"`
-	SandboxActive  int64           `json:"sandbox_active"`
-	BuildQueue     MetricsBuildQ   `json:"build_queue"`
-	Pools          []MetricsPool   `json:"pools"`
+	UptimeSeconds  int64          `json:"uptime_seconds"`
+	Totals         MetricsTotals  `json:"totals"`
+	LatencyMS      MetricsLatency `json:"latency_ms"`
+	ActiveRequests int64          `json:"active_requests"`
+	SandboxActive  int64          `json:"sandbox_active"`
+	BuildQueue     MetricsBuildQ  `json:"build_queue"`
+	Pools          []MetricsPool  `json:"pools"`
 }
 
 type MetricsTotals struct {

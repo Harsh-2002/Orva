@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -174,163 +174,152 @@ type TestFunctionWithFixtureOutput struct {
 
 // ─── registration ──────────────────────────────────────────────────
 
-func registerInvokeTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permInvoke, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name: "invoke_function",
-				Title: "Invoke Function",
-				Description: "Call a function and return its response. `method` is REQUIRED — pick GET for read endpoints, POST for create/write, PUT/PATCH for updates, DELETE for removals (no silent default; an invocation that uses the wrong verb usually returns 404/405 which is hard to debug). Pass `body` as either an object (sent as JSON) or a string. Returns status_code, headers, body, plus execution_id you can pass to get_execution_logs if you want stderr. Bypasses the function's auth_mode (the agent's MCP bearer is already trusted). When the handler crashes with a network-shaped error (ENETUNREACH / fetch failed / OrvaUnavailableError) on a function with network_mode=none, the response includes an `orva_hint` telling you exactly what to fix.",
-				Annotations: &mcpsdk.ToolAnnotations{
-					DestructiveHint: ptrFalse(),
-					OpenWorldHint:   ptrTrue(), // function may call external APIs
-				},
-			},
-			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in InvokeFunctionInput) (*mcpsdk.CallToolResult, InvokeFunctionOutput, error) {
-				return invokeFunction(ctx, deps, in)
-			},
-		)
-	})
+func registerInvokeTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "invoke"
 
-	gatedAdd(perms, permInvoke, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "test_function_with_fixture",
-				Title:        "Test Function With Fixture",
-				Description: "Invoke a function using a previously-saved fixture as the request envelope. Applies optional shallow-merge overrides (override wins on key collision). Returns the same shape as invoke_function plus a `fixture` block listing which overrides were applied. Use list_fixtures to see what's saved.",
-				Annotations: &mcpsdk.ToolAnnotations{
-					DestructiveHint: ptrFalse(),
-					OpenWorldHint:   ptrTrue(),
-				},
+	regAddTool(rc, permInvoke,
+		&mcpsdk.Tool{
+			Name:        "invoke_function",
+			Title:       "Invoke Function",
+			Description: "Call a function and return its response. `method` is REQUIRED — pick GET for read endpoints, POST for create/write, PUT/PATCH for updates, DELETE for removals (no silent default; an invocation that uses the wrong verb usually returns 404/405 which is hard to debug). Pass `body` as either an object (sent as JSON) or a string. Returns status_code, headers, body, plus execution_id you can pass to get_execution_logs if you want stderr. Bypasses the function's auth_mode (the agent's MCP bearer is already trusted). When the handler crashes with a network-shaped error (ENETUNREACH / fetch failed / OrvaUnavailableError) on a function with network_mode=none, the response includes an `orva_hint` telling you exactly what to fix.",
+			Annotations: &mcpsdk.ToolAnnotations{
+				DestructiveHint: ptrFalse(),
+				OpenWorldHint:   ptrTrue(), // function may call external APIs
 			},
-			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in TestFunctionWithFixtureInput) (*mcpsdk.CallToolResult, TestFunctionWithFixtureOutput, error) {
-				return testFunctionWithFixture(ctx, deps, in)
-			},
-		)
-	})
+		},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in InvokeFunctionInput) (*mcpsdk.CallToolResult, InvokeFunctionOutput, error) {
+			return invokeFunction(ctx, deps, in)
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_executions",
-				Title:        "List Executions",
-				Description: "List recent invocations across all functions or filtered to one. Useful for an agent debugging why a function is failing — combine with get_execution_logs to see stderr.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+	regAddTool(rc, permInvoke,
+		&mcpsdk.Tool{
+			Name:        "test_function_with_fixture",
+			Title:       "Test Function With Fixture",
+			Description: "Invoke a function using a previously-saved fixture as the request envelope. Applies optional shallow-merge overrides (override wins on key collision). Returns the same shape as invoke_function plus a `fixture` block listing which overrides were applied. Use list_fixtures to see what's saved.",
+			Annotations: &mcpsdk.ToolAnnotations{
+				DestructiveHint: ptrFalse(),
+				OpenWorldHint:   ptrTrue(),
 			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListExecutionsInput) (*mcpsdk.CallToolResult, ListExecutionsOutput, error) {
-				params := database.ListExecutionsParams{
-					Status: in.Status, Since: in.Since, Until: in.Until,
-					Search: in.Search, Limit: in.Limit, Offset: in.Offset,
-				}
-				if in.FunctionID != "" {
-					fn, err := resolveFunction(deps, in.FunctionID)
-					if err != nil {
-						return nil, ListExecutionsOutput{}, err
-					}
-					params.FunctionID = fn.ID
-				}
-				if params.Limit <= 0 {
-					params.Limit = 50
-				}
-				if params.Limit > 200 {
-					params.Limit = 200
-				}
-				res, err := deps.DB.ListExecutions(params)
+		},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in TestFunctionWithFixtureInput) (*mcpsdk.CallToolResult, TestFunctionWithFixtureOutput, error) {
+			return testFunctionWithFixture(ctx, deps, in)
+		},
+	)
+
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_executions",
+			Title:       "List Executions",
+			Description: "List recent invocations across all functions or filtered to one. Useful for an agent debugging why a function is failing — combine with get_execution_logs to see stderr.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListExecutionsInput) (*mcpsdk.CallToolResult, ListExecutionsOutput, error) {
+			params := database.ListExecutionsParams{
+				Status: in.Status, Since: in.Since, Until: in.Until,
+				Search: in.Search, Limit: in.Limit, Offset: in.Offset,
+			}
+			if in.FunctionID != "" {
+				fn, err := resolveFunction(deps, in.FunctionID)
 				if err != nil {
 					return nil, ListExecutionsOutput{}, err
 				}
-				out := ListExecutionsOutput{Total: res.Total, Limit: params.Limit, Offset: params.Offset}
-				for _, e := range res.Executions {
-					out.Executions = append(out.Executions, toExecutionView(e))
-				}
-				return nil, out, nil
-			},
-		)
-	})
+				params.FunctionID = fn.ID
+			}
+			if params.Limit <= 0 {
+				params.Limit = 50
+			}
+			if params.Limit > 200 {
+				params.Limit = 200
+			}
+			res, err := deps.DB.ListExecutions(params)
+			if err != nil {
+				return nil, ListExecutionsOutput{}, err
+			}
+			out := ListExecutionsOutput{Total: res.Total, Limit: params.Limit, Offset: params.Offset}
+			for _, e := range res.Executions {
+				out.Executions = append(out.Executions, toExecutionView(e))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "get_execution",
-				Title:        "Get Execution",
-				Description: "Fetch one execution by id. Returns status, status_code, duration_ms, cold_start, and any error_message.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetExecutionInput) (*mcpsdk.CallToolResult, ExecutionView, error) {
-				e, err := deps.DB.GetExecution(in.ExecutionID)
-				if err != nil {
-					return nil, ExecutionView{}, fmt.Errorf("execution not found: %s", in.ExecutionID)
-				}
-				return nil, toExecutionView(e), nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_execution",
+			Title:       "Get Execution",
+			Description: "Fetch one execution by id. Returns status, status_code, duration_ms, cold_start, and any error_message.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetExecutionInput) (*mcpsdk.CallToolResult, ExecutionView, error) {
+			e, err := deps.DB.GetExecution(in.ExecutionID)
+			if err != nil {
+				return nil, ExecutionView{}, fmt.Errorf("execution not found: %s", in.ExecutionID)
+			}
+			return nil, toExecutionView(e), nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "get_execution_logs",
-				Title:        "Get Execution Logs",
-				Description: "Read the captured stderr from one execution. Stdout was already returned as the response body to whoever invoked. Returns empty string if the function logged nothing to stderr.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetExecutionInput) (*mcpsdk.CallToolResult, GetExecutionLogsOutput, error) {
-				log, err := deps.DB.GetExecutionLog(in.ExecutionID)
-				if err != nil {
-					return nil, GetExecutionLogsOutput{ExecutionID: in.ExecutionID}, nil
-				}
-				return nil, GetExecutionLogsOutput{ExecutionID: log.ExecutionID, Stderr: log.Stderr}, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_execution_logs",
+			Title:       "Get Execution Logs",
+			Description: "Read the captured stderr from one execution. Stdout was already returned as the response body to whoever invoked. Returns empty string if the function logged nothing to stderr.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetExecutionInput) (*mcpsdk.CallToolResult, GetExecutionLogsOutput, error) {
+			log, err := deps.DB.GetExecutionLog(in.ExecutionID)
+			if err != nil {
+				return nil, GetExecutionLogsOutput{ExecutionID: in.ExecutionID}, nil
+			}
+			return nil, GetExecutionLogsOutput{ExecutionID: log.ExecutionID, Stderr: log.Stderr}, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "delete_execution",
-				Title:        "Delete Execution",
-				Description: "Permanently delete one execution row and its captured stderr. Pass confirm=true.",
-				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteExecutionInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
-				if !in.Confirm {
-					return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true")
-				}
-				if err := deps.DB.DeleteExecution(in.ExecutionID); err != nil {
-					return nil, DeletedOutput{}, err
-				}
-				return nil, DeletedOutput{DeletedID: in.ExecutionID}, nil
-			},
-		)
-	})
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "delete_execution",
+			Title:       "Delete Execution",
+			Description: "Permanently delete one execution row and its captured stderr. Pass confirm=true.",
+			Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteExecutionInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
+			if !in.Confirm {
+				return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true")
+			}
+			if err := deps.DB.DeleteExecution(in.ExecutionID); err != nil {
+				return nil, DeletedOutput{}, err
+			}
+			return nil, DeletedOutput{DeletedID: in.ExecutionID}, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "bulk_delete_executions",
-				Title:        "Bulk Delete Executions",
-				Description: "Delete multiple execution rows. Max 1000 ids per call. Pass confirm=true. Returns counts of deleted vs failed.",
-				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in BulkDeleteExecutionsInput) (*mcpsdk.CallToolResult, BulkDeleteOutput, error) {
-				if !in.Confirm {
-					return nil, BulkDeleteOutput{}, errors.New("delete refused: pass confirm=true")
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "bulk_delete_executions",
+			Title:       "Bulk Delete Executions",
+			Description: "Delete multiple execution rows. Max 1000 ids per call. Pass confirm=true. Returns counts of deleted vs failed.",
+			Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in BulkDeleteExecutionsInput) (*mcpsdk.CallToolResult, BulkDeleteOutput, error) {
+			if !in.Confirm {
+				return nil, BulkDeleteOutput{}, errors.New("delete refused: pass confirm=true")
+			}
+			if len(in.IDs) > 1000 {
+				return nil, BulkDeleteOutput{}, errors.New("too many ids (max 1000 per call)")
+			}
+			out := BulkDeleteOutput{}
+			for _, id := range in.IDs {
+				if err := deps.DB.DeleteExecution(id); err != nil {
+					out.Failed++
+				} else {
+					out.Deleted++
 				}
-				if len(in.IDs) > 1000 {
-					return nil, BulkDeleteOutput{}, errors.New("too many ids (max 1000 per call)")
-				}
-				out := BulkDeleteOutput{}
-				for _, id := range in.IDs {
-					if err := deps.DB.DeleteExecution(id); err != nil {
-						out.Failed++
-					} else {
-						out.Deleted++
-					}
-				}
-				return nil, out, nil
-			},
-		)
-	})
+			}
+			return nil, out, nil
+		},
+	)
 }
 
 // ─── invoke implementation ─────────────────────────────────────────
@@ -394,8 +383,8 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	// auto-Content-Type below picks JSON for the json branch and leaves
 	// the caller's Headers untouched for the string branch.
 	var (
-		bodyStr      string
-		autoCT       string
+		bodyStr string
+		autoCT  string
 	)
 	if in.Body != nil {
 		switch in.Body.Type {

@@ -24,6 +24,9 @@
   --color-primary: #553F83;
   --color-primary-foreground: #FFFFFF;
   --color-primary-hover: #684D9E;
+  /* Inline-link violet: a lighter accent than --color-primary, which fails AA
+     contrast on the near-black background. Used for markdown links in chat. */
+  --color-link: #8b7bd8;
 
   --color-secondary: #2D2B42;
   --color-secondary-foreground: #FFFFFF;
@@ -217,6 +220,13 @@ select::-ms-expand {
 }
 @utility pb-safe {
   padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+}
+/* Composer floor: a comfortable bottom gap that grows to clear the safe-area
+   inset on notched devices. Used by the docked chat composer, where a plain
+   `py-3 pb-safe` collapsed the bottom padding to 0 on non-notched screens
+   (pb-safe overrides py-3's padding-bottom). */
+@utility pb-composer {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 }
 @utility pl-safe {
   padding-left: max(env(safe-area-inset-left, 0px), 0px);

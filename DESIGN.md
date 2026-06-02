@@ -160,6 +160,7 @@ A single muted violet accent on a deep violet-tinted near-black, with cool gray-
 - **Border** (`#2D2B42`, ≈`oklch(28% 0.045 277)`): every divider, every card outline, every input stroke. The system reads layers through borders, not shadows.
 - **Foreground** (`#FFFFFF`): currently pure white. **Tint to `#F4F2FA` (≈`oklch(96% 0.01 290)`)** to match the rest of the palette's hue discipline; the eye reads pure white as harsh against a violet-tinted dark. The `--color-foreground-strong: #FFFFFF` token is reserved for text on saturated brand-colour surfaces (primary CTA labels, on-violet badges); the default `--color-foreground` may shift to a tinted off-white in a future palette pass without breaking those high-contrast sites.
 - **Foreground Muted** (`#A3A3B3`, ≈`oklch(70% 0.018 280)`): all secondary text, icon defaults, table cell content one rank below primary. The cool gray-violet is intentional.
+- **Link** (`--color-link: #8b7bd8`): hyperlinks inside rendered prose (the AI chat markdown, Docs). A lighter, less-saturated lift of the violet accent so links read as interactive without competing with primary CTAs. Inline code in the same prose uses `--color-surface-hover` as its chip background.
 
 ### Status (semantic, used at low chroma)
 - **Success** (`#22C55E`, ≈`oklch(73% 0.21 144)`): only for terminal-success states. Pair with the recommended `success/15` tint background and `success/30` border (see Named Rule below).

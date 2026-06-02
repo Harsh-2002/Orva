@@ -363,3 +363,69 @@ List supported runtimes.
 ### `GET /api/v1/syscalls`
 The seccomp policy catalog. Useful for the dashboard's "what is this
 function allowed to do" tooltip.
+
+## AI assistant
+
+The in-product agentic chat (the dashboard's **AI** section). Requires
+a configured provider (BYO key). Streaming endpoints emit
+`text/event-stream`; everything else is JSON. All paths require `admin`.
+
+### `POST /api/v1/ai/chat`
+Send a user message and stream the assistant turn. Body carries
+`conversation_id` (or omit to start one), `content`, and the selected
+provider/model/thinking level. Response is SSE: `message_start`,
+`delta` (text), `thinking`, `tool_call`, `tool_result`,
+`awaiting_approval`, `message_end`, `error`. Long pre-token gaps are
+kept alive with `: ping` comment frames.
+
+### `GET /api/v1/ai/conversations`
+List conversations (most-recently-updated first).
+
+### `POST /api/v1/ai/conversations`
+Create an empty conversation.
+
+### `GET /api/v1/ai/conversations/{id}`
+Fetch one conversation with its full message + tool-call timeline.
+
+### `PATCH /api/v1/ai/conversations/{id}`
+Rename (`{"title": "..."}`) or archive (`{"archived": true}`).
+
+### `DELETE /api/v1/ai/conversations/{id}`
+Delete a conversation and all its messages + tool calls (cascade).
+
+### `GET /api/v1/ai/conversations/{id}/messages`
+List messages, optionally `?since_seq=N` for incremental loads.
+
+### `POST /api/v1/ai/conversations/{id}/regenerate`
+Truncate the last assistant turn and re-run it. SSE, same frames as
+`/chat`.
+
+### `POST /api/v1/ai/conversations/{id}/messages/{mid}/edit`
+Replace a user message's content, **truncate everything after it**, and
+re-run the turn. SSE. (There is no branching history — the tail is
+discarded.)
+
+### `DELETE /api/v1/ai/conversations/{id}/messages/{mid}`
+Delete a message and every message + tool call after it (truncate by
+`seq`).
+
+### `POST /api/v1/ai/tool-calls/{id}/approve`
+### `POST /api/v1/ai/tool-calls/{id}/reject`
+Resolve a tool call that is `awaiting_approval` and resume the stream
+(approve) or skip it (reject). SSE.
+
+### `GET /api/v1/ai/providers`
+### `POST /api/v1/ai/providers`
+### `DELETE /api/v1/ai/providers/{id}`
+List, upsert, and remove provider configs (provider, label, base URL,
+API key). Keys are encrypted at rest with the same cipher as function
+secrets and **never returned** in responses.
+
+### `GET /api/v1/ai/providers/{id}/models`
+List the models the configured provider/endpoint reports.
+
+### `GET /api/v1/ai/settings`
+### `PUT /api/v1/ai/settings`
+Read/update assistant settings: default provider/model, thinking level,
+approval policy (`all_writes` / `destructive_only` / `auto`), and the
+per-reply tool-step cap.

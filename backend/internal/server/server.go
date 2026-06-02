@@ -530,6 +530,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.Scheduler != nil {
 		s.Scheduler.Stop(5 * time.Second)
 	}
+	// Release the AI LLM gateway pools (HTTP is already drained, so no chat is
+	// mid-stream). Without this the embedded Bifrost pools leak on every restart.
+	if s.router != nil && s.router.ai != nil {
+		s.router.ai.Close()
+	}
 	return nil
 }
 

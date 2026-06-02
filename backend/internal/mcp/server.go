@@ -136,30 +136,34 @@ func NewHandler(deps Deps) http.Handler {
 		// only show the streaming request itself.
 		s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal))
 
-		registerSystemTools(s, reqDeps, perms)
-		registerFunctionTools(s, reqDeps, perms)
-		registerDeployTools(s, reqDeps, perms)
-		registerInvokeTools(s, reqDeps, perms)
-		registerSecretTools(s, reqDeps, perms)
-		registerRouteTools(s, reqDeps, perms)
-		registerKeyTools(s, reqDeps, perms)
-		registerFirewallTools(s, reqDeps, perms)
-		registerPoolTools(s, reqDeps, perms)
+		// Every operator-tool family is registered through a regCtx so the
+		// exact same tool definitions feed both the external MCP server (here)
+		// and the in-process AI agent registry (BuildAgentRegistry).
+		rc := serverRegCtx(s, reqDeps, perms)
+		registerSystemTools(rc)
+		registerFunctionTools(rc)
+		registerDeployTools(rc)
+		registerInvokeTools(rc)
+		registerSecretTools(rc)
+		registerRouteTools(rc)
+		registerKeyTools(rc)
+		registerFirewallTools(rc)
+		registerPoolTools(rc)
 		// v0.2 + v0.3: cron schedules, KV store, background jobs, and
 		// system-event webhooks. Each respects the same permission gates.
-		registerCronTools(s, reqDeps, perms)
-		registerKVTools(s, reqDeps, perms)
-		registerJobTools(s, reqDeps, perms)
-		registerWebhookTools(s, reqDeps, perms)
+		registerCronTools(rc)
+		registerKVTools(rc)
+		registerJobTools(rc)
+		registerWebhookTools(rc)
 		// v0.4 C2a: inbound webhook triggers (signed external POSTs).
-		registerInboundWebhookTools(s, reqDeps, perms)
+		registerInboundWebhookTools(rc)
 		// v0.4 B3 + B5: saved request fixtures (Postman-style presets) +
 		// test_function_with_fixture invoke variant.
-		registerFixtureTools(s, reqDeps, perms)
+		registerFixtureTools(rc)
 		// v0.5: causal tracing — get_trace / list_traces / get_function_baseline.
-		registerTraceTools(s, reqDeps, perms)
+		registerTraceTools(rc)
 		// v0.5: get_orva_docs — return the canonical Orva reference markdown.
-		registerDocsTools(s, reqDeps, perms)
+		registerDocsTools(rc)
 
 		registerResources(s, reqDeps, perms)
 

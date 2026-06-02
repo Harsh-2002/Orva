@@ -568,7 +568,7 @@
             v-model="form.description"
             rows="2"
             placeholder="One-line summary of what this function does. Surfaces in MCP tool catalogs and the agent channel picker."
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white resize-y"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white resize-y"
           />
         </div>
         <div>
@@ -676,7 +676,7 @@
               type="checkbox"
               true-value="egress"
               false-value="none"
-              class="mt-0.5 w-4 h-4 rounded border-border bg-background"
+              class="mt-0.5 w-4 h-4 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
             >
             <div class="min-w-0">
               <div class="text-sm font-medium text-white flex items-center gap-2">
@@ -790,13 +790,13 @@
               <input
                 v-model="newRoute.path"
                 placeholder="/path or /prefix/*"
-                class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-white"
+                class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
               >
               <input
                 v-model="newRoute.methods"
                 placeholder="*"
                 title="Comma-separated methods or * for any (default *)"
-                class="w-20 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-white"
+                class="w-20 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
               >
               <button
                 class="shrink-0 px-3 py-1.5 rounded-md bg-white text-black text-xs font-medium hover:bg-white/90 transition-colors"
@@ -854,12 +854,12 @@
           <input
             v-model="pair.key"
             placeholder="KEY"
-            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-white"
+            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
           <input
             v-model="pair.value"
             placeholder="VALUE"
-            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-white"
+            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
           <button
             class="shrink-0 w-7 h-7 flex items-center justify-center rounded text-foreground-muted hover:text-red-400 hover:bg-surface transition-colors"
@@ -901,7 +901,7 @@
         </div>
         <textarea
           v-model="dependencyText"
-          class="w-full bg-surface-hover border border-border rounded-md text-xs font-mono p-3 text-foreground focus:outline-none focus:border-white resize-none min-h-[200px]"
+          class="w-full bg-surface-hover border border-border rounded-md text-xs font-mono p-3 text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white resize-none min-h-[200px]"
           placeholder="One package per line. e.g. requests==2.31.0"
         />
       </div>
@@ -967,13 +967,13 @@
           <input
             v-model="secretForm.name"
             placeholder="SECRET_NAME"
-            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
           <input
             v-model="secretForm.value"
             placeholder="SECRET_VALUE"
             type="password"
-            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
           <Button
             class="w-full"

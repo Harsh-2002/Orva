@@ -17,6 +17,10 @@ import (
 // KeyHandler handles API key management endpoints.
 type KeyHandler struct {
 	DB *database.Database
+	// InvalidateKey evicts a key (by its hash) from the auth middleware's
+	// in-memory cache so a deleted key stops authenticating immediately.
+	// Optional; nil is a no-op.
+	InvalidateKey func(keyHash string)
 }
 
 // createKeyRequest is the body for creating an API key.
@@ -136,9 +140,20 @@ func (h *KeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture the key's hash BEFORE deleting so we can evict it from the auth
+	// cache — otherwise a revoked key keeps working until process restart.
+	var keyHash string
+	if k, err := h.DB.GetAPIKeyByID(keyID); err == nil && k != nil {
+		keyHash = k.KeyHash
+	}
+
 	if err := h.DB.DeleteAPIKey(keyID); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to delete API key", reqID)
 		return
+	}
+
+	if h.InvalidateKey != nil && keyHash != "" {
+		h.InvalidateKey(keyHash)
 	}
 
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": keyID})
