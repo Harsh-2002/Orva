@@ -10,24 +10,32 @@ every release.
 cli/
 ├── cmd/orva/main.go      # slim CLI entry point (this is THE binary)
 └── commands/             # Cobra subcommand library, package `commands`
-    ├── root.go           # NewRoot() + RegisterClient(root) + Version var
+    ├── root.go           # NewRoot() + RegisterClient(root) + Version var + global flags
     ├── helpers.go        # getClient(cmd), checkResponse, etc.
+    ├── output.go         # shared output framework (stdout/stderr split, table|json, color, confirm)
     ├── activity.go       # `orva activity`
     ├── channels.go       # `orva channels …`
     ├── completion.go     # `orva completion {bash|zsh|fish|powershell}`
     ├── cron.go           # `orva cron …`
-    ├── deploy.go         # `orva deploy <path>`
+    ├── deploy.go         # `orva deploy <path> [--watch]`
+    ├── deployments.go    # `orva deployments list/get/logs`
     ├── diff.go           # `orva diff <function>` (unified diff between deployments)
+    ├── dns.go            # `orva dns get/set`
+    ├── firewall.go       # `orva firewall list/add/enable/disable/delete/resolve`
+    ├── fixtures.go       # `orva fixtures list/get/save/delete/test`
     ├── functions.go      # `orva functions …`
-    ├── invoke.go         # `orva invoke <name>`
+    ├── invoke.go         # `orva invoke <name>` (--body/--stream/--route/-H/-X)
     ├── jobs.go           # `orva jobs …`
     ├── keys.go           # `orva keys …`
     ├── kv.go             # `orva kv …`
-    ├── login.go          # `orva login --endpoint --api-key`
-    ├── logs.go           # `orva logs [--tail]` (SSE)
+    ├── login.go          # `orva login --endpoint --api-key [--test]`
+    ├── logs.go           # `orva logs [--follow]` (SSE)
+    ├── pool.go           # `orva pool get/set` (per-fn warm-pool autoscaler)
+    ├── rollback.go       # `orva rollback <fn> [deployment-id|--code-hash]`
     ├── routes.go         # `orva routes …`
     ├── secrets.go        # `orva secrets …`
-    ├── system.go         # `orva system health`
+    ├── system.go         # `orva system health/metrics/db-stats/storage/vacuum`
+    ├── traces.go         # `orva traces list/get/baseline`
     ├── upgrade.go        # `orva upgrade` (self-update via go-selfupdate)
     ├── webhooks.go       # `orva webhooks …`
     └── commands_test.go  # command-tree + flag-presence tests
@@ -36,6 +44,20 @@ cli/
 The HTTP client and `~/.orva/config.yaml` loader live at `internal/client/`
 (repo-root internal package) so the server binary at `backend/cmd/orva/`
 can also import the same client code through `cli/commands`.
+
+## Output framework (`output.go`)
+
+All commands share one output layer that enforces the **data → stdout,
+status → stderr** contract: response bodies and list/`get` payloads print
+to stdout; progress, success lines, timings, and confirmation prompts go
+to stderr. This keeps `orva <cmd> | jq` clean regardless of verbosity.
+It centralizes the global persistent flags wired up in `root.go` —
+`-o/--output` (`table`|`json`), `-q/--quiet` (silence stderr status),
+`--no-color` (also honors `NO_COLOR` and auto-off on non-TTY), and
+`-y/--yes` (skip the interactive confirm; destructive ops refuse on a
+non-TTY without it). New commands should render through this layer
+rather than calling `fmt.Print*` directly, so the streams and formats
+stay consistent.
 
 ## Build commands
 

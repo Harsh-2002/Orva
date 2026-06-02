@@ -322,10 +322,14 @@ curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/orva-cli-
 
 orva login --endpoint https://orva.example.com --api-key <key>
 orva functions list
-orva deploy my-fn ./src
+orva deploy ./src --name my-fn --runtime node24
 orva invoke my-fn --body '{"name":"world"}'
 orva logs my-fn --follow
 ```
+
+Every command takes `-o json` for machine-readable output (data on
+stdout, status on stderr — so `orva … | jq` is always clean), and
+`orva invoke … --stream` streams a function's response chunk-by-chunk.
 
 Binaries: `linux-amd64`, `linux-arm64`, `darwin-arm64`. Fully static, no runtime deps.
 
