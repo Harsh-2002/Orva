@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -15,97 +15,125 @@ import (
 
 var logsCmd = &cobra.Command{
 	Use:   "logs [name-or-id]",
-	Short: "View function execution logs",
-	Long:  "List recent executions for a function or view logs for a specific execution.",
-	Args:  cobra.ExactArgs(1),
-	Run:   runLogs,
+	Short: "View or follow function execution logs",
+	Long: `List recent executions for a function, read one execution's logs, or follow
+new executions live.
+
+  orva logs greeter                       # recent executions (table)
+  orva logs greeter -o json | jq .        # machine-readable
+  orva logs greeter --exec-id 019df...    # stdout/stderr for one execution
+  orva logs greeter --follow              # stream executions as they happen`,
+	Args: cobra.ExactArgs(1),
+	RunE: runLogs,
 }
 
 func init() {
-	logsCmd.Flags().String("exec-id", "", "specific execution ID to view logs for")
-	logsCmd.Flags().Bool("tail", false, "follow new executions for this function via SSE (Ctrl-C to stop)")
+	logsCmd.Flags().String("exec-id", "", "show stdout/stderr for a specific execution ID")
+	logsCmd.Flags().BoolP("follow", "f", false, "follow new executions for this function via SSE (Ctrl-C to stop)")
 }
 
-func runLogs(cmd *cobra.Command, args []string) {
+func runLogs(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
-	nameOrID := args[0]
-	fnID := resolveFunctionID(client, nameOrID)
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	execID, _ := cmd.Flags().GetString("exec-id")
-	tail, _ := cmd.Flags().GetBool("tail")
+	follow, _ := cmd.Flags().GetBool("follow")
 
-	if tail {
-		runLogsTail(client, fnID)
-		return
+	if follow {
+		return runLogsFollow(cmd, client, fnID)
 	}
 
 	if execID != "" {
-		// Get specific execution logs.
-		resp, err := client.Get("/api/v1/executions/" + execID + "/logs")
-		if err != nil {
-			exitError("request failed: %v", err)
-		}
-		if err := checkResponse(resp); err != nil {
-			exitError("%v", err)
-		}
-
-		var logs struct {
-			ExecutionID string `json:"execution_id"`
-			Stdout      string `json:"stdout"`
-			Stderr      string `json:"stderr"`
-		}
-		if err := decodeJSON(resp, &logs); err != nil {
-			exitError("decode response: %v", err)
-		}
-
-		fmt.Printf("Execution: %s\n", logs.ExecutionID)
-		if logs.Stdout != "" {
-			fmt.Printf("\n--- stdout ---\n%s\n", logs.Stdout)
-		}
-		if logs.Stderr != "" {
-			fmt.Printf("\n--- stderr ---\n%s\n", logs.Stderr)
-		}
-		if logs.Stdout == "" && logs.Stderr == "" {
-			fmt.Println("(no logs)")
-		}
-		return
+		return showExecutionLogs(cmd, client, execID)
 	}
 
-	// List recent executions for this function.
-	resp, err := client.Get("/api/v1/executions?function_id=" + fnID)
+	return listExecutions(cmd, client, fnID)
+}
+
+func showExecutionLogs(cmd *cobra.Command, client *cli.Client, execID string) error {
+	resp, err := client.Get("/api/v1/executions/" + execID + "/logs")
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+
+	var logs struct {
+		ExecutionID string `json:"execution_id"`
+		Stdout      string `json:"stdout"`
+		Stderr      string `json:"stderr"`
+	}
+	if err := json.Unmarshal(raw, &logs); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	infof(cmd, "Execution: %s", logs.ExecutionID)
+	if logs.Stdout != "" {
+		fmt.Print(logs.Stdout)
+		if !strings.HasSuffix(logs.Stdout, "\n") {
+			fmt.Println()
+		}
+	}
+	if logs.Stderr != "" {
+		fmt.Fprint(os.Stderr, logs.Stderr)
+		if !strings.HasSuffix(logs.Stderr, "\n") {
+			fmt.Fprintln(os.Stderr)
+		}
+	}
+	if logs.Stdout == "" && logs.Stderr == "" {
+		infof(cmd, "(no logs)")
+	}
+	return nil
+}
+
+func listExecutions(cmd *cobra.Command, client *cli.Client, fnID string) error {
+	resp, err := client.Get("/api/v1/executions?function_id=" + fnID)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 
 	var result struct {
 		Executions []struct {
-			ID         string     `json:"id"`
-			Status     string     `json:"status"`
-			ColdStart  bool       `json:"cold_start"`
-			DurationMS *int64     `json:"duration_ms"`
-			StatusCode *int       `json:"status_code"`
-			StartedAt  time.Time  `json:"started_at"`
-			FinishedAt *time.Time `json:"finished_at"`
-			ErrorMsg   string     `json:"error_message"`
+			ID         string    `json:"id"`
+			Status     string    `json:"status"`
+			ColdStart  bool      `json:"cold_start"`
+			DurationMS *int64    `json:"duration_ms"`
+			StatusCode *int      `json:"status_code"`
+			StartedAt  time.Time `json:"started_at"`
 		} `json:"executions"`
 		Total int `json:"total"`
 	}
-	if err := decodeJSON(resp, &result); err != nil {
-		// Try raw JSON output as fallback.
-		var raw json.RawMessage
-		fmt.Fprintf(os.Stderr, "Warning: could not parse as expected format: %v\n", err)
-		_ = raw
-		return
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tCOLD START\tDURATION\tCODE\tSTARTED")
+	t := newTable("ID", "STATUS", "COLD START", "DURATION", "CODE", "STARTED")
 	for _, exec := range result.Executions {
 		dur := "-"
 		if exec.DurationMS != nil {
@@ -119,29 +147,25 @@ func runLogs(cmd *cobra.Command, args []string) {
 		if exec.ColdStart {
 			cold = "yes"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			exec.ID, exec.Status, cold, dur, code,
-			exec.StartedAt.Format(time.DateTime),
-		)
+		t.row(exec.ID, exec.Status, cold, dur, code, exec.StartedAt.Format(time.DateTime))
 	}
-	w.Flush()
-	fmt.Printf("\nTotal: %d\n", result.Total)
+	t.flush()
+	infof(cmd, "\nTotal: %d", result.Total)
+	return nil
 }
 
-// runLogsTail subscribes to /api/v1/events and pretty-prints every
+// runLogsFollow subscribes to /api/v1/events and pretty-prints every
 // `execution` event whose function_id matches fnID. The server emits all
-// types on one stream (see internal/server/events/handler.go); the
-// `?type=...&function=...` query params are forward-compatibility hints
-// and are filtered client-side here.
-func runLogsTail(client *cli.Client, fnID string) {
+// types on one stream; we filter client-side.
+func runLogsFollow(cmd *cobra.Command, client *cli.Client, fnID string) error {
 	path := fmt.Sprintf("/api/v1/events?type=execution&function=%s", fnID)
 	resp, err := streamSSE(client, path)
 	if err != nil {
-		exitError("tail: %v", err)
+		return fmt.Errorf("follow: %w", err)
 	}
 	defer resp.Body.Close()
 
-	fmt.Fprintf(os.Stderr, "Tailing executions for %s — Ctrl-C to stop.\n", fnID)
+	infof(cmd, "Following executions for %s — Ctrl-C to stop.", fnID)
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -164,8 +188,9 @@ func runLogsTail(client *cli.Client, fnID string) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		exitError("tail: scanner: %v", err)
+		return fmt.Errorf("follow: scanner: %w", err)
 	}
+	return nil
 }
 
 func printExecutionEvent(data, wantFnID string) {
@@ -183,9 +208,6 @@ func printExecutionEvent(data, wantFnID string) {
 		fmt.Println(data)
 		return
 	}
-	// Filter client-side: the unified hub doesn't honour ?function=.
-	// IDs are UUIDv7 and identical between the SSE payload and the
-	// /fn/<id>/ URL form, so a single equality check suffices.
 	if wantFnID != "" && ev.FunctionID != wantFnID {
 		return
 	}

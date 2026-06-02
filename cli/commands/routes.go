@@ -1,10 +1,10 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
-	"os"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,27 +13,55 @@ import (
 var routesCmd = &cobra.Command{
 	Use:   "routes",
 	Short: "Manage custom URL → function routes",
-	Long:  "List, create, and delete user-defined route mappings.",
+	Long: `List, create, and delete user-defined route mappings that give functions
+pretty URLs (e.g. /webhooks/stripe) instead of /fn/<id>.
+
+A route maps a path to a function and an optional set of HTTP methods.
+Prefix routes end in /* (e.g. /shortener/*).
+
+Examples:
+  orva routes list
+  orva routes set /webhooks/stripe --fn payments
+  orva routes set /api-proxy/* --fn proxy --methods GET,POST
+  orva routes delete /webhooks/stripe`,
 }
 
 var routesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all custom routes",
-	Run:   runRoutesList,
+	Long: `List every user-defined route mapping.
+
+Examples:
+  orva routes list
+  orva routes list -o json`,
+	RunE: runRoutesList,
 }
 
 var routesSetCmd = &cobra.Command{
-	Use:   "set [path]",
+	Use:   "set <path>",
 	Short: "Create or update a route mapping",
-	Args:  cobra.ExactArgs(1),
-	Run:   runRoutesSet,
+	Long: `Map a URL path to a function. The path is positional; the target function
+is given with --fn (name or ID). Restrict methods with --methods (defaults
+to all methods).
+
+Examples:
+  orva routes set /webhooks/stripe --fn payments
+  orva routes set /api-proxy/* --fn proxy --methods GET,POST`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRoutesSet,
 }
 
 var routesDeleteCmd = &cobra.Command{
-	Use:   "delete [path]",
+	Use:   "delete <path>",
 	Short: "Delete a route",
-	Args:  cobra.ExactArgs(1),
-	Run:   runRoutesDelete,
+	Long: `Delete a route by its path. Destructive; prompts for confirmation unless
+--yes is passed.
+
+Examples:
+  orva routes delete /webhooks/stripe
+  orva routes delete /webhooks/stripe --yes`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRoutesDelete,
 }
 
 func init() {
@@ -46,18 +74,24 @@ func init() {
 	routesCmd.AddCommand(routesDeleteCmd)
 }
 
-func runRoutesList(cmd *cobra.Command, args []string) {
+func runRoutesList(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
 	resp, err := client.Get("/api/v1/routes")
 	if err != nil {
-		exitError("list: %v", err)
+		return fmt.Errorf("list: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("list: %v", err)
+		return err
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 
 	var result struct {
@@ -68,37 +102,37 @@ func runRoutesList(cmd *cobra.Command, args []string) {
 			CreatedAt  time.Time `json:"created_at"`
 		} `json:"routes"`
 	}
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PATH\tFUNCTION_ID\tMETHODS\tCREATED")
+	t := newTable("PATH", "FUNCTION_ID", "METHODS", "CREATED")
 	for _, r := range result.Routes {
 		methods := r.Methods
 		if methods == "" {
 			methods = "*"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			r.Path, r.FunctionID, methods,
-			r.CreatedAt.Format(time.DateTime),
-		)
+		t.row(r.Path, r.FunctionID, methods, r.CreatedAt.Format(time.DateTime))
 	}
-	w.Flush()
-	fmt.Printf("\nTotal: %d\n", len(result.Routes))
+	t.flush()
+	infof(cmd, "\nTotal: %d", len(result.Routes))
+	return nil
 }
 
-func runRoutesSet(cmd *cobra.Command, args []string) {
+func runRoutesSet(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
 	path := args[0]
 	fnNameOrID, _ := cmd.Flags().GetString("fn")
 	methods, _ := cmd.Flags().GetString("methods")
 
-	fnID := resolveFunctionID(client, fnNameOrID)
+	fnID, err := resolveFnID(client, fnNameOrID)
+	if err != nil {
+		return err
+	}
 
 	body := map[string]any{
 		"path":        path,
@@ -110,37 +144,50 @@ func runRoutesSet(cmd *cobra.Command, args []string) {
 
 	resp, err := client.Post("/api/v1/routes", body)
 	if err != nil {
-		exitError("set: %v", err)
+		return fmt.Errorf("set: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("set: %v", err)
+		return err
 	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if outputJSON(cmd) {
+		return emitRaw(respBody)
 	}
-	fmt.Printf("Route %s → %s saved\n", path, fnID)
+	okf(cmd, "Route %s → %s saved", path, fnNameOrID)
+	return nil
 }
 
-func runRoutesDelete(cmd *cobra.Command, args []string) {
+func runRoutesDelete(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
 	path := args[0]
+
+	if err := confirm(cmd, fmt.Sprintf("Delete route %s?", path)); err != nil {
+		return err
+	}
+
 	// REST shape note: server expects ?path=... query param (handlers/routes.go).
 	q := url.Values{}
 	q.Set("path", path)
 
 	resp, err := client.Delete("/api/v1/routes?" + q.Encode())
 	if err != nil {
-		exitError("delete: %v", err)
+		return fmt.Errorf("delete: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("delete: %v", err)
+		return err
 	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 
-	fmt.Printf("Route %s deleted\n", path)
+	if outputJSON(cmd) {
+		return emitRaw(respBody)
+	}
+	okf(cmd, "Route %s deleted", path)
+	return nil
 }

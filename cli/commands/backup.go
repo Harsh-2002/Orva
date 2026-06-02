@@ -35,7 +35,7 @@ var backupDownloadCmd = &cobra.Command{
 	Long: `Download a point-in-time snapshot from the connected Orva instance.
 
 The default output filename matches the dashboard's: orva-backup-<RFC3339>.tar.gz
-in the current directory. Override with --output / -o.`,
+in the current directory. Override with --file / -f.`,
 	RunE: runBackupDownload,
 }
 
@@ -56,10 +56,8 @@ and reconnect.`,
 }
 
 func init() {
-	backupDownloadCmd.Flags().StringP("output", "o", "",
+	backupDownloadCmd.Flags().StringP("file", "f", "",
 		"output path (default: orva-backup-<RFC3339>.tar.gz in cwd)")
-	backupRestoreCmd.Flags().Bool("yes", false,
-		"skip the confirmation prompt (required for non-interactive use)")
 
 	backupCmd.AddCommand(backupDownloadCmd, backupRestoreCmd)
 }
@@ -69,7 +67,7 @@ func runBackupDownload(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	out, _ := cmd.Flags().GetString("output")
+	out, _ := cmd.Flags().GetString("file")
 	if out == "" {
 		stamp := time.Now().UTC().Format("2006-01-02T15-04-05Z")
 		out = fmt.Sprintf("orva-backup-%s.tar.gz", stamp)
@@ -115,17 +113,12 @@ func runBackupRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("archive is empty")
 	}
 
-	confirmed, _ := cmd.Flags().GetBool("yes")
-	if !confirmed {
-		fmt.Fprintf(os.Stderr,
-			"This will overwrite the live database, function code, "+
-				"secrets master key, and admin key.\n"+
-				"The orvad process will exit so its supervisor can reopen "+
-				"the restored files.\n\n"+
-				"Archive: %s (%s)\n\n"+
-				"Re-run with --yes to proceed.\n",
-			archivePath, formatBytes(st.Size()))
-		return fmt.Errorf("confirmation required")
+	infof(cmd, "This will overwrite the live database, function code, "+
+		"secrets master key, and admin key.\n"+
+		"The orvad process will exit so its supervisor can reopen the "+
+		"restored files.\nArchive: %s (%s)", archivePath, formatBytes(st.Size()))
+	if err := confirm(cmd, "Restore this snapshot over the live instance?"); err != nil {
+		return err
 	}
 
 	client, err := getClient(cmd)

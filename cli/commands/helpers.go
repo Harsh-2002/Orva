@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/spf13/cobra"
 )
 
@@ -61,8 +61,36 @@ func decodeJSON(resp *http.Response, v any) error {
 	return json.NewDecoder(resp.Body).Decode(v)
 }
 
-// exitError prints an error and exits.
-func exitError(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", a...)
-	os.Exit(1)
+// resolveFnID maps a name-or-id to a function ID, returning a clear error when
+// no function matches instead of silently passing the name through to a later
+// 404. A value that parses as a UUID is used directly.
+func resolveFnID(client *cli.Client, nameOrID string) (string, error) {
+	if ids.IsUUID(nameOrID) {
+		return nameOrID, nil
+	}
+
+	resp, err := client.Get("/api/v1/functions")
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Functions []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"functions"`
+	}
+	if err := decodeJSON(resp, &result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+
+	for _, fn := range result.Functions {
+		if fn.Name == nameOrID {
+			return fn.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no function named %q (run `orva functions list` to see available functions)", nameOrID)
 }
