@@ -25,7 +25,8 @@
         <input
           v-model="filters.q"
           placeholder="Search errors, container ids…"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
+          aria-label="Search invocations by error or container id"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           @input="onSearchInput"
         >
       </div>
@@ -69,16 +70,78 @@
       </button>
     </div>
 
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+    <!-- All-failed fallback: every parallel fetch rejected. Distinct from
+         the empty state — offers a Retry instead of trapping the user in a
+         perpetual spinner. -->
+    <div
+      v-if="loadError && logs.length === 0"
+      class="bg-background border border-border rounded-lg px-6 py-12 text-center"
+    >
+      <CircleAlert class="w-8 h-8 mx-auto text-danger-fg opacity-60" />
+      <p class="mt-3 text-sm text-foreground">Could not load invocations.</p>
+      <p class="mt-1 text-xs text-foreground-muted">{{ loadError }}</p>
+      <Button variant="secondary" size="sm" class="mt-4" @click="refresh">
+        <RefreshCw class="w-3.5 h-3.5 mr-2" />
+        Retry
+      </Button>
+    </div>
+
+    <div v-else class="bg-background border border-border rounded-lg overflow-x-auto">
+      <!-- Mobile (<sm) stacked-row list. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="log in logs"
+          :key="log.id"
+          class="px-4 py-3 cursor-pointer transition-colors"
+          :class="selected.has(log.id) ? 'bg-surface/30' : 'hover:bg-surface/50'"
+          @click="openDetail(log)"
+        >
+          <div class="flex items-start gap-3">
+            <input
+              :checked="selected.has(log.id)"
+              type="checkbox"
+              class="mt-0.5 w-3.5 h-3.5 rounded border-border bg-background shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              @click.stop
+              @change="toggleOne(log.id)"
+            >
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium text-white truncate">{{ getFnName(log.function_id) }}</span>
+                <StatusBadge :status="log.status" />
+              </div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                <span>{{ formatTime(log.started_at) }}</span>
+                <span v-if="log.duration_ms != null" class="font-mono">{{ log.duration_ms }}ms</span>
+                <span v-if="log.status_code != null" class="font-mono">HTTP {{ log.status_code }}</span>
+                <span
+                  v-if="log.cold_start"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-info-fg border-info-ring"
+                >cold</span>
+              </div>
+              <div v-if="log.trace_id" class="mt-1 text-[11px] text-foreground-muted font-mono break-all">
+                trace {{ log.trace_id.substring(0, 11) }}
+              </div>
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="logs.length === 0 && !loading"
+          class="px-6 py-12 text-center text-sm text-foreground-muted"
+        >
+          {{ hasActiveFilter ? 'No matches.' : 'No invocations yet.' }}
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-4 py-3 w-8">
               <input
+                ref="selectAllRef"
                 type="checkbox"
                 :checked="allChecked"
-                :indeterminate.prop="someChecked && !allChecked"
-                class="w-3.5 h-3.5 rounded border-border bg-background"
+                aria-label="Select all invocations"
+                class="w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 @change="toggleAll"
               >
             </th>
@@ -104,7 +167,8 @@
               <input
                 :checked="selected.has(log.id)"
                 type="checkbox"
-                class="w-3.5 h-3.5 rounded border-border bg-background"
+                aria-label="Select invocation"
+                class="w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 @change="toggleOne(log.id)"
               >
             </td>
@@ -125,7 +189,7 @@
             <td class="px-4 py-3 hidden md:table-cell">
               <span
                 v-if="log.cold_start"
-                class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-blue-400 border-blue-900/40"
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-info-fg border-info-ring"
               >
                 cold
               </span>
@@ -154,7 +218,7 @@
             </td>
           </tr>
           <tr v-if="logs.length === 0 && !loading">
-            <td colspan="8" class="px-6 py-8 text-center text-foreground-muted">
+            <td colspan="9" class="px-6 py-8 text-center text-foreground-muted">
               {{ hasActiveFilter ? 'No matches.' : 'No invocations yet.' }}
             </td>
           </tr>
@@ -181,7 +245,7 @@
     <transition name="fade">
       <div
         v-if="selected.size"
-        class="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-2xl rounded-full pl-4 pr-2 py-2"
+        class="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-lg rounded-full pl-4 pr-2 py-2"
       >
         <span class="text-xs text-white">{{ selected.size }} selected</span>
         <span class="w-px h-4 bg-border" />
@@ -207,8 +271,22 @@
       <div v-if="detailLoading" class="p-6 text-sm text-foreground-muted">
         Loading…
       </div>
+      <div v-else-if="detailError" class="p-8 text-center">
+        <CircleAlert class="w-8 h-8 mx-auto text-danger-fg opacity-60" />
+        <p class="mt-3 text-sm text-foreground">Could not load this invocation.</p>
+        <p class="mt-1 text-xs text-foreground-muted">{{ detailError }}</p>
+        <Button
+          variant="secondary"
+          size="sm"
+          class="mt-4"
+          @click="lastDetailLog && openDetail(lastDetailLog)"
+        >
+          <RefreshCw class="w-3.5 h-3.5 mr-2" />
+          Retry
+        </Button>
+      </div>
       <div v-else-if="!drawerRow" class="p-6 text-sm text-foreground-muted">
-        Nothing drawerRow.
+        No invocation selected.
       </div>
       <div v-else class="p-5 space-y-5">
         <!-- Status badges row -->
@@ -216,7 +294,7 @@
           <StatusBadge :status="drawerRow.status" />
           <span
             v-if="drawerRow.cold_start"
-            class="inline-flex items-center px-2.5 py-1 rounded text-xs border bg-background font-mono text-blue-400 border-blue-900/40"
+            class="inline-flex items-center px-2.5 py-1 rounded text-xs border bg-background font-mono text-info-fg border-info-ring"
           >
             cold start
           </span>
@@ -251,7 +329,7 @@
         <!-- Error message -->
         <div v-if="drawerRow.error_message">
           <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Error</h3>
-          <pre class="bg-red-950/30 border border-red-900/40 rounded p-3 text-xs text-red-300 font-mono whitespace-pre-wrap break-words">{{ drawerRow.error_message }}</pre>
+          <pre class="bg-danger-tint border border-danger-ring rounded p-3 text-xs text-danger-fg font-mono whitespace-pre-wrap break-words">{{ drawerRow.error_message }}</pre>
         </div>
 
         <!-- v0.4 A3: captured Request panel. Shown when capture is on
@@ -276,7 +354,7 @@
                   <span class="text-foreground-muted shrink-0">{{ name }}:</span>
                   <span
                     class="text-foreground break-all"
-                    :class="{ 'text-yellow-500/90': value === '[REDACTED]' }"
+                    :class="{ 'text-warning-fg': value === '[REDACTED]' }"
                   >{{ value }}</span>
                 </div>
               </div>
@@ -285,7 +363,7 @@
               <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Body</div>
               <pre class="bg-background border border-border rounded p-2 text-xs text-foreground font-mono overflow-auto max-h-40 whitespace-pre-wrap break-words">{{ prettyBody(requestData.body) }}</pre>
             </div>
-            <div v-if="requestData.truncated" class="text-[11px] text-yellow-500/90">
+            <div v-if="requestData.truncated" class="text-[11px] text-warning-fg">
               Body was truncated at the configured cap. Replay is disabled for this row.
             </div>
             <!-- v0.4 B3: Save as fixture. Round-trips the captured envelope
@@ -393,9 +471,9 @@
 
 <script setup>
 import { EMPTY } from '@/utils/format'
-import { ref, computed, h, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
+import { ref, computed, h, watch, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles, Network } from 'lucide-vue-next'
+import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles, Network, CircleAlert } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
@@ -412,9 +490,16 @@ const PAGE_SIZE = 50
 const logs = ref([])
 const total = ref(0)
 const loading = ref(false)
+// Non-null when the initial parallel fetch fully failed — drives the
+// all-failed fallback (error + Retry) instead of an endless spinner.
+const loadError = ref('')
 const bulkDeleting = ref(false)
 const drawerOpen = ref(false)
 const detailLoading = ref(false)
+// Set when every parallel detail fetch (detail + logs + request) rejected —
+// drives an error + Retry state inside the drawer instead of showing a blank
+// body that looks like it's still loading.
+const detailError = ref('')
 const drawerRow = ref(null)
 const selected = ref(new Set())  // bulk-select set of execution IDs
 const stderrText = ref('')
@@ -425,8 +510,8 @@ const structuredLogs = ref([])
 
 const logLevelClass = (level) => {
   switch (level) {
-    case 'error': return 'text-red-300'
-    case 'warn':  return 'text-amber-300'
+    case 'error': return 'text-danger-fg'
+    case 'warn':  return 'text-warning-fg'
     case 'debug': return 'text-foreground-muted'
     default:      return 'text-primary-light'
   }
@@ -462,6 +547,19 @@ const allChecked = computed(() =>
 )
 const someChecked = computed(() =>
   logs.value.some((l) => selected.value.has(l.id)),
+)
+
+// `indeterminate` is a DOM property with no matching HTML attribute, so it
+// can't be set via a Vue binding reliably across re-renders. Drive it
+// imperatively through a template ref whenever the partial-selection state
+// changes.
+const selectAllRef = ref(null)
+watch(
+  () => someChecked.value && !allChecked.value,
+  (indeterminate) => {
+    if (selectAllRef.value) selectAllRef.value.indeterminate = indeterminate
+  },
+  { immediate: true },
 )
 const toggleOne = (id) => {
   const next = new Set(selected.value)
@@ -668,8 +766,12 @@ const fetchLogs = async () => {
     const res = await listInvocations(buildParams(0))
     logs.value = res.data.executions || []
     total.value = res.data.total ?? logs.value.length
+    loadError.value = ''
   } catch (e) {
     console.error('Failed to fetch logs:', e)
+    // Surface the failure so the all-failed fallback (error + Retry) can
+    // render in place of an endless spinner when we have no rows to show.
+    loadError.value = e?.response?.data?.error?.message || e.message || 'Request failed'
   } finally {
     loading.value = false
   }
@@ -723,10 +825,16 @@ const bulkDelete = async () => {
   }
 }
 
+// Remembers the row passed to the open drawer so the in-drawer Retry can
+// re-run the same fetch without the caller plumbing the argument back in.
+const lastDetailLog = ref(null)
+
 const openDetail = async (log) => {
+  lastDetailLog.value = log
   drawerRow.value = log
   drawerOpen.value = true
   detailLoading.value = true
+  detailError.value = ''
   stderrText.value = ''
   copied.value = false
   requestData.value = null
@@ -738,6 +846,14 @@ const openDetail = async (log) => {
       getInvocationLogs(log.id),
       getExecutionRequest(log.id),
     ])
+    // A rejected request envelope is expected (404 when capture is off), so
+    // it doesn't count toward "everything failed". If both detail AND logs
+    // rejected, we have nothing meaningful to render — surface a retry.
+    if (detailRes.status === 'rejected' && logsRes.status === 'rejected') {
+      const err = detailRes.reason
+      detailError.value =
+        err?.response?.data?.error?.message || err?.message || 'Failed to load invocation detail'
+    }
     if (detailRes.status === 'fulfilled') {
       // Server returns the full Execution row — overlay over the row data.
       drawerRow.value = { ...log, ...detailRes.value.data }
@@ -926,16 +1042,12 @@ const suggestFix = async () => {
   }
 }
 
-// onMounted runs once even with keep-alive — initial load only.
-onMounted(async () => {
-  await loadFnMap()
-  await fetchLogs()
-})
-
 // keep-alive lifecycle: pause polling when the view is offscreen and
 // resume when the user comes back. This avoids running a 5s timer for
 // every cached view, and refreshes once on re-activation so they see
 // new rows immediately.
+// startPolling is idempotent — the pollTimer guard prevents a second
+// interval if onMounted and onActivated both fire on the initial mount.
 const startPolling = () => {
   if (pollTimer) return
   pollTimer = setInterval(fetchLogs, 5000)
@@ -943,7 +1055,13 @@ const startPolling = () => {
 const stopPolling = () => {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
-onMounted(startPolling)
+
+// onMounted runs once even with keep-alive — initial load + start polling.
+onMounted(async () => {
+  await loadFnMap()
+  await fetchLogs()
+  startPolling()
+})
 onActivated(() => { fetchLogs(); startPolling() })
 onDeactivated(stopPolling)
 onUnmounted(stopPolling)

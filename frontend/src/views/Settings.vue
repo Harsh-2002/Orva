@@ -196,6 +196,7 @@
               v-model="pwForm.current"
               type="password"
               autocomplete="current-password"
+              aria-describedby="pw-error"
               class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
@@ -206,6 +207,7 @@
               v-model="pwForm.next"
               type="password"
               autocomplete="new-password"
+              aria-describedby="pw-error"
               class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
@@ -216,6 +218,7 @@
               v-model="pwForm.confirm"
               type="password"
               autocomplete="new-password"
+              aria-describedby="pw-error"
               class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
@@ -224,6 +227,7 @@
 
         <div
           v-if="pwError"
+          id="pw-error"
           class="rounded-md border border-red-700/40 bg-red-950/30 p-2.5 text-xs text-red-200"
         >
           {{ pwError }}

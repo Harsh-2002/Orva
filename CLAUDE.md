@@ -1,6 +1,6 @@
 # Orva
 
-Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node 22/24), Python (3.13/3.14), or TypeScript functions; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, and MCP server.
+Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node 22/24), Python (3.13/3.14), or TypeScript functions; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, MCP server, and an in-product AI chat assistant (the **AI** sidebar section) that operates the instance end-to-end via in-process tool calling (BYO provider keys, embedded Bifrost gateway).
 
 ## Quick Start
 

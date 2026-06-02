@@ -48,8 +48,9 @@
         <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
         <input
           v-model="prefix"
+          aria-label="Search keys by prefix"
           placeholder="Search by key prefix… (e.g. user:)"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:border-white"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           @input="onPrefixInput"
         >
       </div>
@@ -70,7 +71,55 @@
 
     <!-- Table -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-row list. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="row in rows"
+          :key="row.key"
+          class="px-4 py-3 cursor-pointer hover:bg-surface-hover transition-colors"
+          @click="openInspect(row)"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="font-mono text-xs text-white break-all">{{ row.key }}</div>
+              <div class="mt-1 font-mono text-[11px] text-foreground-muted break-all">
+                {{ valuePreview(row.value) }}
+              </div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                <span
+                  v-if="row.expires_at"
+                  :class="ttlClass(row.expires_at)"
+                >{{ formatTTL(row.expires_at) }}</span>
+                <span class="font-mono">{{ formatBytes(row.size_bytes) }}</span>
+                <span>{{ formatRelative(row.updated_at) }}</span>
+              </div>
+            </div>
+            <div class="shrink-0" @click.stop>
+              <IconButton
+                :icon="Trash2"
+                variant="danger"
+                title="Delete key"
+                @click="confirmDelete(row)"
+              />
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="!loading && !rows.length"
+          class="px-6 py-12 text-center text-sm text-foreground-muted"
+        >
+          <template v-if="prefix">
+            No keys match
+            <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">{{ prefix }}</code>.
+          </template>
+          <template v-else>
+            No keys yet. Your function will write here when it calls
+            <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">orva.kv.put(...)</code>.
+          </template>
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-4 py-3">Key</th>
@@ -85,7 +134,7 @@
           <tr
             v-for="row in rows"
             :key="row.key"
-            class="hover:bg-surface/40 cursor-pointer transition-colors"
+            class="hover:bg-surface-hover cursor-pointer transition-colors"
             @click="openInspect(row)"
           >
             <td class="px-4 py-3 font-mono text-xs text-white truncate max-w-[360px]">
@@ -181,8 +230,15 @@
             v-model.number="inspect.ttlSeconds"
             type="number"
             min="0"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-white"
+            max="31536000"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
+          <p
+            class="text-[11px] mt-1.5"
+            :class="ttlInvalid(inspect.ttlSeconds) ? 'text-danger-fg' : 'text-foreground-muted'"
+          >
+            Must be between 0 and 31536000 (1 year).
+          </p>
         </div>
 
         <!-- Value editor -->
@@ -259,8 +315,15 @@
             v-model.number="setKey.ttlSeconds"
             type="number"
             min="0"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-white"
+            max="31536000"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
+          <p
+            class="text-[11px] mt-1.5"
+            :class="ttlInvalid(setKey.ttlSeconds) ? 'text-danger-fg' : 'text-foreground-muted'"
+          >
+            Must be between 0 and 31536000 (1 year).
+          </p>
         </div>
         <div>
           <div class="flex items-center justify-between mb-2">
@@ -344,6 +407,15 @@ const setKey = reactive({
   error: '',
 })
 
+// ── Validation ──────────────────────────────────────────────────────
+// TTL must be a non-negative integer no greater than one year. Mirrors
+// the min/max bounds on the number inputs.
+const MAX_TTL_SECONDS = 31536000
+const ttlInvalid = (v) => {
+  const n = Number(v)
+  return !Number.isFinite(n) || n < 0 || n > MAX_TTL_SECONDS
+}
+
 // ── Derived ─────────────────────────────────────────────────────────
 const totalSize = computed(() =>
   rows.value.reduce((sum, r) => sum + (r.size_bytes || 0), 0),
@@ -393,6 +465,10 @@ const openInspect = (row) => {
 }
 
 const saveInspect = async () => {
+  if (ttlInvalid(inspect.ttlSeconds)) {
+    inspect.error = 'TTL must be between 0 and 31536000 (1 year).'
+    return
+  }
   let parsed
   try {
     parsed = JSON.parse(inspect.text)
@@ -442,6 +518,10 @@ const saveSetKey = async () => {
   const key = setKey.key.trim()
   if (!key) {
     setKey.error = 'Key is required'
+    return
+  }
+  if (ttlInvalid(setKey.ttlSeconds)) {
+    setKey.error = 'TTL must be between 0 and 31536000 (1 year).'
     return
   }
   // Default to a JSON-shaped string if the textarea is empty so the

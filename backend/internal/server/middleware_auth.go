@@ -23,9 +23,11 @@ type sessionCacheEntry struct {
 const sessionCacheTTL = 30 * time.Second
 
 // authMiddleware validates API key authentication and permission checks.
-// Uses an in-memory cache to avoid hitting SQLite on every request.
-func authMiddleware(db *database.Database, next http.Handler) http.Handler {
-	var keyCache sync.Map     // keyHash -> *database.APIKey
+// Uses an in-memory cache to avoid hitting SQLite on every request. keyCache is
+// owned by the Router and shared so the keys handler can evict an entry the
+// instant a key is deleted — otherwise a revoked key would keep authenticating
+// until process restart (it is only otherwise dropped on expiry).
+func authMiddleware(db *database.Database, keyCache *sync.Map, next http.Handler) http.Handler {
 	var sessionCache sync.Map // token -> sessionCacheEntry
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

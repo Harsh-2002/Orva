@@ -25,24 +25,25 @@ func TestSchemaPortability(t *testing.T) {
 	deps := Deps{} // empty deps — handlers won't run; we only inspect schemas
 	perms := allPerms()
 
-	// Register every operator-mode tool surface.
-	registerSystemTools(srv, deps, perms)
-	registerFunctionTools(srv, deps, perms)
-	registerInvokeTools(srv, deps, perms)
-	registerDeployTools(srv, deps, perms)
-	registerSecretTools(srv, deps, perms)
-	registerRouteTools(srv, deps, perms)
-	registerFixtureTools(srv, deps, perms)
-	registerFirewallTools(srv, deps, perms)
-	registerWebhookTools(srv, deps, perms)
-	registerInboundWebhookTools(srv, deps, perms)
-	registerKeyTools(srv, deps, perms)
-	registerKVTools(srv, deps, perms)
-	registerJobTools(srv, deps, perms)
-	registerCronTools(srv, deps, perms)
-	registerPoolTools(srv, deps, perms)
-	registerTraceTools(srv, deps, perms)
-	registerDocsTools(srv, deps, perms)
+	// Register every operator-mode tool surface (via the shared regCtx).
+	rc := serverRegCtx(srv, deps, perms)
+	registerSystemTools(rc)
+	registerFunctionTools(rc)
+	registerInvokeTools(rc)
+	registerDeployTools(rc)
+	registerSecretTools(rc)
+	registerRouteTools(rc)
+	registerFixtureTools(rc)
+	registerFirewallTools(rc)
+	registerWebhookTools(rc)
+	registerInboundWebhookTools(rc)
+	registerKeyTools(rc)
+	registerKVTools(rc)
+	registerJobTools(rc)
+	registerCronTools(rc)
+	registerPoolTools(rc)
+	registerTraceTools(rc)
+	registerDocsTools(rc)
 
 	// Connect via an in-memory transport so we can hit the public
 	// ListTools API without needing a real network listener.

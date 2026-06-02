@@ -74,6 +74,28 @@ func (db *Database) GetAPIKeyByHash(hash string) (*APIKey, error) {
 	return &key, nil
 }
 
+// GetAPIKeyByID looks up a key by its id. Used by the AI chat handler to
+// resolve an API-key caller's permission set when scoping the agent's tool
+// catalog.
+func (db *Database) GetAPIKeyByID(id string) (*APIKey, error) {
+	var key APIKey
+	var lastUsed, expires sql.NullTime
+	err := db.read.QueryRow(`
+		SELECT id, key_hash, COALESCE(key_prefix, ''), name, permissions, created_at, last_used_at, expires_at
+		FROM api_keys WHERE id = ?`, id,
+	).Scan(&key.ID, &key.KeyHash, &key.Prefix, &key.Name, &key.Permissions, &key.CreatedAt, &lastUsed, &expires)
+	if err != nil {
+		return nil, err
+	}
+	if lastUsed.Valid {
+		key.LastUsedAt = &lastUsed.Time
+	}
+	if expires.Valid {
+		key.ExpiresAt = &expires.Time
+	}
+	return &key, nil
+}
+
 func (db *Database) ListAPIKeys() ([]*APIKey, error) {
 	rows, err := db.read.Query(`
 		SELECT id, key_hash, COALESCE(key_prefix, ''), name, permissions, created_at, last_used_at, expires_at

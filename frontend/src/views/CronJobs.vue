@@ -16,7 +16,74 @@
     </div>
 
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-row list. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="job in jobs"
+          :key="job.id"
+          class="px-4 py-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium text-foreground truncate">{{ job.function_name }}</span>
+                <span
+                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border"
+                  :class="job.enabled ? 'bg-success-tint text-success-fg border-success-ring' : 'bg-warning-tint text-warning-fg border-warning-ring'"
+                >
+                  <component
+                    :is="job.enabled ? CheckCircle2 : Clock"
+                    class="h-3 w-3 shrink-0"
+                    aria-hidden="true"
+                  />
+                  {{ job.enabled ? 'Active' : 'Paused' }}
+                </span>
+              </div>
+              <div class="mt-1 text-[11px] text-foreground font-mono break-all">{{ job.cron_expression }}</div>
+              <div class="mt-0.5 text-[11px] text-foreground-muted">
+                {{ humanizeCron(job.cron_expression) }}
+                <span class="text-foreground-muted/70">· {{ job.timezone || 'UTC' }}</span>
+              </div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                <span>last {{ job.last_run_at ? formatDate(job.last_run_at) : EMPTY }}</span>
+                <span>next {{ job.next_run_at ? formatDate(job.next_run_at) : EMPTY }}</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <IconButton
+                :icon="job.enabled ? Pause : Play"
+                :title="job.enabled ? 'Pause' : 'Resume'"
+                @click="toggleSchedule(job)"
+              />
+              <IconButton
+                :icon="Edit"
+                title="Edit"
+                @click="editSchedule(job)"
+              />
+              <IconButton
+                :icon="Trash2"
+                variant="danger"
+                title="Delete"
+                @click="deleteSchedule(job)"
+              />
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="jobs.length === 0"
+          class="px-6 py-12 text-center"
+        >
+          <Clock class="w-12 h-12 text-foreground-muted mx-auto mb-3 opacity-60" />
+          <p class="text-foreground-muted">
+            No scheduled jobs yet.
+          </p>
+          <p class="text-foreground-muted text-xs mt-1">
+            Create your first schedule to automate function execution.
+          </p>
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-6 py-3 font-medium">
@@ -45,12 +112,12 @@
             :key="job.id"
             class="hover:bg-surface-hover transition-colors"
           >
-            <td class="px-6 py-4 font-medium text-foreground">
+            <td class="px-6 py-4 font-medium text-foreground max-w-[16rem] truncate">
               {{ job.function_name }}
             </td>
             <td class="px-6 py-4">
               <div class="flex flex-col gap-1">
-                <span class="text-foreground font-mono text-xs">{{ job.cron_expression }}</span>
+                <span class="text-foreground font-mono text-xs break-all">{{ job.cron_expression }}</span>
                 <span class="text-foreground-muted text-[10px]">
                   {{ humanizeCron(job.cron_expression) }}
                   <span class="text-foreground-muted/70">· {{ job.timezone || 'UTC' }}</span>
@@ -59,9 +126,14 @@
             </td>
             <td class="px-6 py-4 hidden sm:table-cell">
               <span
-                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                :class="job.enabled ? 'bg-success/10 text-success border border-success/30' : 'bg-foreground-muted/10 text-foreground-muted border border-foreground-muted/30'"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border"
+                :class="job.enabled ? 'bg-success-tint text-success-fg border-success-ring' : 'bg-warning-tint text-warning-fg border-warning-ring'"
               >
+                <component
+                  :is="job.enabled ? CheckCircle2 : Clock"
+                  class="h-3 w-3 shrink-0"
+                  aria-hidden="true"
+                />
                 {{ job.enabled ? 'Active' : 'Paused' }}
               </span>
             </td>
@@ -97,7 +169,7 @@
               colspan="6"
               class="px-6 py-12 text-center"
             >
-              <Clock class="w-12 h-12 text-foreground-muted mx-auto mb-3 opacity-30" />
+              <Clock class="w-12 h-12 text-foreground-muted mx-auto mb-3 opacity-60" />
               <p class="text-foreground-muted">
                 No scheduled jobs yet.
               </p>
@@ -111,30 +183,19 @@
     </div>
 
     <!-- Create/Edit Modal -->
-    <div
-      v-if="showCreateModal"
-      class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+    <Modal
+      :model-value="showCreateModal"
+      :title="editingJob ? 'Edit Schedule' : 'Create Schedule'"
+      size="lg"
+      @update:model-value="(v) => { if (!v) closeModal() }"
     >
-      <div class="bg-surface border border-border rounded-lg w-full max-w-2xl shadow-2xl shadow-black/50 max-h-[90vh] overflow-y-auto">
-        <div class="border-b border-border px-6 py-4 flex items-center justify-between sticky top-0 bg-surface">
-          <h2 class="text-lg font-semibold text-foreground">
-            {{ editingJob ? 'Edit Schedule' : 'Create Schedule' }}
-          </h2>
-          <button
-            class="text-foreground-muted hover:text-foreground"
-            @click="closeModal"
-          >
-            <X class="w-5 h-5" />
-          </button>
-        </div>
-
-        <div class="p-6 space-y-5">
+      <div class="space-y-5">
           <!-- Function Selection -->
           <div>
             <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Function</label>
-            <select 
+            <select
               v-model="form.function_name"
-              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
               :disabled="!!editingJob"
             >
               <option value="">
@@ -154,10 +215,10 @@
           <div>
             <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Schedule Type</label>
             <div class="flex gap-2 bg-background rounded-lg p-1 border border-border">
-              <button 
-                v-for="type in ['simple', 'advanced']" 
+              <button
+                v-for="type in ['simple', 'advanced']"
                 :key="type"
-                class="flex-1 py-2 px-3 text-sm font-medium rounded transition-colors"
+                class="flex-1 py-2 px-3 text-sm font-medium rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 :class="scheduleType === type ? 'bg-primary text-primary-foreground shadow-sm' : 'text-foreground-muted hover:text-foreground'"
                 @click="scheduleType = type"
               >
@@ -176,7 +237,7 @@
                 <label class="text-xs font-medium text-foreground-muted block mb-1.5">Frequency</label>
                 <select
                   v-model="simpleSchedule.frequency"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                   @change="updateCronFromSimple"
                 >
                   <option value="minute">
@@ -204,7 +265,7 @@
                   type="number"
                   min="0"
                   max="59"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                   @input="updateCronFromSimple"
                 >
               </div>
@@ -216,7 +277,7 @@
                   type="number"
                   min="0"
                   max="23"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                   @input="updateCronFromSimple"
                 >
               </div>
@@ -225,7 +286,7 @@
                 <label class="text-xs font-medium text-foreground-muted block mb-1.5">Day of Week</label>
                 <select
                   v-model="simpleSchedule.dayOfWeek"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                   @change="updateCronFromSimple"
                 >
                   <option value="0">
@@ -259,7 +320,7 @@
                   type="number"
                   min="1"
                   max="31"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                   @input="updateCronFromSimple"
                 >
               </div>
@@ -288,7 +349,7 @@
               <input 
                 v-model="form.cron"
                 placeholder="* * * * *"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
               >
               <p class="text-xs text-foreground-muted mt-1.5">
                 Format: minute hour day month weekday
@@ -333,7 +394,7 @@
               id="enabled-toggle"
               v-model="form.enabled"
               type="checkbox"
-              class="w-4 h-4 text-primary bg-background border-border rounded focus:ring-primary focus:ring-2"
+              class="w-4 h-4 text-primary bg-background border-border rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
             <label
               for="enabled-toggle"
@@ -342,33 +403,33 @@
               Enable schedule immediately
             </label>
           </div>
-        </div>
-
-        <div class="border-t border-border px-6 py-4 flex items-center justify-end gap-3 bg-surface sticky bottom-0">
-          <Button
-            variant="ghost"
-            @click="closeModal"
-          >
-            Cancel
-          </Button>
-          <Button
-            :disabled="!form.function_name || !form.cron"
-            @click="saveSchedule"
-          >
-            {{ editingJob ? 'Update' : 'Create' }} Schedule
-          </Button>
-        </div>
       </div>
-    </div>
+
+      <template #footer>
+        <Button
+          variant="ghost"
+          @click="closeModal"
+        >
+          Cancel
+        </Button>
+        <Button
+          :disabled="!form.function_name || !form.cron"
+          @click="saveSchedule"
+        >
+          {{ editingJob ? 'Update' : 'Create' }} Schedule
+        </Button>
+      </template>
+    </Modal>
   </div>
 </template>
 
 <script setup>
 import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
-import { PlusCircle, Trash2, Clock, X, Edit, Play, Pause } from 'lucide-vue-next'
+import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import Modal from '@/components/common/Modal.vue'
 import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions, browserTimezone } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 

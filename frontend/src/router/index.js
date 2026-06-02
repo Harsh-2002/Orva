@@ -23,6 +23,7 @@ const router = createRouter({
       meta: { requiresAuth: true },
       children: [
         { path: '', name: 'dashboard', component: () => import('@/views/Dashboard.vue') },
+        { path: 'ai', name: 'ai', component: () => import('@/views/AI.vue') },
         { path: 'functions', name: 'functions', component: () => import('@/views/FunctionsList.vue') },
         { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue') },
         { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue') },

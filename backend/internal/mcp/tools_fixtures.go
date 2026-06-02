@@ -123,89 +123,86 @@ func normaliseFixtureInput(in *SaveFixtureInput) error {
 	return nil
 }
 
-func registerFixtureTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_fixtures",
-				Title:        "List Fixtures",
-				Description: "List saved request fixtures for one function. Fixtures are reusable Postman-style presets (method, path, headers, body) used to invoke the function from the editor's Test pane or via test_function_with_fixture.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFixturesInput) (*mcpsdk.CallToolResult, ListFixturesOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, ListFixturesOutput{}, err
-				}
-				rows, err := deps.DB.ListFixtures(fn.ID)
-				if err != nil {
-					return nil, ListFixturesOutput{}, err
-				}
-				out := ListFixturesOutput{Fixtures: make([]FixtureView, 0, len(rows))}
-				for _, f := range rows {
-					out.Fixtures = append(out.Fixtures, toFixtureView(f))
-				}
-				return nil, out, nil
-			},
-		)
-	})
+func registerFixtureTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "fixtures"
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "save_fixture",
-				Title:        "Save Fixture",
-				Description: "Create or update a saved request fixture for a function. Idempotent on (function_id, name) — re-calling with the same name overwrites method/path/headers/body. Use list_fixtures to see what's already saved before creating dupes.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in SaveFixtureInput) (*mcpsdk.CallToolResult, SaveFixtureOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, SaveFixtureOutput{}, err
-				}
-				if err := normaliseFixtureInput(&in); err != nil {
-					return nil, SaveFixtureOutput{}, err
-				}
-				headersJSON, _ := json.Marshal(in.Headers)
-				row := &database.Fixture{
-					FunctionID:  fn.ID,
-					Name:        in.Name,
-					Method:      in.Method,
-					Path:        in.Path,
-					HeadersJSON: string(headersJSON),
-					Body:        []byte(in.Body),
-				}
-				saved, err := deps.DB.UpsertFixture(row)
-				if err != nil {
-					return nil, SaveFixtureOutput{}, err
-				}
-				return nil, SaveFixtureOutput{Fixture: toFixtureView(saved)}, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_fixtures",
+			Title:       "List Fixtures",
+			Description: "List saved request fixtures for one function. Fixtures are reusable Postman-style presets (method, path, headers, body) used to invoke the function from the editor's Test pane or via test_function_with_fixture.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFixturesInput) (*mcpsdk.CallToolResult, ListFixturesOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, ListFixturesOutput{}, err
+			}
+			rows, err := deps.DB.ListFixtures(fn.ID)
+			if err != nil {
+				return nil, ListFixturesOutput{}, err
+			}
+			out := ListFixturesOutput{Fixtures: make([]FixtureView, 0, len(rows))}
+			for _, f := range rows {
+				out.Fixtures = append(out.Fixtures, toFixtureView(f))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "delete_fixture",
-				Title:        "Delete Fixture",
-				Description: "Remove a saved fixture by (function_id, name). Idempotent — returns ok even if the fixture didn't exist.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteFixtureInput) (*mcpsdk.CallToolResult, DeleteFixtureOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, DeleteFixtureOutput{}, err
-				}
-				name := strings.TrimSpace(in.Name)
-				if name == "" {
-					return nil, DeleteFixtureOutput{}, errors.New("name is required")
-				}
-				if err := deps.DB.DeleteFixture(fn.ID, name); err != nil {
-					return nil, DeleteFixtureOutput{}, err
-				}
-				return nil, DeleteFixtureOutput{Status: "deleted", Name: name}, nil
-			},
-		)
-	})
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "save_fixture",
+			Title:       "Save Fixture",
+			Description: "Create or update a saved request fixture for a function. Idempotent on (function_id, name) — re-calling with the same name overwrites method/path/headers/body. Use list_fixtures to see what's already saved before creating dupes.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in SaveFixtureInput) (*mcpsdk.CallToolResult, SaveFixtureOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, SaveFixtureOutput{}, err
+			}
+			if err := normaliseFixtureInput(&in); err != nil {
+				return nil, SaveFixtureOutput{}, err
+			}
+			headersJSON, _ := json.Marshal(in.Headers)
+			row := &database.Fixture{
+				FunctionID:  fn.ID,
+				Name:        in.Name,
+				Method:      in.Method,
+				Path:        in.Path,
+				HeadersJSON: string(headersJSON),
+				Body:        []byte(in.Body),
+			}
+			saved, err := deps.DB.UpsertFixture(row)
+			if err != nil {
+				return nil, SaveFixtureOutput{}, err
+			}
+			return nil, SaveFixtureOutput{Fixture: toFixtureView(saved)}, nil
+		},
+	)
+
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "delete_fixture",
+			Title:       "Delete Fixture",
+			Description: "Remove a saved fixture by (function_id, name). Idempotent — returns ok even if the fixture didn't exist.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteFixtureInput) (*mcpsdk.CallToolResult, DeleteFixtureOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, DeleteFixtureOutput{}, err
+			}
+			name := strings.TrimSpace(in.Name)
+			if name == "" {
+				return nil, DeleteFixtureOutput{}, errors.New("name is required")
+			}
+			if err := deps.DB.DeleteFixture(fn.ID, name); err != nil {
+				return nil, DeleteFixtureOutput{}, err
+			}
+			return nil, DeleteFixtureOutput{Status: "deleted", Name: name}, nil
+		},
+	)
 }

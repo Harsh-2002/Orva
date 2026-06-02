@@ -114,7 +114,7 @@
         </div>
         <div
           v-if="enqueue.error"
-          class="text-xs text-error"
+          class="text-xs text-danger-fg"
         >
           {{ enqueue.error }}
         </div>
@@ -142,13 +142,103 @@
 
     <!-- Table. -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <!-- Mobile (<sm) stacked-card list. Surfaces every column the
+           desktop table hides (status, attempts, scheduled, finished)
+           so nothing is silently dropped on small screens. -->
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="job in filteredJobs"
+          :key="job.id"
+          class="px-4 py-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="font-medium text-white truncate">
+                {{ job.function_name || job.function_id }}
+              </div>
+              <div class="text-[10px] text-foreground-muted font-mono break-all">
+                {{ job.id }}
+              </div>
+              <div class="mt-2">
+                <span
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border"
+                  :class="statusPill(job.status).classes"
+                >
+                  <component
+                    :is="statusPill(job.status).icon"
+                    class="w-3 h-3 shrink-0"
+                    aria-hidden="true"
+                  />
+                  {{ job.status }}
+                </span>
+              </div>
+              <p
+                v-if="job.last_error"
+                class="text-[11px] text-danger-fg mt-1 break-all"
+                :title="job.last_error"
+              >
+                {{ job.last_error }}
+              </p>
+              <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-foreground-muted">
+                <div>
+                  <dt class="uppercase tracking-wider text-[10px]">
+                    Attempts
+                  </dt>
+                  <dd>{{ job.attempts }} / {{ job.max_attempts }}</dd>
+                </div>
+                <div>
+                  <dt class="uppercase tracking-wider text-[10px]">
+                    Scheduled
+                  </dt>
+                  <dd>{{ formatDate(job.scheduled_at) }}</dd>
+                </div>
+                <div class="col-span-2">
+                  <dt class="uppercase tracking-wider text-[10px]">
+                    Finished
+                  </dt>
+                  <dd>{{ job.finished_at ? formatDate(job.finished_at) : EMPTY }}</dd>
+                </div>
+              </dl>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <IconButton
+                v-if="job.status === 'failed'"
+                :icon="RotateCcw"
+                variant="success"
+                title="Retry"
+                @click="retry(job)"
+              />
+              <IconButton
+                :icon="Trash2"
+                variant="danger"
+                title="Delete"
+                @click="remove(job)"
+              />
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="filteredJobs.length === 0"
+          class="px-4 py-12 text-center"
+        >
+          <Inbox class="w-10 h-10 text-foreground-muted mx-auto mb-3 opacity-60" />
+          <p class="text-foreground-muted text-sm">
+            {{ statusFilter === 'all' ? 'No jobs yet.' : `No ${statusFilter} jobs.` }}
+          </p>
+          <p class="text-foreground-muted text-xs mt-1">
+            Enqueue from inside a function with
+            <code class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface border border-border">orva.jobs.enqueue(name, payload)</code>.
+          </p>
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-4 py-3 font-medium">
               Function
             </th>
-            <th class="px-4 py-3 font-medium hidden sm:table-cell">
+            <th class="px-4 py-3 font-medium">
               Status
             </th>
             <th class="px-4 py-3 font-medium hidden md:table-cell">
@@ -177,16 +267,21 @@
                 <span class="text-[10px] text-foreground-muted font-mono">{{ job.id }}</span>
               </div>
             </td>
-            <td class="px-4 py-3 hidden sm:table-cell">
+            <td class="px-4 py-3">
               <span
-                class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border"
-                :class="statusPill(job.status)"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border"
+                :class="statusPill(job.status).classes"
               >
+                <component
+                  :is="statusPill(job.status).icon"
+                  class="w-3 h-3 shrink-0"
+                  aria-hidden="true"
+                />
                 {{ job.status }}
               </span>
               <p
                 v-if="job.last_error"
-                class="text-[11px] text-error mt-1 truncate max-w-xs"
+                class="text-[11px] text-danger-fg mt-1 truncate max-w-xs"
                 :title="job.last_error"
               >
                 {{ job.last_error }}
@@ -224,7 +319,7 @@
               colspan="6"
               class="px-4 py-12 text-center"
             >
-              <Inbox class="w-10 h-10 text-foreground-muted mx-auto mb-3 opacity-30" />
+              <Inbox class="w-10 h-10 text-foreground-muted mx-auto mb-3 opacity-60" />
               <p class="text-foreground-muted text-sm">
                 {{ statusFilter === 'all' ? 'No jobs yet.' : `No ${statusFilter} jobs.` }}
               </p>
@@ -243,7 +338,7 @@
 <script setup>
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus } from 'lucide-vue-next'
+import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus, CheckCircle2, XCircle, Clock, Circle } from 'lucide-vue-next'
 import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import Button from '@/components/common/Button.vue'
@@ -290,18 +385,21 @@ const counts = computed(() => {
   return c
 })
 
+// State is encoded three ways — color token + glyph + the status text —
+// so it never relies on hue alone (WCAG 1.4.1). No animate-pulse on the
+// running state: motion budget is <=150ms, so it uses a static info token.
 const statusPill = (s) => {
   switch (s) {
     case 'pending':
-      return 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+      return { classes: 'bg-warning-tint text-warning-fg border-warning-ring', icon: Clock }
     case 'running':
-      return 'bg-sky-500/15 text-sky-300 border-sky-500/30 animate-pulse'
+      return { classes: 'bg-info-tint text-info-fg border-info-ring', icon: Clock }
     case 'succeeded':
-      return 'bg-success/10 text-success border-success/30'
+      return { classes: 'bg-success-tint text-success-fg border-success-ring', icon: CheckCircle2 }
     case 'failed':
-      return 'bg-error/10 text-error border-error/30'
+      return { classes: 'bg-danger-tint text-danger-fg border-danger-ring', icon: XCircle }
     default:
-      return 'bg-surface text-foreground-muted border-border'
+      return { classes: 'bg-surface text-foreground-muted border-border', icon: Circle }
   }
 }
 
@@ -401,11 +499,15 @@ const submitEnqueue = async () => {
 onMounted(() => {
   loadJobs()
   // Auto-refresh every 5s while the page is open so running jobs
-  // visibly transition. Cleared on unmount.
-  pollTimer = setInterval(loadJobs, 5000)
+  // visibly transition. Guard against double-starting (HMR / remount)
+  // so we never leak a second interval; cleared on unmount.
+  if (!pollTimer) pollTimer = setInterval(loadJobs, 5000)
 })
 
 onBeforeUnmount(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 })
 </script>

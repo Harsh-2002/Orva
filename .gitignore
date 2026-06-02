@@ -72,3 +72,7 @@ modelcontextprotocol-sdk-*.tgz
 orva-backup-*
 reddit.md
 **/__pycache__/
+.gstack/
+
+# Design-tooling artifacts (impeccable critique snapshots)
+.impeccable/

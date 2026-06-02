@@ -65,18 +65,18 @@ type LogEntryRow struct {
 }
 
 type GetTraceOutput struct {
-	TraceID         string         `json:"trace_id"`
-	RootSpanID      string         `json:"root_span_id,omitempty"`
-	RootFunctionID  string         `json:"root_function_id,omitempty"`
-	Trigger         string         `json:"trigger,omitempty"`
-	StartedAt       string         `json:"started_at"`
-	TotalDurationMS int64          `json:"total_duration_ms"`
-	Status          string         `json:"status"`
-	HasOutlier      bool           `json:"has_outlier"`
-	SpanCount       int            `json:"span_count"`
-	Spans           []SpanRow      `json:"spans"`
-	UserSpans       []UserSpanRow  `json:"user_spans"`
-	LogEntries      []LogEntryRow  `json:"log_entries"`
+	TraceID         string        `json:"trace_id"`
+	RootSpanID      string        `json:"root_span_id,omitempty"`
+	RootFunctionID  string        `json:"root_function_id,omitempty"`
+	Trigger         string        `json:"trigger,omitempty"`
+	StartedAt       string        `json:"started_at"`
+	TotalDurationMS int64         `json:"total_duration_ms"`
+	Status          string        `json:"status"`
+	HasOutlier      bool          `json:"has_outlier"`
+	SpanCount       int           `json:"span_count"`
+	Spans           []SpanRow     `json:"spans"`
+	UserSpans       []UserSpanRow `json:"user_spans"`
+	LogEntries      []LogEntryRow `json:"log_entries"`
 }
 
 type ListTracesInput struct {
@@ -110,176 +110,173 @@ type GetFunctionBaselineInput struct {
 	FunctionID string `json:"function_id" jsonschema:"the function id (UUID) or friendly name"`
 }
 
-func registerTraceTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name: "get_trace",
-				Title: "Get Trace",
-				Description: "Return the full causal tree for a trace. Each span is one execution row; spans are ordered by started_at ascending so the root is first. Use this after list_traces or after spotting a slow request.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetTraceInput) (*mcpsdk.CallToolResult, GetTraceOutput, error) {
-				if in.TraceID == "" {
-					return nil, GetTraceOutput{}, fmt.Errorf("trace_id required")
-				}
-				execs, err := deps.DB.ListByTraceID(in.TraceID)
-				if err != nil {
-					return nil, GetTraceOutput{}, fmt.Errorf("list trace: %w", err)
-				}
-				if len(execs) == 0 {
-					return nil, GetTraceOutput{}, fmt.Errorf("no spans found for trace %s", in.TraceID)
-				}
-				view := handlers.BuildTraceViewForMCP(in.TraceID, execs, deps.Registry)
-				out := GetTraceOutput{
-					TraceID:         view.TraceID,
-					RootSpanID:      view.RootSpanID,
-					RootFunctionID:  view.RootFunctionID,
-					Trigger:         view.Trigger,
-					StartedAt:       view.StartedAt,
-					TotalDurationMS: view.TotalDurationMS,
-					Status:          view.Status,
-					HasOutlier:      view.HasOutlier,
-					SpanCount:       view.SpanCount,
-					Spans:           make([]SpanRow, len(view.Spans)),
-				}
-				for i, sp := range view.Spans {
-					out.Spans[i] = SpanRow{
-						ExecutionID:      sp.ExecutionID,
-						SpanID:           sp.SpanID,
-						ParentSpanID:     sp.ParentSpanID,
-						FunctionID:       sp.FunctionID,
-						FunctionName:     sp.FunctionName,
-						ParentFunctionID: sp.ParentFunctionID,
-						Trigger:          sp.Trigger,
-						Status:           sp.Status,
-						StatusCode:       sp.StatusCode,
-						ColdStart:        sp.ColdStart,
-						IsOutlier:        sp.IsOutlier,
-						BaselineP95MS:    sp.BaselineP95MS,
-						StartedAt:        sp.StartedAt,
-						DurationMS:       sp.DurationMS,
-						OffsetMS:         sp.OffsetMS,
-						ErrorMessage:     sp.ErrorMessage,
-					}
-				}
-				// v0.6 SDK upgrade: include user-defined spans + structured
-				// log entries so MCP clients see the full picture, not
-				// just the system spans.
-				out.UserSpans = []UserSpanRow{}
-				if userSpans, err := deps.DB.ListUserSpansByTrace(in.TraceID); err == nil {
-					for _, us := range userSpans {
-						out.UserSpans = append(out.UserSpans, UserSpanRow{
-							ID:           us.ID,
-							ExecutionID:  us.ExecutionID,
-							ParentSpanID: us.ParentSpanID,
-							Name:         us.Name,
-							StartedAt:    us.StartedAt.Format("2006-01-02T15:04:05.999999999Z"),
-							DurationMS:   us.DurationMS,
-							OffsetMS:     us.OffsetMS,
-							Status:       us.Status,
-							ErrorMessage: us.ErrorMessage,
-							Attributes:   us.Attributes,
-						})
-					}
-				}
-				out.LogEntries = []LogEntryRow{}
-				if entries, err := deps.DB.ListLogEntriesByTrace(in.TraceID); err == nil {
-					for _, le := range entries {
-						out.LogEntries = append(out.LogEntries, LogEntryRow{
-							ID:          le.ID,
-							ExecutionID: le.ExecutionID,
-							SpanID:      le.SpanID,
-							TS:          le.TS.Format("2006-01-02T15:04:05.999999999Z"),
-							Level:       le.Level,
-							Message:     le.Message,
-							Fields:      le.Fields,
-						})
-					}
-				}
-				return nil, out, nil
-			},
-		)
-	})
+func registerTraceTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "traces"
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name: "list_traces",
-				Title: "List Traces",
-				Description: "List recent root spans (one entry per trace). Filter by function, status, time range, or outlier flag. Pair with get_trace to drill into a specific causal chain.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListTracesInput) (*mcpsdk.CallToolResult, ListTracesOutput, error) {
-				params := database.ListRootSpansParams{
-					FunctionID:  resolveFnIDForBaseline(deps, in.FunctionID),
-					Status:      in.Status,
-					OutlierOnly: in.OutlierOnly,
-					Since:       in.Since,
-					Until:       in.Until,
-					Limit:       in.Limit,
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_trace",
+			Title:       "Get Trace",
+			Description: "Return the full causal tree for a trace. Each span is one execution row; spans are ordered by started_at ascending so the root is first. Use this after list_traces or after spotting a slow request.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetTraceInput) (*mcpsdk.CallToolResult, GetTraceOutput, error) {
+			if in.TraceID == "" {
+				return nil, GetTraceOutput{}, fmt.Errorf("trace_id required")
+			}
+			execs, err := deps.DB.ListByTraceID(in.TraceID)
+			if err != nil {
+				return nil, GetTraceOutput{}, fmt.Errorf("list trace: %w", err)
+			}
+			if len(execs) == 0 {
+				return nil, GetTraceOutput{}, fmt.Errorf("no spans found for trace %s", in.TraceID)
+			}
+			view := handlers.BuildTraceViewForMCP(in.TraceID, execs, deps.Registry)
+			out := GetTraceOutput{
+				TraceID:         view.TraceID,
+				RootSpanID:      view.RootSpanID,
+				RootFunctionID:  view.RootFunctionID,
+				Trigger:         view.Trigger,
+				StartedAt:       view.StartedAt,
+				TotalDurationMS: view.TotalDurationMS,
+				Status:          view.Status,
+				HasOutlier:      view.HasOutlier,
+				SpanCount:       view.SpanCount,
+				Spans:           make([]SpanRow, len(view.Spans)),
+			}
+			for i, sp := range view.Spans {
+				out.Spans[i] = SpanRow{
+					ExecutionID:      sp.ExecutionID,
+					SpanID:           sp.SpanID,
+					ParentSpanID:     sp.ParentSpanID,
+					FunctionID:       sp.FunctionID,
+					FunctionName:     sp.FunctionName,
+					ParentFunctionID: sp.ParentFunctionID,
+					Trigger:          sp.Trigger,
+					Status:           sp.Status,
+					StatusCode:       sp.StatusCode,
+					ColdStart:        sp.ColdStart,
+					IsOutlier:        sp.IsOutlier,
+					BaselineP95MS:    sp.BaselineP95MS,
+					StartedAt:        sp.StartedAt,
+					DurationMS:       sp.DurationMS,
+					OffsetMS:         sp.OffsetMS,
+					ErrorMessage:     sp.ErrorMessage,
 				}
-				if params.Limit <= 0 || params.Limit > 200 {
-					params.Limit = 50
-				}
-				roots, err := deps.DB.ListRootSpans(params)
-				if err != nil {
-					return nil, ListTracesOutput{}, fmt.Errorf("list traces: %w", err)
-				}
-				rows := make([]RootSpanRow, 0, len(roots))
-				for _, e := range roots {
-					var name string
-					if deps.Registry != nil {
-						if fn, err := deps.Registry.Get(e.FunctionID); err == nil {
-							name = fn.Name
-						}
-					}
-					var dur int64
-					if e.DurationMS != nil {
-						dur = *e.DurationMS
-					}
-					var sc int
-					if e.StatusCode != nil {
-						sc = *e.StatusCode
-					}
-					rows = append(rows, RootSpanRow{
-						TraceID:        e.TraceID,
-						RootSpanID:     e.SpanID,
-						RootFunctionID: e.FunctionID,
-						FunctionName:   name,
-						Trigger:        e.Trigger,
-						StartedAt:      e.StartedAt.Format("2006-01-02T15:04:05.000Z07:00"),
-						DurationMS:     dur,
-						Status:         e.Status,
-						StatusCode:     sc,
-						IsOutlier:      e.IsOutlier,
+			}
+			// v0.6 SDK upgrade: include user-defined spans + structured
+			// log entries so MCP clients see the full picture, not
+			// just the system spans.
+			out.UserSpans = []UserSpanRow{}
+			if userSpans, err := deps.DB.ListUserSpansByTrace(in.TraceID); err == nil {
+				for _, us := range userSpans {
+					out.UserSpans = append(out.UserSpans, UserSpanRow{
+						ID:           us.ID,
+						ExecutionID:  us.ExecutionID,
+						ParentSpanID: us.ParentSpanID,
+						Name:         us.Name,
+						StartedAt:    us.StartedAt.Format("2006-01-02T15:04:05.999999999Z"),
+						DurationMS:   us.DurationMS,
+						OffsetMS:     us.OffsetMS,
+						Status:       us.Status,
+						ErrorMessage: us.ErrorMessage,
+						Attributes:   us.Attributes,
 					})
 				}
-				return nil, ListTracesOutput{Traces: rows, Count: len(rows)}, nil
-			},
-		)
-	})
+			}
+			out.LogEntries = []LogEntryRow{}
+			if entries, err := deps.DB.ListLogEntriesByTrace(in.TraceID); err == nil {
+				for _, le := range entries {
+					out.LogEntries = append(out.LogEntries, LogEntryRow{
+						ID:          le.ID,
+						ExecutionID: le.ExecutionID,
+						SpanID:      le.SpanID,
+						TS:          le.TS.Format("2006-01-02T15:04:05.999999999Z"),
+						Level:       le.Level,
+						Message:     le.Message,
+						Fields:      le.Fields,
+					})
+				}
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name: "get_function_baseline",
-				Title: "Get Function Baseline",
-				Description: "Return the rolling P95/P99/mean latency baseline for a function plus the current sample count. baseline drives the outlier flag on each execution.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionBaselineInput) (*mcpsdk.CallToolResult, metrics.BaselineSummary, error) {
-				if in.FunctionID == "" {
-					return nil, metrics.BaselineSummary{}, fmt.Errorf("function_id required")
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_traces",
+			Title:       "List Traces",
+			Description: "List recent root spans (one entry per trace). Filter by function, status, time range, or outlier flag. Pair with get_trace to drill into a specific causal chain.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListTracesInput) (*mcpsdk.CallToolResult, ListTracesOutput, error) {
+			params := database.ListRootSpansParams{
+				FunctionID:  resolveFnIDForBaseline(deps, in.FunctionID),
+				Status:      in.Status,
+				OutlierOnly: in.OutlierOnly,
+				Since:       in.Since,
+				Until:       in.Until,
+				Limit:       in.Limit,
+			}
+			if params.Limit <= 0 || params.Limit > 200 {
+				params.Limit = 50
+			}
+			roots, err := deps.DB.ListRootSpans(params)
+			if err != nil {
+				return nil, ListTracesOutput{}, fmt.Errorf("list traces: %w", err)
+			}
+			rows := make([]RootSpanRow, 0, len(roots))
+			for _, e := range roots {
+				var name string
+				if deps.Registry != nil {
+					if fn, err := deps.Registry.Get(e.FunctionID); err == nil {
+						name = fn.Name
+					}
 				}
-				fnID := resolveFnIDForBaseline(deps, in.FunctionID)
-				if deps.Metrics == nil {
-					return nil, metrics.BaselineSummary{FunctionID: fnID, WindowSize: 100}, nil
+				var dur int64
+				if e.DurationMS != nil {
+					dur = *e.DurationMS
 				}
-				return nil, deps.Metrics.Baselines.Summary(fnID), nil
-			},
-		)
-	})
+				var sc int
+				if e.StatusCode != nil {
+					sc = *e.StatusCode
+				}
+				rows = append(rows, RootSpanRow{
+					TraceID:        e.TraceID,
+					RootSpanID:     e.SpanID,
+					RootFunctionID: e.FunctionID,
+					FunctionName:   name,
+					Trigger:        e.Trigger,
+					StartedAt:      e.StartedAt.Format("2006-01-02T15:04:05.000Z07:00"),
+					DurationMS:     dur,
+					Status:         e.Status,
+					StatusCode:     sc,
+					IsOutlier:      e.IsOutlier,
+				})
+			}
+			return nil, ListTracesOutput{Traces: rows, Count: len(rows)}, nil
+		},
+	)
+
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_function_baseline",
+			Title:       "Get Function Baseline",
+			Description: "Return the rolling P95/P99/mean latency baseline for a function plus the current sample count. baseline drives the outlier flag on each execution.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionBaselineInput) (*mcpsdk.CallToolResult, metrics.BaselineSummary, error) {
+			if in.FunctionID == "" {
+				return nil, metrics.BaselineSummary{}, fmt.Errorf("function_id required")
+			}
+			fnID := resolveFnIDForBaseline(deps, in.FunctionID)
+			if deps.Metrics == nil {
+				return nil, metrics.BaselineSummary{FunctionID: fnID, WindowSize: 100}, nil
+			}
+			return nil, deps.Metrics.Baselines.Summary(fnID), nil
+		},
+	)
 }
 
 // resolveFnIDForBaseline accepts either fn_xxx or a friendly name and

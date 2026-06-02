@@ -297,6 +297,22 @@ also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see
 `internal/pool/hostmem.go`).
 
+> "What can the in-product AI assistant do, and where do its provider
+> keys live?"
+
+The assistant (the dashboard's **AI** section) is gated behind the
+`admin` permission and operates the instance through the **same**
+operator tools the MCP server exposes — so it can do anything an admin
+can do via the API, and nothing more. Two gates sit in front of every
+mutation: the per-conversation **approval policy** (`all_writes` /
+`destructive_only` / `auto`), which can pause a write for human
+approval before it runs, and a code-enforced `confirm=true` requirement
+on destructive tools. BYO provider API keys are encrypted at rest with
+the same AES-256-GCM cipher as function secrets, are decrypted only in
+orvad at request time, and are never returned by the API or echoed back
+to the chat. The system prompt also instructs the model never to print
+secret/key/token values it encounters while operating the instance.
+
 ## Layered isolation: what does and doesn't compose
 
 Orva already gives you defense in depth on a single host: a Docker

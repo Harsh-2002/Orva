@@ -1,0 +1,80 @@
+<template>
+  <!--
+    EmptyState — the new-chat greeting shown above a vertically-centered composer
+    until the first message is sent. The starter prompts are Orva-specific and
+    FILL the composer on click (they don't send), so the operator can read, tweak,
+    and then send. Four are drawn at random from POOL on each mount, so a fresh
+    chat shows a fresh, rotating set.
+  -->
+  <div class="text-center">
+    <div class="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/15 text-primary">
+      <MessagesSquare class="h-5 w-5" />
+    </div>
+    <h2 class="text-lg font-semibold tracking-tight text-white">
+      What would you like to do?
+    </h2>
+    <p class="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-foreground-muted">
+      Ask about your functions, logs, deployments, and operations. Or have me create, deploy, and invoke functions for you.
+    </p>
+
+    <!-- Equal-height cards: a fixed min-height floor plus line-clamp-2 keeps every
+         card the same size whether its prompt is one line or two, so a longer
+         prompt never breaks the grid rhythm. No icons, just the prompt. -->
+    <div class="mx-auto mt-6 grid max-w-xl gap-2 sm:grid-cols-2">
+      <button
+        v-for="(p, i) in suggestions"
+        :key="i"
+        type="button"
+        class="flex min-h-[4.25rem] items-center rounded-lg border border-border bg-surface/50 px-3.5 py-3 text-left text-[13px] leading-snug text-foreground-muted transition-colors hover:border-foreground-muted/40 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        @click="$emit('pick', p)"
+      >
+        <span class="line-clamp-2">{{ p }}</span>
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { MessagesSquare } from 'lucide-vue-next'
+
+defineEmits(['pick'])
+
+// A pool of short, instance-aware prompts. Each is kept to about two lines at the
+// card width so the grid stays uniform. Four are sampled per mount (see below).
+const POOL = [
+  'How many functions do I have?',
+  'Which function ran most recently?',
+  'Any errors in the last 24 hours?',
+  'Show my most recent executions.',
+  'List my deployed functions.',
+  'Summarize today’s invocation errors.',
+  'Show failed deployments and why.',
+  'What’s my system health right now?',
+  'Show storage usage for my instance.',
+  'List my cron schedules.',
+  'Are any background jobs failing?',
+  'Check for failed webhook deliveries.',
+  'Which runtimes are available?',
+  'Show my slowest functions by duration.',
+  'Which functions have egress enabled?',
+  'List my secrets by name only.',
+  'Write a Python function that returns the current UTC time.',
+  'Write a Node function that echoes the request body.',
+  'Create an hourly cron schedule for a function.',
+  'Walk me through deploying a new function.',
+]
+
+// Fisher-Yates shuffle, then take four. Runs once per mount; since EmptyState is
+// re-created whenever a new chat opens, every new chat gets a fresh rotation.
+function sample(arr, n) {
+  const copy = [...arr]
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+  return copy.slice(0, n)
+}
+
+const suggestions = ref(sample(POOL, 4))
+</script>

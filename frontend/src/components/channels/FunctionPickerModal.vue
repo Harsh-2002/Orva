@@ -6,7 +6,7 @@
     class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
     @click.self="$emit('close')"
   >
-    <div class="w-full max-w-2xl bg-background border border-border rounded-lg shadow-2xl shadow-black/50 flex flex-col max-h-[80vh]">
+    <div class="w-full max-w-2xl bg-background border border-border rounded-lg shadow-lg flex flex-col max-h-[80vh]">
       <!-- Header. Title + dismiss matches the page-header pattern;
            subtitle explains the snake_case rename so operators don't
            get surprised by tool names. -->

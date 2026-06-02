@@ -29,7 +29,10 @@
           :aria-labelledby="titleId"
         >
           <div class="flex items-start gap-3">
+            <!-- Warning glyph anchors confirm/notice dialogs; a prompt (rename,
+                 save-as) is input-focused and reads cleaner without it. -->
             <div
+              v-if="!confirm.promptMode"
               class="shrink-0 w-9 h-9 rounded-full flex items-center justify-center"
               :class="confirm.danger ? 'bg-red-500/15 text-red-400' : 'bg-primary/15 text-primary'"
             >
@@ -45,7 +48,7 @@
             <div class="flex-1 min-w-0">
               <h3
                 :id="titleId"
-                class="text-base font-semibold text-white"
+                class="text-sm font-semibold text-white tracking-tight"
               >
                 {{ confirm.title }}
               </h3>
@@ -61,7 +64,7 @@
                 v-model="confirm.promptValue"
                 :placeholder="confirm.promptPlaceholder"
                 type="text"
-                class="mt-3 w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-base sm:text-sm text-foreground focus:outline-none focus:border-white"
+                class="mt-3 w-full bg-background border border-border rounded-md px-3 py-2 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                 @keydown.enter.stop.prevent="confirm.settle(true)"
               >
             </div>

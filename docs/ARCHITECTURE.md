@@ -15,10 +15,13 @@ host kernel  (Linux ≥ 5.10, cgroup v2, unprivileged userns)
   │
   └─ orvad   (single Go process, listens on :8443)
        │
-       ├─ HTTP server     /api  /web  /auth  /events (SSE)
+       ├─ HTTP server     /api  /web  /auth  /events (SSE)  /mcp
        ├─ Pool manager    per-function warm workers + KPA autoscaler
        ├─ Build queue     extract → install deps → atomic publish
        ├─ Event hub       SSE pub/sub for metrics + exec + deploy
+       ├─ MCP server      operator-management tools (also reused by the AI agent)
+       ├─ AI assistant    in-product agentic chat: Bifrost LLM gateway +
+       │                  agentic loop, dispatches MCP tools in-process (SSE)
        ├─ GC goroutine    prunes archived versions per system_config
        └─ SQLite          orva.db (WAL mode), single file
                           │
@@ -190,7 +193,7 @@ picks up the new target.
 
 ## Database schema
 
-12 tables, all in one SQLite file:
+One SQLite file, grouped by subsystem. Core tables:
 
 | table | what it stores |
 |---|---|
@@ -199,16 +202,28 @@ picks up the new target.
 | `api_keys`           | bearer tokens for `/api/v1/*` |
 | `functions`          | name, runtime, current version + code_hash, status |
 | `deployments`        | per-build audit trail (queued/building/succeeded/failed; rollback rows are source='rollback') |
-| `executions`         | every invocation: status, duration, cold start flag |
-| `execution_logs`     | stderr + stdout from invocations |
+| `executions` / `execution_requests` / `execution_logs` / `execution_log_entries` | every invocation + its captured request + stderr/stdout |
 | `build_logs`         | stdout/stderr from `npm install` / `pip install` |
-| `secrets`            | per-function encrypted env vars (AES-256-GCM) |
+| `function_secrets`   | per-function encrypted env vars (AES-256-GCM) |
 | `routes`             | custom URL → function-id mappings (`/webhooks/stripe`) |
 | `pool_config`        | per-fn autoscaler tuning (min_warm, max_warm, target_concurrency) |
 | `system_config`      | global tuning knobs (versions_to_keep, gc_interval_seconds, etc.) |
 
-Schema lives in [`backend/internal/database/migrations.go`](../backend/internal/database/migrations.go).
-Additive ALTER columns are run idempotently on every boot.
+Feature tables added since v0.2:
+
+| group | tables |
+|---|---|
+| Scheduling & queues  | `cron_schedules`, `jobs` |
+| KV & fixtures        | `kv_store`, `fixtures` |
+| Webhooks             | `event_subscriptions`, `webhook_deliveries`, `inbound_webhooks` |
+| Tracing & activity   | `user_spans`, `activity_log` |
+| Firewall             | `egress_blocklist` |
+| Agent channels       | `channels`, `channel_functions` |
+| OAuth 2.1            | `oauth_clients`, `oauth_authorization_codes`, `oauth_access_tokens` |
+| AI assistant         | `ai_conversations`, `ai_messages`, `ai_tool_calls`, `ai_provider_configs`, `ai_settings` |
+
+Schema lives in [`backend/internal/database/migrations.go`](../backend/internal/database/migrations.go) (~34 tables).
+Migrations are additive only — `CREATE TABLE IF NOT EXISTS` + idempotent ALTER columns run on every boot. AI message/tool-call rows cascade-delete with their `ai_conversations` parent; editing or deleting a chat message truncates the conversation tail by `seq` (see `DeleteMessagesFromSeq`).
 
 ## Component responsibilities
 
@@ -286,6 +301,38 @@ In-memory ring buffer over the last ~8k invocations. Computes p50,
 p95, p99 server-side so the dashboard doesn't recompute on every
 poll.
 
+### `backend/internal/ai/`
+
+The in-product AI chat assistant — an agentic loop that operates the
+instance end-to-end through the same tools the MCP server exposes, with
+BYO provider keys. Served at `/api/v1/ai/*` (SSE for chat + approval).
+
+- `manager.go` — service layer: wires the SQLite chat store, the
+  secrets cipher (provider-key encryption at rest), the in-process tool
+  registry, the LLM gateway, and the agentic loop. Holds the agent's
+  `defaultSystemPrompt` (a Go raw string — must stay backtick-free).
+- `llm/` — wraps the **embedded Bifrost gateway**
+  (`github.com/maximhq/bifrost/core`) behind neutral types + a
+  normalized event stream. `Account` resolves BYO keys from
+  `ai_provider_configs` at request time; thinking levels map to
+  `ChatReasoning`. (The Bifrost dependency is why the module requires
+  Go ≥1.26.)
+- `agent/` — the agentic loop (≈25-iteration budget): stream a model
+  turn → emit SSE deltas → detect tool calls → approval-gate writes →
+  dispatch the tool **in-process as a Go call** (no MCP transport, no
+  HTTP) → feed the result back. Decoupled from `mcp` — it takes a tool
+  set + a dispatcher. Two independent gates protect mutations: the
+  per-conversation approval policy (`all_writes` / `destructive_only` /
+  `auto`) and a code-enforced `confirm=true` requirement on destructive
+  tools.
+
+The tools the agent dispatches come from `mcp.BuildAgentRegistry`,
+which is fed by the **same** `regAddTool` declarations that register
+the external MCP server — one source of truth, gated to the principal's
+perms, so the two fronts never drift. Served by
+`backend/internal/server/ai_handler.go`; the dashboard surface is the
+`AI` sidebar section (`frontend/src/views/AI.vue`).
+
 ### `backend/runtimes/`
 
 Per-runtime adapter scripts. The adapter is the entrypoint nsjail
@@ -302,11 +349,21 @@ Go server (the build output is embedded at compile time via
 `//go:embed ui_dist`).
 
 - `src/views/` — one file per route (Dashboard, Editor, FunctionsList,
-  Deployments, InvocationsLog, ApiKeys, Onboarding, Login)
-- `src/stores/` — Pinia stores (`auth`, `system`, `events`)
-- `src/components/common/` — `EditorCard`, `StatusBadge`, `Drawer`,
-  `Input`, `Button`
-- `src/api/` — axios client + endpoint helpers + EventSource wrapper
+  Deployments, InvocationsLog, ApiKeys, CronJobs, Jobs, KVStore,
+  Webhooks, InboundWebhooks, Channels, Firewall, Traces, TraceDetail,
+  FunctionDiff, Settings, Docs, Onboarding, Login, and **AI** — the
+  agentic chat)
+- `src/stores/` — Pinia stores (`auth`, `system`, `events`, `confirm`,
+  and `ai` — the chat timeline + streaming client)
+- `src/components/common/` — shared primitives (`Modal`, `Drawer`,
+  `Input`, `Button`, `IconButton`, `StatusBadge`, `ConfirmDialog`,
+  `Toast`, …)
+- `src/components/ai/` — the chat surface (composer, message list,
+  tool-call cards, code/thinking blocks, provider settings)
+- `src/api/` — axios client + endpoint helpers + EventSource wrapper.
+  The AI chat is the exception: it streams over `fetch` +
+  `ReadableStream` (the chat POST carries a body, so `EventSource`
+  won't do)
 
 ## Concurrency model
 

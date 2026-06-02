@@ -132,145 +132,136 @@ type WaitDeploymentInput struct {
 }
 
 // registerDeployTools wires the deploy / rollback / inspect tools.
-func registerDeployTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "get_deployment",
-				Title:        "Get Deployment",
-				Description: "Fetch a single deployment by id. Returns status (queued/building/succeeded/failed), phase, code_hash, duration, and any error message. Use this to poll a deployment that's in flight.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetDeploymentInput) (*mcpsdk.CallToolResult, DeploymentView, error) {
-				dep, err := deps.DB.GetDeployment(in.DeploymentID)
-				if err != nil {
-					return nil, DeploymentView{}, fmt.Errorf("deployment not found: %s", in.DeploymentID)
-				}
-				return nil, toDeploymentView(dep), nil
-			},
-		)
-	})
+func registerDeployTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "deploy"
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "get_deployment_logs",
-				Title:        "Get Deployment Logs",
-				Description: "Read the build log for a deployment. Each line has a monotonically-increasing seq — pass from=<last_seq> to tail incrementally. Empty list = no new lines. Use this for diagnosing build failures.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetDeploymentLogsInput) (*mcpsdk.CallToolResult, GetDeploymentLogsOutput, error) {
-				lim := in.Limit
-				if lim <= 0 {
-					lim = 200
-				}
-				if lim > 2000 {
-					lim = 2000
-				}
-				lines, err := deps.DB.GetBuildLogs(in.DeploymentID, in.From, lim)
-				if err != nil {
-					return nil, GetDeploymentLogsOutput{}, err
-				}
-				out := GetDeploymentLogsOutput{Logs: make([]DeploymentLogLine, 0, len(lines))}
-				for _, ln := range lines {
-					out.Logs = append(out.Logs, DeploymentLogLine{Seq: ln.Seq, Stream: ln.Stream, Text: ln.Line, At: ln.TS})
-				}
-				return nil, out, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_deployment",
+			Title:       "Get Deployment",
+			Description: "Fetch a single deployment by id. Returns status (queued/building/succeeded/failed), phase, code_hash, duration, and any error message. Use this to poll a deployment that's in flight.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetDeploymentInput) (*mcpsdk.CallToolResult, DeploymentView, error) {
+			dep, err := deps.DB.GetDeployment(in.DeploymentID)
+			if err != nil {
+				return nil, DeploymentView{}, fmt.Errorf("deployment not found: %s", in.DeploymentID)
+			}
+			return nil, toDeploymentView(dep), nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_function_deployments",
-				Title:        "List Function Deployments",
-				Description: "List a function's deployment history (newest first). Each entry has the deployment id, code_hash, status, and timestamps — use it to find a target for rollback_function.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFunctionDeploymentsInput) (*mcpsdk.CallToolResult, ListFunctionDeploymentsOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, ListFunctionDeploymentsOutput{}, err
-				}
-				lim := in.Limit
-				if lim <= 0 {
-					lim = 50
-				}
-				deplist, err := deps.DB.ListDeploymentsForFunction(fn.ID, lim)
-				if err != nil {
-					return nil, ListFunctionDeploymentsOutput{}, err
-				}
-				out := ListFunctionDeploymentsOutput{Deployments: make([]DeploymentView, 0, len(deplist))}
-				for _, d := range deplist {
-					out.Deployments = append(out.Deployments, toDeploymentView(d))
-				}
-				return nil, out, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_deployment_logs",
+			Title:       "Get Deployment Logs",
+			Description: "Read the build log for a deployment. Each line has a monotonically-increasing seq — pass from=<last_seq> to tail incrementally. Empty list = no new lines. Use this for diagnosing build failures.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetDeploymentLogsInput) (*mcpsdk.CallToolResult, GetDeploymentLogsOutput, error) {
+			lim := in.Limit
+			if lim <= 0 {
+				lim = 200
+			}
+			if lim > 2000 {
+				lim = 2000
+			}
+			lines, err := deps.DB.GetBuildLogs(in.DeploymentID, in.From, lim)
+			if err != nil {
+				return nil, GetDeploymentLogsOutput{}, err
+			}
+			out := GetDeploymentLogsOutput{Logs: make([]DeploymentLogLine, 0, len(lines))}
+			for _, ln := range lines {
+				out.Logs = append(out.Logs, DeploymentLogLine{Seq: ln.Seq, Stream: ln.Stream, Text: ln.Line, At: ln.TS})
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name: "deploy_function_inline",
-				Title: "Deploy Function Inline",
-				Description: "BEFORE calling this: if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract, SDK shape, and event envelope diverge from Lambda / Vercel / Cloudflare Workers; agents that skip the docs and rely on training-data defaults consistently produce code that fails at first invoke (`require('orva')` not `import orva`, `kv.put` not `kv.set`, `exports.handler` not `export default`, no `event.query` parsing of arbitrary URLs, etc.). Reading the docs once costs ~3 KB and prevents 4-6 round-trips of trial-and-error rebuilds.\n\n" +
-					"Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but the function's network_mode is 'none' (the SDK call would fail at runtime).",
-				Annotations: &mcpsdk.ToolAnnotations{
-					DestructiveHint: ptrFalse(),
-					OpenWorldHint:   ptrFalse(),
-				},
-			},
-			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in DeployInlineInput) (*mcpsdk.CallToolResult, DeployInlineOutput, error) {
-				return deployInline(ctx, deps, in)
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_function_deployments",
+			Title:       "List Function Deployments",
+			Description: "List a function's deployment history (newest first). Each entry has the deployment id, code_hash, status, and timestamps — use it to find a target for rollback_function.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFunctionDeploymentsInput) (*mcpsdk.CallToolResult, ListFunctionDeploymentsOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, ListFunctionDeploymentsOutput{}, err
+			}
+			lim := in.Limit
+			if lim <= 0 {
+				lim = 50
+			}
+			deplist, err := deps.DB.ListDeploymentsForFunction(fn.ID, lim)
+			if err != nil {
+				return nil, ListFunctionDeploymentsOutput{}, err
+			}
+			out := ListFunctionDeploymentsOutput{Deployments: make([]DeploymentView, 0, len(deplist))}
+			for _, d := range deplist {
+				out.Deployments = append(out.Deployments, toDeploymentView(d))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "wait_deployment",
-				Title:        "Wait Deployment",
-				Description: "Block until a deployment reaches a terminal state (succeeded or failed) or the timeout fires. Useful after deploy_function_inline with wait=false. Default timeout 120 s, max 600 s.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:  "deploy_function_inline",
+			Title: "Deploy Function Inline",
+			Description: "BEFORE calling this: if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract, SDK shape, and event envelope diverge from Lambda / Vercel / Cloudflare Workers; agents that skip the docs and rely on training-data defaults consistently produce code that fails at first invoke (`require('orva')` not `import orva`, `kv.put` not `kv.set`, `exports.handler` not `export default`, no `event.query` parsing of arbitrary URLs, etc.). Reading the docs once costs ~3 KB and prevents 4-6 round-trips of trial-and-error rebuilds.\n\n" +
+				"Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but the function's network_mode is 'none' (the SDK call would fail at runtime).",
+			Annotations: &mcpsdk.ToolAnnotations{
+				DestructiveHint: ptrFalse(),
+				OpenWorldHint:   ptrFalse(),
 			},
-			func(ctx context.Context, _ *mcpsdk.CallToolRequest, in WaitDeploymentInput) (*mcpsdk.CallToolResult, DeploymentView, error) {
-				timeout := in.TimeoutSeconds
-				if timeout <= 0 {
-					timeout = 120
-				}
-				if timeout > 600 {
-					timeout = 600
-				}
-				return nil, waitDeployment(ctx, deps, in.DeploymentID, time.Duration(timeout)*time.Second), nil
-			},
-		)
-	})
+		},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in DeployInlineInput) (*mcpsdk.CallToolResult, DeployInlineOutput, error) {
+			return deployInline(ctx, deps, in)
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "rollback_function",
-				Title:        "Rollback Function",
-				Description: "Roll a function back to a prior succeeded deployment. Pass deployment_id (preferred — restores the env_vars + spawn config snapshot from that deploy) or code_hash. Pass confirm=true. Secrets are NOT versioned and remain at current values.",
-				Annotations: &mcpsdk.ToolAnnotations{
-					DestructiveHint: ptrTrue(),
-					OpenWorldHint:   ptrFalse(),
-				},
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "wait_deployment",
+			Title:       "Wait Deployment",
+			Description: "Block until a deployment reaches a terminal state (succeeded or failed) or the timeout fires. Useful after deploy_function_inline with wait=false. Default timeout 120 s, max 600 s.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in WaitDeploymentInput) (*mcpsdk.CallToolResult, DeploymentView, error) {
+			timeout := in.TimeoutSeconds
+			if timeout <= 0 {
+				timeout = 120
+			}
+			if timeout > 600 {
+				timeout = 600
+			}
+			return nil, waitDeployment(ctx, deps, in.DeploymentID, time.Duration(timeout)*time.Second), nil
+		},
+	)
+
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "rollback_function",
+			Title:       "Rollback Function",
+			Description: "Roll a function back to a prior succeeded deployment. Pass deployment_id (preferred — restores the env_vars + spawn config snapshot from that deploy) or code_hash. Pass confirm=true. Secrets are NOT versioned and remain at current values.",
+			Annotations: &mcpsdk.ToolAnnotations{
+				DestructiveHint: ptrTrue(),
+				OpenWorldHint:   ptrFalse(),
 			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in RollbackFunctionInput) (*mcpsdk.CallToolResult, RollbackFunctionOutput, error) {
-				if !in.Confirm {
-					return nil, RollbackFunctionOutput{}, errors.New("rollback refused: pass confirm=true")
-				}
-				if in.DeploymentID == "" && in.CodeHash == "" {
-					return nil, RollbackFunctionOutput{}, errors.New("either deployment_id or code_hash is required")
-				}
-				return rollbackFunction(deps, in)
-			},
-		)
-	})
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in RollbackFunctionInput) (*mcpsdk.CallToolResult, RollbackFunctionOutput, error) {
+			if !in.Confirm {
+				return nil, RollbackFunctionOutput{}, errors.New("rollback refused: pass confirm=true")
+			}
+			if in.DeploymentID == "" && in.CodeHash == "" {
+				return nil, RollbackFunctionOutput{}, errors.New("either deployment_id or code_hash is required")
+			}
+			return rollbackFunction(deps, in)
+		},
+	)
 }
 
 // ─── implementations ───────────────────────────────────────────────

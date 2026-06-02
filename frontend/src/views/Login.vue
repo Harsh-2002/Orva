@@ -15,7 +15,7 @@
       </div>
 
       <!-- Login Card -->
-      <div class="bg-surface border border-border rounded-lg shadow-2xl shadow-black/50 p-8">
+      <div class="bg-surface border border-border rounded-lg shadow-lg p-8">
         <h2 class="text-xl font-semibold text-foreground mb-6">
           Sign In
         </h2>
@@ -54,10 +54,10 @@
 
           <div
             v-if="error"
-            class="bg-error/10 border border-error/30 rounded-md px-4 py-3 flex items-start gap-2"
+            class="bg-danger-tint border border-danger-ring rounded-md px-4 py-3 flex items-start gap-2"
           >
-            <AlertCircle class="w-5 h-5 text-error shrink-0 mt-0.5" />
-            <p class="text-sm text-error">
+            <AlertCircle class="w-5 h-5 text-danger-fg shrink-0 mt-0.5" />
+            <p class="text-sm text-danger-fg">
               {{ error }}
             </p>
           </div>

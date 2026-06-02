@@ -1,0 +1,59 @@
+# Comprehensive programmatic E2E suite (test/e2e). Builds Orva, runs it, and
+# drives every domain + the CLI + the AI agentic loop (via a mock LLM — no real
+# provider key needed). Scenarios that require sandboxed function invocation
+# (real nsjail) self-skip in CI, where nested sandboxing is unavailable.
+name: e2e
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build orva (server + CLI)
+        run: make build
+
+      - name: Start Orva
+        run: |
+          mkdir -p "$RUNNER_TEMP/orva-data"
+          ORVA_DATA_DIR="$RUNNER_TEMP/orva-data" ./build/orva serve > "$RUNNER_TEMP/orva.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/orva.pid"
+          # Wait for health (the API/DB come up without nsjail).
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8443/api/v1/system/health >/dev/null 2>&1; then
+              echo "orva healthy"; break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8443/api/v1/system/health || (cat "$RUNNER_TEMP/orva.log"; exit 1)
+
+      - name: Run E2E suite
+        run: |
+          ADMIN_KEY="$(cat "$RUNNER_TEMP/orva-data/.admin-key")"
+          python3 test/e2e/run.py --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
+
+      - name: Show checklist
+        if: always()
+        run: cat test/e2e/CHECKLIST.md || true
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orva-server-log
+          path: ${{ runner.temp }}/orva.log
+          if-no-files-found: ignore

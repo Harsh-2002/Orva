@@ -3,8 +3,10 @@ package server
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	aipkg "github.com/Harsh-2002/Orva/backend/internal/ai"
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -37,6 +39,10 @@ type Router struct {
 	eventHub      *events.Hub
 	firewall      *firewall.Manager
 	internalToken string
+
+	ai *aipkg.Manager // in-product AI chat assistant (lazily-built LLM gateway)
+
+	keyCache sync.Map // shared API-key cache (keyHash -> *database.APIKey); evicted on key delete
 
 	startTime time.Time
 }
@@ -368,6 +374,9 @@ func (r *Router) setupRoutes() {
 	// API Key management routes.
 	keyHandler := &handlers.KeyHandler{
 		DB: r.db,
+		// Evict the deleted key from the shared auth cache so revocation is
+		// immediate (otherwise a cached key keeps authenticating).
+		InvalidateKey: func(keyHash string) { r.keyCache.Delete(keyHash) },
 	}
 	r.mux.HandleFunc("POST /api/v1/keys", keyHandler.Create)
 	r.mux.HandleFunc("GET /api/v1/keys", keyHandler.List)
@@ -416,7 +425,7 @@ func (r *Router) setupRoutes() {
 	// (or X-Orva-API-Key for parity with REST callers). The handler
 	// owns its own auth gate; /mcp does not start with /api/ so it
 	// naturally bypasses middleware_auth.go.
-	mcpHandler := orvampc.NewHandler(orvampc.Deps{
+	mcpDeps := orvampc.Deps{
 		DB:         r.db,
 		Registry:   r.registry,
 		Builder:    r.builder,
@@ -429,9 +438,35 @@ func (r *Router) setupRoutes() {
 		EventHub:   r.eventHub,
 		DataDir:    r.cfg.Data.Dir,
 		Version:    version.Version,
-	})
+	}
+	mcpHandler := orvampc.NewHandler(mcpDeps)
 	r.mux.Handle("/mcp", mcpHandler)
 	r.mux.Handle("/mcp/", mcpHandler)
+
+	// In-product AI chat assistant. Same mcpDeps power the in-process tool
+	// registry the agent dispatches against; provider keys are encrypted with
+	// the existing secrets cipher. All /api/v1/ai/* paths are gated by the
+	// standard auth middleware (session cookie or API key).
+	r.ai = aipkg.New(r.db, r.secrets, mcpDeps)
+	aiHandler := &AIHandler{Manager: r.ai, DB: r.db}
+	r.mux.HandleFunc("POST /api/v1/ai/chat", aiHandler.ChatStream)
+	r.mux.HandleFunc("GET /api/v1/ai/conversations", aiHandler.ListConversations)
+	r.mux.HandleFunc("POST /api/v1/ai/conversations", aiHandler.CreateConversation)
+	r.mux.HandleFunc("GET /api/v1/ai/conversations/{id}", aiHandler.GetConversation)
+	r.mux.HandleFunc("PATCH /api/v1/ai/conversations/{id}", aiHandler.PatchConversation)
+	r.mux.HandleFunc("DELETE /api/v1/ai/conversations/{id}", aiHandler.DeleteConversation)
+	r.mux.HandleFunc("GET /api/v1/ai/conversations/{id}/messages", aiHandler.ListMessages)
+	r.mux.HandleFunc("POST /api/v1/ai/conversations/{id}/regenerate", aiHandler.Regenerate)
+	r.mux.HandleFunc("POST /api/v1/ai/conversations/{id}/messages/{mid}/edit", aiHandler.EditMessage)
+	r.mux.HandleFunc("DELETE /api/v1/ai/conversations/{id}/messages/{mid}", aiHandler.DeleteMessage)
+	r.mux.HandleFunc("POST /api/v1/ai/tool-calls/{id}/approve", aiHandler.ApproveTool)
+	r.mux.HandleFunc("POST /api/v1/ai/tool-calls/{id}/reject", aiHandler.RejectTool)
+	r.mux.HandleFunc("GET /api/v1/ai/providers", aiHandler.ListProviders)
+	r.mux.HandleFunc("POST /api/v1/ai/providers", aiHandler.SaveProvider)
+	r.mux.HandleFunc("DELETE /api/v1/ai/providers/{id}", aiHandler.DeleteProvider)
+	r.mux.HandleFunc("GET /api/v1/ai/providers/{id}/models", aiHandler.ListProviderModels)
+	r.mux.HandleFunc("GET /api/v1/ai/settings", aiHandler.GetSettings)
+	r.mux.HandleFunc("PUT /api/v1/ai/settings", aiHandler.PutSettings)
 	// RFC 9728 §3.1 — clients MAY look up resource metadata at a path
 	// derived from the protected resource's URL. Serve the same
 	// document at both the bare and the /mcp-suffixed location so MCP
@@ -501,7 +536,7 @@ func (r *Router) buildMiddlewareChain() {
 	// Build chain from inside out: Handler -> Logger -> RequestID -> Auth -> BodySize -> CORS
 	chain := loggerMiddleware(r.db, r.eventHub, r.mux)
 	chain = requestIDMiddleware(chain)
-	chain = authMiddleware(r.db, chain)
+	chain = authMiddleware(r.db, &r.keyCache, chain)
 	chain = bodySizeMiddleware(maxBody, chain)
 	chain = corsMiddleware(origins, chain)
 

@@ -164,22 +164,22 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-6 py-3 font-medium">
+            <th scope="col" class="px-6 py-3 font-medium">
               Name
             </th>
-            <th class="px-6 py-3 font-medium hidden sm:table-cell">
+            <th scope="col" class="px-6 py-3 font-medium hidden sm:table-cell">
               Prefix
             </th>
-            <th class="px-6 py-3 font-medium hidden xl:table-cell">
+            <th scope="col" class="px-6 py-3 font-medium hidden xl:table-cell">
               Created
             </th>
-            <th class="px-6 py-3 font-medium hidden md:table-cell">
+            <th scope="col" class="px-6 py-3 font-medium hidden md:table-cell">
               Last Used
             </th>
-            <th class="px-6 py-3 font-medium hidden lg:table-cell">
+            <th scope="col" class="px-6 py-3 font-medium hidden lg:table-cell">
               Expires
             </th>
-            <th class="px-6 py-3 font-medium text-right">
+            <th scope="col" class="px-6 py-3 font-medium text-right">
               Actions
             </th>
           </tr>

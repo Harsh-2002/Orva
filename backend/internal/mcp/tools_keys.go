@@ -65,106 +65,102 @@ type DeleteAPIKeyInput struct {
 	Confirm bool   `json:"confirm"`
 }
 
-func registerKeyTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_api_keys",
-				Title:        "List API Keys",
-				Description: "List all API keys with their metadata (id, prefix, name, permissions, last-used, expiry). Plaintext key values are NEVER returned — they are SHA256-hashed at rest, and the only opportunity to see one is in the response of create_api_key.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, ListAPIKeysOutput, error) {
-				rows, err := deps.DB.ListAPIKeys()
-				if err != nil {
-					return nil, ListAPIKeysOutput{}, err
-				}
-				out := ListAPIKeysOutput{Keys: make([]APIKeyView, 0, len(rows))}
-				for _, k := range rows {
-					out.Keys = append(out.Keys, toAPIKeyView(k))
-				}
-				return nil, out, nil
-			},
-		)
-	})
+func registerKeyTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "keys"
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "list_api_keys",
+			Title:       "List API Keys",
+			Description: "List all API keys with their metadata (id, prefix, name, permissions, last-used, expiry). Plaintext key values are NEVER returned — they are SHA256-hashed at rest, and the only opportunity to see one is in the response of create_api_key.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, ListAPIKeysOutput, error) {
+			rows, err := deps.DB.ListAPIKeys()
+			if err != nil {
+				return nil, ListAPIKeysOutput{}, err
+			}
+			out := ListAPIKeysOutput{Keys: make([]APIKeyView, 0, len(rows))}
+			for _, k := range rows {
+				out.Keys = append(out.Keys, toAPIKeyView(k))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "create_api_key",
-				Title:        "Create API Key",
-				Description: "Mint a new API key. The plaintext value is returned ONLY in this response; the server keeps a SHA256 hash and forgets the plaintext. `permissions` and `expires_in_days` are REQUIRED — least-privilege scope and finite lifetime are the cheapest defenses against a leaked key. Marked destructive because issuing a key with admin permissions is high-blast-radius — confirm with the user what permissions to grant and how long it should live before calling.",
-				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateAPIKeyInput) (*mcpsdk.CallToolResult, CreateAPIKeyOutput, error) {
-				if strings.TrimSpace(in.Name) == "" {
-					return nil, CreateAPIKeyOutput{}, errors.New("name is required (human-readable label, e.g. 'ci-deploys')")
-				}
-				if len(in.Permissions) == 0 {
-					return nil, CreateAPIKeyOutput{}, errors.New(
-						"permissions is required: pick a subset of [invoke, " +
-							"read, write, admin] matching what the consumer " +
-							"actually needs. Granting all four was the silent " +
-							"default and produced over-privileged keys; least-" +
-							"privilege is the right shape.",
-					)
-				}
-				if in.ExpiresInDays < 0 {
-					return nil, CreateAPIKeyOutput{}, errors.New("expires_in_days must be >= 0 (0 = never expires; >0 = days until expiry)")
-				}
-				perms := in.Permissions
-				rawKey := make([]byte, 32)
-				if _, err := rand.Read(rawKey); err != nil {
-					return nil, CreateAPIKeyOutput{}, err
-				}
-				plaintext := "orva_" + hex.EncodeToString(rawKey)
-				hash := sha256.Sum256([]byte(plaintext))
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "create_api_key",
+			Title:       "Create API Key",
+			Description: "Mint a new API key. The plaintext value is returned ONLY in this response; the server keeps a SHA256 hash and forgets the plaintext. `permissions` and `expires_in_days` are REQUIRED — least-privilege scope and finite lifetime are the cheapest defenses against a leaked key. Marked destructive because issuing a key with admin permissions is high-blast-radius — confirm with the user what permissions to grant and how long it should live before calling.",
+			Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateAPIKeyInput) (*mcpsdk.CallToolResult, CreateAPIKeyOutput, error) {
+			if strings.TrimSpace(in.Name) == "" {
+				return nil, CreateAPIKeyOutput{}, errors.New("name is required (human-readable label, e.g. 'ci-deploys')")
+			}
+			if len(in.Permissions) == 0 {
+				return nil, CreateAPIKeyOutput{}, errors.New(
+					"permissions is required: pick a subset of [invoke, " +
+						"read, write, admin] matching what the consumer " +
+						"actually needs. Granting all four was the silent " +
+						"default and produced over-privileged keys; least-" +
+						"privilege is the right shape.",
+				)
+			}
+			if in.ExpiresInDays < 0 {
+				return nil, CreateAPIKeyOutput{}, errors.New("expires_in_days must be >= 0 (0 = never expires; >0 = days until expiry)")
+			}
+			perms := in.Permissions
+			rawKey := make([]byte, 32)
+			if _, err := rand.Read(rawKey); err != nil {
+				return nil, CreateAPIKeyOutput{}, err
+			}
+			plaintext := "orva_" + hex.EncodeToString(rawKey)
+			hash := sha256.Sum256([]byte(plaintext))
 
-				keyID := ids.New()
-				prefix := plaintext[:12]
+			keyID := ids.New()
+			prefix := plaintext[:12]
 
-				var expiresAt *time.Time
-				if in.ExpiresInDays > 0 {
-					t := time.Now().UTC().Add(time.Duration(in.ExpiresInDays) * 24 * time.Hour)
-					expiresAt = &t
-				}
+			var expiresAt *time.Time
+			if in.ExpiresInDays > 0 {
+				t := time.Now().UTC().Add(time.Duration(in.ExpiresInDays) * 24 * time.Hour)
+				expiresAt = &t
+			}
 
-				permsJSON, _ := json.Marshal(perms)
-				row := &database.APIKey{
-					ID: keyID, KeyHash: hex.EncodeToString(hash[:]),
-					Prefix: prefix, Name: in.Name,
-					Permissions: string(permsJSON), ExpiresAt: expiresAt,
-				}
-				if err := deps.DB.InsertAPIKey(row); err != nil {
-					return nil, CreateAPIKeyOutput{}, err
-				}
+			permsJSON, _ := json.Marshal(perms)
+			row := &database.APIKey{
+				ID: keyID, KeyHash: hex.EncodeToString(hash[:]),
+				Prefix: prefix, Name: in.Name,
+				Permissions: string(permsJSON), ExpiresAt: expiresAt,
+			}
+			if err := deps.DB.InsertAPIKey(row); err != nil {
+				return nil, CreateAPIKeyOutput{}, err
+			}
 
-				return nil, CreateAPIKeyOutput{
-					ID: keyID, Key: plaintext, Prefix: prefix,
-					Name: in.Name, Permissions: perms,
-					ExpiresAt: expiresAt, CreatedAt: time.Now().UTC(),
-				}, nil
-			},
-		)
-	})
+			return nil, CreateAPIKeyOutput{
+				ID: keyID, Key: plaintext, Prefix: prefix,
+				Name: in.Name, Permissions: perms,
+				ExpiresAt: expiresAt, CreatedAt: time.Now().UTC(),
+			}, nil
+		},
+	)
 
-	gatedAdd(perms, permAdmin, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "delete_api_key",
-				Title:        "Delete API Key",
-				Description: "Revoke an API key by id. Pass confirm=true. Active sessions using that key fail their next request with 401.",
-				Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteAPIKeyInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
-				if !in.Confirm {
-					return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true")
-				}
-				if err := deps.DB.DeleteAPIKey(in.KeyID); err != nil {
-					return nil, DeletedOutput{}, err
-				}
-				return nil, DeletedOutput{DeletedID: in.KeyID}, nil
-			},
-		)
-	})
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
+			Name:        "delete_api_key",
+			Title:       "Delete API Key",
+			Description: "Revoke an API key by id. Pass confirm=true. Active sessions using that key fail their next request with 401.",
+			Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteAPIKeyInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
+			if !in.Confirm {
+				return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true")
+			}
+			if err := deps.DB.DeleteAPIKey(in.KeyID); err != nil {
+				return nil, DeletedOutput{}, err
+			}
+			return nil, DeletedOutput{DeletedID: in.KeyID}, nil
+		},
+	)
 }

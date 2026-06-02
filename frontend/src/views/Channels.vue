@@ -30,11 +30,11 @@
          since channels are usually configured in another tool. -->
     <div
       v-if="createdToken"
-      class="bg-background border border-amber-700/40 rounded-lg p-4 space-y-3"
+      class="bg-background border border-warning-ring rounded-lg p-4 space-y-3"
     >
       <div class="flex items-start justify-between gap-3">
         <div>
-          <h2 class="text-xs font-bold text-amber-300 uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-warning-fg uppercase tracking-wider">
             Copy this token now
           </h2>
           <div class="text-xs text-foreground-muted mt-0.5">

@@ -218,166 +218,157 @@ var userSettableStatuses = map[string]bool{"active": true, "inactive": true}
 
 // ─── registration ──────────────────────────────────────────────────
 
-func registerFunctionTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "list_functions",
-				Title:        "List Functions",
-				Description: "List all functions on this Orva instance. Each result includes invoke_url (fully-qualified canonical URL — call this directly, do NOT build it from parts) and routes (list of custom-route URLs, if any). Use id (a UUID) to refer to a function in other MCP tools, or name for human-friendly references. Supports pagination (limit/offset) and filtering by runtime, status, or substring search.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFunctionsInput) (*mcpsdk.CallToolResult, ListFunctionsOutput, error) {
-				lim := in.Limit
-				if lim <= 0 {
-					lim = 50
-				}
-				if lim > 200 {
-					lim = 200
-				}
-				res, err := deps.DB.ListFunctions(database.ListFunctionsParams{
-					Status: in.Status, Runtime: in.Runtime, Limit: lim, Offset: in.Offset,
-				})
-				if err != nil {
-					return nil, ListFunctionsOutput{}, err
-				}
-				out := ListFunctionsOutput{Total: res.Total, Limit: lim, Offset: in.Offset}
-				q := strings.ToLower(strings.TrimSpace(in.Search))
-				for _, fn := range res.Functions {
-					if q != "" {
-						if !strings.Contains(strings.ToLower(fn.Name), q) && !strings.Contains(strings.ToLower(fn.ID), q) {
-							continue
-						}
+func registerFunctionTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "functions"
+
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "list_functions",
+			Title:       "List Functions",
+			Description: "List all functions on this Orva instance. Each result includes invoke_url (fully-qualified canonical URL — call this directly, do NOT build it from parts) and routes (list of custom-route URLs, if any). Use id (a UUID) to refer to a function in other MCP tools, or name for human-friendly references. Supports pagination (limit/offset) and filtering by runtime, status, or substring search.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFunctionsInput) (*mcpsdk.CallToolResult, ListFunctionsOutput, error) {
+			lim := in.Limit
+			if lim <= 0 {
+				lim = 50
+			}
+			if lim > 200 {
+				lim = 200
+			}
+			res, err := deps.DB.ListFunctions(database.ListFunctionsParams{
+				Status: in.Status, Runtime: in.Runtime, Limit: lim, Offset: in.Offset,
+			})
+			if err != nil {
+				return nil, ListFunctionsOutput{}, err
+			}
+			out := ListFunctionsOutput{Total: res.Total, Limit: lim, Offset: in.Offset}
+			q := strings.ToLower(strings.TrimSpace(in.Search))
+			for _, fn := range res.Functions {
+				if q != "" {
+					if !strings.Contains(strings.ToLower(fn.Name), q) && !strings.Contains(strings.ToLower(fn.ID), q) {
+						continue
 					}
-					out.Functions = append(out.Functions, toFunctionView(fn, deps))
 				}
-				return nil, out, nil
-			},
-		)
-	})
+				out.Functions = append(out.Functions, toFunctionView(fn, deps))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "get_function",
-				Title:        "Get Function",
-				Description: "Fetch one function by id or name. Returns the full record including invoke_url (use verbatim to call the function over HTTP — never concatenate /fn/ + id manually), any custom routes, resource limits, env_vars, network_mode, auth_mode, and rate_limit_per_min.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, FunctionView{}, err
-				}
-				return nil, toFunctionView(fn, deps), nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_function",
+			Title:       "Get Function",
+			Description: "Fetch one function by id or name. Returns the full record including invoke_url (use verbatim to call the function over HTTP — never concatenate /fn/ + id manually), any custom routes, resource limits, env_vars, network_mode, auth_mode, and rate_limit_per_min.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, FunctionView{}, err
+			}
+			return nil, toFunctionView(fn, deps), nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "get_function_source",
-				Title:        "Get Function Source",
-				Description: "Read the deployed source code of a function (handler.py / handler.js plus requirements.txt or package.json if any). Useful for an agent that wants to inspect or modify what's running.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionSourceInput) (*mcpsdk.CallToolResult, GetFunctionSourceOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, GetFunctionSourceOutput{}, err
-				}
-				out, err := readFunctionSource(deps, fn)
-				return nil, out, err
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "get_function_source",
+			Title:       "Get Function Source",
+			Description: "Read the deployed source code of a function (handler.py / handler.js plus requirements.txt or package.json if any). Useful for an agent that wants to inspect or modify what's running.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionSourceInput) (*mcpsdk.CallToolResult, GetFunctionSourceOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, GetFunctionSourceOutput{}, err
+			}
+			out, err := readFunctionSource(deps, fn)
+			return nil, out, err
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name: "create_function",
-				Title: "Create Function",
-				Description: "BEFORE calling this: if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract, SDK shape, and event envelope diverge from Lambda / Vercel / Cloudflare Workers; agents that skip the docs and rely on training-data defaults consistently produce code that fails at first invoke (`require('orva')` not `import orva`, `kv.put` not `kv.set`, `exports.handler` not `export default`, etc.). Reading the docs once costs ~3 KB and prevents 4-6 round-trips of trial-and-error.\n\n" +
-					"Create a new function shell (no code yet). The function starts in `created` status — call deploy_function_inline next to ship code and have it activate. " +
-					"Most fields are REQUIRED so the function record carries explicit intent rather than silent defaults. Specifically you MUST provide: " +
-					"`name` (URL-safe identifier), " +
-					"`description` (one-sentence summary of what the function does — visible in list_functions and the dashboard), " +
-					"`runtime` (node22 / node24 / python313 / python314), " +
-					"`entrypoint` (handler file path; e.g. handler.js / handler.py / src/index.ts), " +
-					"`timeout_ms` (per-invocation cap; pick from your handler's expected work — fast CRUD ~5000-10000, AI/LLM ~30000-60000, heavy reports 120000+), " +
-					"`memory_mb` (RAM cap; tiny handlers 64, with frameworks 128-256, image/PDF/ML 512+), " +
-					"`cpus` (CPU shares; IO-bound 0.25-0.5, mixed 0.5-1, CPU-bound 1+), " +
-					"`network_mode` ('egress' if the handler imports `orva` / makes external HTTPS, 'none' only for pure compute), " +
-					"`auth_mode` ('platform_key' / 'signed' for anything that handles user data; 'none' only for genuinely public endpoints). " +
-					"Optional: env_vars, max_concurrency, concurrency_policy, rate_limit_per_min — sane defaults. " +
-					"Defaulting any of the required fields silently has been a frequent source of bugs (auth=none on private endpoints, network_mode=none on SDK handlers, undersized memory) — being explicit costs ~10 extra lines and prevents the whole class of foot-gun.",
-				Annotations: &mcpsdk.ToolAnnotations{
-					DestructiveHint: ptrFalse(),
-					OpenWorldHint:   ptrFalse(),
-				},
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:  "create_function",
+			Title: "Create Function",
+			Description: "BEFORE calling this: if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract, SDK shape, and event envelope diverge from Lambda / Vercel / Cloudflare Workers; agents that skip the docs and rely on training-data defaults consistently produce code that fails at first invoke (`require('orva')` not `import orva`, `kv.put` not `kv.set`, `exports.handler` not `export default`, etc.). Reading the docs once costs ~3 KB and prevents 4-6 round-trips of trial-and-error.\n\n" +
+				"Create a new function shell (no code yet). The function starts in `created` status — call deploy_function_inline next to ship code and have it activate. " +
+				"Most fields are REQUIRED so the function record carries explicit intent rather than silent defaults. Specifically you MUST provide: " +
+				"`name` (URL-safe identifier), " +
+				"`description` (one-sentence summary of what the function does — visible in list_functions and the dashboard), " +
+				"`runtime` (node22 / node24 / python313 / python314), " +
+				"`entrypoint` (handler file path; e.g. handler.js / handler.py / src/index.ts), " +
+				"`timeout_ms` (per-invocation cap; pick from your handler's expected work — fast CRUD ~5000-10000, AI/LLM ~30000-60000, heavy reports 120000+), " +
+				"`memory_mb` (RAM cap; tiny handlers 64, with frameworks 128-256, image/PDF/ML 512+), " +
+				"`cpus` (CPU shares; IO-bound 0.25-0.5, mixed 0.5-1, CPU-bound 1+), " +
+				"`network_mode` ('egress' if the handler imports `orva` / makes external HTTPS, 'none' only for pure compute), " +
+				"`auth_mode` ('platform_key' / 'signed' for anything that handles user data; 'none' only for genuinely public endpoints). " +
+				"Optional: env_vars, max_concurrency, concurrency_policy, rate_limit_per_min — sane defaults. " +
+				"Defaulting any of the required fields silently has been a frequent source of bugs (auth=none on private endpoints, network_mode=none on SDK handlers, undersized memory) — being explicit costs ~10 extra lines and prevents the whole class of foot-gun.",
+			Annotations: &mcpsdk.ToolAnnotations{
+				DestructiveHint: ptrFalse(),
+				OpenWorldHint:   ptrFalse(),
 			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
-				fn, err := createFunction(deps, in)
-				if err != nil {
-					return nil, FunctionView{}, err
-				}
-				return nil, toFunctionView(fn, deps), nil
-			},
-		)
-	})
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
+			fn, err := createFunction(deps, in)
+			if err != nil {
+				return nil, FunctionView{}, err
+			}
+			return nil, toFunctionView(fn, deps), nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "update_function",
-				Title:        "Update Function",
-				Description: "BEFORE calling this with code-shape implications (entrypoint changes, runtime swaps, etc.): if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract diverges from Lambda / Vercel / Workers and skipping the docs is the leading cause of update_function calls that activate broken handlers.\n\n" +
-					"Patch a function's settings. Any field omitted is left unchanged. Flipping memory/cpus/env_vars/network_mode drains the warm pool so the next invocation respawns with the new config.",
-				Annotations: &mcpsdk.ToolAnnotations{
-					IdempotentHint: true,
-					OpenWorldHint:  ptrFalse(),
-				},
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:  "update_function",
+			Title: "Update Function",
+			Description: "BEFORE calling this with code-shape implications (entrypoint changes, runtime swaps, etc.): if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract diverges from Lambda / Vercel / Workers and skipping the docs is the leading cause of update_function calls that activate broken handlers.\n\n" +
+				"Patch a function's settings. Any field omitted is left unchanged. Flipping memory/cpus/env_vars/network_mode drains the warm pool so the next invocation respawns with the new config.",
+			Annotations: &mcpsdk.ToolAnnotations{
+				IdempotentHint: true,
+				OpenWorldHint:  ptrFalse(),
 			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in UpdateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
-				fn, err := updateFunction(deps, in)
-				if err != nil {
-					return nil, FunctionView{}, err
-				}
-				return nil, toFunctionView(fn, deps), nil
-			},
-		)
-	})
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in UpdateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
+			fn, err := updateFunction(deps, in)
+			if err != nil {
+				return nil, FunctionView{}, err
+			}
+			return nil, toFunctionView(fn, deps), nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "delete_function",
-				Title:        "Delete Function",
-				Description: "Permanently delete a function and all its deployments, secrets, routes, and execution history. Pass confirm=true. Irreversible — only do this when the user has explicitly asked.",
-				Annotations: &mcpsdk.ToolAnnotations{
-					DestructiveHint: ptrTrue(),
-					OpenWorldHint:   ptrFalse(),
-				},
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "delete_function",
+			Title:       "Delete Function",
+			Description: "Permanently delete a function and all its deployments, secrets, routes, and execution history. Pass confirm=true. Irreversible — only do this when the user has explicitly asked.",
+			Annotations: &mcpsdk.ToolAnnotations{
+				DestructiveHint: ptrTrue(),
+				OpenWorldHint:   ptrFalse(),
 			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteFunctionInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
-				if !in.Confirm {
-					return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true to acknowledge irreversibility")
-				}
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, DeletedOutput{}, err
-				}
-				if err := deps.Registry.Delete(fn.ID); err != nil {
-					return nil, DeletedOutput{}, err
-				}
-				if deps.PoolMgr != nil {
-					deps.PoolMgr.DrainAndRemove(fn.ID)
-				}
-				return nil, DeletedOutput{DeletedID: fn.ID}, nil
-			},
-		)
-	})
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteFunctionInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
+			if !in.Confirm {
+				return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true to acknowledge irreversibility")
+			}
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, DeletedOutput{}, err
+			}
+			if err := deps.Registry.Delete(fn.ID); err != nil {
+				return nil, DeletedOutput{}, err
+			}
+			if deps.PoolMgr != nil {
+				deps.PoolMgr.DrainAndRemove(fn.ID)
+			}
+			return nil, DeletedOutput{DeletedID: fn.ID}, nil
+		},
+	)
 }
 
 // ─── helpers shared with deploy tools ──────────────────────────────

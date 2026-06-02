@@ -582,9 +582,9 @@ const typeHint = computed(() => {
 
 // Status banner branching — three states.
 const statusBannerClass = computed(() => {
-  if (status.value.last_error) return 'border-red-500/40 bg-red-500/10 text-red-200'
-  if (!status.value.nftables_available) return 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-  return 'border-success/30 bg-success/5 text-foreground-muted'
+  if (status.value.last_error) return 'border-danger-ring bg-danger-tint text-danger-fg'
+  if (!status.value.nftables_available) return 'border-warning-ring bg-warning-tint text-warning-fg'
+  return 'border-success-ring bg-success-tint text-foreground-muted'
 })
 const statusIcon = computed(() => {
   if (status.value.last_error) return AlertTriangle
@@ -755,7 +755,7 @@ const RuleCard = defineComponent({
             h('span', { class: ['rule-kind-pill', pill.value.cls] }, pill.value.label),
           ]),
           h('button', {
-            class: ['rule-toggle', p.rule.enabled ? 'on' : 'off', p.busy ? 'busy' : ''],
+            class: ['rule-toggle', p.rule.enabled ? 'on' : 'off', p.busy ? 'busy' : '', 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background'],
             disabled: p.busy,
             title: p.rule.enabled ? 'Click to allow' : 'Click to block',
             onClick: () => emit('toggle'),

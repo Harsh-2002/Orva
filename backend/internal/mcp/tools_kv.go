@@ -171,188 +171,179 @@ type KVCASInput struct {
 	TTLSeconds int     `json:"ttl_seconds,omitempty"`
 }
 type KVCASOutput struct {
-	OK      bool      `json:"ok"`
-	Current *KVValue  `json:"current,omitempty" jsonschema:"on !ok, the value currently stored so callers can retry with a fresh expectation"`
+	OK      bool     `json:"ok"`
+	Current *KVValue `json:"current,omitempty" jsonschema:"on !ok, the value currently stored so callers can retry with a fresh expectation"`
 }
 
-func registerKVTools(s *mcpsdk.Server, deps Deps, perms permSet) {
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "kv_get",
-				Title:        "KV Get",
-				Description: "Read a value from a function's per-namespace KV store. Returns found=false if the key is missing or has expired (TTL elapsed).",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVGetInput) (*mcpsdk.CallToolResult, KVGetOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, KVGetOutput{}, err
-				}
-				key := strings.TrimSpace(in.Key)
-				if key == "" {
-					return nil, KVGetOutput{}, errors.New("key is required")
-				}
-				entry, err := deps.DB.KVGet(fn.ID, key)
-				if errors.Is(err, database.ErrKVNotFound) {
-					return nil, KVGetOutput{Found: false}, nil
-				}
-				if err != nil {
-					return nil, KVGetOutput{}, err
-				}
-				view := toKVView(entry)
-				return nil, KVGetOutput{Found: true, Entry: &view}, nil
-			},
-		)
-	})
+func registerKVTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "kv"
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "kv_put",
-				Title:        "KV Put",
-				Description: "Write a value to a function's KV store. value can be any JSON-serializable type; it's stored as JSON and returned by kv_get with the same shape. Optional ttl_seconds expires the key automatically.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVPutInput) (*mcpsdk.CallToolResult, KVPutOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, KVPutOutput{}, err
-				}
-				key := strings.TrimSpace(in.Key)
-				if key == "" {
-					return nil, KVPutOutput{}, errors.New("key is required")
-				}
-				body, err := encodeKVValue(in.Value)
-				if err != nil {
-					return nil, KVPutOutput{}, err
-				}
-				if err := deps.DB.KVPut(fn.ID, key, body, in.TTLSeconds); err != nil {
-					return nil, KVPutOutput{}, err
-				}
-				return nil, KVPutOutput{Key: key, TTLSeconds: in.TTLSeconds}, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "kv_get",
+			Title:       "KV Get",
+			Description: "Read a value from a function's per-namespace KV store. Returns found=false if the key is missing or has expired (TTL elapsed).",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVGetInput) (*mcpsdk.CallToolResult, KVGetOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, KVGetOutput{}, err
+			}
+			key := strings.TrimSpace(in.Key)
+			if key == "" {
+				return nil, KVGetOutput{}, errors.New("key is required")
+			}
+			entry, err := deps.DB.KVGet(fn.ID, key)
+			if errors.Is(err, database.ErrKVNotFound) {
+				return nil, KVGetOutput{Found: false}, nil
+			}
+			if err != nil {
+				return nil, KVGetOutput{}, err
+			}
+			view := toKVView(entry)
+			return nil, KVGetOutput{Found: true, Entry: &view}, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "kv_delete",
-				Title:        "KV Delete",
-				Description: "Remove a single key from a function's KV store. Idempotent — returns ok even if the key never existed.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVDeleteInput) (*mcpsdk.CallToolResult, KVDeleteOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, KVDeleteOutput{}, err
-				}
-				if err := deps.DB.KVDelete(fn.ID, in.Key); err != nil {
-					return nil, KVDeleteOutput{}, err
-				}
-				return nil, KVDeleteOutput{Status: "deleted", Key: in.Key}, nil
-			},
-		)
-	})
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "kv_put",
+			Title:       "KV Put",
+			Description: "Write a value to a function's KV store. value can be any JSON-serializable type; it's stored as JSON and returned by kv_get with the same shape. Optional ttl_seconds expires the key automatically.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVPutInput) (*mcpsdk.CallToolResult, KVPutOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, KVPutOutput{}, err
+			}
+			key := strings.TrimSpace(in.Key)
+			if key == "" {
+				return nil, KVPutOutput{}, errors.New("key is required")
+			}
+			body, err := encodeKVValue(in.Value)
+			if err != nil {
+				return nil, KVPutOutput{}, err
+			}
+			if err := deps.DB.KVPut(fn.ID, key, body, in.TTLSeconds); err != nil {
+				return nil, KVPutOutput{}, err
+			}
+			return nil, KVPutOutput{Key: key, TTLSeconds: in.TTLSeconds}, nil
+		},
+	)
 
-	gatedAdd(perms, permRead, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "kv_list",
-				Title:        "KV List",
-				Description: "List a function's KV keys, optionally filtered by prefix. Useful for inspecting what state a function has accumulated. Expired keys are excluded.",
-				Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVListInput) (*mcpsdk.CallToolResult, KVListOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, KVListOutput{}, err
-				}
-				page, err := deps.DB.KVListWithCursor(fn.ID, in.Prefix, in.Cursor, in.Limit)
-				if err != nil {
-					return nil, KVListOutput{}, err
-				}
-				out := KVListOutput{
-					Entries:    make([]KVView, 0, len(page.Entries)),
-					NextCursor: page.NextCursor,
-				}
-				for _, e := range page.Entries {
-					out.Entries = append(out.Entries, toKVView(e))
-				}
-				return nil, out, nil
-			},
-		)
-	})
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "kv_delete",
+			Title:       "KV Delete",
+			Description: "Remove a single key from a function's KV store. Idempotent — returns ok even if the key never existed.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVDeleteInput) (*mcpsdk.CallToolResult, KVDeleteOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, KVDeleteOutput{}, err
+			}
+			if err := deps.DB.KVDelete(fn.ID, in.Key); err != nil {
+				return nil, KVDeleteOutput{}, err
+			}
+			return nil, KVDeleteOutput{Status: "deleted", Key: in.Key}, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "kv_incr",
-				Title:       "KV Increment",
-				Description: "Atomically increment an integer counter. Missing keys are treated as 0; pass a negative delta to decrement. Use this instead of read+put when multiple writers can update the same counter concurrently.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVIncrInput) (*mcpsdk.CallToolResult, KVIncrOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, KVIncrOutput{}, err
-				}
-				key := strings.TrimSpace(in.Key)
-				if key == "" {
-					return nil, KVIncrOutput{}, errors.New("key is required")
-				}
-				delta := in.Delta
-				if delta == 0 {
-					delta = 1
-				}
-				next, err := deps.DB.KVIncr(fn.ID, key, delta, in.TTLSeconds)
-				if err != nil {
-					return nil, KVIncrOutput{}, err
-				}
-				return nil, KVIncrOutput{Value: next}, nil
-			},
-		)
-	})
+	regAddTool(rc, permRead,
+		&mcpsdk.Tool{
+			Name:        "kv_list",
+			Title:       "KV List",
+			Description: "List a function's KV keys, optionally filtered by prefix. Useful for inspecting what state a function has accumulated. Expired keys are excluded.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVListInput) (*mcpsdk.CallToolResult, KVListOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, KVListOutput{}, err
+			}
+			page, err := deps.DB.KVListWithCursor(fn.ID, in.Prefix, in.Cursor, in.Limit)
+			if err != nil {
+				return nil, KVListOutput{}, err
+			}
+			out := KVListOutput{
+				Entries:    make([]KVView, 0, len(page.Entries)),
+				NextCursor: page.NextCursor,
+			}
+			for _, e := range page.Entries {
+				out.Entries = append(out.Entries, toKVView(e))
+			}
+			return nil, out, nil
+		},
+	)
 
-	gatedAdd(perms, permWrite, func() {
-		mcpsdk.AddTool(s,
-			&mcpsdk.Tool{
-				Name:        "kv_cas",
-				Title:       "KV Compare-and-swap",
-				Description: "Atomically swap a key's value only if the current value matches Expected. Useful for safe read-modify-write loops where multiple writers could otherwise overwrite each other. Returns ok=false plus the current value when the precondition fails.",
-				Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
-			},
-			func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVCASInput) (*mcpsdk.CallToolResult, KVCASOutput, error) {
-				fn, err := resolveFunction(deps, in.FunctionID)
-				if err != nil {
-					return nil, KVCASOutput{}, err
-				}
-				key := strings.TrimSpace(in.Key)
-				if key == "" {
-					return nil, KVCASOutput{}, errors.New("key is required")
-				}
-				expected, err := encodeKVValue(in.Expected)
-				if err != nil {
-					return nil, KVCASOutput{}, err
-				}
-				next, err := encodeKVValue(in.New)
-				if err != nil {
-					return nil, KVCASOutput{}, err
-				}
-				ok, current, err := deps.DB.KVCAS(fn.ID, key, expected, next, in.TTLSeconds)
-				if err != nil {
-					return nil, KVCASOutput{}, err
-				}
-				out := KVCASOutput{OK: ok}
-				if !ok && current != nil {
-					// Surface the raw bytes back through KVValue so the
-					// schema stays self-describing for MCP clients.
-					decoded := decodeKVValue(current)
-					out.Current = &decoded
-				}
-				return nil, out, nil
-			},
-		)
-	})
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "kv_incr",
+			Title:       "KV Increment",
+			Description: "Atomically increment an integer counter. Missing keys are treated as 0; pass a negative delta to decrement. Use this instead of read+put when multiple writers can update the same counter concurrently.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVIncrInput) (*mcpsdk.CallToolResult, KVIncrOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, KVIncrOutput{}, err
+			}
+			key := strings.TrimSpace(in.Key)
+			if key == "" {
+				return nil, KVIncrOutput{}, errors.New("key is required")
+			}
+			delta := in.Delta
+			if delta == 0 {
+				delta = 1
+			}
+			next, err := deps.DB.KVIncr(fn.ID, key, delta, in.TTLSeconds)
+			if err != nil {
+				return nil, KVIncrOutput{}, err
+			}
+			return nil, KVIncrOutput{Value: next}, nil
+		},
+	)
+
+	regAddTool(rc, permWrite,
+		&mcpsdk.Tool{
+			Name:        "kv_cas",
+			Title:       "KV Compare-and-swap",
+			Description: "Atomically swap a key's value only if the current value matches Expected. Useful for safe read-modify-write loops where multiple writers could otherwise overwrite each other. Returns ok=false plus the current value when the precondition fails.",
+			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVCASInput) (*mcpsdk.CallToolResult, KVCASOutput, error) {
+			fn, err := resolveFunction(deps, in.FunctionID)
+			if err != nil {
+				return nil, KVCASOutput{}, err
+			}
+			key := strings.TrimSpace(in.Key)
+			if key == "" {
+				return nil, KVCASOutput{}, errors.New("key is required")
+			}
+			expected, err := encodeKVValue(in.Expected)
+			if err != nil {
+				return nil, KVCASOutput{}, err
+			}
+			next, err := encodeKVValue(in.New)
+			if err != nil {
+				return nil, KVCASOutput{}, err
+			}
+			ok, current, err := deps.DB.KVCAS(fn.ID, key, expected, next, in.TTLSeconds)
+			if err != nil {
+				return nil, KVCASOutput{}, err
+			}
+			out := KVCASOutput{OK: ok}
+			if !ok && current != nil {
+				// Surface the raw bytes back through KVValue so the
+				// schema stays self-describing for MCP clients.
+				decoded := decodeKVValue(current)
+				out.Current = &decoded
+			}
+			return nil, out, nil
+		},
+	)
 }

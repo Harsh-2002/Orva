@@ -126,125 +126,113 @@
     </div>
 
     <!-- Create / Edit modal -->
-    <div
-      v-if="showForm"
-      class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      @click.self="closeForm"
+    <Modal
+      :model-value="showForm"
+      :title="editingId ? 'Edit webhook' : 'New webhook'"
+      size="lg"
+      @update:model-value="$event ? null : closeForm()"
     >
-      <div class="bg-surface border border-border rounded-lg w-full max-w-xl shadow-2xl shadow-black/50 max-h-[90vh] overflow-y-auto">
-        <div class="border-b border-border px-6 py-4 flex items-center justify-between">
-          <h2 class="text-base font-semibold text-foreground">
-            {{ editingId ? 'Edit webhook' : 'New webhook' }}
-          </h2>
-          <IconButton
-            :icon="X"
-            title="Close"
-            @click="closeForm"
-          />
+      <div
+        v-if="!mintedSecret"
+        class="space-y-4"
+      >
+        <div>
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Name</label>
+          <input
+            v-model="form.name"
+            placeholder="ops-slack"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+          >
         </div>
-
-        <div
-          v-if="!mintedSecret"
-          class="p-6 space-y-4"
-        >
-          <div>
-            <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Name</label>
-            <input
-              v-model="form.name"
-              placeholder="ops-slack"
-              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-            >
-          </div>
-          <div>
-            <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Receiver URL</label>
-            <input
-              v-model="form.url"
-              placeholder="https://hooks.slack.com/services/..."
-              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-            >
-            <p class="text-[11px] text-foreground-muted mt-1.5">
-              The receiver must respond 2xx within 15s. Failed deliveries retry up to 5× with exponential backoff.
-            </p>
-          </div>
-          <div>
-            <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Events</label>
-            <div class="flex flex-wrap gap-1.5">
-              <Button
-                v-for="ev in allEvents"
-                :key="ev.value"
-                variant="chip"
-                size="xs"
-                :active="form.events.includes(ev.value)"
-                class="font-mono"
-                @click="toggleEvent(ev.value)"
-              >
-                {{ ev.value }}
-              </Button>
-            </div>
-            <p class="text-[11px] text-foreground-muted mt-1.5">
-              Pick <code class="font-mono">*</code> to receive every event. Each badge above is one of the 8 system events that can fire today.
-            </p>
-          </div>
-          <div class="flex items-center gap-2 pt-1">
-            <input
-              id="enabled"
-              v-model="form.enabled"
-              type="checkbox"
-              class="w-4 h-4 rounded border-border bg-background"
-            >
-            <label
-              for="enabled"
-              class="text-sm text-foreground"
-            >Enabled</label>
-          </div>
-        </div>
-
-        <!-- Secret-shown-once view (only on create) -->
-        <div
-          v-else
-          class="p-6 space-y-3"
-        >
-          <div class="flex items-center gap-2 text-success">
-            <CheckCircle class="w-5 h-5" />
-            <span class="text-sm font-medium">Webhook created</span>
-          </div>
-          <p class="text-xs text-foreground-muted">
-            Copy this secret <span class="text-foreground font-medium">now</span> — it won't be shown again. The receiver uses it to verify HMAC signatures.
+        <div>
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Receiver URL</label>
+          <input
+            v-model="form.url"
+            placeholder="https://hooks.slack.com/services/..."
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+          >
+          <p class="text-[11px] text-foreground-muted mt-1.5">
+            The receiver must respond 2xx within 15s. Failed deliveries retry up to 5× with exponential backoff.
           </p>
-          <div class="bg-background border border-border rounded p-3 font-mono text-xs break-all flex items-center gap-2">
-            <code class="flex-1 text-foreground">{{ mintedSecret }}</code>
-            <IconButton
-              :icon="mintedCopied ? Check : Copy"
-              :title="mintedCopied ? 'Copied' : 'Copy secret'"
-              @click="copyMinted"
-            />
-          </div>
         </div>
-
-        <div class="border-t border-border px-6 py-4 flex justify-end gap-2">
-          <Button
-            v-if="!mintedSecret"
-            variant="ghost"
-            @click="closeForm"
+        <div>
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Events</label>
+          <div class="flex flex-wrap gap-1.5">
+            <Button
+              v-for="ev in allEvents"
+              :key="ev.value"
+              variant="chip"
+              size="xs"
+              :active="form.events.includes(ev.value)"
+              class="font-mono"
+              @click="toggleEvent(ev.value)"
+            >
+              {{ ev.value }}
+            </Button>
+          </div>
+          <p class="text-[11px] text-foreground-muted mt-1.5">
+            Pick <code class="font-mono">*</code> to receive every event. Each badge above is one of the 8 system events that can fire today.
+          </p>
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <input
+            id="enabled"
+            v-model="form.enabled"
+            type="checkbox"
+            class="w-4 h-4 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            Cancel
-          </Button>
-          <Button
-            v-if="!mintedSecret"
-            :disabled="!canSubmit || saving"
-            @click="save"
-          >
-            {{ saving ? 'Saving…' : (editingId ? 'Save' : 'Create') }}
-          </Button>
-          <Button
-            v-else
-            @click="closeForm"
-          >
-            Done
-          </Button>
+          <label
+            for="enabled"
+            class="text-sm text-foreground"
+          >Enabled</label>
         </div>
       </div>
-    </div>
+
+      <!-- Secret-shown-once view (only on create) -->
+      <div
+        v-else
+        class="space-y-3"
+      >
+        <div class="flex items-center gap-2 text-success-fg">
+          <CheckCircle class="w-5 h-5" />
+          <span class="text-sm font-medium">Webhook created</span>
+        </div>
+        <p class="text-xs text-foreground-muted">
+          Copy this secret <span class="text-foreground font-medium">now</span> — it won't be shown again. The receiver uses it to verify HMAC signatures.
+        </p>
+        <div class="bg-background border border-border rounded p-3 font-mono text-xs break-all flex items-center gap-2">
+          <code class="flex-1 text-foreground">{{ mintedSecret }}</code>
+          <IconButton
+            :icon="mintedCopied ? Check : Copy"
+            :title="mintedCopied ? 'Copied' : 'Copy secret'"
+            @click="copyMinted"
+          />
+        </div>
+      </div>
+
+      <template #footer>
+        <Button
+          v-if="!mintedSecret"
+          variant="ghost"
+          @click="closeForm"
+        >
+          Cancel
+        </Button>
+        <Button
+          v-if="!mintedSecret"
+          :disabled="!canSubmit || saving"
+          @click="save"
+        >
+          {{ saving ? 'Saving…' : (editingId ? 'Save' : 'Create') }}
+        </Button>
+        <Button
+          v-else
+          @click="closeForm"
+        >
+          Done
+        </Button>
+      </template>
+    </Modal>
 
     <!-- Deliveries drawer -->
     <div
@@ -301,7 +289,7 @@
             </div>
             <p
               v-if="d.last_error"
-              class="text-[11px] text-error truncate"
+              class="text-[11px] text-danger-fg truncate"
               :title="d.last_error"
             >
               {{ d.last_error }}
@@ -336,6 +324,7 @@ import { useConfirmStore } from '@/stores/confirm'
 import { copyText } from '@/utils/clipboard'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import Modal from '@/components/common/Modal.vue'
 
 const confirmStore = useConfirmStore()
 
@@ -378,16 +367,16 @@ const eventsBadgeList = (sub) => {
 }
 
 const statusPill = (sub) => {
-  if (!sub.enabled) return 'bg-surface text-foreground-muted border-border'
-  if (sub.last_status === 'failed') return 'bg-error/10 text-error border-error/30'
-  if (sub.last_status === 'ok') return 'bg-success/10 text-success border-success/30'
-  return 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+  if (!sub.enabled) return 'bg-warning-tint text-warning-fg border-warning-ring'
+  if (sub.last_status === 'failed') return 'bg-danger-tint text-danger-fg border-danger-ring'
+  if (sub.last_status === 'ok') return 'bg-success-tint text-success-fg border-success-ring'
+  return 'bg-warning-tint text-warning-fg border-warning-ring'
 }
 const statusDot = (sub) => {
-  if (!sub.enabled) return 'bg-foreground-muted/40'
-  if (sub.last_status === 'failed') return 'bg-error'
-  if (sub.last_status === 'ok') return 'bg-success'
-  return 'bg-amber-400'
+  if (!sub.enabled) return 'bg-warning-fg'
+  if (sub.last_status === 'failed') return 'bg-danger-fg'
+  if (sub.last_status === 'ok') return 'bg-success-fg'
+  return 'bg-warning-fg'
 }
 const statusLabel = (sub) => {
   if (!sub.enabled) return 'paused'
@@ -398,10 +387,10 @@ const statusLabel = (sub) => {
 
 const deliveryPill = (s) => {
   switch (s) {
-    case 'pending':   return 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-    case 'running':   return 'bg-sky-500/15 text-sky-300 border-sky-500/30 animate-pulse'
-    case 'succeeded': return 'bg-success/10 text-success border-success/30'
-    case 'failed':    return 'bg-error/10 text-error border-error/30'
+    case 'pending':   return 'bg-warning-tint text-warning-fg border-warning-ring'
+    case 'running':   return 'bg-info-tint text-info-fg border-info-ring'
+    case 'succeeded': return 'bg-success-tint text-success-fg border-success-ring'
+    case 'failed':    return 'bg-danger-tint text-danger-fg border-danger-ring'
     default:          return 'bg-surface text-foreground-muted border-border'
   }
 }
