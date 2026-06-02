@@ -9,17 +9,12 @@ name: cli-e2e
 # dispatch — they no longer run on every CLI code change.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "cli/**"
-      - "internal/client/**"
-      - "internal/ids/**"
-      - "backend/cmd/orva/**"
-      - "scripts/install-cli.sh"
-      - "scripts/install-cli.ps1"
-      - "test/cli/**"
-      - ".github/workflows/cli-e2e.yml"
+  # Source validation (unit + cross-build) runs on PRs. The install jobs
+  # download the RELEASED CLI, so they run on release:published (against the
+  # freshly-published artifacts) — not on main-push, which would race the
+  # release cut and 404 on "latest".
+  release:
+    types: [published]
   pull_request:
     paths:
       - "cli/**"
@@ -123,6 +118,7 @@ jobs:
     # of Linux; we don't want one on every CLI code change.
     if: |
       needs.changes.outputs.installers == 'true'
+      || github.event_name == 'release'
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
     env:
@@ -157,6 +153,7 @@ jobs:
     # Same gating as install-macos. Windows runners are 2× Linux cost.
     if: |
       needs.changes.outputs.installers == 'true'
+      || github.event_name == 'release'
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
     env:

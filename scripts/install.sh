@@ -467,6 +467,36 @@ choose_mode() {
     log "mode: $MODE"
 }
 
+# ── Downloader bootstrap ─────────────────────────────────────────────────────
+# Version resolution and asset downloads need curl (or wget). Minimal distro
+# images (the install-e2e containers, and plenty of real bare-metal hosts) ship
+# with neither, and the full prereq install happens later — so ensure a fetcher
+# exists FIRST, installing curl via the detected package manager if necessary.
+ensure_downloader() {
+    if have curl; then return; fi
+    [ "$DRYRUN" = "1" ] && return
+    log "curl not found — installing it"
+    case "$DISTRO_ID" in
+        ubuntu|debian)
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl ;;
+        alpine) apk add --no-cache ca-certificates curl ;;
+        fedora|rhel|centos|rocky|almalinux|amzn) { have dnf && dnf install -y curl; } || yum install -y curl ;;
+        arch|manjaro|endeavouros) pacman -Sy --noconfirm --needed curl ;;
+        opensuse-leap|opensuse-tumbleweed|sles) zypper --non-interactive install curl ;;
+        *)
+            case "$DISTRO_LIKE" in
+                *debian*|*ubuntu*) DEBIAN_FRONTEND=noninteractive apt-get update -qq
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl ;;
+                *rhel*|*fedora*) { have dnf && dnf install -y curl; } || yum install -y curl ;;
+                *arch*) pacman -Sy --noconfirm --needed curl ;;
+                *suse*) zypper --non-interactive install curl ;;
+                *) die "curl is required to download the release — install it and re-run" ;;
+            esac ;;
+    esac
+    have curl || die "failed to install curl"
+}
+
 # ── Version resolution ───────────────────────────────────────────────────────
 resolve_version() {
     if [ -n "$VERSION" ]; then log "version: $VERSION"; return; fi
@@ -1035,6 +1065,7 @@ main() {
     decide_interactive
     detect_existing
     choose_mode
+    ensure_downloader
     resolve_version
 
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT INT TERM

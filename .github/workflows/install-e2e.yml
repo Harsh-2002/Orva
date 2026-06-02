@@ -6,17 +6,12 @@ name: install-e2e
 # the scripts pass lint and focuses on actually running them.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/install.sh"
-      - "scripts/uninstall.sh"
-      - "scripts/orva.service"
-      - "scripts/orva.openrc"
-      - "scripts/entrypoint.sh"
-      - "Dockerfile"
-      - "test/install/**"
-      - ".github/workflows/install-e2e.yml"
+  # Runs AFTER a release publishes — these download the released binary, so
+  # they must not run on main-push: during a release cut the old release is
+  # already gone and the new one isn't published yet, so "latest" 404s. On
+  # release:published they validate the freshly-published artifacts.
+  release:
+    types: [published]
   pull_request:
     paths:
       - "scripts/install.sh"

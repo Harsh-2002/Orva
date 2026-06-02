@@ -37,9 +37,38 @@ env:
   IMAGE_NAME: ghcr.io/harsh-2002/orva
 
 jobs:
+  # ── 0. Validate — the release gate ───────────────────────────────────
+  # The release is the LAST step: nothing is built or published until this
+  # is green. Mirrors ci.yml's go job (vet + race tests over the full
+  # module) so a tag can never ship code whose tests fail. The build +
+  # publish jobs below all depend on it.
+  validate:
+    name: validate (vet + race tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: ""
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+      - name: build ui + embed adapters
+        # //go:embed needs ui_dist + adapters populated before vet/test.
+        run: |
+          make embed
+          make adapters-embed
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 -race ./...
+
   # ── 1. Go binary: matrix amd64 + arm64 ───────────────────────────────
   build-orva:
     name: build orva (${{ matrix.goarch }})
+    needs: validate
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -114,6 +143,7 @@ jobs:
   # Windows builds get the .exe suffix.
   build-cli:
     name: build orva-cli (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: validate
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -201,6 +231,7 @@ jobs:
   # (Linux ≥ 3.2, which covers every system anyone deploys this on).
   build-nsjail:
     name: build nsjail (${{ matrix.goarch }})
+    needs: validate
     runs-on: ${{ matrix.runner }}
     container: debian:bookworm-slim
     strategy:
@@ -247,6 +278,7 @@ jobs:
   # ── 3. Language rootfs tarballs ───────────────────────────────────────
   build-rootfs:
     name: rootfs ${{ matrix.runtime }} (${{ matrix.goarch }})
+    needs: validate
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -405,6 +437,7 @@ jobs:
   # two digests into both `:latest` and the immutable `:${tag}`.
   docker-image:
     name: docker image (${{ matrix.goarch }})
+    needs: validate
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
