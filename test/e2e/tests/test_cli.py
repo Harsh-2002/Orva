@@ -8,6 +8,7 @@ via REST shows up in `orva functions list`). Optionally exercises `orva deploy` 
 `orva invoke`; those need a real build sandbox (nsjail), so they skip gracefully
 when the build/invoke can't complete — the read-only checks still run and must pass.
 """
+import json
 import os
 import sys
 import tempfile
@@ -96,6 +97,39 @@ def main():
         check("functions get with no arg -> nonzero", rc != 0, f"rc={rc}")
         rc, out, err = cli.run("nope-not-a-command")
         check("unknown command -> nonzero", rc != 0, f"rc={rc}")
+        rc, out, err = cli.run("invoke", "nope-not-real", "--body", "{}")
+        check("invoke of missing function -> nonzero", rc != 0, f"rc={rc}")
+        check("missing-function error names the function", "nope-not-real" in err,
+              err.strip()[:160])
+
+        section("global output contract (-o json, --quiet, stdout/stderr split)")
+        rc, out, err = cli.run("functions", "list", "-o", "json")
+        check("functions list -o json -> exit 0", rc == 0, f"rc={rc} err={err.strip()[:160]}")
+        parsed = None
+        try:
+            parsed = json.loads(out)
+        except Exception as e:
+            check("-o json emits parseable JSON on stdout", False, f"{e}: {out.strip()[:160]}")
+        if parsed is not None:
+            check("-o json emits parseable JSON on stdout", True)
+            names = [f.get("name") for f in (parsed.get("functions") or [])]
+            check("-o json payload contains the function", NAME in names, str(names)[:160])
+        # --quiet keeps status (the "Total:" line) off stderr; data stays on stdout.
+        rc, out, err = cli.run("functions", "list", "--quiet")
+        check("functions list --quiet -> exit 0", rc == 0, f"rc={rc} err={err.strip()[:160]}")
+        check("--quiet suppresses stderr status", "Total" not in err, err.strip()[:160])
+        check("--quiet still emits data on stdout", NAME in out, out.strip()[:160])
+
+        section("new read-only command groups reach the server")
+        for label, args in [
+            ("system storage", ("system", "storage")),
+            ("traces list", ("traces", "list", "--limit", "5")),
+            ("firewall list", ("firewall", "list")),
+            ("dns get", ("dns", "get")),
+            ("deployments list", ("deployments", "list", NAME)),
+        ]:
+            rc, out, err = cli.run(*args)
+            check(f"{label} -> exit 0", rc == 0, f"rc={rc} err={err.strip()[:160]}")
 
         section("orva deploy + invoke (nsjail-dependent; skips if unavailable)")
         # Build a trivial node24 source dir and try a real deploy via the CLI.
@@ -112,7 +146,9 @@ def main():
 
         section("delete via CLI + confirm gone")
         if fid:
-            rc, out, err = cli.run("functions", "delete", NAME)
+            # --yes is required: destructive ops prompt interactively and refuse
+            # on a non-TTY (like this harness) without it.
+            rc, out, err = cli.run("functions", "delete", NAME, "--yes")
             check("functions delete -> exit 0", rc == 0,
                   f"rc={rc} err={err.strip()[:160]}")
             # Confirm via REST that it is actually gone (CLI delete resolved the id).
@@ -149,8 +185,10 @@ def _try_deploy_invoke(cli):
             return None
 
         result = {"detail": blob.strip()[-200:]}
-        irc, iout, ierr = cli.run("invoke", dep_name, "--data", "{}", timeout=60)
-        result["invoked"] = (irc == 0 and "Status:" in iout)
+        # invoke now prints the response BODY to stdout (status/timing go to
+        # stderr); a 2xx invocation exits 0 with a non-empty body.
+        irc, iout, ierr = cli.run("invoke", dep_name, "--body", "{}", timeout=60)
+        result["invoked"] = (irc == 0 and iout.strip() != "")
         result["invoke_detail"] = (iout + ierr).strip()[-200:]
         _cli_delete(cli, dep_name)
         return result
@@ -177,7 +215,7 @@ def _try_deploy_invoke(cli):
 
 def _cli_delete(cli, name):
     try:
-        cli.run("functions", "delete", name, timeout=30)
+        cli.run("functions", "delete", name, "--yes", timeout=30)
     except Exception:
         pass
 
