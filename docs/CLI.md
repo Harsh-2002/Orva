@@ -109,10 +109,10 @@ orva system health
 
 # 3. Deploy + invoke a function.
 orva deploy ./my-fn --name my-fn --runtime node24
-orva invoke my-fn --data '{"hello":"world"}'
+orva invoke my-fn --body '{"hello":"world"}'
 
 # 4. See what happened.
-orva logs my-fn --tail
+orva logs my-fn --follow
 ```
 
 Everything past this point is detail. The full command surface, common
@@ -120,16 +120,59 @@ workflows, and scripting patterns are in the sections below.
 
 ---
 
+## Global flags
+
+These persistent flags apply to **every** command (and every
+subcommand). They sit alongside the connection flags documented under
+[Configuration](#configuration) below.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `-o, --output <table\|json>` | `table` | Output format. `table` is human-readable; `json` is machine-readable. Lists and `get`-style commands honor it. |
+| `-q, --quiet` | off | Suppress status/progress messages (which go to **stderr**). Data on stdout is unaffected. |
+| `--no-color` | auto | Disable ANSI color. Also honored via the `NO_COLOR` env var, and auto-disabled when stdout is not a TTY. |
+| `-y, --yes` | off | Skip the confirmation prompt on destructive operations (delete / revoke / rotate / restore). **Required** for those ops on a non-TTY (CI, pipes), where they otherwise refuse rather than block. |
+
+### Output contract — stdout vs stderr
+
+The CLI splits its two kinds of output across the two streams:
+
+- **stdout** — the *data*: function response bodies, list rows, JSON
+  blobs. This is the only thing you pipe.
+- **stderr** — *status*: progress lines, success confirmations, timings,
+  prompts.
+
+That means `orva <cmd> | jq` (or `> file`, or `| grep`) is always clean —
+no status chatter ever lands on stdout. `-q/--quiet` silences the stderr
+side entirely for fully scripted runs. Combine with `-o json` for
+structured piping:
+
+```bash
+orva functions list -o json | jq -r '.[].name'
+orva logs greeter -o json | jq '.[] | select(.status=="error")'
+```
+
+Non-2xx HTTP responses and local errors always set a non-zero exit code,
+so `set -e` / `&&` chains behave.
+
+---
+
 ## Configuration
 
-The CLI reads its endpoint + API key from three sources, in order of
-precedence (highest wins):
+The CLI reads its endpoint + API key with full **precedence** (highest
+wins):
+
+```
+flags  >  environment  >  config file  >  default
+```
 
 1. **Command-line flags** — `--endpoint` and `--api-key` on every
    invocation. Useful in CI where you pass `$ORVA_API_KEY` from a
    secret store.
 2. **Environment variables** — `ORVA_ENDPOINT` and `ORVA_API_KEY`. Set
    once per shell; every `orva` invocation in that shell picks them up.
+   `ORVA_CONFIG` overrides the path to the config file (default
+   `~/.orva/config.yaml`); a leading `~` is expanded.
 3. **Config file** — `~/.orva/config.yaml` on Linux/macOS,
    `%USERPROFILE%\.orva\config.yaml` on Windows. Written by
    `orva login` with mode `0600`. Plain YAML:
@@ -138,6 +181,10 @@ precedence (highest wins):
    endpoint: https://orva.example.com
    api_key: orva_a1b2c3...
    ```
+
+Each field resolves independently — e.g. `ORVA_API_KEY` set in the
+environment overrides the key in the config file while the endpoint
+still comes from the file.
 
 Examples of the precedence in action:
 
@@ -155,10 +202,18 @@ orva functions list                       # falls back to config (prod)
 ```
 
 Multiple environments without juggling env vars? Drop separate config
-files and point at them:
+files and point `ORVA_CONFIG` at them:
 
 ```bash
 ORVA_CONFIG=~/.orva/staging.yaml orva functions list
+```
+
+`orva login --test` verifies the credentials against the server's
+`/system/health` before writing them to disk, so a typo fails loudly
+instead of saving a broken config:
+
+```bash
+orva login --endpoint https://orva.example.com --api-key orva_… --test
 ```
 
 ---
@@ -177,38 +232,100 @@ orva deploy ./my-fn-ts --name greeter --runtime node24
 
 # Python: pick the runtime explicitly.
 orva deploy ./py-fn --name greeter --runtime python314
+
+# Watch the build: stream build logs over SSE, wait for completion, and
+# exit non-zero if the build fails (great for CI gates).
+orva deploy ./src --name greeter --runtime node24 --watch
 ```
 
-### Invoke + debug loop
+### Invoke
+
+`orva invoke` runs a deployed function over HTTP. The response **body**
+goes to stdout (pretty-printed on a TTY, raw bytes when piped); status
+and timing go to stderr. A non-2xx HTTP response exits non-zero.
 
 ```bash
-# Send a JSON payload, see the body + duration + status.
-orva invoke greeter --data '{"name":"Ada"}'
+# Send a JSON body inline.
+orva invoke greeter --body '{"name":"Ada"}'
 
-# Per-call timeout (useful for slow downstreams).
-orva invoke greeter --data '{}' --timeout-ms 60000
+# Body from a file, or from stdin with @-.
+orva invoke greeter --body @payload.json
+echo '{"name":"Ada"}' | orva invoke greeter --body @-
 
-# Tail logs while invoking from another terminal.
-orva logs greeter --tail
+# Pipe the clean body straight to jq.
+orva invoke greeter --body '{"name":"Ada"}' | jq .
 
-# Drill into a specific execution.
+# Non-default method + custom headers (repeat -H for more).
+orva invoke greeter -X GET -H 'X-Trace: 1' -H 'Accept: application/json'
+
+# Invoke a custom route instead of /fn/<id>.
+orva invoke --route /webhooks/stripe --body @event.json
+
+# Stream the response chunk-by-chunk as it arrives (generators,
+# long-lived handlers). No client timeout while streaming.
+orva invoke chat --body @prompt.json --stream
+
+# Print the status line + response headers to stderr for debugging.
+orva invoke greeter --body '{}' -i
+
+# Per-call timeout in ms (0 = client default of 120s; ignored with --stream).
+orva invoke greeter --body '{}' --timeout-ms 60000
+```
+
+`invoke` flags at a glance:
+
+| Flag | Meaning |
+|---|---|
+| `-d, --body <v>` | Request body: inline string, `@file`, or `@-` for stdin |
+| `-X, --method <m>` | HTTP method (default `POST`) |
+| `-H, --header <h>` | Add a `'Key: Value'` header (repeatable) |
+| `--route <path>` | Invoke a custom route path instead of `/fn/<id>` |
+| `--stream` | Stream the response as it arrives (no client timeout) |
+| `-i, --include` | Print response status line + headers to stderr |
+| `--timeout-ms <n>` | Per-call timeout in ms (ignored with `--stream`) |
+
+> **Renamed flag:** the old `--data` is now `-d/--body`.
+
+### Logs
+
+```bash
+# Recent executions (table). Add -o json for scripting.
+orva logs greeter
+orva logs greeter -o json | jq .
+
+# Follow new executions live over SSE (Ctrl-C to stop).
+orva logs greeter --follow            # -f for short
+
+# Drill into a specific execution's stdout/stderr.
 orva logs greeter --exec-id 019df200-7b00-7e00-9c00-aab1cd2e3f40
 ```
+
+> **Renamed flag:** the old `--tail` is now `-f/--follow`.
 
 ### Per-function state (KV)
 
 ```bash
-orva kv put greeter visits '{"count":0}'      # JSON value
-orva kv put greeter cache:home '"hello"' --ttl 3600
+orva kv put greeter visits --value '{"count":0}'         # JSON value
+orva kv put greeter cache:home --value '"hello"' --ttl 3600
+orva kv put greeter config --value @config.json          # value from file
 orva kv list greeter --prefix cache:
 orva kv get greeter visits
 orva kv delete greeter visits
 ```
 
+`kv put --value` accepts an inline string, `@file`, or `@-` (stdin).
+Values are JSON, capped at 64 KB.
+
+> The CLI exposes only `get / put / list / delete`. Atomic counters
+> (`incr`) and compare-and-swap (`cas`) live on the internal SDK path —
+> they require a per-process internal token the CLI does not hold — so
+> use them from inside a function via the runtime SDK.
+
 ### Per-function secrets
 
 ```bash
-orva secrets set greeter STRIPE_KEY sk_live_…
+orva secrets set greeter STRIPE_KEY --value sk_live_…
+orva secrets set greeter STRIPE_KEY --value @key.txt   # value from a file (or @- for stdin)
 orva secrets list greeter                     # names only — values stay server-side
 orva secrets delete greeter STRIPE_KEY
 ```
@@ -242,7 +359,7 @@ on a fresh host and the install boots up byte-faithful.
 ```bash
 # Download a snapshot. Default filename: orva-backup-<RFC3339>.tar.gz.
 orva backup download
-orva backup download -o /backups/orva-$(date +%F).tar.gz
+orva backup download -f /backups/orva-$(date +%F).tar.gz
 
 # Restore. --yes is mandatory; the bare command refuses with a prompt.
 orva backup restore /backups/orva-2026-05-15.tar.gz --yes
@@ -278,7 +395,7 @@ orva diff greeter --no-color | tee greeter.diff
 orva diff greeter | less -R
 
 # Structured output for scripting (file list + raw before/after blobs).
-orva diff greeter --from dep_…01 --to dep_…07 --json | jq '.files[].path'
+orva diff greeter --from dep_…01 --to dep_…07 -o json | jq '.files[].path'
 ```
 
 The unified output skips `node_modules` / `__pycache__` and TypeScript
@@ -287,11 +404,16 @@ compiled output — only the handler source + dependency manifest
 
 ### Routes (custom URLs)
 
+The path is a **positional** argument; `--fn` names the target function.
+Prefix routes end in `/*`, and `--methods` restricts the HTTP verbs
+(default `*`).
+
 ```bash
-# /webhook/stripe → fn_…
-orva routes set --pattern /webhook/stripe --fn stripe-handler
+# /webhooks/stripe → stripe-handler
+orva routes set /webhooks/stripe --fn stripe-handler
+orva routes set /api-proxy/* --fn proxy --methods GET,POST
 orva routes list
-orva routes delete /webhook/stripe
+orva routes delete /webhooks/stripe
 ```
 
 ### API keys
@@ -299,8 +421,10 @@ orva routes delete /webhook/stripe
 ```bash
 # Long-lived bearer for CI / a script / an AI agent.
 orva keys create --name ci-deploy --permissions invoke,write
+# Auto-expiring key (0 = never).
+orva keys create --name temp-agent --permissions invoke --expires-in-days 30
 orva keys list
-orva keys revoke key_…
+orva keys revoke key_…                    # prompts; pass --yes to skip
 ```
 
 ### Channels (curated MCP toolboxes)
@@ -323,8 +447,8 @@ orva channels rotate customer-support    # invalidates the old token
 orva activity --limit 100
 
 # Live tail — every API call, CLI command, MCP tool invoke, webhook delivery.
-orva activity --tail
-orva activity --tail --source mcp        # MCP-only firehose
+orva activity --follow                    # -f for short
+orva activity --follow --source mcp       # MCP-only firehose
 ```
 
 ### System diagnostics
@@ -333,7 +457,107 @@ orva activity --tail --source mcp        # MCP-only firehose
 orva system health        # version, uptime, sandbox stats
 orva system metrics       # JSON snapshot used by the dashboard
 orva system db-stats      # on-disk breakdown
+orva system storage       # storage / VACUUM breakdown
 orva system vacuum        # compact orva.db (briefly blocks writes)
+```
+
+### Deployment history + rollback
+
+Every deploy or rollback creates a deployment record (status,
+content-addressed `code_hash`, append-only build log).
+
+```bash
+# Audit what shipped when.
+orva deployments list greeter
+orva deployments get dep_01J…
+
+# Read or live-stream a build log.
+orva deployments logs dep_01J…
+orva deployments logs dep_01J… --follow
+
+# Roll back. Bare form undoes the last code change; or pin a deployment
+# id / content hash. Prompts for confirmation — pass --yes to skip.
+orva rollback greeter
+orva rollback greeter dep_01J…
+orva rollback greeter --code-hash 9f8e7d…
+```
+
+### Fixtures (saved request presets)
+
+A fixture bundles a method, sub-path, headers, and body under a name so
+you can replay a request without retyping it — the same presets the
+dashboard's Test pane stores and the `test_function_with_fixture` MCP
+tool reads.
+
+```bash
+orva fixtures list greeter
+orva fixtures save greeter happy-path --method POST --body '{"name":"ada"}'
+orva fixtures save greeter search --method GET --path /search --query 'q=hi'
+orva fixtures get greeter happy-path
+orva fixtures test greeter happy-path | jq .    # run the fixture
+orva fixtures delete greeter happy-path
+```
+
+`fixtures save --body` accepts inline / `@file` / `@-` like `invoke`.
+
+### Traces
+
+Every execution is a span; spans sharing a `trace_id` form a causal tree.
+
+```bash
+orva traces list                       # recent root spans
+orva traces list --fn greeter --limit 20
+orva traces get tr_01h…                 # full span tree
+orva traces baseline greeter            # rolling p95/p99/mean latency
+```
+
+### Egress firewall
+
+The allow/block list applied to sandboxes running with
+`network_mode=egress`. Rules are a CIDR, a hostname, or a `*.wildcard`.
+Built-in rules can be toggled but not deleted; custom rules are fully
+editable. Mutations take effect on the next sandbox spawn.
+
+```bash
+orva firewall list
+orva firewall add 10.0.0.0/8 --label "internal net"
+orva firewall add '*.metadata.google.internal'        # type auto-detected
+orva firewall add example.com --type hostname --disabled
+orva firewall enable 7
+orva firewall disable 7
+orva firewall delete 7                                 # prompts; --yes to skip
+orva firewall resolve example.com                      # re-resolve hostnames now
+```
+
+### Sandbox DNS
+
+The DNS config handed to egress-enabled sandboxes. Servers are literal
+resolver IPs; host overrides pin a name to an IP via `/etc/hosts`.
+
+```bash
+orva dns get
+orva dns set --server 1.1.1.1 --server 8.8.8.8 --search corp.internal
+orva dns set --host db.internal=10.0.0.5 --host cache=10.0.0.6
+orva dns set --server "" --search ""                   # reset to defaults
+```
+
+### Warm-pool autoscaler
+
+Per-function warm-sandbox tuning. Always pass `--fn`. Only the fields you
+specify change; the rest keep their current values.
+
+```bash
+orva pool get --fn greeter
+orva pool set --fn greeter --min-warm 2 --max-warm 20 --scale-to-zero
+orva pool set --fn greeter --idle-ttl 300 --target-concurrency 4
+```
+
+### Background jobs + webhook deliveries
+
+```bash
+orva jobs get job_…                       # inspect one job
+orva webhooks deliveries sub_… -o json    # delivery history for a subscription
+orva webhooks retry del_…                 # retry a failed delivery
 ```
 
 ---
@@ -344,46 +568,56 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 
 | Command | What it does |
 |---|---|
-| `orva login` | Save endpoint + API key to `~/.orva/config.yaml` |
+| `orva login [--test]` | Save endpoint + API key to `~/.orva/config.yaml` |
 | `orva functions list / get / create / delete` | Function lifecycle |
-| `orva deploy <path>` | Build + deploy a function from a directory |
+| `orva deploy <path> [--watch]` | Build + deploy a function from a directory |
 | `orva invoke <name>` | Run a function once and print the response |
-| `orva logs <name> [--tail \| --exec-id]` | Execution history, live tail, or single-row drill-down |
+| `orva logs <name> [--follow \| --exec-id]` | Execution history, live tail, or single-row drill-down |
+| `orva deployments list / get / logs` | Deployment history + per-deploy build logs |
+| `orva rollback <fn> [id \| --code-hash]` | Roll back to a prior deployment |
 | `orva kv get / put / list / delete` | Per-function key/value store with optional TTL |
 | `orva secrets set / list / delete` | Per-function encrypted secrets (AES-256-GCM) |
+| `orva fixtures list / get / save / delete / test` | Reusable request presets per function |
 | `orva cron create / list / update / delete` | Per-function schedules with timezone support |
-| `orva jobs enqueue / list / retry / delete` | Durable background queue with idempotency |
-| `orva keys create / list / revoke` | Long-lived API keys |
+| `orva jobs enqueue / list / get / retry / delete` | Durable background queue with idempotency |
+| `orva keys create / list / revoke` | Long-lived API keys (`--expires-in-days`) |
 | `orva channels create / show / rotate / add-functions / remove-functions / delete` | MCP toolbox bundles |
 | `orva routes set / list / delete` | Custom URL → function mappings |
-| `orva webhooks create / list / test / delete` | Outbound system-event subscriptions |
+| `orva webhooks create / list / test / delete / deliveries / retry` | Outbound system-event subscriptions |
 | `orva webhooks inbound …` | Inbound signed-POST triggers (GitHub, Stripe, etc.) |
+| `orva traces list / get / baseline` | Distributed traces + latency baselines |
+| `orva firewall list / add / enable / disable / delete / resolve` | Egress firewall rules |
+| `orva dns get / set` | Sandbox DNS config |
+| `orva pool get / set` | Per-function warm-pool autoscaler config |
 | `orva backup download / restore` | Point-in-time snapshot + restore |
-| `orva diff <name> [--from --to] [--json] [--no-color]` | Git-style unified diff between two past deployments |
-| `orva activity [--tail \| --source X]` | Audit log: every API call, CLI command, MCP invoke |
-| `orva system health / metrics / db-stats / vacuum` | Diagnostics + maintenance |
+| `orva diff <name> [--from --to] [-o json] [--no-color]` | Git-style unified diff between two past deployments |
+| `orva activity [--follow \| --source X]` | Audit log: every API call, CLI command, MCP invoke |
+| `orva system health / metrics / db-stats / storage / vacuum` | Diagnostics + maintenance |
 | `orva upgrade` | Self-update from the latest GitHub release |
 | `orva completion <shell>` | Emit a completion script (see below) |
 | `orva --version` | Build identity (matches `/api/v1/system/health`) |
 
-Every command honors the global `--endpoint` / `--api-key` flags and
-the env-var / config-file fallbacks documented in **Configuration**
-above.
+Every command honors the global flags — `--endpoint` / `--api-key`,
+`-o/--output`, `-q/--quiet`, `--no-color`, `-y/--yes` — and the env-var /
+config-file fallbacks documented in **Configuration** above.
 
 ---
 
 ## Best practices
 
-**Scripting with JSON output.** Most subcommands print pretty JSON.
-Pipe through `jq` for fields you care about:
+**Scripting with JSON output.** Pass `-o json` and pipe through `jq`.
+Because data goes to stdout and status to stderr, the pipe is always
+clean:
 
 ```bash
 # Function id by name.
-fid=$(orva functions list | jq -r '.functions[] | select(.name=="greeter").id')
+fid=$(orva functions list -o json | jq -r '.[] | select(.name=="greeter").id')
 
-# Did the last invoke succeed?
-orva invoke greeter --data '{}' | jq -e '.statusCode < 400' > /dev/null \
-    && echo "ok" || echo "failed"
+# Invoke and inspect the body directly (the body IS stdout).
+orva invoke greeter --body '{}' | jq .
+
+# Use the exit code: non-2xx HTTP → non-zero exit.
+orva invoke greeter --body '{}' > /dev/null && echo ok || echo failed
 ```
 
 **Exit codes.** `orva` exits non-zero on transport errors, HTTP 4xx/5xx
@@ -407,7 +641,7 @@ ORVA_API_KEY=$(vault read -field=key kv/orva/ci) orva functions list
 inline:
 
 ```bash
-orva backup download -o /tmp/pre-deploy.tar.gz \
+orva backup download -f /tmp/pre-deploy.tar.gz \
     && orva deploy ./big-refactor --name greeter --runtime node24
 # If the deploy goes sideways:  orva backup restore /tmp/pre-deploy.tar.gz --yes
 ```
@@ -431,7 +665,7 @@ to leak between jobs:
 
 ```cron
 0 3 * * *  /usr/local/bin/orva backup download \
-           -o /var/backups/orva/orva-$(date +\%F).tar.gz
+           -f /var/backups/orva/orva-$(date +\%F).tar.gz
 0 4 * * 0  find /var/backups/orva -mtime +90 -delete
 ```
 

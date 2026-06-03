@@ -29,7 +29,6 @@
         :title="title"
         :can-export="!!store.timeline.length"
         @toggle-rail="railOpen = true"
-        @open-settings="showSettings = true"
         @export="store.exportActive"
       />
 
@@ -43,7 +42,7 @@
         <Button
           size="xs"
           variant="secondary"
-          @click="showSettings = true"
+          @click="openAISettings"
         >
           Configure
         </Button>
@@ -82,24 +81,6 @@
           @retry="store.retry"
           @dismiss="store.dismissError"
         />
-        <!-- Approval pause: a paused turn streams nothing, so surface a standing
-             cue above the composer (not just the inline card) with a jump-to. -->
-        <div
-          v-if="store.awaitingApproval"
-          class="flex shrink-0 items-center justify-between gap-3 border-t border-warning-ring bg-warning-tint px-4 py-2.5 text-xs text-warning-fg"
-        >
-          <span class="flex min-w-0 items-center gap-2">
-            <Clock class="h-3.5 w-3.5 shrink-0" />
-            <span class="truncate">The assistant is waiting for your approval.</span>
-          </span>
-          <Button
-            size="xs"
-            variant="secondary"
-            @click="jumpToApproval"
-          >
-            Review
-          </Button>
-        </div>
         <Composer
           :streaming="store.streaming"
           :disabled="store.providersLoaded && !store.providers.length"
@@ -109,14 +90,12 @@
         />
       </template>
     </div>
-
-    <ProvidersSettings v-model="showSettings" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, onActivated } from 'vue'
-import { Clock } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
+import { useRouter } from 'vue-router'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import ChatHeader from '@/components/ai/ChatHeader.vue'
@@ -124,12 +103,18 @@ import ConversationRail from '@/components/ai/ConversationRail.vue'
 import EmptyState from '@/components/ai/EmptyState.vue'
 import MessageList from '@/components/ai/MessageList.vue'
 import Composer from '@/components/ai/Composer.vue'
-import ProvidersSettings from '@/components/ai/ProvidersSettings.vue'
 import { useAIStore } from '@/stores/ai'
 import { useConfirmStore } from '@/stores/confirm'
 
 const store = useAIStore()
 const confirm = useConfirmStore()
+const router = useRouter()
+
+// AI configuration (providers, keys, defaults) lives in the centralized Settings
+// page now; the chat's gear + "no provider" banner deep-link to it.
+function openAISettings() {
+  router.push({ name: 'settings', hash: '#ai' })
+}
 
 function onEdit({ id, content }) {
   store.editAndResend(id, content)
@@ -145,7 +130,6 @@ async function onDelete(id) {
   })
   if (ok) store.deleteMessageFrom(id)
 }
-const showSettings = ref(false)
 const railOpen = ref(false)
 const emptyComposer = ref(null)
 
@@ -160,37 +144,23 @@ const title = computed(
 )
 
 async function bootstrap() {
+  // Settings carry the saved provider/model selection, so load them BEFORE
+  // providers — loadProviders restores that selection on first paint.
+  await store.loadSettings()
   await Promise.all([
-    store.loadSettings(),
     store.loadProviders(),
     store.loadConversations(),
   ])
 }
 
 onMounted(bootstrap)
-// keep-alive re-entry: refresh the conversation list + provider state.
+// keep-alive re-entry: refresh conversations + provider/settings state, so
+// changes made over in Settings -> AI are reflected when returning to the chat.
 onActivated(() => {
   store.loadConversations()
+  store.loadSettings()
   store.loadProviders()
 })
-
-// Refresh providers + settings when the settings modal closes, so the chat's
-// model menu and the no-provider banner reflect any changes made inside it.
-watch(showSettings, (open) => {
-  if (!open) {
-    store.loadProviders()
-    store.loadSettings()
-  }
-})
-
-// "Review" on the approval banner scrolls the pending tool card into view and
-// focuses its Approve button.
-function jumpToApproval() {
-  const el = document.querySelector('[data-approval="pending"]')
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  el.querySelector('button')?.focus()
-}
 
 // Power-user accelerator: Escape stops an in-flight stream (unless a dialog or
 // menu is open, which owns Escape for closing itself).

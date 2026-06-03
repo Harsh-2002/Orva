@@ -495,15 +495,23 @@ export const useAIStore = defineStore('ai', () => {
     try {
       const { data } = await apiClient.get('/ai/providers')
       providers.value = data.providers || []
-      // Auto-select a provider on first load so the chat is usable immediately.
-      if (!selectedProviderId.value) {
-        const first = providers.value.find((p) => p.enabled) || providers.value[0]
-        if (first) await selectProvider(first.id)
-      } else if (!providers.value.find((p) => p.id === selectedProviderId.value)) {
-        // The selected provider was removed — fall back.
-        const first = providers.value[0]
-        if (first) await selectProvider(first.id)
-        else { selectedProviderId.value = null; selectedProvider.value = ''; selectedModel.value = ''; models.value = [] }
+      const exists = (id) => providers.value.find((p) => p.id === id)
+      // Keep a valid in-session selection across re-entry (onActivated).
+      if (selectedProviderId.value && exists(selectedProviderId.value)) return
+      // Restore the operator's saved provider (synced server-side, so it follows
+      // them across devices); else first enabled; else first; else none.
+      const savedId = settings.value?.active_provider_id
+      const pick =
+        (savedId && exists(savedId)) ||
+        providers.value.find((p) => p.enabled) ||
+        providers.value[0]
+      if (pick) {
+        await applyProvider(pick.id, { persist: false }) // restore, don't echo back
+      } else {
+        selectedProviderId.value = null
+        selectedProvider.value = ''
+        selectedModel.value = ''
+        models.value = []
       }
     } finally {
       // Mark settled even on failure so the UI lands on a definite state rather
@@ -512,21 +520,46 @@ export const useAIStore = defineStore('ai', () => {
     }
   }
 
-  // selectProvider switches the active provider and loads ITS models dynamically.
-  async function selectProvider(providerId) {
+  // applyProvider switches the active provider, loads ITS models dynamically,
+  // and picks a model: the one saved for this provider (cross-device memory),
+  // else a cheaper/faster default, else the first listed. persist=true writes
+  // the choice back to the server; restore paths pass persist=false.
+  async function applyProvider(providerId, { persist = true } = {}) {
     const p = providers.value.find((x) => x.id === providerId)
     if (!p) return
     selectedProviderId.value = p.id
     selectedProvider.value = p.provider
     selectedModel.value = ''
     await loadProviderModels(p.id)
-    // Prefer a cheaper/faster model over whatever the endpoint lists first
-    // (often the newest + priciest), so an operator doesn't unknowingly run a
-    // large model. Falls back to the first listed model.
-    if (models.value.length) {
+    const saved = settings.value?.provider_models?.[p.id]
+    if (saved && models.value.find((m) => m.id === saved)) {
+      selectedModel.value = saved
+    } else if (models.value.length) {
       const cheap = models.value.find((m) => /\b(mini|small|fast|flash|lite|nano|haiku)\b/i.test(m.id))
       selectedModel.value = (cheap || models.value[0]).id
     }
+    if (persist && selectedModel.value) await persistSelection()
+  }
+
+  // selectProvider is the user-initiated switch (persists the new selection).
+  async function selectProvider(providerId) {
+    await applyProvider(providerId, { persist: true })
+  }
+
+  // persistSelection saves the active provider + model server-side so it syncs
+  // across devices and the provider's model is recalled next time. Best-effort:
+  // a failure never blocks the in-session choice.
+  async function persistSelection() {
+    if (!selectedProviderId.value) return
+    try {
+      const { data } = await apiClient.put('/ai/selection', {
+        provider_id: selectedProviderId.value,
+        provider: selectedProvider.value,
+        model: selectedModel.value,
+        thinking: thinking.value,
+      })
+      if (data?.settings) settings.value = data.settings
+    } catch { /* selection persistence is best-effort */ }
   }
 
   async function loadProviderModels(providerId) {
@@ -544,8 +577,14 @@ export const useAIStore = defineStore('ai', () => {
     }
   }
 
-  function selectModel(modelId) { selectedModel.value = modelId }
-  function setThinking(level) { thinking.value = level }
+  async function selectModel(modelId) {
+    selectedModel.value = modelId
+    await persistSelection() // remember this model for the active provider (synced)
+  }
+  async function setThinking(level) {
+    thinking.value = level
+    await persistSelection() // remember the reasoning level across devices
+  }
 
   async function saveProvider(p) {
     await apiClient.post('/ai/providers', p)

@@ -10,7 +10,6 @@ import (
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // diffCmd exposes the dashboard's FunctionDiff view to the terminal.
@@ -34,9 +33,9 @@ The dashboard's deep-link UI exposes deployment IDs alongside each
 version (Settings → Compare). Copy them from there if you want to pin
 the comparison to specific historical points.
 
-Pipe through pagers (` + "`less -R`" + ` for ANSI) for large diffs. Use --no-color
-to disable terminal escapes even when stdout is a TTY (useful for CI
-captures); --json dumps the structured response for scripted post-processing.`,
+Pipe through pagers (` + "`less -R`" + ` for ANSI) for large diffs. Use the global
+--no-color to disable terminal escapes even when stdout is a TTY (useful for
+CI captures); -o json dumps the structured response for scripted post-processing.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDiff,
 }
@@ -44,8 +43,6 @@ captures); --json dumps the structured response for scripted post-processing.`,
 func init() {
 	diffCmd.Flags().String("from", "", "deployment id to compare FROM (default: previous distinct code_hash)")
 	diffCmd.Flags().String("to", "", "deployment id to compare TO (default: active deployment)")
-	diffCmd.Flags().Bool("json", false, "emit the raw JSON response (no ANSI coloring)")
-	diffCmd.Flags().Bool("no-color", false, "disable ANSI coloring even when stdout is a TTY")
 }
 
 func runDiff(cmd *cobra.Command, args []string) error {
@@ -57,8 +54,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 
 	from, _ := cmd.Flags().GetString("from")
 	to, _ := cmd.Flags().GetString("to")
-	wantJSON, _ := cmd.Flags().GetBool("json")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+	wantJSON := outputJSON(cmd)
 
 	// Fill in defaults when the operator didn't pin a specific range.
 	if from == "" || to == "" {
@@ -114,7 +110,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "(no code differences between these versions)")
 		return nil
 	}
-	if noColor || !term.IsTerminal(int(os.Stdout.Fd())) {
+	if !colorEnabled(cmd) {
 		_, err = os.Stdout.Write(body)
 		return err
 	}
@@ -175,7 +171,10 @@ func resolveDefaultDiffRange(client *cli.Client, fnName string) (string, string,
 	// Resolve name → ID. GET /api/v1/functions/{id} doesn't accept names
 	// (it bypasses the shared resolveFnID helper that the diff endpoint
 	// uses), so we look the name up via the list endpoint first.
-	fnID := resolveFunctionID(client, fnName)
+	fnID, err := resolveFnID(client, fnName)
+	if err != nil {
+		return "", "", err
+	}
 	fnResp, err := client.Get("/api/v1/functions/" + url.PathEscape(fnID))
 	if err != nil {
 		return "", "", err

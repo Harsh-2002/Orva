@@ -293,6 +293,14 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, http.ErrNotSupported
 }
 
+// Unwrap exposes the wrapped ResponseWriter so http.ResponseController can reach
+// the underlying connection — without it, SetWriteDeadline (used by the SSE
+// handlers to clear the server WriteTimeout for long-lived streams) silently
+// no-ops and chat/build/event streams get cut at the 60s write deadline.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 func generateRequestID() string {
 	// UUIDv7 — time-sortable so log scrapers can range over a window
 	// of request IDs without a separate timestamp join.

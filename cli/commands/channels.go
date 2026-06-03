@@ -3,9 +3,8 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"strings"
-	"text/tabwriter"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
@@ -18,13 +17,16 @@ var channelsCmd = &cobra.Command{
 	Long: `Agent channels group N deployed functions under a name and a static
 bearer token. Presenting that token at /mcp exposes ONLY those functions
 as MCP tools (invoke-only). Use this to ship a curated MCP toolbox to
-an agentic workflow without giving it Orva management.`,
+an agentic workflow without giving it Orva management.
+
+  orva channels create my-bot --functions greeter,echo
+  orva channels list -o json | jq '.channels[].name'`,
 }
 
 var channelsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List agent channels",
-	Run:   runChannelsList,
+	RunE:  runChannelsList,
 }
 
 var channelsCreateCmd = &cobra.Command{
@@ -32,35 +34,35 @@ var channelsCreateCmd = &cobra.Command{
 	Short: "Create a new channel",
 	Long:  "Create a channel. The token plaintext is printed once and never shown again.",
 	Args:  cobra.ExactArgs(1),
-	Run:   runChannelsCreate,
+	RunE:  runChannelsCreate,
 }
 
 var channelsShowCmd = &cobra.Command{
 	Use:   "show [id|name]",
 	Short: "Show a channel + its function set",
 	Args:  cobra.ExactArgs(1),
-	Run:   runChannelsShow,
+	RunE:  runChannelsShow,
 }
 
 var channelsAddFunctionsCmd = &cobra.Command{
 	Use:   "add-functions [id|name] [fn1] [fn2] ...",
 	Short: "Add functions to a channel",
 	Args:  cobra.MinimumNArgs(2),
-	Run:   runChannelsAddFunctions,
+	RunE:  runChannelsAddFunctions,
 }
 
 var channelsRemoveFunctionsCmd = &cobra.Command{
 	Use:   "remove-functions [id|name] [fn1] [fn2] ...",
 	Short: "Remove functions from a channel",
 	Args:  cobra.MinimumNArgs(2),
-	Run:   runChannelsRemoveFunctions,
+	RunE:  runChannelsRemoveFunctions,
 }
 
 var channelsRotateCmd = &cobra.Command{
 	Use:   "rotate [id|name]",
 	Short: "Rotate the channel's token (invalidates the old one)",
 	Args:  cobra.ExactArgs(1),
-	Run:   runChannelsRotate,
+	RunE:  runChannelsRotate,
 }
 
 var channelsDeleteCmd = &cobra.Command{
@@ -68,7 +70,7 @@ var channelsDeleteCmd = &cobra.Command{
 	Aliases: []string{"rm"},
 	Short:   "Delete a channel",
 	Args:    cobra.ExactArgs(1),
-	Run:     runChannelsDelete,
+	RunE:    runChannelsDelete,
 }
 
 func init() {
@@ -86,34 +88,40 @@ func init() {
 	channelsCmd.AddCommand(channelsDeleteCmd)
 }
 
-func runChannelsList(cmd *cobra.Command, args []string) {
+func runChannelsList(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 	resp, err := client.Get("/api/v1/channels")
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 	var out struct {
 		Channels []struct {
 			ID            string `json:"id"`
 			Name          string `json:"name"`
-			Description   string `json:"description"`
 			Prefix        string `json:"prefix"`
 			FunctionCount int    `json:"function_count"`
 			ExpiresAt     string `json:"expires_at"`
 			LastUsedAt    string `json:"last_used_at"`
 		} `json:"channels"`
 	}
-	if err := decodeJSON(resp, &out); err != nil {
-		exitError("decode response: %v", err)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tFUNCTIONS\tPREFIX\tLAST USED\tEXPIRES")
+	t := newTable("ID", "NAME", "FUNCTIONS", "PREFIX", "LAST USED", "EXPIRES")
 	for _, c := range out.Channels {
 		last := c.LastUsedAt
 		if last == "" {
@@ -123,27 +131,27 @@ func runChannelsList(cmd *cobra.Command, args []string) {
 		if exp == "" {
 			exp = "never"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\n", c.ID, c.Name, c.FunctionCount, c.Prefix, last, exp)
+		t.row(c.ID, c.Name, c.FunctionCount, c.Prefix, last, exp)
 	}
-	tw.Flush()
+	t.flush()
+	return nil
 }
 
-func runChannelsCreate(cmd *cobra.Command, args []string) {
+func runChannelsCreate(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 	name := args[0]
 	fns, _ := cmd.Flags().GetStringSlice("functions")
 	desc, _ := cmd.Flags().GetString("description")
 	days, _ := cmd.Flags().GetInt("expires-in-days")
 
-	// Resolve names → ids via /api/v1/functions/<nameOrId>.
 	fnIDs := make([]string, 0, len(fns))
 	for _, f := range fns {
-		id := resolveFunctionID(client, strings.TrimSpace(f))
-		if id == "" {
-			exitError("function not found: %s", f)
+		id, err := resolveFnID(client, strings.TrimSpace(f))
+		if err != nil {
+			return err
 		}
 		fnIDs = append(fnIDs, id)
 	}
@@ -158,88 +166,84 @@ func runChannelsCreate(cmd *cobra.Command, args []string) {
 	}
 	resp, err := client.Post("/api/v1/channels", body)
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
 	}
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
 	}
-	data, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(data))
-	if tok, ok := result["token"].(string); ok {
-		fmt.Printf("\nSave this token — it will not be shown again:\n  %s\n", tok)
-	}
+	return emitChannelWithToken(cmd, raw)
 }
 
-func runChannelsShow(cmd *cobra.Command, args []string) {
+func runChannelsShow(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	id := resolveChannelIDByName(client, args[0])
-	if id == "" {
-		exitError("channel not found: %s", args[0])
+	id, err := resolveChannelID(client, args[0])
+	if err != nil {
+		return err
 	}
 	resp, err := client.Get("/api/v1/channels/" + id)
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
 	}
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
 	}
-	data, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(data))
+	return emitRaw(raw)
 }
 
-func runChannelsAddFunctions(cmd *cobra.Command, args []string) {
-	mutateChannelFunctions(cmd, args, true)
+func runChannelsAddFunctions(cmd *cobra.Command, args []string) error {
+	return mutateChannelFunctions(cmd, args, true)
 }
 
-func runChannelsRemoveFunctions(cmd *cobra.Command, args []string) {
-	mutateChannelFunctions(cmd, args, false)
+func runChannelsRemoveFunctions(cmd *cobra.Command, args []string) error {
+	return mutateChannelFunctions(cmd, args, false)
 }
 
-// mutateChannelFunctions does GET then PUT to add/remove from the
-// function set. The REST API only supports replace-set; we read the
-// current list, compute the new list, and PUT it back.
-func mutateChannelFunctions(cmd *cobra.Command, args []string, add bool) {
+// mutateChannelFunctions does GET then PUT to add/remove from the function set.
+// The REST API only supports replace-set; we read the current list, compute the
+// new list, and PUT it back.
+func mutateChannelFunctions(cmd *cobra.Command, args []string, add bool) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	id := resolveChannelIDByName(client, args[0])
-	if id == "" {
-		exitError("channel not found: %s", args[0])
+	id, err := resolveChannelID(client, args[0])
+	if err != nil {
+		return err
 	}
-	// Read current set.
 	resp, err := client.Get("/api/v1/channels/" + id)
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
 	}
 	var current struct {
 		FunctionIDs []string `json:"function_ids"`
 	}
 	if err := decodeJSON(resp, &current); err != nil {
-		exitError("decode response: %v", err)
+		return fmt.Errorf("decode response: %w", err)
 	}
 	have := make(map[string]bool, len(current.FunctionIDs))
 	for _, fnID := range current.FunctionIDs {
 		have[fnID] = true
 	}
 	for _, f := range args[1:] {
-		fnID := resolveFunctionID(client, strings.TrimSpace(f))
-		if fnID == "" {
-			exitError("function not found: %s", f)
+		fnID, err := resolveFnID(client, strings.TrimSpace(f))
+		if err != nil {
+			return err
 		}
 		if add {
 			have[fnID] = true
@@ -254,82 +258,109 @@ func mutateChannelFunctions(cmd *cobra.Command, args []string, add bool) {
 	body := map[string]any{"function_ids": newIDs}
 	resp, err = client.Put("/api/v1/channels/"+id+"/functions", body)
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
 	}
-	fmt.Printf("Channel %s now has %d function(s).\n", args[0], len(newIDs))
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"id": id, "function_ids": newIDs})
+	}
+	okf(cmd, "Channel %s now has %d function(s).", args[0], len(newIDs))
+	return nil
 }
 
-func runChannelsRotate(cmd *cobra.Command, args []string) {
+func runChannelsRotate(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	id := resolveChannelIDByName(client, args[0])
-	if id == "" {
-		exitError("channel not found: %s", args[0])
+	id, err := resolveChannelID(client, args[0])
+	if err != nil {
+		return err
+	}
+	if err := confirm(cmd, fmt.Sprintf("Rotate the token for channel %q? The current token stops working immediately.", args[0])); err != nil {
+		return err
 	}
 	resp, err := client.Post("/api/v1/channels/"+id+"/rotate", nil)
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
 	}
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
 	}
-	data, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(data))
-	if tok, ok := result["token"].(string); ok {
-		fmt.Printf("\nSave this token — it will not be shown again:\n  %s\n", tok)
-	}
+	return emitChannelWithToken(cmd, raw)
 }
 
-func runChannelsDelete(cmd *cobra.Command, args []string) {
+func runChannelsDelete(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	id := resolveChannelIDByName(client, args[0])
-	if id == "" {
-		exitError("channel not found: %s", args[0])
+	id, err := resolveChannelID(client, args[0])
+	if err != nil {
+		return err
+	}
+	if err := confirm(cmd, fmt.Sprintf("Delete channel %q?", args[0])); err != nil {
+		return err
 	}
 	resp, err := client.Delete("/api/v1/channels/" + id)
 	if err != nil {
-		exitError("request failed: %v", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
 	}
-	fmt.Printf("Channel %s deleted.\n", args[0])
+	resp.Body.Close()
+	okf(cmd, "Channel %s deleted.", args[0])
+	return nil
 }
 
-// resolveChannelIDByName lists channels and returns the id matching
-// the supplied UUID OR name. Behaves like resolveFunctionID's pattern.
-func resolveChannelIDByName(client *cli.Client, idOrName string) string {
+// emitChannelWithToken prints the channel record (machine-readable on stdout)
+// and, in human mode, a one-time token reminder on stderr.
+func emitChannelWithToken(cmd *cobra.Command, raw []byte) error {
+	if err := emitRaw(raw); err != nil {
+		return err
+	}
+	if !outputJSON(cmd) {
+		var r struct {
+			Token string `json:"token"`
+		}
+		if json.Unmarshal(raw, &r) == nil && r.Token != "" {
+			infof(cmd, "\nSave this token — it will not be shown again.")
+		}
+	}
+	return nil
+}
+
+// resolveChannelID lists channels and returns the id matching the supplied
+// UUID OR name, with a clear error when none matches.
+func resolveChannelID(client *cli.Client, idOrName string) (string, error) {
 	resp, err := client.Get("/api/v1/channels")
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("request failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		return ""
+		return "", err
 	}
 	var out struct {
 		Channels []struct {
-			ID, Name string
+			ID   string `json:"id"`
+			Name string `json:"name"`
 		} `json:"channels"`
 	}
 	if err := decodeJSON(resp, &out); err != nil {
-		return ""
+		return "", fmt.Errorf("decode response: %w", err)
 	}
 	for _, c := range out.Channels {
 		if c.ID == idOrName || c.Name == idOrName {
-			return c.ID
+			return c.ID, nil
 		}
 	}
-	return ""
+	return "", fmt.Errorf("no channel named %q (run `orva channels list`)", idOrName)
 }

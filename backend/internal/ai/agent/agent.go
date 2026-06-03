@@ -159,15 +159,26 @@ func (r *Runner) Resume(ctx context.Context, sink Sink, convID, toolCallID strin
 // ─── core loop ──────────────────────────────────────────────────────────────
 
 func (r *Runner) advance(ctx context.Context, sink Sink, convID, principalID string) error {
+	// Load the conversation once and grow it in memory as the loop appends new
+	// assistant + tool messages, instead of re-reading and re-parsing the whole
+	// history from SQLite on every iteration (was O(n^2) on the streaming path).
+	history, err := r.loadHistory(convID)
+	if err != nil {
+		return err
+	}
+	// Convert the (fixed) tool catalog to provider format once per turn, reused
+	// across iterations rather than re-serialized on every Stream call.
+	prepared, err := r.llm.PrepareTools(r.toolDefs())
+	if err != nil {
+		_ = sink.Send("error", map[string]any{"message": err.Error()})
+		return err
+	}
+
 	for iter := 0; iter < r.cfg.MaxIterations; iter++ {
 		// Bail if the client disconnected (or the request was cancelled).
 		// Otherwise the loop would keep calling the billed provider and
 		// dispatching auto-approved tools against a dead connection.
 		if err := ctx.Err(); err != nil {
-			return err
-		}
-		history, err := r.loadHistory(convID)
-		if err != nil {
 			return err
 		}
 
@@ -176,7 +187,7 @@ func (r *Runner) advance(ctx context.Context, sink Sink, convID, principalID str
 			Model:       r.cfg.Model,
 			System:      r.cfg.System,
 			Messages:    history,
-			Tools:       r.toolDefs(),
+			Prepared:    prepared,
 			Thinking:    r.cfg.Thinking,
 			Temperature: r.cfg.Temperature,
 		}
@@ -225,14 +236,24 @@ func (r *Runner) advance(ctx context.Context, sink Sink, convID, principalID str
 			return nil
 		}
 
+		// Mirror the just-persisted assistant turn into the in-memory history so
+		// the next iteration sees it without a DB round-trip — matches exactly what
+		// loadHistory reconstructs from the stored parts.
+		asst := llm.Message{Role: llm.RoleAssistant, Content: textB.String()}
+		for _, c := range toolCalls {
+			asst.ToolCalls = append(asst.ToolCalls, llm.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments})
+		}
+		history = append(history, asst)
+
 		// Process the requested tool calls. Read-only / auto ones run now;
 		// anything gated pauses the turn for approval.
-		paused := r.processToolCalls(ctx, sink, convID, assistant.ID, toolCalls)
+		paused, results := r.processToolCalls(ctx, sink, convID, assistant.ID, toolCalls)
 		if paused {
 			_ = sink.Send("awaiting_approval", map[string]any{"conversation_id": convID})
 			return nil
 		}
-		// All tool results recorded; loop and let the model continue.
+		// Append the persisted tool results, then loop and let the model continue.
+		history = append(history, results...)
 	}
 
 	_ = sink.Send("done", map[string]any{"conversation_id": convID, "note": "max tool iterations reached"})
@@ -240,9 +261,11 @@ func (r *Runner) advance(ctx context.Context, sink Sink, convID, principalID str
 }
 
 // processToolCalls persists each requested call, emits its event, runs the
-// non-gated ones immediately, and returns true if any call is awaiting
-// approval (the turn must pause).
-func (r *Runner) processToolCalls(ctx context.Context, sink Sink, convID, msgID string, calls []llm.ToolCall) (paused bool) {
+// non-gated ones immediately, and returns true if any call is awaiting approval
+// (the turn must pause). It also returns the tool-result messages it persisted,
+// in order, so the caller can append them to the in-memory history without a
+// re-read. When paused, results is irrelevant (the turn returns).
+func (r *Runner) processToolCalls(ctx context.Context, sink Sink, convID, msgID string, calls []llm.ToolCall) (paused bool, results []llm.Message) {
 	for _, c := range calls {
 		meta, known := r.byName[c.Name]
 		requiresApproval := known && r.approvalNeeded(meta)
@@ -278,8 +301,11 @@ func (r *Runner) processToolCalls(ctx context.Context, sink Sink, convID, msgID 
 			continue // wait for the user; do NOT run it
 		}
 		r.runToolCall(ctx, sink, convID, row)
+		// Record the result for the in-memory history (mirrors persistToolResult:
+		// a role=tool message keyed by the call id).
+		results = append(results, llm.Message{Role: llm.RoleTool, Content: row.Result, ToolCallID: row.CallID})
 	}
-	return paused
+	return paused, results
 }
 
 // runToolCall dispatches one (approved or auto) tool call, persists the
@@ -415,8 +441,15 @@ func (r *Runner) hasPendingForMessage(convID, msgID string) bool {
 
 // ─── policy + small helpers ──────────────────────────────────────────────────
 
-// approvalNeeded applies the configured policy. Reads/invoke never need
-// approval; writes/admin depend on policy.
+// approvalNeeded applies the configured policy. Reads and invokes never pause
+// for approval; writes/admin depend on policy.
+//
+// invoke_function is intentionally approval-free even under all_writes: calling
+// a function you already deployed is a read-like operation in a FaaS (it's how
+// you USE the platform), and the system prompt states the same contract ("reads
+// and invokes never pause"). Side effects live in the handler's own code, gated
+// at deploy time and by network_mode — not by the chat approval policy. A
+// destructive tool still needs its separate code-enforced confirm=true.
 func (r *Runner) approvalNeeded(t Tool) bool {
 	if t.ReadOnly || t.Perm == "read" || t.Perm == "invoke" {
 		return false

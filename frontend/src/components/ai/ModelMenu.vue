@@ -10,7 +10,7 @@
     <template #trigger="{ toggle }">
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 h-8 max-w-[180px] px-2.5 rounded-lg text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        class="touch-expand-sm inline-flex items-center gap-1.5 h-8 max-w-[180px] px-2.5 rounded-lg text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         :title="store.selectedModel || 'Select model'"
         aria-label="Select model"
         @click="toggle"
@@ -48,6 +48,26 @@
         <p class="px-3 pt-1 pb-1 text-[10px] uppercase tracking-label text-foreground-muted">
           Model
         </p>
+        <!-- Fuzzy filter — only shown once a provider reports enough models to be
+             worth searching; sticks to the top while the list scrolls below. -->
+        <div
+          v-if="showSearch"
+          class="sticky top-0 z-10 bg-background px-3 pb-2 pt-0.5"
+        >
+          <div class="relative">
+            <Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground-muted" />
+            <!-- Matches the app's input vocabulary (Input.vue): white focus
+                 ring, /50 placeholder, 16px on mobile so iOS doesn't zoom on
+                 focus. bg-surface (not bg-background) for contrast against the
+                 popover's bg-background panel. -->
+            <input
+              v-model="query"
+              type="text"
+              placeholder="Search models…"
+              class="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-2.5 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:border-white focus:outline-none focus:ring-1 focus:ring-white"
+            >
+          </div>
+        </div>
         <p
           v-if="store.modelsLoading"
           class="px-3 py-2 text-sm text-foreground-muted"
@@ -60,8 +80,14 @@
         >
           {{ store.modelsError ? 'No models. Check the provider endpoint.' : 'No models reported.' }}
         </p>
+        <p
+          v-else-if="!filteredModels.length"
+          class="px-3 py-2 text-xs text-foreground-muted leading-snug"
+        >
+          No models match “{{ query.trim() }}”.
+        </p>
         <button
-          v-for="m in store.models"
+          v-for="m in filteredModels"
           v-else
           :key="m.id"
           type="button"
@@ -81,14 +107,51 @@
 </template>
 
 <script setup>
-import { Cpu, ChevronDown, Check } from 'lucide-vue-next'
+import { ref, computed, watch } from 'vue'
+import { Cpu, ChevronDown, Check, Search } from 'lucide-vue-next'
 import Popover from '@/components/common/Popover.vue'
 import { useAIStore } from '@/stores/ai'
 
 const store = useAIStore()
 
+const query = ref('')
+
+// Only surface the search box for genuinely long lists; short lists scan fine.
+const showSearch = computed(() => store.models.length > 6)
+
+// Subsequence fuzzy match: every query char must appear in order. Score rewards
+// contiguous runs and earlier matches so the closest model id floats to the top.
+function fuzzyScore(text, q) {
+  let score = 0
+  let ti = 0
+  let prev = -1
+  for (const ch of q) {
+    const at = text.indexOf(ch, ti)
+    if (at === -1) return -1
+    score += at === prev + 1 ? 3 : 1 // contiguous run bonus
+    score -= at - ti // penalise gaps from the last match
+    prev = at
+    ti = at + 1
+  }
+  return score
+}
+
+const filteredModels = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return store.models
+  return store.models
+    .map((m) => ({ m, s: fuzzyScore(m.id.toLowerCase(), q) }))
+    .filter((x) => x.s >= 0)
+    .sort((a, b) => b.s - a.s)
+    .map((x) => x.m)
+})
+
+// Reset the filter when the provider changes (its model list is replaced).
+watch(() => store.selectedProviderId, () => { query.value = '' })
+
 function pick(id, close) {
   store.selectModel(id)
+  query.value = ''
   close()
 }
 </script>

@@ -744,6 +744,13 @@ PRAGMA foreign_keys = ON;
 		)`,
 		"CREATE INDEX IF NOT EXISTS idx_log_entries_exec ON execution_log_entries(execution_id, ts)",
 		"CREATE INDEX IF NOT EXISTS idx_log_entries_trace ON execution_log_entries(trace_id, ts)",
+
+		// Persist the operator's AI provider/model selection server-side so it
+		// follows them across devices. active_provider_id is the last-selected
+		// provider config id; provider_models is a JSON map {providerId: modelId}
+		// remembering the chosen model per provider. Empty for legacy rows.
+		"ALTER TABLE ai_settings ADD COLUMN active_provider_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE ai_settings ADD COLUMN provider_models TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.write.Exec(stmt); err != nil {
 			// Expected non-fatal errors:

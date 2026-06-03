@@ -1,14 +1,11 @@
 package commands
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"strings"
-	"text/tabwriter"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -18,26 +15,31 @@ import (
 var activityCmd = &cobra.Command{
 	Use:   "activity",
 	Short: "Show recent platform activity",
-	Long:  "Show paginated activity rows or follow live activity via SSE.",
-	Run:   runActivity,
+	Long: `Show paginated activity rows, or follow live activity via SSE with --follow.
+
+  orva activity
+  orva activity --source mcp --limit 20
+  orva activity -o json | jq '.rows[] | select(.status >= 400)'
+  orva activity --follow`,
+	Args: cobra.NoArgs,
+	RunE: runActivity,
 }
 
 func init() {
 	activityCmd.Flags().Int("limit", 50, "maximum number of rows to return")
 	activityCmd.Flags().String("source", "", "filter by source (web|api|mcp|sdk|webhook|cron|internal)")
-	activityCmd.Flags().Bool("tail", false, "follow new activity via SSE (Ctrl-C to stop)")
+	activityCmd.Flags().BoolP("follow", "f", false, "follow new activity via SSE (Ctrl-C to stop)")
 }
 
-func runActivity(cmd *cobra.Command, args []string) {
+func runActivity(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
-	tail, _ := cmd.Flags().GetBool("tail")
-	if tail {
-		runActivityTail(client)
-		return
+	follow, _ := cmd.Flags().GetBool("follow")
+	if follow {
+		return runActivityTail(cmd, client)
 	}
 
 	source, _ := cmd.Flags().GetString("source")
@@ -58,10 +60,19 @@ func runActivity(cmd *cobra.Command, args []string) {
 
 	resp, err := client.Get(path)
 	if err != nil {
-		exitError("activity: %v", err)
+		return err
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("activity: %v", err)
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 
 	var result struct {
@@ -77,27 +88,21 @@ func runActivity(cmd *cobra.Command, args []string) {
 		} `json:"rows"`
 		Count int `json:"count"`
 	}
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode: %w", err)
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "TIME\tSOURCE\tACTOR\tMETHOD\tPATH\tSTATUS\tDURATION")
+	t := newTable("TIME", "SOURCE", "ACTOR", "METHOD", "PATH", "STATUS", "DURATION")
 	for _, r := range result.Rows {
 		ts := time.UnixMilli(r.TS).Format(time.DateTime)
-		actor := r.ActorLabel
-		if actor == "" {
-			actor = "-"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%dms\n",
-			ts, r.Source, actor, r.Method, r.Path, r.Status, r.DurationMS,
-		)
+		t.row(ts, r.Source, dash(r.ActorLabel), r.Method, r.Path, r.Status, fmt.Sprintf("%dms", r.DurationMS))
 	}
-	w.Flush()
-	fmt.Printf("\nTotal: %d\n", result.Count)
+	t.flush()
+	infof(cmd, "\nTotal: %d", result.Count)
+	return nil
 }
 
-func runActivityTail(client *cli.Client) {
+func runActivityTail(cmd *cobra.Command, client *cli.Client) error {
 	// Server's /api/v1/events emits all event types on one stream; clients
 	// filter by `event:` field (see internal/server/events/handler.go). The
 	// query params below are forward-compatibility hints and currently
@@ -105,39 +110,22 @@ func runActivityTail(client *cli.Client) {
 	path := "/api/v1/events?type=activity"
 	resp, err := streamSSE(client, path)
 	if err != nil {
-		exitError("tail: %v", err)
+		return fmt.Errorf("follow: %w", err)
 	}
 	defer resp.Body.Close()
 
-	fmt.Fprintln(os.Stderr, "Subscribed to activity stream — Ctrl-C to stop.")
+	infof(cmd, "Subscribed to activity stream — Ctrl-C to stop.")
 
-	// Parse SSE: each frame is `event: <type>\ndata: <json>\n\n`. We read
-	// line-by-line, track the current event's type, and pretty-print each
-	// "activity" event as it arrives.
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-	var curType, curData string
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, ":"):
-			// Comment / heartbeat — ignore.
-		case strings.HasPrefix(line, "event:"):
-			curType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			curData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		case line == "":
-			// Frame boundary — emit if it's an activity event.
-			if curType == "activity" && curData != "" {
-				printActivityEvent(curData)
-			}
-			curType, curData = "", ""
+	// The server emits all event types on one stream; print the "activity" ones.
+	if err := consumeSSE(resp, func(event, data string) (bool, error) {
+		if event == "activity" && data != "" {
+			printActivityEvent(data)
 		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("follow: %w", err)
 	}
-	if err := scanner.Err(); err != nil {
-		exitError("tail: scanner: %v", err)
-	}
+	return nil
 }
 
 func printActivityEvent(data string) {

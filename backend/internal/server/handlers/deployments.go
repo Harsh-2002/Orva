@@ -103,6 +103,10 @@ func (h *DeploymentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Long builds stream for minutes; clear the server WriteTimeout so the
+	// build-log stream isn't cut at the 60s write deadline (which would also
+	// truncate `orva deploy --watch`).
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

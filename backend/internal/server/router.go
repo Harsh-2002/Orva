@@ -467,6 +467,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/ai/providers/{id}/models", aiHandler.ListProviderModels)
 	r.mux.HandleFunc("GET /api/v1/ai/settings", aiHandler.GetSettings)
 	r.mux.HandleFunc("PUT /api/v1/ai/settings", aiHandler.PutSettings)
+	r.mux.HandleFunc("PUT /api/v1/ai/selection", aiHandler.PutSelection)
 	// RFC 9728 §3.1 — clients MAY look up resource metadata at a path
 	// derived from the protected resource's URL. Serve the same
 	// document at both the bare and the /mcp-suffixed location so MCP

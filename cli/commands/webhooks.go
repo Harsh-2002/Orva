@@ -6,14 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -22,33 +19,52 @@ import (
 var webhooksCmd = &cobra.Command{
 	Use:   "webhooks",
 	Short: "Manage system-event webhook subscriptions",
-	Long:  "List, create, test, and delete webhook subscriptions for system events.",
+	Long: `List, create, test, and delete outbound webhook subscriptions for system
+events (deployment.failed, job.failed, cron.failed, …), inspect their delivery
+history, and manage inbound webhook triggers.
+
+  orva webhooks create --name ci --url https://example.com/hook --events deployment.failed
+  orva webhooks deliveries <id> -o json | jq .`,
 }
 
 var webhooksListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List webhook subscriptions",
-	Run:   runWebhooksList,
+	RunE:  runWebhooksList,
 }
 
 var webhooksCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a webhook subscription",
-	Run:   runWebhooksCreate,
+	RunE:  runWebhooksCreate,
 }
 
 var webhooksTestCmd = &cobra.Command{
 	Use:   "test [id]",
 	Short: "Send a synthetic test event to a webhook",
 	Args:  cobra.ExactArgs(1),
-	Run:   runWebhooksTest,
+	RunE:  runWebhooksTest,
 }
 
 var webhooksDeleteCmd = &cobra.Command{
 	Use:   "delete [id]",
 	Short: "Delete a webhook subscription",
 	Args:  cobra.ExactArgs(1),
-	Run:   runWebhooksDelete,
+	RunE:  runWebhooksDelete,
+}
+
+var webhooksDeliveriesCmd = &cobra.Command{
+	Use:   "deliveries [id]",
+	Short: "List recent delivery attempts for a subscription",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runWebhooksDeliveries,
+}
+
+var webhooksRetryCmd = &cobra.Command{
+	Use:   "retry [delivery-id]",
+	Short: "Retry a failed delivery",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runWebhooksRetry,
 }
 
 func init() {
@@ -62,6 +78,8 @@ func init() {
 	webhooksCmd.AddCommand(webhooksCreateCmd)
 	webhooksCmd.AddCommand(webhooksTestCmd)
 	webhooksCmd.AddCommand(webhooksDeleteCmd)
+	webhooksCmd.AddCommand(webhooksDeliveriesCmd)
+	webhooksCmd.AddCommand(webhooksRetryCmd)
 	webhooksCmd.AddCommand(inboundWebhooksCmd)
 
 	// Inbound subcommand tree.
@@ -75,7 +93,7 @@ func init() {
 		"signature format: hmac_sha256_hex|hmac_sha256_base64|github|stripe|slack")
 	inboundCreateCmd.MarkFlagRequired("name")
 
-	inboundTestCmd.Flags().String("data", `{"hello":"orva"}`, "JSON payload to sign and POST")
+	inboundTestCmd.Flags().String("data", `{"hello":"orva"}`, "JSON payload to sign and POST (inline, @file, or @-)")
 	inboundTestCmd.Flags().String("secret", "",
 		"plaintext secret captured at create time (required — server can't recover it)")
 	inboundTestCmd.Flags().String("format", "",
@@ -83,139 +101,200 @@ func init() {
 	inboundTestCmd.MarkFlagRequired("secret")
 }
 
-func runWebhooksList(cmd *cobra.Command, args []string) {
+func runWebhooksList(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-
 	resp, err := client.Get("/api/v1/webhooks")
 	if err != nil {
-		exitError("list: %v", err)
+		return fmt.Errorf("list: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("list: %v", err)
+		return err
 	}
-
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
 	var result struct {
 		Subscriptions []struct {
-			ID            string    `json:"id"`
-			Name          string    `json:"name"`
-			URL           string    `json:"url"`
-			Events        []string  `json:"events"`
-			Enabled       bool      `json:"enabled"`
-			SecretPreview string    `json:"secret_preview"`
-			LastStatus    string    `json:"last_status"`
-			CreatedAt     time.Time `json:"created_at"`
+			ID         string    `json:"id"`
+			Name       string    `json:"name"`
+			URL        string    `json:"url"`
+			Events     []string  `json:"events"`
+			Enabled    bool      `json:"enabled"`
+			LastStatus string    `json:"last_status"`
+			CreatedAt  time.Time `json:"created_at"`
 		} `json:"subscriptions"`
 	}
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if err := jsonUnmarshal(raw, &result); err != nil {
+		return err
 	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tURL\tEVENTS\tENABLED\tLAST STATUS\tCREATED")
+	t := newTable("ID", "NAME", "URL", "EVENTS", "ENABLED", "LAST STATUS", "CREATED")
 	for _, s := range result.Subscriptions {
-		evts := strings.Join(s.Events, ",")
-		if evts == "" {
-			evts = "-"
-		}
-		last := s.LastStatus
-		if last == "" {
-			last = "-"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%t\t%s\t%s\n",
-			s.ID, s.Name, s.URL, evts, s.Enabled, last,
-			s.CreatedAt.Format(time.DateTime),
-		)
+		t.row(s.ID, s.Name, s.URL, dash(strings.Join(s.Events, ",")), s.Enabled,
+			dash(s.LastStatus), s.CreatedAt.Format(time.DateTime))
 	}
-	w.Flush()
-	fmt.Printf("\nTotal: %d\n", len(result.Subscriptions))
+	t.flush()
+	infof(cmd, "\nTotal: %d", len(result.Subscriptions))
+	return nil
 }
 
-func runWebhooksCreate(cmd *cobra.Command, args []string) {
+func runWebhooksCreate(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-
 	name, _ := cmd.Flags().GetString("name")
 	url, _ := cmd.Flags().GetString("url")
 	eventsStr, _ := cmd.Flags().GetString("events")
 
 	events := []string{}
 	for _, e := range strings.Split(eventsStr, ",") {
-		e = strings.TrimSpace(e)
-		if e != "" {
+		if e = strings.TrimSpace(e); e != "" {
 			events = append(events, e)
 		}
 	}
 
-	body := map[string]any{
-		"name":   name,
-		"url":    url,
-		"events": events,
-	}
-
-	resp, err := client.Post("/api/v1/webhooks", body)
+	resp, err := client.Post("/api/v1/webhooks", map[string]any{
+		"name": name, "url": url, "events": events,
+	})
 	if err != nil {
-		exitError("create: %v", err)
+		return fmt.Errorf("create: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("create: %v", err)
+		return err
 	}
-
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
 	}
-	out, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(out))
-	fmt.Fprintln(os.Stderr, "\nNote: the plaintext secret above is shown ONCE — store it now.")
+	if err := emitRaw(raw); err != nil {
+		return err
+	}
+	infof(cmd, "\nNote: the plaintext secret above is shown ONCE — store it now.")
+	return nil
 }
 
-func runWebhooksTest(cmd *cobra.Command, args []string) {
+func runWebhooksTest(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-
-	id := args[0]
-	resp, err := client.Post("/api/v1/webhooks/"+id+"/test", nil)
+	resp, err := client.Post("/api/v1/webhooks/"+args[0]+"/test", nil)
 	if err != nil {
-		exitError("test: %v", err)
+		return fmt.Errorf("test: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("test: %v", err)
+		return err
 	}
-
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
 	}
-	out, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(out))
+	return emitRaw(raw)
 }
 
-func runWebhooksDelete(cmd *cobra.Command, args []string) {
+func runWebhooksDelete(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-
-	id := args[0]
-	resp, err := client.Delete("/api/v1/webhooks/" + id)
+	if err := confirm(cmd, fmt.Sprintf("Delete webhook subscription %q?", args[0])); err != nil {
+		return err
+	}
+	resp, err := client.Delete("/api/v1/webhooks/" + args[0])
 	if err != nil {
-		exitError("delete: %v", err)
+		return fmt.Errorf("delete: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("delete: %v", err)
+		return err
 	}
-
-	fmt.Printf("Webhook %s deleted\n", id)
+	resp.Body.Close()
+	okf(cmd, "Webhook %s deleted", args[0])
+	return nil
 }
 
-// ── Inbound webhook triggers (v0.4 C2a) ─────────────────────────────
+func runWebhooksDeliveries(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Get("/api/v1/webhooks/" + args[0] + "/deliveries")
+	if err != nil {
+		return fmt.Errorf("deliveries: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+	var result struct {
+		Deliveries []struct {
+			ID             string    `json:"id"`
+			EventName      string    `json:"event_name"`
+			Status         string    `json:"status"`
+			Attempts       int       `json:"attempts"`
+			MaxAttempts    int       `json:"max_attempts"`
+			ResponseStatus int       `json:"response_status"`
+			CreatedAt      time.Time `json:"created_at"`
+		} `json:"deliveries"`
+	}
+	if err := jsonUnmarshal(raw, &result); err != nil {
+		return err
+	}
+	t := newTable("ID", "EVENT", "STATUS", "ATTEMPTS", "CODE", "CREATED")
+	for _, d := range result.Deliveries {
+		code := "-"
+		if d.ResponseStatus != 0 {
+			code = strconv.Itoa(d.ResponseStatus)
+		}
+		t.row(d.ID, d.EventName, d.Status, fmt.Sprintf("%d/%d", d.Attempts, d.MaxAttempts),
+			code, d.CreatedAt.Format(time.DateTime))
+	}
+	t.flush()
+	infof(cmd, "\nTotal: %d", len(result.Deliveries))
+	return nil
+}
+
+func runWebhooksRetry(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Post("/api/v1/webhooks/deliveries/"+args[0]+"/retry", nil)
+	if err != nil {
+		return fmt.Errorf("retry: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+	okf(cmd, "Delivery %s re-queued", args[0])
+	return nil
+}
+
+// ── Inbound webhook triggers ────────────────────────────────────────
 
 var inboundWebhooksCmd = &cobra.Command{
 	Use:   "inbound",
@@ -229,7 +308,7 @@ var inboundListCmd = &cobra.Command{
 	Use:   "list [function-name-or-id]",
 	Short: "List inbound webhook triggers for a function",
 	Args:  cobra.ExactArgs(1),
-	Run:   runInboundList,
+	RunE:  runInboundList,
 }
 
 var inboundCreateCmd = &cobra.Command{
@@ -238,14 +317,14 @@ var inboundCreateCmd = &cobra.Command{
 	Long: "Returns the trigger URL and the plaintext secret. The secret is " +
 		"shown ONCE — store it now; subsequent list/get only show the preview.",
 	Args: cobra.ExactArgs(1),
-	Run:  runInboundCreate,
+	RunE: runInboundCreate,
 }
 
 var inboundDeleteCmd = &cobra.Command{
 	Use:   "delete [function-name-or-id] [trigger-id]",
 	Short: "Delete an inbound webhook trigger",
 	Args:  cobra.ExactArgs(2),
-	Run:   runInboundDelete,
+	RunE:  runInboundDelete,
 }
 
 var inboundTestCmd = &cobra.Command{
@@ -255,22 +334,32 @@ var inboundTestCmd = &cobra.Command{
 		"yourself. Useful as a smoke test from the operator's machine before " +
 		"pointing a real upstream at the URL.",
 	Args: cobra.ExactArgs(2),
-	Run:  runInboundTest,
+	RunE: runInboundTest,
 }
 
-func runInboundList(cmd *cobra.Command, args []string) {
+func runInboundList(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	fnID := resolveFunctionID(client, args[0])
-
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	resp, err := client.Get("/api/v1/functions/" + fnID + "/inbound-webhooks")
 	if err != nil {
-		exitError("list: %v", err)
+		return fmt.Errorf("list: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("list: %v", err)
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 	var result struct {
 		InboundWebhooks []struct {
@@ -283,94 +372,106 @@ func runInboundList(cmd *cobra.Command, args []string) {
 			CreatedAt       time.Time `json:"created_at"`
 		} `json:"inbound_webhooks"`
 	}
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if err := jsonUnmarshal(raw, &result); err != nil {
+		return err
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tFORMAT\tHEADER\tSECRET\tACTIVE\tCREATED")
+	t := newTable("ID", "NAME", "FORMAT", "HEADER", "SECRET", "ACTIVE", "CREATED")
 	for _, h := range result.InboundWebhooks {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%t\t%s\n",
-			h.ID, h.Name, h.SignatureFormat, h.SignatureHeader,
-			h.SecretPreview, h.Active, h.CreatedAt.Format(time.DateTime),
-		)
+		t.row(h.ID, h.Name, h.SignatureFormat, h.SignatureHeader, h.SecretPreview,
+			h.Active, h.CreatedAt.Format(time.DateTime))
 	}
-	w.Flush()
-	fmt.Printf("\nTotal: %d\n", len(result.InboundWebhooks))
+	t.flush()
+	infof(cmd, "\nTotal: %d", len(result.InboundWebhooks))
+	return nil
 }
 
-func runInboundCreate(cmd *cobra.Command, args []string) {
+func runInboundCreate(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	fnID := resolveFunctionID(client, args[0])
-
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	name, _ := cmd.Flags().GetString("name")
 	format, _ := cmd.Flags().GetString("format")
 
-	body := map[string]any{
-		"name":             name,
-		"signature_format": format,
-	}
-	resp, err := client.Post("/api/v1/functions/"+fnID+"/inbound-webhooks", body)
+	resp, err := client.Post("/api/v1/functions/"+fnID+"/inbound-webhooks", map[string]any{
+		"name": name, "signature_format": format,
+	})
 	if err != nil {
-		exitError("create: %v", err)
+		return fmt.Errorf("create: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("create: %v", err)
+		return err
 	}
-
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
 	}
-	out, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(out))
-	fmt.Fprintln(os.Stderr, "\nNote: the plaintext secret above is shown ONCE — store it now.")
+	if err := emitRaw(raw); err != nil {
+		return err
+	}
+	infof(cmd, "\nNote: the plaintext secret above is shown ONCE — store it now.")
+	return nil
 }
 
-func runInboundDelete(cmd *cobra.Command, args []string) {
+func runInboundDelete(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	fnID := resolveFunctionID(client, args[0])
-	id := args[1]
-
-	resp, err := client.Delete("/api/v1/functions/" + fnID + "/inbound-webhooks/" + id)
+	fnID, err := resolveFnID(client, args[0])
 	if err != nil {
-		exitError("delete: %v", err)
+		return err
+	}
+	if err := confirm(cmd, fmt.Sprintf("Delete inbound webhook %q?", args[1])); err != nil {
+		return err
+	}
+	resp, err := client.Delete("/api/v1/functions/" + fnID + "/inbound-webhooks/" + args[1])
+	if err != nil {
+		return fmt.Errorf("delete: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("delete: %v", err)
+		return err
 	}
-	fmt.Printf("Inbound webhook %s deleted\n", id)
+	resp.Body.Close()
+	okf(cmd, "Inbound webhook %s deleted", args[1])
+	return nil
 }
 
-// runInboundTest signs the payload locally with --secret in whatever
-// format the trigger row declares (or --format override) and POSTs it
-// to the trigger URL. Mirrors the verifier in
-// internal/server/handlers/inbound_webhook_trigger.go so all five
-// supported formats round-trip.
-func runInboundTest(cmd *cobra.Command, args []string) {
+// runInboundTest signs the payload locally with --secret in whatever format the
+// trigger row declares (or --format override) and POSTs it to the trigger URL.
+// Mirrors the verifier in internal/server/handlers/inbound_webhook_trigger.go
+// so all five supported formats round-trip.
+func runInboundTest(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
-	fnID := resolveFunctionID(client, args[0])
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	id := args[1]
 
 	dataStr, _ := cmd.Flags().GetString("data")
 	secret, _ := cmd.Flags().GetString("secret")
 	formatOverride, _ := cmd.Flags().GetString("format")
 
-	// Pull the trigger row so we know which header + format to send.
+	body, err := readBodyArg(dataStr)
+	if err != nil {
+		return fmt.Errorf("read data: %w", err)
+	}
+
 	getResp, err := client.Get("/api/v1/functions/" + fnID + "/inbound-webhooks/" + id)
 	if err != nil {
-		exitError("lookup: %v", err)
+		return fmt.Errorf("lookup: %w", err)
 	}
 	if err := checkResponse(getResp); err != nil {
-		exitError("lookup: %v", err)
+		return err
 	}
 	var hook struct {
 		ID              string `json:"id"`
@@ -378,7 +479,7 @@ func runInboundTest(cmd *cobra.Command, args []string) {
 		SignatureHeader string `json:"signature_header"`
 	}
 	if err := decodeJSON(getResp, &hook); err != nil {
-		exitError("decode response: %v", err)
+		return fmt.Errorf("decode response: %w", err)
 	}
 
 	format := hook.SignatureFormat
@@ -386,10 +487,6 @@ func runInboundTest(cmd *cobra.Command, args []string) {
 		format = formatOverride
 	}
 
-	// Compute signature, dispatched by format. extraHeaders holds any
-	// additional headers the format needs alongside the primary signature
-	// (e.g. Slack's X-Slack-Request-Timestamp).
-	body := []byte(dataStr)
 	header := hook.SignatureHeader
 	var value string
 	extraHeaders := map[string]string{}
@@ -411,28 +508,28 @@ func runInboundTest(cmd *cobra.Command, args []string) {
 		value = "v0=" + hex.EncodeToString(hmacSHA256(secret, signed))
 		extraHeaders["X-Slack-Request-Timestamp"] = ts
 	default:
-		exitError("unknown signature format %q (expected hmac_sha256_hex|hmac_sha256_base64|github|stripe|slack)", format)
+		return fmt.Errorf("unknown signature format %q (expected hmac_sha256_hex|hmac_sha256_base64|github|stripe|slack)", format)
 	}
 
-	// POST to the trigger. The CLI client targets /api/v1; build the
-	// full URL via base + /webhook/<id> by reusing client's base.
 	url := client.BaseURL + "/webhook/" + hook.ID
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		exitError("build request: %v", err)
+		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(header, value)
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.HTTP.Do(req)
 	if err != nil {
-		exitError("post: %v", err)
+		return fmt.Errorf("post: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
-	fmt.Printf("HTTP %d\n%s\n", resp.StatusCode, string(respBody))
+	infof(cmd, "HTTP %d", resp.StatusCode)
+	fmt.Println(string(respBody))
+	return exitForStatus(resp.StatusCode)
 }
 
 func hmacSHA256(secret string, body []byte) []byte {

@@ -26,6 +26,11 @@ func (h *Hub) Handler() http.HandlerFunc {
 			return
 		}
 
+		// Clear the server WriteTimeout: this is a long-lived stream and the
+		// write deadline would otherwise drop it every 60s, forcing the client
+		// onto a reconnect-churn loop.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
 		// SSE response headers. X-Accel-Buffering disables nginx's response
 		// buffering so events arrive in real time even behind a proxy.
 		w.Header().Set("Content-Type", "text/event-stream")

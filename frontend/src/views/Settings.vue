@@ -44,6 +44,27 @@
       </dl>
     </div>
 
+    <!-- AI assistant card. Centralized configuration for the in-product AI
+         chat: BYO providers + encrypted keys + base URL, and the assistant's
+         defaults (approval policy, tool steps). The active provider/model/
+         reasoning pickers stay in the chat composer (per-conversation controls).
+         The id anchors the chat's "configure" deep-link (#ai). -->
+    <div
+      id="ai"
+      class="bg-background border border-border rounded-lg p-5 space-y-4 scroll-mt-6"
+    >
+      <div>
+        <div class="text-sm font-semibold text-white flex items-center gap-2">
+          <MessagesSquare class="w-4 h-4 text-foreground-muted" />
+          AI assistant
+        </div>
+        <p class="text-xs text-foreground-muted mt-1 max-w-prose leading-body">
+          Configure the providers, keys, and defaults for the in-product chat assistant.
+        </p>
+      </div>
+      <AISettingsPanel />
+    </div>
+
     <!-- Storage card. Shows orva.db / functions tree / WAL sizes plus
          a "Compact" affordance that runs SQLite VACUUM via the
          admin-gated POST /api/v1/system/vacuum endpoint. -->
@@ -531,7 +552,9 @@ import {
   Trash2,
   Info,
   Copy,
+  MessagesSquare,
 } from 'lucide-vue-next'
+import AISettingsPanel from '@/components/ai/AISettingsPanel.vue'
 import Button from '@/components/common/Button.vue'
 import { useConfirmStore } from '@/stores/confirm'
 import { useAuthStore } from '@/stores/auth'
@@ -708,6 +731,14 @@ const formatBytes = (n) => {
 }
 
 onMounted(fetchStorage)
+// Deep-link from the chat ("configure providers") lands on the AI card.
+onMounted(() => {
+  if (window.location.hash === '#ai') {
+    window.requestAnimationFrame(() => {
+      document.getElementById('ai')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+})
 
 // ── Connected applications ──────────────────────────────────────────
 

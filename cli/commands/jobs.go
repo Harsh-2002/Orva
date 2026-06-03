@@ -3,9 +3,8 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
-	"os"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,33 +13,72 @@ import (
 var jobsCmd = &cobra.Command{
 	Use:   "jobs",
 	Short: "Manage background jobs",
-	Long:  "List, enqueue, retry, and delete jobs in the background queue.",
+	Long:  "List, enqueue, inspect, retry, and delete jobs in the background queue.",
 }
 
 var jobsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List jobs",
-	Run:   runJobsList,
+	Long: `List jobs in the background queue, optionally filtered by status or function.
+
+Examples:
+  orva jobs list
+  orva jobs list --status failed
+  orva jobs list --fn report --limit 100
+  orva jobs list -o json | jq '.jobs[].id'`,
+	RunE: runJobsList,
+}
+
+var jobsGetCmd = &cobra.Command{
+	Use:   "get [id]",
+	Short: "Show a single job",
+	Long: `Show the full record for one job, including payload, attempts, and timing.
+
+Examples:
+  orva jobs get <id>
+  orva jobs get <id> -o json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runJobsGet,
 }
 
 var jobsEnqueueCmd = &cobra.Command{
 	Use:   "enqueue",
 	Short: "Enqueue a new job",
-	Run:   runJobsEnqueue,
+	Long: `Enqueue a background job that invokes a function.
+
+Pass a JSON payload with --data (inline, @file, or @-). Use --at to defer
+execution, and the idempotency flags to dedupe repeated enqueues.
+
+Examples:
+  orva jobs enqueue --fn report
+  orva jobs enqueue --fn report --data '{"full":true}'
+  orva jobs enqueue --fn report --data @body.json --max-attempts 5
+  orva jobs enqueue --fn report --at 2026-06-03T09:00:00Z
+  orva jobs enqueue --fn report --idempotency-key daily-2026-06-02`,
+	RunE: runJobsEnqueue,
 }
 
 var jobsRetryCmd = &cobra.Command{
 	Use:   "retry [id]",
 	Short: "Retry a job",
-	Args:  cobra.ExactArgs(1),
-	Run:   runJobsRetry,
+	Long: `Reset a terminal job back to pending so the scheduler picks it up again.
+
+Examples:
+  orva jobs retry <id>`,
+	Args: cobra.ExactArgs(1),
+	RunE: runJobsRetry,
 }
 
 var jobsDeleteCmd = &cobra.Command{
 	Use:   "delete [id]",
 	Short: "Delete a job",
-	Args:  cobra.ExactArgs(1),
-	Run:   runJobsDelete,
+	Long: `Delete a job from the queue. Prompts for confirmation unless --yes is set.
+
+Examples:
+  orva jobs delete <id>
+  orva jobs delete <id> --yes`,
+	Args: cobra.ExactArgs(1),
+	RunE: runJobsDelete,
 }
 
 func init() {
@@ -49,7 +87,7 @@ func init() {
 	jobsListCmd.Flags().Int("limit", 50, "maximum number of jobs to return")
 
 	jobsEnqueueCmd.Flags().String("fn", "", "function name or ID to invoke (required)")
-	jobsEnqueueCmd.Flags().String("data", "", "JSON payload to send to the function")
+	jobsEnqueueCmd.Flags().String("data", "", "JSON payload to send to the function: inline, @file, or @-")
 	jobsEnqueueCmd.Flags().Int("max-attempts", 0, "maximum retry attempts (default 3)")
 	jobsEnqueueCmd.Flags().String("at", "",
 		"RFC3339 timestamp to fire the job at (e.g. 2026-05-15T09:00:00Z). "+
@@ -62,15 +100,16 @@ func init() {
 	jobsEnqueueCmd.MarkFlagRequired("fn")
 
 	jobsCmd.AddCommand(jobsListCmd)
+	jobsCmd.AddCommand(jobsGetCmd)
 	jobsCmd.AddCommand(jobsEnqueueCmd)
 	jobsCmd.AddCommand(jobsRetryCmd)
 	jobsCmd.AddCommand(jobsDeleteCmd)
 }
 
-func runJobsList(cmd *cobra.Command, args []string) {
+func runJobsList(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
 	status, _ := cmd.Flags().GetString("status")
@@ -82,7 +121,10 @@ func runJobsList(cmd *cobra.Command, args []string) {
 		q.Set("status", status)
 	}
 	if fnNameOrID != "" {
-		fnID := resolveFunctionID(client, fnNameOrID)
+		fnID, err := resolveFnID(client, fnNameOrID)
+		if err != nil {
+			return err
+		}
 		q.Set("function_id", fnID)
 	}
 	if limit > 0 {
@@ -96,10 +138,16 @@ func runJobsList(cmd *cobra.Command, args []string) {
 
 	resp, err := client.Get(path)
 	if err != nil {
-		exitError("list: %v", err)
+		return fmt.Errorf("list: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("list: %v", err)
+		return err
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 
 	var result struct {
@@ -114,46 +162,106 @@ func runJobsList(cmd *cobra.Command, args []string) {
 			CreatedAt    time.Time `json:"created_at"`
 		} `json:"jobs"`
 	}
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tFUNCTION\tSTATUS\tATTEMPTS\tSCHEDULED\tCREATED")
+	t := newTable("ID", "FUNCTION", "STATUS", "ATTEMPTS", "SCHEDULED", "CREATED")
 	for _, j := range result.Jobs {
 		fnLabel := j.FunctionName
 		if fnLabel == "" {
 			fnLabel = j.FunctionID
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d/%d\t%s\t%s\n",
-			j.ID, fnLabel, j.Status, j.Attempts, j.MaxAttempts,
-			j.ScheduledAt.Format(time.DateTime), j.CreatedAt.Format(time.DateTime),
-		)
+		t.row(j.ID, dash(fnLabel), j.Status,
+			fmt.Sprintf("%d/%d", j.Attempts, j.MaxAttempts),
+			j.ScheduledAt.Format(time.DateTime), j.CreatedAt.Format(time.DateTime))
 	}
-	w.Flush()
-	fmt.Printf("\nTotal: %d\n", len(result.Jobs))
+	t.flush()
+	infof(cmd, "\nTotal: %d", len(result.Jobs))
+	return nil
 }
 
-func runJobsEnqueue(cmd *cobra.Command, args []string) {
+func runJobsGet(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
+	}
+
+	id := args[0]
+	resp, err := client.Get("/api/v1/jobs/" + id)
+	if err != nil {
+		return fmt.Errorf("get: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+
+	var job struct {
+		ID           string          `json:"id"`
+		FunctionID   string          `json:"function_id"`
+		FunctionName string          `json:"function_name"`
+		Status       string          `json:"status"`
+		Attempts     int             `json:"attempts"`
+		MaxAttempts  int             `json:"max_attempts"`
+		ScheduledAt  time.Time       `json:"scheduled_at"`
+		CreatedAt    time.Time       `json:"created_at"`
+		LastError    string          `json:"last_error"`
+		Payload      json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &job); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	fnLabel := job.FunctionName
+	if fnLabel == "" {
+		fnLabel = job.FunctionID
+	}
+	t := newTable("FIELD", "VALUE")
+	t.row("id", job.ID)
+	t.row("function", dash(fnLabel))
+	t.row("status", job.Status)
+	t.row("attempts", fmt.Sprintf("%d/%d", job.Attempts, job.MaxAttempts))
+	t.row("scheduled", job.ScheduledAt.Format(time.DateTime))
+	t.row("created", job.CreatedAt.Format(time.DateTime))
+	t.row("last_error", dash(job.LastError))
+	if len(job.Payload) > 0 {
+		t.row("payload", string(job.Payload))
+	}
+	t.flush()
+	return nil
+}
+
+func runJobsEnqueue(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
 	}
 
 	fnNameOrID, _ := cmd.Flags().GetString("fn")
-	dataStr, _ := cmd.Flags().GetString("data")
+	dataArg, _ := cmd.Flags().GetString("data")
 	maxAttempts, _ := cmd.Flags().GetInt("max-attempts")
 	atStr, _ := cmd.Flags().GetString("at")
 
-	fnID := resolveFunctionID(client, fnNameOrID)
-
-	body := map[string]any{
-		"function_id": fnID,
+	fnID, err := resolveFnID(client, fnNameOrID)
+	if err != nil {
+		return err
 	}
-	if dataStr != "" {
+
+	body := map[string]any{"function_id": fnID}
+	if dataArg != "" {
+		raw, err := readBodyArg(dataArg)
+		if err != nil {
+			return fmt.Errorf("enqueue: read data: %w", err)
+		}
 		var payload any
-		if err := json.Unmarshal([]byte(dataStr), &payload); err != nil {
-			exitError("enqueue: --data must be valid JSON: %v", err)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return fmt.Errorf("enqueue: --data must be valid JSON: %w", err)
 		}
 		body["payload"] = payload
 	}
@@ -163,7 +271,7 @@ func runJobsEnqueue(cmd *cobra.Command, args []string) {
 	if atStr != "" {
 		t, err := time.Parse(time.RFC3339, atStr)
 		if err != nil {
-			exitError("enqueue: --at must be RFC3339 (e.g. 2026-05-15T09:00:00Z): %v", err)
+			return fmt.Errorf("enqueue: --at must be RFC3339 (e.g. 2026-05-15T09:00:00Z): %w", err)
 		}
 		body["scheduled_at"] = t.UTC().Format(time.RFC3339)
 	}
@@ -176,57 +284,71 @@ func runJobsEnqueue(cmd *cobra.Command, args []string) {
 
 	resp, err := client.Post("/api/v1/jobs", body)
 	if err != nil {
-		exitError("enqueue: %v", err)
+		return fmt.Errorf("enqueue: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("enqueue: %v", err)
+		return err
+	}
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		return emitRaw(out)
 	}
 
-	var job map[string]any
-	if err := decodeJSON(resp, &job); err != nil {
-		exitError("decode response: %v", err)
+	var job struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
 	}
-	out, _ := json.MarshalIndent(job, "", "  ")
-	fmt.Println(string(out))
+	json.Unmarshal(out, &job)
+	okf(cmd, "Enqueued job %s (%s)", job.ID, dash(job.Status))
+	return nil
 }
 
-func runJobsRetry(cmd *cobra.Command, args []string) {
+func runJobsRetry(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
 	id := args[0]
 	resp, err := client.Post("/api/v1/jobs/"+id+"/retry", nil)
 	if err != nil {
-		exitError("retry: %v", err)
+		return fmt.Errorf("retry: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("retry: %v", err)
+		return err
 	}
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if outputJSON(cmd) {
+		return emitRaw(out)
 	}
-	out, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(out))
+	okf(cmd, "Re-queued job %s", id)
+	return nil
 }
 
-func runJobsDelete(cmd *cobra.Command, args []string) {
+func runJobsDelete(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
 	id := args[0]
-	resp, err := client.Delete("/api/v1/jobs/" + id)
-	if err != nil {
-		exitError("delete: %v", err)
-	}
-	if err := checkResponse(resp); err != nil {
-		exitError("delete: %v", err)
+	if err := confirm(cmd, fmt.Sprintf("Delete job %s?", id)); err != nil {
+		return err
 	}
 
-	fmt.Printf("Job %s deleted\n", id)
+	resp, err := client.Delete("/api/v1/jobs/" + id)
+	if err != nil {
+		return fmt.Errorf("delete: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	resp.Body.Close()
+
+	okf(cmd, "Deleted job %s", id)
+	return nil
 }

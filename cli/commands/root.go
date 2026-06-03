@@ -41,8 +41,9 @@ func newRootEmpty() *cobra.Command {
 	}
 	root.Version = Version
 	root.SetVersionTemplate(fmt.Sprintf("orva %s\n", Version))
-	root.PersistentFlags().String("endpoint", "", "Orva API endpoint (overrides config)")
-	root.PersistentFlags().String("api-key", "", "Orva API key (overrides config)")
+	root.PersistentFlags().String("endpoint", "", "Orva API endpoint (overrides config / $ORVA_ENDPOINT)")
+	root.PersistentFlags().String("api-key", "", "Orva API key (overrides config / $ORVA_API_KEY)")
+	registerGlobalFlags(root)
 	return root
 }
 
@@ -57,7 +58,11 @@ func RegisterClient(root *cobra.Command) {
 		completionCmd,
 		cronCmd,
 		deployCmd,
+		deploymentsCmd,
 		diffCmd,
+		dnsCmd,
+		firewallCmd,
+		fixturesCmd,
 		functionsCmd,
 		invokeCmd,
 		jobsCmd,
@@ -65,9 +70,12 @@ func RegisterClient(root *cobra.Command) {
 		kvCmd,
 		loginCmd,
 		logsCmd,
+		poolCmd,
+		rollbackCmd,
 		routesCmd,
 		secretsCmd,
 		systemCmd,
+		tracesCmd,
 		upgradeCmd,
 		webhooksCmd,
 	)

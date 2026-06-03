@@ -11,17 +11,28 @@ func TestCommandTree(t *testing.T) {
 	paths := [][]string{
 		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"},
 		{"deploy"},
+		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
+		{"rollback"},
 		{"invoke"},
 		{"logs"},
 		{"kv"}, {"kv", "get"}, {"kv", "put"}, {"kv", "delete"}, {"kv", "list"},
-		{"cron"}, {"cron", "create"}, {"cron", "list"}, {"cron", "delete"},
-		{"jobs"}, {"jobs", "enqueue"}, {"jobs", "list"}, {"jobs", "retry"}, {"jobs", "delete"},
+		{"cron"}, {"cron", "create"}, {"cron", "list"}, {"cron", "update"}, {"cron", "delete"},
+		{"jobs"}, {"jobs", "enqueue"}, {"jobs", "list"}, {"jobs", "get"}, {"jobs", "retry"}, {"jobs", "delete"},
 		{"secrets"}, {"secrets", "set"}, {"secrets", "list"}, {"secrets", "delete"},
-		{"keys"}, {"keys", "list"}, {"keys", "create"},
-		{"channels"}, {"channels", "create"}, {"channels", "list"}, {"channels", "delete"},
+		{"keys"}, {"keys", "list"}, {"keys", "create"}, {"keys", "revoke"},
+		{"channels"}, {"channels", "create"}, {"channels", "list"}, {"channels", "show"},
+		{"channels", "add-functions"}, {"channels", "remove-functions"}, {"channels", "rotate"}, {"channels", "delete"},
 		{"webhooks"}, {"webhooks", "list"}, {"webhooks", "create"}, {"webhooks", "delete"},
-		{"routes"}, {"routes", "list"},
-		{"system"}, {"system", "health"},
+		{"webhooks", "test"}, {"webhooks", "deliveries"}, {"webhooks", "retry"},
+		{"webhooks", "inbound"}, {"webhooks", "inbound", "list"}, {"webhooks", "inbound", "create"},
+		{"webhooks", "inbound", "delete"}, {"webhooks", "inbound", "test"},
+		{"routes"}, {"routes", "list"}, {"routes", "set"}, {"routes", "delete"},
+		{"fixtures"}, {"fixtures", "list"}, {"fixtures", "get"}, {"fixtures", "save"}, {"fixtures", "delete"}, {"fixtures", "test"},
+		{"traces"}, {"traces", "list"}, {"traces", "get"}, {"traces", "baseline"},
+		{"firewall"}, {"firewall", "list"}, {"firewall", "add"}, {"firewall", "enable"}, {"firewall", "disable"}, {"firewall", "delete"}, {"firewall", "resolve"},
+		{"dns"}, {"dns", "get"}, {"dns", "set"},
+		{"pool"}, {"pool", "get"}, {"pool", "set"},
+		{"system"}, {"system", "health"}, {"system", "metrics"}, {"system", "storage"}, {"system", "vacuum"},
 		{"activity"},
 		{"backup"}, {"backup", "download"}, {"backup", "restore"},
 		{"diff"},
@@ -54,13 +65,17 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"deploy"}, "name"},
 		{[]string{"deploy"}, "runtime"},
 		{[]string{"deploy"}, "entrypoint"},
-		{[]string{"invoke"}, "data"},
+		{[]string{"deploy"}, "watch"},
+		{[]string{"invoke"}, "body"},
+		{[]string{"invoke"}, "method"},
+		{[]string{"invoke"}, "header"},
+		{[]string{"invoke"}, "stream"},
 		{[]string{"login"}, "endpoint"},
 		{[]string{"login"}, "api-key"},
-		{[]string{"logs"}, "tail"},
+		{[]string{"logs"}, "follow"},
 		{[]string{"logs"}, "exec-id"},
 		{[]string{"activity"}, "limit"},
-		{[]string{"activity"}, "tail"},
+		{[]string{"activity"}, "follow"},
 		{[]string{"kv", "list"}, "prefix"},
 		{[]string{"kv", "list"}, "limit"},
 		{[]string{"jobs", "list"}, "status"},
@@ -73,9 +88,10 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"webhooks", "create"}, "url"},
 		{[]string{"channels", "create"}, "functions"},
 		{[]string{"secrets", "set"}, "value"},
+		{[]string{"keys", "create"}, "expires-in-days"},
+		{[]string{"pool", "set"}, "fn"},
 		{[]string{"diff"}, "from"},
 		{[]string{"diff"}, "to"},
-		{[]string{"diff"}, "json"},
 	}
 	root := NewRoot()
 	for _, c := range cases {
@@ -90,14 +106,33 @@ func TestRequiredFlagsPresent(t *testing.T) {
 	}
 }
 
-// TestPersistentFlags confirms the root persistent flags (--endpoint,
-// --api-key) are present and visible to every subcommand.
+// TestPersistentFlags confirms the root persistent flags are present and
+// visible to every subcommand. This includes the global output controls that
+// the whole CLI's scripting story depends on.
 func TestPersistentFlags(t *testing.T) {
 	root := NewRoot()
-	for _, name := range []string{"endpoint", "api-key"} {
+	for _, name := range []string{"endpoint", "api-key", "output", "quiet", "no-color", "yes"} {
 		if root.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("root missing persistent flag --%s", name)
 		}
+	}
+}
+
+// TestKeysCreateDefaultPermission guards least-privilege: `orva keys create`
+// with no --permissions must default to invoke-only, NOT inherit the server's
+// all-four default (which would silently mint admin keys for CI/deploy bots).
+func TestKeysCreateDefaultPermission(t *testing.T) {
+	root := NewRoot()
+	cmd, _, err := root.Find([]string{"keys", "create"})
+	if err != nil {
+		t.Fatalf("find keys create: %v", err)
+	}
+	f := cmd.Flag("permissions")
+	if f == nil {
+		t.Fatal("keys create missing --permissions flag")
+	}
+	if f.DefValue != "invoke" {
+		t.Errorf("keys create --permissions default = %q, want \"invoke\"", f.DefValue)
 	}
 }
 

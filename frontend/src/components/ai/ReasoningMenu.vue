@@ -16,7 +16,7 @@
     <template #trigger="{ toggle }">
       <button
         type="button"
-        class="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        class="touch-expand-sm inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         :class="active
           ? 'text-primary bg-primary/15 hover:bg-primary/20'
           : 'text-foreground-muted hover:text-foreground hover:bg-surface-hover'"

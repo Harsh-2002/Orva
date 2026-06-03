@@ -26,37 +26,43 @@ auto-detects the entrypoint:
   - If the source dir contains a tsconfig.json AND a handler.ts (or another
     .ts file when handler.ts is missing), the entrypoint defaults to that
     .ts file (e.g. handler.ts) so the validator passes before tsc runs.
-  - Otherwise the server's runtime default is used (handler.js / handler.py).`,
+  - Otherwise the server's runtime default is used (handler.js / handler.py).
+
+Examples:
+  orva deploy ./src --name greeter --runtime node24
+  orva deploy ./src --name greeter --runtime node24 --watch   # stream build logs`,
 	Args: cobra.ExactArgs(1),
-	Run:  runDeploy,
+	RunE: runDeploy,
 }
 
 func init() {
 	deployCmd.Flags().String("name", "", "function name (required)")
 	deployCmd.Flags().String("runtime", "", "runtime (node24, node22, python314, python313) (required)")
 	deployCmd.Flags().String("entrypoint", "", "entrypoint file (optional; auto-detects handler.ts when tsconfig.json + handler.ts present)")
+	deployCmd.Flags().Bool("watch", false, "stream build logs and wait for the deploy to finish (non-zero exit on build failure)")
 	deployCmd.MarkFlagRequired("name")
 	deployCmd.MarkFlagRequired("runtime")
 }
 
-func runDeploy(cmd *cobra.Command, args []string) {
+func runDeploy(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
 	srcPath := args[0]
 	name, _ := cmd.Flags().GetString("name")
 	runtime, _ := cmd.Flags().GetString("runtime")
 	entrypoint, _ := cmd.Flags().GetString("entrypoint")
+	watch, _ := cmd.Flags().GetBool("watch")
 
 	// Verify the source path exists.
 	info, err := os.Stat(srcPath)
 	if err != nil {
-		exitError("path %s: %v", srcPath, err)
+		return fmt.Errorf("path %s: %w", srcPath, err)
 	}
 	if !info.IsDir() {
-		exitError("path %s is not a directory", srcPath)
+		return fmt.Errorf("path %s is not a directory", srcPath)
 	}
 
 	// Auto-detect TypeScript projects so the function row gets created with
@@ -67,42 +73,123 @@ func runDeploy(cmd *cobra.Command, args []string) {
 	if entrypoint == "" {
 		if detected := detectTSEntrypoint(srcPath); detected != "" {
 			entrypoint = detected
-			fmt.Printf("Detected TypeScript project, using entrypoint %q\n", entrypoint)
+			infof(cmd, "Detected TypeScript project, using entrypoint %q", entrypoint)
 		}
 	}
 
 	// Resolve or create the function.
-	fnID := resolveOrCreateFunction(client, name, runtime, entrypoint)
-	fmt.Printf("Deploying to function %s...\n", fnID)
+	fnID, err := resolveOrCreateFunction(cmd, client, name, runtime, entrypoint)
+	if err != nil {
+		return err
+	}
+	infof(cmd, "Deploying to function %s...", fnID)
 
 	// Create tar.gz archive.
 	archivePath, err := createArchive(srcPath)
 	if err != nil {
-		exitError("create archive: %v", err)
+		return fmt.Errorf("create archive: %w", err)
 	}
 	defer os.Remove(archivePath)
 
 	// Upload via multipart POST.
 	resp, err := uploadDeploy(client, fnID, archivePath)
 	if err != nil {
-		exitError("upload failed: %v", err)
+		return fmt.Errorf("upload failed: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("%v", err)
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
 	}
 
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	var dep struct {
+		ID           string `json:"id"`
+		DeploymentID string `json:"deployment_id"`
+	}
+	_ = json.Unmarshal(raw, &dep)
+	depID := dep.ID
+	if depID == "" {
+		depID = dep.DeploymentID
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(data))
+	if watch && depID != "" {
+		if err := watchBuild(cmd, client, depID); err != nil {
+			// Emit the deployment record before returning the build error so
+			// callers still get the machine-readable row.
+			if outputJSON(cmd) {
+				_ = emitRaw(raw)
+			}
+			return err
+		}
+	}
+
+	okf(cmd, "Deploy submitted (deployment %s)", depID)
+	return emitRaw(raw)
 }
 
-func resolveOrCreateFunction(client *cli.Client, name, runtime, entrypoint string) string {
+// watchBuild streams a deployment's build logs over SSE until a terminal event
+// arrives. Log lines go to stderr (progress), so stdout stays clean for the
+// final deployment record. Returns a non-nil error if the build fails.
+func watchBuild(cmd *cobra.Command, client *cli.Client, depID string) error {
+	resp, err := streamSSE(client, "/api/v1/deployments/"+depID+"/stream")
+	if err != nil {
+		return fmt.Errorf("watch: %w", err)
+	}
+	defer resp.Body.Close()
+
+	infof(cmd, "Streaming build logs for deployment %s — Ctrl-C to stop.", depID)
+
+	terminal := false
+	cerr := consumeSSE(resp, func(event, data string) (bool, error) {
+		switch event {
+		case "log":
+			var l struct {
+				Line string `json:"line"`
+			}
+			if json.Unmarshal([]byte(data), &l) == nil {
+				fmt.Fprintln(os.Stderr, l.Line)
+			}
+		case "succeeded":
+			terminal = true
+			okf(cmd, "Build succeeded.")
+			return true, nil
+		case "failed", "error":
+			terminal = true
+			var e struct {
+				Message      string `json:"message"`
+				ErrorMessage string `json:"error_message"`
+			}
+			_ = json.Unmarshal([]byte(data), &e)
+			msg := e.Message
+			if msg == "" {
+				msg = e.ErrorMessage
+			}
+			if msg == "" {
+				msg = event
+			}
+			return true, fmt.Errorf("build failed: %s", msg)
+		}
+		return false, nil
+	})
+	if cerr != nil {
+		return cerr
+	}
+	if !terminal {
+		// Clean stream close with no succeeded/failed event (e.g. a reverse-proxy
+		// idle timeout mid-build). Don't report a success we never actually saw.
+		return fmt.Errorf("build stream ended before a result was reported; check `orva deployments get %s`", depID)
+	}
+	return nil
+}
+
+func resolveOrCreateFunction(cmd *cobra.Command, client *cli.Client, name, runtime, entrypoint string) (string, error) {
 	// Try to find existing function by name.
-	resp, err := client.Get("/api/v1/functions")
+	// High limit: the list endpoint defaults to 20, which would make deploy-by-name
+	// miss an existing function on larger instances and wrongly create a duplicate.
+	resp, err := client.Get("/api/v1/functions?limit=10000")
 	if err == nil && resp.StatusCode == http.StatusOK {
 		var result struct {
 			Functions []struct {
@@ -113,14 +200,14 @@ func resolveOrCreateFunction(client *cli.Client, name, runtime, entrypoint strin
 		if decodeJSON(resp, &result) == nil {
 			for _, fn := range result.Functions {
 				if fn.Name == name {
-					return fn.ID
+					return fn.ID, nil
 				}
 			}
 		}
 	}
 
 	// Function doesn't exist, create it.
-	fmt.Printf("Function %q not found, creating...\n", name)
+	infof(cmd, "Function %q not found, creating...", name)
 	body := map[string]string{
 		"name":    name,
 		"runtime": runtime,
@@ -130,20 +217,20 @@ func resolveOrCreateFunction(client *cli.Client, name, runtime, entrypoint strin
 	}
 	resp, err = client.Post("/api/v1/functions", body)
 	if err != nil {
-		exitError("create function: %v", err)
+		return "", fmt.Errorf("create function: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("create function: %v", err)
+		return "", fmt.Errorf("create function: %w", err)
 	}
 
 	var fn struct {
 		ID string `json:"id"`
 	}
 	if err := decodeJSON(resp, &fn); err != nil {
-		exitError("decode create response: %v", err)
+		return "", fmt.Errorf("decode create response: %w", err)
 	}
-	fmt.Printf("Created function %s\n", fn.ID)
-	return fn.ID
+	infof(cmd, "Created function %s", fn.ID)
+	return fn.ID, nil
 }
 
 // detectTSEntrypoint inspects the source dir for a TypeScript project shape

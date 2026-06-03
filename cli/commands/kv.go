@@ -3,9 +3,8 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
-	"os"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,44 +13,85 @@ import (
 var kvCmd = &cobra.Command{
 	Use:   "kv",
 	Short: "Manage per-function key/value state",
-	Long:  "List, get, put, and delete entries in a function's KV store.",
+	Long: `List, get, put, and delete entries in a function's KV store.
+
+Each function has its own namespaced KV store. Values are JSON and may
+carry an optional TTL. Values are capped at 64 KB each.
+
+Examples:
+  orva kv list greeter
+  orva kv put greeter visits --value 0
+  orva kv get greeter visits
+  orva kv delete greeter visits
+
+Note: atomic counters (incr) and compare-and-swap (cas) are only exposed
+on the internal SDK path, which requires a per-process internal token the
+CLI does not hold — use them from inside a function via the runtime SDK.`,
 }
 
 var kvListCmd = &cobra.Command{
-	Use:   "list [fn]",
+	Use:   "list <fn>",
 	Short: "List KV entries for a function",
-	Args:  cobra.ExactArgs(1),
-	Run:   runKVList,
+	Long: `List a function's KV entries, optionally filtered by key prefix.
+
+Examples:
+  orva kv list greeter
+  orva kv list greeter --prefix session: --limit 50
+  orva kv list greeter -o json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runKVList,
 }
 
 var kvGetCmd = &cobra.Command{
-	Use:   "get [fn] [key]",
+	Use:   "get <fn> <key>",
 	Short: "Get a KV entry",
-	Args:  cobra.ExactArgs(2),
-	Run:   runKVGet,
+	Long: `Get a single KV entry. In table mode the stored JSON value is printed to
+stdout; with -o json the full entry object (value, ttl, timestamps) is
+emitted.
+
+Examples:
+  orva kv get greeter visits
+  orva kv get greeter visits -o json`,
+	Args: cobra.ExactArgs(2),
+	RunE: runKVGet,
 }
 
 var kvPutCmd = &cobra.Command{
-	Use:   "put [fn] [key]",
-	Short: "Put a KV entry",
-	Args:  cobra.ExactArgs(2),
-	Run:   runKVPut,
+	Use:   "put <fn> <key>",
+	Short: "Put (create or update) a KV entry",
+	Long: `Store a JSON value under a key. The value comes from --value as inline
+JSON, @file, or @- (stdin). Optionally expire the key with --ttl seconds.
+
+Examples:
+  orva kv put greeter visits --value 0
+  orva kv put greeter config --value '{"theme":"dark"}'
+  orva kv put greeter blob --value @payload.json
+  echo '{"x":1}' | orva kv put greeter blob --value @-
+  orva kv put greeter session --value '"abc"' --ttl 3600`,
+	Args: cobra.ExactArgs(2),
+	RunE: runKVPut,
 }
 
 var kvDeleteCmd = &cobra.Command{
-	Use:   "delete [fn] [key]",
+	Use:   "delete <fn> <key>",
 	Short: "Delete a KV entry",
-	Args:  cobra.ExactArgs(2),
-	Run:   runKVDelete,
+	Long: `Delete a single KV entry. Destructive; prompts for confirmation unless
+--yes is passed. Idempotent on the server — deleting a missing key succeeds.
+
+Examples:
+  orva kv delete greeter visits
+  orva kv delete greeter visits --yes`,
+	Args: cobra.ExactArgs(2),
+	RunE: runKVDelete,
 }
 
 func init() {
 	kvListCmd.Flags().String("prefix", "", "filter entries by key prefix")
 	kvListCmd.Flags().Int("limit", 200, "maximum number of entries to return (max 1000)")
 
-	kvPutCmd.Flags().String("data", "", "JSON value to store (required)")
+	kvPutCmd.Flags().String("value", "", "JSON value to store: inline, @file, or @- for stdin (required)")
 	kvPutCmd.Flags().Int("ttl", 0, "TTL in seconds (0 = no expiry)")
-	kvPutCmd.MarkFlagRequired("data")
+	kvPutCmd.MarkFlagRequired("value")
 
 	kvCmd.AddCommand(kvListCmd)
 	kvCmd.AddCommand(kvGetCmd)
@@ -59,13 +99,16 @@ func init() {
 	kvCmd.AddCommand(kvDeleteCmd)
 }
 
-func runKVList(cmd *cobra.Command, args []string) {
+func runKVList(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
-	fnID := resolveFunctionID(client, args[0])
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	prefix, _ := cmd.Flags().GetString("prefix")
 	limit, _ := cmd.Flags().GetInt("limit")
 
@@ -83,89 +126,113 @@ func runKVList(cmd *cobra.Command, args []string) {
 
 	resp, err := client.Get(path)
 	if err != nil {
-		exitError("list: %v", err)
+		return fmt.Errorf("list: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("list: %v", err)
+		return err
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 
 	var result struct {
 		Entries []struct {
-			Key       string          `json:"key"`
-			Value     json.RawMessage `json:"value"`
-			ExpiresAt *string         `json:"expires_at"`
-			UpdatedAt string          `json:"updated_at"`
-			SizeBytes int             `json:"size_bytes"`
+			Key       string  `json:"key"`
+			ExpiresAt *string `json:"expires_at"`
+			UpdatedAt string  `json:"updated_at"`
+			SizeBytes int     `json:"size_bytes"`
 		} `json:"entries"`
 		Total     int  `json:"total"`
 		Truncated bool `json:"truncated"`
 	}
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "KEY\tSIZE\tEXPIRES\tUPDATED")
+	t := newTable("KEY", "SIZE", "EXPIRES", "UPDATED")
 	for _, e := range result.Entries {
 		expires := "-"
 		if e.ExpiresAt != nil {
 			expires = *e.ExpiresAt
 		}
 		updated := e.UpdatedAt
-		if t, err := time.Parse(time.RFC3339, e.UpdatedAt); err == nil {
-			updated = t.Format(time.DateTime)
+		if ts, err := time.Parse(time.RFC3339, e.UpdatedAt); err == nil {
+			updated = ts.Format(time.DateTime)
 		}
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", e.Key, e.SizeBytes, expires, updated)
+		t.row(e.Key, e.SizeBytes, expires, updated)
 	}
-	w.Flush()
-	fmt.Printf("\nTotal: %d", result.Total)
+	t.flush()
+
 	if result.Truncated {
-		fmt.Printf(" (truncated; narrow the prefix or raise --limit)")
+		infof(cmd, "\nTotal: %d (truncated; narrow --prefix or raise --limit)", result.Total)
+	} else {
+		infof(cmd, "\nTotal: %d", result.Total)
 	}
-	fmt.Println()
+	return nil
 }
 
-func runKVGet(cmd *cobra.Command, args []string) {
+func runKVGet(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
-	fnID := resolveFunctionID(client, args[0])
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	key := args[1]
 
 	resp, err := client.Get("/api/v1/functions/" + fnID + "/kv/" + url.PathEscape(key))
 	if err != nil {
-		exitError("get: %v", err)
+		return fmt.Errorf("get: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("get: %v", err)
+		return err
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	// Table/human mode: print the stored JSON value to stdout so it pipes
+	// cleanly into jq. The value field is raw JSON as the server stored it.
+	var result struct {
+		Value json.RawMessage `json:"value"`
 	}
-
-	out, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(out))
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return emitRaw(result.Value)
 }
 
-func runKVPut(cmd *cobra.Command, args []string) {
+func runKVPut(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
-	fnID := resolveFunctionID(client, args[0])
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	key := args[1]
 
-	dataStr, _ := cmd.Flags().GetString("data")
+	valueArg, _ := cmd.Flags().GetString("value")
 	ttl, _ := cmd.Flags().GetInt("ttl")
 
+	data, err := readBodyArg(valueArg)
+	if err != nil {
+		return fmt.Errorf("put: read --value: %w", err)
+	}
 	var value any
-	if err := json.Unmarshal([]byte(dataStr), &value); err != nil {
-		exitError("put: --data must be valid JSON: %v", err)
+	if err := json.Unmarshal(data, &value); err != nil {
+		return fmt.Errorf("put: --value must be valid JSON: %w", err)
 	}
 
 	body := map[string]any{
@@ -177,36 +244,54 @@ func runKVPut(cmd *cobra.Command, args []string) {
 
 	resp, err := client.Put("/api/v1/functions/"+fnID+"/kv/"+url.PathEscape(key), body)
 	if err != nil {
-		exitError("put: %v", err)
+		return fmt.Errorf("put: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("put: %v", err)
+		return err
 	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 
-	var result map[string]any
-	if err := decodeJSON(resp, &result); err != nil {
-		exitError("decode response: %v", err)
+	if outputJSON(cmd) {
+		return emitRaw(respBody)
 	}
-	out, _ := json.MarshalIndent(result, "", "  ")
-	fmt.Println(string(out))
+	if ttl > 0 {
+		okf(cmd, "KV entry %q saved (ttl %ds)", key, ttl)
+	} else {
+		okf(cmd, "KV entry %q saved", key)
+	}
+	return nil
 }
 
-func runKVDelete(cmd *cobra.Command, args []string) {
+func runKVDelete(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
-		exitError("%v", err)
+		return err
 	}
 
-	fnID := resolveFunctionID(client, args[0])
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
 	key := args[1]
+
+	if err := confirm(cmd, fmt.Sprintf("Delete KV entry %q from %s?", key, args[0])); err != nil {
+		return err
+	}
 
 	resp, err := client.Delete("/api/v1/functions/" + fnID + "/kv/" + url.PathEscape(key))
 	if err != nil {
-		exitError("delete: %v", err)
+		return fmt.Errorf("delete: %w", err)
 	}
 	if err := checkResponse(resp); err != nil {
-		exitError("delete: %v", err)
+		return err
 	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 
-	fmt.Printf("KV entry %q deleted\n", key)
+	if outputJSON(cmd) {
+		return emitRaw(respBody)
+	}
+	okf(cmd, "KV entry %q deleted", key)
+	return nil
 }
