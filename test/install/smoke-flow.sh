@@ -178,7 +178,7 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 
-invoke_out=$(docker exec "$CONTAINER" /usr/local/bin/orva invoke hello-cli --data '{}' 2>&1 || true)
+invoke_out=$(docker exec "$CONTAINER" /usr/local/bin/orva invoke hello-cli --body '{}' 2>&1 || true)
 # Same nested-container caveat as the API leg above. NOT_ACTIVE here
 # usually means the build worker hit the userns/mount restriction, not
 # that the CLI deploy was wrong.
