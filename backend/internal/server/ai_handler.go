@@ -116,6 +116,13 @@ func startSSE(w http.ResponseWriter) (*sseSink, bool) {
 	if !ok {
 		return nil, false
 	}
+	// Clear the server's WriteTimeout for this response. SSE chat turns are
+	// long-lived (deep thinking + several tool calls + analysis routinely exceed
+	// the 60s default), and the write deadline would otherwise cancel the
+	// in-flight model stream mid-turn ("context canceled"), making the chat
+	// appear to freeze. Liveness is still bounded by the 15s heartbeat and by
+	// request-context cancellation when the client disconnects.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
