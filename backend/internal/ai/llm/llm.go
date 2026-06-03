@@ -51,6 +51,18 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 
 	bctx, cancel := schemas.NewBifrostContextWithCancel(ctx)
 	stream, berr := c.bf.ChatCompletionStreamRequest(bctx, breq)
+	// Robust thinking: a model/endpoint that rejects the reasoning params must not
+	// break the chat. If the request fails up front while reasoning was set, drop
+	// it and retry once so a "thinking on" turn degrades to a normal answer rather
+	// than an error. (Endpoints that merely IGNORE reasoning — e.g. many
+	// self-hosted OpenAI-compatible servers — don't error, so they fall through
+	// here unchanged.)
+	if berr != nil && breq.Params != nil && breq.Params.Reasoning != nil {
+		cancel()
+		breq.Params.Reasoning = nil
+		bctx, cancel = schemas.NewBifrostContextWithCancel(ctx)
+		stream, berr = c.bf.ChatCompletionStreamRequest(bctx, breq)
+	}
 	if berr != nil {
 		cancel()
 		return nil, errors.New(bifrostErr(berr))

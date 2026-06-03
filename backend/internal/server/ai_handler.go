@@ -15,6 +15,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 )
 
 // AIHandler serves /api/v1/ai/* — the in-product AI chat assistant. Chat and
@@ -49,6 +50,13 @@ func (h *AIHandler) principal(r *http.Request) ai.Principal {
 	// session / internal operator → full access (the dashboard is the operator console).
 	p.Perms = auth.PermSet{"read": true, "write": true, "invoke": true, "admin": true}
 	return p
+}
+
+// turnCtx is the request context with the instance's per-request base URL
+// attached, so the agent's tools and system prompt produce real invoke URLs
+// for this host (same source of truth the external MCP server uses).
+func turnCtx(r *http.Request) context.Context {
+	return ai.WithBaseURL(r.Context(), urlhint.BaseURL(r))
 }
 
 // ─── SSE sink ────────────────────────────────────────────────────────────────
@@ -142,7 +150,7 @@ func (h *AIHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	defer heartbeat(sink)()
 	// Errors are streamed as SSE `error` frames by the ai layer (it owns the
 	// sink); the returned error is logged for operator visibility.
-	_, err := h.Manager.Chat(r.Context(), sink, h.principal(r), ai.ChatParams{
+	_, err := h.Manager.Chat(turnCtx(r), sink, h.principal(r), ai.ChatParams{
 		ConversationID: body.ConversationID,
 		Content:        body.Content,
 		Provider:       body.Provider,
@@ -181,7 +189,7 @@ func (h *AIHandler) resume(w http.ResponseWriter, r *http.Request, approved bool
 	}
 	defer heartbeat(sink)()
 	// As with chat, the ai layer streams any error as an SSE `error` frame.
-	logAIError(r, "resume", h.Manager.Resume(r.Context(), sink, h.principal(r), tc.ConversationID, id, approved))
+	logAIError(r, "resume", h.Manager.Resume(turnCtx(r), sink, h.principal(r), tc.ConversationID, id, approved))
 }
 
 // ─── conversations (JSON) ────────────────────────────────────────────────────
@@ -271,7 +279,7 @@ func (h *AIHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer heartbeat(sink)()
-	logAIError(r, "regenerate", h.Manager.RegenerateLast(r.Context(), sink, h.principal(r), r.PathValue("id"),
+	logAIError(r, "regenerate", h.Manager.RegenerateLast(turnCtx(r), sink, h.principal(r), r.PathValue("id"),
 		ai.ChatOverrides{Provider: body.Provider, Model: body.Model, Thinking: body.Thinking}))
 }
 
@@ -293,7 +301,7 @@ func (h *AIHandler) EditMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer heartbeat(sink)()
-	logAIError(r, "edit", h.Manager.EditAndResend(r.Context(), sink, h.principal(r), r.PathValue("id"), r.PathValue("mid"), body.Content,
+	logAIError(r, "edit", h.Manager.EditAndResend(turnCtx(r), sink, h.principal(r), r.PathValue("id"), r.PathValue("mid"), body.Content,
 		ai.ChatOverrides{Provider: body.Provider, Model: body.Model, Thinking: body.Thinking}))
 }
 
@@ -372,6 +380,28 @@ func (h *AIHandler) PutSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := h.Manager.SaveSettings(in)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), RequestID(r.Context()))
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"settings": s})
+}
+
+// PutSelection persists just the operator's active provider/model choice (not
+// the full settings row), so the selection follows them across devices and each
+// provider recalls its last model. Returns the resolved settings.
+func (h *AIHandler) PutSelection(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ProviderID string `json:"provider_id"`
+		Provider   string `json:"provider"`
+		Model      string `json:"model"`
+		Thinking   string `json:"thinking"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		respond.Error(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body", RequestID(r.Context()))
+		return
+	}
+	s, err := h.Manager.SaveSelection(in.ProviderID, in.Provider, in.Model, in.Thinking)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), RequestID(r.Context()))
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{"settings": s})

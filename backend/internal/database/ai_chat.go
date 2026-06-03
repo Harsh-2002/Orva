@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -94,7 +95,14 @@ type AISettings struct {
 	SystemPrompt      string    `json:"system_prompt"`   // empty → built-in default
 	ApprovalPolicy    string    `json:"approval_policy"` // all_writes | destructive_only | auto
 	MaxToolIterations int       `json:"max_tool_iterations"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// ActiveProviderID is the provider CONFIG id (ai_provider_configs.id) the
+	// operator last selected, so the dashboard restores the same provider on any
+	// device. ProviderModels remembers the chosen model per provider config id
+	// (JSON map {providerId: modelId}) so switching back to a provider recalls
+	// its last model instead of re-defaulting.
+	ActiveProviderID string            `json:"active_provider_id"`
+	ProviderModels   map[string]string `json:"provider_models"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
 // ─── conversations ────────────────────────────────────────────────────────
@@ -562,21 +570,40 @@ func scanProviderConfig(scan func(...any) error) (*AIProviderConfig, error) {
 // separate not-found dance.
 func (db *Database) GetSettings(id string) (*AISettings, bool, error) {
 	row := db.read.QueryRow(`
-		SELECT id, provider, model, thinking_level, system_prompt, approval_policy, max_tool_iterations, updated_at
+		SELECT id, provider, model, thinking_level, system_prompt, approval_policy, max_tool_iterations,
+		       active_provider_id, provider_models, updated_at
 		FROM ai_settings WHERE id = ?`, id)
 	var (
-		s            AISettings
-		systemPrompt sql.NullString
+		s              AISettings
+		systemPrompt   sql.NullString
+		activeProvider sql.NullString
+		providerModels sql.NullString
 	)
-	err := row.Scan(&s.ID, &s.Provider, &s.Model, &s.ThinkingLevel, &systemPrompt, &s.ApprovalPolicy, &s.MaxToolIterations, &s.UpdatedAt)
+	err := row.Scan(&s.ID, &s.Provider, &s.Model, &s.ThinkingLevel, &systemPrompt, &s.ApprovalPolicy,
+		&s.MaxToolIterations, &activeProvider, &providerModels, &s.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return &AISettings{ID: id}, false, nil
+		// Keep the map non-nil on the not-found path too, so callers never
+		// nil-deref ProviderModels on a fresh instance.
+		return &AISettings{ID: id, ProviderModels: map[string]string{}}, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
 	s.SystemPrompt = systemPrompt.String
+	s.ActiveProviderID = activeProvider.String
+	s.ProviderModels = decodeProviderModels(providerModels.String)
 	return &s, true, nil
+}
+
+// decodeProviderModels parses the JSON provider→model map, returning an empty
+// (non-nil) map for blank or malformed values so callers never nil-deref.
+func decodeProviderModels(raw string) map[string]string {
+	m := map[string]string{}
+	if raw == "" {
+		return m
+	}
+	_ = json.Unmarshal([]byte(raw), &m)
+	return m
 }
 
 // UpsertSettings writes the settings row by id.
@@ -588,10 +615,17 @@ func (db *Database) UpsertSettings(s *AISettings) error {
 		s.MaxToolIterations = 25
 	}
 	s.UpdatedAt = time.Now().UTC()
+	pm := ""
+	if len(s.ProviderModels) > 0 {
+		if b, err := json.Marshal(s.ProviderModels); err == nil {
+			pm = string(b)
+		}
+	}
 	_, err := db.write.Exec(`
 		INSERT INTO ai_settings
-			(id, provider, model, thinking_level, system_prompt, approval_policy, max_tool_iterations, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			(id, provider, model, thinking_level, system_prompt, approval_policy, max_tool_iterations,
+			 active_provider_id, provider_models, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			provider            = excluded.provider,
 			model               = excluded.model,
@@ -599,11 +633,51 @@ func (db *Database) UpsertSettings(s *AISettings) error {
 			system_prompt       = excluded.system_prompt,
 			approval_policy     = excluded.approval_policy,
 			max_tool_iterations = excluded.max_tool_iterations,
+			active_provider_id  = excluded.active_provider_id,
+			provider_models     = excluded.provider_models,
 			updated_at          = excluded.updated_at`,
 		s.ID, s.Provider, s.Model, s.ThinkingLevel, nullStr(s.SystemPrompt), s.ApprovalPolicy,
-		s.MaxToolIterations, s.UpdatedAt,
+		s.MaxToolIterations, s.ActiveProviderID, pm, s.UpdatedAt,
 	)
 	return err
+}
+
+// SetAISelection persists just the operator's active provider/model/thinking
+// choice without disturbing the rest of the settings row (system prompt,
+// approval policy, iterations). It updates the active provider type + id + model
+// + thinking level and remembers the model for that provider config in the
+// provider_models map, so the choices follow the operator across devices and the
+// model is recalled per provider. Empty fields are left unchanged. Creates the
+// row from built-in defaults if it doesn't exist yet.
+func (db *Database) SetAISelection(id, providerID, provider, model, thinking string) (*AISettings, error) {
+	if id == "" {
+		id = "default"
+	}
+	cur, _, err := db.GetSettings(id)
+	if err != nil {
+		return nil, err
+	}
+	if cur.ProviderModels == nil {
+		cur.ProviderModels = map[string]string{}
+	}
+	cur.ID = id
+	cur.ActiveProviderID = providerID
+	if provider != "" {
+		cur.Provider = provider
+	}
+	if model != "" {
+		cur.Model = model
+		if providerID != "" {
+			cur.ProviderModels[providerID] = model
+		}
+	}
+	if thinking != "" {
+		cur.ThinkingLevel = thinking
+	}
+	if err := db.UpsertSettings(cur); err != nil {
+		return nil, err
+	}
+	return cur, nil
 }
 
 // ─── small helpers ────────────────────────────────────────────────────────

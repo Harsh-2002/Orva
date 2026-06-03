@@ -79,6 +79,33 @@ func (m *Manager) unlockConv(id string) {
 	m.convMu.Unlock()
 }
 
+// ─── request-scoped base URL ───────────────────────────────────────────────
+//
+// The Manager is built once at startup, so its mcp.Deps has no BaseURL — but
+// the instance's public URL is request-specific (it varies by reverse proxy,
+// custom domain, or localhost in dev). The handler knows it per request
+// (urlhint.BaseURL(r)); it threads it through context so the tool registry can
+// stamp real invoke_url fields and the system prompt can name the live origin.
+// Without this the in-chat agent returns placeholder URLs while external MCP
+// clients (which set Deps.BaseURL per request) return real ones.
+
+type ctxKey int
+
+const baseURLCtxKey ctxKey = iota
+
+// WithBaseURL carries the instance's base URL (scheme://host) on the context.
+func WithBaseURL(ctx context.Context, baseURL string) context.Context {
+	if strings.TrimSpace(baseURL) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, baseURLCtxKey, strings.TrimRight(baseURL, "/"))
+}
+
+func baseURLFromContext(ctx context.Context) string {
+	u, _ := ctx.Value(baseURLCtxKey).(string)
+	return u
+}
+
 // New constructs the Manager. The LLM gateway is built lazily on first chat
 // (and rebuilt when provider configs change), so startup never depends on a
 // provider being configured.
@@ -182,6 +209,9 @@ func (m *Manager) Chat(ctx context.Context, sink Sink, p Principal, params ChatP
 		MaxIterations:  settings.MaxToolIterations,
 	}
 
+	// A brand-new conversation (no id from the client) is the first turn — the
+	// only turn we inline the full reference on.
+	firstTurn := params.ConversationID == ""
 	convID := params.ConversationID
 	if convID == "" {
 		c := &database.AIConversation{
@@ -203,7 +233,7 @@ func (m *Manager) Chat(ctx context.Context, sink Sink, p Principal, params ChatP
 	}
 	defer m.unlockConv(convID)
 
-	runner, err := m.buildRunner(p.Perms, cfg)
+	runner, err := m.buildRunner(ctx, p.Perms, cfg, firstTurn)
 	if err != nil {
 		_ = sink.Send("error", map[string]any{"message": err.Error()})
 		return convID, err
@@ -237,7 +267,7 @@ func (m *Manager) Resume(ctx context.Context, sink Sink, p Principal, convID, to
 			cfg.Model = c.Model
 		}
 	}
-	runner, err := m.buildRunner(p.Perms, cfg)
+	runner, err := m.buildRunner(ctx, p.Perms, cfg, false)
 	if err != nil {
 		_ = sink.Send("error", map[string]any{"message": err.Error()})
 		return err
@@ -267,7 +297,7 @@ func (m *Manager) runTurn(ctx context.Context, sink Sink, p Principal, convID, c
 		ApprovalPolicy: settings.ApprovalPolicy,
 		MaxIterations:  settings.MaxToolIterations,
 	}
-	runner, err := m.buildRunner(p.Perms, cfg)
+	runner, err := m.buildRunner(ctx, p.Perms, cfg, false)
 	if err != nil {
 		_ = sink.Send("error", map[string]any{"message": err.Error()})
 		return err
@@ -349,13 +379,28 @@ func (m *Manager) DeleteMessageFrom(convID, messageID string) error {
 
 // buildRunner assembles a principal-scoped agent runner: the tool registry is
 // gated to the caller's perms, the gateway is the shared client, and dispatch
-// runs tools in-process.
-func (m *Manager) buildRunner(perms auth.PermSet, cfg agent.Config) (*agent.Runner, error) {
+// runs tools in-process. The per-request base URL (from ctx) is stamped onto a
+// copy of Deps so tools render real invoke URLs, and is appended to the system
+// prompt so the agent can answer "how do I call this" with the live origin.
+func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent.Config, firstTurn bool) (*agent.Runner, error) {
 	client, err := m.getClient()
 	if err != nil {
 		return nil, fmt.Errorf("ai gateway unavailable: %w", err)
 	}
-	reg := mcp.BuildAgentRegistry(m.deps, perms)
+	deps := m.deps
+	baseURL := baseURLFromContext(ctx)
+	if baseURL != "" {
+		deps.BaseURL = baseURL
+		cfg.System = appendInstanceContext(cfg.System, baseURL, deps.Version)
+	}
+	// First turn of a new conversation: inline the complete reference once so the
+	// agent starts fully grounded without a docs round-trip. Later turns rely on
+	// the discipline in the prompt to call get_orva_docs on demand — the full
+	// doc is NOT re-appended every turn (see appendFullReference).
+	if firstTurn {
+		cfg.System = appendFullReference(cfg.System, baseURL)
+	}
+	reg := mcp.BuildAgentRegistry(deps, perms)
 	tools := make([]agent.Tool, 0)
 	for _, t := range reg.Tools() {
 		tools = append(tools, agent.Tool{
@@ -401,14 +446,39 @@ JavaScript/TypeScript (Node 22/24) or Python (3.13/3.14) handlers; Orva builds
 them and runs them in nsjail sandboxes, exposed over HTTP. You operate THIS
 instance on the user's behalf through tools.
 
+# Operating loop
+Work in a reason -> act -> observe -> reflect loop, grounded in facts rather than
+assumptions:
+1. Understand the goal. For a non-trivial task, decide the few steps up front and
+   commit to that approach; don't re-litigate it unless a result contradicts it.
+2. Ground before acting: read the authoritative source — get_orva_docs for how
+   Orva works, get_*/list_* for current state. Don't act on anything you could
+   cheaply verify first.
+3. Act: take ONE concrete step with a tool.
+4. Observe and reflect: read the tool result in full before the next step. Let the
+   result — not your earlier plan — choose the next action; adjust when it surprises
+   you.
+5. Verify before you report: confirm the outcome (re-invoke, re-read, re-check
+   state) so you tell the user observed results, not intentions.
+Reason things through before acting, and reflect after each tool result — but keep
+your visible reply tight: don't narrate the loop or replay your reasoning back to
+the user.
+
 # How to work
 - Act, don't narrate. Prefer doing the task with tools over describing how the
   user could do it. Take the next concrete step.
 - Inspect before you mutate. Read current state (list_*/get_*) before changing it.
-- Don't guess Orva's APIs, handler contract, SDK, config, or limits. When you
-  need authoritative detail beyond the essentials below, call get_orva_docs — it
-  returns the complete, current Orva reference. Avoid re-fetching the same topic
-  in a turn; consulting it again for a different area is fine.
+- NEVER guess Orva's APIs, handler contract, SDK calls, config keys, limits, or
+  field names. Guessing burns a deploy/invoke cycle and the user's money. Orva is
+  the single source of truth: call get_orva_docs and read the complete, current
+  reference BEFORE writing or modifying handler code, picking a runtime/config
+  value, or using the in-sandbox SDK — don't rely on Lambda/Vercel/Workers habits,
+  which Orva diverges from. It is one always-up-to-date document; read what you
+  need from it rather than assuming. (You needn't re-fetch it within the same turn
+  once you have it.)
+- Don't invent ids, names, or current settings. Read live state with the matching
+  get_*/list_* tool first (and prefer the invoke_url those tools return over
+  constructing a URL yourself).
 - Writes are gated by the approval policy (default all_writes). Reads and invokes
   never pause. Under all_writes every write pauses for operator approval;
   destructive_only pauses only destructive-marked tools; auto runs everything.
@@ -420,14 +490,27 @@ instance on the user's behalf through tools.
   guard the tool enforces in code even when approval is auto. Set confirm=true
   only when the user clearly asked for that destructive action, and never retry a
   failed destructive call without fresh user intent.
-- Close the loop on failures: if an invocation or build fails, read the full
-  build/execution log + stderr, diagnose ALL issues at once (syntax, deps,
-  logic), fix them together, and redeploy once — don't redeploy after each single
-  fix, and don't stop at the first error.
+- Keep changes minimal and scoped to what was asked. Don't add files, abstractions,
+  config, or "improvements" that weren't requested, and don't hardcode a handler to
+  the specific test input — write the general solution.
 - Spend steps wisely. Each turn has a bounded tool budget (about 25 calls). Batch
   work (deploy then invoke once; fix everything from one log) rather than
   one-tool-per-item loops. If you run low, finish the highest-value step and tell
   the user what remains.
+
+# Debugging and root cause
+When a build or invocation fails, find the ROOT CAUSE — never guess a fix or patch
+the symptom:
+1. Observe: read the FULL build log or execution log + stderr (and list_traces /
+   get_function_baseline for slow or anomalous runs). Read the whole failure, not
+   just the first error line.
+2. Diagnose: identify EVERY issue at once (syntax, deps, config, logic, network)
+   and the underlying cause. Confirm the contract against get_orva_docs rather than
+   assuming why it failed.
+3. Fix together, redeploy ONCE: apply all fixes in a single change, then redeploy —
+   don't redeploy after each edit, and don't stop at the first error.
+4. Verify: invoke again and confirm a 2xx (or the expected result) before calling
+   it fixed.
 
 # Handling queries
 - "How do I…/what does Orva support…" → answer from the essentials; for anything
@@ -481,6 +564,44 @@ instance on the user's behalf through tools.
   user code logged it. If a value appears in logs, stderr, or KV, redact it and
   describe the symptom (for example: invalid auth header), not the value.`
 
+// appendInstanceContext appends a per-instance addendum giving the agent
+// concrete, correct facts about the Orva it is operating: the live base URL (so
+// it answers "how/where do I call this function" with the real URL instead of a
+// placeholder) and the running version. These values are stable for an instance,
+// so the addendum stays constant across a session's turns and doesn't defeat
+// provider prompt caching. Built with plain concatenation (no backticks) so it
+// never breaks the raw-string defaultSystemPrompt.
+func appendInstanceContext(prompt, baseURL, version string) string {
+	b := strings.Builder{}
+	b.WriteString(prompt)
+	b.WriteString("\n\n# This instance\n")
+	b.WriteString("These facts describe the specific Orva you are operating right now. Treat them as ground truth and use them verbatim — never substitute a placeholder.\n")
+	b.WriteString("- Base URL: " + baseURL + "\n")
+	if v := strings.TrimSpace(version); v != "" {
+		b.WriteString("- Running version: " + v + "\n")
+	}
+	b.WriteString("- Invoke a function over HTTP at " + baseURL + "/fn/<function_id> (the method depends on the handler; POST is the common default). Custom path routes live at " + baseURL + "/<route_path>.\n")
+	b.WriteString("- When the user asks how or where to call a function, give the real URL above — never a placeholder such as your-orva-instance.example.com. get_function and list_functions return the canonical invoke_url (and any route URLs) per function; prefer copying those.\n")
+	b.WriteString("- get_orva_docs already substitutes this instance's origin into its examples, so the URLs in returned snippets are real and pasteable as-is.")
+	return b.String()
+}
+
+// appendFullReference inlines the complete Orva reference (the single source of
+// truth) into the system prompt. It is used ONLY on a conversation's first turn,
+// so the agent starts grounded without a docs round-trip; it is deliberately not
+// re-appended on later turns (those rely on get_orva_docs on demand), which also
+// keeps the stable [essentials + instance] prefix cacheable across turns. Built
+// with plain concatenation (no backticks) so it never breaks the raw-string
+// defaultSystemPrompt.
+func appendFullReference(prompt, baseURL string) string {
+	return prompt + "\n\n# Orva reference (complete)\n" +
+		"The full, current Orva reference for this build follows — the single source of truth. " +
+		"Treat it as ground truth and don't contradict it from training-data assumptions. It is " +
+		"included once to ground this conversation; you will NOT be sent it again automatically, so " +
+		"if you need to re-check a detail later in this conversation, call get_orva_docs.\n\n" +
+		mcp.ReferenceMarkdown(baseURL)
+}
+
 // resolvedSettings returns the stored settings with built-in defaults filled
 // in for any missing field.
 func (m *Manager) resolvedSettings() database.AISettings {
@@ -510,11 +631,28 @@ func (m *Manager) resolvedSettings() database.AISettings {
 	if strings.TrimSpace(s.SystemPrompt) == "" {
 		s.SystemPrompt = defaultSystemPrompt
 	}
+	if s.ProviderModels == nil {
+		s.ProviderModels = map[string]string{}
+	}
 	return *s
 }
 
 // Settings returns the resolved settings for the API (with defaults applied).
 func (m *Manager) Settings() database.AISettings { return m.resolvedSettings() }
+
+// SaveSelection persists the operator's active provider/model/thinking choice so
+// it follows them across devices and the model is recalled per provider. It
+// touches only the selection fields, leaving the rest of the settings row intact.
+// An invalid thinking level is ignored rather than failing the whole save.
+func (m *Manager) SaveSelection(providerID, provider, model, thinking string) (database.AISettings, error) {
+	if !validThinking(thinking) {
+		thinking = ""
+	}
+	if _, err := m.db.SetAISelection("default", providerID, provider, model, thinking); err != nil {
+		return database.AISettings{}, err
+	}
+	return m.resolvedSettings(), nil
+}
 
 // SaveSettings persists settings, validating enums.
 func (m *Manager) SaveSettings(in database.AISettings) (database.AISettings, error) {
@@ -524,6 +662,17 @@ func (m *Manager) SaveSettings(in database.AISettings) (database.AISettings, err
 	}
 	if !validApproval(in.ApprovalPolicy) {
 		return database.AISettings{}, fmt.Errorf("invalid approval_policy %q", in.ApprovalPolicy)
+	}
+	// Preserve the operator's provider/model selection (managed separately via
+	// SaveSelection) so a general-settings save from the settings form — which
+	// doesn't carry these fields — never wipes the cross-device choice.
+	if cur, _, err := m.db.GetSettings("default"); err == nil {
+		if in.ActiveProviderID == "" {
+			in.ActiveProviderID = cur.ActiveProviderID
+		}
+		if len(in.ProviderModels) == 0 {
+			in.ProviderModels = cur.ProviderModels
+		}
 	}
 	if err := m.db.UpsertSettings(&in); err != nil {
 		return database.AISettings{}, err
