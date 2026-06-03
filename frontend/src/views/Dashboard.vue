@@ -59,7 +59,7 @@
             Host machine
           </h2>
           <div class="text-[11px] text-foreground-muted mt-1">
-            The server Orva is running on, and how much of its RAM your warm sandboxes are holding.
+            The server Orva is running on: how much of its RAM is actually in use, and how much your warm pools reserve as headroom.
           </div>
         </div>
 
@@ -74,31 +74,37 @@
           <div>
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted">Memory in use</div>
             <div class="text-lg font-mono text-white mt-0.5">
-              {{ formatMB(memReserved) }} <span class="text-foreground-muted text-sm">/ {{ formatMB(memTotal) }}</span>
+              {{ formatMB(memUsed) }} <span class="text-foreground-muted text-sm">/ {{ formatMB(memTotal) }}</span>
             </div>
             <div class="text-[11px] text-foreground-muted mt-0.5">
-              {{ memUsedPct.toFixed(1) }}% reserved by warm sandbox pools
+              {{ memUsedPct.toFixed(1) }}% used · {{ formatMB(memReserved) }} reserved by warm pools
             </div>
           </div>
         </div>
 
-        <!-- Stacked bar: total = reserved + free. Shows the whole picture in one row. -->
+        <!-- Stacked bar: ACTUAL usage (total = in use + free), what `docker stats`
+             reflects. The warm-pool reservation is a separate admission-control
+             budget that overlaps actual usage, so it's called out below rather
+             than shown as its own segment (which would double-count). -->
         <div class="space-y-2">
           <StackedBar
             :total="memTotal"
             :segments="[
-              { label: 'Reserved by warm pools', value: memReserved, color: 'bg-info/70' },
-              { label: 'Free',                   value: memFree,     color: 'bg-success/40' },
+              { label: 'In use', value: memUsed, color: 'bg-info/70' },
+              { label: 'Free',   value: memFree, color: 'bg-success/40' },
             ]"
           />
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-muted">
             <span class="flex items-center gap-1.5">
               <span class="w-2 h-2 rounded-full bg-info/70" />
-              {{ formatMB(memReserved) }} held by warm sandboxes ready to serve
+              {{ formatMB(memUsed) }} in use
             </span>
             <span class="flex items-center gap-1.5">
               <span class="w-2 h-2 rounded-full bg-success/40" />
-              {{ formatMB(memFree) }} free for new pools or other workloads
+              {{ formatMB(memFree) }} free
+            </span>
+            <span>
+              {{ formatMB(memReserved) }} reserved by warm pools ({{ memReservedPct.toFixed(1) }}% — held ready, not all in use)
             </span>
           </div>
         </div>
@@ -322,10 +328,18 @@ const formatBig = (n) => {
 }
 
 // Memory derived state — kept here so the template stays declarative.
-const memTotal    = computed(() => m.value.host?.mem_total_mb ?? 0)
-const memReserved = computed(() => m.value.host?.mem_reserved_mb ?? 0)
-const memFree     = computed(() => Math.max(0, memTotal.value - memReserved.value))
-const memUsedPct  = computed(() => (memTotal.value > 0 ? (memReserved.value / memTotal.value) * 100 : 0))
+const memTotal     = computed(() => m.value.host?.mem_total_mb ?? 0)
+// Reserved = the warm-pool admission-control budget (Σ ready+busy workers ×
+// 1.5 × memory_mb). It's headroom the scheduler holds, NOT actual consumption.
+const memReserved  = computed(() => m.value.host?.mem_reserved_mb ?? 0)
+// Actual host usage = total - available (from /proc/meminfo) — this is what
+// `docker stats`/`free` show. Idle warm sandboxes use a fraction of their
+// reservation, so memUsed is typically far below memReserved.
+const memAvailable = computed(() => m.value.host?.mem_available_mb ?? 0)
+const memUsed      = computed(() => Math.max(0, memTotal.value - memAvailable.value))
+const memFree      = computed(() => Math.max(0, memTotal.value - memUsed.value))
+const memUsedPct   = computed(() => (memTotal.value > 0 ? (memUsed.value / memTotal.value) * 100 : 0))
+const memReservedPct = computed(() => (memTotal.value > 0 ? (memReserved.value / memTotal.value) * 100 : 0))
 
 onMounted(() => system.connect())
 onUnmounted(() => system.disconnect())
