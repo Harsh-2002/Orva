@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -167,28 +166,13 @@ func runLogsFollow(cmd *cobra.Command, client *cli.Client, fnID string) error {
 
 	infof(cmd, "Following executions for %s — Ctrl-C to stop.", fnID)
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-	var curType, curData string
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, ":"):
-			// SSE comment / heartbeat — ignore.
-		case strings.HasPrefix(line, "event:"):
-			curType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			curData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		case line == "":
-			if curType == "execution" && curData != "" {
-				printExecutionEvent(curData, fnID)
-			}
-			curType, curData = "", ""
+	if err := consumeSSE(resp, func(event, data string) (bool, error) {
+		if event == "execution" && data != "" {
+			printExecutionEvent(data, fnID)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("follow: scanner: %w", err)
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("follow: %w", err)
 	}
 	return nil
 }

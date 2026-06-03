@@ -43,6 +43,20 @@ type GetOrvaDocsOutput struct {
 	Note      string `json:"note,omitempty"`
 }
 
+// docsPlaceholderOrigin is shown when no real instance origin is known.
+const docsPlaceholderOrigin = "https://your-orva-instance.example.com"
+
+// resolveDocsOrigin trims a caller-supplied origin and falls back to the generic
+// placeholder when empty. Single source for the origin normalization used by
+// both ReferenceMarkdown and the get_orva_docs handler so they can't drift.
+func resolveDocsOrigin(origin string) string {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		origin = docsPlaceholderOrigin
+	}
+	return origin
+}
+
 // ReferenceMarkdown returns the full embedded Orva reference with {{ORIGIN}}
 // substituted by origin (or a generic placeholder when origin is empty). It is
 // the same single document get_orva_docs serves, exposed for callers that need
@@ -50,11 +64,7 @@ type GetOrvaDocsOutput struct {
 // conversation's first turn. There is still only ONE document; this is just
 // another way to read it.
 func ReferenceMarkdown(origin string) string {
-	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
-	if origin == "" {
-		origin = "https://your-orva-instance.example.com"
-	}
-	return strings.ReplaceAll(orvaDocsMarkdown, "{{ORIGIN}}", origin)
+	return strings.ReplaceAll(orvaDocsMarkdown, "{{ORIGIN}}", resolveDocsOrigin(origin))
 }
 
 // registerDocsTools wires get_orva_docs into the per-request server.
@@ -79,14 +89,14 @@ func registerDocsTools(rc *regCtx) {
 			},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetOrvaDocsInput) (*mcpsdk.CallToolResult, GetOrvaDocsOutput, error) {
+			// Caller-supplied origin wins; else the per-request base URL; else the
+			// generic placeholder (applied by resolveDocsOrigin via ReferenceMarkdown).
 			origin := strings.TrimRight(strings.TrimSpace(in.Origin), "/")
 			if origin == "" {
 				origin = depBaseURL
 			}
-			if origin == "" {
-				origin = "https://your-orva-instance.example.com"
-			}
-			md := strings.ReplaceAll(orvaDocsMarkdown, "{{ORIGIN}}", origin)
+			origin = resolveDocsOrigin(origin)
+			md := ReferenceMarkdown(origin)
 			return nil, GetOrvaDocsOutput{
 				Markdown:  md,
 				ByteCount: len(md),

@@ -22,8 +22,9 @@ var keysCreateCmd = &cobra.Command{
 	Long: `Create a new API key and print the secret once.
 
 The plaintext key is shown only at creation time — store it immediately.
-Permissions are comma-separated (invoke, read, write, admin); the default
-grants all four. Use --expires-in-days to make the key auto-expire.
+Permissions are comma-separated (invoke, read, write, admin); the default is
+invoke-only (least privilege) — pass --permissions to widen the scope. Use
+--expires-in-days to make the key auto-expire.
 
 Examples:
   orva keys create --name ci
@@ -60,7 +61,7 @@ Examples:
 
 func init() {
 	keysCreateCmd.Flags().String("name", "", "key name (required)")
-	keysCreateCmd.Flags().String("permissions", "", "comma-separated permissions (invoke,read,write,admin); default grants all")
+	keysCreateCmd.Flags().String("permissions", "invoke", "comma-separated permissions (invoke,read,write,admin); defaults to invoke-only")
 	keysCreateCmd.Flags().Int("expires-in-days", 0, "auto-expire the key after N days (0 = never)")
 	keysCreateCmd.MarkFlagRequired("name")
 

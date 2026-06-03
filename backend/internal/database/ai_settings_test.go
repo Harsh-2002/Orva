@@ -41,6 +41,20 @@ func TestSetAISelectionRoundTrip(t *testing.T) {
 	if s.ThinkingLevel != "standard" {
 		t.Errorf("empty thinking should preserve prior level, got %q", s.ThinkingLevel)
 	}
+
+	// Empty providerID must NOT clear the saved active provider (e.g. a caller
+	// updating only the thinking level) — it leaves the cross-device selection
+	// intact rather than wiping it.
+	if _, err := db.SetAISelection("default", "", "", "", "deep"); err != nil {
+		t.Fatalf("SetAISelection thinking-only: %v", err)
+	}
+	s, _, _ = db.GetSettings("default")
+	if s.ActiveProviderID != "prov-2" {
+		t.Errorf("empty providerID wiped ActiveProviderID: got %q, want prov-2", s.ActiveProviderID)
+	}
+	if s.ThinkingLevel != "deep" {
+		t.Errorf("thinking-only update should apply, got %q", s.ThinkingLevel)
+	}
 }
 
 // TestUpsertSettingsPreservesSelectionColumns confirms a general settings write

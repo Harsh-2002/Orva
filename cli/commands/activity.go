@@ -1,13 +1,11 @@
 package commands
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -118,32 +116,14 @@ func runActivityTail(cmd *cobra.Command, client *cli.Client) error {
 
 	infof(cmd, "Subscribed to activity stream — Ctrl-C to stop.")
 
-	// Parse SSE: each frame is `event: <type>\ndata: <json>\n\n`. We read
-	// line-by-line, track the current event's type, and pretty-print each
-	// "activity" event as it arrives.
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-	var curType, curData string
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, ":"):
-			// Comment / heartbeat — ignore.
-		case strings.HasPrefix(line, "event:"):
-			curType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			curData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		case line == "":
-			// Frame boundary — emit if it's an activity event.
-			if curType == "activity" && curData != "" {
-				printActivityEvent(curData)
-			}
-			curType, curData = "", ""
+	// The server emits all event types on one stream; print the "activity" ones.
+	if err := consumeSSE(resp, func(event, data string) (bool, error) {
+		if event == "activity" && data != "" {
+			printActivityEvent(data)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("follow: scanner: %w", err)
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("follow: %w", err)
 	}
 	return nil
 }

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"archive/tar"
-	"bufio"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -142,55 +141,55 @@ func watchBuild(cmd *cobra.Command, client *cli.Client, depID string) error {
 	defer resp.Body.Close()
 
 	infof(cmd, "Streaming build logs for deployment %s — Ctrl-C to stop.", depID)
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
-	var curType, curData string
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, ":"):
-			// heartbeat
-		case strings.HasPrefix(line, "event:"):
-			curType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			curData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		case line == "":
-			switch curType {
-			case "log":
-				var l struct {
-					Line string `json:"line"`
-				}
-				if json.Unmarshal([]byte(curData), &l) == nil {
-					fmt.Fprintln(os.Stderr, l.Line)
-				}
-			case "succeeded":
-				okf(cmd, "Build succeeded.")
-				return nil
-			case "failed", "error":
-				var e struct {
-					Message      string `json:"message"`
-					ErrorMessage string `json:"error_message"`
-				}
-				_ = json.Unmarshal([]byte(curData), &e)
-				msg := e.Message
-				if msg == "" {
-					msg = e.ErrorMessage
-				}
-				if msg == "" {
-					msg = curType
-				}
-				return fmt.Errorf("build failed: %s", msg)
+	terminal := false
+	cerr := consumeSSE(resp, func(event, data string) (bool, error) {
+		switch event {
+		case "log":
+			var l struct {
+				Line string `json:"line"`
 			}
-			curType, curData = "", ""
+			if json.Unmarshal([]byte(data), &l) == nil {
+				fmt.Fprintln(os.Stderr, l.Line)
+			}
+		case "succeeded":
+			terminal = true
+			okf(cmd, "Build succeeded.")
+			return true, nil
+		case "failed", "error":
+			terminal = true
+			var e struct {
+				Message      string `json:"message"`
+				ErrorMessage string `json:"error_message"`
+			}
+			_ = json.Unmarshal([]byte(data), &e)
+			msg := e.Message
+			if msg == "" {
+				msg = e.ErrorMessage
+			}
+			if msg == "" {
+				msg = event
+			}
+			return true, fmt.Errorf("build failed: %s", msg)
 		}
+		return false, nil
+	})
+	if cerr != nil {
+		return cerr
 	}
-	return scanner.Err()
+	if !terminal {
+		// Clean stream close with no succeeded/failed event (e.g. a reverse-proxy
+		// idle timeout mid-build). Don't report a success we never actually saw.
+		return fmt.Errorf("build stream ended before a result was reported; check `orva deployments get %s`", depID)
+	}
+	return nil
 }
 
 func resolveOrCreateFunction(cmd *cobra.Command, client *cli.Client, name, runtime, entrypoint string) (string, error) {
 	// Try to find existing function by name.
-	resp, err := client.Get("/api/v1/functions")
+	// High limit: the list endpoint defaults to 20, which would make deploy-by-name
+	// miss an existing function on larger instances and wrongly create a duplicate.
+	resp, err := client.Get("/api/v1/functions?limit=10000")
 	if err == nil && resp.StatusCode == http.StatusOK {
 		var result struct {
 			Functions []struct {

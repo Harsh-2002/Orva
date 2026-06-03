@@ -69,7 +69,9 @@ func resolveFnID(client *cli.Client, nameOrID string) (string, error) {
 		return nameOrID, nil
 	}
 
-	resp, err := client.Get("/api/v1/functions")
+	// Request a high limit: the list endpoint defaults to 20, which would make
+	// name resolution silently fail for the 21st+ function on larger instances.
+	resp, err := client.Get("/api/v1/functions?limit=10000")
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}

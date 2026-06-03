@@ -661,7 +661,9 @@ func (db *Database) SetAISelection(id, providerID, provider, model, thinking str
 		cur.ProviderModels = map[string]string{}
 	}
 	cur.ID = id
-	cur.ActiveProviderID = providerID
+	if providerID != "" {
+		cur.ActiveProviderID = providerID
+	}
 	if provider != "" {
 		cur.Provider = provider
 	}

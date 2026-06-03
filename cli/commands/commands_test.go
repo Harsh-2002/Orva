@@ -118,6 +118,24 @@ func TestPersistentFlags(t *testing.T) {
 	}
 }
 
+// TestKeysCreateDefaultPermission guards least-privilege: `orva keys create`
+// with no --permissions must default to invoke-only, NOT inherit the server's
+// all-four default (which would silently mint admin keys for CI/deploy bots).
+func TestKeysCreateDefaultPermission(t *testing.T) {
+	root := NewRoot()
+	cmd, _, err := root.Find([]string{"keys", "create"})
+	if err != nil {
+		t.Fatalf("find keys create: %v", err)
+	}
+	f := cmd.Flag("permissions")
+	if f == nil {
+		t.Fatal("keys create missing --permissions flag")
+	}
+	if f.DefValue != "invoke" {
+		t.Errorf("keys create --permissions default = %q, want \"invoke\"", f.DefValue)
+	}
+}
+
 // TestNewRootSetsVersion confirms the version template is wired up so
 // `orva --version` returns the value of commands.Version (set by main()).
 func TestNewRootSetsVersion(t *testing.T) {

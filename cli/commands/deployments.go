@@ -1,13 +1,11 @@
 package commands
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -286,31 +284,9 @@ func followDeploymentLogs(cmd *cobra.Command, client *cli.Client, id string) err
 
 	infof(cmd, "following build log for %s — Ctrl-C to stop", id)
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-	var curEvent, curData string
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, ":"):
-			// SSE comment / heartbeat — ignore.
-		case strings.HasPrefix(line, "event:"):
-			curEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			curData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		case line == "":
-			done, err := handleStreamFrame(cmd, curEvent, curData)
-			if err != nil {
-				return err
-			}
-			if done {
-				return nil
-			}
-			curEvent, curData = "", ""
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	if err := consumeSSE(resp, func(event, data string) (bool, error) {
+		return handleStreamFrame(cmd, event, data)
+	}); err != nil {
 		return fmt.Errorf("follow: %w", err)
 	}
 	return nil

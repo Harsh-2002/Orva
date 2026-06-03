@@ -51,6 +51,10 @@ type Request struct {
 	System      string
 	Messages    []Message
 	Tools       []ToolDef
+	// Prepared, when set, supplies the provider-format tool catalog directly and
+	// takes precedence over Tools — built once per turn to avoid re-serializing
+	// every tool schema on each Stream call. See Client.PrepareTools.
+	Prepared    *PreparedTools
 	Thinking    string   // off | standard | deep
 	Temperature *float64 // nil = provider default
 }

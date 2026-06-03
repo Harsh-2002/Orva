@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -192,5 +193,48 @@ func readBodyArg(v string) ([]byte, error) {
 		return os.ReadFile(v[1:])
 	default:
 		return []byte(v), nil
+	}
+}
+
+// consumeSSE reads a text/event-stream response frame-by-frame, calling onFrame
+// for each complete `event:`/`data:` frame (terminated by a blank line). onFrame
+// returns stop=true to end consumption (e.g. on a terminal event) or a non-nil
+// error to abort. consumeSSE returns nil on a clean stream close (EOF).
+//
+// It uses a bufio.Reader (ReadString), not a bufio.Scanner, so a single very
+// long line — a big build-log line or a large JSON blob — is read in full
+// rather than tripping bufio's max-token limit. This is the one place the four
+// CLI streamers (deploy --watch, deployments logs, activity, logs --follow)
+// parse the SSE wire format.
+func consumeSSE(resp *http.Response, onFrame func(event, data string) (stop bool, err error)) error {
+	reader := bufio.NewReader(resp.Body)
+	var event, data string
+	for {
+		line, rerr := reader.ReadString('\n')
+		trimmed := strings.TrimRight(line, "\r\n")
+		switch {
+		case strings.HasPrefix(trimmed, ":"):
+			// SSE comment / heartbeat — ignore.
+		case strings.HasPrefix(trimmed, "event:"):
+			event = strings.TrimSpace(trimmed[len("event:"):])
+		case strings.HasPrefix(trimmed, "data:"):
+			data = strings.TrimSpace(trimmed[len("data:"):])
+		case trimmed == "" && line != "":
+			// Blank line = end of frame.
+			stop, ferr := onFrame(event, data)
+			if ferr != nil {
+				return ferr
+			}
+			if stop {
+				return nil
+			}
+			event, data = "", ""
+		}
+		if rerr != nil {
+			if rerr == io.EOF {
+				return nil
+			}
+			return rerr
+		}
 	}
 }

@@ -51,13 +51,14 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 
 	bctx, cancel := schemas.NewBifrostContextWithCancel(ctx)
 	stream, berr := c.bf.ChatCompletionStreamRequest(bctx, breq)
-	// Robust thinking: a model/endpoint that rejects the reasoning params must not
-	// break the chat. If the request fails up front while reasoning was set, drop
-	// it and retry once so a "thinking on" turn degrades to a normal answer rather
-	// than an error. (Endpoints that merely IGNORE reasoning — e.g. many
-	// self-hosted OpenAI-compatible servers — don't error, so they fall through
-	// here unchanged.)
-	if berr != nil && breq.Params != nil && breq.Params.Reasoning != nil {
+	// Robust thinking: some models/endpoints reject the reasoning params. When the
+	// up-front request fails AND the error is specifically about reasoning, drop
+	// reasoning and retry once so a "thinking on" turn degrades to a normal answer.
+	// We gate on the error text so unrelated failures (bad key, unknown model,
+	// network) surface immediately instead of being masked by a second doomed
+	// attempt that doubles latency and hides the real cause. (Endpoints that merely
+	// IGNORE reasoning don't error, so they fall through here unchanged.)
+	if berr != nil && breq.Params != nil && breq.Params.Reasoning != nil && isReasoningError(bifrostErr(berr)) {
 		cancel()
 		breq.Params.Reasoning = nil
 		bctx, cancel = schemas.NewBifrostContextWithCancel(ctx)
@@ -76,11 +77,7 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 		// Tool calls arrive incrementally (per OpenAI streaming): each delta
 		// carries a tool-call index plus a fragment of the name/arguments. We
 		// accumulate by index and assemble the complete calls at finish.
-		type acc struct {
-			id, name string
-			args     strings.Builder
-		}
-		byIndex := map[int]*acc{}
+		byIndex := map[int]*toolAcc{}
 		var order []int
 		var finish string
 		var usage *Usage
@@ -124,7 +121,7 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 					idx := int(tc.Index)
 					a := byIndex[idx]
 					if a == nil {
-						a = &acc{}
+						a = &toolAcc{}
 						byIndex[idx] = a
 						order = append(order, idx)
 					}
@@ -139,18 +136,60 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 			}
 		}
 
-		calls := make([]ToolCall, 0, len(order))
-		for _, idx := range order {
-			a := byIndex[idx]
-			if a.name == "" {
-				continue
-			}
-			calls = append(calls, ToolCall{ID: a.id, Name: a.name, Arguments: a.args.String()})
-		}
-		out <- Event{Type: EventDone, ToolCalls: calls, FinishReason: finish, Usage: usage}
+		out <- Event{Type: EventDone, ToolCalls: assembleToolCalls(order, byIndex), FinishReason: finish, Usage: usage}
 	}()
 
 	return out, nil
+}
+
+// toolAcc accumulates the streamed fragments of one tool call (its id, name, and
+// argument chunks arrive across multiple deltas, keyed by index).
+type toolAcc struct {
+	id, name string
+	args     strings.Builder
+}
+
+// assembleToolCalls finalizes the accumulated tool calls in arrival order. Calls
+// with no name are dropped (incomplete). When an endpoint omits the tool-call id
+// in its stream deltas, a stable non-empty id is synthesized from the index so
+// the persisted assistant tool_call and its replayed tool result share a
+// matching id — strict providers reject an empty tool_call_id on the next turn,
+// which would otherwise break every multi-step turn.
+func assembleToolCalls(order []int, byIndex map[int]*toolAcc) []ToolCall {
+	calls := make([]ToolCall, 0, len(order))
+	for _, idx := range order {
+		a := byIndex[idx]
+		if a == nil || a.name == "" {
+			continue
+		}
+		id := a.id
+		if id == "" {
+			id = fmt.Sprintf("call_%d", idx)
+		}
+		calls = append(calls, ToolCall{ID: id, Name: a.name, Arguments: a.args.String()})
+	}
+	return calls
+}
+
+// PreparedTools is an opaque, provider-format tool catalog converted once and
+// reused across the iterations of a single turn (the catalog is fixed per run).
+// Keeps the Bifrost schema types from leaking past this package.
+type PreparedTools struct {
+	tools []schemas.ChatTool
+}
+
+// PrepareTools converts the neutral tool defs to the provider format once, so
+// the agentic loop doesn't re-unmarshal every tool's JSON schema on each of its
+// (up to ~25) Stream calls.
+func (c *Client) PrepareTools(defs []ToolDef) (*PreparedTools, error) {
+	if len(defs) == 0 {
+		return &PreparedTools{}, nil
+	}
+	tools, err := toBifrostTools(defs)
+	if err != nil {
+		return nil, err
+	}
+	return &PreparedTools{tools: tools}, nil
 }
 
 // buildRequest translates a neutral Request into a Bifrost chat request.
@@ -182,7 +221,11 @@ func buildRequest(req Request) (*schemas.BifrostChatRequest, error) {
 	if r := reasoningFor(req.Thinking); r != nil {
 		params.Reasoning = r
 	}
-	if len(req.Tools) > 0 {
+	// Prefer pre-converted tools (built once per turn) to avoid re-unmarshaling
+	// every tool's JSON schema on every Stream call within the agentic loop.
+	if req.Prepared != nil {
+		params.Tools = req.Prepared.tools
+	} else if len(req.Tools) > 0 {
 		tools, err := toBifrostTools(req.Tools)
 		if err != nil {
 			return nil, err
@@ -261,6 +304,19 @@ func toBifrostTools(defs []ToolDef) ([]schemas.ChatTool, error) {
 		out = append(out, schemas.ChatTool{Type: schemas.ChatToolTypeFunction, Function: fn})
 	}
 	return out, nil
+}
+
+// isReasoningError reports whether an upstream error is about the reasoning /
+// thinking parameters (so the caller can safely retry without them) rather than
+// an unrelated failure like auth, an unknown model, or the network.
+func isReasoningError(msg string) bool {
+	m := strings.ToLower(msg)
+	for _, kw := range []string{"reasoning", "thinking", "reasoning_effort", "budget", "effort"} {
+		if strings.Contains(m, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // bifrostErr renders a Bifrost error to a readable string.
