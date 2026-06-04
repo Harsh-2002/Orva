@@ -4,6 +4,10 @@
 # (real nsjail) self-skip in CI, where nested sandboxing is unavailable.
 name: e2e
 
+# Least-privilege default token (these jobs only read the repo).
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, dev]

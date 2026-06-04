@@ -341,6 +341,12 @@ func extractTarGz(archivePath, destDir string) error {
 		}
 
 		target := filepath.Join(destDir, cleanName)
+		// Defense-in-depth: the joined path must still live under destDir even
+		// after Clean (mirrors the backup extractor).
+		if target != filepath.Clean(destDir) &&
+			!strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("path traversal in archive: %s", hdr.Name)
+		}
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:

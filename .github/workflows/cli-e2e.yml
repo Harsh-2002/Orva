@@ -8,6 +8,10 @@ name: cli-e2e
 # installer scripts themselves change, or on schedule, or on manual
 # dispatch — they no longer run on every CLI code change.
 
+# Least-privilege default token (these jobs only read the repo).
+permissions:
+  contents: read
+
 on:
   # Source validation (unit + cross-build) runs on PRs. The install jobs
   # download the RELEASED CLI, so they run on release:published (against the
