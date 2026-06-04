@@ -136,6 +136,24 @@ func TestKeysCreateDefaultPermission(t *testing.T) {
 	}
 }
 
+// TestUpgradeAssetFilterPinsOSArch guards the upgrade asset matcher: it must
+// anchor to the exact orva-cli-<os>-<arch> token so go-selfupdate can't pick a
+// wrong-OS binary that merely shares the arch (the "exec format error" bug).
+func TestUpgradeAssetFilterPinsOSArch(t *testing.T) {
+	cases := []struct {
+		goos, goarch, want string
+	}{
+		{"linux", "amd64", "^orva-cli-linux-amd64"},
+		{"darwin", "arm64", "^orva-cli-darwin-arm64"},
+		{"windows", "amd64", "^orva-cli-windows-amd64"},
+	}
+	for _, c := range cases {
+		if got := upgradeAssetFilter(c.goos, c.goarch); got != c.want {
+			t.Errorf("upgradeAssetFilter(%q,%q) = %q, want %q", c.goos, c.goarch, got, c.want)
+		}
+	}
+}
+
 // TestNewRootSetsVersion confirms the version template is wired up so
 // `orva --version` returns the value of commands.Version (set by main()).
 func TestNewRootSetsVersion(t *testing.T) {

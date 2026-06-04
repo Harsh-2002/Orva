@@ -124,10 +124,12 @@ weekly schedule to catch GH-API / release-asset drift.
 ## Self-update (`orva upgrade`)
 
 Uses `github.com/creativeprojects/go-selfupdate`. The library queries
-GitHub for the latest release matching `Filters: ["^orva-cli-"]`,
-downloads the right OS/arch asset, verifies against `checksums.txt`,
-and atomically replaces the running binary via rename-and-hide on
-Windows / unlink-and-replace on Unix.
+GitHub for the latest release, downloads the OS/arch asset matching
+`Filters: ["^orva-cli-<os>-<arch>"]` (pinned to the exact platform token
+by `upgradeAssetFilter` — a loose `^orva-cli-` filter let it fall back to
+arch-only matching and pick a wrong-OS binary → intermittent "exec format
+error"), verifies against `checksums.txt`, and atomically replaces the
+running binary via rename-and-hide on Windows / unlink-and-replace on Unix.
 
 If the install path is not writable, `orva upgrade` exits non-zero with
 a "re-run with `sudo orva upgrade`" hint. Never silently elevates.
