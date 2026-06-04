@@ -69,7 +69,7 @@ Create a function record.
 ```json
 {
   "name": "my-fn",
-  "runtime": "node",        // node|node|python|python
+  "runtime": "node",        // node | python
   "entrypoint": "handler.js", // optional, defaults match the runtime
   "memory_mb": 128,
   "cpus": 1,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -312,7 +313,8 @@ func cgroupv2Delegate() string {
 		if rel == "" {
 			return
 		}
-		// Walk up from the current cgroup until we find a writable dir.
+		// Walk up from the current cgroup until we find a writable dir that
+		// actually has the controllers we need delegated to children.
 		p := filepath.Join("/sys/fs/cgroup", rel)
 		for p != "/sys/fs/cgroup" && p != "/" {
 			if isWritableDir(p) {
@@ -322,8 +324,21 @@ func cgroupv2Delegate() string {
 			p = filepath.Dir(p)
 		}
 	})
+	if cgroupMount == "" {
+		// One-time heads-up: no usable cgroup-v2 delegate, so per-sandbox
+		// memory/pid/cpu caps are NOT enforced (we fall back to rlimits). This
+		// is normal on hosts where systemd doesn't delegate controllers to the
+		// service (e.g. constrained VMs/containers); functions still run fully
+		// isolated via nsjail. Set Delegate=yes + delegate the controllers, or
+		// ORVA_CGROUPV2_MOUNT, to enable hard caps.
+		cgroupWarnOnce.Do(func() {
+			slog.Warn("cgroup v2 controllers not delegated; per-sandbox memory/pid/cpu caps disabled (rlimit-only fallback)")
+		})
+	}
 	return cgroupMount
 }
+
+var cgroupWarnOnce sync.Once
 
 func getenvOr(m map[string]string, k, def string) string {
 	if v, ok := m[k]; ok {

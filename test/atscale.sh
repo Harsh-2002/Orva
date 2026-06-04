@@ -38,25 +38,21 @@ trap 'rm -rf "$TMPDIR"' EXIT
 # Each function is a hello-world handler in its target runtime; the deps
 # field tests the async build queue without taking minutes per fn.
 
-# 20 fixtures: 5 of each runtime mix.
+# 20 fixtures: 10 node + 10 python (Orva offers two runtimes).
 FN_NAMES=()
-for i in $(seq 1 5); do FN_NAMES+=("ascale-node-$i"); done
-for i in $(seq 1 5); do FN_NAMES+=("ascale-node-$i"); done
-for i in $(seq 1 5); do FN_NAMES+=("ascale-py313-$i"); done
-for i in $(seq 1 5); do FN_NAMES+=("ascale-py314-$i"); done
+for i in $(seq 1 10); do FN_NAMES+=("ascale-node-$i"); done
+for i in $(seq 1 10); do FN_NAMES+=("ascale-py-$i"); done
 
 runtime_for() {
     case "$1" in
         ascale-node-*) echo node ;;
-        ascale-node-*) echo node ;;
-        ascale-py313-*)  echo python ;;
-        ascale-py314-*)  echo python ;;
+        ascale-py-*)   echo python ;;
     esac
 }
 
 handler_for() {
     case "$1" in
-        ascale-node-*|ascale-node-*)
+        ascale-node-*)
             cat <<'EOF'
 exports.handler = async (event) => ({
   statusCode: 200,
@@ -65,7 +61,7 @@ exports.handler = async (event) => ({
 });
 EOF
             ;;
-        ascale-py313-*|ascale-py314-*)
+        ascale-py-*)
             cat <<'EOF'
 import json, os
 def handler(event, context):
@@ -81,8 +77,8 @@ EOF
 
 filename_for() {
     case "$1" in
-        ascale-node-*|ascale-node-*) echo handler.js ;;
-        ascale-py313-*|ascale-py314-*)   echo handler.py ;;
+        ascale-node-*) echo handler.js ;;
+        ascale-py-*)   echo handler.py ;;
     esac
 }
 
