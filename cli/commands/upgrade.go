@@ -15,6 +15,20 @@ import (
 // orvaRepo is the GitHub repo to query for releases. Overridable for tests.
 var orvaRepo = "Harsh-2002/Orva"
 
+// upgradeAssetFilter pins go-selfupdate's asset match to the exact
+// orva-cli-<os>-<arch> release artifact for the running platform.
+//
+// A loose "^orva-cli-" filter let go-selfupdate fall back to matching on
+// arch alone, so on a linux/amd64 host it could pick orva-cli-darwin-amd64
+// (a Mach-O binary) whenever that asset happened to sort first — releases
+// upload the build matrix in parallel, so asset order is non-deterministic.
+// The result was an intermittent "exec format error" after a "successful"
+// upgrade. Anchoring to the full os-arch token removes the ambiguity; the
+// trailing .exe on Windows assets is still matched by the prefix.
+func upgradeAssetFilter(goos, goarch string) string {
+	return fmt.Sprintf("^orva-cli-%s-%s", goos, goarch)
+}
+
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade orva to the latest GitHub release",
@@ -53,7 +67,7 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 		},
 		OS:      runtime.GOOS,
 		Arch:    runtime.GOARCH,
-		Filters: []string{"^orva-cli-"},
+		Filters: []string{upgradeAssetFilter(runtime.GOOS, runtime.GOARCH)},
 	})
 	if err != nil {
 		return fmt.Errorf("init updater: %w", err)
