@@ -22,6 +22,12 @@ func ActivateVersion(dataDir, fnID, codeHash string) error {
 	if codeHash == "" {
 		return fmt.Errorf("activate: empty code hash")
 	}
+	// codeHash becomes part of a filesystem path (versions/<hash>); it is
+	// always a sha256 hex digest. Reject anything else defensively so a
+	// traversal value can never reach the symlink target.
+	if !isHexHash(codeHash) {
+		return fmt.Errorf("activate: invalid code hash %q", codeHash)
+	}
 	fnDir := filepath.Join(dataDir, "functions", fnID)
 	target := filepath.Join("versions", codeHash) // relative; see comment above
 
@@ -36,6 +42,20 @@ func ActivateVersion(dataDir, fnID, codeHash string) error {
 		return fmt.Errorf("activate: atomic rename: %w", err)
 	}
 	return nil
+}
+
+// isHexHash reports whether s is a 64-char lowercase-hex sha256 digest.
+func isHexHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // ResolveActiveHash reads `<dataDir>/functions/<fnID>/current` and returns

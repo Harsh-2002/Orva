@@ -223,7 +223,17 @@ const generatePassword = () => {
   const symbols = '!@#$%^&*()-_=+[]{}|;:,.<>?'
   const all = lower + upper + digits + symbols
 
-  const getRandom = (chars) => chars[crypto.getRandomValues(new Uint32Array(1))[0] % chars.length]
+  // Uniform [0, n) from crypto RNG via rejection sampling — plain `% n` over
+  // 2^32 biases toward low values when n doesn't divide 2^32.
+  const randInt = (n) => {
+    const limit = Math.floor(0xFFFFFFFF / n) * n
+    let r
+    do {
+      r = crypto.getRandomValues(new Uint32Array(1))[0]
+    } while (r >= limit)
+    return r % n
+  }
+  const getRandom = (chars) => chars[randInt(chars.length)]
 
   let pwd = [
     getRandom(lower),
@@ -236,9 +246,9 @@ const generatePassword = () => {
     pwd.push(getRandom(all))
   }
 
-  // Shuffle
+  // Shuffle (Fisher–Yates with unbiased index).
   for (let i = pwd.length - 1; i > 0; i -= 1) {
-    const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1)
+    const j = randInt(i + 1)
     ;[pwd[i], pwd[j]] = [pwd[j], pwd[i]]
   }
 

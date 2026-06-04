@@ -133,6 +133,22 @@ var validRuntimes = map[string]bool{
 func runtimeIsNode(r string) bool   { return r == "node" }
 func runtimeIsPython(r string) bool { return r == "python" }
 
+// isValidCodeHash reports whether s is a 64-char lowercase-hex sha256 digest —
+// the exact shape every Orva code_hash has. Used to reject untrusted code_hash
+// values before they reach a filesystem path (path-traversal defense).
+func isValidCodeHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 // Create handles POST /api/v1/functions.
 func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
@@ -869,6 +885,13 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DeploymentID == "" && req.CodeHash == "" {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "deployment_id or code_hash is required", reqID)
+		return
+	}
+	// A code_hash from the request body flows into a filesystem path
+	// (versions/<hash>); enforce the format it always has (sha256 hex) so a
+	// crafted value like "../.." can't escape the function's versions dir.
+	if req.CodeHash != "" && !isValidCodeHash(req.CodeHash) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "code_hash must be 64 lowercase hex characters", reqID)
 		return
 	}
 
