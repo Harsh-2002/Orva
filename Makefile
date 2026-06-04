@@ -29,11 +29,14 @@ LDFLAGS = -s -w \
 #   tool via //go:embed
 # - frontend/public/docs.md → served by Vite at /docs.md so the Docs page's
 #   "Copy as Markdown" button reads the same bytes
+# - cli/commands/reference.md → embedded by the `orva docs` command via
+#   //go:embed so the slim CLI renders the same reference offline
 # Single source of truth lives at docs/reference.md. Edit it, run
-# `make docs-embed`, and both UI + MCP serve the new content.
+# `make docs-embed`, and UI + MCP + CLI serve the new content.
 docs-embed:
 	@cp docs/reference.md backend/internal/mcp/reference.md
 	@cp docs/reference.md frontend/public/docs.md
+	@cp docs/reference.md cli/commands/reference.md
 
 # Copy adapter sources + bundled SDK into backend/cmd/orva/adapters/ so
 # //go:embed has them at build time. Keeps backend/runtimes/ as the

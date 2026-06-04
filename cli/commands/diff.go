@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Harsh-2002/Orva/cli/commands/theme"
 	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
 )
@@ -114,21 +115,14 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		_, err = os.Stdout.Write(body)
 		return err
 	}
-	return writeColorizedDiff(os.Stdout, string(body))
+	return writeColorizedDiff(os.Stdout, string(body), styles(cmd))
 }
 
-// writeColorizedDiff applies ANSI coloring to the unified-diff bytes:
+// writeColorizedDiff applies the Orva theme to the unified-diff bytes:
 // bold for the +++/--- file headers, cyan for @@ hunk headers, red for
 // removed lines, green for added lines. Untouched context lines pass
 // through plain so the output stays scannable.
-func writeColorizedDiff(w io.Writer, body string) error {
-	const (
-		reset = "\x1b[0m"
-		bold  = "\x1b[1m"
-		red   = "\x1b[31m"
-		green = "\x1b[32m"
-		cyan  = "\x1b[36m"
-	)
+func writeColorizedDiff(w io.Writer, body string, s *theme.Styles) error {
 	var sb strings.Builder
 	for i, line := range strings.Split(body, "\n") {
 		// strings.Split with a trailing newline yields a final empty
@@ -138,21 +132,13 @@ func writeColorizedDiff(w io.Writer, body string) error {
 		}
 		switch {
 		case strings.HasPrefix(line, "---"), strings.HasPrefix(line, "+++"):
-			sb.WriteString(bold)
-			sb.WriteString(line)
-			sb.WriteString(reset)
+			sb.WriteString(s.DiffMeta.Render(line))
 		case strings.HasPrefix(line, "@@"):
-			sb.WriteString(cyan)
-			sb.WriteString(line)
-			sb.WriteString(reset)
+			sb.WriteString(s.DiffHunk.Render(line))
 		case strings.HasPrefix(line, "-"):
-			sb.WriteString(red)
-			sb.WriteString(line)
-			sb.WriteString(reset)
+			sb.WriteString(s.DiffDel.Render(line))
 		case strings.HasPrefix(line, "+"):
-			sb.WriteString(green)
-			sb.WriteString(line)
-			sb.WriteString(reset)
+			sb.WriteString(s.DiffAdd.Render(line))
 		default:
 			sb.WriteString(line)
 		}

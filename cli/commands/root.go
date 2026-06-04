@@ -47,20 +47,82 @@ func newRootEmpty() *cobra.Command {
 	return root
 }
 
+// Command help groups. Assigning each subcommand a GroupID clusters the flat
+// command list in `orva --help` into readable sections instead of one long
+// alphabetical wall.
+const (
+	groupFunctions = "functions"
+	groupData      = "data"
+	groupEventing  = "eventing"
+	groupNetwork   = "network"
+	groupAI        = "ai"
+	groupSystem    = "system"
+)
+
+// commandGroups maps each subcommand to its help group. Commands not listed
+// here fall under cobra's default "Additional Commands" section.
+func commandGroups() map[*cobra.Command]string {
+	return map[*cobra.Command]string{
+		functionsCmd:   groupFunctions,
+		deployCmd:      groupFunctions,
+		deploymentsCmd: groupFunctions,
+		rollbackCmd:    groupFunctions,
+		diffCmd:        groupFunctions,
+		invokeCmd:      groupFunctions,
+		logsCmd:        groupFunctions,
+		fixturesCmd:    groupFunctions,
+		tracesCmd:      groupFunctions,
+		poolCmd:        groupFunctions,
+
+		kvCmd:      groupData,
+		secretsCmd: groupData,
+
+		cronCmd:     groupEventing,
+		jobsCmd:     groupEventing,
+		webhooksCmd: groupEventing,
+		channelsCmd: groupEventing,
+
+		routesCmd:   groupNetwork,
+		dnsCmd:      groupNetwork,
+		firewallCmd: groupNetwork,
+
+		chatCmd: groupAI,
+		docsCmd: groupAI,
+
+		systemCmd:     groupSystem,
+		activityCmd:   groupSystem,
+		backupCmd:     groupSystem,
+		keysCmd:       groupSystem,
+		loginCmd:      groupSystem,
+		completionCmd: groupSystem,
+		upgradeCmd:    groupSystem,
+	}
+}
+
 // RegisterClient adds every client-side subcommand (the ones that talk
 // to a remote orvad over HTTP) to the supplied root. Both the slim CLI
 // binary and the server binary call this — single source of truth.
 func RegisterClient(root *cobra.Command) {
+	root.AddGroup(
+		&cobra.Group{ID: groupFunctions, Title: "Functions & deployments:"},
+		&cobra.Group{ID: groupData, Title: "State (kv, secrets):"},
+		&cobra.Group{ID: groupEventing, Title: "Eventing (cron, jobs, webhooks, channels):"},
+		&cobra.Group{ID: groupNetwork, Title: "Network (routes, dns, firewall):"},
+		&cobra.Group{ID: groupAI, Title: "AI:"},
+		&cobra.Group{ID: groupSystem, Title: "System & maintenance:"},
+	)
 	root.AddCommand(
 		activityCmd,
 		backupCmd,
 		channelsCmd,
+		chatCmd,
 		completionCmd,
 		cronCmd,
 		deployCmd,
 		deploymentsCmd,
 		diffCmd,
 		dnsCmd,
+		docsCmd,
 		firewallCmd,
 		fixturesCmd,
 		functionsCmd,
@@ -79,4 +141,8 @@ func RegisterClient(root *cobra.Command) {
 		upgradeCmd,
 		webhooksCmd,
 	)
+	for cmd, group := range commandGroups() {
+		cmd.GroupID = group
+	}
+	wireCompletions(root)
 }
