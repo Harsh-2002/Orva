@@ -175,5 +175,21 @@ arch-only matching and pick a wrong-OS binary → intermittent "exec format
 error"), verifies against `checksums.txt`, and atomically replaces the
 running binary via rename-and-hide on Windows / unlink-and-replace on Unix.
 
+**Same-tag re-cut detection (checksum staleness).** Releases use date tags
+(`vYYYY.MM.DD`) and are re-cut under the *same* tag when we ship more than once
+a day, so an equal tag can point at a different published binary. A pure semver
+compare would tell a morning-upgraded user "already the latest" after an
+afternoon re-cut. So when the latest tag is **not strictly newer**, `orva
+upgrade` also compares the running binary's SHA-256 against the published
+checksum for its platform asset (`latest.AssetName` looked up in the
+`latest.ValidationAssetURL` checksums file). A mismatch ⇒ a fresh build under
+the same tag ⇒ reinstall. Decision lives in `upgradeAction`; the checksum probe
+is `remoteBuildDiffers` (best-effort: any network/parse failure returns
+`known=false` and falls back to version-only, so a flaky network never blocks or
+hangs the upgrade — the fetch is bounded to 10s). Note: running `orva upgrade`
+against the full server binary (`orva-<os>-<arch>`) sees a mismatch vs the CLI
+asset and offers to replace it — same direction as a version bump; `orva
+upgrade` is the CLI self-update path (servers update via install.sh / Docker).
+
 If the install path is not writable, `orva upgrade` exits non-zero with
 a "re-run with `sudo orva upgrade`" hint. Never silently elevates.
