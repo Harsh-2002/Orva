@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,6 +42,7 @@ type Request struct {
 	Accept      string            // Accept header; defaults to application/json
 	Headers     map[string]string // extra headers (override the above)
 	NoTimeout   bool              // skip the 120s client timeout (for streaming)
+	Ctx         context.Context   // optional request context (for cancellation)
 }
 
 // Send issues the described request and returns the live response. The
@@ -56,7 +58,11 @@ func (c *Client) Send(r Request) (*http.Response, error) {
 		method = http.MethodGet
 	}
 
-	req, err := http.NewRequest(method, u, r.Body)
+	ctx := r.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, r.Body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

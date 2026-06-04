@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/Harsh-2002/Orva/cli/commands/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -74,6 +75,14 @@ func stdoutIsTerminal() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
+// styles resolves the Orva color palette for this command, honoring the same
+// gate as colorEnabled (--no-color / NO_COLOR / JSON mode / non-TTY). Every
+// command and the chat renderer style through the returned set so the look is
+// consistent and color control stays in one place.
+func styles(cmd *cobra.Command) *theme.Styles {
+	return theme.New(colorEnabled(cmd))
+}
+
 // emitJSON writes v as indented JSON to stdout. This is the canonical machine
 // output path: clean, parseable, nothing else on stdout.
 func emitJSON(v any) error {
@@ -121,8 +130,9 @@ func okf(cmd *cobra.Command, format string, a ...any) {
 		return
 	}
 	msg := fmt.Sprintf(format, a...)
-	if colorEnabled(cmd) {
-		fmt.Fprintf(os.Stderr, "\x1b[32m✓\x1b[0m %s\n", msg)
+	s := styles(cmd)
+	if s.Enabled() {
+		fmt.Fprintf(os.Stderr, "%s %s\n", s.Success.Render("✓"), msg)
 	} else {
 		fmt.Fprintf(os.Stderr, "%s\n", msg)
 	}

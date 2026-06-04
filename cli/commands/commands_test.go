@@ -39,6 +39,8 @@ func TestCommandTree(t *testing.T) {
 		{"login"},
 		{"completion"},
 		{"upgrade"},
+		{"chat"},
+		{"docs"},
 	}
 	for _, p := range paths {
 		cmd, _, err := root.Find(p)
@@ -92,6 +94,14 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"pool", "set"}, "fn"},
 		{[]string{"diff"}, "from"},
 		{[]string{"diff"}, "to"},
+		{[]string{"chat"}, "prompt"},
+		{[]string{"chat"}, "provider"},
+		{[]string{"chat"}, "model"},
+		{[]string{"chat"}, "thinking"},
+		{[]string{"chat"}, "conversation"},
+		{[]string{"chat"}, "auto-approve"},
+		{[]string{"chat"}, "raw"},
+		{[]string{"docs"}, "raw"},
 	}
 	root := NewRoot()
 	for _, c := range cases {

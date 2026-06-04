@@ -131,6 +131,18 @@ def main():
             rc, out, err = cli.run(*args)
             check(f"{label} -> exit 0", rc == 0, f"rc={rc} err={err.strip()[:160]}")
 
+        section("orva docs (embedded reference) + completion")
+        rc, out, err = cli.run("docs", "--raw")
+        check("docs --raw -> exit 0", rc == 0, f"rc={rc} err={err.strip()[:160]}")
+        check("docs --raw emits the reference markdown", "# Orva" in out[:400],
+              out.strip()[:160])
+        # origin placeholder must be substituted (no raw {{ORIGIN}} left).
+        check("docs origin placeholder substituted", "{{ORIGIN}}" not in out,
+              "found unsubstituted {{ORIGIN}} in docs output")
+        rc, out, err = cli.run("completion", "bash")
+        check("completion bash -> exit 0", rc == 0, f"rc={rc} err={err.strip()[:160]}")
+        check("completion script references orva", "orva" in out, out.strip()[:120])
+
         section("orva deploy + invoke (nsjail-dependent; skips if unavailable)")
         # Build a trivial node24 source dir and try a real deploy via the CLI.
         # If the build sandbox (nsjail) isn't available the deploy won't succeed;

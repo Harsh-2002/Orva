@@ -65,18 +65,23 @@ for target in "${CLI_TARGETS[@]}"; do
     fi
 done
 
-# Size sanity: the slim CLI should be under 20 MB stripped. If it
+# Size sanity: the slim CLI should stay well under the ceiling stripped. If it
 # balloons past that, somebody pulled in a heavy server package.
+# Ceiling is 28 MB: `orva chat`/`orva docs` render terminal markdown via
+# charmbracelet/glamour, which pulls in chroma (syntax highlighting) — a
+# deliberate ~8 MB add that puts the binaries in the ~18-20 MB range. The
+# ceiling keeps headroom while still catching accidental server-package bloat.
 log "verifying binary sizes"
-SIZE_LIMIT_BYTES=$((20 * 1024 * 1024))
+SIZE_LIMIT_MB=28
+SIZE_LIMIT_BYTES=$((SIZE_LIMIT_MB * 1024 * 1024))
 for f in "$OUT"/orva-cli-*; do
     [[ -f "$f" ]] || continue
     size=$(stat -c '%s' "$f" 2>/dev/null || stat -f '%z' "$f" 2>/dev/null || echo 0)
     if [[ "$size" -le "$SIZE_LIMIT_BYTES" ]]; then
-        ok "$(basename "$f"): $((size / 1024 / 1024)) MB (≤ 20 MB)"
+        ok "$(basename "$f"): $((size / 1024 / 1024)) MB (≤ ${SIZE_LIMIT_MB} MB)"
         PASS=$((PASS+1))
     else
-        fail "$(basename "$f"): $((size / 1024 / 1024)) MB exceeds 20 MB ceiling"
+        fail "$(basename "$f"): $((size / 1024 / 1024)) MB exceeds ${SIZE_LIMIT_MB} MB ceiling"
         FAIL=$((FAIL+1))
     fi
 done
