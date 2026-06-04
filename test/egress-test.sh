@@ -29,7 +29,7 @@ check() {
 fn_name="egress-test-$$"
 create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node24\",\"memory_mb\":128,\"cpus\":1}")
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1}")
 fid=$(echo "$create" | jq -r '.id')
 default_net=$(echo "$create" | jq -r '.network_mode')
 check "default network_mode == none" \

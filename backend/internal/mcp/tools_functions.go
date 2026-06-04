@@ -124,7 +124,7 @@ func resolveFunction(deps Deps, idOrName string) (*database.Function, error) {
 // ─── list_functions ────────────────────────────────────────────────
 
 type ListFunctionsInput struct {
-	Runtime string `json:"runtime,omitempty" jsonschema:"filter to one runtime (node22|node24|python313|python314)"`
+	Runtime string `json:"runtime,omitempty" jsonschema:"filter to one runtime (node|python)"`
 	Status  string `json:"status,omitempty" jsonschema:"filter by status (active|inactive|created|building|error)"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"page size, default 50, max 200"`
 	Offset  int    `json:"offset,omitempty" jsonschema:"skip this many items, default 0"`
@@ -149,7 +149,7 @@ type GetFunctionInput struct {
 type CreateFunctionInput struct {
 	Name              string            `json:"name" jsonschema:"unique function name (lowercase, dash-separated, URL-safe — appears in invoke_url and logs)"`
 	Description       string            `json:"description" jsonschema:"REQUIRED — one-sentence summary of what the function does (e.g. 'resize uploaded images to webp thumbnails'). Surfaces in list_functions, the dashboard's function card, and channel-mode tool descriptions exposed to other agents — so this is how a future operator or LLM identifies what this function is for. Empty / placeholder values rejected."`
-	Runtime           string            `json:"runtime" jsonschema:"one of node22 node24 python313 python314"`
+	Runtime           string            `json:"runtime" jsonschema:"one of node (Node.js 24) or python (Python 3.14)"`
 	Entrypoint        string            `json:"entrypoint" jsonschema:"REQUIRED — handler file path relative to deploy dir (e.g. 'handler.js' for Node, 'handler.py' for Python, 'src/index.ts' for TypeScript). Set explicitly so the runtime+entrypoint pairing is intentional; mismatched values silently fail to spawn."`
 	TimeoutMS         int64             `json:"timeout_ms" jsonschema:"REQUIRED — per-invocation timeout in ms. Cap on how long any single request can run before the sandbox is killed. Pick from the handler's expected work: a quick CRUD endpoint can use 5000-10000; an LLM/AI call usually 30000-60000; a heavy report 120000+. Must be > 0."`
 	MemoryMB          int64             `json:"memory_mb" jsonschema:"REQUIRED — sandbox RAM in MB. Hard cap; a handler that exceeds it gets OOM-killed. Pick from runtime baseline + working set: tiny Node/Python with no deps ~64; with frameworks ~128-256; image/PDF/ML work 512+. Must be > 0."`
@@ -208,11 +208,11 @@ type GetFunctionSourceOutput struct {
 // ─── helpers ───────────────────────────────────────────────────────
 
 var validRuntimesSet = map[string]bool{
-	"node22": true, "node24": true, "python313": true, "python314": true,
+	"node": true, "python": true,
 }
 
-func runtimeIsNode(r string) bool   { return r == "node22" || r == "node24" }
-func runtimeIsPython(r string) bool { return r == "python313" || r == "python314" }
+func runtimeIsNode(r string) bool   { return r == "node" }
+func runtimeIsPython(r string) bool { return r == "python" }
 
 var userSettableStatuses = map[string]bool{"active": true, "inactive": true}
 
@@ -299,7 +299,7 @@ func registerFunctionTools(rc *regCtx) {
 				"Most fields are REQUIRED so the function record carries explicit intent rather than silent defaults. Specifically you MUST provide: " +
 				"`name` (URL-safe identifier), " +
 				"`description` (one-sentence summary of what the function does — visible in list_functions and the dashboard), " +
-				"`runtime` (node22 / node24 / python313 / python314), " +
+				"`runtime` (node or python), " +
 				"`entrypoint` (handler file path; e.g. handler.js / handler.py / src/index.ts), " +
 				"`timeout_ms` (per-invocation cap; pick from your handler's expected work — fast CRUD ~5000-10000, AI/LLM ~30000-60000, heavy reports 120000+), " +
 				"`memory_mb` (RAM cap; tiny handlers 64, with frameworks 128-256, image/PDF/ML 512+), " +
@@ -395,7 +395,7 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 		)
 	}
 	if !validRuntimesSet[in.Runtime] {
-		return nil, fmt.Errorf("unsupported runtime: %s (one of node22, node24, python313, python314)", in.Runtime)
+		return nil, fmt.Errorf("unsupported runtime: %s (one of node, python)", in.Runtime)
 	}
 	if strings.TrimSpace(in.Entrypoint) == "" {
 		return nil, errors.New(

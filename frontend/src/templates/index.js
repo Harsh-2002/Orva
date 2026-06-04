@@ -1473,19 +1473,15 @@ const nodeTemplates = [
 
 // Indexed by runtime — Editor.vue uses this directly.
 export const templates = {
-  python313: pythonTemplates,
-  python314: pythonTemplates,
-  node22:    nodeTemplates,
-  node24:    nodeTemplates,
+  python: pythonTemplates,
+  node:   nodeTemplates,
 }
 
 // Default code (the "HTTP Hello" template) per runtime — used when the
 // Editor picks a runtime and the editor is empty.
 export const defaultCode = {
-  python313: py_http_hello,
-  python314: py_http_hello,
-  node22:    node_http_hello,
-  node24:    node_http_hello,
+  python: py_http_hello,
+  node:   node_http_hello,
 }
 
 // Categories in display order — used by the picker UX to group entries.

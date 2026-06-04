@@ -20,7 +20,7 @@ func seedDiffFunction(t *testing.T, tc *testContext) (fnID, fromID, toID, fromHa
 	t.Helper()
 
 	// Create the function via the API.
-	body := `{"name":"diff-demo","runtime":"node22","entrypoint":"handler.js"}`
+	body := `{"name":"diff-demo","runtime":"node","entrypoint":"handler.js"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions",
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -216,7 +216,7 @@ func TestDiff_RejectsCrossFunction(t *testing.T) {
 	fnID, fromID, _, _, _ := seedDiffFunction(t, tc)
 
 	// Insert a second function + a deployment on it.
-	body := `{"name":"diff-other","runtime":"node22","entrypoint":"handler.js"}`
+	body := `{"name":"diff-other","runtime":"node","entrypoint":"handler.js"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions",
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

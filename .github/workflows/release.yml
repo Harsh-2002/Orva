@@ -3,7 +3,7 @@ name: Release
 # Triggers on `v*` tag pushes. Produces:
 #   - orva-linux-{amd64,arm64}       (Go binary, static)
 #   - nsjail-linux-{amd64,arm64}     (built from source, stripped)
-#   - rootfs-{node22,node24,python313,python314}-{amd64,arm64}.tar.zst
+#   - rootfs-{node,python}-{amd64,arm64}.tar.zst
 #                                    (extracted from official Docker slim
 #                                    images + adapter pre-installed)
 #   - checksums.txt                  (sha256 of every asset)
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           cache: ""
       - uses: actions/setup-go@v6
         with:
@@ -85,7 +85,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           # No npm cache — fresh install on every run.
           cache: ""
 
@@ -283,7 +283,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [node22, node24, python313, python314]
+        runtime: [node, python]
         goarch: [amd64, arm64]
         include:
           - goarch: amd64
@@ -303,11 +303,11 @@ jobs:
 
           # Pre-install the adapter so install.sh doesn't need the source tree.
           mkdir -p "$GITHUB_WORKSPACE/rootfs/opt/orva"
-          if [ -f "runtimes/${{ matrix.runtime }}/adapter.js" ]; then
-            cp "runtimes/${{ matrix.runtime }}/adapter.js" "$GITHUB_WORKSPACE/rootfs/opt/orva/adapter.js"
+          if [ -f "backend/runtimes/${{ matrix.runtime }}/adapter.js" ]; then
+            cp "backend/runtimes/${{ matrix.runtime }}/adapter.js" "$GITHUB_WORKSPACE/rootfs/opt/orva/adapter.js"
           fi
-          if [ -f "runtimes/${{ matrix.runtime }}/adapter.py" ]; then
-            cp "runtimes/${{ matrix.runtime }}/adapter.py" "$GITHUB_WORKSPACE/rootfs/opt/orva/adapter.py"
+          if [ -f "backend/runtimes/${{ matrix.runtime }}/adapter.py" ]; then
+            cp "backend/runtimes/${{ matrix.runtime }}/adapter.py" "$GITHUB_WORKSPACE/rootfs/opt/orva/adapter.py"
           fi
 
       - name: tar + zstd compress
@@ -411,7 +411,7 @@ jobs:
             | `orva-cli-darwin-{amd64,arm64}` | Slim CLI (macOS Intel + Apple Silicon) |
             | `orva-cli-windows-{amd64,arm64}.exe` | Slim CLI (Windows) — used by `install-cli.ps1` |
             | `nsjail-linux-{amd64,arm64}` | Pre-built nsjail (downloaded by install.sh) |
-            | `rootfs-{node22,node24,python313,python314}-{amd64,arm64}.tar.zst` | Language rootfs |
+            | `rootfs-{node,python}-{amd64,arm64}.tar.zst` | Language rootfs |
             | `install.sh`, `install-cli.sh`, `install-cli.ps1` | One-line installers |
             | `checksums.txt` | sha256 of every asset above |
 

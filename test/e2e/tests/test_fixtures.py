@@ -37,7 +37,7 @@ def main():
     fid = None
     try:
         section("setup function")
-        fnbody = {"name": FN_NAME, "description": "fixture host", "runtime": "node24",
+        fnbody = {"name": FN_NAME, "description": "fixture host", "runtime": "node",
                   "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
                   "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         code, created = c.req("POST", "/api/v1/functions", fnbody, expect=range(200, 599))

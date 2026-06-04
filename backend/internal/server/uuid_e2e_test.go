@@ -21,7 +21,7 @@ func TestE2E_FunctionsHaveUUIDIDs(t *testing.T) {
 	tc := newTestServer(t)
 
 	// Create a function via REST.
-	body := `{"name":"hello-uuid","runtime":"python314"}`
+	body := `{"name":"hello-uuid","runtime":"python"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
@@ -200,7 +200,7 @@ func TestE2E_MCPListFunctionsIncludesInvokeURL(t *testing.T) {
 	cookie := onboardAndLogin(t, tc, "alice", "supersecret123")
 
 	// Create a function so list_functions has something to return.
-	body := `{"name":"e2e-mcp-test","runtime":"python314"}`
+	body := `{"name":"e2e-mcp-test","runtime":"python"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)

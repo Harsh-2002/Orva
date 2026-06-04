@@ -19,7 +19,7 @@ const props = defineProps({
     default: ''
   },
   // Accepts either the codemirror language id (`javascript`, `python`) or
-  // an Orva runtime id (`node22`, `python314`, ...) — the editor maps both
+  // an Orva runtime id (`node`, `python`) — the editor maps both
   // shapes onto the same CM language extension.
   language: {
     type: String,

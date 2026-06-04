@@ -1,6 +1,6 @@
 # Orva
 
-Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node 22/24), Python (3.13/3.14), or TypeScript functions; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, MCP server, and an in-product AI chat assistant (the **AI** sidebar section) that operates the instance end-to-end via in-process tool calling (BYO provider keys, embedded Bifrost gateway).
+Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node.js 24), Python (3.14), or TypeScript functions — two generic runtimes, `node` and `python`, latest-stable only; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, MCP server, and an in-product AI chat assistant (the **AI** sidebar section) that operates the instance end-to-end via in-process tool calling (BYO provider keys, embedded Bifrost gateway).
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ go.mod, go.sum    Single Go module rooted at the repo (covers backend/ + cli/ + 
 backend/          Go server (see backend/CLAUDE.md)
   cmd/orva/       Server entry: registers commands.NewRoot() + serve/setup/init
   internal/       Server packages (config, database, pool, proxy, mcp, …)
-  runtimes/       Runtime adapter source: node22, node24, python313, python314
+  runtimes/       Runtime adapter source: node, python
 cli/              Slim standalone CLI codebase (see cli/CLAUDE.md)
   cmd/orva/       Slim CLI entry point (no server packages — ~12 MB binary)
   commands/       Cobra subcommand library — single source of truth for

@@ -21,7 +21,7 @@ check() {
 fn_name="heavy-test-$$"
 create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"python313\",\"memory_mb\":256,\"cpus\":1,\"timeout_ms\":30000}")
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"python\",\"memory_mb\":256,\"cpus\":1,\"timeout_ms\":30000}")
 fid=$(echo "$create" | jq -r '.id')
 
 # 1. First deploy: a trivial handler so we have a known-good baseline.

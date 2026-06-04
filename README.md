@@ -143,7 +143,7 @@ The Build info card at the top of Settings shows the running release's version, 
 
 | Feature | Detail |
 |---|---|
-| **Runtimes** | Node.js 22, Node.js 24, Python 3.13, Python 3.14, TypeScript (via Node) |
+| **Runtimes** | `node` (Node.js 24, also runs TypeScript) and `python` (Python 3.14) — two runtimes, latest-stable only |
 | **Isolation** | Every invocation runs in a fresh nsjail sandbox — user namespace, chroot, cgroup v2, seccomp filter |
 | **Warm pools** | One pool per function; idle workers stay resident between calls so repeated invocations skip the spawn cost entirely. Pool size is configurable per function. |
 | **KV store** | Per-function key-value storage backed by SQLite. Use it as a cache, a counter, a session store, or lightweight persistent state. `kv.put / kv.get / kv.delete / kv.list` with optional TTL. Browsable and editable from the dashboard. |
@@ -322,7 +322,7 @@ curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/orva-cli-
 
 orva login --endpoint https://orva.example.com --api-key <key>
 orva functions list
-orva deploy ./src --name my-fn --runtime node24
+orva deploy ./src --name my-fn --runtime node
 orva invoke my-fn --body '{"name":"world"}'
 orva logs my-fn --follow
 ```

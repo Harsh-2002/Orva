@@ -58,7 +58,7 @@ def main():
 
         section("CLI sees server state (created via REST)")
         # Create a function through the REST client, then assert the CLI lists it.
-        body = {"name": NAME, "description": "cli parity", "runtime": "node24",
+        body = {"name": NAME, "description": "cli parity", "runtime": "node",
                 "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
                 "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         code, created = c.req("POST", "/api/v1/functions", body, expect=range(200, 599))
@@ -144,7 +144,7 @@ def main():
         check("completion script references orva", "orva" in out, out.strip()[:120])
 
         section("orva deploy + invoke (nsjail-dependent; skips if unavailable)")
-        # Build a trivial node24 source dir and try a real deploy via the CLI.
+        # Build a trivial node source dir and try a real deploy via the CLI.
         # If the build sandbox (nsjail) isn't available the deploy won't succeed;
         # we treat that as a skip of just these two checks, not a failure.
         deploy_ok = _try_deploy_invoke(cli)
@@ -173,7 +173,7 @@ def main():
 
 
 def _try_deploy_invoke(cli):
-    """Best-effort: deploy a tiny node24 function to its OWN name via the CLI and
+    """Best-effort: deploy a tiny node function to its OWN name via the CLI and
     invoke it. Returns None when the deploy clearly couldn't build (sandbox
     missing), else a dict describing what happened. Uses a distinct name so it
     never collides with the REST-created NAME used elsewhere."""
@@ -185,7 +185,7 @@ def _try_deploy_invoke(cli):
             f.write("export default async function () { return { ok: true }; }\n")
 
         rc, out, err = cli.run("deploy", src, "--name", dep_name,
-                               "--runtime", "node24", timeout=120)
+                               "--runtime", "node", timeout=120)
         blob = (out + err)
         deployed = ('"status": "succeeded"' in blob or '"status": "deployed"' in blob
                     or '"status": "active"' in blob)

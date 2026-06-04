@@ -2,7 +2,7 @@
 # build-rootfs.sh — extract a minimal language rootfs from an official image.
 #
 # Usage: build-rootfs.sh <output-dir> <runtime>
-#   runtime: node22 | node24 | python313 | python314
+#   runtime: node | python   (latest-stable only: Node.js 24 / Python 3.14)
 #
 # The resulting rootfs is a directory usable as an nsjail --chroot target.
 # It contains /usr/local/bin/node (or python3), all required shared libs,
@@ -14,15 +14,13 @@ set -euo pipefail
 out="${1:-}"
 runtime="${2:-}"
 if [[ -z "$out" || -z "$runtime" ]]; then
-  echo "usage: $0 <output-dir> <node22|node24|python313|python314>" >&2
+  echo "usage: $0 <output-dir> <node|python>" >&2
   exit 2
 fi
 
 case "$runtime" in
-  node22)    image="node:22-slim" ;;
-  node24)    image="node:24-slim" ;;
-  python313) image="python:3.13-slim" ;;
-  python314) image="python:3.14-slim" ;;
+  node)   image="node:24-slim" ;;
+  python) image="python:3.14-slim" ;;
   *) echo "unsupported runtime: $runtime" >&2; exit 2 ;;
 esac
 
@@ -46,12 +44,12 @@ docker export "$tmp" | tar -xf - -C "$out"
 
 # nsjail expects the language binary at /usr/local/bin/<name>.
 case "$runtime" in
-  node22|node24)
+  node)
     if [[ ! -x "$out/usr/local/bin/node" ]]; then
       ln -sf "$(readlink -f "$out/usr/local/bin/node" 2>/dev/null || echo /usr/local/bin/node)" "$out/usr/local/bin/node" || true
     fi
     ;;
-  python313|python314)
+  python)
     if [[ ! -x "$out/usr/local/bin/python3" ]]; then
       (cd "$out/usr/local/bin" && ln -sf python python3) || true
     fi

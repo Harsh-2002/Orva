@@ -29,15 +29,15 @@ auto-detects the entrypoint:
   - Otherwise the server's runtime default is used (handler.js / handler.py).
 
 Examples:
-  orva deploy ./src --name greeter --runtime node24
-  orva deploy ./src --name greeter --runtime node24 --watch   # stream build logs`,
+  orva deploy ./src --name greeter --runtime node
+  orva deploy ./src --name greeter --runtime node --watch   # stream build logs`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDeploy,
 }
 
 func init() {
 	deployCmd.Flags().String("name", "", "function name (required)")
-	deployCmd.Flags().String("runtime", "", "runtime (node24, node22, python314, python313) (required)")
+	deployCmd.Flags().String("runtime", "", "runtime: node or python (required)")
 	deployCmd.Flags().String("entrypoint", "", "entrypoint file (optional; auto-detects handler.ts when tsconfig.json + handler.ts present)")
 	deployCmd.Flags().Bool("watch", false, "stream build logs and wait for the deploy to finish (non-zero exit on build failure)")
 	deployCmd.MarkFlagRequired("name")

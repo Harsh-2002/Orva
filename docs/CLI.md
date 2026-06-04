@@ -108,7 +108,7 @@ orva login --endpoint https://orva.example.com --api-key orva_…
 orva system health
 
 # 3. Deploy + invoke a function.
-orva deploy ./my-fn --name my-fn --runtime node24
+orva deploy ./my-fn --name my-fn --runtime node
 orva invoke my-fn --body '{"hello":"world"}'
 
 # 4. See what happened.
@@ -224,18 +224,18 @@ orva login --endpoint https://orva.example.com --api-key orva_… --test
 
 ```bash
 # Default: handler.js / handler.py based on runtime.
-orva deploy ./my-fn --name greeter --runtime node24
+orva deploy ./my-fn --name greeter --runtime node
 
 # TypeScript: server compiles at deploy time. CLI auto-detects when
 # both tsconfig.json and a .ts file are present.
-orva deploy ./my-fn-ts --name greeter --runtime node24
+orva deploy ./my-fn-ts --name greeter --runtime node
 
 # Python: pick the runtime explicitly.
-orva deploy ./py-fn --name greeter --runtime python314
+orva deploy ./py-fn --name greeter --runtime python
 
 # Watch the build: stream build logs over SSE, wait for completion, and
 # exit non-zero if the build fails (great for CI gates).
-orva deploy ./src --name greeter --runtime node24 --watch
+orva deploy ./src --name greeter --runtime node --watch
 ```
 
 ### Invoke
@@ -642,7 +642,7 @@ inline:
 
 ```bash
 orva backup download -f /tmp/pre-deploy.tar.gz \
-    && orva deploy ./big-refactor --name greeter --runtime node24
+    && orva deploy ./big-refactor --name greeter --runtime node
 # If the deploy goes sideways:  orva backup restore /tmp/pre-deploy.tar.gz --yes
 ```
 
@@ -657,7 +657,7 @@ to leak between jobs:
     ORVA_API_KEY: ${{ secrets.ORVA_API_KEY }}
   run: |
     orva --endpoint https://orva.example.com deploy ./fn \
-        --name greeter --runtime node24
+        --name greeter --runtime node
 ```
 
 **Backup retention.** A typical homelab keeps 7 daily + 4 weekly +

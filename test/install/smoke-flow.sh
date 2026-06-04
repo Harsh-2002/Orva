@@ -82,7 +82,7 @@ CURL=(curl -sf -H "X-Orva-API-Key: $API_KEY")
 # Create hello-api function.
 create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d '{"name":"hello-api","runtime":"node24","memory_mb":128}') \
+    -d '{"name":"hello-api","runtime":"node","memory_mb":128}') \
     || { fail "POST /functions failed"; FAIL=$((FAIL+1)); }
 fid=$(echo "$create" | jq -r '.id // empty')
 if [[ -n "$fid" ]]; then
@@ -163,7 +163,7 @@ EOF
 '
 
 if docker exec "$CONTAINER" /usr/local/bin/orva deploy /tmp/hello-cli \
-        --name hello-cli --runtime node24 >>/tmp/cli-deploy.log 2>&1; then
+        --name hello-cli --runtime node >>/tmp/cli-deploy.log 2>&1; then
     ok "orva deploy hello-cli"; PASS=$((PASS+1))
 else
     fail "orva deploy hello-cli failed"; FAIL=$((FAIL+1))

@@ -110,7 +110,7 @@ run_one() {
     local create
     create=$(curl -sf -H "X-Orva-API-Key: $admin_key" -X POST "$base/api/v1/functions" \
         -H 'Content-Type: application/json' \
-        -d '{"name":"hello","runtime":"node24","memory_mb":128,"network_mode":"none"}')
+        -d '{"name":"hello","runtime":"node","memory_mb":128,"network_mode":"none"}')
     fid=$(echo "$create" | jq -r '.id // empty')
     if [[ -z "$fid" ]]; then
         fail "[$runtime] could not create function"; echo "status: failed" > "$out/result.txt"; kill $stats_pid 2>/dev/null; return 1

@@ -57,12 +57,13 @@ JSON-encoded by the adapter.
 **Runtime env:** env vars and secrets land in `process.env` (Node) /
 `os.environ` (Python).
 
-| Runtime | ID | Entrypoint | Dependencies |
-|---|---|---|---|
-| Python 3.14 | `python314` | `handler.py` | `requirements.txt` |
-| Python 3.13 | `python313` | `handler.py` | `requirements.txt` |
-| Node.js 24 | `node24` | `handler.js` | `package.json` |
-| Node.js 22 | `node22` | `handler.js` | `package.json` |
+Orva offers two runtimes, latest-stable only. The ID is generic (`node` /
+`python`); the version column shows what they currently track.
+
+| Runtime | ID | Version | Entrypoint | Dependencies |
+|---|---|---|---|---|
+| Python | `python` | 3.14 | `handler.py` | `requirements.txt` |
+| Node.js | `node` | 24 | `handler.js` | `package.json` |
 
 ---
 
@@ -78,7 +79,7 @@ stream `/api/v1/deployments/<id>/stream` until `phase: done`.
 curl -X POST {{ORIGIN}}/api/v1/functions \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
-  -d '{"name":"hello","runtime":"python314","memory_mb":128,"cpus":0.5}'
+  -d '{"name":"hello","runtime":"python","memory_mb":128,"cpus":0.5}'
 ```
 
 ### 2. Upload code
@@ -966,10 +967,10 @@ Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel 
 </context>
 
 <runtimes>
-Pick exactly one — Orva has no Docker, no buildpacks, no per-function Python/Node version pinning beyond this:
-- python314 (default) or python313 — entry: handler.py — deps: requirements.txt
-- node24 (default) or node22 — entry: handler.js — deps: package.json
-Older minor versions auto-migrate to the latest patch on next deploy. Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error.
+Pick exactly one — Orva has no Docker, no buildpacks, no per-function version pinning. Two runtimes, generic ids, latest-stable only:
+- python (Python 3.14) — entry: handler.py — deps: requirements.txt
+- node (Node.js 24, also runs TypeScript) — entry: handler.js — deps: package.json
+Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error.
 </runtimes>
 
 <handler_contract>
@@ -1596,10 +1597,10 @@ orva init
 # is present; else uses the runtime default (handler.js / handler.py).
 orva deploy ./my-fn \
   --name    resize-image \
-  --runtime node24
+  --runtime node
 
 # Override the entrypoint explicitly:
-orva deploy ./my-fn --name api --runtime python314 --entrypoint app.py
+orva deploy ./my-fn --name api --runtime python --entrypoint app.py
 ```
 
 #### Invoke + tail logs

@@ -282,23 +282,17 @@ exec(open("/opt/orva/adapter.py").read())
 	}
 }
 
-// isNodeRuntime / isPythonRuntime / pythonVersion are thin helpers so
-// version bumps only need to add new strings in one place. Latest two
-// stable LTS / stable only.
-func isNodeRuntime(r string) bool   { return r == "node22" || r == "node24" }
-func isPythonRuntime(r string) bool { return r == "python313" || r == "python314" }
+// isNodeRuntime / isPythonRuntime / pythonVersionFor are thin helpers so a
+// version bump only changes one place. Orva offers two generic runtimes
+// (node = Node.js 24, python = Python 3.14).
+func isNodeRuntime(r string) bool   { return r == "node" }
+func isPythonRuntime(r string) bool { return r == "python" }
 
-// pythonVersionFor returns the pip --python-version flag value for the
-// runtime. Used so wheels resolve for the right interpreter.
+// pythonVersionFor returns the pip --python-version flag value for the python
+// runtime. Used so wheels resolve for the right interpreter; bump alongside the
+// python rootfs base image.
 func pythonVersionFor(r string) string {
-	switch r {
-	case "python313":
-		return "3.13"
-	case "python314":
-		return "3.14"
-	default:
-		return "3.13" // fallback — should never hit because validation rejects it
-	}
+	return "3.14"
 }
 
 // hashFile computes the SHA256 hash of a file.
@@ -381,7 +375,7 @@ func extractTarGz(archivePath, destDir string) error {
 // the resolved `outDir`; for everything else it's the unchanged
 // `entrypoint` argument.
 //
-//   - node22 / node24: if package.json is present, runs `npm install --prefix
+//   - node: if package.json is present, runs `npm install --prefix
 //     <codeDir>`. node_modules/ lands at /code/node_modules and require()
 //     finds it automatically. If a tsconfig.json is *also* present, runs
 //     `npx --no-install tsc --project tsconfig.json` after the install
@@ -389,7 +383,7 @@ func extractTarGz(archivePath, destDir string) error {
 //     dependencies / devDependencies. The resolved entrypoint becomes
 //     `<outDir>/<stem>.js`.
 //
-//   - python313: if requirements.txt is present, runs `pip install -t <codeDir>`.
+//   - python: if requirements.txt is present, runs `pip install -t <codeDir>`.
 //     Packages land at /code/<pkg> and the Python adapter adds /code to sys.path.
 //
 // Both commands run on the host (not inside nsjail) during the build phase.

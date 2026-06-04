@@ -30,7 +30,7 @@ func TestBuildArgs_NoEgressByDefault(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := ExecConfig{
-				Language:    Python314,
+				Language:    Python,
 				CodeDir:     "/tmp/code",
 				NetworkMode: tc.mode,
 			}
@@ -48,7 +48,7 @@ func TestBuildArgs_NoEgressByDefault(t *testing.T) {
 // stack and lets the sandbox reach external APIs.
 func TestBuildArgs_EgressAddsUsePasta(t *testing.T) {
 	cfg := ExecConfig{
-		Language:    Node24,
+		Language:    Node,
 		CodeDir:     "/tmp/code",
 		NetworkMode: "egress",
 	}
@@ -63,7 +63,7 @@ func TestBuildArgs_EgressAddsUsePasta(t *testing.T) {
 // didn't accidentally drop the -Mo flag (one-shot mode is mandatory).
 func TestBuildArgs_AlwaysHasOnceMode(t *testing.T) {
 	cfg := ExecConfig{
-		Language: Python314,
+		Language: Python,
 		CodeDir:  "/tmp/code",
 	}
 	args := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")

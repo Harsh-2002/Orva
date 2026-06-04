@@ -110,7 +110,7 @@ curl -s -o /dev/null -X POST "$BASE/api/v1/auth/onboard" \
 CURL=(curl -sf -H "X-Orva-API-Key: $ADMIN_KEY")
 create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d '{"name":"hello-kata","runtime":"node24","memory_mb":128}')
+    -d '{"name":"hello-kata","runtime":"node","memory_mb":128}')
 fid=$(echo "$create" | jq -r '.id // empty')
 [[ -n "$fid" ]] || { fail "could not create function under $RUNTIME"; exit 1; }
 

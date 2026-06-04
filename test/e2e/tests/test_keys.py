@@ -67,7 +67,7 @@ def main():
             ro = OrvaClient(api_key=plaintext)
             rc = ro.status("GET", "/api/v1/functions")
             check("read-only key: GET /functions allowed (2xx)", 200 <= rc < 300, f"status {rc}")
-            wbody = {"name": "e2e-keys-ro-fn", "runtime": "node24",
+            wbody = {"name": "e2e-keys-ro-fn", "runtime": "node",
                      "entrypoint": "handler.js", "timeout_ms": 30000,
                      "memory_mb": 128, "cpus": 1, "network_mode": "none",
                      "auth_mode": "none"}

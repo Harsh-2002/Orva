@@ -109,7 +109,7 @@ PASS=0; FAIL=0
 
 # ── 1. Baseline deploy + invoke ───────────────────────────────────────────
 log "1. baseline deploy + invoke"
-if fid=$(deploy_fn "baseline" node24 none \
+if fid=$(deploy_fn "baseline" node none \
     'exports.handler = async () => ({statusCode:200, body:"baseline"});'); then
     body=$(invoke "$fid")
     if [[ "$body" == *"baseline"* ]]; then
@@ -123,7 +123,7 @@ fi
 
 # ── 2. Egress (highest-risk) ──────────────────────────────────────────────
 log "2. egress (network_mode=egress, fetch https://example.com)"
-if fid=$(deploy_fn "egress-test" node24 egress \
+if fid=$(deploy_fn "egress-test" node egress \
     'exports.handler = async () => {
         const r = await fetch("https://example.com", {method:"GET"});
         return { statusCode: r.status, body: "egress-status-" + r.status };
@@ -140,7 +140,7 @@ fi
 
 # ── 3. Secrets (env injection) ────────────────────────────────────────────
 log "3. secrets (FOO=bar env injection)"
-if fid=$(deploy_fn "secrets-test" node24 none \
+if fid=$(deploy_fn "secrets-test" node none \
     'exports.handler = async () => ({statusCode:200, body:"FOO="+(process.env.FOO||"unset")});'); then
     curl -sf -H "X-Orva-API-Key: $C" -X POST "$BASE/api/v1/functions/$fid/secrets" \
         -H 'Content-Type: application/json' \

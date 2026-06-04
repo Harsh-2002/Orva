@@ -48,7 +48,7 @@ def main():
     sid = None
     try:
         section("setup function")
-        body = {"name": FN_NAME, "description": "cron owner", "runtime": "node24",
+        body = {"name": FN_NAME, "description": "cron owner", "runtime": "node",
                 "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
                 "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         fc, fn = c.req("POST", "/api/v1/functions", body, expect=range(200, 599))

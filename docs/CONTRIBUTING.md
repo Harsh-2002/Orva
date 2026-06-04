@@ -49,10 +49,8 @@ backend/
       handlers/     one file per concern (functions, invoke, secrets, ...)
       handlers/respond/  error envelope + Retry-After helpers
   runtimes/
-    node22/adapter.js
-    node24/adapter.js
-    python313/adapter.py
-    python314/adapter.py
+    node/adapter.js
+    python/adapter.py
 
 frontend/
   src/

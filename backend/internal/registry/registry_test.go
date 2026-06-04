@@ -44,7 +44,7 @@ func TestSetAndGetWarmCache(t *testing.T) {
 
 	fn := &database.Function{
 		Name:       "hello",
-		Runtime:    "node22",
+		Runtime:    "node",
 		Entrypoint: "handler.js",
 		Status:     "active",
 	}
@@ -107,7 +107,7 @@ func TestCacheInvalidationOnSet(t *testing.T) {
 
 	fn := &database.Function{
 		Name:       "invalidate-test",
-		Runtime:    "node22",
+		Runtime:    "node",
 		Entrypoint: "handler.js",
 		Status:     "active",
 	}
@@ -115,8 +115,8 @@ func TestCacheInvalidationOnSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Update the function
-	fn.Runtime = "node22"
+	// Update the function (switch runtime to verify the cache invalidates)
+	fn.Runtime = "python"
 	if err := reg.Set(fn); err != nil {
 		t.Fatal(err)
 	}
@@ -125,8 +125,8 @@ func TestCacheInvalidationOnSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Runtime != "node22" {
-		t.Fatalf("expected node22 after update, got %s", got.Runtime)
+	if got.Runtime != "python" {
+		t.Fatalf("expected python after update, got %s", got.Runtime)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestList(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		fn := &database.Function{
 			Name:       "list-fn-" + string(rune('A'+i)),
-			Runtime:    "node22",
+			Runtime:    "node",
 			Entrypoint: "handler.js",
 			Status:     "active",
 		}
@@ -186,7 +186,7 @@ func TestLoadAll(t *testing.T) {
 
 	fn := &database.Function{
 		Name:       "loadall-test",
-		Runtime:    "node22",
+		Runtime:    "node",
 		Entrypoint: "handler.js",
 		Status:     "active",
 	}
@@ -219,7 +219,7 @@ func TestConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		fn := &database.Function{
 			Name:       "conc-" + string(rune('A'+i)),
-			Runtime:    "node22",
+			Runtime:    "node",
 			Entrypoint: "handler.js",
 			Status:     "active",
 		}

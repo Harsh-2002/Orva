@@ -32,8 +32,8 @@ var functionsCreateCmd = &cobra.Command{
 	Long: `Create a new function. Name and runtime are required; resource limits and
 network mode are optional and fall back to server defaults when omitted.
 
-  orva functions create --name greeter --runtime node24
-  orva functions create --name fetcher --runtime python314 \
+  orva functions create --name greeter --runtime node
+  orva functions create --name fetcher --runtime python \
     --memory-mb 256 --timeout-ms 60000 --network-mode egress`,
 	Args: cobra.NoArgs,
 	RunE: runFunctionsCreate,
@@ -64,7 +64,7 @@ confirmation unless --yes is set.
 
 func init() {
 	functionsCreateCmd.Flags().String("name", "", "function name (required)")
-	functionsCreateCmd.Flags().String("runtime", "", "runtime (node24, node22, python314, python313) (required)")
+	functionsCreateCmd.Flags().String("runtime", "", "runtime: node or python (required)")
 	functionsCreateCmd.Flags().Int("memory-mb", 0, "memory limit in MB (0 = server default)")
 	functionsCreateCmd.Flags().Int("timeout-ms", 0, "invocation timeout in ms (0 = server default)")
 	functionsCreateCmd.Flags().String("network-mode", "", "network mode: none | egress (empty = server default)")

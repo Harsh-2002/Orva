@@ -69,7 +69,7 @@ KEY=$(docker exec orva cat /var/lib/orva/.admin-key)
 
 curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
   http://localhost:8443/api/v1/functions \
-  -d '{"name":"whoami","runtime":"node22","memory_mb":128,"cpus":1}'
+  -d '{"name":"whoami","runtime":"node","memory_mb":128,"cpus":1}'
 
 FID=$(curl -s -H "X-Orva-API-Key: $KEY" http://localhost:8443/api/v1/functions \
   | jq -r '.functions[] | select(.name=="whoami") | .id')

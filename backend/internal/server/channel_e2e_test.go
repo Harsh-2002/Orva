@@ -47,7 +47,7 @@ func TestChannelE2E_FullFlow(t *testing.T) {
 	mustFn := func(name string) string {
 		t.Helper()
 		fn := &database.Function{
-			Name: name, Runtime: "python314", Entrypoint: "handler.py",
+			Name: name, Runtime: "python", Entrypoint: "handler.py",
 			MemoryMB: 64, CPUs: 0.5, Status: "active", AuthMode: "none",
 			NetworkMode: "none", ConcurrencyPolicy: "queue",
 		}
@@ -142,12 +142,12 @@ func TestChannelE2E_ToolNameCollisionRejected(t *testing.T) {
 	tc := newTestServer(t)
 
 	a := &database.Function{
-		Name: "stripe-charge", Runtime: "python314", Entrypoint: "handler.py",
+		Name: "stripe-charge", Runtime: "python", Entrypoint: "handler.py",
 		MemoryMB: 64, CPUs: 0.5, Status: "active", AuthMode: "none",
 		NetworkMode: "none", ConcurrencyPolicy: "queue",
 	}
 	b := &database.Function{
-		Name: "stripe_charge", Runtime: "python314", Entrypoint: "handler.py",
+		Name: "stripe_charge", Runtime: "python", Entrypoint: "handler.py",
 		MemoryMB: 64, CPUs: 0.5, Status: "active", AuthMode: "none",
 		NetworkMode: "none", ConcurrencyPolicy: "queue",
 	}
@@ -183,7 +183,7 @@ func TestChannelE2E_RotateInvalidatesOldToken(t *testing.T) {
 	tc := newTestServer(t)
 
 	fn := &database.Function{
-		Name: "echo", Runtime: "python314", Entrypoint: "handler.py",
+		Name: "echo", Runtime: "python", Entrypoint: "handler.py",
 		MemoryMB: 64, CPUs: 0.5, Status: "active", AuthMode: "none",
 		NetworkMode: "none", ConcurrencyPolicy: "queue",
 	}

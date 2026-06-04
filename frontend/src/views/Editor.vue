@@ -1292,17 +1292,14 @@ const terminalTabs = computed(() => [
   { id: 'test',  label: 'Test',  icon: Play,     badge: invokeLogs.value.length || null },
 ])
 
-// Pretty runtime label for the editor strip — "python314" → "Python 3.14",
-// "node24" → "Node.js 24". Anything we don't recognize falls back to the
-// raw id so an unknown runtime still surfaces something visible.
+// Pretty runtime label for the editor strip. Orva exposes two generic
+// runtimes — "node" → "Node.js 24", "python" → "Python 3.14" — where the
+// concrete version is a display detail. Unknown ids fall back to the raw value.
 const runtimeShort = (rt) => {
   if (!rt) return ''
-  const m = /^(python|node)(\d)(\d+)$/.exec(rt)
-  if (!m) return rt
-  const family = m[1] === 'python' ? 'Python' : 'Node.js'
-  const major = m[2]
-  const minor = m[3]
-  return m[1] === 'python' ? `${family} ${major}.${minor}` : `${family} ${major}`
+  if (rt === 'node') return 'Node.js 24'
+  if (rt === 'python') return 'Python 3.14'
+  return rt
 }
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
@@ -1310,7 +1307,7 @@ const code = ref('')
 const form = ref({
   name: '',
   description: '',                // surfaces in list_functions, get_function, the channel picker, and as the MCP tool description
-  runtime: 'python314',
+  runtime: 'python',
   memory_mb: 64,
   cpus: 0.5,
   network_mode: 'none',          // 'none' | 'egress'
@@ -1407,18 +1404,16 @@ const isEditing = computed(() => !!route.params.name)
 const isDeployed = computed(() => isEditing.value || deployedThisSession.value)
 const canTest = computed(() => isDeployed.value && !deploying.value)
 
-// Supported runtimes: latest two stable majors per language. The user
-// picks version explicitly; existing functions on EOL runtimes (node20,
-// python312) are auto-migrated one step up on server startup.
+// Orva offers two runtimes, latest-stable only. The id is generic (node /
+// python); the version shown here is a display label that tracks latest-stable.
+// Functions on legacy versioned ids are migrated to these on server startup.
 const runtimes = [
-  { id: 'python314', label: 'Python 3.14' },
-  { id: 'python313', label: 'Python 3.13' },
-  { id: 'node24',    label: 'Node.js 24 (LTS)' },
-  { id: 'node22',    label: 'Node.js 22 (LTS)' },
+  { id: 'python', label: 'Python 3.14' },
+  { id: 'node',   label: 'Node.js 24' },
 ]
 
-const isPythonRuntime = (rt) => rt === 'python313' || rt === 'python314'
-const isNodeRuntime   = (rt) => rt === 'node22' || rt === 'node24'
+const isPythonRuntime = (rt) => rt === 'python'
+const isNodeRuntime   = (rt) => rt === 'node'
 
 const fileName = computed(() => {
   if (isPythonRuntime(form.value.runtime)) return 'handler.py'
@@ -1512,10 +1507,10 @@ const scheduleDetect = (src) => {
     const isPy = isPythonRuntime(form.value.runtime)
     const isNode = isNodeRuntime(form.value.runtime)
     if (lang === 'python' && !isPy) {
-      form.value.runtime = 'python314'
+      form.value.runtime = 'python'
       autoDetected.value = true
     } else if (lang === 'node' && !isNode) {
-      form.value.runtime = 'node24'
+      form.value.runtime = 'node'
       autoDetected.value = true
     }
   }, 400)
@@ -1693,7 +1688,7 @@ const resetEditorState = () => {
   form.value = {
     name: '',
     description: '',
-    runtime: 'python314',
+    runtime: 'python',
     memory_mb: 64,
     cpus: 0.5,
     network_mode: 'none',
@@ -1775,7 +1770,7 @@ const loadRouteData = async () => {
     // Create mode (/functions/new). Seed a friendly auto-generated
     // name so the field isn't empty. The user can edit it, clear it,
     // or hit the re-roll button next to it.
-    setRuntime('python314')
+    setRuntime('python')
     form.value.name = generateFunctionName()
   }
 }
@@ -2581,7 +2576,7 @@ const resetForm = async () => {
   deployedThisSession.value = false
   output.value = null
   error.value = null
-  setRuntime('python314')
+  setRuntime('python')
 }
 </script>
 

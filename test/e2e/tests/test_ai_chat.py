@@ -61,7 +61,7 @@ def main():
         # ── 2. write tool pauses for approval, then approve runs it ───────
         section("write tool requires approval, then approve (create_function)")
         cleanup_fn(c)
-        args = ('{"name":"%s","description":"e2e mock","runtime":"node24",'
+        args = ('{"name":"%s","description":"e2e mock","runtime":"node",'
                 '"entrypoint":"handler.js","timeout_ms":30000,"memory_mb":128,'
                 '"cpus":1,"network_mode":"none","auth_mode":"none"}') % TEST_FN
         frames, conv = c.chat("CALL create_function " + args)

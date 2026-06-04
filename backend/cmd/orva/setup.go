@@ -80,7 +80,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	// Rootfs.
 	if !skipRootfs {
-		for _, rt := range []string{"node22", "node24", "python313", "python314"} {
+		for _, rt := range []string{"node", "python"} {
 			target := filepath.Join(cfg.Sandbox.RootfsDir, rt)
 			if err := ensureRootfs(target, rt, rootfsURL); err != nil {
 				return err
@@ -217,9 +217,9 @@ func goArchToRelease() string {
 func installAdapter(rootfs, runtime string) error {
 	name := ""
 	switch runtime {
-	case "node22", "node24":
+	case "node":
 		name = "adapter.js"
-	case "python313", "python314":
+	case "python":
 		name = "adapter.py"
 	default:
 		return fmt.Errorf("unknown runtime: %s", runtime)
@@ -272,10 +272,10 @@ func installSDK(rootfs, runtime string) error {
 	var files []string
 	var destSub string
 	switch runtime {
-	case "node22", "node24":
+	case "node":
 		files = []string{"orva.js", "orva.d.ts", "package.json"}
 		destSub = "opt/orva/node_modules/orva"
-	case "python313", "python314":
+	case "python":
 		files = []string{"orva.py", "py.typed"}
 		destSub = "opt/orva"
 	default:

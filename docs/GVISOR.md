@@ -82,7 +82,7 @@ flags the daemon would use shows the exact cause:
 
 ```
 $ docker exec orva-under-runsc \
-    /usr/local/bin/nsjail -v -Mo --chroot /var/lib/orva/rootfs/node24 \
+    /usr/local/bin/nsjail -v -Mo --chroot /var/lib/orva/rootfs/node \
                           -T /tmp -- /usr/local/bin/node --version
 
 [D] runChild():535 Creating new process with clone flags:
@@ -189,7 +189,7 @@ until curl -fsS http://localhost:28443/api/v1/system/health >/dev/null; do sleep
 # 4. Reproduce the clone() rejection directly with nsjail:
 docker exec orva-gvisor-test \
     /usr/local/bin/nsjail -v -Mo \
-        --chroot /var/lib/orva/rootfs/node24 \
+        --chroot /var/lib/orva/rootfs/node \
         -T /tmp -- /usr/local/bin/node --version 2>&1 | tail -5
 # Expected:
 # clone(flags=CLONE_NEWNS|CLONE_NEWCGROUP|CLONE_NEWUTS|CLONE_NEWIPC|

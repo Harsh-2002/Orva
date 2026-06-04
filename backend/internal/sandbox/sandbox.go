@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,20 +18,21 @@ import (
 type Language string
 
 const (
-	// Supported runtimes: latest two stable majors for each language.
-	// node20 / python312 are dropped (Node 20 EOL 2026-04-30). Existing
-	// functions on those are auto-migrated at startup — see migrations.go.
-	Node22    Language = "node22"
-	Node24    Language = "node24"
-	Python313 Language = "python313"
-	Python314 Language = "python314"
+	// Orva offers exactly two runtimes, latest-stable only: `node` (Node.js 24)
+	// and `python` (Python 3.14). The identifier is generic on purpose — the
+	// concrete version is an implementation detail that tracks latest-stable and
+	// is surfaced only as a display label (see handlers/runtimes.go). Legacy
+	// versioned IDs (node22/node24/python313/python314) are rewritten to these
+	// at startup — see migrations.go.
+	Node   Language = "node"
+	Python Language = "python"
 )
 
-// IsNode reports whether a language is a Node runtime.
-func (l Language) IsNode() bool { return l == Node22 || l == Node24 }
+// IsNode reports whether a language is the Node runtime.
+func (l Language) IsNode() bool { return l == Node }
 
-// IsPython reports whether a language is a Python runtime.
-func (l Language) IsPython() bool { return l == Python313 || l == Python314 }
+// IsPython reports whether a language is the Python runtime.
+func (l Language) IsPython() bool { return l == Python }
 
 // ExecConfig holds everything needed to run user code in nsjail.
 type ExecConfig struct {
@@ -144,10 +146,10 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 
 func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
 	switch cfg.Language {
-	case Python313, Python314:
+	case Python:
 		rootfs = filepath.Join(cfg.RootfsDir, string(cfg.Language))
 		entrypoint = "/usr/local/bin/python3"
-	case Node22, Node24:
+	case Node:
 		rootfs = filepath.Join(cfg.RootfsDir, string(cfg.Language))
 		entrypoint = "/usr/local/bin/node"
 	default:
@@ -311,7 +313,8 @@ func cgroupv2Delegate() string {
 		if rel == "" {
 			return
 		}
-		// Walk up from the current cgroup until we find a writable dir.
+		// Walk up from the current cgroup until we find a writable dir that
+		// actually has the controllers we need delegated to children.
 		p := filepath.Join("/sys/fs/cgroup", rel)
 		for p != "/sys/fs/cgroup" && p != "/" {
 			if isWritableDir(p) {
@@ -321,8 +324,21 @@ func cgroupv2Delegate() string {
 			p = filepath.Dir(p)
 		}
 	})
+	if cgroupMount == "" {
+		// One-time heads-up: no usable cgroup-v2 delegate, so per-sandbox
+		// memory/pid/cpu caps are NOT enforced (we fall back to rlimits). This
+		// is normal on hosts where systemd doesn't delegate controllers to the
+		// service (e.g. constrained VMs/containers); functions still run fully
+		// isolated via nsjail. Set Delegate=yes + delegate the controllers, or
+		// ORVA_CGROUPV2_MOUNT, to enable hard caps.
+		cgroupWarnOnce.Do(func() {
+			slog.Warn("cgroup v2 controllers not delegated; per-sandbox memory/pid/cpu caps disabled (rlimit-only fallback)")
+		})
+	}
 	return cgroupMount
 }
+
+var cgroupWarnOnce sync.Once
 
 func getenvOr(m map[string]string, k, def string) string {
 	if v, ok := m[k]; ok {
@@ -331,6 +347,11 @@ func getenvOr(m map[string]string, k, def string) string {
 	return def
 }
 
+// cgroupNeededControllers are the controllers nsjail writes into the sandbox's
+// child cgroup (memory.max / pids.max / cpu.max). They only appear in a child
+// when the parent delegates them via cgroup.subtree_control.
+var cgroupNeededControllers = []string{"memory", "pids", "cpu"}
+
 func isWritableDir(p string) bool {
 	// cgroupfs does not allow creating regular files — probe by creating a
 	// child cgroup directory and checking the kernel auto-creates cgroup.procs.
@@ -338,9 +359,40 @@ func isWritableDir(p string) bool {
 	if err := os.Mkdir(probe, 0o755); err != nil {
 		return false
 	}
-	_, statErr := os.Stat(filepath.Join(probe, "cgroup.procs"))
-	os.Remove(probe)
-	return statErr == nil
+	defer os.Remove(probe)
+	if _, err := os.Stat(filepath.Join(probe, "cgroup.procs")); err != nil {
+		return false
+	}
+	// Being able to mkdir a child is NOT enough: nsjail will write memory.max /
+	// pids.max / cpu.max into its own child cgroup, and those knobs exist only
+	// when the parent delegated the controllers (cgroup.subtree_control). On
+	// hosts where the controllers aren't delegated to children — e.g. the
+	// cgroup-v2 "no internal processes" rule blocks it because the server
+	// process sits directly in this cgroup — the child exposes no controllers,
+	// nsjail's cgroup write fails, and every worker crashes. Verify the child
+	// actually carries the controllers we need; if not, report no-delegate so
+	// the caller falls back to rlimit-only (functions run, just without the
+	// per-sandbox cgroup memory/pid caps) instead of crashing.
+	return childHasControllers(probe)
+}
+
+// childHasControllers reports whether a freshly-created child cgroup exposes all
+// the controllers Orva's sandbox needs.
+func childHasControllers(child string) bool {
+	data, err := os.ReadFile(filepath.Join(child, "cgroup.controllers"))
+	if err != nil {
+		return false
+	}
+	have := make(map[string]bool)
+	for _, c := range strings.Fields(string(data)) {
+		have[c] = true
+	}
+	for _, need := range cgroupNeededControllers {
+		if !have[need] {
+			return false
+		}
+	}
+	return true
 }
 
 // CgroupV2Mount returns the cgroup v2 path nsjail cgroups are created under,

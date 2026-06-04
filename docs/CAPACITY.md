@@ -12,12 +12,10 @@ This doc reports what was measured, not what was hoped for.
 
 20 functions, mixed runtime:
 
-| runtime    | count | shape                        |
-|------------|-------|------------------------------|
-| node22     | 5     | trivial echo handler         |
-| node24     | 5     | trivial echo handler         |
-| python3.13 | 5     | trivial dict-return handler  |
-| python3.14 | 5     | trivial dict-return handler  |
+| runtime  | count | shape                        |
+|----------|-------|------------------------------|
+| node     | 10    | trivial echo handler         |
+| python   | 10    | trivial dict-return handler  |
 
 All 20 inline-deployed (no requirements.txt / package.json — those exercise the longer build path; covered separately in plan §B).
 
@@ -61,11 +59,11 @@ Per-pool snapshot at end of run:
 
 | function          | idle | busy | scale_ups | scale_downs |
 |-------------------|-----:|-----:|----------:|------------:|
-| ascale-node22-1   |   25 |    0 |         0 |          10 |
-| ascale-node22-3   |   25 |    0 |         0 |          11 |
-| ascale-node24-1   |   25 |    0 |         0 |           9 |
-| ascale-py313-1    |   14 |    0 |        14 |           0 |
-| ascale-py314-1    |   14 |    0 |        14 |           0 |
+| ascale-node-1   |   25 |    0 |         0 |          10 |
+| ascale-node-3   |   25 |    0 |         0 |          11 |
+| ascale-node-5   |   25 |    0 |         0 |           9 |
+| ascale-py-1       |   14 |    0 |        14 |           0 |
+| ascale-py-2       |   14 |    0 |        14 |           0 |
 | (15 idle fns)     |    – |    – |         – |           – |
 
 **Only 5 pools exist.** The 15 untouched functions never spawned a worker — confirming pool isolation under the per-function `functionPool` design. A function under heavy load cannot starve another function's resources.

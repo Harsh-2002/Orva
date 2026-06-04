@@ -14,7 +14,7 @@ func TestValidateArchive_Valid(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "handler.js"), []byte("module.exports = {}"), 0644)
 
-	if err := ValidateArchive(dir, "node22", "handler.js"); err != nil {
+	if err := ValidateArchive(dir, "node", "handler.js"); err != nil {
 		t.Errorf("expected valid archive, got: %v", err)
 	}
 }
@@ -22,7 +22,7 @@ func TestValidateArchive_Valid(t *testing.T) {
 func TestValidateArchive_MissingEntrypoint(t *testing.T) {
 	dir := t.TempDir()
 
-	err := ValidateArchive(dir, "node22", "handler.js")
+	err := ValidateArchive(dir, "node", "handler.js")
 	if err == nil {
 		t.Error("expected error for missing entrypoint")
 	}
@@ -32,7 +32,7 @@ func TestValidateArchive_ELFBinary(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "handler.js"), []byte{0x7f, 'E', 'L', 'F', 0, 0, 0, 0}, 0644)
 
-	err := ValidateArchive(dir, "node22", "handler.js")
+	err := ValidateArchive(dir, "node", "handler.js")
 	if err == nil {
 		t.Error("expected ELF binary to be rejected")
 	}
@@ -43,7 +43,7 @@ func TestValidateArchive_SymlinkEscape(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "handler.js"), []byte("ok"), 0644)
 	os.Symlink("/etc/passwd", filepath.Join(dir, "escape"))
 
-	err := ValidateArchive(dir, "node22", "handler.js")
+	err := ValidateArchive(dir, "node", "handler.js")
 	if err == nil {
 		t.Error("expected symlink escape to be rejected")
 	}
@@ -58,7 +58,7 @@ func TestBuild_ExtractAndValidate(t *testing.T) {
 	fn := &database.Function{
 		ID:         "fn_test123",
 		Name:       "test-fn",
-		Runtime:    "python313",
+		Runtime:    "python",
 		Entrypoint: "handler.py",
 	}
 

@@ -826,28 +826,7 @@ PRAGMA foreign_keys = ON;
 		}
 	}
 
-	// Runtime refresh: bump EOL runtimes to the nearest supported version.
-	// This is a one-shot, idempotent update — on subsequent boots there
-	// are no rows to migrate.
-	runtimeMigrations := []struct {
-		from, to string
-	}{
-		{"node20", "node22"},
-		{"python312", "python313"},
-	}
-	for _, m := range runtimeMigrations {
-		res, err := db.write.Exec(
-			"UPDATE functions SET runtime = ? WHERE runtime = ?",
-			m.to, m.from,
-		)
-		if err != nil {
-			slog.Warn("runtime migration failed", "from", m.from, "to", m.to, "err", err)
-			continue
-		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			slog.Info("runtime migrated", "from", m.from, "to", m.to, "functions", n)
-		}
-	}
+	db.collapseRuntimes()
 
 	// One-shot rewrite of every prefix-typed storage ID (fn_, key_,
 	// oat_, etc.) to UUIDv7. Idempotent — guarded by a marker row in
@@ -922,4 +901,35 @@ func dropExecutionRequestsFK(db *Database) error {
 	}
 	slog.Info("execution_requests FK dropped")
 	return nil
+}
+
+// collapseRuntimes rewrites every legacy versioned runtime id to one of Orva's
+// two generic runtimes — `node` (latest Node.js) and `python` (latest Python).
+// Functions deployed before the runtime collapse keep loading and invoking;
+// node22/python313 get bumped to the latest major (native/ABI deps may need a
+// redeploy). One-shot and idempotent: on later boots there are no rows to
+// migrate. Best-effort — a failure here is logged, never fatal.
+func (db *Database) collapseRuntimes() {
+	collapse := []struct {
+		to   string
+		from []string
+	}{
+		{"node", []string{"node20", "node22", "node24"}},
+		{"python", []string{"python312", "python313", "python314"}},
+	}
+	for _, m := range collapse {
+		for _, from := range m.from {
+			res, err := db.write.Exec(
+				"UPDATE functions SET runtime = ? WHERE runtime = ?",
+				m.to, from,
+			)
+			if err != nil {
+				slog.Warn("runtime collapse failed", "from", from, "to", m.to, "err", err)
+				continue
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				slog.Info("runtime collapsed", "from", from, "to", m.to, "functions", n)
+			}
+		}
+	}
 }

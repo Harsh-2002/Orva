@@ -28,7 +28,7 @@ def main():
     cid = None
     try:
         section("setup function")
-        fbody = {"name": FN, "description": "channel member", "runtime": "node24",
+        fbody = {"name": FN, "description": "channel member", "runtime": "node",
                  "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
                  "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         fc, fn = c.req("POST", "/api/v1/functions", fbody, expect=range(200, 599))

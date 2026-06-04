@@ -120,18 +120,18 @@ var userSettableStatus = map[string]bool{
 	"inactive": true,
 }
 
+// validRuntimes is the exact set of runtime IDs Orva accepts. Two, generic,
+// latest-stable only (node = Node.js 24, python = Python 3.14). Legacy versioned
+// IDs are rejected on input (existing rows are migrated — see migrations.go).
 var validRuntimes = map[string]bool{
-	"node22":    true,
-	"node24":    true,
-	"python313": true,
-	"python314": true,
+	"node":   true,
+	"python": true,
 }
 
 // runtimeIsNode / runtimeIsPython centralise the "what kind of runtime is
-// this string" decision so handler switches don't need to be updated
-// every time we bump language versions.
-func runtimeIsNode(r string) bool   { return r == "node22" || r == "node24" }
-func runtimeIsPython(r string) bool { return r == "python313" || r == "python314" }
+// this string" decision so handler switches stay version-agnostic.
+func runtimeIsNode(r string) bool   { return r == "node" }
+func runtimeIsPython(r string) bool { return r == "python" }
 
 // Create handles POST /api/v1/functions.
 func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {

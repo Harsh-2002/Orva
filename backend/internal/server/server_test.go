@@ -136,7 +136,7 @@ func Test404(t *testing.T) {
 func TestCreateAndGetFunction(t *testing.T) {
 	tc := newTestServer(t)
 
-	body := `{"name":"test-hello","runtime":"node22","entrypoint":"handler.js"}`
+	body := `{"name":"test-hello","runtime":"node","entrypoint":"handler.js"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
@@ -180,7 +180,7 @@ func TestCreateAndGetFunction(t *testing.T) {
 func TestListFunctions(t *testing.T) {
 	tc := newTestServer(t)
 
-	body := `{"name":"list-test","runtime":"python313"}`
+	body := `{"name":"list-test","runtime":"python"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
@@ -212,7 +212,7 @@ func TestListFunctions(t *testing.T) {
 func TestDeleteFunction(t *testing.T) {
 	tc := newTestServer(t)
 
-	body := `{"name":"delete-me","runtime":"node22"}`
+	body := `{"name":"delete-me","runtime":"node"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
@@ -285,7 +285,7 @@ func TestAuthMiddleware_InsufficientPermissions(t *testing.T) {
 	}
 
 	// Try to write with a read-only key.
-	body := `{"name":"test","runtime":"node22"}`
+	body := `{"name":"test","runtime":"node"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Orva-API-Key", readOnlyKey)
@@ -314,8 +314,8 @@ func TestRuntimesEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimes, ok := resp["runtimes"].([]any)
-	if !ok || len(runtimes) != 4 {
-		t.Errorf("expected 4 runtimes (node22/node24/python313/python314), got %v", resp["runtimes"])
+	if !ok || len(runtimes) != 2 {
+		t.Errorf("expected 2 runtimes (node/python), got %v", resp["runtimes"])
 	}
 }
 
@@ -406,7 +406,7 @@ func TestUpdateFunction_PartialUpdate(t *testing.T) {
 	tc := newTestServer(t)
 
 	// Create a function first.
-	body := `{"name":"update-partial","runtime":"node22","entrypoint":"handler.js"}`
+	body := `{"name":"update-partial","runtime":"node","entrypoint":"handler.js"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
@@ -436,8 +436,8 @@ func TestUpdateFunction_PartialUpdate(t *testing.T) {
 	if updated.Name != "updated-name" {
 		t.Errorf("expected name updated-name, got %s", updated.Name)
 	}
-	if updated.Runtime != "node22" {
-		t.Errorf("expected runtime preserved as node22, got %s", updated.Runtime)
+	if updated.Runtime != "node" {
+		t.Errorf("expected runtime preserved as node, got %s", updated.Runtime)
 	}
 	if updated.Version != fn.Version+1 {
 		t.Errorf("expected version %d, got %d", fn.Version+1, updated.Version)
@@ -447,7 +447,7 @@ func TestUpdateFunction_PartialUpdate(t *testing.T) {
 func TestCreateFunction_DuplicateName(t *testing.T) {
 	tc := newTestServer(t)
 
-	body := `{"name":"dup-name","runtime":"node22"}`
+	body := `{"name":"dup-name","runtime":"node"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
@@ -490,7 +490,7 @@ func TestCreateFunction_InvalidRuntime(t *testing.T) {
 func TestCreateFunction_RejectsInvalidNetworkMode(t *testing.T) {
 	tc := newTestServer(t)
 
-	body := `{"name":"bad-net","runtime":"node22","network_mode":"wat"}`
+	body := `{"name":"bad-net","runtime":"node","network_mode":"wat"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
@@ -513,9 +513,9 @@ func TestCreateFunction_DefaultNetworkMode(t *testing.T) {
 		body string
 		want string
 	}{
-		{"omitted", `{"name":"net-default","runtime":"node22"}`, "none"},
-		{"explicit-none", `{"name":"net-none","runtime":"node22","network_mode":"none"}`, "none"},
-		{"egress", `{"name":"net-egress","runtime":"node22","network_mode":"egress"}`, "egress"},
+		{"omitted", `{"name":"net-default","runtime":"node"}`, "none"},
+		{"explicit-none", `{"name":"net-none","runtime":"node","network_mode":"none"}`, "none"},
+		{"egress", `{"name":"net-egress","runtime":"node","network_mode":"egress"}`, "egress"},
 	} {
 		t.Run(tc2.name, func(t *testing.T) {
 			req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(tc2.body))
@@ -542,7 +542,7 @@ func TestCreateFunction_DefaultNetworkMode(t *testing.T) {
 func TestUpdateFunction_TogglesNetworkMode(t *testing.T) {
 	tc := newTestServer(t)
 
-	body := `{"name":"net-toggle","runtime":"node22"}`
+	body := `{"name":"net-toggle","runtime":"node"}`
 	req := httptest.NewRequest("POST", "/api/v1/functions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	tc.setAuth(req)
