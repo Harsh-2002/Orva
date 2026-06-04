@@ -2,9 +2,23 @@ package commands
 
 import (
 	"net/url"
+	"time"
 
+	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
 )
+
+// completionClient returns a client with a short timeout so a tab-completion
+// (`__complete`) can never block the user's shell on an unreachable endpoint
+// (the normal 120s client timeout would be a terrible completion experience).
+func completionClient(cmd *cobra.Command) (*cli.Client, bool) {
+	c, err := getClient(cmd)
+	if err != nil {
+		return nil, false
+	}
+	c.HTTP.Timeout = 2 * time.Second
+	return c, true
+}
 
 // This file wires dynamic shell completion onto the command tree. Completion
 // functions run in a short-lived `__complete` invocation of the binary, so they
@@ -31,8 +45,8 @@ func completeFunctionNames(cmd *cobra.Command, args []string, _ string) ([]strin
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	client, err := getClient(cmd)
-	if err != nil {
+	client, ok := completionClient(cmd)
+	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	resp, err := client.Get("/api/v1/functions?limit=10000")
@@ -56,8 +70,8 @@ func completeFunctionNames(cmd *cobra.Command, args []string, _ string) ([]strin
 
 // completeRuntimes suggests the runtime ids the instance supports.
 func completeRuntimes(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-	client, err := getClient(cmd)
-	if err != nil {
+	client, ok := completionClient(cmd)
+	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	resp, err := client.Get("/api/v1/runtimes")
@@ -82,8 +96,8 @@ func completeRuntimes(cmd *cobra.Command, _ []string, _ string) ([]string, cobra
 // completeChatModels suggests model ids of the operator's active provider for
 // `orva chat --model`.
 func completeChatModels(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-	client, err := getClient(cmd)
-	if err != nil {
+	client, ok := completionClient(cmd)
+	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	settingsResp, err := client.Get("/api/v1/ai/settings")
