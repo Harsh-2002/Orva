@@ -6,7 +6,7 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-FROM node:22-alpine AS ui
+FROM node:24-alpine AS ui
 WORKDIR /ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -42,39 +42,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN git clone --depth 1 https://github.com/google/nsjail.git /nsjail \
     && cd /nsjail && make -j"$(nproc)" && strip nsjail
 
-FROM node:22-slim AS rootfs-node22
+# Orva offers two runtimes, latest-stable only: node (Node.js 24) and
+# python (Python 3.14). Bump the base image here to track a newer stable.
+FROM node:24-slim AS rootfs-node
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /opt/orva /opt/orva/node_modules/orva /code
-COPY backend/runtimes/node22/adapter.js /opt/orva/adapter.js
-COPY backend/runtimes/node22/orva.js    /opt/orva/node_modules/orva/index.js
+COPY backend/runtimes/node/adapter.js /opt/orva/adapter.js
+COPY backend/runtimes/node/orva.js    /opt/orva/node_modules/orva/index.js
 RUN echo '{"name":"orva","version":"0.2.0","main":"index.js"}' > /opt/orva/node_modules/orva/package.json
 
-FROM node:24-slim AS rootfs-node24
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
-    && mkdir -p /opt/orva /opt/orva/node_modules/orva /code
-COPY backend/runtimes/node24/adapter.js /opt/orva/adapter.js
-COPY backend/runtimes/node24/orva.js    /opt/orva/node_modules/orva/index.js
-RUN echo '{"name":"orva","version":"0.2.0","main":"index.js"}' > /opt/orva/node_modules/orva/package.json
-
-FROM python:3.13-slim AS rootfs-python313
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
-    && find /usr/local/lib/python3.13 -depth -type d -name __pycache__ -exec rm -rf {} + \
-    && find /usr/local/lib/python3.13 -depth -type d -name tests -exec rm -rf {} + \
-    && mkdir -p /opt/orva /code
-COPY backend/runtimes/python313/adapter.py /opt/orva/adapter.py
-COPY backend/runtimes/python313/orva.py    /opt/orva/orva.py
-
-FROM python:3.14-slim AS rootfs-python314
+FROM python:3.14-slim AS rootfs-python
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && find /usr/local/lib/python3.14 -depth -type d -name __pycache__ -exec rm -rf {} + \
     && find /usr/local/lib/python3.14 -depth -type d -name tests -exec rm -rf {} + \
     && mkdir -p /opt/orva /code
-COPY backend/runtimes/python314/adapter.py /opt/orva/adapter.py
-COPY backend/runtimes/python314/orva.py    /opt/orva/orva.py
+COPY backend/runtimes/python/adapter.py /opt/orva/adapter.py
+COPY backend/runtimes/python/orva.py    /opt/orva/orva.py
 
 FROM debian:bookworm-slim
 ARG VERSION
@@ -102,10 +87,8 @@ COPY --from=nsjail /nsjail/nsjail /usr/local/bin/nsjail
 # uses the same binary; the entrypoint pre-writes ~/.orva/config.yaml so
 # common commands work without re-passing --endpoint / --api-key.
 COPY --from=go /out/orva /usr/local/bin/orva
-COPY --from=rootfs-node22    / /opt/orva/rootfs/node22/
-COPY --from=rootfs-node24    / /opt/orva/rootfs/node24/
-COPY --from=rootfs-python313 / /opt/orva/rootfs/python313/
-COPY --from=rootfs-python314 / /opt/orva/rootfs/python314/
+COPY --from=rootfs-node   / /opt/orva/rootfs/node/
+COPY --from=rootfs-python / /opt/orva/rootfs/python/
 COPY scripts/entrypoint.sh /usr/local/bin/orva-entrypoint
 RUN chmod +x /usr/local/bin/orva-entrypoint
 

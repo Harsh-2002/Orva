@@ -207,6 +207,7 @@ func buildSystemMetrics(deps Deps) SystemMetricsOutput {
 type RuntimeInfo struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
+	Version        string   `json:"version"`
 	Language       string   `json:"language"`
 	DefaultHandler string   `json:"default_handler"`
 	Extensions     []string `json:"extensions"`
@@ -218,10 +219,8 @@ type ListRuntimesOutput struct {
 
 func supportedRuntimes() []RuntimeInfo {
 	return []RuntimeInfo{
-		{ID: "node22", Name: "Node.js 22 (Active LTS)", Language: "javascript", DefaultHandler: "handler.js", Extensions: []string{".js", ".mjs", ".cjs"}},
-		{ID: "node24", Name: "Node.js 24 (Current LTS)", Language: "javascript", DefaultHandler: "handler.js", Extensions: []string{".js", ".mjs", ".cjs"}},
-		{ID: "python313", Name: "Python 3.13", Language: "python", DefaultHandler: "handler.py", Extensions: []string{".py"}},
-		{ID: "python314", Name: "Python 3.14", Language: "python", DefaultHandler: "handler.py", Extensions: []string{".py"}},
+		{ID: "node", Name: "Node.js 24 (current)", Version: "24", Language: "javascript", DefaultHandler: "handler.js", Extensions: []string{".js", ".mjs", ".cjs", ".ts"}},
+		{ID: "python", Name: "Python 3.14 (current)", Version: "3.14", Language: "python", DefaultHandler: "handler.py", Extensions: []string{".py"}},
 	}
 }
 

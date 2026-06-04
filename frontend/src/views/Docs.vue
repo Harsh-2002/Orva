@@ -1441,10 +1441,8 @@ print(r.json())`,
 ])
 
 const runtimes = [
-  { id: 'python314', name: 'Python 3.14', entry: 'handler.py', deps: 'requirements.txt', icon: PythonGlyph },
-  { id: 'python313', name: 'Python 3.13', entry: 'handler.py', deps: 'requirements.txt', icon: PythonGlyph },
-  { id: 'node24',    name: 'Node.js 24',  entry: 'handler.js', deps: 'package.json',     icon: NodeGlyph },
-  { id: 'node22',    name: 'Node.js 22',  entry: 'handler.js', deps: 'package.json',     icon: NodeGlyph },
+  { id: 'python', name: 'Python 3.14', entry: 'handler.py', deps: 'requirements.txt', icon: PythonGlyph },
+  { id: 'node',   name: 'Node.js 24',  entry: 'handler.js', deps: 'package.json',     icon: NodeGlyph },
 ]
 
 const configRows = [
@@ -1458,7 +1456,7 @@ const configRows = [
 const curlCreate = computed(() => `curl -X POST ${origin.value}/api/v1/functions \\
   -H 'X-Orva-API-Key: <YOUR_KEY>' \\
   -H 'Content-Type: application/json' \\
-  -d '{"name":"hello","runtime":"python314","memory_mb":128,"cpus":0.5}'`)
+  -d '{"name":"hello","runtime":"python","memory_mb":128,"cpus":0.5}'`)
 
 const curlDeploy = computed(() => `tar czf code.tar.gz handler.py requirements.txt
 curl -X POST ${origin.value}/api/v1/functions/<function_id>/deploy \\
@@ -1800,10 +1798,10 @@ orva init
 # is present; else uses the runtime default (handler.js / handler.py).
 orva deploy ./my-fn \\
   --name    resize-image \\
-  --runtime node24
+  --runtime node
 
 # Override the entrypoint explicitly:
-orva deploy ./my-fn --name api --runtime python314 --entrypoint app.py`
+orva deploy ./my-fn --name api --runtime python --entrypoint app.py`
 
 const cliInvokeLogs = `# Invoke a function by name or fn_<id>:
 orva invoke resize-image --data '{"url":"https://example.com/cat.jpg"}'

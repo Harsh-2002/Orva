@@ -20,10 +20,10 @@ Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel 
 </context>
 
 <runtimes>
-Pick exactly one — Orva has no Docker, no buildpacks, no per-function Python/Node version pinning beyond this:
-- python314 (default) or python313 — entry: handler.py — deps: requirements.txt
-- node24 (default) or node22 — entry: handler.js — deps: package.json
-Older minor versions auto-migrate to the latest patch on next deploy. Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error.
+Pick exactly one — Orva has no Docker, no buildpacks, no per-function version pinning. Two runtimes, generic ids, latest-stable only:
+- python (Python 3.14) — entry: handler.py — deps: requirements.txt
+- node (Node.js 24, also runs TypeScript) — entry: handler.js — deps: package.json
+Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error.
 </runtimes>
 
 <handler_contract>
@@ -500,9 +500,9 @@ const truncateStderr = (s) => {
   return `[truncated — original was ${bytes.length} bytes; showing first ${STDERR_CAP_BYTES}]\n${head}`
 }
 
-// Map runtime → language attr on the <source> tag. The runtime string
-// arrives as the platform's canonical form (python314, node24, …); we
-// collapse to the broad family the model recognises.
+// Map runtime → language attr on the <source> tag. The runtime string is the
+// platform's canonical id (python, node); collapse to the broad family the
+// model recognises.
 const sourceLanguageFor = (runtime) => {
   if (!runtime) return 'text'
   const r = String(runtime).toLowerCase()
@@ -512,17 +512,13 @@ const sourceLanguageFor = (runtime) => {
   return 'text'
 }
 
-// Pretty-print a runtime tag for the <context> blurb. python314 →
-// "Python 3.14"; node24 → "Node.js 24"; falls back to the raw id.
-// Python tags pack {major}{minor:2}, Node tags pack {major:2} — so
-// Python splits at first/rest, Node uses the whole numeric tail.
+// Pretty-print a runtime tag for the <context> blurb. node → "Node.js 24",
+// python → "Python 3.14"; falls back to the raw id for anything unexpected.
 const formatRuntime = (runtime) => {
   if (!runtime) return 'unknown runtime'
   const r = String(runtime).toLowerCase()
-  let m = r.match(/^python(\d)(\d+)$/)
-  if (m) return `Python ${m[1]}.${m[2]}`
-  m = r.match(/^node(\d+)$/)
-  if (m) return `Node.js ${m[1]}`
+  if (r === 'node') return 'Node.js 24'
+  if (r === 'python') return 'Python 3.14'
   return runtime
 }
 
@@ -559,7 +555,7 @@ const formatRequest = (req) => {
 export const buildFixSuggestionPrompt = ({
   source = '',
   language,           // optional — falls back to detection from runtime
-  runtime = '',       // canonical Orva runtime id (python314 / node24 / …)
+  runtime = '',       // canonical Orva runtime id (node / python)
   stderr = '',
   requestPreview = null,
   errorMessage = '',

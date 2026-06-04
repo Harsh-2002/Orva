@@ -77,12 +77,12 @@ EP="--endpoint http://localhost:8443 --api-key $API_KEY"
 # Deploy all functions
 echo "Deploying functions..."
 FUNCTIONS=(
-  "node-api:node22:test/fixtures/node-api"
-  "node-cpu:node22:test/fixtures/node-cpu"
-  "node-slow:node22:test/fixtures/node-slow"
-  "python-data:python313:test/fixtures/python-data"
-  "python-compute:python313:test/fixtures/python-compute"
-  "python-error:python313:test/fixtures/python-error"
+  "node-api:node:test/fixtures/node-api"
+  "node-cpu:node:test/fixtures/node-cpu"
+  "node-slow:node:test/fixtures/node-slow"
+  "python-data:python:test/fixtures/python-data"
+  "python-compute:python:test/fixtures/python-compute"
+  "python-error:python:test/fixtures/python-error"
 )
 
 for fn_spec in "${FUNCTIONS[@]}"; do

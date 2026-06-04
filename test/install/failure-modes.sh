@@ -93,7 +93,7 @@ curl -s -o /dev/null -X POST "$BASE/api/v1/auth/onboard" \
 
 create=$(curl -sf -H "X-Orva-API-Key: $ADMIN_KEY" -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d '{"name":"fail-idem","runtime":"node24"}')
+    -d '{"name":"fail-idem","runtime":"node"}')
 fid=$(echo "$create" | jq -r '.id // empty')
 [[ -n "$fid" ]] || die "could not create marker function"
 ok "created marker function fail-idem ($fid)"

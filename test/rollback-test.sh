@@ -25,7 +25,7 @@ check() {
 fn_name="rb-$$"
 echo "# 0: setup function $fn_name"
 "${CURL[@]}" -X POST "$BASE/api/v1/functions" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node22\",\"memory_mb\":128,\"cpus\":1}" >/dev/null
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1}" >/dev/null
 fid=$("${CURL[@]}" "$BASE/api/v1/functions" | jq -r --arg n "$fn_name" '.functions[] | select(.name==$n) | .id')
 [ -z "$fid" ] && { echo "fail	create fn"; exit 1; }
 

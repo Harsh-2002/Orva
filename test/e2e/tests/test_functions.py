@@ -23,7 +23,7 @@ def main():
     fid = None
     try:
         section("create function")
-        body = {"name": NAME, "description": "crud", "runtime": "node24",
+        body = {"name": NAME, "description": "crud", "runtime": "node",
                 "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
                 "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         code, created = c.req("POST", "/api/v1/functions", body, expect=range(200, 599))
@@ -48,6 +48,15 @@ def main():
                "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         bc, _ = c.req("POST", "/api/v1/functions", bad, expect=range(200, 599))
         check("invalid runtime rejected (4xx)", 400 <= bc < 500, f"status {bc}")
+
+        # Strict cutover: the legacy versioned ids are no longer valid runtimes —
+        # only the generic `node` / `python` are accepted.
+        for legacy in ("node24", "node22", "python314", "python313"):
+            lb = {"name": f"e2e-legacy-{legacy}", "description": "x", "runtime": legacy,
+                  "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
+                  "cpus": 1, "network_mode": "none", "auth_mode": "none"}
+            lc, _ = c.req("POST", "/api/v1/functions", lb, expect=range(200, 599))
+            check(f"legacy runtime {legacy} rejected (4xx)", 400 <= lc < 500, f"status {lc}")
 
         section("delete")
         if fid:

@@ -652,7 +652,7 @@ download_rootfs() {
     [ "$DRYRUN" = "1" ] && { log "(dryrun) would download runtime rootfs tarballs"; return; }
     base="https://github.com/${REPO}/releases/download/${VERSION}"
     install -d -m 0755 "$DATA_DIR/rootfs"
-    for dr_rt in node22 node24 python313 python314; do
+    for dr_rt in node python; do
         dr_target="$DATA_DIR/rootfs/$dr_rt"
         if [ -f "$dr_target/.orva-rootfs-version" ] &&
            [ "$(cat "$dr_target/.orva-rootfs-version" 2>/dev/null)" = "$VERSION" ]; then
@@ -717,7 +717,11 @@ ReadWritePaths=${DATA_DIR}
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ProtectKernelTunables=true
+# ProtectKernelTunables is intentionally OMITTED: it overmounts /proc/sys,
+# which prevents nsjail from mounting a fresh procfs inside its user
+# namespace (functions would crash with 'Failed to mount mandatory point
+# /proc'). nsjail already isolates each function heavily (userns + seccomp
+# + chroot), so the marginal loss is acceptable.
 ProtectKernelModules=true
 LimitNOFILE=65536
 LimitNPROC=8192

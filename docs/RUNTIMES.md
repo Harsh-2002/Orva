@@ -6,12 +6,10 @@ the sandbox your function file is at `/code/<entrypoint>` (default
 adapter wraps your handler and speaks a JSON frame protocol over
 stdin/stdout to the parent `orvad` process.
 
-| runtime    | base image     | entrypoint default | dependency file    |
-|------------|----------------|--------------------|--------------------|
-| `node22`   | node:22-slim   | `handler.js`       | `package.json`     |
-| `node24`   | node:24-slim   | `handler.js`       | `package.json`     |
-| `python313`| python:3.13-slim | `handler.py`     | `requirements.txt` |
-| `python314`| python:3.14-slim | `handler.py`     | `requirements.txt` |
+| runtime  | base image       | entrypoint default | dependency file    |
+|----------|------------------|--------------------|--------------------|
+| `node`   | node:24-slim     | `handler.js`       | `package.json`     |
+| `python` | python:3.14-slim | `handler.py`       | `requirements.txt` |
 
 ## The `event` object
 
@@ -93,7 +91,7 @@ def handler(req):
 ```
 
 The adapter looks for a top-level `handler` callable. Async (`async def`)
-is supported on Python 3.13+; the adapter awaits if needed.
+is supported on the python runtime (Python 3.14); the adapter awaits if needed.
 
 ## Dependencies
 
@@ -192,7 +190,7 @@ See [`docs/CONFIG.md`](CONFIG.md) for everything tunable.
 # 1. Create the function
 curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \
   http://localhost:8443/api/v1/functions \
-  -d '{"name":"my-fn","runtime":"node22","memory_mb":128,"cpus":1}'
+  -d '{"name":"my-fn","runtime":"node","memory_mb":128,"cpus":1}'
 
 # 2. Deploy code (inline)
 curl -X POST -H "X-Orva-API-Key: $KEY" -H 'content-type: application/json' \

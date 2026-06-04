@@ -42,7 +42,7 @@ def main():
     try:
         section("setup function")
         fbody = {"name": FN_NAME, "description": "inbound webhook host",
-                 "runtime": "node24", "entrypoint": "handler.js",
+                 "runtime": "node", "entrypoint": "handler.js",
                  "timeout_ms": 30000, "memory_mb": 128, "cpus": 1,
                  "network_mode": "none", "auth_mode": "none"}
         fc, fn = c.req("POST", "/api/v1/functions", fbody, expect=range(200, 599))

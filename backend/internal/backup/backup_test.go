@@ -37,7 +37,7 @@ func TestSnapshotArchiveRestoreRoundtrip(t *testing.T) {
 	fn := &database.Function{
 		ID:          "fn_backup_test",
 		Name:        "backup-test",
-		Runtime:     "node22",
+		Runtime:     "node",
 		Entrypoint:  "handler.js",
 		TimeoutMS:   30000,
 		MemoryMB:    64,

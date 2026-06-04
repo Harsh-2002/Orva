@@ -40,23 +40,23 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 # 20 fixtures: 5 of each runtime mix.
 FN_NAMES=()
-for i in $(seq 1 5); do FN_NAMES+=("ascale-node22-$i"); done
-for i in $(seq 1 5); do FN_NAMES+=("ascale-node24-$i"); done
+for i in $(seq 1 5); do FN_NAMES+=("ascale-node-$i"); done
+for i in $(seq 1 5); do FN_NAMES+=("ascale-node-$i"); done
 for i in $(seq 1 5); do FN_NAMES+=("ascale-py313-$i"); done
 for i in $(seq 1 5); do FN_NAMES+=("ascale-py314-$i"); done
 
 runtime_for() {
     case "$1" in
-        ascale-node22-*) echo node22 ;;
-        ascale-node24-*) echo node24 ;;
-        ascale-py313-*)  echo python313 ;;
-        ascale-py314-*)  echo python314 ;;
+        ascale-node-*) echo node ;;
+        ascale-node-*) echo node ;;
+        ascale-py313-*)  echo python ;;
+        ascale-py314-*)  echo python ;;
     esac
 }
 
 handler_for() {
     case "$1" in
-        ascale-node22-*|ascale-node24-*)
+        ascale-node-*|ascale-node-*)
             cat <<'EOF'
 exports.handler = async (event) => ({
   statusCode: 200,
@@ -81,7 +81,7 @@ EOF
 
 filename_for() {
     case "$1" in
-        ascale-node22-*|ascale-node24-*) echo handler.js ;;
+        ascale-node-*|ascale-node-*) echo handler.js ;;
         ascale-py313-*|ascale-py314-*)   echo handler.py ;;
     esac
 }

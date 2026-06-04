@@ -75,7 +75,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           # No npm cache — every CI run starts from scratch so we
           # never pick up a stale lockfile or dependency tree.
           cache: ""
@@ -117,7 +117,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           cache: ""
 
       - name: npm ci

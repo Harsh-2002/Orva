@@ -185,10 +185,8 @@ picks up the new target.
 │           │   └── main.js                    Orva's adapter wrapper
 │           └── def5678.../
 └── rootfs/
-    ├── node22/                                debian-slim with /usr/bin/node
-    ├── node24/
-    ├── python313/
-    └── python314/
+    ├── node/                                slim image with /usr/local/bin/node (Node.js 24)
+    └── python/                              slim image with /usr/local/bin/python3 (Python 3.14)
 ```
 
 ## Database schema
@@ -346,8 +344,8 @@ Per-runtime adapter scripts. The adapter is the entrypoint nsjail
 exec's into; it reads request frames from stdin, calls the user's
 exported handler, and writes response frames back.
 
-- `node22/adapter.js` — also used for node24
-- `python313/adapter.py` — also used for python314
+- `node/adapter.js` — also used for node
+- `python/adapter.py` — also used for python
 
 ### `frontend/`
 

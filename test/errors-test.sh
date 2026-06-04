@@ -68,7 +68,7 @@ http_assert "PAYLOAD_TOO_LARGE 413" "413" "PAYLOAD_TOO_LARGE" "" "$resp"
 echo "# 2: WORKER_CRASHED"
 fn_name="errs-crash-$$"
 "${CURL[@]}" -X POST "$BASE/api/v1/functions" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node24\",\"memory_mb\":128,\"cpus\":1}" >/dev/null
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1}" >/dev/null
 fid=$("${CURL[@]}" "$BASE/api/v1/functions" | jq -r --arg n "$fn_name" '.functions[] | select(.name==$n) | .id')
 
 crash_code='exports.handler = async () => { process.exit(1); };'
@@ -91,7 +91,7 @@ http_assert "WORKER_CRASHED 502" "502" "WORKER_CRASHED" "" "$resp"
 echo "# 3: TIMEOUT"
 fn_name="errs-timeout-$$"
 "${CURL[@]}" -X POST "$BASE/api/v1/functions" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node24\",\"memory_mb\":128,\"cpus\":1,\"timeout_ms\":1000}" >/dev/null
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1,\"timeout_ms\":1000}" >/dev/null
 fid=$("${CURL[@]}" "$BASE/api/v1/functions" | jq -r --arg n "$fn_name" '.functions[] | select(.name==$n) | .id')
 
 slow='exports.handler = async () => { await new Promise(r => setTimeout(r, 5000)); return { statusCode: 200, body: "" }; };'
@@ -118,7 +118,7 @@ http_assert "NOT_FOUND 404" "404" "NOT_FOUND" "" "$resp"
 echo "# 5: METHOD_NOT_ALLOWED via custom route"
 fn_name="errs-method-$$"
 "${CURL[@]}" -X POST "$BASE/api/v1/functions" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node24\",\"memory_mb\":128,\"cpus\":1}" >/dev/null
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1}" >/dev/null
 fid=$("${CURL[@]}" "$BASE/api/v1/functions" | jq -r --arg n "$fn_name" '.functions[] | select(.name==$n) | .id')
 
 ok_code='exports.handler = async () => ({ statusCode: 200, body: "{}" });'
@@ -143,7 +143,7 @@ http_assert "METHOD_NOT_ALLOWED 405" "405" "METHOD_NOT_ALLOWED" "" "$resp"
 echo "# 6: POOL_AT_CAPACITY"
 fn_name="errs-pool-$$"
 "${CURL[@]}" -X POST "$BASE/api/v1/functions" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node24\",\"memory_mb\":128,\"cpus\":1,\"timeout_ms\":2000}" >/dev/null
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1,\"timeout_ms\":2000}" >/dev/null
 fid=$("${CURL[@]}" "$BASE/api/v1/functions" | jq -r --arg n "$fn_name" '.functions[] | select(.name==$n) | .id')
 
 slow_ok='exports.handler = async () => { await new Promise(r => setTimeout(r, 1500)); return { statusCode: 200, body: "{}" }; };'
@@ -191,7 +191,7 @@ fi
 echo "# 7: NOT_ACTIVE"
 fn_name="errs-inactive-$$"
 "${CURL[@]}" -X POST "$BASE/api/v1/functions" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node22\"}" >/dev/null
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\"}" >/dev/null
 fid=$("${CURL[@]}" "$BASE/api/v1/functions" | jq -r --arg n "$fn_name" '.functions[] | select(.name==$n) | .id')
 "${CURL[@]}" -X POST "$BASE/api/v1/functions/$fid/deploy-inline" \
     -H "Content-Type: application/json" \

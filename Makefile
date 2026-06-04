@@ -44,24 +44,16 @@ docs-embed:
 # Also copies the v0.2 orva SDK module (kv / invoke / jobs).
 adapters-embed:
 	@rm -rf backend/cmd/orva/adapters
-	@mkdir -p backend/cmd/orva/adapters/node22 backend/cmd/orva/adapters/node24 \
-	          backend/cmd/orva/adapters/python313 backend/cmd/orva/adapters/python314
-	@cp backend/runtimes/node22/adapter.js    backend/cmd/orva/adapters/node22/adapter.js
-	@cp backend/runtimes/node24/adapter.js    backend/cmd/orva/adapters/node24/adapter.js
-	@cp backend/runtimes/python313/adapter.py backend/cmd/orva/adapters/python313/adapter.py
-	@cp backend/runtimes/python314/adapter.py backend/cmd/orva/adapters/python314/adapter.py
-	@cp backend/runtimes/node22/orva.js       backend/cmd/orva/adapters/node22/orva.js
-	@cp backend/runtimes/node24/orva.js       backend/cmd/orva/adapters/node24/orva.js
-	@cp backend/runtimes/python313/orva.py    backend/cmd/orva/adapters/python313/orva.py
-	@cp backend/runtimes/python314/orva.py    backend/cmd/orva/adapters/python314/orva.py
+	@mkdir -p backend/cmd/orva/adapters/node backend/cmd/orva/adapters/python
+	@cp backend/runtimes/node/adapter.js     backend/cmd/orva/adapters/node/adapter.js
+	@cp backend/runtimes/python/adapter.py   backend/cmd/orva/adapters/python/adapter.py
+	@cp backend/runtimes/node/orva.js        backend/cmd/orva/adapters/node/orva.js
+	@cp backend/runtimes/python/orva.py      backend/cmd/orva/adapters/python/orva.py
 	@# v0.6 SDK: ship .d.ts + package.json so TS handlers get types;
 	@# py.typed marks the Python module as fully typed for static checkers.
-	@cp backend/runtimes/node22/orva.d.ts     backend/cmd/orva/adapters/node22/orva.d.ts
-	@cp backend/runtimes/node22/package.json  backend/cmd/orva/adapters/node22/package.json
-	@cp backend/runtimes/node24/orva.d.ts     backend/cmd/orva/adapters/node24/orva.d.ts
-	@cp backend/runtimes/node24/package.json  backend/cmd/orva/adapters/node24/package.json
-	@cp backend/runtimes/python313/py.typed   backend/cmd/orva/adapters/python313/py.typed
-	@cp backend/runtimes/python314/py.typed   backend/cmd/orva/adapters/python314/py.typed
+	@cp backend/runtimes/node/orva.d.ts      backend/cmd/orva/adapters/node/orva.d.ts
+	@cp backend/runtimes/node/package.json   backend/cmd/orva/adapters/node/package.json
+	@cp backend/runtimes/python/py.typed     backend/cmd/orva/adapters/python/py.typed
 
 build: adapters-embed docs-embed
 	@mkdir -p $(BUILD)

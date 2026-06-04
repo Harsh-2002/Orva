@@ -75,7 +75,7 @@ func TestMigrationPopulatedDB(t *testing.T) {
 	}
 
 	mustExec(`INSERT INTO functions (id, name, runtime, entrypoint) VALUES (?, ?, ?, ?)`,
-		legacyFnID, "test-func", "python314", "handler.py")
+		legacyFnID, "test-func", "python", "handler.py")
 	mustExec(`INSERT INTO deployments (id, function_id, version, status, phase) VALUES (?, ?, ?, ?, ?)`,
 		legacyDepID, legacyFnID, 1, "succeeded", "complete")
 	mustExec(`INSERT INTO build_logs (deployment_id, seq, line, stream) VALUES (?, ?, ?, ?)`,

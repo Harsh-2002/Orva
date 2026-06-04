@@ -48,7 +48,7 @@ func TestFunctionCRUD(t *testing.T) {
 	fn := &Function{
 		ID:          "fn_test123456",
 		Name:        "hello-world",
-		Runtime:     "node22",
+		Runtime:     "node",
 		Entrypoint:  "handler.js",
 		TimeoutMS:   30000,
 		MemoryMB:    128,
@@ -119,7 +119,7 @@ func TestExecutionCRUD(t *testing.T) {
 	db := newTestDB(t)
 
 	fn := &Function{
-		ID: "fn_test123456", Name: "test-fn", Runtime: "node22",
+		ID: "fn_test123456", Name: "test-fn", Runtime: "node",
 		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 128,
 		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
 	}
@@ -207,7 +207,7 @@ func TestFixtureCRUD(t *testing.T) {
 	db := newTestDB(t)
 
 	fn := &Function{
-		ID: "fn_fixt12345678", Name: "fixture-test", Runtime: "node22",
+		ID: "fn_fixt12345678", Name: "fixture-test", Runtime: "node",
 		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 128,
 		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
 	}
@@ -305,7 +305,7 @@ func TestInboundWebhookCRUD(t *testing.T) {
 	db := newTestDB(t)
 
 	fn := &Function{
-		ID: "fn_inb12345678", Name: "inbound-test", Runtime: "node22",
+		ID: "fn_inb12345678", Name: "inbound-test", Runtime: "node",
 		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 128,
 		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
 	}
@@ -386,7 +386,7 @@ func TestJobScheduledAtFiltering(t *testing.T) {
 	db := newTestDB(t)
 
 	fn := &Function{
-		ID: "fn_jobsched12345", Name: "job-sched-test", Runtime: "node22",
+		ID: "fn_jobsched12345", Name: "job-sched-test", Runtime: "node",
 		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 64,
 		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
 	}
@@ -437,7 +437,7 @@ func TestCascadeDelete(t *testing.T) {
 	db := newTestDB(t)
 
 	fn := &Function{
-		ID: "fn_cascade1234", Name: "cascade-test", Runtime: "node22",
+		ID: "fn_cascade1234", Name: "cascade-test", Runtime: "node",
 		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 128,
 		CPUs: 0.5, EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
 	}

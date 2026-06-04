@@ -31,7 +31,7 @@ code='exports.handler = async (event) => ({ statusCode: 200, headers: {"Content-
 status=$("${CURL_AUTH[@]}" -o /dev/null -w '%{http_code}' \
     -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d '{"name":"auth-bogus-'$$'","runtime":"node24","auth_mode":"wat"}')
+    -d '{"name":"auth-bogus-'$$'","runtime":"node","auth_mode":"wat"}')
 check "reject auth_mode=wat" "$([ "$status" = 400 ] && echo ok || echo fail)" "status=$status"
 
 # ---------------------------------------------------------------
@@ -40,7 +40,7 @@ check "reject auth_mode=wat" "$([ "$status" = 400 ] && echo ok || echo fail)" "s
 fn_none="auth-none-$$"
 fid_none=$("${CURL_AUTH[@]}" -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$fn_none\",\"runtime\":\"node24\",\"auth_mode\":\"none\"}" | jq -r '.id')
+    -d "{\"name\":\"$fn_none\",\"runtime\":\"node\",\"auth_mode\":\"none\"}" | jq -r '.id')
 "${CURL_AUTH[@]}" -X POST "$BASE/api/v1/functions/$fid_none/deploy-inline" \
     -H 'Content-Type: application/json' \
     -d "$(jq -n --arg c "$code" '{code:$c, filename:"handler.js"}')" > /dev/null
@@ -63,7 +63,7 @@ check "auth=none allows public invoke" "$([ "$status" = 200 ] && echo ok || echo
 fn_key="auth-key-$$"
 fid_key=$("${CURL_AUTH[@]}" -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$fn_key\",\"runtime\":\"node24\",\"auth_mode\":\"platform_key\"}" | jq -r '.id')
+    -d "{\"name\":\"$fn_key\",\"runtime\":\"node\",\"auth_mode\":\"platform_key\"}" | jq -r '.id')
 "${CURL_AUTH[@]}" -X POST "$BASE/api/v1/functions/$fid_key/deploy-inline" \
     -H 'Content-Type: application/json' \
     -d "$(jq -n --arg c "$code" '{code:$c, filename:"handler.js"}')" > /dev/null
@@ -93,7 +93,7 @@ check "auth=platform_key rejects bad key" "$([ "$status" = 401 ] && echo ok || e
 fn_sig="auth-signed-$$"
 fid_sig=$("${CURL_AUTH[@]}" -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$fn_sig\",\"runtime\":\"node24\",\"auth_mode\":\"signed\"}" | jq -r '.id')
+    -d "{\"name\":\"$fn_sig\",\"runtime\":\"node\",\"auth_mode\":\"signed\"}" | jq -r '.id')
 
 # Set the signing secret BEFORE first deploy.
 SIGNING_SECRET="test-secret-$(date +%s)"
@@ -150,7 +150,7 @@ check "auth=signed rejects stale timestamp" "$([ "$status" = 401 ] && echo ok ||
 fn_rl="auth-rl-$$"
 fid_rl=$("${CURL_AUTH[@]}" -X POST "$BASE/api/v1/functions" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"$fn_rl\",\"runtime\":\"node24\",\"auth_mode\":\"none\",\"rate_limit_per_min\":5}" | jq -r '.id')
+    -d "{\"name\":\"$fn_rl\",\"runtime\":\"node\",\"auth_mode\":\"none\",\"rate_limit_per_min\":5}" | jq -r '.id')
 "${CURL_AUTH[@]}" -X POST "$BASE/api/v1/functions/$fid_rl/deploy-inline" \
     -H 'Content-Type: application/json' \
     -d "$(jq -n --arg c "$code" '{code:$c, filename:"handler.js"}')" > /dev/null

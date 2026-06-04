@@ -75,7 +75,7 @@ wait_active() {
 NOOP_FN_NAME="sdk-test-noop"
 noop_create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$NOOP_FN_NAME\",\"runtime\":\"python314\",\"network_mode\":\"none\",\"entrypoint\":\"handler.py\"}" 2>/dev/null || true)
+    -d "{\"name\":\"$NOOP_FN_NAME\",\"runtime\":\"python\",\"network_mode\":\"none\",\"entrypoint\":\"handler.py\"}" 2>/dev/null || true)
 noop_id=$(echo "$noop_create" | jq -r '.id // empty')
 if [ -z "$noop_id" ]; then
     noop_id=$(curl -s -H "X-Orva-API-Key: $KEY" "$BASE/api/v1/functions?limit=200" \
@@ -117,9 +117,9 @@ EOF
 
 py_create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$PY_FN\",\"runtime\":\"python314\",\"network_mode\":\"egress\",\"entrypoint\":\"handler.py\"}")
+    -d "{\"name\":\"$PY_FN\",\"runtime\":\"python\",\"network_mode\":\"egress\",\"entrypoint\":\"handler.py\"}")
 py_id=$(echo "$py_create" | jq -r '.id')
-assert_nonempty "POST /functions (python314)" "$py_id"
+assert_nonempty "POST /functions (python)" "$py_id"
 
 py_deploy=$(jq -nc --arg src "$PY_SRC" '{code:$src,filename:"handler.py"}')
 "${CURL[@]}" -X POST "$BASE/api/v1/functions/$py_id/deploy-inline" \
@@ -215,9 +215,9 @@ EOF
 
 node_create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$NODE_FN\",\"runtime\":\"node24\",\"network_mode\":\"egress\",\"entrypoint\":\"handler.js\"}")
+    -d "{\"name\":\"$NODE_FN\",\"runtime\":\"node\",\"network_mode\":\"egress\",\"entrypoint\":\"handler.js\"}")
 node_id=$(echo "$node_create" | jq -r '.id')
-assert_nonempty "POST /functions (node24)" "$node_id"
+assert_nonempty "POST /functions (node)" "$node_id"
 
 node_deploy=$(jq -nc --arg src "$NODE_SRC" '{code:$src,filename:"handler.js"}')
 "${CURL[@]}" -X POST "$BASE/api/v1/functions/$node_id/deploy-inline" \

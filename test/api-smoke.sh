@@ -41,7 +41,7 @@ expect_code "GET  /api/v1/auth/status" 200 "$code"
 fn_name="smoke-$$"
 create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node24\",\"network_mode\":\"egress\"}")
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"network_mode\":\"egress\"}")
 fid=$(echo "$create" | jq -r '.id')
 mode=$(echo "$create" | jq -r '.network_mode')
 [ "$mode" = "egress" ] && expect_code "POST /functions {network_mode:egress}" 201 201 \

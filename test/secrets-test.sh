@@ -26,7 +26,7 @@ check() {
 fn_name="secrets-test-$$"
 create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$fn_name\",\"runtime\":\"node24\",\"memory_mb\":128,\"cpus\":1}")
+    -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1}")
 fid=$(echo "$create" | jq -r '.id')
 
 code='exports.handler = async () => ({ statusCode: 200, headers: {"Content-Type":"application/json"}, body: JSON.stringify({STRIPE_SECRET: process.env.STRIPE_SECRET || null, STRIPE_WEBHOOK: process.env.STRIPE_WEBHOOK || null, STRIPE_PUBLIC: process.env.STRIPE_PUBLIC || null}) });'

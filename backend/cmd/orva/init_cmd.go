@@ -19,7 +19,7 @@ func newInitCmd() *cobra.Command {
 }
 
 const orvaYAMLTemplate = `# Orva configuration
-# Supported runtimes: node22 (Node.js 20), python313 (Python 3.12)
+# Supported runtimes: node (Node.js 24), python (Python 3.14)
 
 server:
   host: "0.0.0.0"

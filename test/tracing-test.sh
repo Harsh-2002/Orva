@@ -93,7 +93,7 @@ cleanup  # also wipe leftovers from a previous interrupted run
 section "T1: HTTP root span"
 
 # Tiny function that echoes back its trace context env vars.
-fid_c=$(deploy trace_chain_c node22 'module.exports.handler = async () => ({
+fid_c=$(deploy trace_chain_c node 'module.exports.handler = async () => ({
   statusCode: 200,
   headers: {"content-type":"application/json"},
   body: JSON.stringify({
@@ -116,13 +116,13 @@ trigger=$(echo "$http_trace" | jq -r '.spans[0].trigger')
 
 section "T2: F2F propagation"
 
-deploy trace_chain_b node22 'module.exports.handler = async () => ({
+deploy trace_chain_b node 'module.exports.handler = async () => ({
   statusCode: 200,
   headers: {"content-type":"application/json"},
   body: JSON.stringify({ from: "B" })
 })' >/dev/null
 
-fid_a=$(deploy trace_chain_a node22 'const { invoke } = require("orva")
+fid_a=$(deploy trace_chain_a node 'const { invoke } = require("orva")
 module.exports.handler = async () => {
   const r = await invoke("trace_chain_b", {})
   return { statusCode: 200, headers: {"content-type":"application/json"},
@@ -175,7 +175,7 @@ section "T7: Outlier detection"
 
 # Deploy a function whose duration we can swap. We feed the baseline with
 # fast calls, then make it slow.
-fid_o=$(deploy trace_outlier python313 '
+fid_o=$(deploy trace_outlier python '
 import os, time
 def handler(event):
     if os.environ.get("SLOW") == "1":

@@ -37,9 +37,9 @@ from harness import (
 RO_KEY_NAME = "e2e-perm-readonly"
 PERM_FN = "e2e-perm-fn"
 
-# create_function args used to probe the write path. node24 / minimal limits.
+# create_function args used to probe the write path. node / minimal limits.
 CREATE_ARGS = (
-    '{"name":"%s","description":"x","runtime":"node24",'
+    '{"name":"%s","description":"x","runtime":"node",'
     '"entrypoint":"handler.js","timeout_ms":30000,"memory_mb":128,'
     '"cpus":1,"network_mode":"none","auth_mode":"none"}'
 ) % PERM_FN

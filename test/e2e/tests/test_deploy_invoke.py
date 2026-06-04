@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Full sandboxed loop: create node24 fn -> deploy-inline -> wait active -> invoke -> executions.
+"""Full sandboxed loop: create node fn -> deploy-inline -> wait active -> invoke -> executions.
 
 Needs nsjail/sandbox. If the build never reaches active (no nested sandboxing in
 this env), the whole module skips. REST resolves functions by UUID only, so the
@@ -59,8 +59,8 @@ def main():
     cleanup(c)
     fid = None
     try:
-        section("create node24 function")
-        body = {"name": NAME, "description": "deploy+invoke e2e", "runtime": "node24",
+        section("create node function")
+        body = {"name": NAME, "description": "deploy+invoke e2e", "runtime": "node",
                 "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
                 "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         code, created = c.req("POST", "/api/v1/functions", body, expect=range(200, 599))

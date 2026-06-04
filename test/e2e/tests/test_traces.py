@@ -74,7 +74,7 @@ def main():
             check("no traces on fresh instance (expected)", True)
 
         section("create function for baseline")
-        body = {"name": NAME, "description": "baseline", "runtime": "node24",
+        body = {"name": NAME, "description": "baseline", "runtime": "node",
                 "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
                 "cpus": 1, "network_mode": "none", "auth_mode": "none"}
         cc, created = c.req("POST", "/api/v1/functions", body, expect=range(200, 599))
