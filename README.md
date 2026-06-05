@@ -25,13 +25,22 @@ per-invocation billing.
 
 ```bash
 docker run -d --name orva -p 8443:8443 \
-  --cap-add SYS_ADMIN \
+  --pid host --cgroupns host \
+  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
   --security-opt seccomp=unconfined \
   --security-opt apparmor=unconfined \
   --security-opt systempaths=unconfined \
+  --device /dev/net/tun \
   -v orva-data:/var/lib/orva \
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
   ghcr.io/harsh-2002/orva:latest
 ```
+
+> `--pid host` and `--cgroupns host` are **required** on the default runc runtime:
+> nsjail enrolls each sandbox PID in the host cgroup hierarchy, and without them
+> every invocation fails with `Launching child process failed`. `--cap-add
+> NET_ADMIN` + `--device /dev/net/tun` are needed for `network_mode: egress`
+> functions. `docker compose up -d` (see [Install](#install)) sets all of this for you.
 
 Open **http://localhost:8443**, finish onboarding (~30s), and deploy your first
 function from the in-browser editor.

@@ -1,7 +1,10 @@
 services:
   orva:
     image: ${ORVA_IMAGE:-orva:local}
-    runtime: kata-clh
+    # Default runtime is runc (the pid/cgroup host settings below make nsjail work on it).
+    # Uncomment for hypervisor-class isolation via Kata + Cloud Hypervisor (see docs/KATA.md);
+    # on Kata the guest kernel provides cgroup/pid delegation, so it does not need pid/cgroup: host.
+    # runtime: kata-clh
     build:
       context: .
       args:

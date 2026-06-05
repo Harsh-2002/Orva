@@ -1609,7 +1609,7 @@ orva deploy ./my-fn --name api --runtime python --entrypoint app.py
 
 ```bash
 # Invoke a function by name or UUID id:
-orva invoke resize-image --data '{"url":"https://example.com/cat.jpg"}'
+orva invoke resize-image --body '{"url":"https://example.com/cat.jpg"}'
 
 # Recent executions:
 orva logs resize-image

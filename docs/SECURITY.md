@@ -247,11 +247,20 @@ sandbox can't be constructed and there's no isolation at all.
 The container itself is launched with:
 
 ```
+--pid host
+--cgroupns host
 --cap-add SYS_ADMIN
+--cap-add NET_ADMIN
 --security-opt seccomp=unconfined
 --security-opt apparmor=unconfined
 --security-opt systempaths=unconfined
+--device /dev/net/tun
 ```
+
+`--pid host` + `--cgroupns host` let nsjail enroll each sandbox PID in the
+host cgroup hierarchy (per-function `memory.max` / `cpu.max`); without them
+sandbox spawn fails. On the `kata-clh` runtime the guest kernel provides this
+delegation, so those two are not needed there.
 
 These apply **only to the orva container**, not to functions. Within
 the container, only the orvad process and its child nsjails benefit;

@@ -5,7 +5,7 @@ This doc reports what was measured, not what was hoped for.
 ## Test rig
 - Host: 2 CPU / 12 GB RAM (`mem_total_mb=11961` reported by `/proc/meminfo`)
 - Image: `orva:ui-mature` (built from this tree, nsjail compiled from source, four rootfs trees)
-- Container flags: `--cap-add SYS_ADMIN --security-opt seccomp=unconfined,apparmor=unconfined,systempaths=unconfined`
+- Container flags: `--pid host --cgroupns host --cap-add SYS_ADMIN --cap-add NET_ADMIN --security-opt seccomp=unconfined,apparmor=unconfined,systempaths=unconfined --device /dev/net/tun`
 - Test: `bash test/atscale.sh` against a clean container (volume `orva-test-data`)
 
 ## What was deployed

@@ -172,11 +172,27 @@ shipped `docker-compose.yml` sets `max-size: 10m, max-file: 5`).
 ### Docker
 
 ```bash
+# With the shipped compose (recommended — it carries all the sandbox flags):
+docker compose pull && docker compose up -d
+
+# Or with plain docker run, re-passing the full flag set and the same volume:
 docker pull ghcr.io/harsh-2002/orva:latest
 docker stop orva && docker rm orva
-# re-run with the same volume mount
-docker run -d --name orva ... -v orva-data:/var/lib/orva ghcr.io/harsh-2002/orva:latest
+docker run -d --name orva -p 8443:8443 \
+  --pid host --cgroupns host \
+  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined \
+  --device /dev/net/tun \
+  -v orva-data:/var/lib/orva \
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+  ghcr.io/harsh-2002/orva:latest
 ```
+
+`--pid host` + `--cgroupns host` are required on the runc runtime: nsjail
+enrolls each sandbox PID in the host cgroup hierarchy, and omitting them
+makes every invocation fail with `Launching child process failed`.
 
 The DB schema migrations are idempotent additive ALTERs — running a
 newer image on an older volume is safe. **Downgrade is not.**
