@@ -156,19 +156,6 @@ Defaults work out of the box. Common knobs: `ORVA_PORT` (8443), `ORVA_DATA_DIR`
 
 ---
 
-## Build from source
-
-```bash
-git clone https://github.com/Harsh-2002/Orva.git && cd Orva
-make dev          # hot-reload frontend :5173 + backend :8443
-make build-all    # production binary → ./build/orva
-make test
-```
-
-Requires Go 1.26+, Node 24+, and nsjail on Linux. Contributing guide: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
-
----
-
 ## Documentation
 
 | | |
@@ -183,6 +170,7 @@ Requires Go 1.26+, Node 24+, and nsjail on Linux. Contributing guide: [docs/CONT
 | [OPERATIONS](docs/OPERATIONS.md) | Monitoring, troubleshooting, common errors |
 | [SUPPORT](docs/SUPPORT.md) | Distro / kernel / container-runtime matrix |
 | [CAPACITY](docs/CAPACITY.md) | Throughput numbers + benchmark methodology |
+| [CONTRIBUTING](docs/CONTRIBUTING.md) | Dev setup, build from source, tests |
 
 Runtime isolation specifics (Kata, gVisor) live in [docs/KATA.md](docs/KATA.md) and [docs/GVISOR.md](docs/GVISOR.md).
 

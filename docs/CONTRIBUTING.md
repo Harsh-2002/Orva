@@ -8,8 +8,13 @@ and for the items called out as "not yet shipped" in the README.
 ```bash
 git clone https://github.com/Harsh-2002/Orva.git
 cd Orva
-make dev    # frontend on :5173 with hot reload, backend on :8443
+make dev          # frontend on :5173 with hot reload, backend on :8443
+make build-all    # production binary (server + embedded UI) → ./build/orva
+make test         # go test ./...
 ```
+
+All build/dev/test workflows go through the `Makefile` — see `make help`-able
+targets in it (`build`, `build-all`, `cli`, `embed`, `adapters-embed`, …).
 
 Requires:
 
