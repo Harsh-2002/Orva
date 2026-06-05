@@ -28,47 +28,87 @@ on:
       tag:
         description: "release tag (e.g. v0.3.0) — required for workflow_dispatch"
         required: true
+      force:
+        description: "skip the verification gate (emergency / rc only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # create releases, upload assets
   packages: write   # push to ghcr.io
+  actions: read     # gate job reads CI/e2e run status for the tagged commit
 
 env:
   IMAGE_NAME: ghcr.io/harsh-2002/orva
 
 jobs:
-  # ── 0. Validate — the release gate ───────────────────────────────────
-  # The release is the LAST step: nothing is built or published until this
-  # is green. Mirrors ci.yml's go job (vet + race tests over the full
-  # module) so a tag can never ship code whose tests fail. The build +
-  # publish jobs below all depend on it.
-  validate:
-    name: validate (vet + race tests)
+  # ── 0. Gate — verify, don't re-test ──────────────────────────────────
+  # The release pipeline does NOT run tests. All verification (shellcheck,
+  # go vet/test/build, ui build, docker smoke, full e2e) already ran on the
+  # PR and on the push to main. This job only CONFIRMS the tagged commit is
+  # green — a status lookup, not a test run — so the release stays fast while
+  # a tag can still never ship code whose tests failed. Every build job
+  # `needs: gate`. `workflow_dispatch` with force=true skips it (rc/emergency).
+  gate:
+    name: gate (verify CI + e2e already passed)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: ""
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.26.x"
-          cache: false
-      - name: build ui + embed adapters
-        # //go:embed needs ui_dist + adapters populated before vet/test.
+      - name: resolve commit SHA for the tag
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          make embed
-          make adapters-embed
-      - name: go vet
-        run: go vet ./...
-      - name: go test
-        run: go test -count=1 -race ./...
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha 2>/dev/null || true)"
+            [ -z "$SHA" ] && SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha 2>/dev/null || true)"
+          else
+            SHA="${GITHUB_SHA}"
+          fi
+          [ -n "$SHA" ] || { echo "::error::could not resolve a commit SHA to gate on"; exit 1; }
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "gating on commit $SHA"
+
+      - name: require CI + e2e success on that commit
+        if: ${{ github.event.inputs.force != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # Confirm the tagged commit's verification is green — a status lookup,
+          # not a test run. Poll until the workflow completes (handles tagging
+          # right after the merge push), bounded so a stuck check can't hang the
+          # release. `hard` = must exist and succeed; `soft` = must succeed IF it
+          # ran (ci.yml is path-filtered, so a docs-only release commit may have
+          # no CI run — e2e always runs on a main push and actually builds + runs
+          # the server, so it's the hard gate).
+          check() {
+            local wf="$1" mode="$2" deadline=$((SECONDS + 1200))  # ~20 min cap
+            while :; do
+              read -r status conclusion < <(gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${SHA}&per_page=1" \
+                --jq '.workflow_runs[0] | "\(.status) \(.conclusion)"' 2>/dev/null || echo "null null")
+              if [ "$status" = "null" ]; then
+                if [ "$mode" = "soft" ]; then echo "• $wf: no run for $SHA (path-filtered) — skipping"; return 0; fi
+                echo "::error::no $wf run for $SHA — commit was not verified (use force=true to override)"; return 1
+              fi
+              if [ "$status" = "completed" ]; then
+                [ "$conclusion" = "success" ] && { echo "✓ $wf succeeded for $SHA"; return 0; }
+                echo "::error::$wf for $SHA concluded '$conclusion' — refusing to release an unverified commit"; return 1
+              fi
+              [ $SECONDS -lt $deadline ] || { echo "::error::timed out waiting for $wf on $SHA"; return 1; }
+              echo "… $wf is '$status' for $SHA — waiting"; sleep 20
+            done
+          }
+          check e2e.yml hard
+          check ci.yml  soft
+          echo "gate passed: verification is green for $SHA"
 
   # ── 1. Go binary: matrix amd64 + arm64 ───────────────────────────────
   build-orva:
     name: build orva (${{ matrix.goarch }})
-    needs: validate
+    needs: gate
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -143,7 +183,7 @@ jobs:
   # Windows builds get the .exe suffix.
   build-cli:
     name: build orva-cli (${{ matrix.goos }}/${{ matrix.goarch }})
-    needs: validate
+    needs: gate
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -231,7 +271,7 @@ jobs:
   # (Linux ≥ 3.2, which covers every system anyone deploys this on).
   build-nsjail:
     name: build nsjail (${{ matrix.goarch }})
-    needs: validate
+    needs: gate
     runs-on: ${{ matrix.runner }}
     container: debian:bookworm-slim
     strategy:
@@ -278,7 +318,7 @@ jobs:
   # ── 3. Language rootfs tarballs ───────────────────────────────────────
   build-rootfs:
     name: rootfs ${{ matrix.runtime }} (${{ matrix.goarch }})
-    needs: validate
+    needs: gate
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -437,7 +477,7 @@ jobs:
   # two digests into both `:latest` and the immutable `:${tag}`.
   docker-image:
     name: docker image (${{ matrix.goarch }})
-    needs: validate
+    needs: gate
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
