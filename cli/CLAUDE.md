@@ -1,7 +1,8 @@
 # cli/
 
-Standalone Orva CLI codebase. Builds into a slim `orva` binary (~12 MB
-stripped) that ships on Linux, macOS, and Windows × amd64/arm64 from
+Standalone Orva CLI codebase. Builds into a slim `orva` binary (~20 MB
+stripped — `orva chat`/`orva docs` pull in glamour/chroma for terminal
+markdown) that ships on Linux, macOS, and Windows × amd64/arm64 from
 every release.
 
 ## Layout

@@ -560,6 +560,44 @@ orva webhooks deliveries sub_… -o json    # delivery history for a subscriptio
 orva webhooks retry del_…                 # retry a failed delivery
 ```
 
+### AI assistant (`orva chat`)
+
+The same AI assistant as the dashboard's **AI** sidebar, in the terminal. It can
+operate your instance end-to-end (list/deploy functions, read logs, manage
+secrets, …). Providers, API keys, the default model, and the approval policy are
+configured in the web UI under **Settings → AI**; the CLI uses that saved
+selection.
+
+```bash
+# Interactive streaming REPL (banner shows the active provider/model).
+orva chat
+#   slash commands: /help /model /thinking /new /clear /yolo /exit
+#   Ctrl-C aborts the current turn; Ctrl-D exits.
+
+# One-shot — prints the reply to stdout and exits (pipe-friendly).
+orva chat -p "list my functions and their status"
+echo "what failed today?" | orva chat -p @-
+
+# Per-session overrides (don't change the saved default):
+orva chat --model gpt-4o --thinking deep -p "summarize recent errors"
+```
+
+Write/destructive tools pause for a `[y/N]` approval per the server's policy;
+reads and invokes run freely. In non-interactive use (piped), a tool that needs
+approval **fails closed** unless you pass `--auto-approve`. On a terminal the
+reply is rendered as markdown; piped, it's plain text (`--raw` forces plain).
+
+### Reference docs (`orva docs`)
+
+```bash
+orva docs            # render the full Orva reference, paged through $PAGER
+orva docs --raw      # raw markdown (for grep / redirect)
+orva docs | grep -i webhook
+```
+
+`orva docs` ships the same reference the dashboard and the AI assistant use,
+embedded in the binary — no network needed.
+
 ---
 
 ## Command reference
@@ -593,6 +631,8 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | `orva diff <name> [--from --to] [-o json] [--no-color]` | Git-style unified diff between two past deployments |
 | `orva activity [--follow \| --source X]` | Audit log: every API call, CLI command, MCP invoke |
 | `orva system health / metrics / db-stats / storage / vacuum` | Diagnostics + maintenance |
+| `orva chat [-p MSG]` | Chat with the Orva AI assistant — interactive REPL, or one-shot with `-p` |
+| `orva docs [--raw]` | Render the Orva reference documentation in the terminal |
 | `orva upgrade` | Self-update from the latest GitHub release |
 | `orva completion <shell>` | Emit a completion script (see below) |
 | `orva --version` | Build identity (matches `/api/v1/system/health`) |
@@ -801,7 +841,7 @@ perspective; the slim CLI is just smaller.
 | Linux | ✅ (amd64, arm64) | ✅ (amd64, arm64) |
 | macOS | ✅ (amd64, arm64) | ❌ (nsjail is Linux-only) |
 | Windows | ✅ (amd64, arm64) | ❌ |
-| Size | ~12 MB | ~20 MB |
+| Size | ~20 MB | ~55 MB |
 | `orva serve` | ❌ | ✅ |
 | `orva setup` | ❌ | ✅ |
 | `orva init` | ❌ | ✅ |

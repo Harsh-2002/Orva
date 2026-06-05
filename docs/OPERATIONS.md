@@ -77,11 +77,35 @@ curl -s -H "X-Orva-API-Key: $KEY" "http://localhost:8443/api/v1/executions/$EXEC
 
 Look at the `stderr`. If empty, the worker died before writing —
 common causes: missing dependency (typo in `requirements.txt`), wrong
-entrypoint, runtime version mismatch (`requirements.txt` references a
-package that doesn't have a 3.13 wheel).
+entrypoint, or a package with no wheel for the runtime's Python (3.14).
 
 **Fix.** Redeploy with corrected code; or rollback to the last known
 good version via the Deployments view.
+
+## Symptom: EVERY function returns `WORKER_CRASHED` right after a bare-metal install
+
+**Diagnosis.** If *nothing* invokes (even a trivial handler) and the
+`stderr` is empty, nsjail can't set up its sandbox in this host
+environment — not a code problem. Two host-level causes seen on some
+kernels/VMs:
+
+- **`/proc` overmount.** `journalctl -u orva` shows nsjail
+  `Failed to mount mandatory point: '/proc'`. Caused by the systemd
+  unit's `ProtectKernelTunables=true` overmounting `/proc/sys`, which
+  blocks nsjail's procfs mount inside its user namespace. The shipped
+  unit (`scripts/install.sh`) no longer sets this; if you have an older
+  unit, remove the `ProtectKernelTunables=true` line and
+  `systemctl daemon-reload && systemctl restart orva`.
+- **cgroup controllers not delegated.** When systemd doesn't delegate
+  the cgroup v2 controllers to the service (constrained/cloud VMs),
+  Orva now logs `cgroup v2 controllers not delegated; per-sandbox
+  memory/pid/cpu caps disabled (rlimit-only fallback)` at startup and
+  runs functions **without** hard per-sandbox memory caps rather than
+  crashing. Older builds crashed every worker here — upgrade to fix.
+
+Quick confirmation that nsjail itself works on the host:
+`sudo -u orva nsjail -Mo --chroot /var/lib/orva/rootfs/node -T /tmp -- /usr/local/bin/node --version`
+should print the Node version.
 
 ## Symptom: deploys stuck in `building` forever
 
