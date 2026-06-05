@@ -84,7 +84,7 @@ against the real artifacts).
    that exact commit (a status lookup — seconds, not a test run; it polls briefly if you tag
    right after the merge). It **refuses to build** if either is missing or red. On pass it builds
    + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
-   checksums, and the GitHub Release, then redeploys + prunes ghcr. Every build job `needs: gate`.
+   checksums, and the GitHub Release, then prunes ghcr. Every build job `needs: gate`.
    *Emergency/rc only:* `workflow_dispatch` with `force=true` skips the gate.
 3. **On release publish**, dispatch `install-e2e` + `cli-e2e` against the freshly-published
    artifacts (a `GITHUB_TOKEN`-created release does not auto-fire downstream workflows, so trigger

@@ -207,7 +207,7 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    The release's `gate` confirms `ci` + `e2e` already passed for that commit
    (seconds, not a test run; it polls briefly if you tag right after the merge)
    and refuses to build if either is missing or red. On pass it builds + publishes
-   everything, then redeploys + prunes ghcr. The arm64 rootfs builds are the
+   everything, then prunes ghcr. The arm64 rootfs builds are the
    slowest leg.
 3. **On release publish**, dispatch `install-e2e` + `cli-e2e` against the
    freshly-published artifacts (a `GITHUB_TOKEN`-created release does not auto-fire
