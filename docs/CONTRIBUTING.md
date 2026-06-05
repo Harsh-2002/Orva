@@ -167,35 +167,65 @@ The same harness drives `.github/workflows/install-e2e.yml` in CI.
 
 ## CI
 
-Two workflows on push:
+Two single-purpose pipelines: **verify on push/PR, ship on tag.** All testing
+lives in the verify pipeline; the release pipeline does no testing.
 
-- **`ci.yml`** — go vet/test/build, frontend build, shell-lint, docker
-  smoke build.
-- **`install-test.yml`** — runs `scripts/install.sh` (dryrun) in
-  containers for ubuntu, debian, alpine, rocky, arch on every push.
+Verification (on push to `main` + every PR):
 
-A third runs on `v*` tag push:
+- **`ci.yml`** — shellcheck + go vet/test/build, frontend build, docker
+  smoke build. Path-filtered (skips docs-only changes).
+- **`e2e.yml`** — full programmatic end-to-end suite against a running server.
+- **`cli-e2e.yml`** — CLI build matrix, `install-cli.{sh,ps1}`, upgrade
+  round-trip. On PR (CLI paths) + on `release:published` against real artifacts.
+- **`install-e2e.yml`** — bare-metal `scripts/install.sh` end-to-end per distro
+  (privileged systemd-in-docker). On PR (install paths) + on `release:published`.
 
-- **`release.yml`** — full multi-arch build matrix, publishes a
-  GitHub Release with static binaries + rootfs tarballs + multi-arch
-  Docker image to `ghcr.io/harsh-2002/orva`.
+Ship (on `v*` tag push):
+
+- **`release.yml`** — a fast **`gate`** job verifies the tagged commit's `ci` +
+  `e2e` already concluded `success` (a status lookup, not a re-run), then builds
+  the multi-arch Docker image, all CLI binaries, rootfs tarballs, and checksums,
+  and publishes the GitHub Release + `ghcr.io/harsh-2002/orva`. **No tests run in
+  the release** — it trusts the already-green checks on that exact SHA. A
+  `workflow_dispatch` with `force=true` bypasses the gate for emergency/rc builds.
 
 ## Releasing
 
-One active release at a time. Delete the existing one first, then tag HEAD:
+**One active release at a time** — never delete the old release *before* the new
+one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
+"latest" → 404). The flow:
 
-```bash
-# Replace v2026.05.06 with the tag currently listed on the Releases page
-gh release delete v2026.05.06 --yes
-git tag -d v2026.05.06 && git push origin --delete v2026.05.06
+1. **Merge to `main`** and wait for **`ci`** + **`e2e`** to go green on the merge
+   commit. This is the verification — the release will not re-run it.
+2. **Tag today's date (zero-padded) and push:**
 
-# Tag today's date (zero-padded)
-git tag v$(date -u +%Y.%m.%d) && git push origin v$(date -u +%Y.%m.%d)
-```
+   ```bash
+   git tag -a v$(date -u +%Y.%m.%d) -m "Orva v$(date -u +%Y.%m.%d)"
+   git push origin v$(date -u +%Y.%m.%d)
+   ```
 
-The release workflow builds the multi-arch Docker image, all CLI binaries,
-rootfs tarballs, and checksums automatically. Takes ~15 minutes; the arm64
-rootfs builds are the slowest leg.
+   The release's `gate` confirms `ci` + `e2e` already passed for that commit
+   (seconds, not a test run; it polls briefly if you tag right after the merge)
+   and refuses to build if either is missing or red. On pass it builds + publishes
+   everything, then redeploys + prunes ghcr. The arm64 rootfs builds are the
+   slowest leg.
+3. **On release publish**, dispatch `install-e2e` + `cli-e2e` against the
+   freshly-published artifacts (a `GITHUB_TOKEN`-created release does not auto-fire
+   downstream workflows):
+
+   ```bash
+   gh workflow run install-e2e.yml && gh workflow run cli-e2e.yml
+   ```
+
+4. **After** the new release is confirmed live, prune the previous one — last,
+   not first:
+
+   ```bash
+   gh release delete v<old-tag> --yes --cleanup-tag   # removes the release + its tag
+   ```
+
+The full policy (gate internals, force bypass, build-time identity stamping) lives
+in the root `CLAUDE.md`.
 
 ## Filing issues
 
