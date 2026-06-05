@@ -1581,6 +1581,8 @@ orva system health      # smoke test
 | `orva keys` | list / create / revoke | Manage API keys |
 | `orva activity` | [--tail] [--source web|api|...] | Paginated activity rows; live SSE with --tail |
 | `orva system` | health / metrics / db-stats / vacuum | Server diagnostics |
+| `orva chat` | [-p MSG] | Chat with the AI assistant — interactive REPL or one-shot |
+| `orva docs` | [--raw] | Render this reference in the terminal |
 | `orva setup` | [--skip-nsjail] [--skip-rootfs] | Install nsjail + rootfs on a bare host |
 | `orva serve` | [--port N] | Run as the server daemon (not the CLI client) |
 | `orva completion` | bash / zsh / fish / powershell | Emit shell completion script |

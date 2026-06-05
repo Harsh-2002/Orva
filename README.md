@@ -4,8 +4,8 @@
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fharsh--2002%2Forva-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/Harsh-2002/Orva/pkgs/container/orva)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
-[![Node](https://img.shields.io/badge/Node.js-22%20%7C%2024-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
-[![Python](https://img.shields.io/badge/Python-3.13%20%7C%203.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Node](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
+[![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 
 **Self-hosted Functions-as-a-Service for your homelab or on-prem server.**
 
@@ -72,7 +72,7 @@ to install just the client. Then open **http://localhost:8443**.
 ## Install just the CLI
 
 If you only need to talk to a remote Orva server (operator laptop, CI
-runner, etc.), grab the ~12 MB standalone CLI. No Docker required, no
+runner, etc.), grab the standalone CLI. No Docker required, no
 server install. Ships for Linux + macOS + Windows × amd64 + arm64.
 
 **Linux + macOS:**
@@ -92,7 +92,9 @@ Then:
 ```bash
 orva login --endpoint https://your-orva.example.com --api-key orva_...
 orva functions list
-orva upgrade            # in-place self-update from GitHub
+orva chat -p "how many functions do I have?"   # the AI assistant, in your terminal
+orva docs                                       # the full reference, offline
+orva upgrade                                    # in-place self-update from GitHub
 ```
 
 Full CLI docs at [docs/CLI.md](docs/CLI.md) — configuration (flag /
@@ -158,7 +160,7 @@ The Build info card at the top of Settings shows the running release's version, 
 | **Version diff** | Side-by-side source diff between any two past deployments — in the dashboard (CodeMirror merge view) or `orva diff <fn>` for git-style unified output in the terminal. |
 | **MCP server** | 70 tools at `/mcp` — any MCP client (Claude Code, Cursor, etc.) can create functions, deploy code, manage secrets, browse KV, and read logs. |
 | **OAuth 2.1** | Add Orva as a custom connector in claude.ai or other OAuth-capable MCP clients — no API key copy-paste needed. |
-| **Built-in AI assistant** | An in-product agentic chat (the dashboard's **AI** section) that operates your instance end-to-end — create and deploy functions, read logs, manage secrets and routes — using the same tools as the MCP server, in-process. Bring your own provider key (OpenAI, Anthropic, or any OpenAI-compatible endpoint); writes can be gated behind per-conversation approval. |
+| **Built-in AI assistant** | An in-product agentic chat (the dashboard's **AI** section, or the terminal via `orva chat`) that operates your instance end-to-end — create and deploy functions, read logs, manage secrets and routes — using the same tools as the MCP server, in-process. Bring your own provider key (OpenAI, Anthropic, or any OpenAI-compatible endpoint); writes can be gated behind per-conversation approval. |
 | **16 templates** | Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener, and more — pickable in the editor. |
 
 ---
@@ -322,16 +324,20 @@ curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/orva-cli-
 
 orva login --endpoint https://orva.example.com --api-key <key>
 orva functions list
-orva deploy ./src --name my-fn --runtime node
+orva deploy ./src --name my-fn --runtime node    # runtimes: node | python
 orva invoke my-fn --body '{"name":"world"}'
 orva logs my-fn --follow
+orva chat                                        # the AI assistant in your terminal
+orva docs                                        # the full reference, rendered offline
 ```
 
 Every command takes `-o json` for machine-readable output (data on
 stdout, status on stderr — so `orva … | jq` is always clean), and
 `orva invoke … --stream` streams a function's response chunk-by-chunk.
+`orva chat` (interactive REPL or one-shot `-p`) drives the same AI
+assistant as the dashboard, straight from the terminal.
 
-Binaries: `linux-amd64`, `linux-arm64`, `darwin-arm64`. Fully static, no runtime deps.
+Binaries: Linux, macOS, and Windows × amd64 + arm64. Fully static, no runtime deps.
 
 ---
 
@@ -363,7 +369,7 @@ make build-all    # production binary → ./build/orva
 make test         # go test ./...
 ```
 
-Requires Go 1.25+, Node 22+, and nsjail on Linux for sandbox invocations.
+Requires Go 1.26+, Node 24+, and nsjail on Linux for sandbox invocations.
 
 ---
 
