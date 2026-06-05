@@ -178,27 +178,6 @@ const shots: [string, string, string][] = [
         </a>
       </div>
 
-      <div class="hero-cmd code">
-        <div class="code-bar">
-          <span>~ /</span>
-          <button class="copy" data-copy="#hero-cmd-text">Copy</button>
-        </div>
-        <pre
-          id="hero-cmd-text"><code>{`docker run -d --name orva -p 8443:8443 \\
-  --pid host --cgroupns host \\
-  --cap-add SYS_ADMIN --cap-add NET_ADMIN \\
-  --security-opt seccomp=unconfined \\
-  --security-opt apparmor=unconfined \\
-  --security-opt systempaths=unconfined \\
-  --device /dev/net/tun \\
-  -v orva-data:/var/lib/orva \\
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \\
-  ghcr.io/harsh-2002/orva:latest`}</code></pre>
-      </div>
-
-      <p class="hero-foot">
-        Open <code>https://localhost:8443</code> · onboarding takes ~30 seconds.
-      </p>
     </div>
   </section>
 
@@ -469,13 +448,6 @@ volumes:
           </div>
         </article>
       </div>
-
-      <p class="sec-foot">
-        Prefer one command for everything? The universal installer auto-detects your host —
-        <code>curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh</code>
-        picks Docker when it's present, bare-metal otherwise. Add <code>--docker</code>,
-        <code>--bare-metal</code>, or <code>--cli-only</code> to force a mode.
-      </p>
     </div>
   </section>
 
@@ -600,6 +572,19 @@ export default handler;`}</code></pre>
 </Layout>
 
 <style>
+  /* Anchor targets (e.g. "Install — 30 seconds" → #install) clear the
+     fixed masthead instead of landing hidden behind it. */
+  .hero[id],
+  .sec[id] {
+    scroll-margin-top: 96px;
+  }
+  @media (max-width: 480px) {
+    .hero[id],
+    .sec[id] {
+      scroll-margin-top: 80px;
+    }
+  }
+
   /* ── Masthead ─────────────────────────────────────────── */
   .masthead {
     position: fixed;
@@ -749,28 +734,6 @@ export default handler;`}</code></pre>
     gap: 14px;
     margin-top: 40px;
     margin-bottom: 56px;
-  }
-
-  .hero-cmd {
-    max-width: 820px;
-  }
-  .hero-cmd pre {
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .hero-foot {
-    margin-top: 16px;
-    color: var(--subtle);
-    font-size: 0.8125rem;
-    font-family: var(--mono);
-    letter-spacing: 0.02em;
-  }
-  .hero-foot code {
-    font-family: var(--mono);
-    background: transparent;
-    border: none;
-    padding: 0;
-    color: var(--fg);
   }
 
   /* ── 01 · Capabilities ────────────────────────────────── */
