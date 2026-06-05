@@ -4,26 +4,6 @@ import Layout from '../layouts/Layout.astro';
 const base = import.meta.env.BASE_URL;
 const baseTrim = base.replace(/\/$/, '');
 
-// Fetch latest release tag at build time (best-effort; falls back gracefully)
-let latestVersion = 'v2026.06.05';
-let latestUrl = 'https://github.com/Harsh-2002/Orva/releases/latest';
-try {
-  const r = await fetch('https://api.github.com/repos/Harsh-2002/Orva/releases/latest', {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'orva-site-build',
-      ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
-    },
-  });
-  if (r.ok) {
-    const j: { tag_name?: string; html_url?: string } = await r.json();
-    if (j.tag_name) latestVersion = j.tag_name;
-    if (j.html_url) latestUrl = j.html_url;
-  }
-} catch {
-  /* offline build or rate-limit — keep fallback */
-}
-
 const capabilities: [string, string][] = [
   ['Multi-runtime', 'Node.js 24, Python 3.14, and TypeScript — two generic runtimes, latest-stable only.'],
   [
@@ -178,17 +158,6 @@ const shots: [string, string, string][] = [
   <section class="hero" id="top">
     <div class="inner hero-inner">
       <div class="hero-meta">
-        <a
-          class="overline ver-pill"
-          href={latestUrl}
-          target="_blank"
-          rel="noopener"
-          aria-label={`Latest release ${latestVersion} on GitHub`}
-        >
-          <span class="ver-dot" aria-hidden="true"></span>
-          <span class="ver-text">{latestVersion} · latest</span>
-        </a>
-        <span class="hero-meta-sep" aria-hidden="true">/</span>
         <span class="hero-meta-build">self-hosted · MIT</span>
       </div>
 
@@ -600,32 +569,6 @@ export default handler;`}</code></pre>
       </div>
     </div>
   </section>
-
-  <script>
-    // Keep the release pill current without a site rebuild. The build-time
-    // fetch (frontmatter) gives the initial value; this refreshes it live on
-    // every visit from the GitHub Releases API, so cutting a release updates
-    // the site with no redeploy. Silently keeps the build-time value on
-    // rate-limit / offline.
-    (async () => {
-      const pill = document.querySelector('.ver-pill');
-      const text = pill?.querySelector('.ver-text');
-      if (!pill || !text) return;
-      try {
-        const res = await fetch('https://api.github.com/repos/Harsh-2002/Orva/releases/latest', {
-          headers: { Accept: 'application/vnd.github+json' },
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data.tag_name) return;
-        text.textContent = `${data.tag_name} · latest`;
-        if (data.html_url) pill.setAttribute('href', data.html_url);
-        pill.setAttribute('aria-label', `Latest release ${data.tag_name} on GitHub`);
-      } catch {
-        /* offline or rate-limited — keep the build-time value */
-      }
-    })();
-  </script>
 </Layout>
 
 <style>
@@ -748,55 +691,13 @@ export default handler;`}</code></pre>
     letter-spacing: 0.16em;
     text-transform: uppercase;
   }
-  .hero-meta-sep {
-    color: var(--faint);
-  }
   .hero-meta-build {
     color: var(--subtle);
-  }
-
-  .ver-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--accent-hi);
-    border: 1px solid var(--border-hi);
-    padding: 4px 10px;
-    transition:
-      background 140ms,
-      border-color 140ms,
-      color 140ms;
-  }
-  .ver-pill:hover {
-    background: var(--surface);
-    color: var(--fg);
-    border-color: var(--fg);
-  }
-  .ver-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 0 3px color-mix(in oklab, var(--green) 22%, transparent);
-    animation: ver-pulse 2.4s ease-in-out infinite;
-    flex-shrink: 0;
-  }
-  @keyframes ver-pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.55;
-    }
   }
   @media (max-width: 480px) {
     .hero-meta {
       flex-wrap: wrap;
       gap: 10px;
-    }
-    .hero-meta-sep {
-      display: none;
     }
   }
 
