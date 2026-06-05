@@ -13,8 +13,8 @@ make dev    # frontend on :5173 with hot reload, backend on :8443
 
 Requires:
 
-- **Go 1.25+**
-- **Node 22+**
+- **Go 1.26+** (the embedded AI gateway requires it)
+- **Node 24+**
 - **nsjail** on PATH — easy install: `make build-nsjail` (clones
   google/nsjail, builds with apt deps; needs `libprotobuf-dev`,
   `libnl-route-3-dev`, `bison`, `flex`).
