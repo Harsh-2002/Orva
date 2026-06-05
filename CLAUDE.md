@@ -64,15 +64,32 @@ Dockerfile        Multi-stage image (dev and production — single file)
 
 ## Release Policy
 
-**One active release at a time** — and **validate first, release last**. Order matters: never delete the old release *before* the new one is live (that opens a window where `install.sh`/`install-cli.sh` resolve "latest" → 404). The flow:
+**Two single-purpose pipelines: verify on push/PR, ship on tag.** The release pipeline does
+**no testing** — it gates on the tagged commit's checks already being green, then builds and
+publishes. All verification (`ci` = shellcheck + go vet/test/build + ui build + docker smoke,
+and `e2e` = full programmatic suite) runs on every PR and on the push to `main`; `cli-e2e` /
+`install-e2e` cover the CLI + bare-metal install (on PR for source, on `release:published`
+against the real artifacts).
 
-1. **Merge to `main`** and wait for **CI** + **e2e** to go green on the merge commit (these build from source — no release needed).
+**One active release at a time** — never delete the old release *before* the new one is live
+(that opens a window where `install.sh`/`install-cli.sh` resolve "latest" → 404). The flow:
+
+1. **Merge to `main`** and wait for **CI** + **e2e** to go green on the merge commit. This is the
+   verification — the release will not re-run it.
 2. **Tag today's date and push** (zero-padded `vYYYY.MM.DD`):
    ```bash
    git tag -a v2026.05.03 -m "Orva v2026.05.03" && git push origin v2026.05.03
    ```
-   The Release workflow then **validates** (`go vet` + race tests) and *only on success* builds + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs, checksums, and the GitHub Release. Nothing is built or published if validation fails (every build job `needs: validate`).
-3. **On release publish**, `install-e2e` and `cli-e2e` run automatically against the freshly-published artifacts (they no longer trigger on main-push, which used to race the release cut).
+   The Release workflow's **`gate`** job confirms `CI` + `e2e` already concluded `success` for
+   that exact commit (a status lookup — seconds, not a test run; it polls briefly if you tag
+   right after the merge). It **refuses to build** if either is missing or red. On pass it builds
+   + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
+   checksums, and the GitHub Release, then redeploys + prunes ghcr. Every build job `needs: gate`.
+   *Emergency/rc only:* `workflow_dispatch` with `force=true` skips the gate.
+3. **On release publish**, dispatch `install-e2e` + `cli-e2e` against the freshly-published
+   artifacts (a `GITHUB_TOKEN`-created release does not auto-fire downstream workflows, so trigger
+   them with `gh workflow run`). The `cli-e2e` upgrade-leg upgrades from the *previous* release's
+   binary, so it stays red until the next release makes this one the baseline — expected.
 4. **After** the new release is confirmed live, prune the previous one — last, not first:
    ```bash
    gh release delete v<old-tag> --yes --cleanup-tag   # removes the release + its tag
