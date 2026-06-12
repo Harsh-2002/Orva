@@ -437,7 +437,9 @@ func (s *chatSession) runTurn(parent context.Context, content string) error {
 		fmt.Fprintln(s.errOut, s.styles.Muted.Render("("+res.note+")"))
 	}
 	if res.errMsg != "" {
-		s.printError(res.errMsg)
+		// Return without printing: the REPL prints returned errors itself and
+		// the one-shot path surfaces them via cobra — printing here too showed
+		// every stream error twice.
 		return errors.New(res.errMsg)
 	}
 	return nil
@@ -607,6 +609,10 @@ func (s *chatSession) drive(resp *http.Response) (turnResult, error) {
 			}
 			_ = json.Unmarshal([]byte(data), &d)
 			res.errMsg = d.Message
+			// The error path sends no message_end — close out whatever
+			// streamed so the error doesn't land on the same row as a
+			// truncated half-answer.
+			s.finishMessage(text.String(), textStarted && !interleaved)
 			return true, nil
 		}
 		return false, nil

@@ -81,7 +81,11 @@ export const useAIStore = defineStore('ai', () => {
     if (!activeId.value) return
     try {
       const { data } = await apiClient.get(`/ai/conversations/${activeId.value}`)
-      timeline.value = buildTimeline(data)
+      // Error items live only in the optimistic timeline (the server has no
+      // notion of them) — carry them across the rebuild or the ErrorCard for
+      // a just-failed turn vanishes the moment the post-turn refresh lands.
+      const errors = timeline.value.filter((it) => it.kind === 'error')
+      timeline.value = [...buildTimeline(data), ...errors]
     } catch { /* keep the optimistic timeline on a refresh failure */ }
   }
 
@@ -205,6 +209,16 @@ export const useAIStore = defineStore('ai', () => {
       case 'error':
         pushError(data.message || 'stream error', data.code)
         streaming.value = false
+        // The error path sends no message_end, so settle the streaming
+        // assistant message here too: stop the thinking timer/shimmer and
+        // release the index so the next turn starts a fresh message.
+        if (curIdx >= 0) {
+          patchAssistant((m) => {
+            const i = m.parts.findIndex((p) => p.type === 'thinking')
+            if (i >= 0) m.parts[i] = { ...m.parts[i], streaming: false }
+          })
+        }
+        curIdx = -1
         break
     }
   }

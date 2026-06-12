@@ -73,73 +73,105 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 	go func() {
 		defer close(out)
 		defer cancel()
-
-		// Tool calls arrive incrementally (per OpenAI streaming): each delta
-		// carries a tool-call index plus a fragment of the name/arguments. We
-		// accumulate by index and assemble the complete calls at finish.
-		byIndex := map[int]*toolAcc{}
-		var order []int
-		var finish string
-		var usage *Usage
-
-		for chunk := range stream {
-			if chunk == nil {
-				continue
-			}
-			if chunk.BifrostError != nil {
-				out <- Event{Type: EventError, Err: errors.New(bifrostErr(chunk.BifrostError))}
-				return
-			}
-			resp := chunk.BifrostChatResponse
-			if resp == nil {
-				continue
-			}
-			if resp.Usage != nil {
-				usage = &Usage{
-					PromptTokens:     resp.Usage.PromptTokens,
-					CompletionTokens: resp.Usage.CompletionTokens,
-					TotalTokens:      resp.Usage.TotalTokens,
-				}
-			}
-			for i := range resp.Choices {
-				choice := resp.Choices[i]
-				if choice.FinishReason != nil && *choice.FinishReason != "" {
-					finish = *choice.FinishReason
-				}
-				sc := choice.ChatStreamResponseChoice
-				if sc == nil || sc.Delta == nil {
-					continue
-				}
-				d := sc.Delta
-				if d.Content != nil && *d.Content != "" {
-					out <- Event{Type: EventText, Text: *d.Content}
-				}
-				if d.Reasoning != nil && *d.Reasoning != "" {
-					out <- Event{Type: EventThinking, Text: *d.Reasoning}
-				}
-				for _, tc := range d.ToolCalls {
-					idx := int(tc.Index)
-					a := byIndex[idx]
-					if a == nil {
-						a = &toolAcc{}
-						byIndex[idx] = a
-						order = append(order, idx)
-					}
-					if tc.ID != nil && *tc.ID != "" {
-						a.id = *tc.ID
-					}
-					if tc.Function.Name != nil && *tc.Function.Name != "" {
-						a.name = *tc.Function.Name
-					}
-					a.args.WriteString(tc.Function.Arguments)
-				}
-			}
-		}
-
-		out <- Event{Type: EventDone, ToolCalls: assembleToolCalls(order, byIndex), FinishReason: finish, Usage: usage}
+		pump(ctx, stream, out)
 	}()
 
 	return out, nil
+}
+
+// pump consumes one provider stream and translates it into neutral events.
+// It always terminates the event stream with exactly one EventDone or
+// EventError. Split out of Stream so the termination logic is unit-testable
+// with a synthetic chunk channel.
+func pump(ctx context.Context, stream chan *schemas.BifrostStreamChunk, out chan<- Event) {
+	// Tool calls arrive incrementally (per OpenAI streaming): each delta
+	// carries a tool-call index plus a fragment of the name/arguments. We
+	// accumulate by index and assemble the complete calls at finish.
+	byIndex := map[int]*toolAcc{}
+	var order []int
+	var finish string
+	var usage *Usage
+
+	for chunk := range stream {
+		if chunk == nil {
+			continue
+		}
+		if chunk.BifrostError != nil {
+			// When the request context is already cancelled, the provider error
+			// is just the wreckage of our own abort (Bifrost may surface the
+			// cancellation as an error chunk instead of a bare channel close).
+			// Surface the context error so callers can keep filtering routine
+			// disconnects out of the error log with errors.Is.
+			err := error(errors.New(bifrostErr(chunk.BifrostError)))
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				err = ctxErr
+			}
+			out <- Event{Type: EventError, Err: err}
+			return
+		}
+		resp := chunk.BifrostChatResponse
+		if resp == nil {
+			continue
+		}
+		if resp.Usage != nil {
+			usage = &Usage{
+				PromptTokens:     resp.Usage.PromptTokens,
+				CompletionTokens: resp.Usage.CompletionTokens,
+				TotalTokens:      resp.Usage.TotalTokens,
+			}
+		}
+		for i := range resp.Choices {
+			choice := resp.Choices[i]
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				finish = *choice.FinishReason
+			}
+			sc := choice.ChatStreamResponseChoice
+			if sc == nil || sc.Delta == nil {
+				continue
+			}
+			d := sc.Delta
+			if d.Content != nil && *d.Content != "" {
+				out <- Event{Type: EventText, Text: *d.Content}
+			}
+			if d.Reasoning != nil && *d.Reasoning != "" {
+				out <- Event{Type: EventThinking, Text: *d.Reasoning}
+			}
+			for _, tc := range d.ToolCalls {
+				idx := int(tc.Index)
+				a := byIndex[idx]
+				if a == nil {
+					a = &toolAcc{}
+					byIndex[idx] = a
+					order = append(order, idx)
+				}
+				if tc.ID != nil && *tc.ID != "" {
+					a.id = *tc.ID
+				}
+				if tc.Function.Name != nil && *tc.Function.Name != "" {
+					a.name = *tc.Function.Name
+				}
+				a.args.WriteString(tc.Function.Arguments)
+			}
+		}
+	}
+
+	// A healthy stream always reports a finish reason ("stop", "tool_calls", …)
+	// before the provider closes it. The channel closing without one means the
+	// upstream connection was reset or the response was truncated mid-stream —
+	// reporting Done here would hand the caller a half answer (or half a tool
+	// call) marked as success.
+	if finish == "" {
+		err := ctx.Err()
+		if err == nil {
+			err = errors.New("provider stream ended unexpectedly (connection reset or truncated response)")
+		}
+		// Usage may have arrived before the cut — pass it along so the turn's
+		// token accounting survives the error path.
+		out <- Event{Type: EventError, Err: err, Usage: usage}
+		return
+	}
+
+	out <- Event{Type: EventDone, ToolCalls: assembleToolCalls(order, byIndex), FinishReason: finish, Usage: usage}
 }
 
 // toolAcc accumulates the streamed fragments of one tool call (its id, name, and
@@ -259,12 +291,22 @@ func toBifrostMessage(m Message) schemas.ChatMessage {
 			for _, tc := range m.ToolCalls {
 				id := tc.ID
 				name := tc.Name
+				// Replay only valid-JSON arguments. A persisted call whose args
+				// were cut mid-stream (or emitted malformed by the model) would
+				// otherwise be replayed verbatim on every subsequent iteration
+				// AND every future turn of the conversation — strict providers
+				// reject the whole request, permanently bricking the chat. The
+				// model already saw the failure in the call's tool result.
+				args := tc.Arguments
+				if strings.TrimSpace(args) == "" || !json.Valid([]byte(args)) {
+					args = "{}"
+				}
 				calls = append(calls, schemas.ChatAssistantMessageToolCall{
 					Type: ptrStr("function"),
 					ID:   &id,
 					Function: schemas.ChatAssistantMessageToolCallFunction{
 						Name:      &name,
-						Arguments: tc.Arguments,
+						Arguments: args,
 					},
 				})
 			}
