@@ -39,8 +39,6 @@ jobs:
         run: npm run lint
 
       - name: Build Astro site
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build
 
       - name: Upload Pages artifact
