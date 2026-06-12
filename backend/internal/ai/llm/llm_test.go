@@ -152,6 +152,27 @@ func TestPumpRejectsTruncatedToolCall(t *testing.T) {
 	}
 }
 
+// TestPumpAssemblesFragmentedToolCall: tool-call arguments arrive as indexed
+// fragments across deltas (id/name only on the first); a properly finished
+// stream must reassemble them into one complete call.
+func TestPumpAssemblesFragmentedToolCall(t *testing.T) {
+	events := runPump(context.Background(),
+		toolFragmentChunk(0, "call_1", "create_function", `{"na`),
+		toolFragmentChunk(0, "", "", `me":"demo"}`),
+		finishChunk("tool_calls"))
+	last := events[len(events)-1]
+	if last.Type != EventDone {
+		t.Fatalf("expected EventDone, got %s (%v)", last.Type, last.Err)
+	}
+	if len(last.ToolCalls) != 1 {
+		t.Fatalf("expected 1 assembled call, got %d", len(last.ToolCalls))
+	}
+	tc := last.ToolCalls[0]
+	if tc.ID != "call_1" || tc.Name != "create_function" || tc.Arguments != `{"name":"demo"}` {
+		t.Errorf("fragments not reassembled: %+v", tc)
+	}
+}
+
 // TestPumpCancelledContextClassifiedAsCancellation: when the request context
 // is cancelled (client disconnect), the terminating error must be the context
 // error so callers can keep filtering cancellations out of the error log.

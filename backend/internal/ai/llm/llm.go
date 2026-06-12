@@ -97,7 +97,16 @@ func pump(ctx context.Context, stream chan *schemas.BifrostStreamChunk, out chan
 			continue
 		}
 		if chunk.BifrostError != nil {
-			out <- Event{Type: EventError, Err: errors.New(bifrostErr(chunk.BifrostError))}
+			// When the request context is already cancelled, the provider error
+			// is just the wreckage of our own abort (Bifrost may surface the
+			// cancellation as an error chunk instead of a bare channel close).
+			// Surface the context error so callers can keep filtering routine
+			// disconnects out of the error log with errors.Is.
+			err := error(errors.New(bifrostErr(chunk.BifrostError)))
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				err = ctxErr
+			}
+			out <- Event{Type: EventError, Err: err}
 			return
 		}
 		resp := chunk.BifrostChatResponse
@@ -156,7 +165,9 @@ func pump(ctx context.Context, stream chan *schemas.BifrostStreamChunk, out chan
 		if err == nil {
 			err = errors.New("provider stream ended unexpectedly (connection reset or truncated response)")
 		}
-		out <- Event{Type: EventError, Err: err}
+		// Usage may have arrived before the cut — pass it along so the turn's
+		// token accounting survives the error path.
+		out <- Event{Type: EventError, Err: err, Usage: usage}
 		return
 	}
 
@@ -280,12 +291,22 @@ func toBifrostMessage(m Message) schemas.ChatMessage {
 			for _, tc := range m.ToolCalls {
 				id := tc.ID
 				name := tc.Name
+				// Replay only valid-JSON arguments. A persisted call whose args
+				// were cut mid-stream (or emitted malformed by the model) would
+				// otherwise be replayed verbatim on every subsequent iteration
+				// AND every future turn of the conversation — strict providers
+				// reject the whole request, permanently bricking the chat. The
+				// model already saw the failure in the call's tool result.
+				args := tc.Arguments
+				if strings.TrimSpace(args) == "" || !json.Valid([]byte(args)) {
+					args = "{}"
+				}
 				calls = append(calls, schemas.ChatAssistantMessageToolCall{
 					Type: ptrStr("function"),
 					ID:   &id,
 					Function: schemas.ChatAssistantMessageToolCallFunction{
 						Name:      &name,
-						Arguments: tc.Arguments,
+						Arguments: args,
 					},
 				})
 			}

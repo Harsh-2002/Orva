@@ -88,7 +88,9 @@ type Event struct {
 	// requested this turn (empty if the model produced only text).
 	ToolCalls []ToolCall
 
-	// FinishReason and Usage are set on EventDone when the provider reports them.
+	// FinishReason and Usage are set on EventDone when the provider reports
+	// them. Usage may also accompany an EventError when the provider reported
+	// it before the stream was cut, so token accounting survives the error path.
 	FinishReason string
 	Usage        *Usage
 

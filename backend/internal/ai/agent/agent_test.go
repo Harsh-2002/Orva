@@ -109,13 +109,12 @@ func TestRunToolCallValidArgsStillDispatch(t *testing.T) {
 
 // ─── loop-breaker signal ─────────────────────────────────────────────────────
 
-// TestProcessToolCallsAllFailedSignal: the third return value feeds the
-// agent's loop-breaker; it must be true only when every dispatched call in
-// the round failed.
-func TestProcessToolCallsAllFailedSignal(t *testing.T) {
-	failing := func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
-		return nil, errors.New("boom")
-	}
+// TestProcessToolCallsFailedSignatures: the third return value feeds the
+// agent's loop-breaker; it must carry the signature (name + args) of exactly
+// the calls that failed, so the breaker can track per-call streaks — a
+// succeeding companion call must not mask a repeatedly failing one, and
+// distinct failing probes must not be conflated into one signature.
+func TestProcessToolCallsFailedSignatures(t *testing.T) {
 	succeedFor := func(okName string) Dispatcher {
 		return func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
 			if name == okName {
@@ -125,20 +124,32 @@ func TestProcessToolCallsAllFailedSignal(t *testing.T) {
 		}
 	}
 	calls := []llm.ToolCall{
-		{ID: "c1", Name: "alpha", Arguments: `{}`},
+		{ID: "c1", Name: "alpha", Arguments: `{"x":1}`},
 		{ID: "c2", Name: "beta", Arguments: `{}`},
 	}
 	tools := []Tool{readOnlyTool("alpha"), readOnlyTool("beta")}
 
-	r := testRunner(failing, tools...)
-	_, _, allFailed := r.processToolCalls(context.Background(), &fakeSink{}, "c", "m", calls)
-	if !allFailed {
-		t.Error("every call failed → allFailed must be true")
+	r := testRunner(succeedFor("beta"), tools...)
+	_, _, sigs := r.processToolCalls(context.Background(), &fakeSink{}, "c", "m", calls)
+	if len(sigs) != 1 {
+		t.Fatalf("exactly the failing call must be reported, got %d signatures", len(sigs))
+	}
+	if sigs[0] != "alpha\x00"+`{"x":1}` {
+		t.Errorf("signature must be name+args, got %q", sigs[0])
 	}
 
-	r = testRunner(succeedFor("beta"), tools...)
-	_, _, allFailed = r.processToolCalls(context.Background(), &fakeSink{}, "c", "m", calls)
-	if allFailed {
-		t.Error("one call succeeded → allFailed must be false")
+	r = testRunner(succeedFor("alpha"), tools...)
+	_, _, sigs = r.processToolCalls(context.Background(), &fakeSink{}, "c", "m", calls)
+	if len(sigs) != 1 || sigs[0] != "beta\x00{}" {
+		t.Errorf("expected only beta's signature, got %v", sigs)
+	}
+
+	allOK := func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	}
+	r = testRunner(allOK, tools...)
+	_, _, sigs = r.processToolCalls(context.Background(), &fakeSink{}, "c", "m", calls)
+	if len(sigs) != 0 {
+		t.Errorf("no failures → no signatures, got %v", sigs)
 	}
 }
