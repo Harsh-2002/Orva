@@ -154,20 +154,17 @@ func printActivityEvent(data string) {
 }
 
 // streamSSE issues a GET that expects a text/event-stream response. The
-// returned http.Response is left open — the caller reads resp.Body.
+// returned http.Response is left open — the caller reads resp.Body. Routed
+// through client.Send so every SSE consumer shares one hardened path: no
+// total-duration cap (long-lived streams survive) but a 45s idle deadline so
+// a stream that goes silent after the headers can't hang the CLI forever.
 func streamSSE(client *cli.Client, path string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, client.BaseURL+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "text/event-stream")
-	if client.APIKey != "" {
-		req.Header.Set("X-Orva-API-Key", client.APIKey)
-	}
-	// SSE streams are long-lived; bypass the client's default 120s timeout
-	// by using a fresh client with no timeout for streaming reads.
-	streamingClient := &http.Client{Timeout: 0}
-	resp, err := streamingClient.Do(req)
+	resp, err := client.Send(cli.Request{
+		Path:        path,
+		Accept:      "text/event-stream",
+		NoTimeout:   true,
+		IdleTimeout: cli.DefaultStreamIdleTimeout,
+	})
 	if err != nil {
 		return nil, err
 	}

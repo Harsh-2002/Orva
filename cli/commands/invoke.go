@@ -131,6 +131,11 @@ func runInvoke(cmd *cobra.Command, args []string) error {
 		Accept:    "*/*",
 		NoTimeout: stream,
 	}
+	if stream {
+		// No total cap on a streamed invocation, but an idle deadline so a
+		// stalled stream can't hang the CLI forever.
+		req.IdleTimeout = cli.DefaultStreamIdleTimeout
+	}
 	if len(body) > 0 {
 		req.Body = bytes.NewReader(body)
 	}

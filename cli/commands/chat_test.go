@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Harsh-2002/Orva/cli/commands/theme"
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -78,6 +79,67 @@ func TestDriveSSE(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "\x1b") {
 		t.Errorf("stdout contains ANSI escapes with color disabled: %q", out.String())
+	}
+}
+
+// TestDrivePrematureEOF asserts the PR-C guard: a stream that ends (clean EOF)
+// without a terminal frame (done / awaiting_approval / error) is surfaced as an
+// error, not silently accepted as a successful (truncated) turn.
+func TestDrivePrematureEOF(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		sseFrame(w, "message_start", `{"message_id":"m1","role":"assistant"}`)
+		sseFrame(w, "delta", `{"text":"partial answer"}`)
+		// Handler returns here — connection closes mid-turn, NO done/error frame.
+	}))
+	defer srv.Close()
+
+	s, _, _ := newTestSession(cli.NewClient(srv.URL, "k"))
+	resp, err := s.postChat(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("postChat: %v", err)
+	}
+	_, err = s.drive(resp)
+	if err == nil {
+		t.Fatal("expected an error for a stream that ended without a terminal frame, got nil")
+	}
+	if !strings.Contains(err.Error(), "ended unexpectedly") {
+		t.Errorf("error = %v, want it to mention the stream ending unexpectedly", err)
+	}
+}
+
+// TestClientIdleTimeout asserts the PR-C client idle deadline: a stream that
+// goes silent after the headers is cancelled within the idle window instead of
+// hanging forever. Reading blocks until the idle timer cancels the request ctx.
+func TestClientIdleTimeout(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, ": ping\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-release // stall: never send more, never close, until the test ends
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	c := cli.NewClient(srv.URL, "k")
+	resp, err := c.Send(cli.Request{Path: "/", NoTimeout: true, IdleTimeout: 200 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	defer resp.Body.Close()
+
+	start := time.Now()
+	buf := make([]byte, 4096)
+	for {
+		if _, rerr := resp.Body.Read(buf); rerr != nil {
+			break // idle timer cancelled the ctx → Read unblocks with an error
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("read did not unblock within the idle window; took %v (idle was 200ms)", elapsed)
 	}
 }
 
