@@ -127,6 +127,7 @@ func runDeploymentsList(cmd *cobra.Command, args []string) error {
 			SubmittedAt time.Time `json:"submitted_at"`
 			DurationMS  *int64    `json:"duration_ms"`
 		} `json:"deployments"`
+		Total int `json:"total"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return fmt.Errorf("decode response: %w", err)
@@ -153,6 +154,13 @@ func runDeploymentsList(cmd *cobra.Command, args []string) error {
 		)
 	}
 	t.flush()
+
+	shown := len(result.Deployments)
+	if shown < result.Total {
+		infof(cmd, "\nShowing %d of %d (raise --limit to see older deployments)", shown, result.Total)
+	} else {
+		infof(cmd, "\nShowing %d of %d", shown, result.Total)
+	}
 	return nil
 }
 

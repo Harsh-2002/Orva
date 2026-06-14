@@ -254,3 +254,99 @@ func (h *KVOperatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "key": key})
 }
+
+// kvOperatorIncrRequest carries the delta and optional TTL refresh. Mirrors
+// the internal kvIncrRequest (kv.go) — same shape, operator auth.
+type kvOperatorIncrRequest struct {
+	Delta      int64 `json:"delta"`
+	TTLSeconds int   `json:"ttl_seconds,omitempty"`
+}
+
+// Incr handles POST /api/v1/functions/{fn_id}/kv/{key}/incr. Atomically adds
+// delta (default 1) to an integer value and returns the new value. The
+// API-key-authed twin of the internal-token KVHandler.Incr.
+func (h *KVOperatorHandler) Incr(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
+	key := r.PathValue("key")
+	if key == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "key is required", reqID)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return
+	}
+	req := kvOperatorIncrRequest{Delta: 1}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+			return
+		}
+	}
+	next, err := h.DB.KVIncr(fnID, key, req.Delta, req.TTLSeconds)
+	if err != nil {
+		respond.Error(w, http.StatusConflict, "KV_INCR_FAILED", err.Error(), reqID)
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"value": next})
+}
+
+// kvOperatorCASRequest expresses "swap from Expected to New, only if Expected
+// matches the current value". A null Expected means "the key must not currently
+// exist" (insert-if-absent). Mirrors the internal kvCASRequest (kv.go).
+type kvOperatorCASRequest struct {
+	Expected   *json.RawMessage `json:"expected"`
+	New        json.RawMessage  `json:"new"`
+	TTLSeconds int              `json:"ttl_seconds,omitempty"`
+}
+
+// CAS handles POST /api/v1/functions/{fn_id}/kv/{key}/cas. A failed precondition
+// is a successful HTTP 200 with {"ok": false, "current": <value>} so callers can
+// retry; only a genuine store error is a 500.
+func (h *KVOperatorHandler) CAS(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
+	key := r.PathValue("key")
+	if key == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "key is required", reqID)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, kvOperatorBodyCap))
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return
+	}
+	var req kvOperatorCASRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+		return
+	}
+	if len(req.New) == 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "new value is required", reqID)
+		return
+	}
+	var expectedBytes []byte
+	if req.Expected != nil {
+		expectedBytes = []byte(*req.Expected)
+	}
+	swapped, current, err := h.DB.KVCAS(fnID, key, expectedBytes, []byte(req.New), req.TTLSeconds)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv cas failed: "+err.Error(), reqID)
+		return
+	}
+	resp := map[string]any{"ok": swapped}
+	if !swapped && current != nil {
+		resp["current"] = json.RawMessage(current)
+	}
+	respond.JSON(w, http.StatusOK, resp)
+}

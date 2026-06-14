@@ -53,7 +53,13 @@ func (h *DeploymentHandler) ListForFunction(w http.ResponseWriter, r *http.Reque
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
 		return
 	}
-	respond.JSON(w, http.StatusOK, map[string]any{"deployments": list})
+	total, err := h.DB.CountDeploymentsForFunction(fnID)
+	if err != nil {
+		// Soft-fail on the count — the list itself succeeded, so report the
+		// page length rather than 500ing the whole response.
+		total = len(list)
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"deployments": list, "total": total})
 }
 
 // GetLogs — GET /api/v1/deployments/{id}/logs?from=<seq>

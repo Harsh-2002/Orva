@@ -227,6 +227,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Get)
 	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Put)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Delete)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/kv/{key}/incr", kvOperatorHandler.Incr)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/kv/{key}/cas", kvOperatorHandler.CAS)
 
 	// Saved request fixtures (v0.4 B3) — Postman-style presets reused by
 	// the editor's Test pane and the test_function_with_fixture MCP tool.
