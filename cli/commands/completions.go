@@ -138,7 +138,7 @@ func wireCompletions(root *cobra.Command) {
 	// First positional = function name.
 	for _, path := range [][]string{
 		{"invoke"}, {"diff"}, {"rollback"}, {"logs"},
-		{"functions", "get"}, {"functions", "delete"},
+		{"functions", "get"}, {"functions", "delete"}, {"functions", "update"},
 		{"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
 	} {
 		if c, _, err := root.Find(path); err == nil && c.Name() == path[len(path)-1] {
@@ -152,6 +152,15 @@ func wireCompletions(root *cobra.Command) {
 	} {
 		if c, _, err := root.Find(path); err == nil {
 			_ = c.RegisterFlagCompletionFunc("fn", completeFunctionNames)
+		}
+	}
+
+	// --function flag = function name (executions filters).
+	for _, path := range [][]string{
+		{"executions", "list"}, {"executions", "prune"},
+	} {
+		if c, _, err := root.Find(path); err == nil {
+			_ = c.RegisterFlagCompletionFunc("function", completeFunctionNames)
 		}
 	}
 

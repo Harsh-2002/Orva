@@ -9,12 +9,14 @@ import "testing"
 func TestCommandTree(t *testing.T) {
 	root := NewRoot()
 	paths := [][]string{
-		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"},
+		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"}, {"functions", "update"},
 		{"deploy"},
 		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
 		{"rollback"},
 		{"invoke"},
 		{"logs"},
+		{"executions"}, {"executions", "list"}, {"executions", "get"}, {"executions", "logs"},
+		{"executions", "delete"}, {"executions", "prune"}, {"executions", "replay"},
 		{"kv"}, {"kv", "get"}, {"kv", "put"}, {"kv", "delete"}, {"kv", "list"}, {"kv", "incr"}, {"kv", "cas"},
 		{"cron"}, {"cron", "create"}, {"cron", "list"}, {"cron", "update"}, {"cron", "delete"},
 		{"jobs"}, {"jobs", "enqueue"}, {"jobs", "list"}, {"jobs", "get"}, {"jobs", "retry"}, {"jobs", "delete"},
@@ -94,6 +96,12 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"cron", "create"}, "expr"},
 		{[]string{"webhooks", "create"}, "name"},
 		{[]string{"webhooks", "create"}, "url"},
+		{[]string{"webhooks", "update"}, "events"},
+		{[]string{"functions", "update"}, "network-mode"},
+		{[]string{"functions", "update"}, "env"},
+		{[]string{"executions", "list"}, "status"},
+		{[]string{"executions", "list"}, "limit"},
+		{[]string{"executions", "prune"}, "older-than"},
 		{[]string{"channels", "create"}, "functions"},
 		{[]string{"secrets", "set"}, "value"},
 		{[]string{"keys", "create"}, "expires-in-days"},
