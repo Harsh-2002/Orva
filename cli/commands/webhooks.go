@@ -46,6 +46,31 @@ var webhooksTestCmd = &cobra.Command{
 	RunE:  runWebhooksTest,
 }
 
+var webhooksGetCmd = &cobra.Command{
+	Use:   "get <id>",
+	Short: "Get a webhook subscription",
+	Long: `Print a single webhook subscription as JSON (the plaintext secret is never
+returned — only a preview).
+
+  orva webhooks get <id>
+  orva webhooks get <id> | jq .events`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWebhooksGet,
+}
+
+var webhooksUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Update a webhook subscription",
+	Long: `Update a subscription in place (partial — only the flags you pass change).
+The secret cannot be rotated here; delete and recreate to rotate it.
+
+  orva webhooks update <id> --enabled=false
+  orva webhooks update <id> --url https://new.example.com/hook
+  orva webhooks update <id> --events deployment.failed,job.failed`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWebhooksUpdate,
+}
+
 var webhooksDeleteCmd = &cobra.Command{
 	Use:   "delete [id]",
 	Short: "Delete a webhook subscription",
@@ -74,8 +99,15 @@ func init() {
 	webhooksCreateCmd.MarkFlagRequired("name")
 	webhooksCreateCmd.MarkFlagRequired("url")
 
+	webhooksUpdateCmd.Flags().String("name", "", "rename the subscription")
+	webhooksUpdateCmd.Flags().String("url", "", "delivery URL")
+	webhooksUpdateCmd.Flags().String("events", "", "comma-separated event names (replaces the set)")
+	webhooksUpdateCmd.Flags().Bool("enabled", true, "enable or disable delivery")
+
 	webhooksCmd.AddCommand(webhooksListCmd)
 	webhooksCmd.AddCommand(webhooksCreateCmd)
+	webhooksCmd.AddCommand(webhooksGetCmd)
+	webhooksCmd.AddCommand(webhooksUpdateCmd)
 	webhooksCmd.AddCommand(webhooksTestCmd)
 	webhooksCmd.AddCommand(webhooksDeleteCmd)
 	webhooksCmd.AddCommand(webhooksDeliveriesCmd)
@@ -179,6 +211,79 @@ func runWebhooksCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	infof(cmd, "\nNote: the plaintext secret above is shown ONCE — store it now.")
+	return nil
+}
+
+func runWebhooksGet(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Get("/api/v1/webhooks/" + args[0])
+	if err != nil {
+		return fmt.Errorf("get: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	return emitRaw(raw)
+}
+
+func runWebhooksUpdate(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+	// Partial update — only send fields whose flag was explicitly set.
+	body := map[string]any{}
+	f := cmd.Flags()
+	if f.Changed("name") {
+		v, _ := f.GetString("name")
+		body["name"] = v
+	}
+	if f.Changed("url") {
+		v, _ := f.GetString("url")
+		body["url"] = v
+	}
+	if f.Changed("events") {
+		v, _ := f.GetString("events")
+		events := []string{}
+		for _, e := range strings.Split(v, ",") {
+			if e = strings.TrimSpace(e); e != "" {
+				events = append(events, e)
+			}
+		}
+		body["events"] = events
+	}
+	if f.Changed("enabled") {
+		v, _ := f.GetBool("enabled")
+		body["enabled"] = v
+	}
+	if len(body) == 0 {
+		return fmt.Errorf("update: nothing to change — pass at least one of --name/--url/--events/--enabled")
+	}
+
+	resp, err := client.Put("/api/v1/webhooks/"+args[0], body)
+	if err != nil {
+		return fmt.Errorf("update: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+	okf(cmd, "Updated webhook %s", args[0])
 	return nil
 }
 

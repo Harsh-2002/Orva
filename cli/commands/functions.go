@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -70,6 +71,24 @@ confirmation unless --yes is set.
 	RunE: runFunctionsDelete,
 }
 
+var functionsUpdateCmd = &cobra.Command{
+	Use:   "update <name-or-id>",
+	Short: "Update a function's configuration",
+	Long: `Update a function's settings in place (a partial merge — only the flags you
+pass are changed). This is how an agent or CI toggles egress, adjusts limits,
+or pauses a function without a full redeploy.
+
+Runtime cannot be changed here (it is fixed at create; deploy new code to
+change behavior). --env replaces the entire env-var map.
+
+  orva functions update greeter --network-mode egress
+  orva functions update greeter --memory-mb 256 --timeout-ms 60000
+  orva functions update greeter --status inactive
+  orva functions update greeter --env API_URL=https://x --env DEBUG=1`,
+	Args: cobra.ExactArgs(1),
+	RunE: runFunctionsUpdate,
+}
+
 func init() {
 	functionsListCmd.Flags().Int("limit", 100, "maximum number of functions to return")
 	functionsListCmd.Flags().Int("offset", 0, "number of functions to skip (pagination)")
@@ -82,10 +101,25 @@ func init() {
 	functionsCreateCmd.MarkFlagRequired("name")
 	functionsCreateCmd.MarkFlagRequired("runtime")
 
+	functionsUpdateCmd.Flags().String("name", "", "rename the function")
+	functionsUpdateCmd.Flags().String("description", "", "function description")
+	functionsUpdateCmd.Flags().String("entrypoint", "", "entrypoint file")
+	functionsUpdateCmd.Flags().Int64("timeout-ms", 0, "invocation timeout in ms")
+	functionsUpdateCmd.Flags().Int64("memory-mb", 0, "memory limit in MB")
+	functionsUpdateCmd.Flags().Float64("cpus", 0, "CPU limit (cores)")
+	functionsUpdateCmd.Flags().StringArray("env", nil, "env var KEY=VALUE (repeatable; replaces the whole env map)")
+	functionsUpdateCmd.Flags().String("network-mode", "", "network mode: none | egress")
+	functionsUpdateCmd.Flags().Int("max-concurrency", 0, "max concurrent invocations (0 = unlimited)")
+	functionsUpdateCmd.Flags().String("concurrency-policy", "", "when at capacity: queue | reject")
+	functionsUpdateCmd.Flags().String("auth-mode", "", "invocation auth: none | platform_key | signed")
+	functionsUpdateCmd.Flags().Int("rate-limit-per-min", 0, "per-minute invocation rate limit (0 = none)")
+	functionsUpdateCmd.Flags().String("status", "", "status: active | inactive")
+
 	functionsCmd.AddCommand(functionsListCmd)
 	functionsCmd.AddCommand(functionsCreateCmd)
 	functionsCmd.AddCommand(functionsGetCmd)
 	functionsCmd.AddCommand(functionsDeleteCmd)
+	functionsCmd.AddCommand(functionsUpdateCmd)
 }
 
 func runFunctionsList(cmd *cobra.Command, args []string) error {
@@ -270,5 +304,90 @@ func runFunctionsDelete(cmd *cobra.Command, args []string) error {
 		return emitRaw(raw)
 	}
 	okf(cmd, "Deleted function %s", fnID)
+	return nil
+}
+
+func runFunctionsUpdate(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
+
+	// Partial update: only send fields whose flag was explicitly set, so an
+	// omitted flag leaves the server's value untouched (the REST struct is
+	// all-pointers/merge).
+	body := map[string]any{}
+	f := cmd.Flags()
+	setStr := func(flag, json string) {
+		if f.Changed(flag) {
+			v, _ := f.GetString(flag)
+			body[json] = v
+		}
+	}
+	setStr("name", "name")
+	setStr("description", "description")
+	setStr("entrypoint", "entrypoint")
+	setStr("network-mode", "network_mode")
+	setStr("concurrency-policy", "concurrency_policy")
+	setStr("auth-mode", "auth_mode")
+	setStr("status", "status")
+	if f.Changed("timeout-ms") {
+		v, _ := f.GetInt64("timeout-ms")
+		body["timeout_ms"] = v
+	}
+	if f.Changed("memory-mb") {
+		v, _ := f.GetInt64("memory-mb")
+		body["memory_mb"] = v
+	}
+	if f.Changed("cpus") {
+		v, _ := f.GetFloat64("cpus")
+		body["cpus"] = v
+	}
+	if f.Changed("max-concurrency") {
+		v, _ := f.GetInt("max-concurrency")
+		body["max_concurrency"] = v
+	}
+	if f.Changed("rate-limit-per-min") {
+		v, _ := f.GetInt("rate-limit-per-min")
+		body["rate_limit_per_min"] = v
+	}
+	if f.Changed("env") {
+		pairs, _ := f.GetStringArray("env")
+		env := map[string]string{}
+		for _, p := range pairs {
+			k, v, ok := strings.Cut(p, "=")
+			if !ok {
+				return fmt.Errorf("update: --env %q must be KEY=VALUE", p)
+			}
+			env[k] = v
+		}
+		body["env_vars"] = env
+	}
+
+	if len(body) == 0 {
+		return fmt.Errorf("update: nothing to change — pass at least one field flag (see --help)")
+	}
+
+	resp, err := client.Put("/api/v1/functions/"+fnID, body)
+	if err != nil {
+		return err
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+	okf(cmd, "Updated function %s", args[0])
 	return nil
 }
