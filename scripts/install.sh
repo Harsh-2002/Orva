@@ -633,8 +633,9 @@ download_and_install_binaries() {
     log "downloading orva + nsjail (linux-${ARCH})"
     fetch "$base/orva-linux-${ARCH}"   "$tmp/orva"   || die "failed to download orva-linux-${ARCH}"
     fetch "$base/nsjail-linux-${ARCH}" "$tmp/nsjail" || die "failed to download nsjail-linux-${ARCH}"
-    # Leave checksums.txt absent on failure and let verify() enforce policy
-    # (fail-closed unless ORVA_SKIP_VERIFY=1).
+    # Best-effort: if checksums.txt can't be fetched it's left absent, and
+    # verify() then finds no entry and warns+skips per asset (fail-open on a
+    # MISSING checksum). A checksum MISMATCH still aborts via die().
     fetch "$base/checksums.txt"        "$tmp/checksums.txt" || warn "could not download checksums.txt"
     log "verifying checksums"
     verify "$tmp/orva"   "orva-linux-${ARCH}"
