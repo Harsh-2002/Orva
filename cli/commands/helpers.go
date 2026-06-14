@@ -43,6 +43,15 @@ func checkResponse(resp *http.Response) error {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
+	// Auth failures are the most common first-run stumble — point at the fix
+	// instead of a bare "API error (401)".
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("not authenticated (HTTP 401) — run `orva login`, or pass --endpoint/--api-key (or set ORVA_ENDPOINT / ORVA_API_KEY)")
+	case http.StatusForbidden:
+		return fmt.Errorf("not authorized (HTTP 403) — the API key is valid but lacks the required permission for this command")
+	}
+
 	var errResp struct {
 		Error struct {
 			Code    string `json:"code"`

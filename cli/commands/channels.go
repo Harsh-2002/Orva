@@ -26,51 +26,77 @@ an agentic workflow without giving it Orva management.
 var channelsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List agent channels",
-	RunE:  runChannelsList,
+	Long: `List agent channels (function bundles exposed at /mcp under a static token).
+
+  orva channels list
+  orva channels list -o json | jq '.[].name'`,
+	RunE: runChannelsList,
 }
 
 var channelsCreateCmd = &cobra.Command{
-	Use:   "create [name]",
+	Use:   "create <name>",
 	Short: "Create a new channel",
-	Long:  "Create a channel. The token plaintext is printed once and never shown again.",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runChannelsCreate,
+	Long: `Create a channel bundling one or more functions under a static bearer token.
+The token plaintext is printed once and never shown again — store it.
+
+  orva channels create prod --functions greeter,echo
+  orva channels create ci --functions deploy-hook --expires-in-days 90`,
+	Args: cobra.ExactArgs(1),
+	RunE: runChannelsCreate,
 }
 
 var channelsShowCmd = &cobra.Command{
-	Use:   "show [id|name]",
+	Use:   "show <id|name>",
 	Short: "Show a channel + its function set",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runChannelsShow,
+	Long: `Show a channel's metadata and the functions it exposes.
+
+  orva channels show prod`,
+	Args: cobra.ExactArgs(1),
+	RunE: runChannelsShow,
 }
 
 var channelsAddFunctionsCmd = &cobra.Command{
-	Use:   "add-functions [id|name] [fn1] [fn2] ...",
+	Use:   "add-functions <id|name> <fn>...",
 	Short: "Add functions to a channel",
-	Args:  cobra.MinimumNArgs(2),
-	RunE:  runChannelsAddFunctions,
+	Long: `Add one or more functions (by id or name) to an existing channel.
+
+  orva channels add-functions prod echo summarize`,
+	Args: cobra.MinimumNArgs(2),
+	RunE: runChannelsAddFunctions,
 }
 
 var channelsRemoveFunctionsCmd = &cobra.Command{
-	Use:   "remove-functions [id|name] [fn1] [fn2] ...",
+	Use:   "remove-functions <id|name> <fn>...",
 	Short: "Remove functions from a channel",
-	Args:  cobra.MinimumNArgs(2),
-	RunE:  runChannelsRemoveFunctions,
+	Long: `Remove one or more functions (by id or name) from a channel.
+
+  orva channels remove-functions prod echo`,
+	Args: cobra.MinimumNArgs(2),
+	RunE: runChannelsRemoveFunctions,
 }
 
 var channelsRotateCmd = &cobra.Command{
-	Use:   "rotate [id|name]",
+	Use:   "rotate <id|name>",
 	Short: "Rotate the channel's token (invalidates the old one)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runChannelsRotate,
+	Long: `Issue a fresh token for the channel and invalidate the old one. The new
+token plaintext is printed once.
+
+  orva channels rotate prod`,
+	Args: cobra.ExactArgs(1),
+	RunE: runChannelsRotate,
 }
 
 var channelsDeleteCmd = &cobra.Command{
-	Use:     "delete [id|name]",
+	Use:     "delete <id|name>",
 	Aliases: []string{"rm"},
 	Short:   "Delete a channel",
-	Args:    cobra.ExactArgs(1),
-	RunE:    runChannelsDelete,
+	Long: `Delete a channel and invalidate its token. Prompts for confirmation unless
+--yes is passed.
+
+  orva channels delete prod
+  orva channels delete prod --yes`,
+	Args: cobra.ExactArgs(1),
+	RunE: runChannelsDelete,
 }
 
 func init() {
@@ -317,6 +343,9 @@ func runChannelsDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	resp.Body.Close()
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"deleted": true, "id": id, "name": args[0]})
+	}
 	okf(cmd, "Channel %s deleted.", args[0])
 	return nil
 }

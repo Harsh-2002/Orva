@@ -30,20 +30,34 @@ history, and manage inbound webhook triggers.
 var webhooksListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List webhook subscriptions",
-	RunE:  runWebhooksList,
+	Long: `List outbound webhook subscriptions with their URL, subscribed events, and
+last delivery status.
+
+  orva webhooks list
+  orva webhooks list -o json | jq '.subscriptions[].url'`,
+	RunE: runWebhooksList,
 }
 
 var webhooksCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a webhook subscription",
-	RunE:  runWebhooksCreate,
+	Long: `Create an outbound webhook subscription. The signing secret is returned ONCE
+on create — store it. Events default to '*' (all).
+
+  orva webhooks create --name ci --url https://example.com/hook --events deployment.failed
+  orva webhooks create --name all --url https://example.com/hook`,
+	RunE: runWebhooksCreate,
 }
 
 var webhooksTestCmd = &cobra.Command{
-	Use:   "test [id]",
+	Use:   "test <id>",
 	Short: "Send a synthetic test event to a webhook",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWebhooksTest,
+	Long: `Deliver a synthetic test event to a subscription so you can verify the
+endpoint receives and accepts it.
+
+  orva webhooks test <id>`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWebhooksTest,
 }
 
 var webhooksGetCmd = &cobra.Command{
@@ -72,24 +86,38 @@ The secret cannot be rotated here; delete and recreate to rotate it.
 }
 
 var webhooksDeleteCmd = &cobra.Command{
-	Use:   "delete [id]",
+	Use:   "delete <id>",
 	Short: "Delete a webhook subscription",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWebhooksDelete,
+	Long: `Delete an outbound webhook subscription. Prompts for confirmation unless
+--yes is passed.
+
+  orva webhooks delete <id>
+  orva webhooks delete <id> --yes`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWebhooksDelete,
 }
 
 var webhooksDeliveriesCmd = &cobra.Command{
-	Use:   "deliveries [id]",
+	Use:   "deliveries <id>",
 	Short: "List recent delivery attempts for a subscription",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWebhooksDeliveries,
+	Long: `Show recent delivery attempts (status, response code, error) for a
+subscription — the first stop when a webhook isn't arriving.
+
+  orva webhooks deliveries <id>
+  orva webhooks deliveries <id> -o json | jq .`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWebhooksDeliveries,
 }
 
 var webhooksRetryCmd = &cobra.Command{
-	Use:   "retry [delivery-id]",
+	Use:   "retry <delivery-id>",
 	Short: "Retry a failed delivery",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWebhooksRetry,
+	Long: `Re-attempt a single failed delivery by its delivery id (from
+'orva webhooks deliveries <id>').
+
+  orva webhooks retry <delivery-id>`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWebhooksRetry,
 }
 
 func init() {
@@ -323,6 +351,9 @@ func runWebhooksDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	resp.Body.Close()
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"deleted": true, "id": args[0]})
+	}
 	okf(cmd, "Webhook %s deleted", args[0])
 	return nil
 }
@@ -632,6 +663,22 @@ func runInboundTest(cmd *cobra.Command, args []string) error {
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
+	if outputJSON(cmd) {
+		out := map[string]any{
+			"status":  resp.StatusCode,
+			"headers": flattenHeaders(resp.Header),
+		}
+		var parsed any
+		if jsonUnmarshal(respBody, &parsed) == nil {
+			out["body"] = parsed
+		} else {
+			out["body"] = string(respBody)
+		}
+		if err := emitJSON(out); err != nil {
+			return err
+		}
+		return exitForStatus(resp.StatusCode)
+	}
 	infof(cmd, "HTTP %d", resp.StatusCode)
 	fmt.Println(string(respBody))
 	return exitForStatus(resp.StatusCode)

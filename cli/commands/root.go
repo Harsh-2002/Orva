@@ -146,5 +146,55 @@ func RegisterClient(root *cobra.Command) {
 	for cmd, group := range commandGroups() {
 		cmd.GroupID = group
 	}
+	addConvenienceAliases(root)
 	wireCompletions(root)
+}
+
+// addConvenienceAliases adds the reflexive aliases developers reach for:
+// short/singular names for the noun groups (fn, secret, route, key) and
+// `ls`/`rm`/`del` on every list/delete leaf. Purely additive — primary names
+// are unchanged, so scripts and the command-tree golden test are unaffected.
+func addConvenienceAliases(root *cobra.Command) {
+	top := map[string][]string{
+		"functions": {"fn", "fns"},
+		"secrets":   {"secret"},
+		"routes":    {"route"},
+		"keys":      {"key"},
+	}
+	for _, c := range root.Commands() {
+		if a, ok := top[c.Name()]; ok {
+			c.Aliases = appendMissing(c.Aliases, a...)
+		}
+	}
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		for _, sub := range c.Commands() {
+			switch sub.Name() {
+			case "list":
+				sub.Aliases = appendMissing(sub.Aliases, "ls")
+			case "delete":
+				sub.Aliases = appendMissing(sub.Aliases, "rm", "del")
+			}
+			walk(sub)
+		}
+	}
+	walk(root)
+}
+
+// appendMissing appends each value not already present (alias de-dup so we
+// never hand cobra a duplicate, which it rejects).
+func appendMissing(have []string, add ...string) []string {
+	for _, a := range add {
+		found := false
+		for _, h := range have {
+			if h == a {
+				found = true
+				break
+			}
+		}
+		if !found {
+			have = append(have, a)
+		}
+	}
+	return have
 }
