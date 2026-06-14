@@ -494,6 +494,7 @@ func (s *chatSession) postChat(ctx context.Context, content string) (*http.Respo
 		Accept:      "text/event-stream",
 		ContentType: "application/json",
 		NoTimeout:   true,
+		IdleTimeout: cli.DefaultStreamIdleTimeout,
 		Ctx:         ctx,
 		Body:        bytes.NewReader(j),
 	})
@@ -617,6 +618,14 @@ func (s *chatSession) drive(resp *http.Response) (turnResult, error) {
 		}
 		return false, nil
 	})
+	// A clean EOF with no terminal frame (done / awaiting_approval / error)
+	// means the stream was cut mid-turn — the server or provider dropped the
+	// connection. Surface it as an error instead of silently accepting a
+	// truncated turn as success. Guarded on err==nil so it never masks a
+	// Ctrl-C (context.Canceled) or a real transport error.
+	if err == nil && !res.done && !res.awaiting && res.errMsg == "" {
+		return res, errors.New("chat stream ended unexpectedly — the server or provider dropped the connection (no completion received)")
+	}
 	return res, err
 }
 
@@ -691,7 +700,8 @@ func (s *chatSession) handleApprovals(ctx context.Context, pending []pendingTool
 		}
 		path := "/api/v1/ai/tool-calls/" + url.PathEscape(tc.ID) + "/" + verb
 		resp, err := s.client.Send(cli.Request{
-			Method: http.MethodPost, Path: path, Accept: "text/event-stream", NoTimeout: true, Ctx: ctx,
+			Method: http.MethodPost, Path: path, Accept: "text/event-stream",
+			NoTimeout: true, IdleTimeout: cli.DefaultStreamIdleTimeout, Ctx: ctx,
 		})
 		if err != nil {
 			return last, err

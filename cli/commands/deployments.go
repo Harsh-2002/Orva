@@ -292,10 +292,20 @@ func followDeploymentLogs(cmd *cobra.Command, client *cli.Client, id string) err
 
 	infof(cmd, "following build log for %s — Ctrl-C to stop", id)
 
+	terminal := false
 	if err := consumeSSE(resp, func(event, data string) (bool, error) {
-		return handleStreamFrame(cmd, event, data)
+		stop, ferr := handleStreamFrame(cmd, event, data)
+		if stop {
+			terminal = true
+		}
+		return stop, ferr
 	}); err != nil {
 		return fmt.Errorf("follow: %w", err)
+	}
+	// A clean EOF with no terminal event means the build stream was cut before
+	// reporting a result — don't pass it off as success (mirrors watchBuild).
+	if !terminal {
+		return fmt.Errorf("build stream ended before a result was reported; check `orva deployments get %s`", id)
 	}
 	return nil
 }
