@@ -12,10 +12,10 @@ Support scripts for deployment and installation. None of these are called by the
 
 ## Gotchas
 
-- `entrypoint.sh` **always overwrites** `adapter.js` / `adapter.py` from the image on every container start — this ensures runtime upgrades roll out even when the user mounts a persistent `orva_data` volume.
+- `entrypoint.sh` **always overwrites** `adapter.js` / `adapter.py` from the image on every container start — this ensures runtime upgrades roll out even when the user mounts a persistent `orva-data` volume.
 - `install.sh` embeds the systemd/OpenRC units and `uninstall.sh`; the bare-metal install writes them to `$PREFIX/share/orva/scripts/` and the generated uninstaller to the same path. Edit the heredocs in `install.sh` — there is no separate unit file.
 - `install.sh --cli-only` installs only the `orva` CLI binary to `/usr/local/bin/orva` — no systemd unit, no rootfs, no service user. Use this on operator laptops or CI runners that talk to a remote Orva over HTTPS.
-- Mode/option precedence is flag > env > interactive prompt > default. Key knobs: `--version`/`ORVA_VERSION` (pin a release), `--dry-run`/`ORVA_INSTALL_DRYRUN=1` (detect only), `--no-pkg`/`ORVA_NO_PKG=1` (skip system packages), `--runtime`/`ORVA_DOCKER_RUNTIME` (force the Docker runtime), `ORVA_SKIP_VERIFY=1` (bypass checksum verification — air-gapped mirrors only; verification is fail-closed otherwise).
-- Downloaded assets (orva, nsjail, rootfs, CLI) are SHA-256 verified against `checksums.txt`; a missing checksum **aborts** the install unless `ORVA_SKIP_VERIFY=1`.
+- Mode/option precedence is flag > env > interactive prompt > default. Key knobs: `--version`/`ORVA_VERSION` (pin a release), `--dry-run`/`ORVA_INSTALL_DRYRUN=1` (detect only), `--no-pkg`/`ORVA_NO_PKG=1` (skip system packages), `--runtime`/`ORVA_DOCKER_RUNTIME` (force the Docker runtime). There is **no** checksum-bypass env var — `ORVA_SKIP_VERIFY` is referenced in a stale `install.sh` comment but is not implemented.
+- Downloaded assets (orva, nsjail, rootfs, CLI) are SHA-256 verified against `checksums.txt`. A checksum **mismatch** aborts the install. A *missing* checksum entry only warns and proceeds in `install.sh` (`verify()` is fail-open on a missing entry); `install-cli.sh` is stricter and aborts when the entry is missing.
 - `build-rootfs.sh` produces large tarballs (~hundreds of MB); run only when updating the rootfs base image or adding system libraries.
 - Cross-distro installer tests: `test/install/matrix.sh` (fast, unprivileged — shellcheck + POSIX parse + dry-run + real CLI install across 6 distros) and the privileged systemd-in-docker harness under `test/install/`. CI: `.github/workflows/install-e2e.yml`.

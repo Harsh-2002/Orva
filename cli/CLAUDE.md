@@ -45,7 +45,8 @@ cli/
     ├── upgrade.go        # `orva upgrade` (self-update via go-selfupdate)
     ├── webhooks.go       # `orva webhooks …`
     ├── commands_test.go  # command-tree + flag-presence tests
-    ├── chat_test.go      # chat SSE drive + approval-flow tests (httptest)
+    ├── chat_test.go      # chat SSE drive + approval-flow + idle/EOF tests (httptest)
+    ├── upgrade_test.go   # `orva upgrade` decision logic + asset-filter tests
     ├── reference.md      # GENERATED — embedded by docs.go (make docs-embed)
     └── theme/            # lipgloss color palette (theme.New(enabled))
 ```

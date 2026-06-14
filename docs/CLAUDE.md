@@ -19,7 +19,7 @@ Human-maintained reference documentation. Keep these in sync when changing API s
 | `SECURITY.md` | Threat model, nsjail sandbox isolation, network firewall (nftables) |
 | `SUPPORT.md` | Support matrix — distros, kernels, container runtimes |
 | `TRACING.md` | Causal trace model, propagation, W3C interop, outlier detection |
-| `reference.md` | **Canonical** Orva reference (~53 KB GFM markdown) — single source of truth shipped to the dashboard's Copy-as-Markdown button (via `frontend/public/docs.md`) and the `get_orva_docs` MCP tool (via `backend/internal/mcp/reference.md`). `make docs-embed` syncs both copies. Uses `{{ORIGIN}}` placeholders that consumers substitute at runtime. |
+| `reference.md` | **Canonical** Orva reference (~68 KB GFM markdown) — single source of truth shipped to the dashboard's Copy-as-Markdown button (via `frontend/public/docs.md`), the `get_orva_docs` MCP tool (via `backend/internal/mcp/reference.md`), and the slim CLI's `orva docs` command (via `cli/commands/reference.md`). `make docs-embed` syncs all three copies. Uses `{{ORIGIN}}` placeholders that consumers substitute at runtime. |
 
 ## Update Triggers
 

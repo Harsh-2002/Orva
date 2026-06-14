@@ -92,7 +92,7 @@ This suite is meant to **grow on every change**:
     cached keys and only evicted on expiry, never on delete. Fixed by sharing
     the cache and evicting on delete (`test_keys.py` now asserts a revoked key
     returns 401 immediately).
-  - REST `GET/DELETE /functions/{id}` resolve by UUID only, not name.
+  - REST `GET /functions/{id}` resolves by UUID only, not name (the handler calls `Registry.Get` directly); `DELETE` and the other id-taking routes resolve by UUID OR name via `resolveFnID`.
   - REST `create_function` is lenient (fills defaults), unlike the strict MCP
     tool — validation tests must use genuinely invalid input.
 - New feature/endpoint/CLI command → it is **not done** until it has a module/cases here.
@@ -108,7 +108,8 @@ This suite is meant to **grow on every change**:
   via `CLIRunner`, confirming CLI↔server parity for each surface.
 - **nsjail-dependent** scenarios (real function **deploy-build** + **invoke**) only
   run when the container's kernel allows nested sandboxing; otherwise they `skip()`.
-- **Function lookup:** REST `GET/DELETE /functions/{id}` resolve by **UUID only**;
-  capture the id from create responses (the agent/MCP layer also accepts a name).
+- **Function lookup:** REST `GET /functions/{id}` resolves by **UUID only**
+  (capture the id from create responses); `DELETE` and most other id-taking
+  routes accept a UUID **or** a name via `resolveFnID`, as does the agent/MCP layer.
 - **Settings** is a shared singleton row; the mock helpers snapshot/restore it so
   modules don't contaminate each other's view of "defaults".
