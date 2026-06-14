@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,10 +19,16 @@ var functionsCmd = &cobra.Command{
 
 var functionsListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all functions",
-	Long: `List every function on the server with its runtime, status, and version.
+	Short: "List functions",
+	Long: `List functions on the server with their runtime, status, and version.
+
+Results are paginated. The footer reports "showing N of TOTAL"; when more
+exist than the current page, raise --limit or page with --offset so a script
+or agent never silently misses functions.
 
   orva functions list
+  orva functions list --limit 500
+  orva functions list --limit 50 --offset 50
   orva functions list -o json | jq '.functions[].name'`,
 	Args: cobra.NoArgs,
 	RunE: runFunctionsList,
@@ -63,6 +71,9 @@ confirmation unless --yes is set.
 }
 
 func init() {
+	functionsListCmd.Flags().Int("limit", 100, "maximum number of functions to return")
+	functionsListCmd.Flags().Int("offset", 0, "number of functions to skip (pagination)")
+
 	functionsCreateCmd.Flags().String("name", "", "function name (required)")
 	functionsCreateCmd.Flags().String("runtime", "", "runtime: node or python (required)")
 	functionsCreateCmd.Flags().Int("memory-mb", 0, "memory limit in MB (0 = server default)")
@@ -83,7 +94,21 @@ func runFunctionsList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	resp, err := client.Get("/api/v1/functions")
+	limit, _ := cmd.Flags().GetInt("limit")
+	offset, _ := cmd.Flags().GetInt("offset")
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		q.Set("offset", strconv.Itoa(offset))
+	}
+	path := "/api/v1/functions"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+
+	resp, err := client.Get(path)
 	if err != nil {
 		return err
 	}
@@ -120,7 +145,13 @@ func runFunctionsList(cmd *cobra.Command, args []string) error {
 		t.row(fn.ID, fn.Name, fn.Runtime, fn.Status, fn.Version, fn.CreatedAt.Format(time.DateTime))
 	}
 	t.flush()
-	infof(cmd, "\nTotal: %d", result.Total)
+
+	shown := len(result.Functions)
+	if offset+shown < result.Total {
+		infof(cmd, "\nShowing %d of %d (raise --limit or page with --offset %d)", shown, result.Total, offset+shown)
+	} else {
+		infof(cmd, "\nShowing %d of %d", shown, result.Total)
+	}
 	return nil
 }
 

@@ -236,6 +236,14 @@ func (db *Database) ListDeploymentsForFunction(fnID string, limit int) ([]*Deplo
 	return out, nil
 }
 
+// CountDeploymentsForFunction returns the total number of deployments for a
+// function (across all pages) so list responses can carry a truncation signal.
+func (db *Database) CountDeploymentsForFunction(fnID string) (int, error) {
+	var n int
+	err := db.read.QueryRow(`SELECT COUNT(*) FROM deployments WHERE function_id = ?`, fnID).Scan(&n)
+	return n, err
+}
+
 // AppendBuildLog writes one log line. Seq numbers are provided by the caller
 // to guarantee monotonicity across concurrent writers for the same
 // deployment (the build worker owns the deployment, so that's trivial).

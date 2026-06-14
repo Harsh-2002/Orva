@@ -74,6 +74,7 @@ current sample count. The baseline drives the outlier flag on each span.
 func init() {
 	tracesListCmd.Flags().String("fn", "", "filter to traces whose root span is this function (name or id)")
 	tracesListCmd.Flags().Int("limit", 50, "max number of traces to return (1-200)")
+	tracesListCmd.Flags().String("before", "", "cursor: return traces older than this timestamp (from a prior page's next_cursor)")
 
 	tracesCmd.AddCommand(
 		tracesListCmd,
@@ -156,6 +157,9 @@ func runTracesList(cmd *cobra.Command, args []string) error {
 	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", limit))
 	}
+	if before, _ := cmd.Flags().GetString("before"); before != "" {
+		q.Set("before", before)
+	}
 
 	path := "/api/v1/traces"
 	if len(q) > 0 {
@@ -177,7 +181,8 @@ func runTracesList(cmd *cobra.Command, args []string) error {
 	}
 
 	var result struct {
-		Traces []rootSpanRow `json:"traces"`
+		Traces     []rootSpanRow `json:"traces"`
+		NextCursor string        `json:"next_cursor"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return fmt.Errorf("decode response: %w", err)
@@ -196,6 +201,10 @@ func runTracesList(cmd *cobra.Command, args []string) error {
 		t.row(tr.TraceID, dash(root), dash(tr.Status), formatDuration(tr.DurationMS), dash(tr.StartedAt))
 	}
 	t.flush()
+
+	if result.NextCursor != "" {
+		infof(cmd, "\nMore available; next page: --before %s", result.NextCursor)
+	}
 	return nil
 }
 

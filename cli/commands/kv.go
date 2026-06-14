@@ -22,11 +22,9 @@ Examples:
   orva kv list greeter
   orva kv put greeter visits --value 0
   orva kv get greeter visits
-  orva kv delete greeter visits
-
-Note: atomic counters (incr) and compare-and-swap (cas) are only exposed
-on the internal SDK path, which requires a per-process internal token the
-CLI does not hold — use them from inside a function via the runtime SDK.`,
+  orva kv incr greeter visits --by 1
+  orva kv cas greeter lock --expected null --new '"held"'
+  orva kv delete greeter visits`,
 }
 
 var kvListCmd = &cobra.Command{
@@ -85,6 +83,42 @@ Examples:
 	RunE: runKVDelete,
 }
 
+var kvIncrCmd = &cobra.Command{
+	Use:   "incr <fn> <key>",
+	Short: "Atomically increment an integer KV entry",
+	Long: `Atomically add a delta (default 1) to an integer-valued key and print the
+new value. Useful for counters and rate limiters from CI or an agent. The
+key is created at the delta if it does not yet exist. Fails if the stored
+value is not an integer.
+
+Examples:
+  orva kv incr greeter visits
+  orva kv incr greeter visits --by 5
+  orva kv incr greeter remaining --by -1
+  orva kv incr greeter window --by 1 --ttl 60`,
+	Args: cobra.ExactArgs(2),
+	RunE: runKVIncr,
+}
+
+var kvCASCmd = &cobra.Command{
+	Use:   "cas <fn> <key>",
+	Short: "Compare-and-swap a KV entry",
+	Long: `Atomically set a key to --new only if its current value equals --expected.
+Both values are JSON. Use --expected null to require that the key does not
+yet exist (insert-if-absent) — the building block for distributed locks and
+optimistic concurrency.
+
+On success prints the new value and exits 0. On a precondition mismatch it
+prints the current value and exits non-zero, so scripts can branch or retry.
+
+Examples:
+  orva kv cas greeter lock --expected null --new '"held"'
+  orva kv cas greeter counter --expected 4 --new 5
+  orva kv cas greeter lock --expected '"held"' --new null --ttl 0`,
+	Args: cobra.ExactArgs(2),
+	RunE: runKVCAS,
+}
+
 func init() {
 	kvListCmd.Flags().String("prefix", "", "filter entries by key prefix")
 	kvListCmd.Flags().Int("limit", 200, "maximum number of entries to return (max 1000)")
@@ -93,10 +127,21 @@ func init() {
 	kvPutCmd.Flags().Int("ttl", 0, "TTL in seconds (0 = no expiry)")
 	kvPutCmd.MarkFlagRequired("value")
 
+	kvIncrCmd.Flags().Int64("by", 1, "amount to add (may be negative)")
+	kvIncrCmd.Flags().Int("ttl", 0, "TTL in seconds to (re)set on the key (0 = preserve existing)")
+
+	kvCASCmd.Flags().String("expected", "", "expected current JSON value; 'null' means the key must not exist (required)")
+	kvCASCmd.Flags().String("new", "", "new JSON value to store if the precondition holds (required)")
+	kvCASCmd.Flags().Int("ttl", 0, "TTL in seconds to set on the new value (0 = no expiry)")
+	kvCASCmd.MarkFlagRequired("expected")
+	kvCASCmd.MarkFlagRequired("new")
+
 	kvCmd.AddCommand(kvListCmd)
 	kvCmd.AddCommand(kvGetCmd)
 	kvCmd.AddCommand(kvPutCmd)
 	kvCmd.AddCommand(kvDeleteCmd)
+	kvCmd.AddCommand(kvIncrCmd)
+	kvCmd.AddCommand(kvCASCmd)
 }
 
 func runKVList(cmd *cobra.Command, args []string) error {
@@ -294,4 +339,121 @@ func runKVDelete(cmd *cobra.Command, args []string) error {
 	}
 	okf(cmd, "KV entry %q deleted", key)
 	return nil
+}
+
+func runKVIncr(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
+	key := args[1]
+	by, _ := cmd.Flags().GetInt64("by")
+	ttl, _ := cmd.Flags().GetInt("ttl")
+
+	body := map[string]any{"delta": by}
+	if ttl > 0 {
+		body["ttl_seconds"] = ttl
+	}
+
+	resp, err := client.Post("/api/v1/functions/"+fnID+"/kv/"+url.PathEscape(key)+"/incr", body)
+	if err != nil {
+		return fmt.Errorf("incr: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+	var result struct {
+		Value int64 `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	// The new value is data → stdout (pipes into scripts); status stays on stderr.
+	fmt.Println(result.Value)
+	return nil
+}
+
+func runKVCAS(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
+	key := args[1]
+	expectedArg, _ := cmd.Flags().GetString("expected")
+	newArg, _ := cmd.Flags().GetString("new")
+	ttl, _ := cmd.Flags().GetInt("ttl")
+
+	var expected json.RawMessage
+	if err := json.Unmarshal([]byte(expectedArg), &expected); err != nil {
+		return fmt.Errorf("cas: --expected must be valid JSON (use 'null' for insert-if-absent): %w", err)
+	}
+	var newVal json.RawMessage
+	if err := json.Unmarshal([]byte(newArg), &newVal); err != nil {
+		return fmt.Errorf("cas: --new must be valid JSON: %w", err)
+	}
+
+	body := map[string]any{"expected": expected, "new": newVal}
+	if ttl > 0 {
+		body["ttl_seconds"] = ttl
+	}
+
+	resp, err := client.Post("/api/v1/functions/"+fnID+"/kv/"+url.PathEscape(key)+"/cas", body)
+	if err != nil {
+		return fmt.Errorf("cas: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if outputJSON(cmd) {
+		// JSON mode prints the server envelope verbatim to stdout; still exit
+		// non-zero on a precondition miss so `... cas -o json && echo won` works.
+		if err := emitRaw(raw); err != nil {
+			return err
+		}
+		var r struct {
+			OK bool `json:"ok"`
+		}
+		_ = json.Unmarshal(raw, &r)
+		if !r.OK {
+			return fmt.Errorf("CAS precondition not met for %q", key)
+		}
+		return nil
+	}
+
+	var result struct {
+		OK      bool            `json:"ok"`
+		Current json.RawMessage `json:"current"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	if result.OK {
+		okf(cmd, "swapped %q", key)
+		return emitRaw(newVal)
+	}
+	// Precondition mismatch: print the current value (data → stdout) so a script
+	// can read it, then exit non-zero with a clear message on stderr.
+	if len(result.Current) > 0 {
+		_ = emitRaw(result.Current)
+	}
+	return fmt.Errorf("CAS precondition not met for %q", key)
 }
