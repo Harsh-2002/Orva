@@ -15,23 +15,25 @@ cli/
     ├── helpers.go        # getClient(cmd), checkResponse, etc.
     ├── output.go         # shared output framework (stdout/stderr split, table|json, color, confirm)
     ├── activity.go       # `orva activity`
+    ├── backup.go         # `orva backup download/restore`
     ├── channels.go       # `orva channels …`
     ├── chat.go           # `orva chat` (interactive AI REPL + one-shot -p, SSE)
     ├── completion.go     # `orva completion {bash|zsh|fish|powershell}`
     ├── completions.go    # dynamic shell completions (fn names, runtimes, models)
     ├── cron.go           # `orva cron …`
-    ├── deploy.go         # `orva deploy <path> [--watch]`
+    ├── deploy.go         # `orva deploy <path> [--follow]` (--watch = deprecated alias)
     ├── deployments.go    # `orva deployments list/get/logs`
     ├── diff.go           # `orva diff <function>` (unified diff between deployments)
     ├── dns.go            # `orva dns get/set`
     ├── docs.go           # `orva docs` (renders embedded docs/reference.md)
+    ├── executions.go     # `orva executions list/get/logs/delete/prune/replay`
     ├── firewall.go       # `orva firewall list/add/enable/disable/delete/resolve`
     ├── fixtures.go       # `orva fixtures list/get/save/delete/test`
     ├── functions.go      # `orva functions …`
     ├── invoke.go         # `orva invoke <name>` (--body/--stream/--route/-H/-X)
     ├── jobs.go           # `orva jobs …`
     ├── keys.go           # `orva keys …`
-    ├── kv.go             # `orva kv …`
+    ├── kv.go             # `orva kv list/get/put/delete/incr/cas`
     ├── login.go          # `orva login --endpoint --api-key [--test]`
     ├── logs.go           # `orva logs [--follow]` (SSE)
     ├── pool.go           # `orva pool get/set` (per-fn warm-pool autoscaler)
@@ -129,9 +131,10 @@ is built by `make build` from `./backend/cmd/orva`.
 - **No `os.Exit` inside subcommand bodies.** Use `RunE` and return errors
   so tests can observe failures. The existing `Run`-style commands are
   pre-refactor; new commands should use `RunE`.
-- **Add new subcommands to `clientFactories` in `root.go`.** Otherwise
-  they won't show up — and `cli/commands/commands_test.go::TestCommandTree`
-  will fail in CI.
+- **Register new top-level commands in `RegisterClient` (`root.go`).** Add the
+  `*Cmd` var to the `root.AddCommand(...)` list and give it a group in
+  `commandGroups()`. Otherwise it won't show up — and
+  `cli/commands/commands_test.go::TestCommandTree` will fail in CI.
 
 ## Testing
 
@@ -160,11 +163,14 @@ weekly schedule to catch GH-API / release-asset drift.
 
 1. Create `cli/commands/<name>.go` with `package commands`.
 2. Define `var <name>Cmd = &cobra.Command{…}` + an `init()` for flags.
-3. Add `<name>Cmd` to the `clientFactories` slice in `root.go`.
+3. Add `<name>Cmd` to the `root.AddCommand(...)` list in `RegisterClient` (`root.go`)
+   and assign it a group in `commandGroups()`.
 4. Add the leaf path to `commands_test.go::TestCommandTree`'s `paths` list.
 5. Add any required flags to `TestRequiredFlagsPresent`.
-6. Run `go test ./cli/commands/` — should pass.
-7. Run `bash test/cli/command-tree.sh` — golden diff should remain zero.
+6. (If a subcommand takes a function name) wire fn-name completion in
+   `wireCompletions` (`completions.go`).
+7. Run `go test ./cli/commands/` — should pass.
+8. Run `bash test/cli/command-tree.sh` — golden diff should remain zero.
 
 ## Self-update (`orva upgrade`)
 

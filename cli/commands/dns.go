@@ -140,6 +140,13 @@ func runDNSSet(cmd *cobra.Command, _ []string) error {
 		records = append(records, dnsRecord{Host: name, IP: ip})
 	}
 
+	// This replaces the entire DNS config — omitted flags clear their section
+	// (e.g. passing no --server wipes all servers). Confirm so it can't silently
+	// nuke the config; --yes skips the prompt and is required on a non-TTY.
+	if err := confirm(cmd, "Replace the sandbox DNS config? (omitted flags clear their section)"); err != nil {
+		return err
+	}
+
 	body := map[string]any{
 		"servers": cleanServers,
 		"search":  strings.TrimSpace(search),

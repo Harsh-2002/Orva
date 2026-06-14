@@ -30,7 +30,7 @@ auto-detects the entrypoint:
 
 Examples:
   orva deploy ./src --name greeter --runtime node
-  orva deploy ./src --name greeter --runtime node --watch   # stream build logs`,
+  orva deploy ./src --name greeter --runtime node --follow   # stream build logs`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDeploy,
 }
@@ -39,7 +39,11 @@ func init() {
 	deployCmd.Flags().String("name", "", "function name (required)")
 	deployCmd.Flags().String("runtime", "", "runtime: node or python (required)")
 	deployCmd.Flags().String("entrypoint", "", "entrypoint file (optional; auto-detects handler.ts when tsconfig.json + handler.ts present)")
-	deployCmd.Flags().Bool("watch", false, "stream build logs and wait for the deploy to finish (non-zero exit on build failure)")
+	// --follow/-f matches logs/activity/deployments-logs; --watch is the
+	// original name, kept as a hidden alias for back-compat.
+	deployCmd.Flags().BoolP("follow", "f", false, "stream build logs and wait for the deploy to finish (non-zero exit on build failure)")
+	deployCmd.Flags().Bool("watch", false, "deprecated alias for --follow")
+	_ = deployCmd.Flags().MarkHidden("watch")
 	deployCmd.MarkFlagRequired("name")
 	deployCmd.MarkFlagRequired("runtime")
 }
@@ -54,7 +58,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	name, _ := cmd.Flags().GetString("name")
 	runtime, _ := cmd.Flags().GetString("runtime")
 	entrypoint, _ := cmd.Flags().GetString("entrypoint")
-	watch, _ := cmd.Flags().GetBool("watch")
+	watch, _ := cmd.Flags().GetBool("follow")
+	if w, _ := cmd.Flags().GetBool("watch"); w {
+		watch = true // honor the deprecated --watch alias
+	}
 
 	// Verify the source path exists.
 	info, err := os.Stat(srcPath)

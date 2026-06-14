@@ -234,7 +234,7 @@ func runFixturesGet(cmd *cobra.Command, args []string) error {
 		ht.flush()
 	}
 	if f.Body != "" {
-		fmt.Println("\nbody:")
+		infof(cmd, "\nbody:") // label → stderr; the body itself stays on stdout for piping
 		fmt.Println(f.Body)
 	}
 	return nil
@@ -334,6 +334,9 @@ func runFixturesDelete(cmd *cobra.Command, args []string) error {
 	}
 	resp.Body.Close()
 
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"deleted": true, "name": name})
+	}
 	okf(cmd, "deleted fixture %q", name)
 	return nil
 }

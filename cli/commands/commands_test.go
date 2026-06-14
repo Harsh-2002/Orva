@@ -70,6 +70,7 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"deploy"}, "runtime"},
 		{[]string{"deploy"}, "entrypoint"},
 		{[]string{"deploy"}, "watch"},
+		{[]string{"deploy"}, "follow"},
 		{[]string{"invoke"}, "body"},
 		{[]string{"invoke"}, "method"},
 		{[]string{"invoke"}, "header"},

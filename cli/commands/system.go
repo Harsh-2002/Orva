@@ -213,6 +213,13 @@ func runSystemVacuum(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// VACUUM holds an exclusive lock — writes block until it finishes. Confirm
+	// so it isn't run by accident; --yes skips the prompt and is required on a
+	// non-TTY.
+	if err := confirm(cmd, "Run VACUUM now? Writes to the database will block until it completes."); err != nil {
+		return err
+	}
+
 	infof(cmd, "Running VACUUM (writes will block briefly)...")
 	resp, err := client.Post("/api/v1/system/vacuum", nil)
 	if err != nil {

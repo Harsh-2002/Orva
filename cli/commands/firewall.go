@@ -332,7 +332,7 @@ func runFirewallResolve(cmd *cobra.Command, args []string) error {
 	// applied set when the host isn't a configured hostname rule.
 	if ips, ok := result.Status.HostnameMap[hostname]; ok {
 		if len(ips) == 0 {
-			fmt.Printf("(%s resolved to no addresses)\n", hostname)
+			infof(cmd, "%s resolved to no addresses", hostname)
 			return nil
 		}
 		for _, ip := range ips {
@@ -344,7 +344,7 @@ func runFirewallResolve(cmd *cobra.Command, args []string) error {
 	infof(cmd, "%q is not a configured hostname rule; showing the full applied set:", hostname)
 	all := append(append([]string{}, result.Status.IPv4...), result.Status.IPv6...)
 	if len(all) == 0 {
-		fmt.Println("(no resolved IPs in the applied set)")
+		infof(cmd, "no resolved IPs in the applied set")
 		return nil
 	}
 	for _, ip := range all {
