@@ -39,7 +39,7 @@ go vet ./...
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `secrets` | AES-256-GCM encrypted secrets per function |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
-| `mcp` | MCP server (go-sdk); 70 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. |
+| `mcp` | MCP server (go-sdk); 72 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. |
 | `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps` and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`. |
 | `auth` | Shared `Principal` type (Kind=api_key / oauth / channel + ID/Label/Perms/Channel). Both REST middleware and MCP auth resolve the inbound bearer to a `*Principal`; downstream code (activity log, MCP tool registration) consumes the Kind directly. |
 | `trace` | Causal-trace collector + span lifecycle (W3C `traceparent` interop, outlier detection). See `docs/TRACING.md`. |
@@ -50,7 +50,6 @@ go vet ./...
 | `server` | HTTP router + middleware chain + all handlers |
 | `server/events` | SSE event hub + outbound webhook fanout |
 | `server/handlers` | One file per resource group; `respond/` sub-package |
-| `cli` | Shared `Client` + `Config` for CLI subcommands |
 | `backup` | `SnapshotDB` / `ArchiveTo` / `RestoreFrom` helpers |
 | `version` | Single source of truth for the version string |
 | `ai` | In-product AI chat assistant. `Manager` (service layer) wires the SQLite store, the secrets cipher (provider-key encryption), the in-process tool registry, the embedded Bifrost LLM gateway (`ai/llm`), and the agentic loop (`ai/agent`). Served at `/api/v1/ai/*` by `server/ai_handler.go` (SSE for chat/approval). The agent's `defaultSystemPrompt` const lives in `ai/manager.go` — it's a Go **raw string, so it must stay backtick-free** (escape any fenced-code examples by description, not literal ```). |
@@ -59,21 +58,21 @@ go vet ./...
 
 The canonical UUIDv7 generator (`ids`) and HTTP client (`client`) live at **repo-root** `internal/ids/` and `internal/client/` — shared with the slim CLI codebase, not under `backend/internal/`.
 
-## CLI Commands (`cmd/orva/`)
+## CLI Commands (`cli/commands/`)
 
-All Cobra subcommands share one binary with the server. `orva serve` starts the daemon; every other command is a CLI client that reads `~/.orva/config.yaml`.
+All Cobra subcommands share one binary with the server. `orva serve` starts the daemon; every other command is a CLI client that reads `~/.orva/config.yaml`. The command library lives at repo-root `cli/commands/` (NOT under `backend/cmd/orva/`, which holds only `main.go`/`serve.go`/`setup.go`/`init_cmd.go` + the embedded `adapters/`); both binaries register it via `commands.NewRoot()`. See `cli/CLAUDE.md`.
 
-Key files: `deploy.go`, `diff.go`, `functions.go`, `invoke.go`, `logs.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `keys.go`, `system.go`, `activity.go`, `completion.go`.
+Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.go`, `invoke.go`, `logs.go`, `executions.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `dns.go`, `firewall.go`, `fixtures.go`, `channels.go`, `traces.go`, `pool.go`, `keys.go`, `system.go`, `backup.go`, `activity.go`, `chat.go`, `docs.go`, `completion.go`.
 
 ## Key Patterns
 
-**Handler responses**: always use `respond.JSON(w, status, val)` / `respond.Error(w, status, "SLUG", "message")` from `server/handlers/respond/`.
+**Handler responses**: always use `respond.JSON(w, status, val)` / `respond.Error(w, status, "SLUG", "message", requestID)` from `server/handlers/respond/` (the last arg is the request ID, often `RequestID(r.Context())` or `""`).
 
 **Invocation funnel**: HTTP, cron, jobs, and F2F calls all go through `Worker.Dispatch()` (sync response) or `Worker.DispatchEx()` (multi-frame streaming). Never invoke nsjail directly from handlers.
 
 **Async DB writes**: execution rows use `database.AsyncInsertExecution*` batch writers — no synchronous DB calls on the hot proxy path.
 
-**Name resolution**: functions can be referenced by UUID or by name. Use `resolveFnID(db, nameOrID)` from `handlers/functions_helpers.go`.
+**Name resolution**: functions can be referenced by UUID or by name. Use the handler method `(h *FunctionHandler) resolveFnID(idOrName string) (string, bool)` in `handlers/functions.go` (sibling copies on `FixtureHandler` / `KVOperatorHandler` / `InboundWebhookHandler`).
 
 **Streaming wire protocol**: `response_start` → `chunk` (base64 body data) → `response_end` frames over the worker's stdin/stdout pipe. `proxy.Forward()` owns the write-loop.
 
@@ -98,4 +97,4 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 - **AI conversation editing is destructive-tail:** editing or deleting a chat message (`EditMessage` / `DeleteMessage` in `server/ai_handler.go`, backed by `database.DeleteMessagesFromSeq`) truncates the conversation at that message's `seq` — it deletes that message and every message + tool call after it, then (for edit) re-runs the turn. There is no branching history; the tail is gone. `Regenerate` is the same truncate-then-rerun on the last assistant turn.
 - **AI turns are one-per-conversation:** the `ai.Manager` holds a keyed try-lock (`tryLockConv`/`unlockConv`) acquired by every mutating entry point (Chat, Resume, RegenerateLast, EditAndResend, DeleteMessageFrom). An overlapping turn on the same conversation is rejected — SSE `error` for streaming paths, `ai.ErrConversationBusy` → 409 for the JSON delete. `database.InsertMessage` assigns `seq` atomically inside the INSERT (`MAX(seq)+1` subquery); never split it back into a SELECT-then-INSERT.
 - **AI gateway lifecycle:** `ai.Manager.Close()` releases the embedded Bifrost pools and is called from `Server.Shutdown` (via `s.router.ai`). The gateway is built lazily and rebuilt on provider-config change (`invalidateClient`).
-- **Docs single source:** `docs/reference.md` is the canonical Orva reference markdown (~53 KB). `make docs-embed` syncs it to `backend/internal/mcp/reference.md` (embedded by the `get_orva_docs` MCP tool) and `frontend/public/docs.md` (served at `/docs.md` for the dashboard's Copy as Markdown button). Edit the canonical file then run `make docs-embed`; the Vue Docs page is the rendered version (separate templates) and must be updated alongside if content changes.
+- **Docs single source:** `docs/reference.md` is the canonical Orva reference markdown (~68 KB). `make docs-embed` syncs it to `backend/internal/mcp/reference.md` (embedded by the `get_orva_docs` MCP tool), `frontend/public/docs.md` (served at `/docs.md` for the dashboard's Copy as Markdown button), and `cli/commands/reference.md` (embedded into the slim CLI, served by `orva docs`). Edit the canonical file then run `make docs-embed`; the Vue Docs page is the rendered version (separate templates) and must be updated alongside if content changes.
