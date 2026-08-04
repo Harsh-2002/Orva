@@ -76,10 +76,12 @@ def handler(event):
     }
 EOF
 
-orva=(/opt/orva/bin/orva --endpoint "$endpoint" --api-key "$api_key")
+orva=(/opt/orva/bin/orva --quiet --endpoint "$endpoint" --api-key "$api_key")
 "${orva[@]}" deploy "$workdir/node" --name ci-native-node --runtime node --follow
-if ! node_body=$("${orva[@]}" invoke ci-native-node --body '{}' 2>&1); then
-    printf 'Node invocation failed:\n%s\n' "$node_body" >&2
+node_error="$workdir/node-invoke.stderr"
+if ! node_body=$("${orva[@]}" invoke ci-native-node --body '{}' 2>"$node_error"); then
+    printf 'Node invocation failed:\n' >&2
+    cat "$node_error" >&2
     exit 1
 fi
 if ! jq -e '. == {runtime:"node", ok:true}' <<<"$node_body" >/dev/null; then
@@ -88,8 +90,10 @@ if ! jq -e '. == {runtime:"node", ok:true}' <<<"$node_body" >/dev/null; then
 fi
 
 "${orva[@]}" deploy "$workdir/python" --name ci-native-python --runtime python --follow
-if ! python_body=$("${orva[@]}" invoke ci-native-python --body '{}' 2>&1); then
-    printf 'Python invocation failed:\n%s\n' "$python_body" >&2
+python_error="$workdir/python-invoke.stderr"
+if ! python_body=$("${orva[@]}" invoke ci-native-python --body '{}' 2>"$python_error"); then
+    printf 'Python invocation failed:\n' >&2
+    cat "$python_error" >&2
     exit 1
 fi
 if ! jq -e '. == {runtime:"python", ok:true}' <<<"$python_body" >/dev/null; then

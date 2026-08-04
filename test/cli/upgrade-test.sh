@@ -8,7 +8,7 @@
 # old_version defaults to the second-newest release tag fetched from
 # GitHub at runtime (so the test stays meaningful without manual pins).
 # distro defaults to ubuntu24 (only Linux/macOS via docker — Windows
-# self-upgrade is exercised by the cli-e2e CI workflow's windows-2022
+# self-upgrade is exercised by the consolidated E2E workflow's windows-2022
 # job, not here).
 
 set -uo pipefail

@@ -127,7 +127,7 @@ bash test/install/gvisor-flow.sh          # gVisor (runsc) compat — skipped if
 Requires Docker with `--privileged` allowed and `/sys/fs/cgroup`
 mountable. Output goes to `test/install/logs/<distro>-*.log`.
 
-The same harness drives `.github/workflows/install-e2e.yml` in CI.
+The same harness drives the installer jobs in `.github/workflows/e2e.yml`.
 
 ## Adding a new error code
 
@@ -167,18 +167,16 @@ The same harness drives `.github/workflows/install-e2e.yml` in CI.
 
 ## CI
 
-Two single-purpose pipelines: **verify on push/PR, ship on tag.** All testing
-lives in the verify pipeline; the release pipeline does no testing.
+Two stages: **verify on push/PR, ship on tag.** All testing lives in CI/E2E;
+the release workflow does no testing.
 
 Verification (on push to `main` + every PR):
 
 - **`ci.yml`** — shellcheck + go vet/test/build, frontend build, docker
   smoke build. Path-filtered (skips docs-only changes).
-- **`e2e.yml`** — full programmatic end-to-end suite against a running server.
-- **`cli-e2e.yml`** — CLI build matrix, `install-cli.{sh,ps1}`, upgrade
-  round-trip. On PR (CLI paths) + on `release:published` against real artifacts.
-- **`install-e2e.yml`** — bare-metal `scripts/install.sh` end-to-end per distro
-  (privileged systemd-in-docker). On PR (install paths) + on `release:published`.
+- **`e2e.yml`** — full programmatic E2E plus path-selected CLI build/install and
+  bare-metal installer matrices. Its `artifacts` suite validates every published
+  CLI/server asset on Linux, macOS, Windows, amd64, and arm64.
 
 Ship (on `v*` tag push):
 
@@ -188,6 +186,8 @@ Ship (on `v*` tag push):
   and publishes the GitHub Release + `ghcr.io/harsh-2002/orva`. **No tests run in
   the release** — it trusts the already-green checks on that exact SHA. A
   `workflow_dispatch` with `force=true` bypasses the gate for emergency/rc builds.
+- **`cleanup-ghcr.yml`** — destructive registry pruning, isolated from Release;
+  runs only after a successful Release or by explicit manual dispatch.
 
 ## Releasing
 
@@ -207,14 +207,13 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    The release's `gate` confirms `ci` + `e2e` already passed for that commit
    (seconds, not a test run; it polls briefly if you tag right after the merge)
    and refuses to build if either is missing or red. On pass it builds + publishes
-   everything, then prunes ghcr. The arm64 rootfs builds are the
-   slowest leg.
-3. **On release publish**, dispatch `install-e2e` + `cli-e2e` against the
-   freshly-published artifacts (a `GITHUB_TOKEN`-created release does not auto-fire
-   downstream workflows):
+   everything. The successful Release triggers the separate GHCR cleanup; the
+   arm64 rootfs builds are the slowest leg.
+3. **On release publish**, dispatch the consolidated released-artifact suite (a
+   `GITHUB_TOKEN`-created release does not auto-fire downstream workflows):
 
    ```bash
-   gh workflow run install-e2e.yml && gh workflow run cli-e2e.yml
+   gh workflow run e2e.yml -f suite=artifacts -f tag=vYYYY.MM.DD
    ```
 
 4. **After** the new release is confirmed live, prune the previous one — last,

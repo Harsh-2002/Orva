@@ -470,7 +470,7 @@ choose_mode() {
 
 # ── Downloader bootstrap ─────────────────────────────────────────────────────
 # Version resolution and asset downloads need curl (or wget). Minimal distro
-# images (the install-e2e containers, and plenty of real bare-metal hosts) ship
+# images (the E2E installer containers, and plenty of real bare-metal hosts) ship
 # with neither, and the full prereq install happens later — so ensure a fetcher
 # exists FIRST, installing curl via the detected package manager if necessary.
 ensure_downloader() {
@@ -984,7 +984,28 @@ if have systemctl && [ -f /etc/systemd/system/orva.service ]; then
     rm -f /etc/systemd/system/orva.service; systemctl daemon-reload 2>/dev/null || true
 fi
 if [ -f /etc/init.d/orva ]; then
+    openrc_pid=""
+    [ -s /run/orva.pid ] && openrc_pid=\$(cat /run/orva.pid 2>/dev/null || true)
     rc-service orva stop 2>/dev/null || service orva stop 2>/dev/null || true
+    # OpenRC can return before a command_background process is fully gone.
+    # A rapid uninstall/reinstall would then reuse its stale pidfile and mark
+    # the new service started without launching it. Bound the wait, terminate
+    # a lingering old process, and clear OpenRC's cached service state.
+    if [ -n "\$openrc_pid" ]; then
+        openrc_wait=0
+        while kill -0 "\$openrc_pid" 2>/dev/null && [ "\$openrc_wait" -lt 30 ]; do
+            sleep 1
+            openrc_wait=\$((openrc_wait + 1))
+        done
+        if kill -0 "\$openrc_pid" 2>/dev/null; then
+            echo "orva process \$openrc_pid did not stop; terminating it" >&2
+            kill -TERM "\$openrc_pid" 2>/dev/null || true
+            sleep 2
+            kill -KILL "\$openrc_pid" 2>/dev/null || true
+        fi
+    fi
+    rc-service orva zap 2>/dev/null || true
+    rm -f /run/orva.pid
     have rc-update && rc-update del orva default 2>/dev/null || true
     rm -f /etc/init.d/orva
 fi

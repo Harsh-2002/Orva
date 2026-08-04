@@ -1,9 +1,10 @@
 # Supported platforms
 
 Orva runs on any Linux distro with kernel 5.10+ that ships unprivileged
-user namespaces and cgroup v2. The 6 distros below are the ones the
-`install-e2e` workflow (`test/install/`) exercises end-to-end on every
-push affecting `scripts/install.sh`.
+user namespaces and cgroup v2. The installer suite in the consolidated
+`e2e` workflow (`test/install/`) exercises the 6 distros below
+end-to-end on every pull request affecting `scripts/install.sh`
+and against every published release.
 
 End-to-end means the workflow does, per distro:
 
@@ -81,8 +82,8 @@ and `orva upgrade` details.
 | macOS | ✓ | ✓ | `orva-cli-darwin-{amd64,arm64}` | `/usr/local/bin/orva` |
 | Windows | ✓ | ✓ | `orva-cli-windows-{amd64,arm64}.exe` | `%LocalAppData%\Programs\orva\orva.exe` |
 
-CI: `.github/workflows/cli-e2e.yml` runs the full install on Ubuntu 24,
-macOS 14, and Windows 2022 every push and weekly.
+CI: `.github/workflows/e2e.yml` runs the released CLI install on Ubuntu 24,
+macOS 14, and Windows 2022 after every release and weekly.
 
 ## Running the matrix locally
 

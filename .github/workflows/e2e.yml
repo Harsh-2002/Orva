@@ -1,28 +1,88 @@
-# Comprehensive programmatic E2E suite (test/e2e). Builds Orva, runs it, and
-# drives every domain + the CLI + the AI agentic loop (via a mock LLM — no real
-# provider key needed). Orva runs directly on the hosted VM (not inside a
-# nested container), with nsjail and both runtime rootfs trees provisioned so
-# deploy + real sandbox invocation are mandatory parts of the gate.
+# Orva's single end-to-end workflow. It owns three suites:
+#   source  — build the current commit and exercise every API/CLI domain
+#   cli     — cross-build and validate released CLI installers/upgrades
+#   install — validate released server installers plus native sandboxes
+# CI owns lint/unit/build checks; Release only ships commits already green here.
 name: e2e
 
-# Least-privilege default token (these jobs only read the repo).
 permissions:
   contents: read
+  pull-requests: read
 
 on:
   push:
     branches: [main]
   pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
-
-concurrency:
-  group: e2e-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      suite:
+        description: "suite to run"
+        required: true
+        type: choice
+        default: source
+        options:
+          - source
+          - cli
+          - install
+          - artifacts
+          - all
+      tag:
+        description: "release tag for artifact suites (defaults to latest)"
+        required: false
+        type: string
+  schedule:
+    - cron: "0 3 * * 0" # released server installers
+    - cron: "0 4 * * 0" # released CLI installers
 
 jobs:
+  # PR-only path routing keeps expensive platform/install jobs scoped to the
+  # files they cover. Release, schedule, and manual routing is event-driven.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+      cli_installers: ${{ steps.filter.outputs.cli_installers }}
+      server_install: ${{ steps.filter.outputs.server_install }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            cli:
+              - 'cli/**'
+              - 'internal/client/**'
+              - 'internal/ids/**'
+              - 'scripts/install-cli.sh'
+              - 'scripts/install-cli.ps1'
+              - 'test/cli/**'
+              - '.github/workflows/e2e.yml'
+            cli_installers:
+              - 'scripts/install-cli.sh'
+              - 'scripts/install-cli.ps1'
+              - 'test/cli/install-cli-test.sh'
+              - 'test/cli/upgrade-test.sh'
+              - '.github/workflows/e2e.yml'
+            server_install:
+              - 'scripts/install.sh'
+              - 'test/install/**'
+              - '.github/workflows/e2e.yml'
+
   e2e:
+    name: source API + sandbox E2E
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'source' || inputs.suite == 'all'))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    concurrency:
+      group: e2e-source-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v6
 
@@ -128,3 +188,233 @@ jobs:
           [ -n "$audit_summary" ] || audit_summary="E2E process failed before writing its checklist; inspect the job log"
           audit_summary=${audit_summary//'%'/'%25'}
           echo "::error title=E2E checklist::$audit_summary"
+
+  cli-unit:
+    name: CLI unit tests
+    needs: changes
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.cli == 'true') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'cli' || inputs.suite == 'all')))
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+      - name: go vet (cli + internal)
+        run: go vet ./cli/... ./internal/...
+      - name: go test ./cli/commands
+        run: go test ./cli/commands/ -count=1 -v
+
+  cli-cross-build:
+    name: CLI cross-compile matrix
+    needs: cli-unit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+      - name: build matrix
+        run: bash test/cli/build-matrix.sh
+      - name: command-tree golden diff
+        run: bash test/cli/command-tree.sh
+
+  cli-install-linux:
+    name: released CLI installer (Linux)
+    needs: changes
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.cli_installers == 'true') ||
+       github.event_name == 'release' ||
+       (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'cli' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
+    runs-on: ubuntu-24.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: install jq + curl
+        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+      - name: run install-cli-test.sh
+        run: bash test/cli/install-cli-test.sh ubuntu24
+
+  cli-install-macos:
+    name: released CLI installer (macOS)
+    needs: changes
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.cli_installers == 'true') ||
+       github.event_name == 'release' ||
+       (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'cli' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
+    runs-on: macos-14
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: run installer against released artifact
+        run: |
+          mkdir -p /tmp/orva-test-bin
+          export ORVA_CLI_PATH=/tmp/orva-test-bin/orva
+          export ORVA_INSTALL_COMPLETION=0
+          sh scripts/install-cli.sh
+          test -x /tmp/orva-test-bin/orva
+          /tmp/orva-test-bin/orva --version
+          /tmp/orva-test-bin/orva completion zsh > /tmp/orva-test-bin/_orva
+          test -s /tmp/orva-test-bin/_orva
+      - name: confirm slim CLI lacks serve
+        run: |
+          if /tmp/orva-test-bin/orva serve --help >/dev/null 2>&1; then
+            echo "ERROR: slim CLI on macOS unexpectedly has 'serve' subcommand" >&2
+            exit 1
+          fi
+          echo "OK: slim CLI on macOS correctly lacks 'serve'"
+
+  cli-install-windows:
+    name: released CLI installer (Windows)
+    needs: changes
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.cli_installers == 'true') ||
+       github.event_name == 'release' ||
+       (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'cli' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
+    runs-on: windows-2022
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: run installer
+        shell: pwsh
+        run: |
+          $env:ORVA_CLI_DIR = "$env:RUNNER_TEMP\orva-test-bin"
+          $env:ORVA_INSTALL_COMPLETION = "0"
+          pwsh -NoProfile -File scripts/install-cli.ps1
+          $exe = Join-Path $env:ORVA_CLI_DIR "orva.exe"
+          if (-not (Test-Path $exe)) { throw "orva.exe not installed at $exe" }
+          & $exe --version
+          $serveOut = & $exe serve --help 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            throw "slim CLI on Windows unexpectedly has 'serve' subcommand"
+          }
+          Write-Host "OK: slim CLI on Windows correctly lacks 'serve'"
+          & $exe completion powershell | Out-File -FilePath "$env:RUNNER_TEMP\orva-completion.ps1"
+          if ((Get-Item "$env:RUNNER_TEMP\orva-completion.ps1").Length -lt 100) {
+            throw "completion script too small — likely failed"
+          }
+
+  cli-upgrade:
+    name: released CLI upgrade round-trip
+    needs: cli-install-linux
+    runs-on: ubuntu-24.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: install jq + curl
+        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+      - name: run upgrade-test.sh
+        run: bash test/cli/upgrade-test.sh
+
+  install-matrix:
+    name: server installer (${{ matrix.distro }})
+    needs: changes
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.server_install == 'true') ||
+       github.event_name == 'release' ||
+       (github.event_name == 'schedule' && github.event.schedule == '0 3 * * 0') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'install' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.distro == 'arch' || matrix.distro == 'alpine321' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - ubuntu24
+          - debian12
+          - alpine321
+          - rocky9
+          - fedora41
+          - arch
+    steps:
+      - uses: actions/checkout@v6
+      - name: install jq + curl
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq curl
+      - name: run install + smoke + uninstall
+        env:
+          ORVA_BROWSER_LEG: "0"
+          ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
+        run: bash test/install/run-distro.sh ${{ matrix.distro }}
+      - name: summarize result
+        if: always()
+        run: |
+          result="not recorded"
+          if compgen -G 'test/install/results-*.tsv' >/dev/null; then
+            recorded=$(awk -F '\t' -v distro="${{ matrix.distro }}" '$1 == distro { value=$2 } END { print value }' test/install/results-*.tsv)
+            [ -z "$recorded" ] || result="$recorded"
+          fi
+          {
+            echo "## installer: ${{ matrix.distro }}"
+            echo ""
+            echo "Result: **$result**"
+            echo ""
+            echo "Detailed output is available in this job's log."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  native-engine:
+    name: native systemd + Node/Python engine (${{ matrix.arch }})
+    needs: changes
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.server_install == 'true') ||
+       github.event_name == 'release' ||
+       (github.event_name == 'schedule' && github.event.schedule == '0 3 * * 0') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'install' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: install jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq
+      - name: install and invoke both runtimes
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: sudo --preserve-env=RELEASE_TAG bash test/install/native-engine.sh

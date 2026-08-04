@@ -65,12 +65,13 @@ Dockerfile        Multi-stage image (dev and production — single file)
 
 ## Release Policy
 
-**Two single-purpose pipelines: verify on push/PR, ship on tag.** The release pipeline does
+**Two-stage policy: verify on push/PR, ship on tag.** The release workflow does
 **no testing** — it gates on the tagged commit's checks already being green, then builds and
 publishes. For code changes, `ci` (workflow lint, shellcheck, go vet/test/build, UI lint/build,
 dependency audit, and a running-container smoke test) plus `e2e` run on PRs and pushes to
-`main`; docs-only changes skip `ci` but still run `e2e`. `cli-e2e` / `install-e2e` cover the
-CLI + bare-metal installer on relevant PRs and against released artifacts.
+`main`; docs-only changes skip `ci` but still run `e2e`. The same `e2e` workflow also owns
+CLI + bare-metal installer jobs on relevant PRs and against released artifacts. Registry
+pruning is isolated in `cleanup-ghcr`, which runs only after a successful Release.
 
 GitHub-hosted E2E runs Orva directly on the VM, provisions nsjail plus Node/Python rootfs
 trees, and sets `ORVA_REQUIRE_SANDBOX=1`; real deploy/invoke is therefore mandatory and a
@@ -91,12 +92,13 @@ kernel boundary manually.
    that exact commit (a status lookup — seconds, not a test run; it polls briefly if you tag
    right after the merge). It **refuses to build** if either is missing or red. On pass it builds
    + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
-   checksums, and the GitHub Release, then prunes ghcr. Every build job `needs: gate`.
+   checksums, and the GitHub Release. Every build job `needs: gate`; a successful Release then
+   triggers the separate `cleanup-ghcr` workflow.
    *Emergency/rc only:* `workflow_dispatch` with `force=true` skips the gate.
-3. **On release publish**, dispatch `install-e2e` + `cli-e2e` against the freshly-published
-   artifacts (a `GITHUB_TOKEN`-created release does not auto-fire downstream workflows, so trigger
-   them with `gh workflow run`). The `cli-e2e` upgrade-leg upgrades from the *previous* release's
-   binary, so it stays red until the next release makes this one the baseline — expected.
+3. **On release publish**, dispatch the `e2e` workflow's `artifacts` suite against the
+   freshly-published CLI + server assets (a `GITHUB_TOKEN`-created release does not auto-fire
+   downstream workflows, so Release calls `gh workflow run e2e.yml -f suite=artifacts`). The CLI
+   upgrade leg uses the previous active release when present and skips cleanly when there is none.
 4. **After** the new release is confirmed live, prune the previous one — last, not first:
    ```bash
    gh release delete v<old-tag> --yes --cleanup-tag   # removes the release + its tag

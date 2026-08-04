@@ -1,7 +1,7 @@
 name: CI
 
 # Fast PR / push gate. Owns ALL shell linting for the repo so the heavier
-# install-e2e + cli-e2e workflows don't have to re-lint the same scripts.
+# suites consolidated in e2e.yml don't re-lint the same scripts.
 # Path-filtered: docs-only / screenshot-only commits skip CI entirely.
 
 on:
@@ -25,6 +25,11 @@ concurrency:
 
 permissions:
   contents: read
+
+# The Docker build action otherwise retains a .dockerbuild record. Validation
+# output belongs in logs/check summaries; only Release may create artifacts.
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
 
 jobs:
   lint:
@@ -56,8 +61,8 @@ jobs:
             scripts/install.sh \
             scripts/install-cli.sh
 
-      # bash scripts — entrypoint + every test suite. Failing
-      # builds here gate the install-e2e + cli-e2e workflows downstream.
+      # bash scripts — entrypoint + every test suite. Failing builds here
+      # gate the consolidated E2E workflow's installer and CLI jobs.
       - name: bash scripts
         run: |
           bash -n scripts/entrypoint.sh

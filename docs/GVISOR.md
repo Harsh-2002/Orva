@@ -214,8 +214,8 @@ Orva-specific about the failure — any tool that needs
   (2026-05-13). The README now points here instead.
 - `docs/SECURITY.md` cross-references this document under "layered
   isolation: what does and doesn't compose."
-- The previous CI harness (`test/install/gvisor-flow.sh`,
-  `.github/workflows/install-e2e.yml`'s `gvisor` job, gated on
+- The previous CI harness (`test/install/gvisor-flow.sh` and the former
+  installer workflow's `gvisor` job, gated on
   `HAS_GVISOR`) was removed alongside this writeup. There's no value
   in burning CI minutes re-verifying an architectural incompatibility
   on every release. If gVisor's behavior changes, follow the
