@@ -1,13 +1,15 @@
 name: cleanup-ghcr
 
 # Destructive release maintenance is intentionally isolated from Release.
-# It runs only after the released-artifact E2E suite succeeds, so the CLI
-# upgrade leg can still use the previous release and no publication can race.
+# The consolidated E2E workflow dispatches it only after every released-
+# artifact job succeeds, so the CLI upgrade leg can use the previous release.
 on:
-  workflow_run:
-    workflows: [e2e]
-    types: [completed]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "validated release tag (defaults to latest)"
+        required: false
+        type: string
 
 concurrency:
   group: cleanup-ghcr
@@ -20,12 +22,6 @@ permissions:
 jobs:
   prune:
     name: prune old release state
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'workflow_dispatch' &&
-       startsWith(github.event.workflow_run.head_branch, 'v') &&
-       github.event.workflow_run.display_title == 'e2e / artifacts')
     runs-on: ubuntu-24.04
     steps:
       - uses: docker/setup-buildx-action@v4
@@ -92,7 +88,7 @@ jobs:
       - name: enforce one active GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DISPATCH_TAG: ${{ github.event.workflow_run.head_branch }}
+          DISPATCH_TAG: ${{ inputs.tag }}
         run: |
           set -eu
 

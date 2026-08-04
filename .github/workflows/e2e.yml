@@ -419,3 +419,38 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         run: sudo --preserve-env=RELEASE_TAG bash test/install/native-engine.sh
+
+  dispatch-cleanup:
+    name: dispatch post-release cleanup
+    needs:
+      - cli-install-linux
+      - cli-install-macos
+      - cli-install-windows
+      - cli-upgrade
+      - install-matrix
+      - native-engine
+    if: >-
+      always() &&
+      (github.event_name == 'release' ||
+       (github.event_name == 'workflow_dispatch' && inputs.suite == 'artifacts')) &&
+      needs.cli-install-linux.result == 'success' &&
+      needs.cli-install-macos.result == 'success' &&
+      needs.cli-install-windows.result == 'success' &&
+      needs.cli-upgrade.result == 'success' &&
+      needs.install-matrix.result == 'success' &&
+      needs.native-engine.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: dispatch isolated cleanup workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          test -n "$RELEASE_TAG" || {
+            echo "::error::released-artifact validation has no release tag"
+            exit 1
+          }
+          gh workflow run cleanup-ghcr.yml --ref main -f tag="$RELEASE_TAG"
