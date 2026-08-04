@@ -21,11 +21,11 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/robfig/cron/v3"
 )
 
@@ -73,10 +73,10 @@ type Scheduler struct {
 	// expired entries; jobs claims due jobs and dispatches them;
 	// webhooks delivers queued event payloads. All have sane defaults
 	// but are exported via setters for tests.
-	cronInterval     time.Duration
-	kvInterval       time.Duration
-	jobsInterval     time.Duration
-	webhookInterval  time.Duration
+	cronInterval    time.Duration
+	kvInterval      time.Duration
+	jobsInterval    time.Duration
+	webhookInterval time.Duration
 
 	// Concurrency cap on background jobs so a queue spike can't starve
 	// HTTP traffic. Default min(8, sandbox.max_concurrent / 4).
@@ -334,7 +334,7 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 		return
 	}
 	var reqErr error
-	defer func() { s.pool.Release(row.FunctionID, acq.Worker, reqErr) }()
+	defer func() { s.pool.Release(acq, reqErr) }()
 
 	// Build the synthetic event. Cron payloads land at POST / so the
 	// handler signature is identical to a public invocation; we add a
@@ -351,13 +351,13 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 		"method": "POST",
 		"path":   "/",
 		"headers": map[string]string{
-			"content-type":          "application/json",
-			"x-orva-trigger":        "cron",
-			"x-orva-cron-id":        row.ID,
-			"x-orva-execution-id":   execID,
-			"x-orva-function-id":    fn.ID,
-			"x-orva-trace-id":       traceID,
-			"x-orva-span-id":        spanID,
+			"content-type":        "application/json",
+			"x-orva-trigger":      "cron",
+			"x-orva-cron-id":      row.ID,
+			"x-orva-execution-id": execID,
+			"x-orva-function-id":  fn.ID,
+			"x-orva-trace-id":     traceID,
+			"x-orva-span-id":      spanID,
 		},
 		"body": body,
 	}
@@ -633,7 +633,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 		return
 	}
 	var reqErr error
-	defer func() { s.pool.Release(j.FunctionID, acq.Worker, reqErr) }()
+	defer func() { s.pool.Release(acq, reqErr) }()
 
 	body := string(j.Payload)
 	if body == "" {
@@ -655,14 +655,14 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 		"method": "POST",
 		"path":   "/",
 		"headers": map[string]string{
-			"content-type":          "application/json",
-			"x-orva-trigger":        "job",
-			"x-orva-job-id":         j.ID,
-			"x-orva-function-id":    fn.ID,
-			"x-orva-attempt":        strconv.Itoa(j.Attempts),
-			"x-orva-execution-id":   execID,
-			"x-orva-trace-id":       traceID,
-			"x-orva-span-id":        spanID,
+			"content-type":        "application/json",
+			"x-orva-trigger":      "job",
+			"x-orva-job-id":       j.ID,
+			"x-orva-function-id":  fn.ID,
+			"x-orva-attempt":      strconv.Itoa(j.Attempts),
+			"x-orva-execution-id": execID,
+			"x-orva-trace-id":     traceID,
+			"x-orva-span-id":      spanID,
 		},
 		"body": body,
 	}

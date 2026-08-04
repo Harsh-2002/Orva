@@ -161,7 +161,7 @@ for _ in $(seq 1 15); do
 done
 
 throttled=0
-for i in $(seq 1 7); do
+for _ in $(seq 1 7); do
     code_=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/fn/${fid_rl#fn_}/" -d '{}')
     if [ "$code_" = "429" ]; then throttled=$((throttled+1)); fi
 done

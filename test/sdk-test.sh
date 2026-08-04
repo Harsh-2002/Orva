@@ -23,7 +23,6 @@ if [ -z "$KEY" ]; then
 fi
 
 CURL=(curl -sf -H "X-Orva-API-Key: $KEY")
-HCURL=(curl -s -o /dev/null -w '%{http_code}' -H "X-Orva-API-Key: $KEY")
 
 PASS=0
 FAIL=0
@@ -53,8 +52,9 @@ assert_nonempty() {
 
 wait_active() {
     local fid="$1"
+    local s
     for _ in $(seq 1 30); do
-        local s=$("${CURL[@]}" "$BASE/api/v1/functions/$fid" | jq -r '.status')
+        s=$("${CURL[@]}" "$BASE/api/v1/functions/$fid" | jq -r '.status')
         [ "$s" = "active" ] && return 0
         sleep 0.5
     done
@@ -127,7 +127,6 @@ py_deploy=$(jq -nc --arg src "$PY_SRC" '{code:$src,filename:"handler.py"}')
 wait_active "$py_id"
 
 py_resp=$("${CURL[@]}" -X POST "$BASE/fn/$py_id" -H "Content-Type: application/json" -d '{}')
-py_status=$?
 py_body=$(echo "$py_resp" | head -c 4096)
 
 a=$(echo "$py_body" | jq -r '.a // empty')
@@ -140,7 +139,6 @@ assert_eq "python kv.cas succeeds on match"      "true" "$cas_ok"
 
 # Fetch the most recent execution for this function to peek at trace/logs.
 py_exec=$("${CURL[@]}" "$BASE/api/v1/executions?function_id=$py_id&limit=1" | jq -r '.executions[0]')
-py_exec_id=$(echo "$py_exec" | jq -r '.id')
 py_trace_id=$(echo "$py_exec" | jq -r '.trace_id // empty')
 assert_nonempty "python execution trace_id propagated" "$py_trace_id"
 

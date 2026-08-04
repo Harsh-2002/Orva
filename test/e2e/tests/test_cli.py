@@ -16,12 +16,13 @@ import tempfile
 from harness import OrvaClient, CLIRunner, section, check, summary, skip
 
 NAME = "e2e-cli-fn"
+DEPLOY_NAME = "e2e-cli-deploy"
 
 
 def cleanup(c):
-    lst = c.get("/api/v1/functions") or {}
+    lst = c.get("/api/v1/functions?limit=10000") or {}
     for f in (lst.get("functions") or []):
-        if f.get("name") == NAME:
+        if f.get("name") in (NAME, DEPLOY_NAME):
             c.req("DELETE", f"/api/v1/functions/{f['id']}", expect=(200, 204, 404))
 
 
@@ -181,7 +182,7 @@ def _try_deploy_invoke(cli):
     invoke it. Returns None when the deploy clearly couldn't build (sandbox
     missing), else a dict describing what happened. Uses a distinct name so it
     never collides with the REST-created NAME used elsewhere."""
-    dep_name = "e2e-cli-deploy"
+    dep_name = DEPLOY_NAME
     src = None
     try:
         src = tempfile.mkdtemp(prefix="orva-cli-e2e-")
@@ -204,7 +205,11 @@ def _try_deploy_invoke(cli):
         # invoke now prints the response BODY to stdout (status/timing go to
         # stderr); a 2xx invocation exits 0 with a non-empty body.
         irc, iout, ierr = cli.run("invoke", dep_name, "--body", "{}", timeout=60)
-        result["invoked"] = (irc == 0 and iout.strip() != "")
+        try:
+            invoke_body = json.loads(iout)
+        except (TypeError, json.JSONDecodeError):
+            invoke_body = None
+        result["invoked"] = (irc == 0 and invoke_body == {"ok": True})
         result["invoke_detail"] = (iout + ierr).strip()[-200:]
         _cli_delete(cli, dep_name)
         return result

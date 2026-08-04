@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // InternalInvokeHandler is the F2F (function-to-function) entrypoint.
@@ -121,7 +121,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var reqErr error
-	defer func() { h.Pool.Release(fn.ID, acq.Worker, reqErr) }()
+	defer func() { h.Pool.Release(acq, reqErr) }()
 
 	// Generate an execution ID so this F2F call shows up in the executions
 	// log AND in the trace tree as a distinct span. Without this, F2F
@@ -136,13 +136,13 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		"method": "POST",
 		"path":   "/",
 		"headers": map[string]string{
-			"content-type":          "application/json",
-			"x-orva-trigger":        "f2f",
-			"x-orva-call-depth":     strconv.Itoa(depth + 1),
-			"x-orva-function-id":    fn.ID,
-			"x-orva-execution-id":   execID,
-			"x-orva-trace-id":       traceID,
-			"x-orva-span-id":        spanID,
+			"content-type":        "application/json",
+			"x-orva-trigger":      "f2f",
+			"x-orva-call-depth":   strconv.Itoa(depth + 1),
+			"x-orva-function-id":  fn.ID,
+			"x-orva-execution-id": execID,
+			"x-orva-trace-id":     traceID,
+			"x-orva-span-id":      spanID,
 		},
 		"body": string(body),
 	}
@@ -292,7 +292,7 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var reqErr error
-	defer func() { h.Pool.Release(fn.ID, acq.Worker, reqErr) }()
+	defer func() { h.Pool.Release(acq, reqErr) }()
 
 	execID := ids.New()
 	event := map[string]any{

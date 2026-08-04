@@ -27,7 +27,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS_DIR = os.path.join(HERE, "tests")
-RESULT_RE = re.compile(r"RESULT pass=(\d+) fail=(\d+)(?: skip=(\d+))?")
+RESULT_RE = re.compile(r"^RESULT pass=(\d+) fail=(\d+)(?: skip=(\d+))?$")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def discover(flt):
@@ -40,28 +41,65 @@ def discover(flt):
 def run_module(path, env):
     name = os.path.basename(path)
     print(f"\n\033[1;35m{'=' * 60}\n  {name}\n{'=' * 60}\033[0m")
-    p = subprocess.run([sys.executable, path], env=env, text=True,
-                       capture_output=True, timeout=900)
+    try:
+        p = subprocess.run([sys.executable, path], env=env, text=True,
+                           capture_output=True, timeout=900)
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        sys.stdout.write(stdout)
+        sys.stderr.write(stderr)
+        return {
+            "name": name, "status": "FAIL", "pass": 0, "fail": 1,
+            "rc": 124, "detail": "module timed out after 900 seconds",
+        }
+    except OSError as exc:
+        return {
+            "name": name, "status": "FAIL", "pass": 0, "fail": 1,
+            "rc": 126, "detail": f"could not start module: {exc}",
+        }
     sys.stdout.write(p.stdout)
     if p.stderr.strip():
         sys.stderr.write(p.stderr)
-    m = None
-    for line in reversed(p.stdout.splitlines()):
-        m = RESULT_RE.search(line)
-        if m:
-            break
+    output_lines = [line.strip() for line in p.stdout.splitlines() if line.strip()]
+    m = RESULT_RE.fullmatch(output_lines[-1]) if output_lines else None
     pass_n = int(m.group(1)) if m else 0
     fail_n = int(m.group(2)) if m else 0
-    skipped = bool(m and m.group(3))
-    if p.returncode == 3 or skipped:
-        status = "SKIP"
-    elif p.returncode == 0 and fail_n == 0:
+    skip_n = int(m.group(3) or 0) if m else 0
+    protocol_error = ""
+    if not m:
+        status = "FAIL"
+        fail_n = max(fail_n, 1)
+        protocol_error = "missing RESULT trailer"
+    elif skip_n > 0:
+        if p.returncode == 3 and fail_n == 0:
+            status = "SKIP"
+        else:
+            status = "FAIL"
+            fail_n = max(fail_n, 1)
+            protocol_error = "skip result requires exit 3 and zero failed checks"
+    elif p.returncode == 0 and fail_n == 0 and pass_n > 0:
         status = "PASS"
     else:
         status = "FAIL"
-        if not m:  # crashed before printing a result
-            fail_n = fail_n or 1
-    return {"name": name, "status": status, "pass": pass_n, "fail": fail_n, "rc": p.returncode}
+        fail_n = max(fail_n, 1)
+        if p.returncode == 3:
+            protocol_error = "exit 3 requires RESULT skip=1"
+        elif p.returncode == 0 and pass_n == 0:
+            protocol_error = "passing result requires at least one passed check"
+    clean_stdout = ANSI_RE.sub("", p.stdout)
+    failure_lines = [line.strip() for line in clean_stdout.splitlines() if "✗" in line]
+    if status == "FAIL" and not failure_lines:
+        clean_stderr = ANSI_RE.sub("", p.stderr).strip()
+        fallback = clean_stderr or clean_stdout.strip()
+        failure_lines = fallback.splitlines()[-5:]
+    if protocol_error:
+        failure_lines.append(protocol_error)
+    detail = " / ".join(failure_lines[-4:])[:1200]
+    return {
+        "name": name, "status": status, "pass": pass_n, "fail": fail_n,
+        "rc": p.returncode, "detail": detail,
+    }
 
 
 def write_checklist(results, target_desc):
@@ -90,6 +128,13 @@ def write_checklist(results, target_desc):
     for r in sorted(results, key=lambda x: x["name"]):
         lines.append(f"| `{r['name']}` | {icon.get(r['status'], '?')} {r['status']} | {r['pass']}/{r['fail']} |")
     lines.append("")
+    failed = [r for r in results if r["status"] == "FAIL"]
+    if failed:
+        lines.extend(["## Failure details", ""])
+        for r in sorted(failed, key=lambda x: x["name"]):
+            detail = r.get("detail") or f"module exited {r['rc']} without failure output"
+            lines.append(f"- `{r['name']}`: {detail}")
+        lines.append("")
     with open(os.path.join(HERE, "CHECKLIST.md"), "w") as f:
         f.write("\n".join(lines))
     return n_fail

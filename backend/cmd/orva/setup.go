@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/spf13/cobra"
@@ -139,8 +140,27 @@ func hasCaps(path string) bool {
 	if err != nil {
 		return false
 	}
-	// Any non-empty getcap output means capabilities are present.
-	return len(out) > 0
+	return hasRequiredNsjailCaps(string(out))
+}
+
+var requiredNsjailCaps = []string{
+	"cap_sys_admin",
+	"cap_setuid",
+	"cap_setgid",
+	"cap_net_admin",
+	"cap_net_bind_service",
+}
+
+func hasRequiredNsjailCaps(output string) bool {
+	if !strings.Contains(output, "=eip") {
+		return false
+	}
+	for _, capability := range requiredNsjailCaps {
+		if !strings.Contains(output, capability) {
+			return false
+		}
+	}
+	return true
 }
 
 func runWithPossibleSudo(cmd string, args ...string) error {
@@ -156,7 +176,8 @@ func runWithPossibleSudo(cmd string, args ...string) error {
 }
 
 func ensureRootfs(target, runtime, rootfsURL string) error {
-	if _, err := os.Stat(filepath.Join(target, "usr/local/bin")); err == nil {
+	entrypoint := filepath.Join(target, "usr/local/bin", runtimeEntrypoint(runtime))
+	if runtimeComplete(entrypoint) {
 		fmt.Printf("[ok] %s rootfs already at %s\n", runtime, target)
 		return nil
 	}
@@ -180,6 +201,18 @@ func ensureRootfs(target, runtime, rootfsURL string) error {
 	c := exec.Command("bash", script, target, runtime)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	return c.Run()
+}
+
+func runtimeEntrypoint(runtimeName string) string {
+	if runtimeName == "python" {
+		return "python3"
+	}
+	return runtimeName
+}
+
+func runtimeComplete(entrypoint string) bool {
+	entrypointInfo, err := os.Stat(entrypoint)
+	return err == nil && !entrypointInfo.IsDir() && entrypointInfo.Mode()&0o111 != 0
 }
 
 // fetchRootfsTarball downloads <base>/rootfs-<runtime>-<arch>.tar.zst and

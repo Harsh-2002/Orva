@@ -22,7 +22,12 @@ on:
       - "scripts/uninstall.sh"
       - "test/install/**"
       - ".github/workflows/install-e2e.yml"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag to validate (defaults to latest)"
+        required: false
+        type: string
   schedule:
     # Weekly Sunday 03:00 UTC catches rolling-release breakage (Arch).
     - cron: "0 3 * * 0"
@@ -64,6 +69,7 @@ jobs:
         # HTTP route spot-checks still run.
         env:
           ORVA_BROWSER_LEG: "0"
+          ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
         run: bash test/install/run-distro.sh ${{ matrix.distro }}
 
       - name: Upload logs
@@ -99,7 +105,8 @@ jobs:
             echo "|---|---|"
             for d in ubuntu24 debian12 alpine321 rocky9 fedora41 arch; do
               if [ -d "artifacts/install-e2e-$d" ]; then
-                if grep -q "^$d\tpass" artifacts/install-e2e-$d/results-*.tsv 2>/dev/null; then
+                if awk -F '\t' -v distro="$d" '$1 == distro && $2 == "pass" { found=1 } END { exit !found }' \
+                    artifacts/install-e2e-$d/results-*.tsv 2>/dev/null; then
                   echo "| $d | ✅ pass |"
                 else
                   echo "| $d | ❌ fail |"
@@ -109,3 +116,29 @@ jobs:
               fi
             done
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Hosted runners are VMs, so this leg exercises the real systemd service
+  # and makes both language engines mandatory. The distro matrix above still
+  # covers installer portability inside privileged containers.
+  native-engine:
+    name: native systemd + Node/Python engine (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq
+      - name: Install and invoke both runtimes
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: sudo --preserve-env=RELEASE_TAG bash test/install/native-engine.sh

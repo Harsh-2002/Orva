@@ -13,6 +13,7 @@ import time
 from harness import OrvaClient, section, check, summary, skip
 
 NAME = "e2e-deploy-invoke"
+PYTHON_NAME = "e2e-deploy-invoke-python"
 REQUIRE_SANDBOX = os.environ.get("ORVA_REQUIRE_SANDBOX", "") in ("1", "true", "yes")
 
 
@@ -40,9 +41,9 @@ HANDLER_JS = """exports.handler = async (event) => {
 
 
 def cleanup(c):
-    lst = c.get("/api/v1/functions") or {}
+    lst = c.get("/api/v1/functions?limit=10000") or {}
     for f in (lst.get("functions") or []):
-        if f.get("name") == NAME:
+        if f.get("name") in (NAME, PYTHON_NAME):
             c.req("DELETE", f"/api/v1/functions/{f['id']}", expect=(200, 204, 404))
 
 
@@ -165,17 +166,58 @@ def main():
                            expect=range(200, 599))
             if ec == 200 and isinstance(el, dict):
                 execs = el.get("executions") or []
-                if execs:
+                successful = [e for e in execs if e.get("status") == "success"]
+                if len(successful) >= 2:
                     recorded = True
                     break
             time.sleep(0.5)
-        check("executions list -> 200 with rows", recorded, f"got {len(execs)} rows")
+        check("both invokes recorded successfully", recorded, f"got {len(execs)} rows")
         if execs:
             check("execution belongs to this function",
                   all(e.get("function_id") == fid for e in execs))
-            check("at least one successful execution",
-                  any(e.get("status") == "success" for e in execs),
+            check("at least two successful executions",
+                  sum(e.get("status") == "success" for e in execs) >= 2,
                   str([e.get("status") for e in execs])[:160])
+
+        section("python deploy + real sandbox invoke")
+        py_body = {
+            "name": PYTHON_NAME, "description": "python engine e2e", "runtime": "python",
+            "entrypoint": "handler.py", "timeout_ms": 30000, "memory_mb": 128,
+            "cpus": 1, "network_mode": "none", "auth_mode": "none",
+        }
+        pyc, py_created = c.req("POST", "/api/v1/functions", py_body, expect=range(200, 599))
+        check("create python -> 2xx", 200 <= pyc < 300, f"status {pyc}: {str(py_created)[:160]}")
+        pyfid = (py_created or {}).get("id") if isinstance(py_created, dict) else None
+        check("python function has id", bool(pyfid))
+        if pyfid:
+            py_code = """import json
+def handler(event):
+    body = event.get("body") or {}
+    if isinstance(body, str):
+        body = json.loads(body) if body else {}
+    return {"statusCode": 200, "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"runtime": "python", "echo": body.get("name")})}
+"""
+            pdc, pdep = c.req(
+                "POST", f"/api/v1/functions/{pyfid}/deploy-inline",
+                {"code": py_code, "filename": "handler.py"}, expect=range(200, 599),
+            )
+            check("python deploy accepted", pdc in (200, 202), f"status {pdc}: {str(pdep)[:160]}")
+            py_status = wait_active(c, pyfid, timeout=60)
+            check("python status == active", py_status == "active", str(py_status))
+            if py_status == "active":
+                pic, pib = c.req("POST", f"/fn/{pyfid}", {"name": "Orva"}, expect=range(200, 599))
+                check("python invoke -> 200", pic == 200, f"status {pic}: {str(pib)[:200]}")
+                if isinstance(pib, str):
+                    try:
+                        pib = json.loads(pib)
+                    except Exception:
+                        pib = {}
+                check("python handler executed",
+                      isinstance(pib, dict) and pib == {"runtime": "python", "echo": "Orva"},
+                      str(pib)[:200])
+            pdel, _ = c.req("DELETE", f"/api/v1/functions/{pyfid}", expect=range(200, 599))
+            check("delete python -> 2xx", pdel in (200, 204), f"status {pdel}")
 
         section("delete + confirm gone")
         delc, _ = c.req("DELETE", f"/api/v1/functions/{fid}", expect=range(200, 599))

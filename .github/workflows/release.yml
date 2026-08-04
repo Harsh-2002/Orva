@@ -36,10 +36,11 @@ on:
 permissions:
   contents: write   # create releases, upload assets
   packages: write   # push to ghcr.io
-  actions: read     # gate job reads CI/e2e run status for the tagged commit
+  actions: write    # gate reads verification; release dispatches artifact E2E
 
 env:
   IMAGE_NAME: ghcr.io/harsh-2002/orva
+  NSJAIL_REF: 5ebcc30bef4af60d6e28f012dd8bf7b99b8b0acf
 
 jobs:
   # ── 0. Gate — verify, don't re-test ──────────────────────────────────
@@ -87,7 +88,7 @@ jobs:
             local wf="$1" mode="$2" deadline=$((SECONDS + 1200))  # ~20 min cap
             while :; do
               read -r status conclusion < <(gh api \
-                "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${SHA}&per_page=1" \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${SHA}&event=push&branch=main&per_page=1" \
                 --jq '.workflow_runs[0] | "\(.status) \(.conclusion)"' 2>/dev/null || echo "null null")
               if [ "$status" = "null" ]; then
                 if [ "$mode" = "soft" ]; then echo "• $wf: no run for $SHA (path-filtered) — skipping"; return 0; fi
@@ -294,7 +295,8 @@ jobs:
 
       - name: build nsjail from source
         run: |
-          git clone --depth 1 https://github.com/google/nsjail.git /tmp/nsjail
+          git clone --filter=blob:none https://github.com/google/nsjail.git /tmp/nsjail
+          git -C /tmp/nsjail checkout "$NSJAIL_REF"
           cd /tmp/nsjail
           make -j"$(nproc)"
           strip nsjail
@@ -463,6 +465,16 @@ jobs:
             | `install.sh`, `install-cli.sh`, `install-cli.ps1` | One-line installers |
             | `checksums.txt` | SHA-256 of every other asset above |
 
+      # Releases created with GITHUB_TOKEN do not emit downstream release
+      # events. Dispatch the artifact-validation workflows explicitly.
+      - name: dispatch released-artifact E2E
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          gh workflow run install-e2e.yml --ref "$RELEASE_TAG" -f tag="$RELEASE_TAG"
+          gh workflow run cli-e2e.yml --ref "$RELEASE_TAG" -f tag="$RELEASE_TAG"
+
   # ── 5. Per-arch Docker image, native runners (no QEMU) ────────────────
   # Single source of truth: the unified Dockerfile builds UI, Go binary,
   # nsjail, and rootfs stages itself, all in matched debian:bookworm-slim
@@ -541,6 +553,7 @@ jobs:
             VERSION=${{ steps.v.outputs.tag }}
             COMMIT=${{ steps.v.outputs.commit }}
             BUILD_TIME=${{ steps.v.outputs.build_time }}
+            NSJAIL_REF=${{ env.NSJAIL_REF }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: export digest for manifest job

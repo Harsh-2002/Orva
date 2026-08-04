@@ -15,7 +15,7 @@ export ORVA_CONTAINER="$CONTAINER"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS="$DIR/run-all-results.tsv"
-> "$RESULTS"
+: > "$RESULTS"
 
 run() {
     local script="$1" out
@@ -50,3 +50,6 @@ echo "============================================================"
 echo "  SUMMARY"
 echo "============================================================"
 column -ts $'\t' "$RESULTS" || cat "$RESULTS"
+if grep -q $'\tfail\t' "$RESULTS"; then
+    exit 1
+fi

@@ -36,6 +36,7 @@ func newTestSession(client *cli.Client) (*chatSession, *bytes.Buffer, *bytes.Buf
 		stdin:     bufio.NewReader(strings.NewReader("")),
 		out:       out,
 		errOut:    errOut,
+		stdinTTY:  func() bool { return false },
 		toolNames: map[string]string{},
 	}
 	return s, out, errOut
@@ -179,6 +180,21 @@ func TestApprovalFailClosedNonTTY(t *testing.T) {
 	}
 	if approveHits != 0 {
 		t.Errorf("expected no approve/reject POST, got %d", approveHits)
+	}
+}
+
+// TestApprovalFailClosedOneShotWithTTY guards the real E2E failure where a
+// one-shot command inherited a terminal and blocked forever waiting for input.
+// One-shot mode is scriptable and must require --auto-approve even with a TTY.
+func TestApprovalFailClosedOneShotWithTTY(t *testing.T) {
+	s, _, _ := newTestSession(cli.NewClient("http://127.0.0.1", "k"))
+	s.interactive = false
+	s.stdinTTY = func() bool { return true }
+	s.stdin = bufio.NewReader(strings.NewReader("y\n"))
+
+	approved, err := s.decideApproval(pendingTool{Name: "create_function"})
+	if err == nil || !strings.Contains(err.Error(), "requires approval") {
+		t.Fatalf("one-shot TTY must fail closed, approved=%v err=%v", approved, err)
 	}
 }
 

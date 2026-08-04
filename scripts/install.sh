@@ -59,6 +59,7 @@ RUNTIME_FOR_COMPOSE=""  # decided in assess_runtime(); empty = docker default
 DOCKER_DEFAULT_RUNTIME=""
 DOCKER_RUNTIMES=""
 DOCKER_RUNTIME_PATHS=""
+SERVICE_DISABLE_USERNS="${ORVA_DISABLE_USERNS:-}"
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -513,12 +514,12 @@ resolve_version() {
 install_prereqs() {
     if [ "$NO_PKG" = "1" ]; then log "skipping package install (--no-pkg)"; return; fi
     case "$DISTRO_ID" in
-        ubuntu)        ip_nsjail="libprotobuf32t64 libnl-route-3-200 libnl-3-200" ;;
-        debian)        ip_nsjail="libprotobuf32 libnl-route-3-200 libnl-3-200" ;;
-        alpine)        ip_nsjail="protobuf libnl3 gcompat" ;;
-        fedora|rhel|centos|rocky|almalinux|amzn) ip_nsjail="protobuf libnl3" ;;
-        arch|manjaro|endeavouros)                ip_nsjail="protobuf libnl" ;;
-        opensuse-leap|opensuse-tumbleweed|sles)  ip_nsjail="libprotobuf-lite libnl3-200" ;;
+        ubuntu)        ip_nsjail="libprotobuf32t64 libnl-route-3-200 libnl-3-200 libcap2-bin" ;;
+        debian)        ip_nsjail="libprotobuf32 libnl-route-3-200 libnl-3-200 libcap2-bin" ;;
+        alpine)        ip_nsjail="protobuf libnl3 gcompat libcap" ;;
+        fedora|rhel|centos|rocky|almalinux|amzn) ip_nsjail="protobuf libnl3 libcap" ;;
+        arch|manjaro|endeavouros)                ip_nsjail="protobuf libnl libcap" ;;
+        opensuse-leap|opensuse-tumbleweed|sles)  ip_nsjail="libprotobuf-lite libnl3-200 libcap-progs" ;;
         *)             ip_nsjail="" ;;
     esac
     ip_pkgs="ca-certificates curl tar zstd $ip_nsjail"
@@ -600,6 +601,17 @@ check_kernel_features() {
         warn "unprivileged user namespaces disabled — enable: sysctl -w kernel.unprivileged_userns_clone=1"
         ckf_missing="userns "
     fi
+    if [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
+       [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ]; then
+        warn "AppArmor restricts unprivileged user namespaces — using nsjail's setcap fallback"
+        ckf_missing="userns ${ckf_missing#userns }"
+        [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=1
+    fi
+    if [ -f /.dockerenv ] || [ -f /run/systemd/container ] || grep -qaE '(lxc|container)' /proc/1/cgroup 2>/dev/null; then
+        warn "containerized host detected — using nsjail's setcap fallback"
+        [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=1
+    fi
+    [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=0
     if ! grep -q cgroup2 /proc/mounts 2>/dev/null; then
         warn "cgroup v2 not detected — per-function resource limits will be best-effort"
         ckf_missing="${ckf_missing}cgroupv2 "
@@ -621,7 +633,7 @@ fetch() {
 verify() {
     v_file="$1"; v_asset="$2"
     v_want=$(grep " ${v_asset}\$" "$tmp/checksums.txt" 2>/dev/null | awk '{print $1}' | head -n1)
-    [ -n "$v_want" ] || { warn "no checksum for $v_asset — skipping verification"; return 0; }
+    [ -n "$v_want" ] || die "release checksums do not contain $v_asset"
     v_got=$(sha256sum "$v_file" | awk '{print $1}')
     [ "$v_want" = "$v_got" ] || die "checksum mismatch for $v_asset (want $v_want, got $v_got)"
 }
@@ -633,10 +645,7 @@ download_and_install_binaries() {
     log "downloading orva + nsjail (linux-${ARCH})"
     fetch "$base/orva-linux-${ARCH}"   "$tmp/orva"   || die "failed to download orva-linux-${ARCH}"
     fetch "$base/nsjail-linux-${ARCH}" "$tmp/nsjail" || die "failed to download nsjail-linux-${ARCH}"
-    # Best-effort: if checksums.txt can't be fetched it's left absent, and
-    # verify() then finds no entry and warns+skips per asset (fail-open on a
-    # MISSING checksum). A checksum MISMATCH still aborts via die().
-    fetch "$base/checksums.txt"        "$tmp/checksums.txt" || warn "could not download checksums.txt"
+    fetch "$base/checksums.txt"        "$tmp/checksums.txt" || die "failed to download checksums.txt"
     log "verifying checksums"
     verify "$tmp/orva"   "orva-linux-${ARCH}"
     verify "$tmp/nsjail" "nsjail-linux-${ARCH}"
@@ -647,6 +656,21 @@ download_and_install_binaries() {
     # Daemon defaults to nsjail at /usr/local/bin/nsjail (matches Docker image).
     install -d -m 0755 /usr/local/bin
     install -m 0755 "$tmp/nsjail" /usr/local/bin/nsjail
+    nsjail_caps="cap_sys_admin,cap_setuid,cap_setgid,cap_net_admin,cap_net_bind_service=eip"
+    have setcap || die "setcap is required to install nsjail capabilities"
+    setcap "$nsjail_caps" "$PREFIX/bin/nsjail" || die "failed to apply capabilities to $PREFIX/bin/nsjail"
+    setcap "$nsjail_caps" /usr/local/bin/nsjail || die "failed to apply capabilities to /usr/local/bin/nsjail"
+    cap_state=$(getcap /usr/local/bin/nsjail 2>/dev/null || true)
+    for cap_name in cap_sys_admin cap_setuid cap_setgid cap_net_admin cap_net_bind_service; do
+        case "$cap_state" in
+            *"$cap_name"*) ;;
+            *) die "nsjail capability verification failed: missing $cap_name" ;;
+        esac
+    done
+    case "$cap_state" in
+        *=eip*) ;;
+        *) die "nsjail capability verification failed: expected effective, inheritable, and permitted flags" ;;
+    esac
 }
 
 download_rootfs() {
@@ -710,10 +734,10 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
-# orvad needs NET_ADMIN for nftables. nsjail's file capabilities also include
+# orvad needs NET_ADMIN for nftables. nsjail's file capabilities include
 # SETUID, SETGID, and NET_BIND_SERVICE; those must remain in the service's
 # bounding set or Linux rejects execve(nsjail) with EPERM before it can start.
-AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
 CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE
 NoNewPrivileges=false
 Delegate=yes
@@ -730,6 +754,7 @@ ProtectKernelModules=true
 LimitNOFILE=65536
 LimitNPROC=8192
 Environment=ORVA_DATA_DIR=${DATA_DIR}
+Environment=ORVA_DISABLE_USERNS=${SERVICE_DISABLE_USERNS}
 
 [Install]
 WantedBy=multi-user.target
@@ -748,6 +773,7 @@ error_log="/var/log/orva.log"
 
 export ORVA_DATA_DIR="${DATA_DIR}"
 export ORVA_ROOTFS_DIR="${DATA_DIR}/rootfs"
+export ORVA_DISABLE_USERNS="${SERVICE_DISABLE_USERNS}"
 
 depend() {
     need net
@@ -993,7 +1019,9 @@ run_uninstall() {
             fi
         else
             docker rm -f orva 2>/dev/null || true
-            [ "$PURGE" = "1" ] && docker volume rm orva-data 2>/dev/null || true
+            if [ "$PURGE" = "1" ]; then
+                docker volume rm orva-data 2>/dev/null || true
+            fi
         fi
         un_done=1
     fi

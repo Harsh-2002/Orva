@@ -15,9 +15,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -28,6 +33,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
+
+      - name: Test E2E harness
+        run: python3 -m unittest discover -s test/e2e/unit -p 'test_*.py'
 
       - name: Build orva (server + CLI)
         run: make build
@@ -53,10 +61,28 @@ jobs:
           bash scripts/build-rootfs.sh "$RUNNER_TEMP/orva-data/rootfs/python" python
           ./build/orva setup --data-dir "$RUNNER_TEMP/orva-data"
 
+      - name: Validate nsjail preflight
+        run: |
+          getcap /usr/local/bin/nsjail || true
+          sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
+          sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
+          # Ubuntu 24.04 hosted runners restrict unprivileged user namespaces.
+          # Exercise Orva's setcap fallback while keeping every other nsjail
+          # namespace and the mandatory real invocation gate enabled.
+          if ! preflight=$(nsjail -Mo --disable_clone_newuser --chroot "$RUNNER_TEMP/orva-data/rootfs/node" -- /usr/local/bin/node --version 2>&1); then
+            preflight=${preflight//'%'/'%25'}
+            preflight=${preflight//$'\r'/'%0D'}
+            preflight=${preflight//$'\n'/'%0A'}
+            echo "::error title=nsjail preflight::$preflight"
+            exit 1
+          fi
+          echo "$preflight"
+
       - name: Start Orva
         run: |
           mkdir -p "$RUNNER_TEMP/orva-data"
-          ORVA_DATA_DIR="$RUNNER_TEMP/orva-data" ./build/orva serve > "$RUNNER_TEMP/orva.log" 2>&1 &
+          ORVA_DATA_DIR="$RUNNER_TEMP/orva-data" ORVA_DISABLE_USERNS=1 \
+            ./build/orva serve > "$RUNNER_TEMP/orva.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/orva.pid"
           # Wait for health (the API/DB come up without nsjail).
           for _ in $(seq 1 30); do
@@ -68,9 +94,13 @@ jobs:
           curl -fsS http://127.0.0.1:8443/api/v1/system/health || (cat "$RUNNER_TEMP/orva.log"; exit 1)
 
       - name: Run E2E suite
+        id: suite
         env:
           ORVA_REQUIRE_SANDBOX: "1"
         run: |
+          # Never let a tracked checklist from an earlier run impersonate the
+          # diagnostics for a runner/process failure before aggregation.
+          : > test/e2e/CHECKLIST.md
           ADMIN_KEY="$(cat "$RUNNER_TEMP/orva-data/.admin-key")"
           python3 test/e2e/run.py --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
 
@@ -82,21 +112,29 @@ jobs:
           fi
 
       - name: Show checklist
-        if: always()
+        if: always() && steps.suite.outcome != 'skipped'
         run: cat test/e2e/CHECKLIST.md || true
 
       - name: Annotate E2E failures
-        if: failure()
+        if: failure() && steps.suite.outcome == 'failure'
         run: |
-          audit_summary=$(grep -E '^\- \*\*(Modules|Checks)|\| .* \| ❌ FAIL' test/e2e/CHECKLIST.md | paste -sd ' ' -)
+          audit_summary=$(grep -E '^\- \*\*(Modules|Checks)|\| .* \| ❌ FAIL|^- .*test_.*: ' test/e2e/CHECKLIST.md | paste -sd ' ' - || true)
+          [ -n "$audit_summary" ] || audit_summary="E2E process failed before writing its checklist; inspect the server log artifact"
+          audit_summary=${audit_summary//'%'/'%25'}
           echo "::error title=E2E checklist::$audit_summary"
 
       - name: Upload server log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: orva-e2e-diagnostics
-          path: |
-            ${{ runner.temp }}/orva.log
-            test/e2e/CHECKLIST.md
+          name: orva-server-log
+          path: ${{ runner.temp }}/orva.log
+          if-no-files-found: ignore
+
+      - name: Upload E2E checklist
+        if: always() && steps.suite.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: orva-e2e-checklist
+          path: test/e2e/CHECKLIST.md
           if-no-files-found: ignore

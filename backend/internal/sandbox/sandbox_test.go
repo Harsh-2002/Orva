@@ -1,8 +1,14 @@
 package sandbox
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // containsArg returns true if any element in args equals s — useful for
@@ -93,6 +99,8 @@ func TestApplyExecDefaultsPreservesExplicitProcessLimit(t *testing.T) {
 }
 
 func TestARM64SeccompFiltersUnsupportedLegacySyscalls(t *testing.T) {
+	policy := buildSeccompPolicyForArch("default", nil, nil, "arm64")
+	allowed := policySyscalls(policy)
 	for name := range arm64UnsupportedSyscalls {
 		if syscallSupportedOnArch(name, "arm64") {
 			t.Errorf("%s must be filtered on arm64", name)
@@ -100,8 +108,154 @@ func TestARM64SeccompFiltersUnsupportedLegacySyscalls(t *testing.T) {
 		if !syscallSupportedOnArch(name, "amd64") {
 			t.Errorf("%s should remain available on amd64", name)
 		}
+		if allowed[name] {
+			t.Errorf("ARM64 policy still contains unsupported syscall %s", name)
+		}
 	}
 	if !syscallSupportedOnArch("openat", "arm64") {
 		t.Fatal("openat must remain available on arm64")
+	}
+}
+
+func policySyscalls(policy string) map[string]bool {
+	result := make(map[string]bool)
+	const prefix = "POLICY orva { ALLOW { "
+	body := strings.TrimPrefix(policy, prefix)
+	if end := strings.Index(body, " } }"); end >= 0 {
+		body = body[:end]
+	}
+	for _, name := range strings.Split(body, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			result[name] = true
+		}
+	}
+	return result
+}
+
+func TestSeccompPolicyIsAnEnforcingAllowlist(t *testing.T) {
+	policy := buildSeccompPolicyForArch("default", nil, nil, "amd64")
+	if !strings.HasSuffix(policy, "DEFAULT ERRNO(1)") {
+		t.Fatalf("policy must deny unknown syscalls, got: %s", policy)
+	}
+	if strings.Contains(policy, "DEFAULT LOG") {
+		t.Fatal("DEFAULT LOG observes syscalls but does not restrict them")
+	}
+}
+
+func TestDefaultSeccompBlocksNestedNamespaceCreation(t *testing.T) {
+	policy := buildSeccompPolicyForArch("default", nil, nil, "amd64")
+	want := "clone(orva_clone_flags) { (orva_clone_flags & " + cloneNamespaceFlags + ") == 0 }"
+	if !strings.Contains(policy, want) {
+		t.Fatalf("default policy must restrict clone namespace flags: %s", policy)
+	}
+	if strings.Contains(policy, "clone3") {
+		t.Fatalf("default policy cannot safely inspect clone3's pointer arguments: %s", policy)
+	}
+}
+
+func TestARM64SeccompUsesKafelRuntimeAliases(t *testing.T) {
+	allowed := policySyscalls(buildSeccompPolicyForArch("default", nil, nil, "arm64"))
+	for _, name := range arm64RuntimeAliases {
+		if !allowed[name] {
+			t.Errorf("ARM64 policy is missing Kafel runtime alias %s", name)
+		}
+	}
+}
+
+func TestStrictSeccompFiltersUnknownKafelIdentifiers(t *testing.T) {
+	policy := buildSeccompPolicyForArch("strict", nil, nil, "amd64")
+	if strings.Contains(policy, "uname") {
+		t.Fatalf("strict policy contains uname, which is absent from the Kafel catalog: %s", policy)
+	}
+}
+
+func TestDeadWorkerReturnsStartupStderr(t *testing.T) {
+	w := &Worker{errBuf: newRingBuffer(1024)}
+	w.dead.Store(true)
+	_, _ = w.errBuf.Write([]byte("nsjail startup failed"))
+
+	result, err := w.DispatchEx(context.Background(), []byte(`{}`))
+	if !errors.Is(err, ErrWorkerExited) {
+		t.Fatalf("expected ErrWorkerExited, got %v", err)
+	}
+	if got := string(result.Stderr()); got != "nsjail startup failed" {
+		t.Fatalf("startup stderr: want %q, got %q", "nsjail startup failed", got)
+	}
+}
+
+func TestFastProcessExitDrainsStartupStderr(t *testing.T) {
+	for iteration := 0; iteration < 100; iteration++ {
+		t.Run(fmt.Sprintf("iteration-%03d", iteration), testFastProcessExitDrainsStartupStderr)
+	}
+}
+
+func testFastProcessExitDrainsStartupStderr(t *testing.T) {
+	root := t.TempDir()
+	nodeRoot := filepath.Join(root, "rootfs", "node")
+	if err := os.MkdirAll(filepath.Join(nodeRoot, "usr/local/bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(nodeRoot, "opt/orva"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nodeRoot, "usr/local/bin/node"), []byte("node"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nodeRoot, "opt/orva/adapter.js"), []byte("adapter"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codeDir := filepath.Join(root, "code")
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeNsjail := filepath.Join(root, "fake-nsjail")
+	if err := os.WriteFile(fakeNsjail, []byte("#!/bin/sh\nprintf 'kafel startup failed\\n' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := Spawn(context.Background(), ExecConfig{
+		Language: Node, CodeDir: codeDir, NsjailBin: fakeNsjail,
+		RootfsDir: filepath.Join(root, "rootfs"), Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("spawn fast-failing process: %v", err)
+	}
+	select {
+	case <-w.waitDone:
+	case <-time.After(time.Second):
+		t.Fatal("fast-failing process did not exit")
+	}
+	result, err := w.DispatchEx(context.Background(), []byte(`{}`))
+	if !errors.Is(err, ErrWorkerExited) {
+		t.Fatalf("expected ErrWorkerExited, got %v", err)
+	}
+	if got := string(result.Stderr()); !strings.Contains(got, "kafel startup failed") {
+		t.Fatalf("startup stderr was not drained: %q", got)
+	}
+}
+
+func TestResolveRuntimeRejectsIncompleteRootfs(t *testing.T) {
+	root := t.TempDir()
+	nodeRoot := filepath.Join(root, "node")
+	if err := os.MkdirAll(filepath.Join(nodeRoot, "usr/local/bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveRuntime(ExecConfig{Language: Node, RootfsDir: root}); err == nil {
+		t.Fatal("incomplete rootfs without node executable was accepted")
+	}
+	if err := os.WriteFile(filepath.Join(nodeRoot, "usr/local/bin/node"), []byte("node"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveRuntime(ExecConfig{Language: Node, RootfsDir: root}); err == nil {
+		t.Fatal("rootfs without embedded adapter was accepted")
+	}
+	if err := os.MkdirAll(filepath.Join(nodeRoot, "opt/orva"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nodeRoot, "opt/orva/adapter.js"), []byte("adapter"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveRuntime(ExecConfig{Language: Node, RootfsDir: root}); err != nil {
+		t.Fatalf("complete rootfs was rejected: %v", err)
 	}
 }

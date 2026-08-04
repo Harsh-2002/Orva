@@ -28,7 +28,12 @@ on:
       - "scripts/install-cli.ps1"
       - "test/cli/**"
       - ".github/workflows/cli-e2e.yml"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag to validate (defaults to latest)"
+        required: false
+        type: string
   schedule:
     # Weekly Sunday 04:00 UTC — catches GH-API / release-asset drift,
     # and gives the expensive macOS/Windows jobs a guaranteed run.
@@ -100,6 +105,7 @@ jobs:
     # runner IPs hit the 60/hr unauthenticated rate limit fast.
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v6
       - name: install jq + curl
@@ -127,6 +133,7 @@ jobs:
       || github.event_name == 'workflow_dispatch'
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v6
       - name: run installer against latest release
@@ -162,6 +169,7 @@ jobs:
       || github.event_name == 'workflow_dispatch'
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v6
       - name: run installer

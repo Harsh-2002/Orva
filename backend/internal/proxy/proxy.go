@@ -313,7 +313,7 @@ func (p *Proxy) Forward(
 	// reqErr is the error we pass back to Release — determines whether the
 	// worker gets returned to the pool or killed.
 	var reqErr error
-	defer func() { p.Pool.Release(fnID, acq.Worker, reqErr) }()
+	defer func() { p.Pool.Release(acq, reqErr) }()
 
 	dispatchStart := time.Now()
 	dres, err := acq.Worker.DispatchEx(ctx, reqJSON)
@@ -321,7 +321,7 @@ func (p *Proxy) Forward(
 	// (Streaming responses inflate this number — the dispatch "duration"
 	// includes the entire stream wall-clock. The autoscaler treats this as
 	// signal regardless; see pool.go's note near recordAcquire.)
-	p.Pool.RecordLatency(fnID, time.Since(dispatchStart))
+	p.Pool.RecordLatency(acq, time.Since(dispatchStart))
 	var stderr []byte
 	if dres != nil {
 		stderr = p.finalizeStderr(r, execID, dres.Stderr())

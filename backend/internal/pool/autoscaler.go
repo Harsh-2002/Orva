@@ -11,14 +11,14 @@ import (
 // Autoscaler parameters — these match Knative KPA defaults and are tuned
 // for ~100s of per-function pools on a single host.
 const (
-	scalerTick      = 2 * time.Second
-	stableWindow    = 60 * time.Second
-	panicWindow     = 6 * time.Second
-	panicThreshold  = 2.0
-	utilFactor      = 0.7
-	scaleDownStep   = 0.5  // at most 50% shrink per tick — release path also prunes,
+	scalerTick     = 2 * time.Second
+	stableWindow   = 60 * time.Second
+	panicWindow    = 6 * time.Second
+	panicThreshold = 2.0
+	utilFactor     = 0.7
+	scaleDownStep  = 0.5 // at most 50% shrink per tick — release path also prunes,
 	//                          so this is just the catch-up rate for stragglers
-	scaleDownGrace  = 1    // 1 tick (~20s) below target before scale-down. Was 3 ticks
+	scaleDownGrace = 1 // 1 tick (~20s) below target before scale-down. Was 3 ticks
 	//                          (60 s) which left burst-spawned idle workers parked
 	//                          long enough to noticeably slow down the UI on small hosts.
 )
@@ -251,14 +251,22 @@ func (s *scaler) scaleUp(p *functionPool, want int, reason string) {
 		p.spawned.Add(1)
 		// Push to idle non-blockingly; if the channel is full we're racing
 		// another scale-up — kill the excess to keep the invariant clean.
-		select {
-		case p.idle <- w:
-			spawned++
-		default:
-			_ = w.Kill()
-			if p.memoryBytes > 0 && s.hostMem != nil {
-				s.hostMem.release(p.memoryBytes)
+		// The lock makes the closing check + publication atomic with pool
+		// retirement, preventing a stale worker from arriving after its drain.
+		p.mu.Lock()
+		parked := false
+		if !p.closing.Load() {
+			select {
+			case p.idle <- w:
+				parked = true
+			default:
 			}
+		}
+		p.mu.Unlock()
+		if parked {
+			spawned++
+		} else {
+			p.killWorker(w)
 		}
 	}
 	if spawned > 0 {
@@ -304,4 +312,3 @@ func (s *scaler) ensureSignals(p *functionPool) {
 		p.inflightSamples = make([]int64, s.samplesPerWindow)
 	}
 }
-

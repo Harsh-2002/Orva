@@ -64,6 +64,10 @@ type Worker struct {
 	// markDead but the kill that followed sometimes spawned a duplicate
 	// Wait() goroutine which errored out without reaping.
 	waitDone chan struct{}
+	// stderrDone closes after the background drain reaches EOF. Fast startup
+	// failures can exit before Dispatch begins, so dead-path snapshots wait
+	// briefly for this signal rather than racing an empty ring buffer.
+	stderrDone chan struct{}
 
 	errBuf *ringBuffer
 }
@@ -130,23 +134,39 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	}
 
 	w := &Worker{
-		Cmd:      cmd,
-		stdin:    stdinPipe,
-		stdout:   stdoutPipe,
-		stderr:   stderrPipe,
-		Spawned:  time.Now(),
-		errBuf:   newRingBuffer(64 * 1024),
-		waitDone: make(chan struct{}),
+		Cmd:        cmd,
+		stdin:      stdinPipe,
+		stdout:     stdoutPipe,
+		stderr:     stderrPipe,
+		Spawned:    time.Now(),
+		errBuf:     newRingBuffer(64 * 1024),
+		waitDone:   make(chan struct{}),
+		stderrDone: make(chan struct{}),
 	}
 
-	// Single, authoritative Wait() for this worker's lifetime. Whichever
+	// Start draining before Wait. exec.Cmd.Wait closes its parent-side pipes
+	// after process exit, so reversing this order can lose stderr from a fast
+	// Kafel/nsjail startup failure.
+	go func() {
+		_, _ = io.Copy(w.errBuf, stderrPipe)
+		close(w.stderrDone)
+	}()
+
+	// Single, authoritative Wait() for this worker's lifetime. Wait must not
+	// run until the stderr reader reaches EOF: os/exec closes StderrPipe from
+	// Wait, so merely starting the reader first is not sufficient ordering for
+	// a process that writes a diagnostic and exits immediately.
+	//
+	// Whichever
 	// path tears the process down (clean Quit, SIGKILL via Kill, child
 	// crash, ctx cancel that closes stdin), this goroutine is the one
 	// that reaps the kernel-side PID. Nothing else may call cmd.Wait().
 	// On return we close waitDone so any blocked Quit/Kill grace-timer
 	// can wake up.
 	go func() {
+		<-w.stderrDone
 		_ = cmd.Wait()
+		w.dead.Store(true)
 		close(w.waitDone)
 	}()
 
@@ -166,12 +186,6 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 			}
 		}()
 	}
-
-	// Background goroutine drains stderr into the ring buffer so the pipe
-	// never blocks the worker and we can snapshot per-request stderr.
-	go func() {
-		io.Copy(w.errBuf, stderrPipe)
-	}()
 
 	return w, nil
 }
@@ -356,6 +370,12 @@ func (r *DispatchResult) Stderr() []byte {
 	if r == nil || r.w == nil {
 		return nil
 	}
+	if r.w.dead.Load() && r.w.stderrDone != nil {
+		select {
+		case <-r.w.stderrDone:
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	return r.w.errBuf.Snapshot(r.errBefore)
 }
 
@@ -377,7 +397,8 @@ func (r *DispatchResult) Stderr() []byte {
 // after the proxy's Forward unwinds.
 func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchResult, error) {
 	if w.dead.Load() {
-		return nil, errors.New("worker dead")
+		return &DispatchResult{w: w, errBefore: 0},
+			fmt.Errorf("%w: process exited before dispatch", ErrWorkerExited)
 	}
 	w.mu.Lock()
 	// We can't unconditionally defer Unlock here because streaming holds
@@ -393,7 +414,8 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 
 	if w.dead.Load() {
 		unlock()
-		return nil, errors.New("worker dead")
+		return &DispatchResult{w: w, errBefore: 0},
+			fmt.Errorf("%w: process exited before dispatch", ErrWorkerExited)
 	}
 
 	errBefore := w.errBuf.Len()

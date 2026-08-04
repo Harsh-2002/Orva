@@ -152,7 +152,7 @@ ext_par="bbbbbbbbbbbbbbbb"
 ext_resp=$(curl -sSI "${H_KEY[@]}" -H "traceparent: 00-$ext_id-$ext_par-01" "$ENDPOINT/fn/$short_c/")
 ext_trace=$(echo "$ext_resp" | grep -i '^x-trace-id:' | awk '{print $2}' | tr -d '\r\n')
 case "$ext_trace" in
-  tr_${ext_id}) ok "External traceparent honored: $ext_trace" ;;
+  "tr_${ext_id}") ok "External traceparent honored: $ext_trace" ;;
   *) fail "external traceparent ignored (got $ext_trace, expected tr_$ext_id)" ;;
 esac
 

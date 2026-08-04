@@ -19,9 +19,9 @@ type functionPool struct {
 	maxUses int64
 
 	// Autoscaler inputs — set at creation time, read by scaler evaluate().
-	target       int  // target_concurrency per worker (pool_config, default 10)
-	memoryBytes  int64 // per-worker memory.max budget for admission accounting
-	scaleToZero  bool  // pool_config.scale_to_zero
+	target      int   // target_concurrency per worker (pool_config, default 10)
+	memoryBytes int64 // per-worker memory.max budget for admission accounting
+	scaleToZero bool  // pool_config.scale_to_zero
 
 	// hostMem is the global tracker for admission control. We need a
 	// back-reference here (not just on the autoscaler) so the request-path
@@ -45,16 +45,18 @@ type functionPool struct {
 	belowTargetTicks int // # of consecutive ticks below target (for scale-down gating)
 
 	// Lifetime counters for metrics.
-	spawned     atomic.Int64
-	killed      atomic.Int64
-	scaleUps    atomic.Int64
-	scaleDowns  atomic.Int64
-	dynamicMax  atomic.Int64 // last computed memory/cpu/operator cap (published for metrics)
+	spawned    atomic.Int64
+	killed     atomic.Int64
+	scaleUps   atomic.Int64
+	scaleDowns atomic.Int64
+	dynamicMax atomic.Int64 // last computed memory/cpu/operator cap (published for metrics)
 
 	// mu guards the slow paths (spawn decision, drain). The fast path is
 	// channel-only and lock-free.
 	mu      sync.Mutex
 	closing atomic.Bool
+	retired chan struct{} // closed exactly once when this generation is retired
+	retire  sync.Once
 
 	// Per-function concurrency cap. concSem is a buffered channel acting
 	// as a semaphore: capacity = max_concurrency. nil means unlimited.
@@ -73,13 +75,22 @@ type functionPool struct {
 // reject policy when the cap is full, or the ctx error if the queue
 // wait timed out. Cap = 0 means unlimited (no semaphore configured).
 func (p *functionPool) acquireSlot(ctx context.Context) error {
+	if p.closing.Load() {
+		return errPoolRetired
+	}
 	if p.concSem == nil {
 		return nil
 	}
 	if p.concPolicy == "reject" {
 		select {
 		case p.concSem <- struct{}{}:
+			if p.closing.Load() {
+				p.releaseSlot()
+				return errPoolRetired
+			}
 			return nil
+		case <-p.retired:
+			return errPoolRetired
 		default:
 			return ErrFunctionBusy
 		}
@@ -87,7 +98,13 @@ func (p *functionPool) acquireSlot(ctx context.Context) error {
 	// "queue" policy: block until a slot frees or ctx fires.
 	select {
 	case p.concSem <- struct{}{}:
+		if p.closing.Load() {
+			p.releaseSlot()
+			return errPoolRetired
+		}
 		return nil
+	case <-p.retired:
+		return errPoolRetired
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -195,10 +212,16 @@ func stampAcquire(w *sandbox.Worker) {
 // acquire returns an idle worker or spawns a new one up to max. If at max
 // it blocks on the idle channel or ctx cancellation.
 func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
+	if p.closing.Load() {
+		return nil, errPoolRetired
+	}
 	// Fast path: non-blocking pop from idle.
 	select {
 	case w := <-p.idle:
-		if p.isUnusable(w) {
+		if p.closing.Load() {
+			p.killWorker(w)
+			return nil, errPoolRetired
+		} else if p.isUnusable(w) {
 			p.killWorker(w)
 			// Fall through to spawn below.
 		} else {
@@ -250,6 +273,17 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 			return nil, err
 		}
 		p.spawned.Add(1)
+		// Retirement may have happened while spawnFn was starting the
+		// process. Never hand that stale worker to the caller; release its
+		// accounting and let Manager.Acquire retry on the new generation.
+		p.mu.Lock()
+		retired := p.closing.Load()
+		p.mu.Unlock()
+		if retired {
+			p.busy.Add(-1)
+			p.killWorker(w)
+			return nil, errPoolRetired
+		}
 		// Count lazy growth as a scale-up event too. Operators watching the
 		// autoscaler metric want "how often did this pool grow" — which
 		// includes both the predictive scaler and request-path expansion.
@@ -265,7 +299,10 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 	// derived ctx and surfaces as ErrTimeout from Worker.Dispatch).
 	select {
 	case w := <-p.idle:
-		if p.isUnusable(w) {
+		if p.closing.Load() {
+			p.killWorker(w)
+			return nil, errPoolRetired
+		} else if p.isUnusable(w) {
 			p.killWorker(w)
 			// Recursive retry with same ctx — but avoid unbounded recursion
 			// by just attempting to spawn once more if under max now.
@@ -274,9 +311,19 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 		p.busy.Add(1)
 		stampAcquire(w)
 		return &AcquireResult{Worker: w, ColdStart: false}, nil
+	case <-p.retired:
+		return nil, errPoolRetired
 	case <-ctx.Done():
 		return nil, ErrPoolAtCapacity
 	}
+}
+
+// markRetired closes the generation notification exactly once. Callers hold
+// p.mu so no worker can be published between the closing transition and the
+// idle drain performed by the manager.
+func (p *functionPool) markRetired() {
+	p.closing.Store(true)
+	p.retire.Do(func() { close(p.retired) })
 }
 
 // release returns the worker to the pool unless it errored or is unusable.
@@ -314,7 +361,13 @@ func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 		p.sigMu.Unlock()
 	}
 
+	// Serialize the closing check and idle publication with retirement. If
+	// release checked closing and then parked lock-free, retirePool could mark
+	// the generation closed, drain an empty channel, and have this stale worker
+	// arrive immediately afterward.
+	p.mu.Lock()
 	if reqErr != nil || p.isUnusable(w) || p.closing.Load() {
+		p.mu.Unlock()
 		p.killWorker(w)
 		return
 	}
@@ -324,6 +377,7 @@ func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	// computed yet) — fall through to the original cap-only check there.
 	dyn := int(p.dynamicMax.Load())
 	if dyn > 0 && len(p.idle) >= dyn {
+		p.mu.Unlock()
 		p.killWorker(w)
 		return
 	}
@@ -332,7 +386,9 @@ func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	// shrinking (pool max was reduced, or race) — kill the worker.
 	select {
 	case p.idle <- w:
+		p.mu.Unlock()
 	default:
+		p.mu.Unlock()
 		p.killWorker(w)
 	}
 }
@@ -365,6 +421,11 @@ func (p *functionPool) killWorker(w *sandbox.Worker) {
 // sweep walks the idle channel, killing expired workers and putting live
 // ones back. Called periodically by the manager's reaper.
 func (p *functionPool) sweep(defaultMaxUses int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closing.Load() {
+		return
+	}
 	n := len(p.idle)
 	for i := 0; i < n; i++ {
 		select {
@@ -388,7 +449,9 @@ func (p *functionPool) sweep(defaultMaxUses int64) {
 
 // drain is called at shutdown to terminate every idle worker in parallel.
 func (p *functionPool) drain(grace time.Duration) {
-	p.closing.Store(true)
+	p.mu.Lock()
+	p.markRetired()
+	p.mu.Unlock()
 	var wg sync.WaitGroup
 	for {
 		select {

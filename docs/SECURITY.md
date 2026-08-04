@@ -102,7 +102,7 @@ nothing root-on-the-host could do.
 Configured at `internal/sandbox/sandbox.go:154-160`:
 
 ```go
-"-Mo",                          // mount mode: ownership-mapped userns
+"-Mo",                          // standalone-once mode; userns by default
 "--chroot", rootfs,             // pivot_root into the runtime's rootfs
 "-R", cfg.CodeDir + ":/code",   // read-only bind mount of the function's code
 "-T", "/tmp",                   // private tmpfs at /tmp
@@ -121,8 +121,13 @@ Configured at `internal/sandbox/sandbox.go:154-160`:
 
 ## Capability dropping
 
-The `-Mo` flag puts the function in a user namespace where it appears
-to have UID 0 but holds **zero capabilities outside that namespace**.
+By default nsjail puts the function in a user namespace where it appears to
+have UID 0 but holds **zero capabilities outside that namespace**. On a
+bare-metal host that blocks unprivileged user namespaces, the installer uses
+nsjail file capabilities for setup and starts it with
+`--disable_clone_newuser`; nsjail drops privileges before running the adapter,
+while the remaining mount, PID, network, IPC, UTS, chroot, and seccomp
+boundaries stay enabled.
 nsjail does not need to call `prctl(PR_SET_NO_NEW_PRIVS)` separately —
 the user namespace gives the same effect for cross-namespace operations.
 
@@ -137,31 +142,35 @@ against effective caps (`CAP_NET_ADMIN`, `CAP_SYS_PTRACE`,
 nsjail via `--seccomp_string` (sandbox.go:198). Three policies ship:
 
 - **`default`** (used by all functions unless overridden): allows the
-  ~250 syscalls modern Node/Python need; blocks the rest. Notably
+  curated syscalls modern Node/Python need and returns `EPERM` for any
+  syscall outside the allowlist. Notably
   blocks: `mount`, `umount`, `pivot_root`, `unshare`,
   `clone(CLONE_NEWUSER)`, `bpf`, `kexec_load`, `init_module`,
   `delete_module`, `iopl`, `swapon`, `reboot`, `setns`, `userfaultfd`.
 - **`strict`**: tightens `default` further by blocking many `*at` calls
   and most ioctls. Use for high-trust untrusted code.
-- **`permissive`**: blocks only the unambiguously dangerous syscalls
-  (`init_module`, `kexec_load`, etc.). Use during dev when you need to
-  run something that the default policy refuses (e.g., a custom runtime
-  that calls `unshare`).
+- **`permissive`**: extends `default` with the outbound networking syscall
+  set. It remains an allowlist and continues to deny privileged kernel
+  operations such as `mount`, `bpf`, and module loading.
 
-The policy is compiled by `BuildSeccompPolicy` (seccomp.go:136) and
-passed inline; it covers ~150 syscall denials in the default config.
+The policy is compiled by `BuildSeccompPolicy` and passed inline with
+`DEFAULT ERRNO(1)`. Returning an error rather than killing the process lets
+Node and Python fall back when an optional facility such as io_uring is
+unavailable. Linux seccomp's `LOG` action is deliberately not used as a
+default because it records an event but still permits the syscall.
 
 ## Resource limits
 
 Per-function caps are enforced in two places:
 
-- **Per-process**: `--rlimit_as max` (sandbox.go:158) caps virtual
-  address space at the worker's per-cgroup memory budget.
+- **Per-process**: `--rlimit_as max` preserves the service user's existing
+  hard address-space limit; it is a fallback, not the declared function
+  memory budget.
 - **Per-cgroup** (when cgroup v2 delegation is available, sandbox.go:170-194):
   - `memory.max` at **1.5×** the declared `memory_mb`. The 0.5×
     headroom lets the kernel reclaim via PSI pressure before OOM-killing.
     The 1.5× factor matches the autoscaler's per-worker admission budget.
-  - `pids.max` at the configured `MaxPids` (default 64).
+  - `pids.max` at the configured `MaxPids` (default 32).
   - `cpu.max` via `cgroup_cpu_ms_per_sec` (e.g., `cpus: 0.5` →
     500 ms of CPU per 1000 ms wall — fractional CPU as bandwidth, not
     affinity, so the scheduler can load-balance freely).

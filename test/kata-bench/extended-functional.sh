@@ -22,7 +22,6 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 LOGS_DIR="$HERE/logs"
 mkdir -p "$LOGS_DIR"
 

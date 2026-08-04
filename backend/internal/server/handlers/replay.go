@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // ReplayHandler powers POST /api/v1/executions/{id}/replay (v0.4 A3).
@@ -55,9 +55,13 @@ type adapterResponse struct {
 // Replay handles POST /api/v1/executions/{id}/replay.
 //
 // 404 — no captured request for that execution (capture was disabled at
-//       the time, or the row was purged).
+//
+//	the time, or the row was purged).
+//
 // 410 — the captured body was truncated; replay would be inaccurate, so
-//       we refuse rather than silently corrupt downstream state.
+//
+//	we refuse rather than silently corrupt downstream state.
+//
 // 502 — worker dispatch failed.
 // 504 — the function timed out during the replay.
 //
@@ -165,7 +169,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var reqErr error
-	defer func() { h.Pool.Release(fn.ID, acq.Worker, reqErr) }()
+	defer func() { h.Pool.Release(acq, reqErr) }()
 
 	event := adapterRequest{
 		Method:  captured.Method,

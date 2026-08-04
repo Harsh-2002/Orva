@@ -56,7 +56,7 @@ jobs:
             scripts/install.sh \
             scripts/install-cli.sh
 
-      # bash scripts — entrypoint + test/install/* + test/cli/*. Failing
+      # bash scripts — entrypoint + every test suite. Failing
       # builds here gate the install-e2e + cli-e2e workflows downstream.
       - name: bash scripts
         run: |
@@ -65,9 +65,11 @@ jobs:
           shellcheck -S warning \
             scripts/entrypoint.sh \
             scripts/build-rootfs.sh \
+            test/*.sh \
             test/install/*.sh \
             test/install/lib/*.sh \
             test/cli/*.sh \
+            test/kata-bench/*.sh \
             test/cli/lib/*.sh
 
   go:

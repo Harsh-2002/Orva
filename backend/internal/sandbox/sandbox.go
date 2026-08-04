@@ -153,30 +153,45 @@ func applyExecDefaults(cfg ExecConfig) ExecConfig {
 }
 
 func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
+	adapter := ""
 	switch cfg.Language {
 	case Python:
 		rootfs = filepath.Join(cfg.RootfsDir, string(cfg.Language))
 		entrypoint = "/usr/local/bin/python3"
+		adapter = "/opt/orva/adapter.py"
 	case Node:
 		rootfs = filepath.Join(cfg.RootfsDir, string(cfg.Language))
 		entrypoint = "/usr/local/bin/node"
+		adapter = "/opt/orva/adapter.js"
 	default:
 		return "", "", fmt.Errorf("unsupported language: %s", cfg.Language)
 	}
 
-	if _, err := os.Stat(rootfs); err != nil {
+	rootInfo, err := os.Stat(rootfs)
+	if err != nil {
 		return "", "", fmt.Errorf("rootfs not found at %s: %w", rootfs, err)
+	}
+	if !rootInfo.IsDir() {
+		return "", "", fmt.Errorf("rootfs path is not a directory: %s", rootfs)
+	}
+	entrypointPath := filepath.Join(rootfs, filepath.FromSlash(strings.TrimPrefix(entrypoint, "/")))
+	entrypointInfo, err := os.Stat(entrypointPath)
+	if err != nil || entrypointInfo.IsDir() || entrypointInfo.Mode()&0o111 == 0 {
+		return "", "", fmt.Errorf("runtime entrypoint is missing or not executable at %s", entrypointPath)
+	}
+	adapterPath := filepath.Join(rootfs, filepath.FromSlash(strings.TrimPrefix(adapter, "/")))
+	adapterInfo, err := os.Stat(adapterPath)
+	if err != nil || adapterInfo.IsDir() {
+		return "", "", fmt.Errorf("runtime adapter is missing at %s", adapterPath)
 	}
 	return rootfs, entrypoint, nil
 }
 
 func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
-	// Rely on user namespaces instead of setcap to grant nsjail the caps it
-	// needs for mount/chroot. This works both on bare Linux hosts with
-	// unprivileged_userns_clone=1 AND inside Docker with --cap-add SYS_ADMIN
-	// (where file capabilities don't transfer across fork/exec from a
-	// non-root parent). If you need to force the old setcap-based model
-	// (e.g., kernel has no user namespaces), set ORVA_DISABLE_USERNS=1.
+	// Prefer user namespaces for nsjail's mount/chroot setup. On hosts that
+	// restrict unprivileged user namespaces, the bare-metal installer grants
+	// the nsjail executable the narrow capability set it needs and exports
+	// ORVA_DISABLE_USERNS=1. Docker keeps the default userns path.
 	//
 	// NOTE: --time_limit intentionally dropped; Go-side context.WithTimeout
 	// + Worker.Kill() handles timeouts with millisecond resolution and

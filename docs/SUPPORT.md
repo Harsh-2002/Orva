@@ -39,8 +39,11 @@ an issue.
 The install script warns (but does not block) when these are missing.
 Without them, nsjail's isolation degrades:
 
-- `kernel.unprivileged_userns_clone = 1` — required for nsjail to
-  construct per-function user namespaces.
+- `kernel.unprivileged_userns_clone = 1` — preferred for nsjail's
+  per-function user namespaces. On bare-metal hosts that disable or restrict
+  unprivileged user namespaces, `install.sh` applies a verified, narrow file
+  capability set to nsjail and configures `ORVA_DISABLE_USERNS=1`; the runtime
+  still uses mount, PID, network, IPC, UTS, chroot, and seccomp isolation.
 - cgroup v2 — required for per-function memory / CPU limits.
 - `nf_tables` kernel module — required for the egress firewall feature.
   Without it, the daemon runs fine; the firewall UI shows "degraded".
@@ -138,4 +141,6 @@ End-to-end passes on Ubuntu 24 and ARM64 bare metal surfaced several bugs in
    `CAP_NET_ADMIN`, and `CAP_NET_BIND_SERVICE`. Linux therefore rejected the
    nsjail `execve` with `EPERM`, producing an immediate `SANDBOX_ERROR` with
    no child stderr. The shipped unit now retains all nsjail file capabilities
-   and gives orvad `CAP_NET_ADMIN` for nftables.
+   and gives orvad only ambient `CAP_NET_ADMIN` for nftables. On hosts where
+   AppArmor or container policy blocks unprivileged user namespaces, the
+   installer also selects nsjail's setcap fallback automatically.

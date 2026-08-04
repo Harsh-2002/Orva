@@ -26,12 +26,12 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // maxInboundBody caps the request body the trigger will read. nsjail
@@ -147,7 +147,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var reqErr error
-	defer func() { h.Pool.Release(fn.ID, acq.Worker, reqErr) }()
+	defer func() { h.Pool.Release(acq, reqErr) }()
 
 	// Generate execution id up-front so the activity + execution rows
 	// stay correlated. Format mirrors invoke / cron / job.

@@ -85,6 +85,7 @@ type Manager struct {
 	reg      *registry.Registry
 	limiter  *sandbox.Limiter // host-wide ceiling
 	pools    sync.Map         // fnID -> *functionPool
+	poolMu   sync.Mutex       // serializes pool generation create/retire
 	closing  atomic.Bool
 	wg       sync.WaitGroup // reaper goroutines
 	shutdown chan struct{}
@@ -119,6 +120,14 @@ func (m *Manager) FunctionLock(fnID string) *sync.Mutex {
 type AcquireResult struct {
 	Worker    *sandbox.Worker
 	ColdStart bool // true iff Acquire spawned a new worker
+
+	// pool is the exact pool generation that handed out Worker. A function's
+	// pool can be retired and recreated while this request is still running;
+	// release must never look the pool up by fnID again or an old worker can be
+	// inserted into the replacement generation (an ABA race).
+	pool *functionPool
+
+	released atomic.Bool
 }
 
 // PoolStats is a point-in-time snapshot for metrics.
@@ -173,6 +182,11 @@ var (
 	// cap is reached AND its policy is "reject". With "queue" policy
 	// callers wait until a slot frees; this error is "reject" only.
 	ErrFunctionBusy = errors.New("function busy")
+	// errPoolRetired is internal control flow: a deploy retired the pool
+	// generation while Acquire was taking a slot or spawning a worker. The
+	// manager retries against the replacement generation without surfacing a
+	// transient failure to the caller.
+	errPoolRetired = errors.New("pool generation retired")
 )
 
 // NewManager creates a pool manager. limiter is the host-wide concurrency
@@ -236,93 +250,89 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		}
 	}
 
-	p, err := m.getOrCreatePool(fnID)
-	if err != nil {
-		if m.limiter != nil {
-			m.limiter.Release()
+	for {
+		if err := ctx.Err(); err != nil {
+			if m.limiter != nil {
+				m.limiter.Release()
+			}
+			return nil, err
 		}
-		return nil, err
-	}
 
-	// Per-function concurrency gate. Runs *before* worker acquire so a
-	// busy function doesn't pull workers from the pool only to error
-	// out. Returns ErrFunctionBusy under "reject" policy or ctx.Err()
-	// if the queue wait timed out.
-	if err := p.acquireSlot(ctx); err != nil {
-		if m.limiter != nil {
-			m.limiter.Release()
+		p, err := m.getOrCreatePool(fnID)
+		if err != nil {
+			if m.limiter != nil {
+				m.limiter.Release()
+			}
+			return nil, err
 		}
-		return nil, err
-	}
 
-	res, err := p.acquire(ctx)
-	if err != nil {
-		p.releaseSlot()
-		if m.limiter != nil {
-			m.limiter.Release()
+		// Per-function concurrency gate. Runs *before* worker acquire so a
+		// busy function doesn't pull workers from the pool only to error
+		// out. A generation retired while waiting is retried transparently.
+		if err := p.acquireSlot(ctx); err != nil {
+			if errors.Is(err, errPoolRetired) {
+				continue
+			}
+			if m.limiter != nil {
+				m.limiter.Release()
+			}
+			return nil, err
 		}
-		return nil, err
+
+		res, err := p.acquire(ctx)
+		if err != nil {
+			p.releaseSlot()
+			if errors.Is(err, errPoolRetired) {
+				continue
+			}
+			if m.limiter != nil {
+				m.limiter.Release()
+			}
+			return nil, err
+		}
+		res.pool = p
+		// Bump autoscaler signal so rate EWMA reflects real traffic.
+		//
+		// v0.4 C1 caveat (streaming): every Acquire bumps the rate counter
+		// once, but a streaming request holds the worker for the full
+		// response duration (potentially up to stream_max_seconds = 300s).
+		// The autoscaler will see "1 req/burst" and a long latency EWMA, so
+		// Little's-Law floor inflates apparent target concurrency. For
+		// mixed streaming + non-streaming workloads this can over-provision.
+		// We accept the tradeoff for v1; if it becomes a real problem we
+		// could weight streaming acquires differently or sample inflight
+		// concurrency separately. — TODO(autoscaler-streaming-weight)
+		p.recordAcquire()
+		return res, nil
 	}
-	// Bump autoscaler signal so rate EWMA reflects real traffic.
-	//
-	// v0.4 C1 caveat (streaming): every Acquire bumps the rate counter
-	// once, but a streaming request holds the worker for the full
-	// response duration (potentially up to stream_max_seconds = 300s).
-	// The autoscaler will see "1 req/burst" and a long latency EWMA, so
-	// Little's-Law floor inflates apparent target concurrency. For
-	// mixed streaming + non-streaming workloads this can over-provision.
-	// We accept the tradeoff for v1; if it becomes a real problem we
-	// could weight streaming acquires differently or sample inflight
-	// concurrency separately. — TODO(autoscaler-streaming-weight)
-	p.recordAcquire()
-	return res, nil
 }
 
 // RecordLatency feeds a per-request dispatch latency sample into the
 // function's EWMA. Called by the proxy after Dispatch returns (success or
 // error). Non-blocking, safe from any goroutine.
-func (m *Manager) RecordLatency(fnID string, d time.Duration) {
-	if v, ok := m.pools.Load(fnID); ok {
-		v.(*functionPool).recordLatency(d)
+func (m *Manager) RecordLatency(acq *AcquireResult, d time.Duration) {
+	if acq != nil && acq.pool != nil {
+		acq.pool.recordLatency(d)
 	}
 }
 
-// RefreshForDeploy drains idle workers for a function so the next Acquire
-// lazily respawns from the new code directory. Called by the build queue
-// after a successful deploy. Idempotent — no-op if the pool hasn't been
-// created yet.
+// RefreshForDeploy retires the current pool generation so the next Acquire
+// rebuilds all spawn and pool-level configuration from the registry/DB. Idle
+// workers die immediately; busy workers finish their in-flight request and
+// are killed when their generation-bound AcquireResult is released.
 //
-// Busy workers are left running: a stale code-dir or env_var on a worker
-// that's mid-request is benign (it finishes its in-flight call and the
-// next Release puts it back as idle, where the next sweep prunes it
-// anyway). For changes that make existing workers fundamentally unsafe
-// to reuse (currently: network_mode flips, where a stale "none" worker
-// has no network namespace at all), use Drain instead.
+// Removing the whole generation is necessary for more than code refreshes:
+// concurrency semaphores, memory admission budgets, network namespaces and
+// secret/env snapshots all live on the functionPool or its workers.
 func (m *Manager) RefreshForDeploy(fnID string) {
-	v, ok := m.pools.Load(fnID)
-	if !ok {
-		return
-	}
-	p := v.(*functionPool)
-	for {
-		select {
-		case w := <-p.idle:
-			_ = w.Quit(200 * time.Millisecond)
-			p.killed.Add(1)
-			if m.hostMem != nil && p.memoryBytes > 0 {
-				m.hostMem.release(p.memoryBytes)
-			}
-		default:
-			return
-		}
-	}
+	m.retirePool(fnID)
 }
 
 // Drain performs a hard reset of a function's pool: every idle worker is
 // killed synchronously, the pool entry is removed from the manager map,
 // and any busy worker mid-request is killed on its next Release (the
-// Release path detects the missing pool entry via LoadAndDelete and
-// kills rather than reparking).
+// generation-bound Release path observes closing and kills rather than
+// reparking it).
 //
 // Use this when the spawn config has changed in a way that makes a
 // surviving worker incorrect — most importantly, network_mode flips.
@@ -341,60 +351,77 @@ func (m *Manager) Drain(fnID string) {
 // entry entirely. Used when a function is deleted so that Stats() no longer
 // includes it and memory reservations are freed immediately.
 //
-// Busy workers (mid-request) are handled lazily: once the pool entry is gone
-// from the map, their next Release call finds !ok and kills them there.
+// Busy workers (mid-request) are handled lazily: their AcquireResult retains
+// this generation, and its next Release sees closing and kills them there.
 func (m *Manager) DrainAndRemove(fnID string) {
+	m.retirePool(fnID)
+}
+
+// retirePool atomically removes and closes one pool generation. poolMu makes
+// retirement linearizable with getOrCreatePool, so a racing creator cannot
+// publish an unretired stale generation after this method returns. Releases
+// remain safe because AcquireResult retains a pointer to the exact generation.
+func (m *Manager) retirePool(fnID string) {
+	m.poolMu.Lock()
 	v, loaded := m.pools.LoadAndDelete(fnID)
 	if !loaded {
+		m.poolMu.Unlock()
 		return
 	}
 	p := v.(*functionPool)
+	p.mu.Lock()
+	p.markRetired()
+	p.mu.Unlock()
+	m.poolMu.Unlock()
 	for {
 		select {
 		case w := <-p.idle:
-			_ = w.Quit(200 * time.Millisecond)
-			p.killed.Add(1)
-			if m.hostMem != nil && p.memoryBytes > 0 {
-				m.hostMem.release(p.memoryBytes)
-			}
+			p.killWorker(w)
 		default:
 			return
 		}
 	}
 }
 
-// Release returns a worker to the pool. If err is non-nil or the worker
-// died mid-request, the worker is killed instead of re-queued.
-func (m *Manager) Release(fnID string, w *sandbox.Worker, reqErr error) {
+// Release returns an acquired worker to the exact pool generation that handed
+// it out. If that generation was retired, functionPool.release sees closing
+// and kills the worker while balancing that generation's semaphore and memory
+// reservation. Releasing the same acquisition twice is a no-op.
+func (m *Manager) Release(acq *AcquireResult, reqErr error) {
+	if acq == nil || !acq.released.CompareAndSwap(false, true) {
+		return
+	}
 	defer func() {
 		if m.limiter != nil {
 			m.limiter.Release()
 		}
 	}()
-	val, ok := m.pools.Load(fnID)
-	if !ok {
-		if w != nil {
-			_ = w.Kill()
+	p := acq.pool
+	if p == nil {
+		if acq.Worker != nil {
+			_ = acq.Worker.Kill()
 		}
 		return
 	}
-	p := val.(*functionPool)
 	// Always free the per-fn concurrency slot, regardless of whether the
 	// worker exists (Acquire may have errored after taking the slot).
 	defer p.releaseSlot()
-	if w == nil {
+	if acq.Worker == nil {
 		return
 	}
-	p.release(w, reqErr)
+	p.release(acq.Worker, reqErr)
 }
 
 // Shutdown quits all workers, waits for reapers, and stops accepting new
 // Acquire calls. Caller passes a context with a deadline — after that the
 // shutdown escalates to SIGKILL.
 func (m *Manager) Shutdown(ctx context.Context) error {
+	m.poolMu.Lock()
 	if !m.closing.CompareAndSwap(false, true) {
+		m.poolMu.Unlock()
 		return nil
 	}
+	m.poolMu.Unlock()
 	// Stop the scaler first so it doesn't race us spawning fresh workers.
 	if m.scaler != nil {
 		m.scaler.shutdown()
@@ -483,18 +510,35 @@ func (m *Manager) PrewarmAll(ctx context.Context) {
 			min := p.min
 			p.mu.Unlock()
 			for i := 0; i < min; i++ {
+				if p.memoryBytes > 0 && p.hostMem != nil {
+					if !p.hostMem.reserve(p.memoryBytes) {
+						return
+					}
+				}
 				w, err := p.spawnFn(ctx)
 				if err != nil {
+					if p.memoryBytes > 0 && p.hostMem != nil {
+						p.hostMem.release(p.memoryBytes)
+					}
 					slog.Warn("prewarm spawn failed", "fn", fnID, "err", err)
 					return
 				}
 				p.spawned.Add(1)
-				select {
-				case p.idle <- w:
-				default:
-					_ = w.Kill()
-					return
+				p.mu.Lock()
+				parked := false
+				if !p.closing.Load() {
+					select {
+					case p.idle <- w:
+						parked = true
+					default:
+					}
 				}
+				p.mu.Unlock()
+				if parked {
+					continue
+				}
+				p.killWorker(w)
+				return
 			}
 		}(fn.ID)
 	}
@@ -505,7 +549,29 @@ func (m *Manager) PrewarmAll(ctx context.Context) {
 // getOrCreatePool loads the pool for fnID, creating it if missing.
 func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	if existing, ok := m.pools.Load(fnID); ok {
-		return existing.(*functionPool), nil
+		p := existing.(*functionPool)
+		if !p.closing.Load() {
+			return p, nil
+		}
+	}
+
+	// Serialize the missing-pool path with retirement. Without this lock,
+	// RefreshForDeploy could observe no entry and return just before this
+	// goroutine publishes a pool built from the pre-refresh registry snapshot.
+	m.poolMu.Lock()
+	defer m.poolMu.Unlock()
+	if m.closing.Load() {
+		return nil, ErrManagerClosed
+	}
+	if existing, ok := m.pools.Load(fnID); ok {
+		p := existing.(*functionPool)
+		if !p.closing.Load() {
+			return p, nil
+		}
+		// A closed generation should normally already have been removed by
+		// retirePool. Cleaning it here also keeps hand-built test managers and
+		// interrupted retirements from spinning forever.
+		m.pools.Delete(fnID)
 	}
 	fn, err := m.reg.Get(fnID)
 	if err != nil {
@@ -570,18 +636,19 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	}
 
 	p := &functionPool{
-		fnID:         fnID,
-		min:          minWarm,
-		max:          maxWarm,
-		idleTTL:      idleTTL,
-		maxUses:      m.cfg.DefaultMaxUses,
-		target:       targetConc,
-		memoryBytes:  memoryBytes,
-		scaleToZero:  scaleToZero,
-		hostMem:      m.hostMem,
-		idle:         make(chan *sandbox.Worker, channelCap),
-		concSem:      concSem,
-		concPolicy:   concPolicy,
+		fnID:        fnID,
+		min:         minWarm,
+		max:         maxWarm,
+		idleTTL:     idleTTL,
+		maxUses:     m.cfg.DefaultMaxUses,
+		target:      targetConc,
+		memoryBytes: memoryBytes,
+		scaleToZero: scaleToZero,
+		hostMem:     m.hostMem,
+		idle:        make(chan *sandbox.Worker, channelCap),
+		retired:     make(chan struct{}),
+		concSem:     concSem,
+		concPolicy:  concPolicy,
 		spawnFn: func(ctx context.Context) (*sandbox.Worker, error) {
 			// Merge env at spawn time: function config + decrypted secrets.
 			// We read the lookup off m (not the local tmpl copy) so that
@@ -604,13 +671,13 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			}
 			start := time.Now()
 			w, err := sandbox.Spawn(ctx, sandbox.ExecConfig{
-				Language:       sandbox.Language(fn.Runtime),
-				CodeDir:        codeDir,
-				MemoryMB:       int(fn.MemoryMB),
-				MaxCPUs:        fn.CPUs,
-				Env:            env,
-				SeccompPolicy:  sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, nil, nil),
-				NetworkMode:    fn.NetworkMode,
+				Language:      sandbox.Language(fn.Runtime),
+				CodeDir:       codeDir,
+				MemoryMB:      int(fn.MemoryMB),
+				MaxCPUs:       fn.CPUs,
+				Env:           env,
+				SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, nil, nil),
+				NetworkMode:   fn.NetworkMode,
 				// Operator-managed DNS for egress sandboxes; written by
 				// internal/firewall on every refresh tick. Bound at
 				// /etc/resolv.conf and /etc/hosts when present.
@@ -654,6 +721,8 @@ func (m *Manager) reap(p *functionPool) {
 		select {
 		case <-ticker.C:
 			p.sweep(m.cfg.DefaultMaxUses)
+		case <-p.retired:
+			return
 		case <-m.shutdown:
 			return
 		}

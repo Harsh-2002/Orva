@@ -41,7 +41,7 @@ var defaultSyscalls = []string{
 	"membarrier", "memfd_create",
 
 	// Process
-	"clone", "clone3", "execve", "exit", "exit_group",
+	"clone", "execve", "exit", "exit_group",
 	"wait4", "waitid", "getpid", "getppid", "gettid",
 	"getuid", "getgid", "geteuid", "getegid",
 	"getgroups", "getrlimit", "prlimit64", "getrusage",
@@ -143,6 +143,20 @@ var arm64UnsupportedSyscalls = map[string]bool{
 	"select": true, "unlink": true,
 }
 
+// Kafel's aarch64 catalog uses the kernel-internal names newfstat/newuname
+// for the syscalls strace and libc expose as fstat/uname. They are not part of
+// the x86_64-derived API catalog below, but both current runtimes need them at
+// startup. Add them after generic validation so ARM64 gets the correct Kafel
+// identifiers without exposing architecture-specific names in the API.
+var arm64RuntimeAliases = []string{"newfstat", "newuname"}
+
+// Namespace-creating clone flags. Language runtimes need clone for threads,
+// but a function has no reason to create a nested user/mount/network/etc.
+// namespace. clone3 stores flags behind a pointer that classic seccomp BPF
+// cannot inspect, so it is omitted from the presets and runtimes fall back to
+// clone. Keep this numeric so Kafel compiles the same policy on both targets.
+const cloneNamespaceFlags = "0x7e020080"
+
 func syscallSupportedOnArch(name, goarch string) bool {
 	return goarch != "arm64" || !arm64UnsupportedSyscalls[name]
 }
@@ -151,6 +165,10 @@ func syscallSupportedOnArch(name, goarch string) bool {
 // base is one of: "default", "strict", "permissive", "disabled".
 // allow adds syscalls to the base. block removes syscalls (takes precedence).
 func BuildSeccompPolicy(base string, allow, block []string) string {
+	return buildSeccompPolicyForArch(base, allow, block, runtime.GOARCH)
+}
+
+func buildSeccompPolicyForArch(base string, allow, block []string, goarch string) string {
 	if base == "disabled" || base == "" {
 		return ""
 	}
@@ -189,8 +207,13 @@ func BuildSeccompPolicy(base string, allow, block []string) string {
 	// Filter after custom allow overrides as well, otherwise an operator can
 	// accidentally reintroduce an identifier Kafel cannot compile here.
 	for name := range allowed {
-		if !syscallSupportedOnArch(name, runtime.GOARCH) {
+		if !ValidSyscallName(name) || !syscallSupportedOnArch(name, goarch) {
 			delete(allowed, name)
+		}
+	}
+	if goarch == "arm64" {
+		for _, name := range arm64RuntimeAliases {
+			allowed[name] = true
 		}
 	}
 
@@ -203,17 +226,25 @@ func BuildSeccompPolicy(base string, allow, block []string) string {
 
 	// Generate Kafel policy.
 	// ALLOW: explicitly permitted syscalls.
-	// DEFAULT LOG: unrecognized syscalls are logged (not killed) — this
-	// provides audit visibility while avoiding crashes from syscalls that
-	// Kafel's symbol table doesn't include (e.g. fstat on kernel 6.17+).
-	//
-	// The ALLOW list still matters: nsjail's seccomp_log flag combined
-	// with this policy means only ALLOW'd calls pass silently, everything
-	// else generates a kernel audit log entry for monitoring.
+	// DEFAULT ERRNO(1) makes this an enforcing allowlist while allowing
+	// language runtimes to fall back when optional kernel features such as
+	// io_uring are denied. DEFAULT LOG is not a restriction: Linux logs the
+	// syscall and then permits it to execute.
 	var b strings.Builder
 	b.WriteString("POLICY orva { ALLOW { ")
-	b.WriteString(strings.Join(names, ", "))
-	b.WriteString(" } } USE orva DEFAULT LOG")
+	var rules []string
+	for _, name := range names {
+		if name == "clone" {
+			// Declare arg0 ourselves instead of relying on Kafel's
+			// architecture-specific catalog name (flags on x86_64,
+			// clone_flags on aarch64).
+			rules = append(rules, "clone(orva_clone_flags) { (orva_clone_flags & "+cloneNamespaceFlags+") == 0 }")
+			continue
+		}
+		rules = append(rules, name)
+	}
+	b.WriteString(strings.Join(rules, ", "))
+	b.WriteString(" } } USE orva DEFAULT ERRNO(1)")
 
 	return b.String()
 }

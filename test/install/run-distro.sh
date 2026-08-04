@@ -93,10 +93,12 @@ if [[ "$DISTRO_INIT" == "systemd" ]]; then
     ok "orva.service active"
 
     unit=$(docker exec "$CONTAINER" systemctl cat orva)
-    [[ "$unit" == *"AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN"* ]] \
+    [[ "$unit" == *"AmbientCapabilities=CAP_NET_ADMIN"* ]] \
         || die "orva.service is missing required ambient capabilities"
     [[ "$unit" == *"CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE"* ]] \
         || die "orva.service bounding set would prevent nsjail exec"
+    [[ "$unit" == *"Environment=ORVA_DISABLE_USERNS="* ]] \
+        || die "orva.service is missing the detected userns mode"
     ok "orva.service sandbox capability set"
 else
     log "starting OpenRC service"

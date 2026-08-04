@@ -113,6 +113,7 @@ type chatSession struct {
 	autoApprove bool
 	raw         bool
 	interactive bool // REPL mode (vs one-shot)
+	stdinTTY    func() bool
 
 	settings  *aiSettings
 	providers []providerView
@@ -157,6 +158,7 @@ func newChatSession(cmd *cobra.Command, client *cli.Client) *chatSession {
 		thinking:    thinking,
 		autoApprove: auto,
 		raw:         raw,
+		stdinTTY:    func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
 		toolNames:   map[string]string{},
 	}
 	s.initRenderer()
@@ -728,7 +730,11 @@ func (s *chatSession) decideApproval(tc pendingTool) (bool, error) {
 		s.printToolLine(tc.Name, "auto-approved", toolWarn)
 		return true, nil
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	// -p/positional turns are the scriptable one-shot surface. Never turn
+	// them into an interactive prompt merely because the caller happens to
+	// have inherited a TTY (for example a CI/debug harness). Writes must fail
+	// closed unless --auto-approve was explicit.
+	if !s.interactive || s.stdinTTY == nil || !s.stdinTTY() {
 		return false, fmt.Errorf("tool %q requires approval; re-run in an interactive terminal or pass --auto-approve", tc.Name)
 	}
 	summary := compactArgs(tc.Args)

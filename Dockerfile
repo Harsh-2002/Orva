@@ -35,11 +35,13 @@ RUN CGO_ENABLED=0 go build \
       -o /out/orva ./backend/cmd/orva
 
 FROM debian:bookworm-slim AS nsjail
+ARG NSJAIL_REF=5ebcc30bef4af60d6e28f012dd8bf7b99b8b0acf
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates git make gcc g++ autoconf bison flex libtool pkg-config \
       libprotobuf-dev libnl-route-3-dev protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/google/nsjail.git /nsjail \
+RUN git clone --filter=blob:none https://github.com/google/nsjail.git /nsjail \
+    && git -C /nsjail checkout "$NSJAIL_REF" \
     && cd /nsjail && make -j"$(nproc)" && strip nsjail
 
 # Orva offers two runtimes, latest-stable only: node (Node.js 24) and

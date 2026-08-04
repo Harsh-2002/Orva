@@ -134,10 +134,10 @@ class OrvaClient:
         with urllib.request.urlopen(r, timeout=timeout) as resp:
             event, datalines = None, []
             for raw in resp:
-                line = raw.decode(errors="replace").rstrip("\n")
+                line = raw.decode(errors="replace").rstrip("\r\n")
                 if line == "":
                     if event is not None:
-                        payload = "".join(datalines)
+                        payload = "\n".join(datalines)
                         try:
                             payload = json.loads(payload) if payload else {}
                         except Exception:
@@ -198,9 +198,21 @@ class CLIRunner:
         cmd = [self.binary, *args, "--endpoint", self.base]
         if self.key:
             cmd += ["--api-key", self.key]
-        p = subprocess.run(cmd, capture_output=True, text=True,
-                           input=input_text, timeout=timeout)
-        return p.returncode, p.stdout, p.stderr
+        kwargs = {"capture_output": True, "text": True, "timeout": timeout}
+        if input_text is None:
+            # Never inherit a developer terminal: one-shot CLI tests must have
+            # the same non-interactive stdin locally and on GitHub runners.
+            kwargs["stdin"] = subprocess.DEVNULL
+        else:
+            kwargs["input"] = input_text
+        try:
+            p = subprocess.run(cmd, **kwargs)
+            return p.returncode, p.stdout, p.stderr
+        except subprocess.TimeoutExpired as exc:
+            out = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            err = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            err += f"\ncommand timed out after {timeout}s"
+            return 124, out, err
 
 
 # ── frame helpers ──────────────────────────────────────────────────────────────
