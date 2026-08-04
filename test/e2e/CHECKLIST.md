@@ -4,8 +4,8 @@
 > overwrites it. When a module FAILs, fix the code or harden the test;
 > when you add a feature, add a module here.
 
-- **Last run:** 2026-08-04 13:06:11Z
-- **Target:** external instance http://127.0.0.1:18444
+- **Last run:** 2026-08-04 13:34:37Z
+- **Target:** external instance http://127.0.0.1:18443
 - **Modules:** 26 passed, 0 failed, 0 skipped
 - **Checks:** 537 passed, 0 failed
 

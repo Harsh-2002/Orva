@@ -126,46 +126,6 @@ class OrvaClient:
     def status(self, method, path, body=None):
         return self.req(method, path, body, expect=range(100, 600))[0]
 
-
-def latest_execution_stderr(client, function_id="", function_name="", timeout=5):
-    """Return persisted stderr for the newest execution of a function.
-
-    Worker-start failures are deliberately not echoed in public invoke
-    responses, but authenticated execution logs retain the diagnostic. E2E
-    callers use this before cleanup so CI annotations identify the actual
-    sandbox/runtime failure instead of reporting only WORKER_CRASHED.
-    """
-    if not function_id and function_name:
-        code, payload = client.req("GET", "/api/v1/functions?limit=10000",
-                                   expect=range(200, 599))
-        if code == 200 and isinstance(payload, dict):
-            for function in payload.get("functions") or []:
-                if function.get("name") == function_name:
-                    function_id = function.get("id", "")
-                    break
-    if not function_id:
-        return ""
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        code, payload = client.req(
-            "GET", f"/api/v1/executions?function_id={function_id}&limit=10",
-            expect=range(200, 599),
-        )
-        if code == 200 and isinstance(payload, dict):
-            for execution in payload.get("executions") or []:
-                execution_id = execution.get("id")
-                if not execution_id:
-                    continue
-                log_code, logs = client.req(
-                    "GET", f"/api/v1/executions/{execution_id}/logs",
-                    expect=range(200, 599),
-                )
-                if log_code == 200 and isinstance(logs, dict) and logs.get("stderr"):
-                    return str(logs["stderr"]).strip()
-        time.sleep(0.2)
-    return ""
-
     # SSE: POST and collect frames as (event, data) until the stream ends.
     def stream(self, path, body, timeout=90):
         data = json.dumps(body).encode()
@@ -215,6 +175,46 @@ def latest_execution_stderr(client, function_id="", function_name="", timeout=5)
                 pass
             time.sleep(0.5)
         return False
+
+
+def latest_execution_stderr(client, function_id="", function_name="", timeout=5):
+    """Return persisted stderr for the newest execution of a function.
+
+    Worker-start failures are deliberately not echoed in public invoke
+    responses, but authenticated execution logs retain the diagnostic. E2E
+    callers use this before cleanup so CI annotations identify the actual
+    sandbox/runtime failure instead of reporting only WORKER_CRASHED.
+    """
+    if not function_id and function_name:
+        code, payload = client.req("GET", "/api/v1/functions?limit=10000",
+                                   expect=range(200, 599))
+        if code == 200 and isinstance(payload, dict):
+            for function in payload.get("functions") or []:
+                if function.get("name") == function_name:
+                    function_id = function.get("id", "")
+                    break
+    if not function_id:
+        return ""
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        code, payload = client.req(
+            "GET", f"/api/v1/executions?function_id={function_id}&limit=10",
+            expect=range(200, 599),
+        )
+        if code == 200 and isinstance(payload, dict):
+            for execution in payload.get("executions") or []:
+                execution_id = execution.get("id")
+                if not execution_id:
+                    continue
+                log_code, logs = client.req(
+                    "GET", f"/api/v1/executions/{execution_id}/logs",
+                    expect=range(200, 599),
+                )
+                if log_code == 200 and isinstance(logs, dict) and logs.get("stderr"):
+                    return str(logs["stderr"]).strip()
+        time.sleep(0.2)
+    return ""
 
 
 # ── CLI runner ───────────────────────────────────────────────────────────────

@@ -148,8 +148,11 @@ func TestDefaultSeccompBlocksNestedNamespaceCreation(t *testing.T) {
 	if !strings.Contains(policy, want) {
 		t.Fatalf("default policy must restrict clone namespace flags: %s", policy)
 	}
-	if strings.Contains(policy, "clone3") {
-		t.Fatalf("default policy cannot safely inspect clone3's pointer arguments: %s", policy)
+	if !strings.Contains(policy, "ERRNO(38) { clone3 }") {
+		t.Fatalf("default policy must deny clone3 with ENOSYS so runtimes fall back safely: %s", policy)
+	}
+	if policySyscalls(policy)["clone3"] {
+		t.Fatalf("default policy cannot allow clone3's pointer arguments: %s", policy)
 	}
 }
 

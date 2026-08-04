@@ -153,8 +153,9 @@ var kafelRuntimeAliases = []string{"newfstat", "newuname"}
 // Namespace-creating clone flags. Language runtimes need clone for threads,
 // but a function has no reason to create a nested user/mount/network/etc.
 // namespace. clone3 stores flags behind a pointer that classic seccomp BPF
-// cannot inspect, so it is omitted from the presets and runtimes fall back to
-// clone. Keep this numeric so Kafel compiles the same policy on both targets.
+// cannot inspect, so it stays denied with ENOSYS rather than the policy's
+// default EPERM. glibc then falls back to clone, whose flags we can inspect.
+// Keep this numeric so Kafel compiles the same policy on both targets.
 const cloneNamespaceFlags = "0x7e020080"
 
 func syscallSupportedOnArch(name, goarch string) bool {
@@ -229,7 +230,12 @@ func buildSeccompPolicyForArch(base string, allow, block []string, goarch string
 	// io_uring are denied. DEFAULT LOG is not a restriction: Linux logs the
 	// syscall and then permits it to execute.
 	var b strings.Builder
-	b.WriteString("POLICY orva { ALLOW { ")
+	// pthread_create on current amd64 glibc tries clone3 first and falls back
+	// to clone only for ENOSYS. Returning the default EPERM makes Node abort at
+	// startup; allowing clone3 would let a function hide namespace flags behind
+	// its pointer argument. An explicit ENOSYS rule preserves both compatibility
+	// and the clone flag boundary below.
+	b.WriteString("POLICY orva { ERRNO(38) { clone3 }, ALLOW { ")
 	var rules []string
 	for _, name := range names {
 		if name == "clone" {
