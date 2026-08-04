@@ -395,8 +395,49 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find artifacts -type f -exec cp -v {} dist/ \;
-          cp scripts/install.sh scripts/install-cli.sh scripts/install-cli.ps1 dist/
+
+          # download-artifact also retrieves the digest-* coordination
+          # artifacts produced by the Docker jobs. Those are intentionally
+          # zero-byte files whose names encode image digests; flattening every
+          # artifact would make action-gh-release try to publish them and the
+          # GitHub API rejects zero-byte release assets. Copy only the public
+          # release contract, and require exactly one non-empty source for each
+          # asset so missing/duplicate build output fails closed.
+          expected=(
+            orva-linux-amd64
+            orva-linux-arm64
+            orva-cli-linux-amd64
+            orva-cli-linux-arm64
+            orva-cli-darwin-amd64
+            orva-cli-darwin-arm64
+            orva-cli-windows-amd64.exe
+            orva-cli-windows-arm64.exe
+            nsjail-linux-amd64
+            nsjail-linux-arm64
+            rootfs-node-amd64.tar.zst
+            rootfs-node-arm64.tar.zst
+            rootfs-python-amd64.tar.zst
+            rootfs-python-arm64.tar.zst
+          )
+          for asset in "${expected[@]}"; do
+            mapfile -t matches < <(find artifacts -type f -name "$asset" -print)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::expected exactly one $asset artifact, found ${#matches[@]}"
+              exit 1
+            fi
+            [ -s "${matches[0]}" ] || { echo "::error::$asset is empty"; exit 1; }
+            cp -v "${matches[0]}" "dist/$asset"
+          done
+
+          for installer in install.sh install-cli.sh install-cli.ps1; do
+            [ -s "scripts/$installer" ] || { echo "::error::$installer is empty"; exit 1; }
+            cp -v "scripts/$installer" "dist/$installer"
+          done
+
+          if find dist -type f -size 0 -print -quit | grep -q .; then
+            echo "::error::release staging contains a zero-byte file"
+            exit 1
+          fi
           # Mark every Unix-style binary executable. Windows .exe doesn't
           # need a chmod but the no-op is harmless.
           chmod +x dist/orva-linux-* dist/nsjail-linux-* 2>/dev/null || true
