@@ -16,6 +16,9 @@ python3 run.py --filter ai     # run only matching modules
 
 # Against an existing instance (skip Docker):
 python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.admin-key)"
+
+# Make real nsjail deploy/invoke mandatory (used by GitHub Actions):
+ORVA_REQUIRE_SANDBOX=1 python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.admin-key)"
 ```
 
 Requirements: `docker`, `python3`, and `build/orva` (`make build`) for CLI tests.

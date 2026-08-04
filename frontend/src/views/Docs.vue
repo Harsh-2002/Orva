@@ -590,7 +590,7 @@
             MCP: Model Context Protocol
           </h2>
           <p class="doc-lede">
-            Same API surface the dashboard uses, exposed as 70 tools an agent
+            Same API surface the dashboard uses, exposed as 71 tools an agent
             can call directly. API key permissions scope the available tool
             set.
           </p>
@@ -950,12 +950,12 @@
             CLI
           </h2>
           <p class="doc-lede">
-            <code class="doc-chip">orva</code> is a single static binary
-            that talks to a remote (or local) Orva server over HTTPS.
-            Same binary as the daemon, <code class="doc-chip">orva serve</code>
-            starts a server, every other subcommand is a CLI client.
-            Drop it on operator laptops, CI runners, or anywhere bash
-            runs.
+            Orva ships a full Linux server binary and a slim cross-platform
+            CLI, both named <code class="doc-chip">orva</code>. They share
+            every client command; only the full build adds
+            <code class="doc-chip">serve</code>,
+            <code class="doc-chip">setup</code>, and
+            <code class="doc-chip">init</code>.
           </p>
         </div>
       </div>
@@ -973,9 +973,9 @@
         <div class="doc-card">
           <div class="doc-microlabel">Install (CLI only)</div>
           <div class="doc-card-body">
-            <code class="doc-chip">install.sh --cli-only</code>
+            <code class="doc-chip">curl … install-cli.sh | sh</code>
             <p class="mt-1.5 text-foreground-muted">
-              ~10 MB binary at <code>/usr/local/bin/orva</code>. No service.
+              ~20 MB binary at <code>/usr/local/bin/orva</code>. No service.
             </p>
           </div>
         </div>
@@ -1756,17 +1756,17 @@ const errorCodes = [
 ]
 
 // ── CLI reference (section 11) ──────────────────────────────────────
-// Single binary: same `cmd/orva` Go program that runs the daemon.
-// `orva serve` is the server; everything else is a client. CLI reads
+// Full server + slim CLI share the `cli/commands` client surface. Only
+// the full server adds serve/setup/init. The CLI reads
 // ~/.orva/config.yaml for endpoint + api_key. Values mirror what's
 // shipped today by ./build/orva — keep in sync if subcommands change.
 
 const cliIndex = [
   { cmd: 'login',      subs: EMPTY,                                purpose: 'Save endpoint + API key to ~/.orva/config.yaml' },
-  { cmd: 'init',       subs: EMPTY,                                purpose: 'Scaffold an orva.yaml in the current directory' },
+  { cmd: 'init',       subs: EMPTY,                              purpose: 'Full server only: write the legacy orva.yaml template' },
   { cmd: 'deploy',     subs: '[path]',                           purpose: 'Package a directory and deploy as a function' },
   { cmd: 'invoke',     subs: '[name|id]',                        purpose: 'POST to /fn/<id>/ and print the response' },
-  { cmd: 'logs',       subs: '[name|id] [--tail]',               purpose: 'List recent executions; --tail follows live via SSE' },
+  { cmd: 'logs',       subs: '[name|id] [--follow]',             purpose: 'List recent executions; --follow streams live via SSE' },
   { cmd: 'functions',  subs: 'list / get / create / delete',     purpose: 'CRUD for the function registry' },
   { cmd: 'cron',       subs: 'list / create / update / delete',  purpose: 'Manage cron schedules attached to functions' },
   { cmd: 'jobs',       subs: 'list / enqueue / retry / delete',  purpose: 'Background queue management' },
@@ -1775,7 +1775,7 @@ const cliIndex = [
   { cmd: 'webhooks',   subs: 'list / create / test / delete / inbound', purpose: 'System-event subscribers + inbound triggers' },
   { cmd: 'routes',     subs: 'list / set / delete',              purpose: 'Custom URL → function path mappings' },
   { cmd: 'keys',       subs: 'list / create / revoke',           purpose: 'Manage API keys' },
-  { cmd: 'activity',   subs: '[--tail] [--source web|api|...]',  purpose: 'Paginated activity rows; live SSE with --tail' },
+  { cmd: 'activity',   subs: '[--follow] [--source web|api|...]', purpose: 'Paginated activity rows; live SSE with --follow' },
   { cmd: 'system',     subs: 'health / metrics / db-stats / vacuum', purpose: 'Server diagnostics' },
   { cmd: 'setup',      subs: '[--skip-nsjail] [--skip-rootfs]',  purpose: 'Install nsjail + rootfs on a bare host' },
   { cmd: 'serve',      subs: '[--port N]',                       purpose: 'Run as the server daemon (not the CLI client)' },
@@ -1791,10 +1791,7 @@ orva login \\
 # Writes ~/.orva/config.yaml. Subsequent commands need no flags.
 orva system health      # smoke test`
 
-const cliDeploy = `# Init a project in cwd (creates orva.yaml + handler stub)
-orva init
-
-# Deploy from a directory. Auto-detects handler.ts when tsconfig.json
+const cliDeploy = `# Deploy from a directory. Auto-detects handler.ts when tsconfig.json
 # is present; else uses the runtime default (handler.js / handler.py).
 orva deploy ./my-fn \\
   --name    resize-image \\
@@ -1803,8 +1800,8 @@ orva deploy ./my-fn \\
 # Override the entrypoint explicitly:
 orva deploy ./my-fn --name api --runtime python --entrypoint app.py`
 
-const cliInvokeLogs = `# Invoke a function by name or fn_<id>:
-orva invoke resize-image --data '{"url":"https://example.com/cat.jpg"}'
+const cliInvokeLogs = `# Invoke a function by name or UUID:
+orva invoke resize-image --body '{"url":"https://example.com/cat.jpg"}'
 
 # Recent executions:
 orva logs resize-image
@@ -1813,7 +1810,7 @@ orva logs resize-image
 orva logs resize-image --exec-id exec_abc123
 
 # Live tail — SSE stream, Ctrl-C to stop:
-orva logs resize-image --tail`
+orva logs resize-image --follow`
 
 const cliKv = `# List keys (optionally by prefix)
 orva kv list resize-image
@@ -1854,7 +1851,7 @@ orva system db-stats      # on-disk breakdown (orva.db, WAL, functions/)
 orva system vacuum        # rewrite SQLite to reclaim freelist pages
 
 orva activity                          # last 50 activity rows
-orva activity --tail                   # live feed (Ctrl-C)
+orva activity --follow                 # live feed (Ctrl-C)
 orva activity --source mcp --limit 200 # MCP-only, last 200`
 
 // ── Docs → Markdown export ──────────────────────────────────────────
@@ -1942,7 +1939,7 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'Claude Code',
     lang: 'bash',
-    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 70 tools.',
+    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 71 tools.',
     code: `claude mcp add --transport http --scope user orva ${origin.value}/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {

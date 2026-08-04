@@ -4,10 +4,10 @@
 > overwrites it. When a module FAILs, fix the code or harden the test;
 > when you add a feature, add a module here.
 
-- **Last run:** 2026-06-04 10:47:18Z
-- **Target:** isolated Docker image `orva:e2e` (http://127.0.0.1:8455)
-- **Modules:** 25 passed, 0 failed, 1 skipped
-- **Checks:** 512 passed, 0 failed
+- **Last run:** 2026-08-04 11:19:26Z
+- **Target:** external instance http://127.0.0.1:18444
+- **Modules:** 26 passed, 0 failed, 0 skipped
+- **Checks:** 530 passed, 0 failed
 
 | Module | Status | Checks (pass/fail) |
 |---|---|---|
@@ -21,10 +21,10 @@
 | `test_auth.py` | ✅ PASS | 15/0 |
 | `test_backup.py` | ✅ PASS | 11/0 |
 | `test_channels.py` | ✅ PASS | 21/0 |
-| `test_cli.py` | ✅ PASS | 39/0 |
+| `test_cli.py` | ✅ PASS | 41/0 |
 | `test_cli_chat.py` | ✅ PASS | 11/0 |
 | `test_cron.py` | ✅ PASS | 19/0 |
-| `test_deploy_invoke.py` | ⚠️ SKIP | 0/0 |
+| `test_deploy_invoke.py` | ✅ PASS | 16/0 |
 | `test_firewall.py` | ✅ PASS | 30/0 |
 | `test_fixtures.py` | ✅ PASS | 29/0 |
 | `test_functions.py` | ✅ PASS | 13/0 |

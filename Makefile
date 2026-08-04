@@ -78,13 +78,10 @@ dev:
 	cd frontend && npm run dev &
 	go run ./backend/cmd/orva serve
 
-# Standalone CLI binary. Same Go program as the daemon (orva and orva-cli
-# share `./cmd/orva`), but built without the embedded UI/rootfs assumptions
-# and named distinctly so release artifacts don't collide with the server.
-# CGO disabled + -trimpath + stripped symbols → fully static, ships anywhere.
 # Slim standalone CLI. Built from the dedicated ./cli/cmd/orva entry point
 # which imports only the cli/commands library — no server packages, no
-# embedded UI/adapters/docs/MCP. Targets ~6–9 MB vs the ~20 MB server.
+# embedded UI/adapters/MCP. It embeds the CLI reference docs and currently
+# ships at roughly 20 MB.
 # CGO disabled + -trimpath + stripped symbols → fully static.
 cli:
 	@mkdir -p $(BUILD)

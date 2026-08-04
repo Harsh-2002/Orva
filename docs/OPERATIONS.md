@@ -85,9 +85,8 @@ good version via the Deployments view.
 ## Symptom: EVERY function returns `WORKER_CRASHED` right after a bare-metal install
 
 **Diagnosis.** If *nothing* invokes (even a trivial handler) and the
-`stderr` is empty, nsjail can't set up its sandbox in this host
-environment — not a code problem. Two host-level causes seen on some
-kernels/VMs:
+`stderr` is empty, nsjail cannot start or construct its sandbox in the
+service environment. Check these known causes:
 
 - **`/proc` overmount.** `journalctl -u orva` shows nsjail
   `Failed to mount mandatory point: '/proc'`. Caused by the systemd
@@ -102,6 +101,13 @@ kernels/VMs:
   memory/pid/cpu caps disabled (rlimit-only fallback)` at startup and
   runs functions **without** hard per-sandbox memory caps rather than
   crashing. Older builds crashed every worker here — upgrade to fix.
+- **nsjail capabilities excluded by systemd.** If the API returns
+  `SANDBOX_ERROR` immediately and nsjail produces no stderr, inspect
+  `systemctl cat orva`. The bounding set must retain `CAP_SYS_ADMIN`,
+  `CAP_NET_ADMIN`, `CAP_SETUID`, `CAP_SETGID`, and
+  `CAP_NET_BIND_SERVICE`; otherwise Linux rejects the setcap nsjail binary at
+  `execve` before it can log. Re-running the current bare-metal installer
+  refreshes the unit safely on upgrades.
 
 Quick confirmation that nsjail itself works on the host:
 `sudo -u orva nsjail -Mo --chroot /var/lib/orva/rootfs/node -T /tmp -- /usr/local/bin/node --version`

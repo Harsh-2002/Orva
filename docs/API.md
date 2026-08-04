@@ -1,6 +1,8 @@
 # HTTP API reference
 
-All endpoints under `/api/v1/`. Auth via either:
+Management endpoints live under `/api/v1/`; invocation, MCP, metrics,
+and OAuth discovery/authorization also expose the public paths called out
+below. Management auth uses either:
 
 - **API key**: `X-Orva-API-Key: orva_xxx...` header. Used by curl, CI,
   external callers.
@@ -61,6 +63,14 @@ Rotates the cookie's expiry forward by 7 days.
 ### `POST /api/v1/auth/logout`
 Invalidates the session.
 
+### Account and session management
+
+- `POST /api/v1/auth/change-password` — change the current user's password.
+- `GET /api/v1/auth/sessions` — list active login sessions.
+- `DELETE /api/v1/auth/sessions/{prefix}` — revoke a session by token prefix.
+- `GET /api/v1/oauth/connected-apps` — list authorized OAuth clients.
+- `DELETE /api/v1/oauth/connected-apps/{id}` — revoke a connected client.
+
 ## Functions
 
 ### `POST /api/v1/functions`
@@ -100,7 +110,7 @@ Partial update. Whitelisted fields: `name`, `entrypoint`, `timeout_ms`,
 `memory_mb`, `cpus`, `env_vars`, `network_mode`, `status`.
 
 `status` accepts only `active` | `inactive`. Setting `inactive` causes
-`POST /invoke/<id>` to return 409 NOT_ACTIVE.
+`POST /fn/<id>` to return 409 NOT_ACTIVE.
 
 ### `DELETE /api/v1/functions/{id}`
 Removes the row + the on-disk versions dir. Irreversible.
@@ -163,7 +173,8 @@ Deployment history for a function. Optional `?limit=N` (default 50).
 
 ### `POST /fn/{id}/{path}`
 Calls the function. `id` is the function's UUID (the same value returned in the `id` field by GET /api/v1/functions).
-(e.g. function `019df200-7b00-7e00-9c00-aab1cd2e3f40` → URL `/fn/ttp836b9x3m1`). Method,
+(e.g. function `019df200-7b00-7e00-9c00-aab1cd2e3f40` → URL
+`/fn/019df200-7b00-7e00-9c00-aab1cd2e3f40`). Method,
 headers, body, query, and `path` (everything after `/{id}`) are all
 passed to the handler as `event`.
 
@@ -196,6 +207,16 @@ Single execution row (status, duration, cold_start flag).
 ### `GET /api/v1/executions/{id}/logs`
 The function's stderr from this invocation.
 
+### Execution lifecycle and observability
+
+- `GET /api/v1/executions/{id}/request` — return the captured invocation request.
+- `DELETE /api/v1/executions/{id}` — delete one execution record.
+- `POST /api/v1/executions/bulk-delete` — delete matching execution records.
+- `POST /api/v1/executions/{id}/replay` — replay a captured request.
+- `GET /api/v1/traces` and `GET /api/v1/traces/{id}` — list and inspect traces.
+- `GET /api/v1/functions/{id}/baseline` — return the function's trace baseline.
+- `GET /api/v1/activity` — list the operator activity feed.
+
 ## Secrets
 
 ### `GET /api/v1/functions/{id}/secrets`
@@ -208,6 +229,46 @@ pool refresh so the next invocation sees the new value.
 
 ### `DELETE /api/v1/functions/{id}/secrets/{key}`
 Remove. Triggers a pool refresh.
+
+## Function data, fixtures, and schedules
+
+Operator-facing function resources use the normal API-key/session auth:
+
+- `GET /api/v1/functions/{id}/kv`
+- `GET|PUT|DELETE /api/v1/functions/{id}/kv/{key}`
+- `POST /api/v1/functions/{id}/kv/{key}/incr`
+- `POST /api/v1/functions/{id}/kv/{key}/cas`
+- `GET|POST /api/v1/functions/{id}/fixtures`
+- `GET|PUT|DELETE /api/v1/functions/{id}/fixtures/{name}`
+- `GET|POST /api/v1/functions/{id}/cron`
+- `PUT|DELETE /api/v1/functions/{id}/cron/{schedule_id}`
+- `GET /api/v1/cron` — list schedules across all functions.
+
+The `/_kv` and `/_internal` route families are sandbox-SDK transport
+endpoints authenticated with invocation-scoped credentials. They are not an
+operator API and should not be called with long-lived API keys.
+
+## Jobs
+
+- `POST /api/v1/jobs` — enqueue a background job.
+- `GET /api/v1/jobs` and `GET /api/v1/jobs/{id}` — list or inspect jobs.
+- `POST /api/v1/jobs/{id}/retry` — retry a failed job.
+- `DELETE /api/v1/jobs/{id}` — delete a job.
+
+## Webhooks
+
+Inbound function endpoints:
+
+- `GET|POST /api/v1/functions/{id}/inbound-webhooks`
+- `GET|PUT|DELETE /api/v1/functions/{id}/inbound-webhooks/{webhook_id}`
+
+Outbound event delivery:
+
+- `GET|POST /api/v1/webhooks`
+- `GET|PUT|DELETE /api/v1/webhooks/{id}`
+- `POST /api/v1/webhooks/{id}/test`
+- `GET /api/v1/webhooks/{id}/deliveries`
+- `POST /api/v1/webhooks/deliveries/{id}/retry`
 
 ## Routes
 
@@ -344,6 +405,18 @@ Prometheus text format.
 ### `GET /api/v1/system/metrics.json`
 Same data, JSON shape, used by the dashboard.
 
+Prometheus also scrapes the unauthenticated `GET /metrics` path.
+
+### Backup, storage, and firewall administration
+
+- `GET /api/v1/backup` and `POST /api/v1/restore` — download or restore an instance backup.
+- `GET /api/v1/system/storage` — inspect disk/database usage.
+- `POST /api/v1/system/vacuum` — compact the SQLite database.
+- `GET|POST /api/v1/firewall/rules`
+- `PUT|DELETE /api/v1/firewall/rules/{rule_id}`
+- `POST /api/v1/firewall/resolve`
+- `GET|PUT /api/v1/firewall/dns`
+
 ### `GET /api/v1/events`
 Server-sent events stream of:
 
@@ -429,3 +502,20 @@ List the models the configured provider/endpoint reports.
 Read/update assistant settings: default provider/model, thinking level,
 approval policy (`all_writes` / `destructive_only` / `auto`), and the
 per-reply tool-step cap.
+
+### `PUT /api/v1/ai/selection`
+Persist the dashboard's active provider/model/thinking selection.
+
+## MCP and OAuth public endpoints
+
+`POST /mcp` is the Streamable HTTP MCP endpoint. Operator API keys expose
+the management tools; channel tokens expose only the functions bundled into
+that channel. OAuth-capable MCP clients discover and authorize through:
+
+- `GET /.well-known/oauth-protected-resource[/mcp]`
+- `GET /.well-known/oauth-authorization-server[/mcp]`
+- `GET /.well-known/openid-configuration[/mcp]`
+- `POST /register`
+- `GET|POST /oauth/authorize`
+- `POST /oauth/token`
+- `POST /oauth/revoke`

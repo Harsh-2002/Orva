@@ -39,7 +39,7 @@ go vet ./...
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `secrets` | AES-256-GCM encrypted secrets per function |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
-| `mcp` | MCP server (go-sdk); 72 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. |
+| `mcp` | MCP server (go-sdk); 71 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. |
 | `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps` and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`. |
 | `auth` | Shared `Principal` type (Kind=api_key / oauth / channel + ID/Label/Perms/Channel). Both REST middleware and MCP auth resolve the inbound bearer to a `*Principal`; downstream code (activity log, MCP tool registration) consumes the Kind directly. |
 | `trace` | Causal-trace collector + span lifecycle (W3C `traceparent` interop, outlier detection). See `docs/TRACING.md`. |

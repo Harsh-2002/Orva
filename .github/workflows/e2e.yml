@@ -1,7 +1,8 @@
 # Comprehensive programmatic E2E suite (test/e2e). Builds Orva, runs it, and
 # drives every domain + the CLI + the AI agentic loop (via a mock LLM — no real
-# provider key needed). Scenarios that require sandboxed function invocation
-# (real nsjail) self-skip in CI, where nested sandboxing is unavailable.
+# provider key needed). Orva runs directly on the hosted VM (not inside a
+# nested container), with nsjail and both runtime rootfs trees provisioned so
+# deploy + real sandbox invocation are mandatory parts of the gate.
 name: e2e
 
 # Least-privilege default token (these jobs only read the repo).
@@ -16,7 +17,7 @@ on:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
@@ -30,6 +31,27 @@ jobs:
 
       - name: Build orva (server + CLI)
         run: make build
+
+      - name: Provision nsjail
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            git make gcc g++ autoconf bison flex libtool pkg-config \
+            libcap-dev libcap2-bin libprotobuf-dev libnl-route-3-dev protobuf-compiler
+          git clone --filter=blob:none https://github.com/google/nsjail.git "$RUNNER_TEMP/nsjail-src"
+          git -C "$RUNNER_TEMP/nsjail-src" checkout 5ebcc30bef4af60d6e28f012dd8bf7b99b8b0acf
+          make -C "$RUNNER_TEMP/nsjail-src" -j"$(nproc)"
+          sudo install -m 0755 "$RUNNER_TEMP/nsjail-src/nsjail" /usr/local/bin/nsjail
+          sudo setcap cap_sys_admin,cap_setuid,cap_setgid,cap_net_admin,cap_net_bind_service=eip \
+            /usr/local/bin/nsjail
+          getcap /usr/local/bin/nsjail
+
+      - name: Provision runtime rootfs trees
+        run: |
+          mkdir -p "$RUNNER_TEMP/orva-data/rootfs"
+          bash scripts/build-rootfs.sh "$RUNNER_TEMP/orva-data/rootfs/node" node
+          bash scripts/build-rootfs.sh "$RUNNER_TEMP/orva-data/rootfs/python" python
+          ./build/orva setup --data-dir "$RUNNER_TEMP/orva-data"
 
       - name: Start Orva
         run: |
@@ -46,9 +68,18 @@ jobs:
           curl -fsS http://127.0.0.1:8443/api/v1/system/health || (cat "$RUNNER_TEMP/orva.log"; exit 1)
 
       - name: Run E2E suite
+        env:
+          ORVA_REQUIRE_SANDBOX: "1"
         run: |
           ADMIN_KEY="$(cat "$RUNNER_TEMP/orva-data/.admin-key")"
           python3 test/e2e/run.py --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
+
+      - name: Stop Orva
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/orva.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/orva.pid")" 2>/dev/null || true
+          fi
 
       - name: Show checklist
         if: always()

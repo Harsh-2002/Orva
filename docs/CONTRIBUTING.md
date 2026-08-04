@@ -64,7 +64,7 @@ frontend/
     stores/         Pinia stores (auth, system, events)
     views/          one file per route (Dashboard, Editor, Functions, ...)
 
-scripts/            install.sh, uninstall.sh, systemd unit, OpenRC
+scripts/            installers + entrypoint; install.sh emits service units/uninstaller
 test/               end-to-end shell suites (run with bash test/run-all.sh)
 docs/               human-readable docs (this folder)
 ```

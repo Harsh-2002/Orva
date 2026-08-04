@@ -367,7 +367,10 @@ jobs:
   # ── 4. Collate + compute checksums + publish GitHub Release ───────────
   release:
     name: publish github release
-    needs: [build-orva, build-cli, build-nsjail, build-rootfs]
+    # Do not publish a GitHub Release until the multi-arch image is live.
+    # Installers resolve the newest published release, so publishing early
+    # would expose a partially shipped version.
+    needs: [build-orva, build-cli, build-nsjail, build-rootfs, docker-manifest]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -391,6 +394,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           find artifacts -type f -exec cp -v {} dist/ \;
+          cp scripts/install.sh scripts/install-cli.sh scripts/install-cli.ps1 dist/
           # Mark every Unix-style binary executable. Windows .exe doesn't
           # need a chmod but the no-op is harmless.
           chmod +x dist/orva-linux-* dist/nsjail-linux-* 2>/dev/null || true
@@ -421,9 +425,13 @@ jobs:
 
             **Docker:**
             ```
-            docker run -p 8443:8443 --cap-add SYS_ADMIN \
+            docker run -d --name orva --restart unless-stopped \
+              -p 8443:8443 --pid=host \
+              --cap-add SYS_ADMIN --cap-add NET_ADMIN \
               --security-opt seccomp=unconfined \
+              --cgroupns=host --device /dev/net/tun \
               -v orva-data:/var/lib/orva \
+              -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
               ghcr.io/harsh-2002/orva:latest
             ```
 
@@ -453,17 +461,7 @@ jobs:
             | `nsjail-linux-{amd64,arm64}` | Pre-built nsjail (downloaded by install.sh) |
             | `rootfs-{node,python}-{amd64,arm64}.tar.zst` | Language rootfs |
             | `install.sh`, `install-cli.sh`, `install-cli.ps1` | One-line installers |
-            | `checksums.txt` | sha256 of every asset above |
-
-      # Upload installer scripts alongside the release so versioned URLs work.
-      - name: attach installer scripts
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ steps.v.outputs.tag }}
-          files: |
-            scripts/install.sh
-            scripts/install-cli.sh
-            scripts/install-cli.ps1
+            | `checksums.txt` | SHA-256 of every other asset above |
 
   # ── 5. Per-arch Docker image, native runners (no QEMU) ────────────────
   # Single source of truth: the unified Dockerfile builds UI, Go binary,
@@ -474,7 +472,7 @@ jobs:
   # reason for splitting builds; native runners removed that pressure).
   #
   # Each arch pushes by digest only; the manifest job below stitches the
-  # two digests into both `:latest` and the immutable `:${tag}`.
+  # two digests into the single public `:latest` tag.
   docker-image:
     name: docker image (${{ matrix.goarch }})
     needs: gate

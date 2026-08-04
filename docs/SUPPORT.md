@@ -113,9 +113,9 @@ real bare-metal Linux or on a fresh VM. For full end-to-end invocation
 coverage, run install.sh on an actual VM (Vagrant, QEMU, Hetzner,
 Lima, Multipass, etc.).
 
-### Install lifecycle gaps fixed in 2026-05
+### Install lifecycle gaps fixed
 
-The end-to-end pass on Ubuntu 24 surfaced three production bugs in
+End-to-end passes on Ubuntu 24 and ARM64 bare metal surfaced several bugs in
 `install.sh` that have since been fixed:
 
 1. `nsjail` was installed at `/opt/orva/bin/nsjail`, but the daemon's
@@ -133,3 +133,9 @@ The end-to-end pass on Ubuntu 24 surfaced three production bugs in
    them.
 4. The systemd unit lacked `Delegate=yes`, so `nsjail`'s per-sandbox
    cgroup v2 setup couldn't create child cgroups. Added.
+5. The systemd capability bounding set retained only `CAP_SYS_ADMIN`, while
+   the installed nsjail binary also carries `CAP_SETUID`, `CAP_SETGID`,
+   `CAP_NET_ADMIN`, and `CAP_NET_BIND_SERVICE`. Linux therefore rejected the
+   nsjail `execve` with `EPERM`, producing an immediate `SANDBOX_ERROR` with
+   no child stderr. The shipped unit now retains all nsjail file capabilities
+   and gives orvad `CAP_NET_ADMIN` for nftables.

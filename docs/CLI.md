@@ -235,7 +235,7 @@ orva deploy ./py-fn --name greeter --runtime python
 
 # Watch the build: stream build logs over SSE, wait for completion, and
 # exit non-zero if the build fails (great for CI gates).
-orva deploy ./src --name greeter --runtime node --watch
+orva deploy ./src --name greeter --runtime node --follow
 ```
 
 ### Invoke
@@ -608,7 +608,7 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 |---|---|
 | `orva login [--test]` | Save endpoint + API key to `~/.orva/config.yaml` |
 | `orva functions list / get / create / delete` | Function lifecycle |
-| `orva deploy <path> [--watch]` | Build + deploy a function from a directory |
+| `orva deploy <path> [--follow]` | Build + deploy a function from a directory |
 | `orva invoke <name>` | Run a function once and print the response |
 | `orva logs <name> [--follow \| --exec-id]` | Execution history, live tail, or single-row drill-down |
 | `orva deployments list / get / logs` | Deployment history + per-deploy build logs |

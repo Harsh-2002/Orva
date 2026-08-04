@@ -710,8 +710,11 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
-AmbientCapabilities=CAP_SYS_ADMIN
-CapabilityBoundingSet=CAP_SYS_ADMIN
+# orvad needs NET_ADMIN for nftables. nsjail's file capabilities also include
+# SETUID, SETGID, and NET_BIND_SERVICE; those must remain in the service's
+# bounding set or Linux rejects execve(nsjail) with EPERM before it can start.
+AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE
 NoNewPrivileges=false
 Delegate=yes
 ReadWritePaths=${DATA_DIR}

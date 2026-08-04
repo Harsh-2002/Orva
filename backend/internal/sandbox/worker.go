@@ -91,6 +91,7 @@ type frameResponse struct {
 // Spawn boots a fresh nsjail+adapter process. Caller owns the returned
 // Worker and is responsible for eventually calling Quit or Kill.
 func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
+	cfg = applyExecDefaults(cfg)
 	rootfs, entrypoint, err := resolveRuntime(cfg)
 	if err != nil {
 		return nil, err

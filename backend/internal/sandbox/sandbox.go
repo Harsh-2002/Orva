@@ -36,13 +36,13 @@ func (l Language) IsPython() bool { return l == Python }
 
 // ExecConfig holds everything needed to run user code in nsjail.
 type ExecConfig struct {
-	Language  Language
-	CodeDir   string // Directory containing user code
-	Stdin     []byte // Request JSON piped to stdin
-	Timeout   time.Duration
-	MemoryMB  int
-	MaxPids   int
-	MaxCPUs   float64 // 0 = no cpu cap; positive = fractional CPUs allowed (e.g. 0.5)
+	Language Language
+	CodeDir  string // Directory containing user code
+	Stdin    []byte // Request JSON piped to stdin
+	Timeout  time.Duration
+	MemoryMB int
+	MaxPids  int
+	MaxCPUs  float64 // 0 = no cpu cap; positive = fractional CPUs allowed (e.g. 0.5)
 
 	// Env holds environment variables injected into the sandbox. Includes
 	// both function config env_vars and decrypted secrets at invoke time.
@@ -90,16 +90,7 @@ type ExecResult struct {
 // fresh process — no daemon, no pool.
 func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 	start := time.Now()
-
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 30 * time.Second
-	}
-	if cfg.MemoryMB == 0 {
-		cfg.MemoryMB = 64
-	}
-	if cfg.MaxPids == 0 {
-		cfg.MaxPids = 32
-	}
+	cfg = applyExecDefaults(cfg)
 
 	rootfs, entrypoint, err := resolveRuntime(cfg)
 	if err != nil {
@@ -142,6 +133,23 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 	}
 
 	return result
+}
+
+// applyExecDefaults is shared by one-shot execution and pooled workers.
+// Keeping the defaults in one place is security-sensitive: passing MaxPids=0
+// to nsjail's cgroup-v2 flag means "allow zero processes", so every pooled
+// worker exits immediately on hosts where cgroup delegation is available.
+func applyExecDefaults(cfg ExecConfig) ExecConfig {
+	if cfg.Timeout == 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+	if cfg.MemoryMB == 0 {
+		cfg.MemoryMB = 64
+	}
+	if cfg.MaxPids == 0 {
+		cfg.MaxPids = 32
+	}
+	return cfg
 }
 
 func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
@@ -280,8 +288,8 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
 }
 
 var (
-	cgroupOnce   sync.Once
-	cgroupMount  string
+	cgroupOnce  sync.Once
+	cgroupMount string
 )
 
 // cgroupv2Delegate returns a cgroup v2 path this process can create children

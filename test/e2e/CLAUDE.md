@@ -104,10 +104,12 @@ This suite is meant to **grow on every change**:
   jobs, kv, webhooks, inbound-webhooks, fixtures, firewall/dns, api-keys, channels,
   traces, system, backup, auth — plus the **AI** assistant (chat, providers,
   settings, conversations, approval, perms).
-- **CLI:** the same binary's subcommands (`orva deploy/invoke/functions/logs/kv/…`)
-  via `CLIRunner`, confirming CLI↔server parity for each surface.
-- **nsjail-dependent** scenarios (real function **deploy-build** + **invoke**) only
-  run when the container's kernel allows nested sandboxing; otherwise they `skip()`.
+- **CLI:** the shared client subcommands (`orva deploy/invoke/functions/logs/kv/…`)
+  via `CLIRunner`, confirming slim-CLI ↔ full-server command parity.
+- **nsjail-dependent** scenarios (real function **deploy-build** + **invoke**) skip
+  when an ordinary local container cannot provide nested sandboxing. Set
+  `ORVA_REQUIRE_SANDBOX=1` (as the GitHub `e2e` workflow does on its provisioned VM)
+  to turn any such skip into a hard failure.
 - **Function lookup:** REST `GET /functions/{id}` resolves by **UUID only**
   (capture the id from create responses); `DELETE` and most other id-taking
   routes accept a UUID **or** a name via `resolveFnID`, as does the agent/MCP layer.

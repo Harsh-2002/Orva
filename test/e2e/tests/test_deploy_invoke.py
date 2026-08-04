@@ -6,12 +6,22 @@ this env), the whole module skips. REST resolves functions by UUID only, so the
 id is captured from the create response.
 """
 import json
+import os
 import sys
 import time
 
 from harness import OrvaClient, section, check, summary, skip
 
 NAME = "e2e-deploy-invoke"
+REQUIRE_SANDBOX = os.environ.get("ORVA_REQUIRE_SANDBOX", "") in ("1", "true", "yes")
+
+
+def sandbox_unavailable(reason):
+    """Skip on API-only environments, but fail the mandatory engine gate."""
+    if REQUIRE_SANDBOX:
+        check("sandbox invocation is available", False, reason)
+        return summary()
+    return skip(reason)
 
 # Known-good node handler (mirrors frontend node_http_hello template): a default
 # exports.handler(event) returning {statusCode, headers, body} with JSON body.
@@ -88,7 +98,7 @@ def main():
                 _, d = c.req("GET", f"/api/v1/deployments/{deployment_id}", expect=range(200, 599))
                 if isinstance(d, dict):
                     detail += f", deployment status={d.get('status')!r} error={str(d.get('error'))[:120]!r}"
-            return skip(f"sandbox/nsjail not available ({detail})")
+            return sandbox_unavailable(f"sandbox/nsjail not available ({detail})")
         check("function status == active", status == "active")
 
         if deployment_id:
@@ -113,7 +123,9 @@ def main():
         blob = str(err).lower()
         if icode >= 500 and (ecode in ("WORKER_CRASHED", "SANDBOX_ERROR")
                              or "rootfs" in blob or "nsjail" in blob or "sandbox" in blob):
-            return skip(f"sandbox/invoke unavailable here ({ecode or icode}); create+deploy+build verified")
+            return sandbox_unavailable(
+                f"sandbox/invoke unavailable here ({ecode or icode}); create+deploy+build verified"
+            )
         check("invoke -> 200", icode == 200, f"status {icode}: {str(ibody)[:200]}")
         # Body may come back parsed (dict) or as a raw JSON string; normalize.
         parsed = ibody

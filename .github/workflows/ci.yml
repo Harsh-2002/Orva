@@ -28,10 +28,18 @@ permissions:
 
 jobs:
   lint:
-    name: shellcheck (all)
+    name: workflow + shell lint
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: GitHub Actions workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
       - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends dash shellcheck
 
@@ -103,11 +111,16 @@ jobs:
       - name: go build (server binary)
         run: |
           mkdir -p build
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           CGO_ENABLED=0 go build \
             -trimpath \
-            -ldflags="-s -w -X main.Version=ci-${GITHUB_SHA::7}" \
+            -ldflags="-s -w \
+              -X github.com/Harsh-2002/Orva/backend/internal/version.Version=ci-${GITHUB_SHA::7} \
+              -X github.com/Harsh-2002/Orva/backend/internal/version.Commit=${GITHUB_SHA::7} \
+              -X github.com/Harsh-2002/Orva/backend/internal/version.BuildTime=${BUILD_TIME}" \
             -o build/orva ./backend/cmd/orva
           ./build/orva --help >/dev/null
+          ./build/orva --version | grep -F "ci-${GITHUB_SHA::7}"
 
   ui:
     name: ui build
@@ -123,6 +136,14 @@ jobs:
       - name: npm ci
         working-directory: frontend
         run: npm ci --no-audit --no-fund
+
+      - name: dependency audit (moderate+)
+        working-directory: frontend
+        run: npm audit --audit-level=moderate
+
+      - name: eslint
+        working-directory: frontend
+        run: npm run lint
 
       - name: vite build
         working-directory: frontend
@@ -141,8 +162,26 @@ jobs:
         with:
           context: .
           push: false
-          load: false
+          load: true
           platforms: linux/amd64
           tags: orva:ci
           no-cache: true
           pull: true
+
+      - name: run container + health smoke
+        run: |
+          docker run -d --name orva-ci -p 127.0.0.1:18443:8443 orva:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18443/api/v1/system/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18443/api/v1/system/health
+          curl -fsS http://127.0.0.1:18443/ >/dev/null
+
+      - name: container logs
+        if: always()
+        run: |
+          docker logs orva-ci 2>&1 || true
+          docker rm -f orva-ci >/dev/null 2>&1 || true

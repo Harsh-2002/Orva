@@ -157,8 +157,9 @@ bash test/cli/install-cli-test.sh ubuntu24
 bash test/cli/upgrade-test.sh
 ```
 
-CI runs every script in `.github/workflows/cli-e2e.yml` on push, plus a
-weekly schedule to catch GH-API / release-asset drift.
+CI runs unit and cross-build checks on relevant pull requests. Installer and
+upgrade legs run for published releases, manual dispatches, and the weekly
+schedule; macOS/Windows installer legs are additionally path-gated on PRs.
 
 ## Adding a new subcommand
 

@@ -143,13 +143,17 @@ def main():
         check("completion bash -> exit 0", rc == 0, f"rc={rc} err={err.strip()[:160]}")
         check("completion script references orva", "orva" in out, out.strip()[:120])
 
-        section("orva deploy + invoke (nsjail-dependent; skips if unavailable)")
+        section("orva deploy + invoke (nsjail-dependent)")
         # Build a trivial node source dir and try a real deploy via the CLI.
-        # If the build sandbox (nsjail) isn't available the deploy won't succeed;
-        # we treat that as a skip of just these two checks, not a failure.
+        # API-only runs skip when nsjail is unavailable; the mandatory engine
+        # gate converts the same condition into a failure.
         deploy_ok = _try_deploy_invoke(cli)
-        if deploy_ok is None:
-            print("  (deploy/invoke skipped — build sandbox unavailable)")
+        if deploy_ok is None or deploy_ok.get("failed"):
+            if os.environ.get("ORVA_REQUIRE_SANDBOX", "") in ("1", "true", "yes"):
+                check("CLI deploy/invoke sandbox path is available", False,
+                      (deploy_ok or {}).get("detail", "deploy or invoke did not complete successfully")[:300])
+            else:
+                print("  (deploy/invoke skipped — build sandbox unavailable)")
         else:
             # Reaching here means the CLI deploy reached a success status.
             check("CLI deploy succeeded", True, deploy_ok.get("detail", "")[:200])
@@ -185,16 +189,16 @@ def _try_deploy_invoke(cli):
             f.write("export default async function () { return { ok: true }; }\n")
 
         rc, out, err = cli.run("deploy", src, "--name", dep_name,
-                               "--runtime", "node", timeout=120)
+                               "--runtime", "node", "--follow", timeout=120)
         blob = (out + err)
-        deployed = ('"status": "succeeded"' in blob or '"status": "deployed"' in blob
-                    or '"status": "active"' in blob)
+        deployed = ('Build succeeded.' in blob or '"status": "succeeded"' in blob
+                    or '"status": "deployed"' in blob or '"status": "active"' in blob)
         # A build/sandbox failure (no nsjail) shows up as nonzero exit or a
         # non-success status. Treat anything that isn't a clear success as a
         # SKIP of just these two checks — the read-only CLI checks still stand.
         if rc != 0 or not deployed:
             _cli_delete(cli, dep_name)
-            return None
+            return {"failed": True, "detail": f"deploy rc={rc}: {blob.strip()[-300:]}"}
 
         result = {"detail": blob.strip()[-200:]}
         # invoke now prints the response BODY to stdout (status/timing go to
@@ -210,7 +214,7 @@ def _try_deploy_invoke(cli):
             _cli_delete(cli, dep_name)
         except Exception:
             pass
-        return None
+        return {"failed": True, "detail": f"deploy/invoke exception: {e}"}
     finally:
         if src and os.path.isdir(src):
             for root, _dirs, files in os.walk(src, topdown=False):

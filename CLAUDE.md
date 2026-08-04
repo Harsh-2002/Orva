@@ -9,7 +9,7 @@ Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users 
 docker compose up -d
 # → dashboard at http://localhost:3000  (compose maps host 3000 → container 8443)
 
-# Dev mode (frontend hot-reload + backend auto-restart)
+# Dev mode (frontend hot-reload + backend foreground process)
 make dev
 ```
 
@@ -60,17 +60,23 @@ Dockerfile        Multi-stage image (dev and production — single file)
 ## Data & Configuration
 
 - **Data dir**: `/var/lib/orva` (Docker volume `orva-data`) — contains `orva.db` (SQLite WAL) and `functions/<id>/versions/`
-- **Server config**: env vars or `/etc/orva/config.yaml`; full reference in `docs/CONFIG.md`
+- **Server config**: environment variables only; full reference in `docs/CONFIG.md`
 - **CLI config**: `~/.orva/config.yaml` with `endpoint` and `api_key`
 
 ## Release Policy
 
 **Two single-purpose pipelines: verify on push/PR, ship on tag.** The release pipeline does
 **no testing** — it gates on the tagged commit's checks already being green, then builds and
-publishes. All verification (`ci` = shellcheck + go vet/test/build + ui build + docker smoke,
-and `e2e` = full programmatic suite) runs on every PR and on the push to `main`; `cli-e2e` /
-`install-e2e` cover the CLI + bare-metal install (on PR for source, on `release:published`
-against the real artifacts).
+publishes. For code changes, `ci` (workflow lint, shellcheck, go vet/test/build, UI lint/build,
+dependency audit, and a running-container smoke test) plus `e2e` run on PRs and pushes to
+`main`; docs-only changes skip `ci` but still run `e2e`. `cli-e2e` / `install-e2e` cover the
+CLI + bare-metal installer on relevant PRs and against released artifacts.
+
+GitHub-hosted E2E runs Orva directly on the VM, provisions nsjail plus Node/Python rootfs
+trees, and sets `ORVA_REQUIRE_SANDBOX=1`; real deploy/invoke is therefore mandatory and a
+sandbox skip fails the gate. Local Docker runs may still skip when their host forbids nested
+namespaces. Use the same environment flag on a provisioned target node when validating the
+kernel boundary manually.
 
 **One active release at a time** — never delete the old release *before* the new one is live
 (that opens a window where `install.sh`/`install-cli.sh` resolve "latest" → 404). The flow:
@@ -111,7 +117,9 @@ Go silently ignores unknown `-X` targets, so renaming the version package or any
 ## Non-obvious Gotchas
 
 - **`adapters-embed` must run before any `go build`** — it copies `runtimes/` into `backend/cmd/orva/adapters/` for `//go:embed`. `make build` calls it automatically; bare `go build` does not.
-- **Server and CLI are the same binary** — `orva serve` starts the daemon; every other subcommand is a CLI client. Deploy either as a server or as a standalone CLI (`make cli`).
+- **Full server and slim CLI are separate binaries with one command library** — the Linux
+  server build includes `serve` / `setup` / `init` plus every client command; `make cli`
+  builds the smaller cross-platform client without server packages.
 - **UI is embedded** in the Go binary via `//go:embed ui_dist`; `make build` alone reuses the last embedded snapshot. Run `make build-all` (or `make embed` first) to pick up frontend changes.
 - **nsjail required on Linux** for sandbox invocations; the server starts without it but every invocation fails until it is installed.
 - **Firewall (nft) probe is lazy** — the nftables package does not probe on import; it probes on first use via `sync.Once`, so CLI invocations do not trigger nft warnings.

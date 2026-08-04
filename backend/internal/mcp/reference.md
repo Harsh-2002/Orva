@@ -647,7 +647,7 @@ app.post('/webhooks/orva', (req, res) => {
 
 ## MCP — Model Context Protocol
 
-Same API surface the dashboard uses, exposed as 69 tools an agent can
+Same API surface the dashboard uses, exposed as 71 tools an agent can
 call directly. API key permissions scope the available tool set.
 
 - **Endpoint:** `{{ORIGIN}}/mcp`
@@ -691,7 +691,7 @@ call directly. API key permissions scope the available tool set.
 
 ### MCP — Claude Code
 
-> Anthropic's `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva's 70 operator-mode tools.
+> Anthropic's `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva's 71 operator-mode tools.
 
 ```bash
 claude mcp add --transport http --scope user orva {{ORIGIN}}/mcp --header "Authorization: Bearer <YOUR_ORVA_TOKEN>"
@@ -896,7 +896,7 @@ Use whichever your MCP client supports. Most (Claude Code, Claude
 Desktop, Cursor, ChatGPT custom connector, etc.) default to
 `Authorization: Bearer`.
 
-Manage channels from the dashboard.s **Channels** page or via REST:
+Manage channels from the dashboard's **Channels** page or via REST:
 
 | Endpoint | Method | Purpose |
 |---|---|---|
@@ -963,7 +963,7 @@ want" into a pasteable handler on the first try.
 You are an Orva serverless-function expert. You write production-ready Python or Node handlers that follow Orva's contract exactly, use Orva's built-in primitives instead of inventing external infrastructure, and never produce framework boilerplate the platform doesn't need.
 
 <context>
-Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel Functions / AWS Lambda, but on the user's own box. Each function runs in a firecracker-style microsandbox with cold start ~200 ms and warm reuse for ~5 minutes. The platform ships HTTP routing, encrypted secrets, custom routes, scheduled triggers, durable background jobs, an in-sandbox KV store, function-to-function calls, system-event webhooks, per-function rate limiting, an outbound firewall, content-addressed deploys with rollback, and a 70-tool operator-mode MCP endpoint plus an auto-generated channel-mode endpoint that exposes one tool per bundled function to downstream agents. Everything below is the surface you write against.
+Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel Functions / AWS Lambda, but on the user's own box. Each invocation runs in an nsjail sandbox, with per-function warm pools for reuse. The platform ships HTTP routing, encrypted secrets, custom routes, scheduled triggers, durable background jobs, an in-sandbox KV store, function-to-function calls, system-event webhooks, per-function rate limiting, an outbound firewall, content-addressed deploys with rollback, and a 71-tool operator-mode MCP endpoint plus an auto-generated channel-mode endpoint that exposes one tool per bundled function to downstream agents. Everything below is the surface you write against.
 </context>
 
 <runtimes>
@@ -1138,7 +1138,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 </webhooks>
 
 <sandbox_limits>
-- Defaults (configurable per function): 128 MB memory, 0.5 CPU, 30 s timeout, 6 MB max payload, max 10 MB total response.
+- Defaults (configurable per function): 64 MB memory, 0.5 CPU, 30 s timeout, 6 MB max payload, max 10 MB total response. The supplied Compose file overrides new-function memory to 128 MB.
 - Filesystem: read-only EXCEPT /code (your code) and /tmp (writable, ephemeral, cleared between cold starts).
 - NO subprocess execution (subprocess / child_process disabled). NO raw sockets. NO listening ports — the platform owns the HTTP server.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
@@ -1536,15 +1536,15 @@ a unified-diff in the terminal.
 
 ## CLI
 
-`orva` is a single static binary that talks to a remote (or local)
-Orva server over HTTPS. Same binary as the daemon — `orva serve`
-starts a server, every other subcommand is a CLI client. Drop it on
-operator laptops, CI runners, or anywhere bash runs.
+Orva ships two static binaries named `orva`: a full Linux server build and a
+slim cross-platform CLI. Both expose the same client commands; only the full
+server adds `serve`, `setup`, and `init`. Drop the slim CLI on operator laptops,
+CI runners, or any supported Linux, macOS, or Windows host.
 
 ### Install
 
 - **Server included:** `curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh` — daemon + nsjail + rootfs + CLI.
-- **CLI only:** add `--cli-only` for a ~10 MB binary at `/usr/local/bin/orva` (no service, no rootfs).
+- **CLI only:** run `curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh` for the ~20 MB slim binary at `/usr/local/bin/orva` (no service, no rootfs).
 - **Inside Docker:** the dashboard image ships the CLI at the same path; `docker exec orva orva system health` works out of the box (auto-authed via the bootstrap key the entrypoint writes to `~/.orva/config.yaml`).
 
 ### Authenticate
@@ -1567,10 +1567,10 @@ orva system health      # smoke test
 | Command | Subcommands | Purpose |
 |---|---|---|
 | `orva login` | — | Save endpoint + API key to ~/.orva/config.yaml |
-| `orva init` | — | Scaffold an orva.yaml in the current directory |
+| `orva init` | — | Full server build only: write the legacy orva.yaml template (the current server is configured by environment variables) |
 | `orva deploy` | [path] | Package a directory and deploy as a function |
 | `orva invoke` | [name|id] | POST to /fn/<id>/ and print the response |
-| `orva logs` | [name|id] [--tail] | List recent executions; --tail follows live via SSE |
+| `orva logs` | [name|id] [--follow] | List recent executions; --follow streams live via SSE |
 | `orva functions` | list / get / create / delete | CRUD for the function registry |
 | `orva cron` | list / create / update / delete | Manage cron schedules attached to functions |
 | `orva jobs` | list / enqueue / retry / delete | Background queue management |
@@ -1579,12 +1579,12 @@ orva system health      # smoke test
 | `orva webhooks` | list / create / test / delete / inbound | System-event subscribers + inbound triggers |
 | `orva routes` | list / set / delete | Custom URL → function path mappings |
 | `orva keys` | list / create / revoke | Manage API keys |
-| `orva activity` | [--tail] [--source web|api|...] | Paginated activity rows; live SSE with --tail |
+| `orva activity` | [--follow] [--source web|api|...] | Paginated activity rows; live SSE with --follow |
 | `orva system` | health / metrics / db-stats / vacuum | Server diagnostics |
 | `orva chat` | [-p MSG] | Chat with the AI assistant — interactive REPL or one-shot |
 | `orva docs` | [--raw] | Render this reference in the terminal |
-| `orva setup` | [--skip-nsjail] [--skip-rootfs] | Install nsjail + rootfs on a bare host |
-| `orva serve` | [--port N] | Run as the server daemon (not the CLI client) |
+| `orva setup` | [--skip-nsjail] [--skip-rootfs] | Full server build only: install nsjail + rootfs on a bare host |
+| `orva serve` | [--port N] | Full server build only: run the daemon |
 | `orva completion` | bash / zsh / fish / powershell | Emit shell completion script |
 
 ### Common recipes
@@ -1592,9 +1592,6 @@ orva system health      # smoke test
 #### Deploy
 
 ```bash
-# Init a project in cwd (creates orva.yaml + handler stub)
-orva init
-
 # Deploy from a directory. Auto-detects handler.ts when tsconfig.json
 # is present; else uses the runtime default (handler.js / handler.py).
 orva deploy ./my-fn \
@@ -1618,7 +1615,7 @@ orva logs resize-image
 orva logs resize-image --exec-id exec_abc123
 
 # Live tail — SSE stream, Ctrl-C to stop:
-orva logs resize-image --tail
+orva logs resize-image --follow
 ```
 
 #### KV
@@ -1671,7 +1668,7 @@ orva system db-stats      # on-disk breakdown (orva.db, WAL, functions/)
 orva system vacuum        # rewrite SQLite to reclaim freelist pages
 
 orva activity                          # last 50 activity rows
-orva activity --tail                   # live feed (Ctrl-C)
+orva activity --follow                 # live feed (Ctrl-C)
 orva activity --source mcp --limit 200 # MCP-only, last 200
 ```
 
