@@ -41,6 +41,10 @@ permissions:
 env:
   IMAGE_NAME: ghcr.io/harsh-2002/orva
   NSJAIL_REF: 5ebcc30bef4af60d6e28f012dd8bf7b99b8b0acf
+  # Docker's build action uploads .dockerbuild records by default. Release
+  # outputs are already explicit below, so retaining those diagnostic records
+  # only creates undeclared artifacts and can leak into a retried draft.
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
 
 jobs:
   # ── 0. Gate — verify, don't re-test ──────────────────────────────────
@@ -389,6 +393,7 @@ jobs:
       - name: download all artifacts
         uses: actions/download-artifact@v8
         with:
+          pattern: "!*.dockerbuild"
           path: artifacts
 
       - name: flatten + chmod
@@ -450,6 +455,39 @@ jobs:
         working-directory: dist
         run: |
           sha256sum -- * | tee checksums.txt
+
+      - name: remove stale non-contract release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -euo pipefail
+          declare -A allowed
+          for asset in \
+            orva-linux-amd64 orva-linux-arm64 \
+            orva-cli-linux-amd64 orva-cli-linux-arm64 \
+            orva-cli-darwin-amd64 orva-cli-darwin-arm64 \
+            orva-cli-windows-amd64.exe orva-cli-windows-arm64.exe \
+            nsjail-linux-amd64 nsjail-linux-arm64 \
+            rootfs-node-amd64.tar.zst rootfs-node-arm64.tar.zst \
+            rootfs-python-amd64.tar.zst rootfs-python-arm64.tar.zst \
+            install.sh install-cli.sh install-cli.ps1 checksums.txt; do
+            allowed["$asset"]=1
+          done
+
+          # A failed upload can leave a draft containing files from an earlier
+          # attempt. Keep every declared public asset available, but remove any
+          # undeclared leftovers before the release is created or updated.
+          while IFS=$'\t' read -r asset_id asset_name; do
+            [ -n "$asset_id" ] || continue
+            if [ -z "${allowed[$asset_name]+x}" ]; then
+              echo "removing stale release asset: $asset_name"
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+            fi
+          done < <(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq '.assets[] | "\(.id)\t\(.name)"' 2>/dev/null || true)
 
       - name: create / update github release
         uses: softprops/action-gh-release@v3
