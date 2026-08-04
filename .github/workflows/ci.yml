@@ -41,7 +41,7 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends dash shellcheck
 
       - name: GitHub Actions workflow syntax + embedded shell
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
       # POSIX scripts (install.sh, install-cli.sh) MUST run under any POSIX sh
       # on user systems. dash -n catches bashisms that shellcheck -s sh would
