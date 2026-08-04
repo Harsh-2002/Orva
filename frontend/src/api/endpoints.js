@@ -1,4 +1,4 @@
-import apiClient, { getApiKey, fnClient } from './client'
+import apiClient, { fnClient } from './client'
 
 // Health check
 export const getHealth = () => apiClient.get('/system/health')

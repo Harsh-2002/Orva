@@ -51,8 +51,8 @@
         </span>
       </div>
 
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <!--
+      <div class="bg-background border border-border rounded-lg overflow-x-auto">
+        <!--
         Mobile (<sm) stacked-row list. Each card carries: name + badges,
         description (clamped), runtime + resources micro-row, and the
         same edit/delete actions as the desktop table. Mobile drops the
@@ -60,185 +60,41 @@
         phone is rare and the floating bar's space is better spent on
         the row content. Bulk-select returns at sm+ via the table.
       -->
-      <ul class="sm:hidden divide-y divide-border">
-        <li
-          v-for="fn in filtered"
-          :key="fn.id"
-          class="px-4 py-3 active:bg-surface-hover/50 transition-colors"
-        >
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="font-medium text-white truncate">{{ fn.name }}</span>
-                <span
-                  v-if="fn.network_mode === 'egress'"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-tint text-warning-fg border border-warning-ring"
-                >
-                  <Globe class="w-3 h-3" /> egress
-                </span>
-                <span
-                  v-if="fn.auth_mode && fn.auth_mode !== 'none'"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-info-tint text-info-fg border border-info-ring"
-                >
-                  <Lock class="w-3 h-3" /> {{ fn.auth_mode === 'platform_key' ? 'key' : 'signed' }}
-                </span>
-              </div>
-              <p
-                v-if="fn.description"
-                class="mt-1 text-xs text-foreground-muted line-clamp-2"
-              >{{ fn.description }}</p>
-              <div class="mt-1.5 flex items-center gap-3 text-[11px] text-foreground-muted font-mono">
-                <span>{{ fn.runtime }}</span>
-                <span>{{ fn.cpus }} CPU / {{ fn.memory_mb }}MB</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-1 shrink-0">
-              <IconButton
-                :icon="Pencil"
-                title="Edit function"
-                @click="router.push('/functions/' + fn.name)"
-              />
-              <IconButton
-                :icon="Trash2"
-                variant="danger"
-                title="Delete function"
-                :disabled="deletingId === fn.id"
-                @click="deleteFn(fn)"
-              />
-            </div>
-          </div>
-        </li>
-        <li
-          v-if="!filtered.length && !loading && search"
-          class="px-6 py-8 text-center text-sm text-foreground-muted space-y-3"
-        >
-          <div>No matches for "{{ search }}".</div>
-          <button
-            class="text-xs text-foreground hover:text-white underline underline-offset-2"
-            @click="search = ''"
-          >Clear search</button>
-        </li>
-      </ul>
-
-      <table class="hidden sm:table w-full text-sm text-left">
-        <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
-          <tr>
-            <th class="px-4 py-3 w-8">
-              <input
-                type="checkbox"
-                :checked="allChecked"
-                :indeterminate.prop="someChecked && !allChecked"
-                class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
-                @change="toggleAll"
-              >
-            </th>
-            <th class="px-4 py-3 font-medium">
-              Name
-            </th>
-            <th class="px-4 py-3 font-medium hidden sm:table-cell">
-              Runtime
-            </th>
-            <th class="px-4 py-3 font-medium hidden lg:table-cell">
-              Resources
-            </th>
-            <th class="px-4 py-3 font-medium hidden md:table-cell">
-              Function ID
-            </th>
-            <th class="px-4 py-3 font-medium hidden xl:table-cell">
-              Last Update
-            </th>
-            <th class="px-4 py-3 font-medium text-right">
-              Actions
-            </th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          <tr
+        <ul class="sm:hidden divide-y divide-border">
+          <li
             v-for="fn in filtered"
             :key="fn.id"
-            class="hover:bg-surface/50 transition-colors"
-            :class="{ 'bg-surface/30': selected.has(fn.id) }"
+            class="px-4 py-3 active:bg-surface-hover/50 transition-colors"
           >
-            <td class="px-4 py-3 align-middle">
-              <input
-                :checked="selected.has(fn.id)"
-                type="checkbox"
-                class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
-                @change="toggleOne(fn.id)"
-              >
-            </td>
-            <td class="px-4 py-3 font-medium text-white">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span>{{ fn.name }}</span>
-                <span
-                  v-if="fn.network_mode === 'egress'"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-tint text-warning-fg border border-warning-ring"
-                  title="Outbound network enabled"
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="font-medium text-white truncate">{{ fn.name }}</span>
+                  <span
+                    v-if="fn.network_mode === 'egress'"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-tint text-warning-fg border border-warning-ring"
+                  >
+                    <Globe class="w-3 h-3" /> egress
+                  </span>
+                  <span
+                    v-if="fn.auth_mode && fn.auth_mode !== 'none'"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-info-tint text-info-fg border border-info-ring"
+                  >
+                    <Lock class="w-3 h-3" /> {{ fn.auth_mode === 'platform_key' ? 'key' : 'signed' }}
+                  </span>
+                </div>
+                <p
+                  v-if="fn.description"
+                  class="mt-1 text-xs text-foreground-muted line-clamp-2"
                 >
-                  <Globe class="w-3 h-3" /> egress
-                </span>
-                <span
-                  v-if="fn.auth_mode && fn.auth_mode !== 'none'"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-info-tint text-info-fg border border-info-ring"
-                  :title="fn.auth_mode === 'platform_key' ? 'Requires Orva API key' : 'Requires HMAC signature'"
-                >
-                  <Lock class="w-3 h-3" /> {{ fn.auth_mode === 'platform_key' ? 'key' : 'signed' }}
-                </span>
-                <span
-                  v-if="fn.rate_limit_per_min > 0"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary/15 text-primary border border-primary/30 tabular-nums"
-                  :title="`Rate limit: ${fn.rate_limit_per_min}/min per IP`"
-                >
-                  <Gauge class="w-3 h-3" /> {{ fn.rate_limit_per_min }}/m
-                </span>
+                  {{ fn.description }}
+                </p>
+                <div class="mt-1.5 flex items-center gap-3 text-[11px] text-foreground-muted font-mono">
+                  <span>{{ fn.runtime }}</span>
+                  <span>{{ fn.cpus }} CPU / {{ fn.memory_mb }}MB</span>
+                </div>
               </div>
-              <p
-                v-if="fn.description"
-                class="mt-1 text-xs font-normal text-foreground-muted line-clamp-2"
-                :title="fn.description"
-              >{{ fn.description }}</p>
-            </td>
-            <td class="px-4 py-3 text-foreground hidden sm:table-cell">
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border border-border bg-background text-foreground-muted font-mono">
-                {{ fn.runtime }}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden lg:table-cell">
-              {{ fn.cpus }} CPU / {{ fn.memory_mb }}MB
-            </td>
-            <td class="px-4 py-3 hidden md:table-cell align-middle">
-              <!--
-                Function ID + Copy URL row.
-                Cell stays compact: ID truncates to a 12-char + ellipsis
-                head with the full UUID exposed via title (operators who
-                need the literal value can copy from the tooltip or use
-                the Copy URL button next to it). The flex group is
-                shrink-locked at min-w-0 so the code chip can ellipsis
-                without pushing the button against the cell border.
-                The IconButton variant replaces the labelled Button so
-                the action lives in a fixed 28×28 square that never
-                clips and reads as a peer of the Edit/Delete row in
-                the Actions cell. Tooltip carries the "Copy URL"
-                semantics; a momentary check flip confirms success.
-              -->
-              <div class="flex items-center gap-2 min-w-0">
-                <code
-                  class="text-xs font-mono text-foreground-muted bg-surface px-2 py-1 rounded border border-border truncate min-w-0 max-w-[14ch]"
-                  :title="fn.id"
-                >{{ fn.id }}</code>
-                <IconButton
-                  :icon="copiedId === fn.id ? Check : Copy"
-                  :title="copiedId === fn.id ? 'Copied!' : 'Copy invoke URL'"
-                  :variant="copiedId === fn.id ? 'primary' : 'default'"
-                  @click="copyUrl(fn)"
-                />
-              </div>
-            </td>
-            <td class="px-4 py-3 text-foreground-muted hidden xl:table-cell">
-              {{ new Date(fn.updated_at).toLocaleDateString() }}
-            </td>
-            <td class="px-4 py-3 text-right">
-              <div class="inline-flex items-center gap-1">
+              <div class="flex items-center gap-1 shrink-0">
                 <IconButton
                   :icon="Pencil"
                   title="Edit function"
@@ -252,43 +108,195 @@
                   @click="deleteFn(fn)"
                 />
               </div>
-            </td>
-          </tr>
-          <tr v-if="!filtered.length && !loading && search">
-            <td
-              colspan="7"
-              class="px-6 py-8 text-center text-foreground-muted"
+            </div>
+          </li>
+          <li
+            v-if="!filtered.length && !loading && search"
+            class="px-6 py-8 text-center text-sm text-foreground-muted space-y-3"
+          >
+            <div>No matches for "{{ search }}".</div>
+            <button
+              class="text-xs text-foreground hover:text-white underline underline-offset-2"
+              @click="search = ''"
             >
-              <div class="space-y-3">
-                <div>No matches for "{{ search }}".</div>
-                <button
-                  class="text-xs text-foreground hover:text-white underline underline-offset-2"
-                  @click="search = ''"
-                >Clear search</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+              Clear search
+            </button>
+          </li>
+        </ul>
 
-      <!-- Load more — offset-paginated -->
-      <div
-        v-if="hasMore"
-        class="flex justify-center border-t border-border py-3 bg-surface/30"
-      >
-        <button
-          class="text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
-          :disabled="loading"
-          @click="loadMore"
+        <table class="hidden sm:table w-full text-sm text-left">
+          <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
+            <tr>
+              <th class="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  :checked="allChecked"
+                  :indeterminate.prop="someChecked && !allChecked"
+                  class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
+                  @change="toggleAll"
+                >
+              </th>
+              <th class="px-4 py-3 font-medium">
+                Name
+              </th>
+              <th class="px-4 py-3 font-medium hidden sm:table-cell">
+                Runtime
+              </th>
+              <th class="px-4 py-3 font-medium hidden lg:table-cell">
+                Resources
+              </th>
+              <th class="px-4 py-3 font-medium hidden md:table-cell">
+                Function ID
+              </th>
+              <th class="px-4 py-3 font-medium hidden xl:table-cell">
+                Last Update
+              </th>
+              <th class="px-4 py-3 font-medium text-right">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            <tr
+              v-for="fn in filtered"
+              :key="fn.id"
+              class="hover:bg-surface/50 transition-colors"
+              :class="{ 'bg-surface/30': selected.has(fn.id) }"
+            >
+              <td class="px-4 py-3 align-middle">
+                <input
+                  :checked="selected.has(fn.id)"
+                  type="checkbox"
+                  class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
+                  @change="toggleOne(fn.id)"
+                >
+              </td>
+              <td class="px-4 py-3 font-medium text-white">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span>{{ fn.name }}</span>
+                  <span
+                    v-if="fn.network_mode === 'egress'"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-tint text-warning-fg border border-warning-ring"
+                    title="Outbound network enabled"
+                  >
+                    <Globe class="w-3 h-3" /> egress
+                  </span>
+                  <span
+                    v-if="fn.auth_mode && fn.auth_mode !== 'none'"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-info-tint text-info-fg border border-info-ring"
+                    :title="fn.auth_mode === 'platform_key' ? 'Requires Orva API key' : 'Requires HMAC signature'"
+                  >
+                    <Lock class="w-3 h-3" /> {{ fn.auth_mode === 'platform_key' ? 'key' : 'signed' }}
+                  </span>
+                  <span
+                    v-if="fn.rate_limit_per_min > 0"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary/15 text-primary border border-primary/30 tabular-nums"
+                    :title="`Rate limit: ${fn.rate_limit_per_min}/min per IP`"
+                  >
+                    <Gauge class="w-3 h-3" /> {{ fn.rate_limit_per_min }}/m
+                  </span>
+                </div>
+                <p
+                  v-if="fn.description"
+                  class="mt-1 text-xs font-normal text-foreground-muted line-clamp-2"
+                  :title="fn.description"
+                >
+                  {{ fn.description }}
+                </p>
+              </td>
+              <td class="px-4 py-3 text-foreground hidden sm:table-cell">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border border-border bg-background text-foreground-muted font-mono">
+                  {{ fn.runtime }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden lg:table-cell">
+                {{ fn.cpus }} CPU / {{ fn.memory_mb }}MB
+              </td>
+              <td class="px-4 py-3 hidden md:table-cell align-middle">
+                <!--
+                Function ID + Copy URL row.
+                Cell stays compact: ID truncates to a 12-char + ellipsis
+                head with the full UUID exposed via title (operators who
+                need the literal value can copy from the tooltip or use
+                the Copy URL button next to it). The flex group is
+                shrink-locked at min-w-0 so the code chip can ellipsis
+                without pushing the button against the cell border.
+                The IconButton variant replaces the labelled Button so
+                the action lives in a fixed 28×28 square that never
+                clips and reads as a peer of the Edit/Delete row in
+                the Actions cell. Tooltip carries the "Copy URL"
+                semantics; a momentary check flip confirms success.
+              -->
+                <div class="flex items-center gap-2 min-w-0">
+                  <code
+                    class="text-xs font-mono text-foreground-muted bg-surface px-2 py-1 rounded border border-border truncate min-w-0 max-w-[14ch]"
+                    :title="fn.id"
+                  >{{ fn.id }}</code>
+                  <IconButton
+                    :icon="copiedId === fn.id ? Check : Copy"
+                    :title="copiedId === fn.id ? 'Copied!' : 'Copy invoke URL'"
+                    :variant="copiedId === fn.id ? 'primary' : 'default'"
+                    @click="copyUrl(fn)"
+                  />
+                </div>
+              </td>
+              <td class="px-4 py-3 text-foreground-muted hidden xl:table-cell">
+                {{ new Date(fn.updated_at).toLocaleDateString() }}
+              </td>
+              <td class="px-4 py-3 text-right">
+                <div class="inline-flex items-center gap-1">
+                  <IconButton
+                    :icon="Pencil"
+                    title="Edit function"
+                    @click="router.push('/functions/' + fn.name)"
+                  />
+                  <IconButton
+                    :icon="Trash2"
+                    variant="danger"
+                    title="Delete function"
+                    :disabled="deletingId === fn.id"
+                    @click="deleteFn(fn)"
+                  />
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!filtered.length && !loading && search">
+              <td
+                colspan="7"
+                class="px-6 py-8 text-center text-foreground-muted"
+              >
+                <div class="space-y-3">
+                  <div>No matches for "{{ search }}".</div>
+                  <button
+                    class="text-xs text-foreground hover:text-white underline underline-offset-2"
+                    @click="search = ''"
+                  >
+                    Clear search
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Load more — offset-paginated -->
+        <div
+          v-if="hasMore"
+          class="flex justify-center border-t border-border py-3 bg-surface/30"
         >
-          <RefreshCw
-            v-if="loading"
-            class="w-3 h-3 animate-spin"
-          />
-          {{ loading ? 'Loading…' : `Load more (${total - functions.length} remaining)` }}
-        </button>
+          <button
+            class="text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
+            :disabled="loading"
+            @click="loadMore"
+          >
+            <RefreshCw
+              v-if="loading"
+              class="w-3 h-3 animate-spin"
+            />
+            {{ loading ? 'Loading…' : `Load more (${total - functions.length} remaining)` }}
+          </button>
+        </div>
       </div>
-    </div>
     </div><!-- /space-y-3 search + table group -->
 
     <!-- Rich empty state for the first-run path. Replaces the muted
@@ -300,7 +308,9 @@
       class="bg-background border border-border rounded-lg p-8 text-center space-y-4"
     >
       <div class="space-y-1.5">
-        <div class="text-sm text-white">No functions deployed yet</div>
+        <div class="text-sm text-white">
+          No functions deployed yet
+        </div>
         <div class="text-xs text-foreground-muted max-w-prose mx-auto leading-body">
           Each function runs in its own nsjail sandbox and is reachable
           at <code class="font-mono text-[11px]">/fn/&lt;id&gt;</code> the

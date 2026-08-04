@@ -62,6 +62,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'AIComposer' })
+
 import { ref, computed, nextTick } from 'vue'
 import { ArrowUp, Square } from 'lucide-vue-next'
 import ReasoningMenu from './ReasoningMenu.vue'

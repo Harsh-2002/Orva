@@ -181,18 +181,35 @@
               <div
                 v-if="c.description"
                 class="mt-1 text-xs text-foreground-muted line-clamp-2"
-              >{{ c.description }}</div>
+              >
+                {{ c.description }}
+              </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
                 <code class="font-mono">{{ c.prefix }}…</code>
                 <span v-if="c.last_used_at">used {{ formatRelative(c.last_used_at) }}</span>
-                <span v-else class="text-amber-400/80">never used</span>
-                <span v-if="c.expires_at && isExpired(c.expires_at)" class="text-red-400">expired</span>
+                <span
+                  v-else
+                  class="text-amber-400/80"
+                >never used</span>
+                <span
+                  v-if="c.expires_at && isExpired(c.expires_at)"
+                  class="text-red-400"
+                >expired</span>
                 <span v-else-if="c.expires_at">expires {{ formatRelative(c.expires_at) }}</span>
               </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <IconButton :icon="RotateCcw" title="Rotate token" @click="rotate(c)" />
-              <IconButton :icon="Trash2" variant="danger" title="Delete channel" @click="remove(c)" />
+              <IconButton
+                :icon="RotateCcw"
+                title="Rotate token"
+                @click="rotate(c)"
+              />
+              <IconButton
+                :icon="Trash2"
+                variant="danger"
+                title="Delete channel"
+                @click="remove(c)"
+              />
             </div>
           </div>
         </li>
@@ -316,6 +333,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'ChannelsView' })
+
 import { ref, computed, onMounted } from 'vue'
 import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'

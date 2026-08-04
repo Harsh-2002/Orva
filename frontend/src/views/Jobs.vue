@@ -89,7 +89,7 @@
             rows="6"
             spellcheck="false"
             class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono focus:outline-none focus:border-white"
-            placeholder='{"hello":"world"}'
+            placeholder="{&quot;hello&quot;:&quot;world&quot;}"
           />
         </div>
         <div>
@@ -336,6 +336,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'JobsView' })
+
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus, CheckCircle2, XCircle, Clock, Circle } from 'lucide-vue-next'

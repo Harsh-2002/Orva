@@ -9,8 +9,14 @@
           Every function execution recorded across HTTP, MCP, cron, and job triggers. Click any row to drill into the captured request, response body, latency breakdown, and handler stderr; replay it against a different version when debugging regressions.
         </p>
       </div>
-      <Button variant="secondary" @click="refresh">
-        <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': loading }" />
+      <Button
+        variant="secondary"
+        @click="refresh"
+      >
+        <RefreshCw
+          class="w-4 h-4 mr-2"
+          :class="{ 'animate-spin': loading }"
+        />
         Refresh
       </Button>
     </div>
@@ -33,15 +39,15 @@
 
       <FilterChip
         :options="statusOptions"
-        :modelValue="filters.status"
+        :model-value="filters.status"
         label="Status"
-        @update:modelValue="filters.status = $event; onFilterChange()"
+        @update:model-value="filters.status = $event; onFilterChange()"
       />
       <FilterChip
         :options="rangeOptions"
-        :modelValue="filters.range"
+        :model-value="filters.range"
         label="Range"
-        @update:modelValue="filters.range = $event; onFilterChange()"
+        @update:model-value="filters.range = $event; onFilterChange()"
       />
 
       <select
@@ -78,15 +84,27 @@
       class="bg-background border border-border rounded-lg px-6 py-12 text-center"
     >
       <CircleAlert class="w-8 h-8 mx-auto text-danger-fg opacity-60" />
-      <p class="mt-3 text-sm text-foreground">Could not load invocations.</p>
-      <p class="mt-1 text-xs text-foreground-muted">{{ loadError }}</p>
-      <Button variant="secondary" size="sm" class="mt-4" @click="refresh">
+      <p class="mt-3 text-sm text-foreground">
+        Could not load invocations.
+      </p>
+      <p class="mt-1 text-xs text-foreground-muted">
+        {{ loadError }}
+      </p>
+      <Button
+        variant="secondary"
+        size="sm"
+        class="mt-4"
+        @click="refresh"
+      >
         <RefreshCw class="w-3.5 h-3.5 mr-2" />
         Retry
       </Button>
     </div>
 
-    <div v-else class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div
+      v-else
+      class="bg-background border border-border rounded-lg overflow-x-auto"
+    >
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
@@ -111,14 +129,23 @@
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
                 <span>{{ formatTime(log.started_at) }}</span>
-                <span v-if="log.duration_ms != null" class="font-mono">{{ log.duration_ms }}ms</span>
-                <span v-if="log.status_code != null" class="font-mono">HTTP {{ log.status_code }}</span>
+                <span
+                  v-if="log.duration_ms != null"
+                  class="font-mono"
+                >{{ log.duration_ms }}ms</span>
+                <span
+                  v-if="log.status_code != null"
+                  class="font-mono"
+                >HTTP {{ log.status_code }}</span>
                 <span
                   v-if="log.cold_start"
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-info-fg border-info-ring"
                 >cold</span>
               </div>
-              <div v-if="log.trace_id" class="mt-1 text-[11px] text-foreground-muted font-mono break-all">
+              <div
+                v-if="log.trace_id"
+                class="mt-1 text-[11px] text-foreground-muted font-mono break-all"
+              >
                 trace {{ log.trace_id.substring(0, 11) }}
               </div>
             </div>
@@ -145,14 +172,30 @@
                 @change="toggleAll"
               >
             </th>
-            <th class="px-4 py-3 font-medium">Time</th>
-            <th class="px-4 py-3 font-medium">Function</th>
-            <th class="px-4 py-3 font-medium">Status</th>
-            <th class="px-4 py-3 font-medium hidden md:table-cell">Cold</th>
-            <th class="px-4 py-3 font-medium hidden lg:table-cell">HTTP</th>
-            <th class="px-4 py-3 font-medium hidden sm:table-cell">Duration</th>
-            <th class="px-4 py-3 font-medium hidden lg:table-cell">Trace</th>
-            <th class="px-4 py-3 font-medium text-right hidden xl:table-cell">ID</th>
+            <th class="px-4 py-3 font-medium">
+              Time
+            </th>
+            <th class="px-4 py-3 font-medium">
+              Function
+            </th>
+            <th class="px-4 py-3 font-medium">
+              Status
+            </th>
+            <th class="px-4 py-3 font-medium hidden md:table-cell">
+              Cold
+            </th>
+            <th class="px-4 py-3 font-medium hidden lg:table-cell">
+              HTTP
+            </th>
+            <th class="px-4 py-3 font-medium hidden sm:table-cell">
+              Duration
+            </th>
+            <th class="px-4 py-3 font-medium hidden lg:table-cell">
+              Trace
+            </th>
+            <th class="px-4 py-3 font-medium text-right hidden xl:table-cell">
+              ID
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -163,7 +206,10 @@
             :class="{ 'bg-surface/30': selected.has(log.id) }"
             @click="openDetail(log)"
           >
-            <td class="px-4 py-3 align-middle" @click.stop>
+            <td
+              class="px-4 py-3 align-middle"
+              @click.stop
+            >
               <input
                 :checked="selected.has(log.id)"
                 type="checkbox"
@@ -193,7 +239,10 @@
               >
                 cold
               </span>
-              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
+              <span
+                v-else
+                class="text-foreground-muted text-xs"
+              >{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden lg:table-cell">
               {{ log.status_code ?? EMPTY }}
@@ -211,14 +260,20 @@
                 <Network class="w-3 h-3" />
                 {{ log.trace_id.substring(0, 11) }}
               </button>
-              <span v-else class="text-foreground-muted">{{ EMPTY }}</span>
+              <span
+                v-else
+                class="text-foreground-muted"
+              >{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-3 text-right text-foreground-muted font-mono text-xs hidden xl:table-cell">
               {{ log.id?.substring(0, 12) }}
             </td>
           </tr>
           <tr v-if="logs.length === 0 && !loading">
-            <td colspan="9" class="px-6 py-8 text-center text-foreground-muted">
+            <td
+              colspan="9"
+              class="px-6 py-8 text-center text-foreground-muted"
+            >
               {{ hasActiveFilter ? 'No matches.' : 'No invocations yet.' }}
             </td>
           </tr>
@@ -267,14 +322,28 @@
       </div>
     </transition>
 
-    <Drawer v-model="drawerOpen" :title="drawerTitle" width="640px">
-      <div v-if="detailLoading" class="p-6 text-sm text-foreground-muted">
+    <Drawer
+      v-model="drawerOpen"
+      :title="drawerTitle"
+      width="640px"
+    >
+      <div
+        v-if="detailLoading"
+        class="p-6 text-sm text-foreground-muted"
+      >
         Loading…
       </div>
-      <div v-else-if="detailError" class="p-8 text-center">
+      <div
+        v-else-if="detailError"
+        class="p-8 text-center"
+      >
         <CircleAlert class="w-8 h-8 mx-auto text-danger-fg opacity-60" />
-        <p class="mt-3 text-sm text-foreground">Could not load this invocation.</p>
-        <p class="mt-1 text-xs text-foreground-muted">{{ detailError }}</p>
+        <p class="mt-3 text-sm text-foreground">
+          Could not load this invocation.
+        </p>
+        <p class="mt-1 text-xs text-foreground-muted">
+          {{ detailError }}
+        </p>
         <Button
           variant="secondary"
           size="sm"
@@ -285,10 +354,16 @@
           Retry
         </Button>
       </div>
-      <div v-else-if="!drawerRow" class="p-6 text-sm text-foreground-muted">
+      <div
+        v-else-if="!drawerRow"
+        class="p-6 text-sm text-foreground-muted"
+      >
         No invocation selected.
       </div>
-      <div v-else class="p-5 space-y-5">
+      <div
+        v-else
+        class="p-5 space-y-5"
+      >
         <!-- Status badges row -->
         <div class="flex items-center gap-2 flex-wrap">
           <StatusBadge :status="drawerRow.status" />
@@ -318,17 +393,38 @@
 
         <!-- Stat grid -->
         <div class="grid grid-cols-2 gap-3 text-sm">
-          <Stat label="Duration" :value="drawerRow.duration_ms != null ? drawerRow.duration_ms + ' ms' : EMPTY" />
-          <Stat label="Response size" :value="drawerRow.response_size != null ? formatBytes(drawerRow.response_size) : EMPTY" />
-          <Stat label="Started" :value="formatTime(drawerRow.started_at)" />
-          <Stat label="Finished" :value="drawerRow.finished_at ? formatTime(drawerRow.finished_at) : EMPTY" />
-          <Stat label="Function" :value="getFnName(drawerRow.function_id)" />
-          <Stat label="Execution ID" :value="drawerRow.id" mono />
+          <Stat
+            label="Duration"
+            :value="drawerRow.duration_ms != null ? drawerRow.duration_ms + ' ms' : EMPTY"
+          />
+          <Stat
+            label="Response size"
+            :value="drawerRow.response_size != null ? formatBytes(drawerRow.response_size) : EMPTY"
+          />
+          <Stat
+            label="Started"
+            :value="formatTime(drawerRow.started_at)"
+          />
+          <Stat
+            label="Finished"
+            :value="drawerRow.finished_at ? formatTime(drawerRow.finished_at) : EMPTY"
+          />
+          <Stat
+            label="Function"
+            :value="getFnName(drawerRow.function_id)"
+          />
+          <Stat
+            label="Execution ID"
+            :value="drawerRow.id"
+            mono
+          />
         </div>
 
         <!-- Error message -->
         <div v-if="drawerRow.error_message">
-          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Error</h3>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
+            Error
+          </h3>
           <pre class="bg-danger-tint border border-danger-ring rounded p-3 text-xs text-danger-fg font-mono whitespace-pre-wrap break-words">{{ drawerRow.error_message }}</pre>
         </div>
 
@@ -337,14 +433,18 @@
              land here as the literal "[REDACTED]" string from the
              backend — never the original credential. -->
         <div v-if="requestData">
-          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request</h3>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
+            Request
+          </h3>
           <div class="bg-surface border border-border rounded p-3 space-y-3">
             <div class="flex items-center gap-2 font-mono text-xs">
               <span class="px-2 py-0.5 rounded bg-background text-white border border-border">{{ requestData.method }}</span>
               <span class="text-foreground-muted truncate">{{ requestData.path }}</span>
             </div>
             <div v-if="requestData.headers && Object.keys(requestData.headers).length">
-              <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Headers</div>
+              <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+                Headers
+              </div>
               <div class="bg-background border border-border rounded p-2 max-h-40 overflow-auto">
                 <div
                   v-for="(value, name) in requestData.headers"
@@ -360,10 +460,15 @@
               </div>
             </div>
             <div v-if="requestData.body">
-              <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Body</div>
+              <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+                Body
+              </div>
               <pre class="bg-background border border-border rounded p-2 text-xs text-foreground font-mono overflow-auto max-h-40 whitespace-pre-wrap break-words">{{ prettyBody(requestData.body) }}</pre>
             </div>
-            <div v-if="requestData.truncated" class="text-[11px] text-warning-fg">
+            <div
+              v-if="requestData.truncated"
+              class="text-[11px] text-warning-fg"
+            >
               Body was truncated at the configured cap. Replay is disabled for this row.
             </div>
             <!-- v0.4 B3: Save as fixture. Round-trips the captured envelope
@@ -398,11 +503,17 @@
               <span class="text-foreground-muted text-[10px] tabular-nums">
                 {{ formatLogTime(entry.ts) }}
               </span>
-              <span class="text-[10px] uppercase" :class="logLevelClass(entry.level)">
+              <span
+                class="text-[10px] uppercase"
+                :class="logLevelClass(entry.level)"
+              >
                 {{ entry.level }}
               </span>
               <span class="text-white truncate">{{ entry.message }}</span>
-              <code v-if="entry.fields" class="text-[10px] text-foreground-muted truncate">
+              <code
+                v-if="entry.fields"
+                class="text-[10px] text-foreground-muted truncate"
+              >
                 {{ entry.fields }}
               </code>
             </div>

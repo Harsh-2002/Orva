@@ -311,6 +311,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'WebhooksView' })
+
 import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import {

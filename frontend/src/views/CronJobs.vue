@@ -39,7 +39,9 @@
                   {{ job.enabled ? 'Active' : 'Paused' }}
                 </span>
               </div>
-              <div class="mt-1 text-[11px] text-foreground font-mono break-all">{{ job.cron_expression }}</div>
+              <div class="mt-1 text-[11px] text-foreground font-mono break-all">
+                {{ job.cron_expression }}
+              </div>
               <div class="mt-0.5 text-[11px] text-foreground-muted">
                 {{ humanizeCron(job.cron_expression) }}
                 <span class="text-foreground-muted/70">· {{ job.timezone || 'UTC' }}</span>
@@ -190,219 +192,223 @@
       @update:model-value="(v) => { if (!v) closeModal() }"
     >
       <div class="space-y-5">
-          <!-- Function Selection -->
-          <div>
-            <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Function</label>
-            <select
-              v-model="form.function_name"
-              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-              :disabled="!!editingJob"
+        <!-- Function Selection -->
+        <div>
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Function</label>
+          <select
+            v-model="form.function_name"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            :disabled="!!editingJob"
+          >
+            <option value="">
+              Select a function
+            </option>
+            <option
+              v-for="fn in functions"
+              :key="fn.name"
+              :value="fn.name"
             >
-              <option value="">
-                Select a function
-              </option>
-              <option
-                v-for="fn in functions"
-                :key="fn.name"
-                :value="fn.name"
-              >
-                {{ fn.name }} ({{ fn.runtime }})
-              </option>
-            </select>
+              {{ fn.name }} ({{ fn.runtime }})
+            </option>
+          </select>
+        </div>
+
+        <!-- Schedule Type Tabs -->
+        <div>
+          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Schedule Type</label>
+          <div class="flex gap-2 bg-background rounded-lg p-1 border border-border">
+            <button
+              v-for="type in ['simple', 'advanced']"
+              :key="type"
+              class="flex-1 py-2 px-3 text-sm font-medium rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              :class="scheduleType === type ? 'bg-primary text-primary-foreground shadow-sm' : 'text-foreground-muted hover:text-foreground'"
+              @click="scheduleType = type"
+            >
+              {{ type === 'simple' ? 'Natural Language' : 'Cron Expression' }}
+            </button>
           </div>
+        </div>
 
-          <!-- Schedule Type Tabs -->
-          <div>
-            <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Schedule Type</label>
-            <div class="flex gap-2 bg-background rounded-lg p-1 border border-border">
-              <button
-                v-for="type in ['simple', 'advanced']"
-                :key="type"
-                class="flex-1 py-2 px-3 text-sm font-medium rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                :class="scheduleType === type ? 'bg-primary text-primary-foreground shadow-sm' : 'text-foreground-muted hover:text-foreground'"
-                @click="scheduleType = type"
-              >
-                {{ type === 'simple' ? 'Natural Language' : 'Cron Expression' }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Simple Schedule -->
-          <div
-            v-if="scheduleType === 'simple'"
-            class="space-y-4"
-          >
-            <div class="grid grid-cols-3 gap-3">
-              <div>
-                <label class="text-xs font-medium text-foreground-muted block mb-1.5">Frequency</label>
-                <select
-                  v-model="simpleSchedule.frequency"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-                  @change="updateCronFromSimple"
-                >
-                  <option value="minute">
-                    Every Minute
-                  </option>
-                  <option value="hour">
-                    Hourly
-                  </option>
-                  <option value="day">
-                    Daily
-                  </option>
-                  <option value="week">
-                    Weekly
-                  </option>
-                  <option value="month">
-                    Monthly
-                  </option>
-                </select>
-              </div>
-
-              <div v-if="['hour', 'day', 'week', 'month'].includes(simpleSchedule.frequency)">
-                <label class="text-xs font-medium text-foreground-muted block mb-1.5">At Minute</label>
-                <input
-                  v-model.number="simpleSchedule.minute"
-                  type="number"
-                  min="0"
-                  max="59"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-                  @input="updateCronFromSimple"
-                >
-              </div>
-
-              <div v-if="['day', 'week', 'month'].includes(simpleSchedule.frequency)">
-                <label class="text-xs font-medium text-foreground-muted block mb-1.5">At Hour</label>
-                <input
-                  v-model.number="simpleSchedule.hour"
-                  type="number"
-                  min="0"
-                  max="23"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-                  @input="updateCronFromSimple"
-                >
-              </div>
-
-              <div v-if="simpleSchedule.frequency === 'week'">
-                <label class="text-xs font-medium text-foreground-muted block mb-1.5">Day of Week</label>
-                <select
-                  v-model="simpleSchedule.dayOfWeek"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-                  @change="updateCronFromSimple"
-                >
-                  <option value="0">
-                    Sunday
-                  </option>
-                  <option value="1">
-                    Monday
-                  </option>
-                  <option value="2">
-                    Tuesday
-                  </option>
-                  <option value="3">
-                    Wednesday
-                  </option>
-                  <option value="4">
-                    Thursday
-                  </option>
-                  <option value="5">
-                    Friday
-                  </option>
-                  <option value="6">
-                    Saturday
-                  </option>
-                </select>
-              </div>
-
-              <div v-if="simpleSchedule.frequency === 'month'">
-                <label class="text-xs font-medium text-foreground-muted block mb-1.5">Day of Month</label>
-                <input
-                  v-model.number="simpleSchedule.dayOfMonth"
-                  type="number"
-                  min="1"
-                  max="31"
-                  class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-                  @input="updateCronFromSimple"
-                >
-              </div>
-            </div>
-
-            <div class="bg-background border border-border rounded-lg p-4">
-              <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide mb-2">
-                Generated Expression
-              </div>
-              <div class="font-mono text-sm text-foreground">
-                {{ form.cron }}
-              </div>
-              <div class="text-xs text-foreground-muted mt-1">
-                {{ humanizeCron(form.cron) }}
-              </div>
-            </div>
-          </div>
-
-          <!-- Advanced Schedule -->
-          <div
-            v-if="scheduleType === 'advanced'"
-            class="space-y-3"
-          >
+        <!-- Simple Schedule -->
+        <div
+          v-if="scheduleType === 'simple'"
+          class="space-y-4"
+        >
+          <div class="grid grid-cols-3 gap-3">
             <div>
-              <label class="text-xs font-medium text-foreground-muted block mb-1.5">Cron Expression</label>
-              <input 
-                v-model="form.cron"
-                placeholder="* * * * *"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+              <label class="text-xs font-medium text-foreground-muted block mb-1.5">Frequency</label>
+              <select
+                v-model="simpleSchedule.frequency"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                @change="updateCronFromSimple"
               >
-              <p class="text-xs text-foreground-muted mt-1.5">
-                Format: minute hour day month weekday
-              </p>
+                <option value="minute">
+                  Every Minute
+                </option>
+                <option value="hour">
+                  Hourly
+                </option>
+                <option value="day">
+                  Daily
+                </option>
+                <option value="week">
+                  Weekly
+                </option>
+                <option value="month">
+                  Monthly
+                </option>
+              </select>
             </div>
 
-            <div class="bg-background border border-border rounded-lg p-4">
-              <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide mb-2">
-                Preview
-              </div>
-              <div class="text-xs text-foreground">
-                {{ humanizeCron(form.cron) }}
-              </div>
+            <div v-if="['hour', 'day', 'week', 'month'].includes(simpleSchedule.frequency)">
+              <label class="text-xs font-medium text-foreground-muted block mb-1.5">At Minute</label>
+              <input
+                v-model.number="simpleSchedule.minute"
+                type="number"
+                min="0"
+                max="59"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                @input="updateCronFromSimple"
+              >
+            </div>
+
+            <div v-if="['day', 'week', 'month'].includes(simpleSchedule.frequency)">
+              <label class="text-xs font-medium text-foreground-muted block mb-1.5">At Hour</label>
+              <input
+                v-model.number="simpleSchedule.hour"
+                type="number"
+                min="0"
+                max="23"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                @input="updateCronFromSimple"
+              >
+            </div>
+
+            <div v-if="simpleSchedule.frequency === 'week'">
+              <label class="text-xs font-medium text-foreground-muted block mb-1.5">Day of Week</label>
+              <select
+                v-model="simpleSchedule.dayOfWeek"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                @change="updateCronFromSimple"
+              >
+                <option value="0">
+                  Sunday
+                </option>
+                <option value="1">
+                  Monday
+                </option>
+                <option value="2">
+                  Tuesday
+                </option>
+                <option value="3">
+                  Wednesday
+                </option>
+                <option value="4">
+                  Thursday
+                </option>
+                <option value="5">
+                  Friday
+                </option>
+                <option value="6">
+                  Saturday
+                </option>
+              </select>
+            </div>
+
+            <div v-if="simpleSchedule.frequency === 'month'">
+              <label class="text-xs font-medium text-foreground-muted block mb-1.5">Day of Month</label>
+              <input
+                v-model.number="simpleSchedule.dayOfMonth"
+                type="number"
+                min="1"
+                max="31"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                @input="updateCronFromSimple"
+              >
             </div>
           </div>
 
-          <!-- Timezone -->
+          <div class="bg-background border border-border rounded-lg p-4">
+            <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide mb-2">
+              Generated Expression
+            </div>
+            <div class="font-mono text-sm text-foreground">
+              {{ form.cron }}
+            </div>
+            <div class="text-xs text-foreground-muted mt-1">
+              {{ humanizeCron(form.cron) }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Advanced Schedule -->
+        <div
+          v-if="scheduleType === 'advanced'"
+          class="space-y-3"
+        >
           <div>
-            <label class="block text-xs font-medium text-foreground-muted uppercase tracking-wide mb-1.5">
-              Timezone
-            </label>
-            <select
-              v-model="form.timezone"
-              class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            <label class="text-xs font-medium text-foreground-muted block mb-1.5">Cron Expression</label>
+            <input
+              v-model="form.cron"
+              placeholder="* * * * *"
+              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
             >
-              <option v-for="tz in timezoneOptions" :key="tz" :value="tz">
-                {{ tz }}{{ tz === detectedTZ ? '  (your browser)' : '' }}
-              </option>
-            </select>
-            <div class="text-xs text-foreground-muted mt-1.5">
-              The cron expression is interpreted in this zone (e.g.
-              <code class="bg-surface px-1 rounded">0 9 * * *</code>
-              with timezone
-              <code class="bg-surface px-1 rounded">{{ form.timezone }}</code>
-              fires at 9 AM local time every day.
-            </div>
+            <p class="text-xs text-foreground-muted mt-1.5">
+              Format: minute hour day month weekday
+            </p>
           </div>
 
-          <!-- Enabled Toggle -->
-          <div class="flex items-center gap-3">
-            <input
-              id="enabled-toggle"
-              v-model="form.enabled"
-              type="checkbox"
-              class="w-4 h-4 text-primary bg-background border-border rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            >
-            <label
-              for="enabled-toggle"
-              class="text-sm font-medium text-foreground cursor-pointer"
-            >
-              Enable schedule immediately
-            </label>
+          <div class="bg-background border border-border rounded-lg p-4">
+            <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide mb-2">
+              Preview
+            </div>
+            <div class="text-xs text-foreground">
+              {{ humanizeCron(form.cron) }}
+            </div>
           </div>
+        </div>
+
+        <!-- Timezone -->
+        <div>
+          <label class="block text-xs font-medium text-foreground-muted uppercase tracking-wide mb-1.5">
+            Timezone
+          </label>
+          <select
+            v-model="form.timezone"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+          >
+            <option
+              v-for="tz in timezoneOptions"
+              :key="tz"
+              :value="tz"
+            >
+              {{ tz }}{{ tz === detectedTZ ? '  (your browser)' : '' }}
+            </option>
+          </select>
+          <div class="text-xs text-foreground-muted mt-1.5">
+            The cron expression is interpreted in this zone (e.g.
+            <code class="bg-surface px-1 rounded">0 9 * * *</code>
+            with timezone
+            <code class="bg-surface px-1 rounded">{{ form.timezone }}</code>
+            fires at 9 AM local time every day.
+          </div>
+        </div>
+
+        <!-- Enabled Toggle -->
+        <div class="flex items-center gap-3">
+          <input
+            id="enabled-toggle"
+            v-model="form.enabled"
+            type="checkbox"
+            class="w-4 h-4 text-primary bg-background border-border rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+          <label
+            for="enabled-toggle"
+            class="text-sm font-medium text-foreground cursor-pointer"
+          >
+            Enable schedule immediately
+          </label>
+        </div>
       </div>
 
       <template #footer>

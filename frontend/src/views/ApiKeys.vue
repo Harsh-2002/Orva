@@ -139,9 +139,15 @@
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
                 <span v-if="key.last_used_at">used {{ formatRelative(key.last_used_at) }}</span>
-                <span v-else class="text-amber-400/80">never used</span>
+                <span
+                  v-else
+                  class="text-amber-400/80"
+                >never used</span>
                 <span v-if="!key.expires_at">no expiry</span>
-                <span v-else-if="isExpired(key.expires_at)" class="text-red-400">expired {{ formatRelative(key.expires_at) }}</span>
+                <span
+                  v-else-if="isExpired(key.expires_at)"
+                  class="text-red-400"
+                >expired {{ formatRelative(key.expires_at) }}</span>
                 <span v-else>expires {{ formatRelative(key.expires_at) }}</span>
               </div>
             </div>
@@ -164,22 +170,40 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th scope="col" class="px-6 py-3 font-medium">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium"
+            >
               Name
             </th>
-            <th scope="col" class="px-6 py-3 font-medium hidden sm:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden sm:table-cell"
+            >
               Prefix
             </th>
-            <th scope="col" class="px-6 py-3 font-medium hidden xl:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden xl:table-cell"
+            >
               Created
             </th>
-            <th scope="col" class="px-6 py-3 font-medium hidden md:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden md:table-cell"
+            >
               Last Used
             </th>
-            <th scope="col" class="px-6 py-3 font-medium hidden lg:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden lg:table-cell"
+            >
               Expires
             </th>
-            <th scope="col" class="px-6 py-3 font-medium text-right">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium text-right"
+            >
               Actions
             </th>
           </tr>

@@ -106,15 +106,27 @@
                     : 'bg-surface text-foreground-muted border-border'"
                 >{{ row.active ? 'active' : 'paused' }}</span>
               </div>
-              <div class="mt-1 text-[11px] text-foreground-muted font-mono break-all">{{ origin }}/webhook/{{ row.id }}</div>
+              <div class="mt-1 text-[11px] text-foreground-muted font-mono break-all">
+                {{ origin }}/webhook/{{ row.id }}
+              </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
                 <span class="font-mono">{{ row.signature_format }}</span>
                 <span>created {{ formatDate(row.created_at) }}</span>
               </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-              <IconButton :icon="Send" variant="success" title="Send a test payload" @click="openTest(row)" />
-              <IconButton :icon="Trash2" variant="danger" title="Delete" @click="confirmRemove(row)" />
+              <IconButton
+                :icon="Send"
+                variant="success"
+                title="Send a test payload"
+                @click="openTest(row)"
+              />
+              <IconButton
+                :icon="Trash2"
+                variant="danger"
+                title="Delete"
+                @click="confirmRemove(row)"
+              />
             </div>
           </div>
         </li>
@@ -129,13 +141,27 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3">Name</th>
-            <th class="px-4 py-3 hidden md:table-cell">URL</th>
-            <th class="px-4 py-3 hidden sm:table-cell">Format</th>
-            <th class="px-4 py-3 hidden lg:table-cell">Secret</th>
-            <th class="px-4 py-3 hidden md:table-cell">Active</th>
-            <th class="px-4 py-3 hidden lg:table-cell">Created</th>
-            <th class="px-4 py-3 text-right">Actions</th>
+            <th class="px-4 py-3">
+              Name
+            </th>
+            <th class="px-4 py-3 hidden md:table-cell">
+              URL
+            </th>
+            <th class="px-4 py-3 hidden sm:table-cell">
+              Format
+            </th>
+            <th class="px-4 py-3 hidden lg:table-cell">
+              Secret
+            </th>
+            <th class="px-4 py-3 hidden md:table-cell">
+              Active
+            </th>
+            <th class="px-4 py-3 hidden lg:table-cell">
+              Created
+            </th>
+            <th class="px-4 py-3 text-right">
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -226,11 +252,21 @@
             v-model="create.format"
             class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
           >
-            <option value="hmac_sha256_hex">hmac_sha256_hex (default)</option>
-            <option value="hmac_sha256_base64">hmac_sha256_base64</option>
-            <option value="github">github (X-Hub-Signature-256)</option>
-            <option value="stripe">stripe (Stripe-Signature)</option>
-            <option value="slack">slack (X-Slack-Signature)</option>
+            <option value="hmac_sha256_hex">
+              hmac_sha256_hex (default)
+            </option>
+            <option value="hmac_sha256_base64">
+              hmac_sha256_base64
+            </option>
+            <option value="github">
+              github (X-Hub-Signature-256)
+            </option>
+            <option value="stripe">
+              stripe (Stripe-Signature)
+            </option>
+            <option value="slack">
+              slack (X-Slack-Signature)
+            </option>
           </select>
           <p class="text-[11px] text-foreground-muted mt-2">
             Pick the format your upstream service produces. The header name is

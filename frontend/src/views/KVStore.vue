@@ -27,7 +27,10 @@
           size="sm"
           @click="refresh"
         >
-          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
+          <RefreshCw
+            class="w-3.5 h-3.5"
+            :class="{ 'animate-spin': loading }"
+          />
           Refresh
         </Button>
         <Button
@@ -81,7 +84,9 @@
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
-              <div class="font-mono text-xs text-white break-all">{{ row.key }}</div>
+              <div class="font-mono text-xs text-white break-all">
+                {{ row.key }}
+              </div>
               <div class="mt-1 font-mono text-[11px] text-foreground-muted break-all">
                 {{ valuePreview(row.value) }}
               </div>
@@ -94,7 +99,10 @@
                 <span>{{ formatRelative(row.updated_at) }}</span>
               </div>
             </div>
-            <div class="shrink-0" @click.stop>
+            <div
+              class="shrink-0"
+              @click.stop
+            >
               <IconButton
                 :icon="Trash2"
                 variant="danger"
@@ -122,11 +130,21 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3">Key</th>
-            <th class="px-4 py-3 hidden md:table-cell">Value preview</th>
-            <th class="px-4 py-3 w-28 hidden sm:table-cell">TTL</th>
-            <th class="px-4 py-3 w-20 hidden lg:table-cell">Size</th>
-            <th class="px-4 py-3 w-28 hidden md:table-cell">Updated</th>
+            <th class="px-4 py-3">
+              Key
+            </th>
+            <th class="px-4 py-3 hidden md:table-cell">
+              Value preview
+            </th>
+            <th class="px-4 py-3 w-28 hidden sm:table-cell">
+              TTL
+            </th>
+            <th class="px-4 py-3 w-20 hidden lg:table-cell">
+              Size
+            </th>
+            <th class="px-4 py-3 w-28 hidden md:table-cell">
+              Updated
+            </th>
             <th class="px-4 py-3 w-10 text-right" />
           </tr>
         </thead>
@@ -151,7 +169,10 @@
               >
                 {{ formatTTL(row.expires_at) }}
               </span>
-              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
+              <span
+                v-else
+                class="text-foreground-muted text-xs"
+              >{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-3 text-xs font-mono text-foreground-muted hidden lg:table-cell">
               {{ formatBytes(row.size_bytes) }}
@@ -172,7 +193,10 @@
             </td>
           </tr>
           <tr v-if="!loading && !rows.length">
-            <td colspan="6" class="px-4 py-12 text-center text-foreground-muted text-sm">
+            <td
+              colspan="6"
+              class="px-4 py-12 text-center text-foreground-muted text-sm"
+            >
               <template v-if="prefix">
                 No keys match
                 <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">{{ prefix }}</code>.
@@ -197,26 +221,46 @@
       :title="inspect.row ? inspect.row.key : 'Inspect key'"
       width="640px"
     >
-      <div v-if="inspect.row" class="p-5 space-y-5 text-sm">
+      <div
+        v-if="inspect.row"
+        class="p-5 space-y-5 text-sm"
+      >
         <!-- Stat strip -->
         <div class="grid grid-cols-2 gap-3">
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Key</div>
-            <div class="text-xs text-white font-mono break-all">{{ inspect.row.key }}</div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Key
+            </div>
+            <div class="text-xs text-white font-mono break-all">
+              {{ inspect.row.key }}
+            </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">TTL</div>
-            <div class="text-xs text-white font-mono" :class="ttlClass(inspect.row.expires_at)">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              TTL
+            </div>
+            <div
+              class="text-xs text-white font-mono"
+              :class="ttlClass(inspect.row.expires_at)"
+            >
               {{ inspect.row.expires_at ? formatTTL(inspect.row.expires_at) : 'Never' }}
             </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Updated</div>
-            <div class="text-xs text-white font-mono truncate">{{ formatFullTime(inspect.row.updated_at) }}</div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Updated
+            </div>
+            <div class="text-xs text-white font-mono truncate">
+              {{ formatFullTime(inspect.row.updated_at) }}
+            </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Size</div>
-            <div class="text-xs text-white font-mono">{{ formatBytes(inspect.row.size_bytes) }}</div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Size
+            </div>
+            <div class="text-xs text-white font-mono">
+              {{ formatBytes(inspect.row.size_bytes) }}
+            </div>
           </div>
         </div>
 
@@ -337,7 +381,7 @@
             v-model="setKey.text"
             rows="14"
             spellcheck="false"
-            placeholder='{"hello": "world"}'
+            placeholder="{&quot;hello&quot;: &quot;world&quot;}"
             class="w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono leading-relaxed focus:outline-none focus:border-white whitespace-pre overflow-x-auto"
           />
         </div>

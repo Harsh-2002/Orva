@@ -19,16 +19,30 @@
         Build info
       </div>
       <dl class="grid grid-cols-[max-content,1fr] gap-x-6 gap-y-2 text-xs">
-        <dt class="text-foreground-muted">Version</dt>
-        <dd class="font-mono text-white">{{ buildInfo?.version || EMPTY }}</dd>
+        <dt class="text-foreground-muted">
+          Version
+        </dt>
+        <dd class="font-mono text-white">
+          {{ buildInfo?.version || EMPTY }}
+        </dd>
 
-        <dt class="text-foreground-muted">Commit</dt>
-        <dd class="font-mono text-white">{{ buildInfo?.commit && buildInfo.commit !== 'unknown' ? buildInfo.commit : 'dev build' }}</dd>
+        <dt class="text-foreground-muted">
+          Commit
+        </dt>
+        <dd class="font-mono text-white">
+          {{ buildInfo?.commit && buildInfo.commit !== 'unknown' ? buildInfo.commit : 'dev build' }}
+        </dd>
 
-        <dt class="text-foreground-muted">Built</dt>
-        <dd class="font-mono text-white">{{ formatBuildTime(buildInfo?.buildTime) }}</dd>
+        <dt class="text-foreground-muted">
+          Built
+        </dt>
+        <dd class="font-mono text-white">
+          {{ formatBuildTime(buildInfo?.buildTime) }}
+        </dd>
 
-        <dt class="text-foreground-muted">Image</dt>
+        <dt class="text-foreground-muted">
+          Image
+        </dt>
         <dd class="font-mono text-white flex items-center gap-2 min-w-0">
           <span class="truncate">{{ buildInfo?.image || EMPTY }}</span>
           <button
@@ -39,7 +53,10 @@
           >
             <Copy class="w-3.5 h-3.5" />
           </button>
-          <span v-if="imageCopied" class="text-[10px] text-primary-light shrink-0">copied</span>
+          <span
+            v-if="imageCopied"
+            class="text-[10px] text-primary-light shrink-0"
+          >copied</span>
         </dd>
       </dl>
     </div>
@@ -106,11 +123,18 @@
         v-if="storageError"
         class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
       >
-        <div class="font-semibold text-red-100 mb-1">Failed to load storage stats</div>
-        <div class="font-mono break-all">{{ storageError }}</div>
+        <div class="font-semibold text-red-100 mb-1">
+          Failed to load storage stats
+        </div>
+        <div class="font-mono break-all">
+          {{ storageError }}
+        </div>
       </div>
 
-      <div v-if="storage" class="space-y-3">
+      <div
+        v-if="storage"
+        class="space-y-3"
+      >
         <!-- Stacked bar — proportions of total. -->
         <div class="h-2 w-full rounded-full overflow-hidden bg-border/60 flex">
           <div
@@ -137,21 +161,24 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
           <div class="flex items-center justify-between">
             <span class="flex items-center gap-2 text-foreground-muted">
-              <span class="w-2 h-2 rounded-sm bg-sky-500"></span>
+              <span class="w-2 h-2 rounded-sm bg-sky-500" />
               orva.db
             </span>
             <span class="font-mono text-white">{{ formatBytes(storage.db_bytes) }}</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="flex items-center gap-2 text-foreground-muted">
-              <span class="w-2 h-2 rounded-sm bg-emerald-500"></span>
+              <span class="w-2 h-2 rounded-sm bg-emerald-500" />
               functions/
             </span>
             <span class="font-mono text-white">{{ formatBytes(storage.functions_bytes) }}</span>
           </div>
-          <div v-if="storage.wal_bytes > 0" class="flex items-center justify-between">
+          <div
+            v-if="storage.wal_bytes > 0"
+            class="flex items-center justify-between"
+          >
             <span class="flex items-center gap-2 text-foreground-muted">
-              <span class="w-2 h-2 rounded-sm bg-amber-500"></span>
+              <span class="w-2 h-2 rounded-sm bg-amber-500" />
               orva.db-wal
             </span>
             <span class="font-mono text-white">{{ formatBytes(storage.wal_bytes) }}</span>
@@ -186,8 +213,12 @@
         v-if="vacuumError"
         class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
       >
-        <div class="font-semibold text-red-100 mb-1">Compact failed</div>
-        <div class="font-mono break-all">{{ vacuumError }}</div>
+        <div class="font-semibold text-red-100 mb-1">
+          Compact failed
+        </div>
+        <div class="font-mono break-all">
+          {{ vacuumError }}
+        </div>
       </div>
     </div>
 
@@ -296,7 +327,12 @@
           <p class="text-xs text-foreground-muted mt-1 max-w-prose">
             Apps you've granted access to your Orva via OAuth.
             Connect new ones from the
-            <RouterLink to="/docs#mcp" class="text-primary hover:underline">Docs</RouterLink>
+            <RouterLink
+              to="/docs#mcp"
+              class="text-primary hover:underline"
+            >
+              Docs
+            </RouterLink>
             page.
           </p>
         </div>
@@ -312,8 +348,12 @@
         v-if="connectedAppsError"
         class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
       >
-        <div class="font-semibold text-red-100 mb-1">Failed to load connected apps</div>
-        <div class="font-mono break-all">{{ connectedAppsError }}</div>
+        <div class="font-semibold text-red-100 mb-1">
+          Failed to load connected apps
+        </div>
+        <div class="font-mono break-all">
+          {{ connectedAppsError }}
+        </div>
       </div>
 
       <div
@@ -339,7 +379,10 @@
         </p>
       </div>
 
-      <ul v-else class="divide-y divide-border -mx-5">
+      <ul
+        v-else
+        class="divide-y divide-border -mx-5"
+      >
         <li
           v-for="app in connectedApps"
           :key="app.id"
@@ -359,7 +402,10 @@
               <span v-if="app.last_used_at">
                 · Last used {{ formatRelative(app.last_used_at) }}
               </span>
-              <span v-else class="italic opacity-70">· Never used</span>
+              <span
+                v-else
+                class="italic opacity-70"
+              >· Never used</span>
               <span v-if="app.refresh_expires_at">
                 · Re-consent {{ formatRelative(app.refresh_expires_at) }}
               </span>
@@ -415,11 +461,18 @@
         v-if="sessionsError"
         class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
       >
-        <div class="font-semibold text-red-100 mb-1">Failed to load sessions</div>
-        <div class="font-mono break-all">{{ sessionsError }}</div>
+        <div class="font-semibold text-red-100 mb-1">
+          Failed to load sessions
+        </div>
+        <div class="font-mono break-all">
+          {{ sessionsError }}
+        </div>
       </div>
 
-      <ul v-else class="divide-y divide-border -mx-5">
+      <ul
+        v-else
+        class="divide-y divide-border -mx-5"
+      >
         <li
           v-for="s in sessions"
           :key="s.prefix"
@@ -432,7 +485,10 @@
           <div class="flex-1 min-w-0">
             <div class="text-sm font-medium text-white flex items-center gap-2 flex-wrap">
               <span v-if="s.current">This session</span>
-              <span v-else class="font-mono text-xs">{{ maskPrefix(s.prefix) }}</span>
+              <span
+                v-else
+                class="font-mono text-xs"
+              >{{ maskPrefix(s.prefix) }}</span>
               <span
                 v-if="s.current"
                 class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-medium"
@@ -515,8 +571,12 @@
         v-if="restoreError"
         class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
       >
-        <div class="font-semibold text-red-100 mb-1">Restore failed</div>
-        <div class="font-mono break-all">{{ restoreError }}</div>
+        <div class="font-semibold text-red-100 mb-1">
+          Restore failed
+        </div>
+        <div class="font-mono break-all">
+          {{ restoreError }}
+        </div>
       </div>
       <div
         v-if="restoreOk"
@@ -536,6 +596,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'SettingsView' })
+
 import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'

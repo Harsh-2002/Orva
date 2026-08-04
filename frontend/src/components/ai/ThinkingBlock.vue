@@ -34,7 +34,9 @@
       v-if="expanded"
       class="px-3 pb-2.5"
     >
-      <div class="border-t border-border/70 pt-2 text-xs leading-relaxed text-foreground-muted font-mono whitespace-pre-wrap break-words">{{ part.text }}</div>
+      <div class="border-t border-border/70 pt-2 text-xs leading-relaxed text-foreground-muted font-mono whitespace-pre-wrap break-words">
+        {{ part.text }}
+      </div>
     </div>
   </div>
 </template>

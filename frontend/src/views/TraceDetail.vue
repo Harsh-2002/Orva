@@ -70,13 +70,17 @@
             <div class="text-foreground-muted uppercase tracking-wide mb-1">
               Total duration
             </div>
-            <div class="text-white font-mono">{{ trace.total_duration_ms }}ms</div>
+            <div class="text-white font-mono">
+              {{ trace.total_duration_ms }}ms
+            </div>
           </div>
           <div>
             <div class="text-foreground-muted uppercase tracking-wide mb-1">
               Spans
             </div>
-            <div class="text-white">{{ trace.span_count }}</div>
+            <div class="text-white">
+              {{ trace.span_count }}
+            </div>
           </div>
           <div>
             <div class="text-foreground-muted uppercase tracking-wide mb-1">
@@ -107,7 +111,10 @@
           Waterfall
         </div>
         <div class="space-y-1.5">
-          <template v-for="(s, i) in trace.spans" :key="s.span_id || `s${i}`">
+          <template
+            v-for="(s, i) in trace.spans"
+            :key="s.span_id || `s${i}`"
+          >
             <div
               class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1.5 rounded cursor-pointer transition-colors"
               @click="onSpanClick(s)"
@@ -140,7 +147,10 @@
 
               <div class="col-span-2 text-right font-mono">
                 <span class="text-white">{{ s.duration_ms }}ms</span>
-                <span v-if="s.baseline_p95_ms" class="block text-[10px] text-foreground-muted">
+                <span
+                  v-if="s.baseline_p95_ms"
+                  class="block text-[10px] text-foreground-muted"
+                >
                   p95 {{ s.baseline_p95_ms }}ms
                 </span>
               </div>
@@ -155,8 +165,10 @@
               <div class="col-span-3 truncate flex items-center gap-1.5 pl-5">
                 <span class="text-foreground-muted text-[10px]">└</span>
                 <span class="text-foreground-muted">{{ us.name }}</span>
-                <span v-if="us.status === 'error'"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-danger-tint text-danger-fg border border-danger-ring">
+                <span
+                  v-if="us.status === 'error'"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-danger-tint text-danger-fg border border-danger-ring"
+                >
                   error
                 </span>
               </div>
@@ -195,11 +207,17 @@
             <span class="text-foreground-muted text-[10px] tabular-nums">
               {{ formatLogTime(entry.ts) }}
             </span>
-            <span class="text-[10px] uppercase tracking-wide" :class="logLevelClass(entry.level)">
+            <span
+              class="text-[10px] uppercase tracking-wide"
+              :class="logLevelClass(entry.level)"
+            >
               {{ entry.level }}
             </span>
             <span class="text-white truncate">{{ entry.message }}</span>
-            <code v-if="entry.fields" class="text-[10px] text-foreground-muted truncate">
+            <code
+              v-if="entry.fields"
+              class="text-[10px] text-foreground-muted truncate"
+            >
               {{ entry.fields }}
             </code>
           </div>
@@ -211,12 +229,24 @@
         <table class="w-full text-sm text-left">
           <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
             <tr>
-              <th class="px-4 py-3 w-32">Span</th>
-              <th class="px-4 py-3">Function</th>
-              <th class="px-4 py-3 w-28 hidden md:table-cell">Trigger</th>
-              <th class="px-4 py-3 w-24 text-right">Offset</th>
-              <th class="px-4 py-3 w-24 text-right">Duration</th>
-              <th class="px-4 py-3 w-24">Status</th>
+              <th class="px-4 py-3 w-32">
+                Span
+              </th>
+              <th class="px-4 py-3">
+                Function
+              </th>
+              <th class="px-4 py-3 w-28 hidden md:table-cell">
+                Trigger
+              </th>
+              <th class="px-4 py-3 w-24 text-right">
+                Offset
+              </th>
+              <th class="px-4 py-3 w-24 text-right">
+                Duration
+              </th>
+              <th class="px-4 py-3 w-24">
+                Status
+              </th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border">

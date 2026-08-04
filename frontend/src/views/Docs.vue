@@ -9,7 +9,10 @@
          weight without screaming, and stays inside the dashboard's
          dark/mono aesthetic. -->
     <header class="docs-hero">
-      <div class="docs-hero-bg" aria-hidden="true"></div>
+      <div
+        class="docs-hero-bg"
+        aria-hidden="true"
+      />
 
       <div class="docs-hero-content">
         <div class="docs-hero-row">
@@ -452,7 +455,9 @@
             <router-link
               to="/cron"
               class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
-            >Schedules page</router-link>
+            >
+              Schedules page
+            </router-link>
             or via the API. Standard 5-field cron with the usual shorthands
             (<code class="doc-chip">@daily</code>,
             <code class="doc-chip">@hourly</code>,
@@ -495,7 +500,9 @@
             <router-link
               to="/webhooks"
               class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
-            >Webhooks page</router-link>; Orva delivers signed POSTs to
+            >
+              Webhooks page
+            </router-link>; Orva delivers signed POSTs to
             them when matching events fire (deployments, function
             lifecycle, cron failures, job outcomes). Subscriptions are
             global, not per-function.
@@ -759,7 +766,7 @@
           v-if="!promptExpanded"
           class="prompt-collapse-fade"
           aria-hidden="true"
-        ></div>
+        />
       </div>
       <button
         class="prompt-expand-btn"
@@ -805,7 +812,9 @@
 
       <TraceTreeDiagram />
 
-      <h3 class="doc-h3">What user code sees</h3>
+      <h3 class="doc-h3">
+        What user code sees
+      </h3>
       <p class="doc-prose">
         Two env vars are stamped per invocation. Read them only if you want to
         log the trace_id alongside your own messages; they're optional.
@@ -815,7 +824,9 @@
         lang="text"
       />
 
-      <h3 class="doc-h3">Automatic propagation</h3>
+      <h3 class="doc-h3">
+        Automatic propagation
+      </h3>
       <p class="doc-prose">
         When a function calls another via the SDK, the trace context flows
         through automatically. The called function becomes a child span of the
@@ -832,7 +843,9 @@
         function that enqueued it, even if the gap is hours or days.
       </p>
 
-      <h3 class="doc-h3">Triggers</h3>
+      <h3 class="doc-h3">
+        Triggers
+      </h3>
       <p class="doc-prose">
         Each span carries a <code class="doc-chip">trigger</code> label so the
         UI can show how the chain started.
@@ -846,15 +859,24 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="t in triggers" :key="t.name">
-              <td class="doc-cell-key whitespace-nowrap"><code>{{ t.name }}</code></td>
-              <td class="doc-cell-body">{{ t.desc }}</td>
+            <tr
+              v-for="t in triggers"
+              :key="t.name"
+            >
+              <td class="doc-cell-key whitespace-nowrap">
+                <code>{{ t.name }}</code>
+              </td>
+              <td class="doc-cell-body">
+                {{ t.desc }}
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <h3 class="doc-h3">External correlation (W3C traceparent)</h3>
+      <h3 class="doc-h3">
+        External correlation (W3C traceparent)
+      </h3>
       <p class="doc-prose">
         Send a standard <code class="doc-chip">traceparent</code> header on the
         inbound HTTP request and Orva makes its trace a child of yours. The
@@ -867,7 +889,9 @@
         lang="bash"
       />
 
-      <h3 class="doc-h3">Outlier detection</h3>
+      <h3 class="doc-h3">
+        Outlier detection
+      </h3>
       <p class="doc-prose">
         Each function maintains an in-memory rolling P95 baseline over its last
         100 successful warm executions. An invocation is flagged as an outlier
@@ -878,7 +902,9 @@
         flag icon next to the span.
       </p>
 
-      <h3 class="doc-h3">Where to look</h3>
+      <h3 class="doc-h3">
+        Where to look
+      </h3>
       <ul class="doc-list">
         <li><code class="doc-chip">/traces</code>: list of recent traces, filterable by function / status / outlier-only.</li>
         <li><code class="doc-chip">/traces/:id</code>: waterfall + per-span detail. Click a span to jump to its execution in the Invocations log.</li>
@@ -962,7 +988,9 @@
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div class="doc-card">
-          <div class="doc-microlabel">Install (server included)</div>
+          <div class="doc-microlabel">
+            Install (server included)
+          </div>
           <div class="doc-card-body">
             <code class="doc-chip">curl … install.sh | sh</code>
             <p class="mt-1.5 text-foreground-muted">
@@ -971,7 +999,9 @@
           </div>
         </div>
         <div class="doc-card">
-          <div class="doc-microlabel">Install (CLI only)</div>
+          <div class="doc-microlabel">
+            Install (CLI only)
+          </div>
           <div class="doc-card-body">
             <code class="doc-chip">curl … install-cli.sh | sh</code>
             <p class="mt-1.5 text-foreground-muted">
@@ -980,7 +1010,9 @@
           </div>
         </div>
         <div class="doc-card">
-          <div class="doc-microlabel">Inside Docker</div>
+          <div class="doc-microlabel">
+            Inside Docker
+          </div>
           <div class="doc-card-body">
             <code class="doc-chip">docker exec orva orva …</code>
             <p class="mt-1.5 text-foreground-muted">
@@ -990,46 +1022,65 @@
         </div>
       </div>
 
-      <h3 class="doc-h3">Authenticate</h3>
+      <h3 class="doc-h3">
+        Authenticate
+      </h3>
       <p class="doc-prose">
         The CLI reads <code class="doc-chip">~/.orva/config.yaml</code>
         for <code class="doc-chip">endpoint</code> + <code class="doc-chip">api_key</code>.
         Generate a key from <router-link
           to="/api-keys"
           class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
-        >Keys</router-link> in the dashboard, then:
+        >
+          Keys
+        </router-link> in the dashboard, then:
       </p>
       <CodeBlock
         :code="cliLogin"
         lang="bash"
       />
 
-      <h3 class="doc-h3">Command index</h3>
+      <h3 class="doc-h3">
+        Command index
+      </h3>
       <div class="doc-table-wrap">
         <table class="doc-table">
           <thead>
             <tr>
               <th>Command</th>
               <th>Subcommands</th>
-              <th class="hidden md:table-cell">Purpose</th>
+              <th class="hidden md:table-cell">
+                Purpose
+              </th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in cliIndex" :key="c.cmd">
+            <tr
+              v-for="c in cliIndex"
+              :key="c.cmd"
+            >
               <td class="doc-cell-key whitespace-nowrap">
                 <code>orva {{ c.cmd }}</code>
               </td>
-              <td class="doc-cell-mono">{{ c.subs }}</td>
-              <td class="doc-cell-body hidden md:table-cell">{{ c.purpose }}</td>
+              <td class="doc-cell-mono">
+                {{ c.subs }}
+              </td>
+              <td class="doc-cell-body hidden md:table-cell">
+                {{ c.purpose }}
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <h3 class="doc-h3">Common recipes</h3>
+      <h3 class="doc-h3">
+        Common recipes
+      </h3>
 
       <div class="space-y-2">
-        <div class="doc-microlabel">Deploy a function from a directory</div>
+        <div class="doc-microlabel">
+          Deploy a function from a directory
+        </div>
         <CodeBlock
           :code="cliDeploy"
           lang="bash"
@@ -1037,7 +1088,9 @@
       </div>
 
       <div class="space-y-2">
-        <div class="doc-microlabel">Invoke + tail logs</div>
+        <div class="doc-microlabel">
+          Invoke + tail logs
+        </div>
         <CodeBlock
           :code="cliInvokeLogs"
           lang="bash"
@@ -1045,7 +1098,9 @@
       </div>
 
       <div class="space-y-2">
-        <div class="doc-microlabel">Manage KV state</div>
+        <div class="doc-microlabel">
+          Manage KV state
+        </div>
         <CodeBlock
           :code="cliKv"
           lang="bash"
@@ -1053,7 +1108,9 @@
       </div>
 
       <div class="space-y-2">
-        <div class="doc-microlabel">Secrets, cron, jobs, webhooks</div>
+        <div class="doc-microlabel">
+          Secrets, cron, jobs, webhooks
+        </div>
         <CodeBlock
           :code="cliMisc"
           lang="bash"
@@ -1061,7 +1118,9 @@
       </div>
 
       <div class="space-y-2">
-        <div class="doc-microlabel">System health, metrics, vacuum</div>
+        <div class="doc-microlabel">
+          System health, metrics, vacuum
+        </div>
         <CodeBlock
           :code="cliSystem"
           lang="bash"
@@ -1084,6 +1143,7 @@
 </template>
 
 <script setup>
+/* eslint-disable vue/one-component-per-file -- Render-only documentation diagrams share this page's reactive data and styles. */
 import { EMPTY } from '@/utils/format'
 import { computed, h, ref, defineComponent, onMounted, onBeforeUnmount } from 'vue'
 import {
@@ -1867,7 +1927,6 @@ orva activity --source mcp --limit 200 # MCP-only, last 200`
 // substitutes the {{ORIGIN}} placeholders with window.location.origin
 // at copy time so users get URLs that match their live instance.
 const docsMarkdownRaw = ref('')
-const docsMarkdownReady = computed(() => docsMarkdownRaw.value.length > 0)
 
 const fetchDocsMarkdown = async () => {
   try {
@@ -2193,7 +2252,7 @@ const TabbedCode = defineComponent({
 })
 
 const Callout = defineComponent({
-  name: 'Callout',
+  name: 'DocsCallout',
   props: {
     title: { type: String, default: '' },
     icon: { type: [Object, Function], default: null },

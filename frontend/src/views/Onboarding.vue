@@ -113,8 +113,14 @@
                   :title="showPassword ? 'Hide password' : 'Show password'"
                   @click="showPassword = !showPassword"
                 >
-                  <Eye v-if="!showPassword" class="w-4 h-4 text-foreground-muted hover:text-foreground" />
-                  <EyeOff v-else class="w-4 h-4 text-foreground-muted hover:text-foreground" />
+                  <Eye
+                    v-if="!showPassword"
+                    class="w-4 h-4 text-foreground-muted hover:text-foreground"
+                  />
+                  <EyeOff
+                    v-else
+                    class="w-4 h-4 text-foreground-muted hover:text-foreground"
+                  />
                 </button>
               </div>
             </div>

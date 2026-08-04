@@ -53,6 +53,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'CommonPopover' })
+
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import Drawer from './Drawer.vue'
 

@@ -64,6 +64,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'CommonModal' })
+
 import { computed, ref, toRef, onMounted, onUnmounted } from 'vue'
 import { X } from 'lucide-vue-next'
 import { useFocusTrap } from '@/composables/useFocusTrap'

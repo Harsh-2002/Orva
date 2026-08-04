@@ -254,14 +254,14 @@
         class="rule-grid"
       >
         <RuleCard
-          v-for="rule in visibleRules"
-          :key="rule.id"
-          :rule="rule"
+          v-for="firewallRule in visibleRules"
+          :key="firewallRule.id"
+          :rule="firewallRule"
           :status="status"
-          :busy="busyId === rule.id"
-          :readonly-edit="rule.kind !== 'custom'"
-          @toggle="toggle(rule)"
-          @delete="deleteRule(rule)"
+          :busy="busyId === firewallRule.id"
+          :readonly-edit="firewallRule.kind !== 'custom'"
+          @toggle="toggle(firewallRule)"
+          @delete="deleteRule(firewallRule)"
         />
       </div>
     </PanelSection>
@@ -338,10 +338,11 @@
 </template>
 
 <script setup>
+/* eslint-disable vue/one-component-per-file -- Private render components share this page's state and styling. */
 import { computed, h, onMounted, onActivated, ref, defineComponent } from 'vue'
 import {
   Plus, RefreshCw, ShieldAlert, ShieldOff, ShieldCheck,
-  AlertTriangle, Network, Globe, Globe2, Asterisk, Hash, Trash2,
+  AlertTriangle, Globe, Globe2, Asterisk, Hash, Trash2,
 } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
@@ -490,10 +491,7 @@ const saveDNS = async () => {
   }
 }
 
-const defaultRules   = computed(() => rules.value.filter((r) => r.kind === 'default'))
-const suggestedRules = computed(() => rules.value.filter((r) => r.kind === 'suggested'))
 const customRules    = computed(() => rules.value.filter((r) => r.kind === 'custom'))
-const countOf = (list) => list.length
 
 // Plain-language explanations for shipped (default + suggested) rules. The
 // table values are stable identifiers in the migration so we can key on
@@ -692,7 +690,10 @@ onActivated(loadAll)
 // reserved HTML <section> element name (vue/no-reserved-component-names).
 const PanelSection = defineComponent({
   name: 'PanelSection',
-  props: { title: String, subtitle: String },
+  props: {
+    title: { type: String, default: '' },
+    subtitle: { type: String, default: '' },
+  },
   setup(p, { slots }) {
     return () =>
       h('section', { class: 'space-y-3' }, [

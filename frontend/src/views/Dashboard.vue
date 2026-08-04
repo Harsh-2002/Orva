@@ -1,8 +1,12 @@
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-xl font-semibold text-white tracking-tight">System Overview</h1>
-      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">Live snapshot of what your platform is doing right now.</p>
+      <h1 class="text-xl font-semibold text-white tracking-tight">
+        System Overview
+      </h1>
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        Live snapshot of what your platform is doing right now.
+      </p>
     </div>
 
     <!-- Top-line numbers — every tile has a one-line "what does this mean" -->
@@ -65,14 +69,20 @@
 
         <div class="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">CPU cores</div>
-            <div class="text-lg font-mono text-white mt-0.5">{{ m.host?.num_cpu ?? '?' }}</div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">
+              CPU cores
+            </div>
+            <div class="text-lg font-mono text-white mt-0.5">
+              {{ m.host?.num_cpu ?? '?' }}
+            </div>
             <div class="text-[11px] text-foreground-muted mt-0.5">
               available to functions on this host
             </div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">Memory in use</div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">
+              Memory in use
+            </div>
             <div class="text-lg font-mono text-white mt-0.5">
               {{ formatMB(memUsed) }} <span class="text-foreground-muted text-sm">/ {{ formatMB(memTotal) }}</span>
             </div>
@@ -91,7 +101,7 @@
             :total="memTotal"
             :segments="[
               { label: 'In use', value: memUsed, color: 'bg-info/70' },
-              { label: 'Free',   value: memFree, color: 'bg-success/40' },
+              { label: 'Free', value: memFree, color: 'bg-success/40' },
             ]"
           />
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-muted">
@@ -200,11 +210,17 @@
           <!-- Header -->
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
-              <div class="text-sm font-medium text-white truncate">{{ p.function_name || p.function_id }}</div>
-              <div class="text-[10px] text-foreground-muted font-mono truncate">{{ p.function_id }}</div>
+              <div class="text-sm font-medium text-white truncate">
+                {{ p.function_name || p.function_id }}
+              </div>
+              <div class="text-[10px] text-foreground-muted font-mono truncate">
+                {{ p.function_id }}
+              </div>
             </div>
             <div class="text-right shrink-0">
-              <div class="text-[10px] text-foreground-muted">Target / cap</div>
+              <div class="text-[10px] text-foreground-muted">
+                Target / cap
+              </div>
               <div class="text-xs font-mono text-white">
                 {{ p.target }} <span class="text-foreground-muted">/</span> {{ p.dynamic_max }}
               </div>
@@ -241,25 +257,46 @@
           <!-- Lifetime + resource averages -->
           <div class="border-t border-border pt-3 grid grid-cols-2 gap-3 text-[11px]">
             <div>
-              <div class="text-foreground-muted">Spawned · killed</div>
-              <div class="font-mono text-white">{{ p.spawned }} · {{ p.killed }}</div>
+              <div class="text-foreground-muted">
+                Spawned · killed
+              </div>
+              <div class="font-mono text-white">
+                {{ p.spawned }} · {{ p.killed }}
+              </div>
             </div>
             <div>
-              <div class="text-foreground-muted">Avg latency</div>
-              <div class="font-mono text-white">{{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms</div>
+              <div class="text-foreground-muted">
+                Avg latency
+              </div>
+              <div class="font-mono text-white">
+                {{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms
+              </div>
             </div>
             <div>
-              <div class="text-foreground-muted">Avg memory</div>
-              <div class="font-mono text-white" title="Average memory used per invocation vs allocated limit">
+              <div class="text-foreground-muted">
+                Avg memory
+              </div>
+              <div
+                class="font-mono text-white"
+                title="Average memory used per invocation vs allocated limit"
+              >
                 {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : EMPTY }}
                 <span class="text-foreground-muted">/ {{ p.mem_limit_mb }} MB</span>
               </div>
             </div>
             <div>
-              <div class="text-foreground-muted">Avg CPU</div>
-              <div class="font-mono text-white" title="Average CPU cores consumed per invocation vs allocated">
+              <div class="text-foreground-muted">
+                Avg CPU
+              </div>
+              <div
+                class="font-mono text-white"
+                title="Average CPU cores consumed per invocation vs allocated"
+              >
                 {{ p.cpu_frac_avg > 0 && p.cpu_limit > 0 ? (p.cpu_frac_avg * p.cpu_limit).toFixed(2) : EMPTY }}
-                <span v-if="p.cpu_limit > 0" class="text-foreground-muted">/ {{ p.cpu_limit }} CPU</span>
+                <span
+                  v-if="p.cpu_limit > 0"
+                  class="text-foreground-muted"
+                >/ {{ p.cpu_limit }} CPU</span>
               </div>
             </div>
           </div>
@@ -278,7 +315,9 @@
       class="bg-background border border-border rounded-lg p-8 text-center space-y-4"
     >
       <div>
-        <div class="text-sm text-white">No warm pools yet</div>
+        <div class="text-sm text-white">
+          No warm pools yet
+        </div>
         <div class="text-xs text-foreground-muted mt-1 max-w-prose mx-auto leading-body">
           Deploy your first function to see live worker pools, latency,
           and cold-start rate land in the tiles above.

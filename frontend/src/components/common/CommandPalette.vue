@@ -30,7 +30,10 @@
                  readers announce "Command palette, search routes" on
                  open. The input's placeholder isn't sufficient (placeholders
                  don't get announced as labels). -->
-            <span id="command-palette-label" class="sr-only">Command palette</span>
+            <span
+              id="command-palette-label"
+              class="sr-only"
+            >Command palette</span>
             <input
               ref="searchInput"
               v-model="query"
@@ -72,7 +75,10 @@
               @click="activate(item)"
               @mouseenter="selectedIdx = idx"
             >
-              <component :is="item.icon" class="w-4 h-4 shrink-0 text-foreground-muted" />
+              <component
+                :is="item.icon"
+                class="w-4 h-4 shrink-0 text-foreground-muted"
+              />
               <span class="flex-1 truncate">{{ item.label }}</span>
               <span
                 v-if="item.shortcut"

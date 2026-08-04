@@ -7,7 +7,9 @@
       content keeps the AT cursor's "you are on" announcement aligned
       with whatever the operator has typed in the name field.
     -->
-    <h1 class="sr-only">{{ form.name || 'New function' }}</h1>
+    <h1 class="sr-only">
+      {{ form.name || 'New function' }}
+    </h1>
     <!-- Top action bar — distilled. The 8 individual panel buttons that
          used to live here (Settings, Env, Deps, Secrets, KV, Webhooks,
          Versions, Docs) collapsed to two grouped dropdowns: Config and
@@ -44,123 +46,154 @@
            one row (or wrap among themselves). On sm+ they merge back
            into the parent flex-wrap. -->
       <div class="flex flex-wrap items-center gap-2 sm:contents">
-
-      <!-- Config menu — Settings / Env / Deps / Secrets / Versions.
+        <!-- Config menu — Settings / Env / Deps / Secrets / Versions.
            Versions is hidden until isEditing && versions.length so the
            menu stays small for new-function flows. -->
-      <div class="relative" ref="configMenuRef">
-        <button
-          type="button"
-          class="panel-btn"
-          aria-haspopup="menu"
-          :aria-expanded="menus.config"
-          @click="toggleMenu('config')"
-        >
-          <Settings2 class="w-3.5 h-3.5" /> Config
-          <ChevronDown class="w-3 h-3 text-foreground-muted" />
-        </button>
         <div
-          v-if="menus.config"
-          class="absolute right-0 mt-1 z-30 min-w-[210px] bg-background border border-border rounded-md shadow-xl overflow-hidden"
-          role="menu"
+          ref="configMenuRef"
+          class="relative"
         >
-          <button class="menu-item" role="menuitem" @click="openMenuItem('settings')">
-            <Settings2 class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">Settings</span>
-            <span class="text-[10px] text-foreground-muted">runtime · limits</span>
-          </button>
-          <button class="menu-item" role="menuitem" @click="openMenuItem('envVars')">
-            <Variable class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">Env</span>
-            <span v-if="envVarCount" class="text-[10px] text-foreground-muted tabular-nums">{{ envVarCount }}</span>
-          </button>
-          <button class="menu-item" role="menuitem" @click="openMenuItem('deps')">
-            <Package class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">Deps</span>
-            <span class="text-[10px] text-foreground-muted">package · requirements</span>
-          </button>
-          <button class="menu-item" role="menuitem" @click="openMenuItem('secrets')">
-            <KeyRound class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">Secrets</span>
-            <span v-if="totalSecretsCount" class="text-[10px] text-foreground-muted tabular-nums">{{ totalSecretsCount }}</span>
-          </button>
           <button
-            v-if="isEditing && versions.length"
-            class="menu-item"
-            role="menuitem"
-            @click="openMenuItem('versions')"
+            type="button"
+            class="panel-btn"
+            aria-haspopup="menu"
+            :aria-expanded="menus.config"
+            @click="toggleMenu('config')"
           >
-            <Layers class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">Versions</span>
-            <span class="text-[10px] text-foreground-muted tabular-nums">{{ versions.length }}</span>
+            <Settings2 class="w-3.5 h-3.5" /> Config
+            <ChevronDown class="w-3 h-3 text-foreground-muted" />
           </button>
+          <div
+            v-if="menus.config"
+            class="absolute right-0 mt-1 z-30 min-w-[210px] bg-background border border-border rounded-md shadow-xl overflow-hidden"
+            role="menu"
+          >
+            <button
+              class="menu-item"
+              role="menuitem"
+              @click="openMenuItem('settings')"
+            >
+              <Settings2 class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">Settings</span>
+              <span class="text-[10px] text-foreground-muted">runtime · limits</span>
+            </button>
+            <button
+              class="menu-item"
+              role="menuitem"
+              @click="openMenuItem('envVars')"
+            >
+              <Variable class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">Env</span>
+              <span
+                v-if="envVarCount"
+                class="text-[10px] text-foreground-muted tabular-nums"
+              >{{ envVarCount }}</span>
+            </button>
+            <button
+              class="menu-item"
+              role="menuitem"
+              @click="openMenuItem('deps')"
+            >
+              <Package class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">Deps</span>
+              <span class="text-[10px] text-foreground-muted">package · requirements</span>
+            </button>
+            <button
+              class="menu-item"
+              role="menuitem"
+              @click="openMenuItem('secrets')"
+            >
+              <KeyRound class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">Secrets</span>
+              <span
+                v-if="totalSecretsCount"
+                class="text-[10px] text-foreground-muted tabular-nums"
+              >{{ totalSecretsCount }}</span>
+            </button>
+            <button
+              v-if="isEditing && versions.length"
+              class="menu-item"
+              role="menuitem"
+              @click="openMenuItem('versions')"
+            >
+              <Layers class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">Versions</span>
+              <span class="text-[10px] text-foreground-muted tabular-nums">{{ versions.length }}</span>
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- Bindings menu — KV / Webhooks / Docs. KV + Webhooks only
+        <!-- Bindings menu — KV / Webhooks / Docs. KV + Webhooks only
            visible once the function is saved (they need an fnId).
            Docs is always available. -->
-      <div class="relative" ref="bindingsMenuRef">
-        <button
-          type="button"
-          class="panel-btn"
-          aria-haspopup="menu"
-          :aria-expanded="menus.bindings"
-          @click="toggleMenu('bindings')"
-        >
-          <Plug class="w-3.5 h-3.5" /> Bindings
-          <ChevronDown class="w-3 h-3 text-foreground-muted" />
-        </button>
         <div
-          v-if="menus.bindings"
-          class="absolute right-0 mt-1 z-30 min-w-[210px] bg-background border border-border rounded-md shadow-xl overflow-hidden"
-          role="menu"
+          ref="bindingsMenuRef"
+          class="relative"
         >
           <button
-            v-if="isEditing"
-            class="menu-item"
-            role="menuitem"
-            @click="navMenu({ name: 'function-kv', params: { name: form.name } })"
+            type="button"
+            class="panel-btn"
+            aria-haspopup="menu"
+            :aria-expanded="menus.bindings"
+            @click="toggleMenu('bindings')"
           >
-            <Database class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">KV store</span>
-            <span class="text-[10px] text-foreground-muted">per-function state</span>
+            <Plug class="w-3.5 h-3.5" /> Bindings
+            <ChevronDown class="w-3 h-3 text-foreground-muted" />
           </button>
-          <button
-            v-if="isEditing"
-            class="menu-item"
-            role="menuitem"
-            @click="navMenu({ name: 'function-inbound-webhooks', params: { name: form.name } })"
+          <div
+            v-if="menus.bindings"
+            class="absolute right-0 mt-1 z-30 min-w-[210px] bg-background border border-border rounded-md shadow-xl overflow-hidden"
+            role="menu"
           >
-            <Webhook class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">Inbound webhooks</span>
-            <span class="text-[10px] text-foreground-muted">signed POST</span>
-          </button>
-          <button class="menu-item" role="menuitem" @click="openMenuItem('docs')">
-            <BookOpen class="w-3.5 h-3.5" />
-            <span class="flex-1 text-left">Docs</span>
-            <span class="text-[10px] text-foreground-muted">handler reference</span>
-          </button>
+            <button
+              v-if="isEditing"
+              class="menu-item"
+              role="menuitem"
+              @click="navMenu({ name: 'function-kv', params: { name: form.name } })"
+            >
+              <Database class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">KV store</span>
+              <span class="text-[10px] text-foreground-muted">per-function state</span>
+            </button>
+            <button
+              v-if="isEditing"
+              class="menu-item"
+              role="menuitem"
+              @click="navMenu({ name: 'function-inbound-webhooks', params: { name: form.name } })"
+            >
+              <Webhook class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">Inbound webhooks</span>
+              <span class="text-[10px] text-foreground-muted">signed POST</span>
+            </button>
+            <button
+              class="menu-item"
+              role="menuitem"
+              @click="openMenuItem('docs')"
+            >
+              <BookOpen class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left">Docs</span>
+              <span class="text-[10px] text-foreground-muted">handler reference</span>
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div class="w-px h-5 bg-border mx-1" />
+        <div class="w-px h-5 bg-border mx-1" />
 
-      <Button
-        variant="secondary"
-        size="sm"
-        @click="resetForm"
-      >
-        Reset
-      </Button>
-      <Button
-        size="sm"
-        :loading="deploying"
-        @click="deployFunction"
-      >
-        <UploadCloud class="w-4 h-4" />
-        {{ isEditing ? 'Deploy New Version' : 'Deploy' }}
-      </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          @click="resetForm"
+        >
+          Reset
+        </Button>
+        <Button
+          size="sm"
+          :loading="deploying"
+          @click="deployFunction"
+        >
+          <UploadCloud class="w-4 h-4" />
+          {{ isEditing ? 'Deploy New Version' : 'Deploy' }}
+        </Button>
       </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
 
@@ -316,7 +349,13 @@
                 :disabled="!canTest"
                 class="text-[11px] font-mono bg-background border border-border rounded px-1.5 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
               >
-                <option v-for="m in methods" :key="m" :value="m">{{ m }}</option>
+                <option
+                  v-for="m in methods"
+                  :key="m"
+                  :value="m"
+                >
+                  {{ m }}
+                </option>
               </select>
               <input
                 v-model="testPath"
@@ -416,21 +455,24 @@
                   :class="headersOpen ? 'rotate-0' : '-rotate-90'"
                 />
               </button>
-              <div v-if="headersOpen" class="px-2 py-2 space-y-1">
+              <div
+                v-if="headersOpen"
+                class="px-2 py-2 space-y-1"
+              >
                 <div
-                  v-for="(h, idx) in testHeaders"
+                  v-for="(header, idx) in testHeaders"
                   :key="idx"
                   class="flex items-center gap-1.5"
                 >
                   <input
-                    v-model="h.name"
+                    v-model="header.name"
                     :disabled="!canTest"
                     spellcheck="false"
                     placeholder="Header name"
                     class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
                   >
                   <input
-                    v-model="h.value"
+                    v-model="header.value"
                     :disabled="!canTest"
                     spellcheck="false"
                     placeholder="value"
@@ -482,7 +524,8 @@
           <!-- Response + logs column -->
           <div class="flex flex-col min-h-0">
             <div class="h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
-              <span class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5"
+              <span
+                class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5"
                 :class="error ? 'text-red-400' : output ? 'text-success' : 'text-foreground-muted'"
               >
                 <span
@@ -1178,7 +1221,7 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, ExternalLink, Settings2, Variable, Package, X, Trash2, Terminal, Activity, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from 'lucide-vue-next'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
@@ -1221,7 +1264,7 @@ import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import { generateFunctionName } from '@/utils/funName'
 import { templates, defaultCode, categoryOrder } from '@/templates'
-import { rollbackFunction, listFixtures, createFixture, updateFixture, deleteFixture, invokeFunctionFull, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
+import { rollbackFunction, listFixtures, updateFixture, deleteFixture, invokeFunctionFull, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
 import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
@@ -2315,7 +2358,7 @@ const refreshFixtures = async () => {
   try {
     const res = await listFixtures(fnId.value)
     fixtures.value = res.data?.fixtures || []
-  } catch (e) {
+  } catch {
     // Soft-fail — fixture popover stays empty if the backend is
     // unreachable; the rest of the editor still works.
     fixtures.value = []
@@ -2425,7 +2468,7 @@ const rollbackToVersion = async (v) => {
         diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}). Settings and env are already identical, so only the code changes.`
       }
     }
-  } catch (e) {
+  } catch {
     // fall through to default message
   }
 

@@ -25,7 +25,9 @@
           v-if="icon"
           class="w-4 h-4"
         />
-        <slot name="title">{{ title }}</slot>
+        <slot name="title">
+          {{ title }}
+        </slot>
       </div>
       <div
         v-if="$slots.actions"

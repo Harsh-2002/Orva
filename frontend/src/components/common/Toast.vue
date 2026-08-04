@@ -15,7 +15,12 @@
                sm:inset-x-auto sm:bottom-6 sm:right-6 sm:mx-0 sm:pb-4"
       >
         <div class="flex-1 min-w-0">
-          <div v-if="title" class="text-sm font-medium text-white mb-0.5">{{ title }}</div>
+          <div
+            v-if="title"
+            class="text-sm font-medium text-white mb-0.5"
+          >
+            {{ title }}
+          </div>
           <div class="text-xs text-foreground-muted">
             <slot />
           </div>
@@ -43,6 +48,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'CommonToast' })
+
 defineProps({
   visible: { type: Boolean, default: false },
   title: { type: String, default: '' },

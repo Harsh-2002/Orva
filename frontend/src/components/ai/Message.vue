@@ -1,4 +1,6 @@
 <script setup>
+defineOptions({ name: 'AIMessage' })
+
 import { ref, computed, nextTick } from 'vue'
 import { Copy, Check, RotateCcw, Pencil, Trash2 } from 'lucide-vue-next'
 import MessagePart from './MessagePart.vue'

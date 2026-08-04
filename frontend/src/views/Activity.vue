@@ -26,50 +26,49 @@
         >
       </div>
       <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0">
+        <Button
+          v-for="opt in sourceOptions"
+          :key="opt.value"
+          variant="chip"
+          size="xs"
+          :active="filters.source === opt.value"
+          class="shrink-0 snap-start"
+          @click="filters.source = opt.value; reset()"
+        >
+          {{ opt.label }}
+          <span
+            v-if="counts[opt.value] != null && opt.value !== ''"
+            class="ml-1 opacity-60 tabular-nums"
+          >{{ counts[opt.value] }}</span>
+        </Button>
 
-      <Button
-        v-for="opt in sourceOptions"
-        :key="opt.value"
-        variant="chip"
-        size="xs"
-        :active="filters.source === opt.value"
-        class="shrink-0 snap-start"
-        @click="filters.source = opt.value; reset()"
-      >
-        {{ opt.label }}
-        <span
-          v-if="counts[opt.value] != null && opt.value !== ''"
-          class="ml-1 opacity-60 tabular-nums"
-        >{{ counts[opt.value] }}</span>
-      </Button>
+        <span class="text-foreground-muted/40 shrink-0">·</span>
 
-      <span class="text-foreground-muted/40 shrink-0">·</span>
+        <Button
+          v-for="opt in statusOptions"
+          :key="opt.value"
+          variant="chip"
+          size="xs"
+          :active="filters.statusBucket === opt.value"
+          class="shrink-0 snap-start"
+          @click="filters.statusBucket = opt.value; reset()"
+        >
+          {{ opt.label }}
+        </Button>
 
-      <Button
-        v-for="opt in statusOptions"
-        :key="opt.value"
-        variant="chip"
-        size="xs"
-        :active="filters.statusBucket === opt.value"
-        class="shrink-0 snap-start"
-        @click="filters.statusBucket = opt.value; reset()"
-      >
-        {{ opt.label }}
-      </Button>
+        <span class="text-foreground-muted/40 shrink-0">·</span>
 
-      <span class="text-foreground-muted/40 shrink-0">·</span>
-
-      <Button
-        v-for="opt in rangeOptions"
-        :key="opt.value"
-        variant="chip"
-        size="xs"
-        :active="filters.range === opt.value"
-        class="shrink-0 snap-start"
-        @click="filters.range = opt.value; reset()"
-      >
-        {{ opt.label }}
-      </Button>
+        <Button
+          v-for="opt in rangeOptions"
+          :key="opt.value"
+          variant="chip"
+          size="xs"
+          :active="filters.range === opt.value"
+          class="shrink-0 snap-start"
+          @click="filters.range = opt.value; reset()"
+        >
+          {{ opt.label }}
+        </Button>
       </div>
     </div>
 
@@ -104,7 +103,10 @@
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted font-mono">
                 <span>{{ formatTime(row.ts) }}</span>
                 <span v-if="row.duration_ms != null">{{ formatDuration(row.duration_ms) }}</span>
-                <span v-if="row.actor_label || row.actor_id" class="break-all">{{ row.actor_label || row.actor_id }}</span>
+                <span
+                  v-if="row.actor_label || row.actor_id"
+                  class="break-all"
+                >{{ row.actor_label || row.actor_id }}</span>
               </div>
             </div>
           </div>
@@ -121,14 +123,30 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3 w-32">Time</th>
-            <th class="px-4 py-3 w-24">Source</th>
-            <th class="px-4 py-3 w-40 hidden md:table-cell">Actor</th>
-            <th class="px-4 py-3 w-20 hidden sm:table-cell">Method</th>
-            <th class="px-4 py-3">Path / Tool</th>
-            <th class="px-4 py-3 w-16 hidden sm:table-cell">Status</th>
-            <th class="px-4 py-3 w-20 hidden lg:table-cell">Duration</th>
-            <th class="px-4 py-3 hidden xl:table-cell">Summary</th>
+            <th class="px-4 py-3 w-32">
+              Time
+            </th>
+            <th class="px-4 py-3 w-24">
+              Source
+            </th>
+            <th class="px-4 py-3 w-40 hidden md:table-cell">
+              Actor
+            </th>
+            <th class="px-4 py-3 w-20 hidden sm:table-cell">
+              Method
+            </th>
+            <th class="px-4 py-3">
+              Path / Tool
+            </th>
+            <th class="px-4 py-3 w-16 hidden sm:table-cell">
+              Status
+            </th>
+            <th class="px-4 py-3 w-20 hidden lg:table-cell">
+              Duration
+            </th>
+            <th class="px-4 py-3 hidden xl:table-cell">
+              Summary
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -166,7 +184,10 @@
                 v-if="row.status"
                 :status="statusLabel(row.status)"
               />
-              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
+              <span
+                v-else
+                class="text-foreground-muted text-xs"
+              >{{ EMPTY }}</span>
             </td>
             <td class="px-4 py-2.5 text-xs font-mono text-foreground-muted hidden lg:table-cell">
               {{ formatDuration(row.duration_ms) }}
@@ -176,7 +197,10 @@
             </td>
           </tr>
           <tr v-if="!rows.length">
-            <td colspan="8" class="px-4 py-12 text-center text-foreground-muted text-sm">
+            <td
+              colspan="8"
+              class="px-4 py-12 text-center text-foreground-muted text-sm"
+            >
               No activity yet. Drive any action (open the dashboard,
               call a function, fire an MCP tool) and rows will land here.
             </td>
@@ -229,62 +253,113 @@
     </div>
 
     <!-- Detail drawer -->
-    <Drawer v-model="drawerOpen" :title="drawerTitle" width="640px">
-      <div v-if="drawerRow" class="p-5 space-y-5 text-sm">
+    <Drawer
+      v-model="drawerOpen"
+      :title="drawerTitle"
+      width="640px"
+    >
+      <div
+        v-if="drawerRow"
+        class="p-5 space-y-5 text-sm"
+      >
         <!-- Stat grid — 2 cols, mirrors InvocationsLog drawer for visual parity. -->
         <div class="grid grid-cols-2 gap-3">
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Time</div>
-            <div class="text-xs text-white font-mono truncate">{{ formatFullTime(drawerRow.ts) }}</div>
-          </div>
-          <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Source</div>
-            <SourceTag :source="drawerRow.source" />
-          </div>
-          <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Actor</div>
-            <div class="text-sm text-white truncate">{{ drawerRow.actor_label || EMPTY }}</div>
-            <div v-if="drawerRow.actor_id" class="text-[11px] text-foreground-muted font-mono truncate mt-0.5">{{ drawerRow.actor_id }}</div>
-          </div>
-          <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Status</div>
-            <div class="flex items-center gap-2">
-              <StatusBadge v-if="drawerRow.status" :status="statusLabel(drawerRow.status)" />
-              <span v-else class="text-foreground-muted text-xs">{{ EMPTY }}</span>
-              <span v-if="drawerRow.status" class="text-xs text-foreground-muted font-mono">HTTP {{ drawerRow.status }}</span>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Time
+            </div>
+            <div class="text-xs text-white font-mono truncate">
+              {{ formatFullTime(drawerRow.ts) }}
             </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Method</div>
-            <div class="text-xs text-white font-mono truncate">{{ drawerRow.method || EMPTY }}</div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Source
+            </div>
+            <SourceTag :source="drawerRow.source" />
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">Duration</div>
-            <div class="text-xs text-white font-mono">{{ formatDuration(drawerRow.duration_ms) }}</div>
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Actor
+            </div>
+            <div class="text-sm text-white truncate">
+              {{ drawerRow.actor_label || EMPTY }}
+            </div>
+            <div
+              v-if="drawerRow.actor_id"
+              class="text-[11px] text-foreground-muted font-mono truncate mt-0.5"
+            >
+              {{ drawerRow.actor_id }}
+            </div>
+          </div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Status
+            </div>
+            <div class="flex items-center gap-2">
+              <StatusBadge
+                v-if="drawerRow.status"
+                :status="statusLabel(drawerRow.status)"
+              />
+              <span
+                v-else
+                class="text-foreground-muted text-xs"
+              >{{ EMPTY }}</span>
+              <span
+                v-if="drawerRow.status"
+                class="text-xs text-foreground-muted font-mono"
+              >HTTP {{ drawerRow.status }}</span>
+            </div>
+          </div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Method
+            </div>
+            <div class="text-xs text-white font-mono truncate">
+              {{ drawerRow.method || EMPTY }}
+            </div>
+          </div>
+          <div class="bg-surface border border-border rounded p-3 min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+              Duration
+            </div>
+            <div class="text-xs text-white font-mono">
+              {{ formatDuration(drawerRow.duration_ms) }}
+            </div>
           </div>
         </div>
 
         <!-- Path / tool — full-width -->
         <div>
-          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Path / Tool</h3>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
+            Path / Tool
+          </h3>
           <pre class="bg-surface border border-border rounded p-3 text-xs text-white font-mono whitespace-pre-wrap break-all">{{ drawerRow.path || EMPTY }}</pre>
         </div>
 
         <!-- Summary -->
         <div>
-          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Summary</h3>
-          <div class="text-foreground break-words">{{ drawerRow.summary || EMPTY }}</div>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
+            Summary
+          </h3>
+          <div class="text-foreground break-words">
+            {{ drawerRow.summary || EMPTY }}
+          </div>
         </div>
 
         <!-- Request id -->
         <div v-if="drawerRow.request_id">
-          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Request ID</h3>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
+            Request ID
+          </h3>
           <pre class="bg-surface border border-border rounded p-3 text-xs text-foreground-muted font-mono whitespace-pre-wrap break-all">{{ drawerRow.request_id }}</pre>
         </div>
 
         <!-- Metadata JSON -->
         <div v-if="prettyMetadata">
-          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">Metadata</h3>
+          <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
+            Metadata
+          </h3>
           <pre class="bg-surface border border-border rounded p-3 text-xs text-foreground font-mono overflow-auto max-h-72 whitespace-pre-wrap break-words">{{ prettyMetadata }}</pre>
         </div>
       </div>
@@ -293,6 +368,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'ActivityView' })
+
 import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { Search, ChevronLeft, ChevronRight } from 'lucide-vue-next'

@@ -90,13 +90,25 @@
       <table class="w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3 w-32">Time</th>
-            <th class="px-4 py-3 w-40">Trace</th>
-            <th class="px-4 py-3">Root function</th>
-            <th class="px-4 py-3 w-28 hidden md:table-cell">Trigger</th>
-            <th class="px-4 py-3 w-24 text-right hidden sm:table-cell">Duration</th>
-            <th class="px-4 py-3 w-24">Status</th>
-            <th class="px-4 py-3 w-10"></th>
+            <th class="px-4 py-3 w-32">
+              Time
+            </th>
+            <th class="px-4 py-3 w-40">
+              Trace
+            </th>
+            <th class="px-4 py-3">
+              Root function
+            </th>
+            <th class="px-4 py-3 w-28 hidden md:table-cell">
+              Trigger
+            </th>
+            <th class="px-4 py-3 w-24 text-right hidden sm:table-cell">
+              Duration
+            </th>
+            <th class="px-4 py-3 w-24">
+              Status
+            </th>
+            <th class="px-4 py-3 w-10" />
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -138,8 +150,15 @@
       </table>
     </div>
 
-    <div v-if="nextCursor" class="flex justify-center">
-      <Button variant="ghost" size="sm" @click="loadMore">
+    <div
+      v-if="nextCursor"
+      class="flex justify-center"
+    >
+      <Button
+        variant="ghost"
+        size="sm"
+        @click="loadMore"
+      >
         Load more
       </Button>
     </div>
@@ -147,6 +166,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'TracesView' })
+
 import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'

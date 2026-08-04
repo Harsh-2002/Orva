@@ -23,28 +23,30 @@
             indicator. Border lives on the top edge only.
 
             Desktop (sm+): right-anchored side panel as before. The
-            CSS variable --drawer-w is consumed by sm:w-[var(...)] so
+            The --drawer-w CSS variable feeds the responsive width utility so
             the parent can pass any width string the design wants.
           -->
           <div
             v-if="modelValue"
+            ref="root"
             class="absolute pointer-events-auto bg-background flex flex-col
                    inset-x-0 bottom-0 max-h-[85dvh] border-t border-border rounded-t-lg pb-safe
                    sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:border-t-0 sm:border-l sm:rounded-none sm:pb-0
                    sm:w-[var(--drawer-w,560px)]"
             :style="{ '--drawer-w': width }"
-            @keydown.esc="close"
             tabindex="-1"
-            ref="root"
+            @keydown.esc="close"
           >
             <header class="px-5 py-3 border-b border-border flex items-center justify-between shrink-0">
               <div class="text-sm font-medium text-white truncate">
-                <slot name="title">{{ title }}</slot>
+                <slot name="title">
+                  {{ title }}
+                </slot>
               </div>
               <button
                 class="text-foreground-muted hover:text-white transition-colors touch-expand-iconbtn -mr-1"
-                @click="close"
                 aria-label="Close"
+                @click="close"
               >
                 <X class="w-4 h-4" />
               </button>
@@ -66,6 +68,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'CommonDrawer' })
+
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { X } from 'lucide-vue-next'
 
