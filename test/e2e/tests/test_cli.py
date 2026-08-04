@@ -13,7 +13,8 @@ import os
 import sys
 import tempfile
 
-from harness import OrvaClient, CLIRunner, section, check, summary, skip
+from harness import (CLIRunner, OrvaClient, latest_execution_stderr, section,
+                     check, summary, skip)
 
 NAME = "e2e-cli-fn"
 DEPLOY_NAME = "e2e-cli-deploy"
@@ -148,7 +149,7 @@ def main():
         # Build a trivial node source dir and try a real deploy via the CLI.
         # API-only runs skip when nsjail is unavailable; the mandatory engine
         # gate converts the same condition into a failure.
-        deploy_ok = _try_deploy_invoke(cli)
+        deploy_ok = _try_deploy_invoke(c, cli)
         if deploy_ok is None or deploy_ok.get("failed"):
             if os.environ.get("ORVA_REQUIRE_SANDBOX", "") in ("1", "true", "yes"):
                 check("CLI deploy/invoke sandbox path is available", False,
@@ -177,7 +178,7 @@ def main():
     return summary()
 
 
-def _try_deploy_invoke(cli):
+def _try_deploy_invoke(client, cli):
     """Best-effort: deploy a tiny node function to its OWN name via the CLI and
     invoke it. Returns None when the deploy clearly couldn't build (sandbox
     missing), else a dict describing what happened. Uses a distinct name so it
@@ -211,6 +212,10 @@ def _try_deploy_invoke(cli):
             invoke_body = None
         result["invoked"] = (irc == 0 and invoke_body == {"ok": True})
         result["invoke_detail"] = (iout + ierr).strip()[-200:]
+        if not result["invoked"]:
+            stderr = latest_execution_stderr(client, function_name=dep_name)
+            if stderr:
+                result["invoke_detail"] += f"; stderr={stderr[:700]!r}"
         _cli_delete(cli, dep_name)
         return result
     except Exception as e:

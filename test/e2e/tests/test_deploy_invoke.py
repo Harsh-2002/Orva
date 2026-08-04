@@ -10,7 +10,7 @@ import os
 import sys
 import time
 
-from harness import OrvaClient, section, check, summary, skip
+from harness import OrvaClient, latest_execution_stderr, section, check, summary, skip
 
 NAME = "e2e-deploy-invoke"
 PYTHON_NAME = "e2e-deploy-invoke-python"
@@ -124,9 +124,11 @@ def main():
         blob = str(err).lower()
         if icode >= 500 and (ecode in ("WORKER_CRASHED", "SANDBOX_ERROR")
                              or "rootfs" in blob or "nsjail" in blob or "sandbox" in blob):
+            stderr = latest_execution_stderr(c, function_id=fid)
+            diagnostic = f"; stderr={stderr[:700]!r}" if stderr else "; stderr unavailable"
             return sandbox_unavailable(
                 f"sandbox/invoke unavailable here ({ecode or icode}: {str(err)[:240]}); "
-                "create+deploy+build verified"
+                f"create+deploy+build verified{diagnostic}"
             )
         check("invoke -> 200", icode == 200, f"status {icode}: {str(ibody)[:200]}")
         # Body may come back parsed (dict) or as a raw JSON string; normalize.
