@@ -153,19 +153,24 @@ func TestDefaultSeccompBlocksNestedNamespaceCreation(t *testing.T) {
 	}
 }
 
-func TestARM64SeccompUsesKafelRuntimeAliases(t *testing.T) {
-	allowed := policySyscalls(buildSeccompPolicyForArch("default", nil, nil, "arm64"))
-	for _, name := range arm64RuntimeAliases {
-		if !allowed[name] {
-			t.Errorf("ARM64 policy is missing Kafel runtime alias %s", name)
+func TestSeccompUsesKafelRuntimeAliasesOnSupportedArchitectures(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		allowed := policySyscalls(buildSeccompPolicyForArch("default", nil, nil, arch))
+		for _, name := range kafelRuntimeAliases {
+			if !allowed[name] {
+				t.Errorf("%s policy is missing Kafel runtime alias %s", arch, name)
+			}
 		}
 	}
 }
 
 func TestStrictSeccompFiltersUnknownKafelIdentifiers(t *testing.T) {
-	policy := buildSeccompPolicyForArch("strict", nil, nil, "amd64")
-	if strings.Contains(policy, "uname") {
-		t.Fatalf("strict policy contains uname, which is absent from the Kafel catalog: %s", policy)
+	allowed := policySyscalls(buildSeccompPolicyForArch("strict", nil, nil, "amd64"))
+	if allowed["uname"] {
+		t.Fatal("strict policy contains uname, which is absent from the Kafel catalog")
+	}
+	if !allowed["newuname"] {
+		t.Fatal("strict policy is missing Kafel's newuname runtime alias")
 	}
 }
 

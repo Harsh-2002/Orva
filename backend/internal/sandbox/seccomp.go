@@ -143,12 +143,12 @@ var arm64UnsupportedSyscalls = map[string]bool{
 	"select": true, "unlink": true,
 }
 
-// Kafel's aarch64 catalog uses the kernel-internal names newfstat/newuname
-// for the syscalls strace and libc expose as fstat/uname. They are not part of
-// the x86_64-derived API catalog below, but both current runtimes need them at
-// startup. Add them after generic validation so ARM64 gets the correct Kafel
-// identifiers without exposing architecture-specific names in the API.
-var arm64RuntimeAliases = []string{"newfstat", "newuname"}
+// Kafel's amd64 and aarch64 catalogs use the kernel-internal names
+// newfstat/newuname for the syscalls strace and libc expose as fstat/uname.
+// They are not part of the API catalog below, but both current runtimes need
+// them at startup. Add them after generic validation without exposing
+// Kafel-specific names in the user-facing API.
+var kafelRuntimeAliases = []string{"newfstat", "newuname"}
 
 // Namespace-creating clone flags. Language runtimes need clone for threads,
 // but a function has no reason to create a nested user/mount/network/etc.
@@ -211,10 +211,8 @@ func buildSeccompPolicyForArch(base string, allow, block []string, goarch string
 			delete(allowed, name)
 		}
 	}
-	if goarch == "arm64" {
-		for _, name := range arm64RuntimeAliases {
-			allowed[name] = true
-		}
+	for _, name := range kafelRuntimeAliases {
+		allowed[name] = true
 	}
 
 	// Build sorted syscall list for deterministic output.
