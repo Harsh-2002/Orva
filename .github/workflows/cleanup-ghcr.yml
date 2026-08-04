@@ -37,9 +37,6 @@ jobs:
             echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Resolve :latest → digest → find the tag that shares that digest.
-          latest_digest=$(docker buildx imagetools inspect ghcr.io/harsh-2002/orva:latest --raw \
-            | sha256sum | awk '{print "sha256:"$1}')
           # The :latest manifest itself is a multi-arch manifest list. Find
           # which version row in the API has 'latest' in its tags — that
           # row's adjacent tag (vYYYY.MM.DD) is what we preserve.

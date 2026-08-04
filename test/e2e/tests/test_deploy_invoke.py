@@ -124,7 +124,8 @@ def main():
         if icode >= 500 and (ecode in ("WORKER_CRASHED", "SANDBOX_ERROR")
                              or "rootfs" in blob or "nsjail" in blob or "sandbox" in blob):
             return sandbox_unavailable(
-                f"sandbox/invoke unavailable here ({ecode or icode}); create+deploy+build verified"
+                f"sandbox/invoke unavailable here ({ecode or icode}: {str(err)[:240]}); "
+                "create+deploy+build verified"
             )
         check("invoke -> 200", icode == 200, f"status {icode}: {str(ibody)[:200]}")
         # Body may come back parsed (dict) or as a raw JSON string; normalize.

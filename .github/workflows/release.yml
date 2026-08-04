@@ -406,7 +406,7 @@ jobs:
       - name: sha256 checksums
         working-directory: dist
         run: |
-          sha256sum * | tee checksums.txt
+          sha256sum -- * | tee checksums.txt
 
       - name: create / update github release
         uses: softprops/action-gh-release@v3
@@ -604,10 +604,10 @@ jobs:
       - name: create + push multi-arch manifest (:latest only)
         run: |
           cd /tmp/digests
-          DIGESTS=$(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          mapfile -t digests < <(printf '${{ env.IMAGE_NAME }}@sha256:%s\n' *)
           docker buildx imagetools create \
             -t ${{ env.IMAGE_NAME }}:latest \
-            $DIGESTS
+            "${digests[@]}"
 
       - name: inspect
         run: |

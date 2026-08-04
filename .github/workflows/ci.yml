@@ -38,10 +38,10 @@ jobs:
           go-version: "1.26.x"
           cache: false
 
-      - name: GitHub Actions workflow syntax
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-
       - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends dash shellcheck
+
+      - name: GitHub Actions workflow syntax + embedded shell
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
       # POSIX scripts (install.sh, install-cli.sh) MUST run under any POSIX sh
       # on user systems. dash -n catches bashisms that shellcheck -s sh would
@@ -171,7 +171,7 @@ jobs:
       - name: run container + health smoke
         run: |
           docker run -d --name orva-ci -p 127.0.0.1:18443:8443 orva:ci
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18443/api/v1/system/health >/dev/null; then
               break
             fi
