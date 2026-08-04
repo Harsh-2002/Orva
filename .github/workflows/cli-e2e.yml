@@ -14,9 +14,9 @@ permissions:
 
 on:
   # Source validation (unit + cross-build) runs on PRs. The install jobs
-  # download the RELEASED CLI, so they run on release:published (against the
-  # freshly-published artifacts) — not on main-push, which would race the
-  # release cut and 404 on "latest".
+  # download released CLI assets, so they do not run on main-push. External
+  # publications can trigger release:published; release.yml explicitly
+  # dispatches this workflow with the newly published tag.
   release:
     types: [published]
   pull_request:
@@ -87,14 +87,6 @@ jobs:
         run: bash test/cli/build-matrix.sh
       - name: command-tree golden diff
         run: bash test/cli/command-tree.sh
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: cli-cross-build
-          path: |
-            build/cli-matrix
-            test/cli/logs
-          retention-days: 7
 
   install-linux:
     name: install-cli.sh on Linux
@@ -112,12 +104,6 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y jq curl
       - name: run install-cli-test.sh
         run: bash test/cli/install-cli-test.sh ubuntu24
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: install-linux-logs
-          path: test/cli/logs/
-          retention-days: 7
 
   install-macos:
     name: install-cli.sh on macOS
@@ -205,9 +191,3 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y jq curl
       - name: run upgrade-test.sh
         run: bash test/cli/upgrade-test.sh
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: upgrade-logs
-          path: test/cli/logs/
-          retention-days: 7

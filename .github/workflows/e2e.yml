@@ -11,7 +11,7 @@ permissions:
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -113,28 +113,18 @@ jobs:
 
       - name: Show checklist
         if: always() && steps.suite.outcome != 'skipped'
-        run: cat test/e2e/CHECKLIST.md || true
+        run: |
+          cat test/e2e/CHECKLIST.md || true
+          {
+            echo "## E2E checklist"
+            echo ""
+            cat test/e2e/CHECKLIST.md
+          } >> "$GITHUB_STEP_SUMMARY" || true
 
       - name: Annotate E2E failures
         if: failure() && steps.suite.outcome == 'failure'
         run: |
           audit_summary=$(grep -E '^\- \*\*(Modules|Checks)|\| .* \| ❌ FAIL|^- .*test_.*: ' test/e2e/CHECKLIST.md | paste -sd ' ' - || true)
-          [ -n "$audit_summary" ] || audit_summary="E2E process failed before writing its checklist; inspect the server log artifact"
+          [ -n "$audit_summary" ] || audit_summary="E2E process failed before writing its checklist; inspect the job log"
           audit_summary=${audit_summary//'%'/'%25'}
           echo "::error title=E2E checklist::$audit_summary"
-
-      - name: Upload server log
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: orva-server-log
-          path: ${{ runner.temp }}/orva.log
-          if-no-files-found: ignore
-
-      - name: Upload E2E checklist
-        if: always() && steps.suite.outcome != 'skipped'
-        uses: actions/upload-artifact@v7
-        with:
-          name: orva-e2e-checklist
-          path: test/e2e/CHECKLIST.md
-          if-no-files-found: ignore

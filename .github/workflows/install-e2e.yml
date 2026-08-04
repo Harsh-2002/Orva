@@ -10,10 +10,9 @@ permissions:
   contents: read
 
 on:
-  # Runs AFTER a release publishes — these download the released binary, so
-  # they must not run on main-push: during a release cut the old release is
-  # already gone and the new one isn't published yet, so "latest" 404s. On
-  # release:published they validate the freshly-published artifacts.
+  # These jobs download released binaries, so they do not run on main-push.
+  # External/manual publications can trigger release:published; releases made
+  # by release.yml with GITHUB_TOKEN are dispatched explicitly with their tag.
   release:
     types: [published]
   pull_request:
@@ -72,50 +71,26 @@ jobs:
           ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
         run: bash test/install/run-distro.sh ${{ matrix.distro }}
 
-      - name: Upload logs
+      - name: Summarize ${{ matrix.distro }} result
         if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: install-e2e-${{ matrix.distro }}
-          path: |
-            test/install/logs/${{ matrix.distro }}-*.log
-            test/install/results-*.tsv
-          retention-days: 14
+        run: |
+          result="not recorded"
+          if compgen -G 'test/install/results-*.tsv' >/dev/null; then
+            recorded=$(awk -F '\t' -v distro="${{ matrix.distro }}" '$1 == distro { value=$2 } END { print value }' test/install/results-*.tsv)
+            [ -z "$recorded" ] || result="$recorded"
+          fi
+          {
+            echo "## install-e2e: ${{ matrix.distro }}"
+            echo ""
+            echo "Result: **$result**"
+            echo ""
+            echo "Detailed output is available in this job's log."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # gVisor (runsc) CI leg removed 2026-05-13 after end-to-end testing
   # confirmed Orva does not run under gVisor — nsjail's nested-namespace
   # clone() is rejected by gVisor's sentry on every invocation. See
   # docs/GVISOR.md for the full writeup.
-
-  summary:
-    runs-on: ubuntu-24.04
-    needs: [matrix]
-    if: always()
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-      - name: Build summary
-        run: |
-          {
-            echo "## install-e2e summary"
-            echo ""
-            echo "| Distro | Result |"
-            echo "|---|---|"
-            for d in ubuntu24 debian12 alpine321 rocky9 fedora41 arch; do
-              if [ -d "artifacts/install-e2e-$d" ]; then
-                if awk -F '\t' -v distro="$d" '$1 == distro && $2 == "pass" { found=1 } END { exit !found }' \
-                    artifacts/install-e2e-$d/results-*.tsv 2>/dev/null; then
-                  echo "| $d | ✅ pass |"
-                else
-                  echo "| $d | ❌ fail |"
-                fi
-              else
-                echo "| $d | ⚠️ no artifact |"
-              fi
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
 
   # Hosted runners are VMs, so this leg exercises the real systemd service
   # and makes both language engines mandatory. The distro matrix above still
