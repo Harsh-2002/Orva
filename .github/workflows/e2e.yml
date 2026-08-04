@@ -4,6 +4,7 @@
 #   install — validate released server installers plus native sandboxes
 # CI owns lint/unit/build checks; Release only ships commits already green here.
 name: e2e
+run-name: e2e / ${{ inputs.suite || github.event_name }}
 
 permissions:
   contents: read

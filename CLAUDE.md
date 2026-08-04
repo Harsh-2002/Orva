@@ -71,7 +71,7 @@ publishes. For code changes, `ci` (workflow lint, shellcheck, go vet/test/build,
 dependency audit, and a running-container smoke test) plus `e2e` run on PRs and pushes to
 `main`; docs-only changes skip `ci` but still run `e2e`. The same `e2e` workflow also owns
 CLI + bare-metal installer jobs on relevant PRs and against released artifacts. Registry
-pruning is isolated in `cleanup-ghcr`, which runs only after a successful Release.
+pruning is isolated in `cleanup-ghcr`, which runs only after released-artifact E2E succeeds.
 
 GitHub-hosted E2E runs Orva directly on the VM, provisions nsjail plus Node/Python rootfs
 trees, and sets `ORVA_REQUIRE_SANDBOX=1`; real deploy/invoke is therefore mandatory and a
@@ -93,16 +93,15 @@ kernel boundary manually.
    right after the merge). It **refuses to build** if either is missing or red. On pass it builds
    + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
    checksums, and the GitHub Release. Every build job `needs: gate`; a successful Release then
-   triggers the separate `cleanup-ghcr` workflow.
+   dispatches released-artifact E2E; its success triggers the separate `cleanup-ghcr` workflow.
    *Emergency/rc only:* `workflow_dispatch` with `force=true` skips the gate.
 3. **On release publish**, dispatch the `e2e` workflow's `artifacts` suite against the
    freshly-published CLI + server assets (a `GITHUB_TOKEN`-created release does not auto-fire
    downstream workflows, so Release calls `gh workflow run e2e.yml -f suite=artifacts`). The CLI
    upgrade leg uses the previous active release when present and skips cleanly when there is none.
-4. **After** the new release is confirmed live, prune the previous one — last, not first:
-   ```bash
-   gh release delete v<old-tag> --yes --cleanup-tag   # removes the release + its tag
-   ```
+4. **After** released-artifact E2E confirms the new version, `cleanup-ghcr` prunes stale
+   container versions plus every previous published GitHub release/tag, leaving exactly one
+   active release. Manual cleanup is available from the Actions tab.
 
 ### Build-time identity
 

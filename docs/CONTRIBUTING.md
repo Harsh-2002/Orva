@@ -187,7 +187,8 @@ Ship (on `v*` tag push):
   the release** — it trusts the already-green checks on that exact SHA. A
   `workflow_dispatch` with `force=true` bypasses the gate for emergency/rc builds.
 - **`cleanup-ghcr.yml`** — destructive registry pruning, isolated from Release;
-  runs only after a successful Release or by explicit manual dispatch.
+  runs only after released-artifact E2E succeeds or by explicit manual dispatch,
+  then removes previous published releases/tags to enforce one active release.
 
 ## Releasing
 
@@ -207,8 +208,8 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    The release's `gate` confirms `ci` + `e2e` already passed for that commit
    (seconds, not a test run; it polls briefly if you tag right after the merge)
    and refuses to build if either is missing or red. On pass it builds + publishes
-   everything. The successful Release triggers the separate GHCR cleanup; the
-   arm64 rootfs builds are the slowest leg.
+   everything. Released-artifact E2E triggers the separate cleanup only after
+   validation succeeds; the arm64 rootfs builds are the slowest leg.
 3. **On release publish**, dispatch the consolidated released-artifact suite (a
    `GITHUB_TOKEN`-created release does not auto-fire downstream workflows):
 
@@ -216,12 +217,8 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    gh workflow run e2e.yml -f suite=artifacts -f tag=vYYYY.MM.DD
    ```
 
-4. **After** the new release is confirmed live, prune the previous one — last,
-   not first:
-
-   ```bash
-   gh release delete v<old-tag> --yes --cleanup-tag   # removes the release + its tag
-   ```
+4. **After** the new release is confirmed live, `cleanup-ghcr` automatically removes
+   older published releases/tags and stale container versions — last, not first.
 
 The full policy (gate internals, force bypass, build-time identity stamping) lives
 in the root `CLAUDE.md`.
