@@ -1,6 +1,7 @@
 # Orva
 
 [![Release](https://img.shields.io/github/v/release/Harsh-2002/Orva?style=flat-square&label=release&color=7c5cbf)](https://github.com/Harsh-2002/Orva/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Harsh-2002/Orva/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/Harsh-2002/Orva/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fharsh--2002%2Forva-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/Harsh-2002/Orva/pkgs/container/orva)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
@@ -74,8 +75,8 @@ Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)
 - **Built-in primitives** — per-function KV store, background jobs (retries + backoff), cron schedules, function-to-function calls, encrypted secrets, custom routes, and signed inbound webhooks.
 - **Distributed tracing** — every HTTP → F2F → job chain shares one trace, with a waterfall view and zero code changes.
 - **Versioning** — content-hashed deploys with one-click (or one-command) rollback and side-by-side diffs.
-- **MCP + AI** — a 71-tool operator MCP server at `/mcp` and a built-in agentic AI assistant (dashboard or `orva chat`) that operate your instance with your own provider key. → [AI & MCP](#ai--mcp)
-- **Templates** — 16 starters (Stripe/GitHub webhooks, JWT/OAuth, CSV→JSON, URL shortener, …) in the editor.
+- **MCP + AI** — a 72-tool operator MCP server at `/mcp` and a built-in agentic AI assistant (dashboard or `orva chat`) that operate your instance with your own provider key. → [AI & MCP](#ai--mcp)
+- **Templates** — 21 starters (Stripe/GitHub webhooks, JWT/OAuth, CSV→JSON, URL shortener, …) in the editor.
 
 ---
 
