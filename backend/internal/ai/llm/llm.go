@@ -242,13 +242,18 @@ func buildRequest(req Request) (*schemas.BifrostChatRequest, error) {
 	if req.Temperature != nil {
 		params.Temperature = req.Temperature
 	}
-	// Cache the (large, stable) system prompt so providers that support prompt
-	// caching charge a fraction for it after the first call. Bifrost applies
-	// this only to provider families that support it (Anthropic); OpenAI-family
-	// providers cache automatically and ignore the field, so this is safe for
-	// custom OpenAI-compatible endpoints too.
-	if strings.TrimSpace(req.System) != "" {
-		params.CacheControl = &schemas.CacheControl{Type: schemas.CacheControlType("ephemeral")}
+	// Cache the (large, stable) system prompt so Anthropic charges a fraction
+	// for it after the first call.
+	//
+	// This MUST stay gated on the provider. cache_control is an Anthropic-family
+	// field that Bifrost keeps on the shared ChatParameters struct, and its
+	// OpenAI-format request marshaller only strips cache_control from message
+	// and tool content blocks — the top-level params field is embedded verbatim
+	// and reaches the wire. Strict OpenAI-compatible providers reject unknown
+	// properties, so sending it unconditionally fails every request with
+	// "property 'cache_control' is unsupported" (observed on Groq).
+	if strings.TrimSpace(req.System) != "" && supportsCacheControl(req.Provider) {
+		params.CacheControl = &schemas.CacheControl{Type: schemas.CacheControlTypeEphemeral}
 	}
 	if r := reasoningFor(req.Thinking); r != nil {
 		params.Reasoning = r
@@ -271,6 +276,14 @@ func buildRequest(req Request) (*schemas.BifrostChatRequest, error) {
 		Input:    input,
 		Params:   params,
 	}, nil
+}
+
+// supportsCacheControl reports whether the provider's native API accepts a
+// top-level cache_control field. Only Anthropic does: Bifrost builds a native
+// Anthropic request for it, whereas every other provider goes out through an
+// OpenAI-format body where the field is either ignored or rejected outright.
+func supportsCacheControl(provider string) bool {
+	return schemas.ModelProvider(strings.ToLower(strings.TrimSpace(provider))) == schemas.Anthropic
 }
 
 func textMessage(role schemas.ChatMessageRole, text string) schemas.ChatMessage {

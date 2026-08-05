@@ -252,3 +252,57 @@ func TestIsReasoningError(t *testing.T) {
 		}
 	}
 }
+
+// cache_control is Anthropic-only. Bifrost's OpenAI-format marshaller strips it
+// from message/tool content blocks but embeds the top-level ChatParameters
+// field verbatim, so sending it to a strict OpenAI-compatible provider fails
+// the whole request with "property 'cache_control' is unsupported" (Groq).
+func TestBuildRequestSetsCacheControlOnlyForAnthropic(t *testing.T) {
+	cases := []struct {
+		provider string
+		want     bool
+	}{
+		{"anthropic", true},
+		{"Anthropic", true}, // case-insensitive
+		{"groq", false},
+		{"openai", false},
+		{"openrouter", false},
+		{"gemini", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			got, err := buildRequest(Request{
+				Provider: tc.provider,
+				Model:    "some-model",
+				System:   "you are a helpful assistant",
+				Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("buildRequest: %v", err)
+			}
+			has := got.Params != nil && got.Params.CacheControl != nil
+			if has != tc.want {
+				t.Fatalf("provider %q: CacheControl set = %v, want %v", tc.provider, has, tc.want)
+			}
+			if has && got.Params.CacheControl.Type != schemas.CacheControlTypeEphemeral {
+				t.Fatalf("provider %q: CacheControl.Type = %q, want ephemeral",
+					tc.provider, got.Params.CacheControl.Type)
+			}
+		})
+	}
+}
+
+// No system prompt means nothing to cache, even on Anthropic.
+func TestBuildRequestOmitsCacheControlWithoutSystemPrompt(t *testing.T) {
+	got, err := buildRequest(Request{
+		Provider: "anthropic",
+		Model:    "some-model",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest: %v", err)
+	}
+	if got.Params != nil && got.Params.CacheControl != nil {
+		t.Fatal("CacheControl set without a system prompt")
+	}
+}
