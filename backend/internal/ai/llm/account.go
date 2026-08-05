@@ -39,7 +39,7 @@ func (a *account) GetKeysForProvider(_ context.Context, providerKey schemas.Mode
 	}
 	return []schemas.Key{{
 		ID:     string(providerKey),
-		Value:  schemas.EnvVar{Val: apiKey},
+		Value:  schemas.SecretVar{Val: apiKey},
 		Models: schemas.WhiteList{"*"}, // this key may serve any model (empty list = none allowed)
 		Weight: 1.0,
 	}}, nil
