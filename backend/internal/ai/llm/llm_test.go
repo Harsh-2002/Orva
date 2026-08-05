@@ -15,6 +15,39 @@ func acc(id, name, args string) *toolAcc {
 	return a
 }
 
+type staticKeyResolver struct {
+	apiKey  string
+	baseURL string
+	err     error
+}
+
+func (r staticKeyResolver) Providers() []string { return []string{"openai"} }
+
+func (r staticKeyResolver) Resolve(string) (string, string, error) {
+	return r.apiKey, r.baseURL, r.err
+}
+
+// Bifrost 1.7 replaced EnvVar with SecretVar for provider credentials. Orva's
+// resolver already returns a decrypted value, so even an env.-prefixed value
+// must remain literal rather than being interpreted as a new environment ref.
+func TestAccountReturnsDecryptedProviderKeyAsLiteralSecret(t *testing.T) {
+	const apiKey = "env.literal-api-key"
+	keys, err := (&account{resolver: staticKeyResolver{apiKey: apiKey}}).
+		GetKeysForProvider(context.Background(), schemas.OpenAI)
+	if err != nil {
+		t.Fatalf("GetKeysForProvider: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("got %d keys, want 1", len(keys))
+	}
+	if keys[0].Value.Val != apiKey {
+		t.Fatalf("key value = %q, want literal %q", keys[0].Value.Val, apiKey)
+	}
+	if keys[0].Value.IsFromSecret() {
+		t.Fatal("decrypted provider key was reinterpreted as an external secret reference")
+	}
+}
+
 // TestAssembleToolCallsSynthesizesID covers the fix for endpoints that omit
 // tool-call ids in their stream deltas: the assembled call must carry a stable,
 // non-empty id so the replayed tool result matches it on the next turn.
