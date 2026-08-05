@@ -87,7 +87,7 @@
 
 <script setup>
 import { computed, ref, watch, nextTick, onMounted } from 'vue'
-import { Wrench, ChevronDown } from 'lucide-vue-next'
+import { Wrench, ChevronDown } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import CodeBlock from './CodeBlock.vue'
 

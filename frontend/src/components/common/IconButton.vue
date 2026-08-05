@@ -17,7 +17,7 @@
     Layout note: the button is square so a strip of three never
     misaligns vertically. Padding is computed so the icon sits with
     1px of breathing room on every side at the standard 14px (w-3.5)
-    icon size lucide-vue-next ships.
+    icon size @lucide/vue ships.
   -->
   <button
     type="button"
@@ -42,7 +42,7 @@
 import { computed } from 'vue'
 
 const props = defineProps({
-  // Pass a lucide-vue-next (or any Vue) icon component, e.g. Trash2.
+  // Pass an @lucide/vue (or any Vue) icon component, e.g. Trash2.
   icon: { type: [Object, Function], required: true },
   // Tooltip text — required for accessibility since the button has no
   // text label.

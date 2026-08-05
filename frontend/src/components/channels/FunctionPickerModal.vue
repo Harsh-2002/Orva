@@ -125,7 +125,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Search, X } from 'lucide-vue-next'
+import { Search, X } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import { listFunctions } from '@/api/endpoints'
 

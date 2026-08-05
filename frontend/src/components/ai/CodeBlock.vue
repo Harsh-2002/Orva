@@ -53,7 +53,7 @@
 
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { Copy, Check, ChevronsUpDown, ChevronsDownUp } from 'lucide-vue-next'
+import { Copy, Check, ChevronsUpDown, ChevronsDownUp } from '@lucide/vue'
 import { highlightCode } from '@/utils/highlight'
 import { copyText } from '@/utils/clipboard'
 

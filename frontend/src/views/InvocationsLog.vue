@@ -584,7 +584,7 @@
 import { EMPTY } from '@/utils/format'
 import { ref, computed, h, watch, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles, Network, CircleAlert } from 'lucide-vue-next'
+import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles, Network, CircleAlert } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'

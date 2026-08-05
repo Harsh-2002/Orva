@@ -36,7 +36,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { MessagesSquare } from 'lucide-vue-next'
+import { MessagesSquare } from '@lucide/vue'
 
 defineEmits(['pick'])
 

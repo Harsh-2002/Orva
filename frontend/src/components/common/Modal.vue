@@ -67,7 +67,7 @@
 defineOptions({ name: 'CommonModal' })
 
 import { computed, ref, toRef, onMounted, onUnmounted } from 'vue'
-import { X } from 'lucide-vue-next'
+import { X } from '@lucide/vue'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 
 const props = defineProps({

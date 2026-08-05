@@ -171,7 +171,7 @@ defineOptions({ name: 'TracesView' })
 import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, Search, Flag, Network } from 'lucide-vue-next'
+import { RefreshCw, Search, Flag, Network } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import { listTraces } from '@/api/endpoints'

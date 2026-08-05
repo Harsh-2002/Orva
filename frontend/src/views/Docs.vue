@@ -1157,7 +1157,7 @@ import {
   ChevronRight,
   CalendarClock,
   ChevronDown,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import { copyText } from '@/utils/clipboard'
 import {
   buildPromptText,

@@ -288,7 +288,7 @@
 import { EMPTY } from '@/utils/format'
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Copy, Flag, AlertCircle } from 'lucide-vue-next'
+import { ArrowLeft, Copy, Flag, AlertCircle } from '@lucide/vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import { getTrace } from '@/api/endpoints'
 

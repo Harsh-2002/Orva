@@ -15,7 +15,7 @@ import {
   Code2,
   Terminal,
   Plug,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import ChatGPTIcon from '@/components/icons/brand/ChatGPTIcon.vue'
 import ClaudeIcon from '@/components/icons/brand/ClaudeIcon.vue'
 

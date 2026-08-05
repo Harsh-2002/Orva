@@ -340,7 +340,7 @@ defineOptions({ name: 'JobsView' })
 
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus, CheckCircle2, XCircle, Clock, Circle } from 'lucide-vue-next'
+import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus, CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
 import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import Button from '@/components/common/Button.vue'

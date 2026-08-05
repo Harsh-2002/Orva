@@ -112,7 +112,7 @@ import {
   LibraryBig,
   Menu,
   X,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 
 const route = useRoute()
 const open = ref(false)

@@ -19,7 +19,7 @@
 </template>
 
 <script setup>
-import { ArrowDown } from 'lucide-vue-next'
+import { ArrowDown } from '@lucide/vue'
 
 defineProps({
   visible: { type: Boolean, default: false },

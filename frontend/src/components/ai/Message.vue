@@ -2,7 +2,7 @@
 defineOptions({ name: 'AIMessage' })
 
 import { ref, computed, nextTick } from 'vue'
-import { Copy, Check, RotateCcw, Pencil, Trash2 } from 'lucide-vue-next'
+import { Copy, Check, RotateCcw, Pencil, Trash2 } from '@lucide/vue'
 import MessagePart from './MessagePart.vue'
 import Button from '@/components/common/Button.vue'
 import { copyText } from '@/utils/clipboard'

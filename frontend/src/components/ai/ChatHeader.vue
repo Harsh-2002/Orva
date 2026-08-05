@@ -34,7 +34,7 @@
 </template>
 
 <script setup>
-import { MessageSquare, PanelLeft, Download } from 'lucide-vue-next'
+import { MessageSquare, PanelLeft, Download } from '@lucide/vue'
 
 defineProps({
   title: { type: String, default: 'Assistant' },

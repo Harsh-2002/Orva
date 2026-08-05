@@ -71,7 +71,7 @@
 defineOptions({ name: 'CommonDrawer' })
 
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { X } from 'lucide-vue-next'
+import { X } from '@lucide/vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

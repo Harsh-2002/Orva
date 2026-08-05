@@ -317,7 +317,7 @@ import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import {
   Plus, Edit, Trash2, X, Webhook, CheckCircle, Copy, Check, Zap, RotateCcw,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import {
   listWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook,
   listWebhookDeliveries, retryWebhookDelivery,
