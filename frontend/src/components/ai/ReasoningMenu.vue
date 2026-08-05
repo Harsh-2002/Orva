@@ -71,7 +71,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Brain, Check, Zap, Sparkles, Ban } from 'lucide-vue-next'
+import { Brain, Check, Zap, Sparkles, Ban } from '@lucide/vue'
 import Popover from '@/components/common/Popover.vue'
 import { useAIStore } from '@/stores/ai'
 

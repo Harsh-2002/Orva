@@ -421,7 +421,7 @@ export const useAIStore = defineStore('ai', () => {
   // displayParts keeps only the renderable text/thinking parts (tool_call
   // parts are rendered as separate tool items, not inside the bubble).
   function displayParts(raw) {
-    let ps = []
+    let ps
     try { ps = JSON.parse(raw || '[]') } catch { ps = [] }
     return ps.filter((p) => p.type === 'text' || p.type === 'thinking')
   }

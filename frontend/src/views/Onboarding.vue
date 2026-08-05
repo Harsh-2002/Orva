@@ -180,7 +180,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertCircle, Eye, EyeOff, Copy } from 'lucide-vue-next'
+import { AlertCircle, Eye, EyeOff, Copy } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import OrvaLogo from '@/components/OrvaLogo.vue'
 import { useAuthStore } from '@/stores/auth'

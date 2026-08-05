@@ -363,7 +363,7 @@
 <script setup>
 import { ref, computed, onMounted, onActivated, onDeactivated, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import apiClient from '@/api/client'

@@ -207,7 +207,7 @@ import {
   Upload,
   Plus,
   X,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 
 const router = useRouter()
 const confirmStore = useConfirmStore()

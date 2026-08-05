@@ -94,7 +94,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { AlertTriangle, HelpCircle } from 'lucide-vue-next'
+import { AlertTriangle, HelpCircle } from '@lucide/vue'
 import Button from './Button.vue'
 import { useConfirmStore } from '@/stores/confirm'
 import { useFocusTrap } from '@/composables/useFocusTrap'

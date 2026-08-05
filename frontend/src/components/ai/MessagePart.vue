@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue'
-import MarkdownIt from 'markdown-it'
 import hljs from '@/utils/highlight'
+import { createMarkdownRenderer } from '@/utils/markdown'
 import CodeBlock from './CodeBlock.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 
@@ -12,7 +12,7 @@ const props = defineProps({
   },
 })
 
-const md = new MarkdownIt({
+const md = createMarkdownRenderer({
   html: false,
   linkify: true,
   breaks: true,

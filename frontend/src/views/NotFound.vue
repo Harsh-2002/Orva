@@ -46,7 +46,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, BookOpen } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen } from '@lucide/vue'
 import OrvaLogo from '@/components/OrvaLogo.vue'
 
 const route = useRoute()

@@ -6,6 +6,7 @@ Vue 3 + Vite + Tailwind CSS 4 dashboard. Dev server at http://localhost:5173 (pr
 
 ```bash
 npm install          # install dependencies (node_modules/)
+npm test             # Node-native focused frontend unit tests
 npm run dev          # hot-reload dev server → http://localhost:5173
 npm run build        # production build → dist/
 npm run lint         # eslint check
@@ -18,10 +19,10 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 
 - **Vue 3** Composition API with `<script setup>` everywhere
 - **Pinia** for global state
-- **Vue Router 4** — routes defined in `src/router/`
+- **Vue Router 5** — routes defined in `src/router/`
 - **Tailwind CSS 4** (PostCSS plugin)
 - **CodeMirror 6** — `@codemirror/lang-javascript`, `@codemirror/lang-python`, `@codemirror/lang-json`, `@codemirror/theme-one-dark`, `@codemirror/merge` (side-by-side / unified diff in FunctionDiff.vue)
-- **lucide-vue-next** icons (tree-shaken per-import)
+- **@lucide/vue** icons (tree-shaken per-import)
 - **axios** for HTTP
 - **markdown-it** + **highlight.js** — render assistant chat messages (markdown + fenced-code highlight) in the AI view
 

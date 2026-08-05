@@ -354,7 +354,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from '@/components/common/Button.vue'
-import { ArrowLeftRight, Copy, Settings2, ChevronDown, FileCode, Package, List, RotateCcw, Zap } from 'lucide-vue-next'
+import { ArrowLeftRight, Copy, Settings2, ChevronDown, FileCode, Package, List, RotateCcw, Zap } from '@lucide/vue'
 import { compareDeployments, listDeployments, listFunctions, getDeployment, rollbackFunction } from '@/api/endpoints'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 import { copyText } from '@/utils/clipboard'

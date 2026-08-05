@@ -108,7 +108,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { Cpu, ChevronDown, Check, Search } from 'lucide-vue-next'
+import { Cpu, ChevronDown, Check, Search } from '@lucide/vue'
 import Popover from '@/components/common/Popover.vue'
 import { useAIStore } from '@/stores/ai'
 

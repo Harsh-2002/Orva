@@ -43,7 +43,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { Brain, ChevronDown } from 'lucide-vue-next'
+import { Brain, ChevronDown } from '@lucide/vue'
 
 const props = defineProps({
   part: { type: Object, required: true },

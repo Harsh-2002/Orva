@@ -372,7 +372,7 @@ defineOptions({ name: 'ActivityView' })
 
 import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
-import { Search, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { Search, ChevronLeft, ChevronRight } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'

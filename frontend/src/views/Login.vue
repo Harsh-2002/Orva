@@ -80,7 +80,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { LogIn, AlertCircle } from 'lucide-vue-next'
+import { LogIn, AlertCircle } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import OrvaLogo from '@/components/OrvaLogo.vue'
 import { useAuthStore } from '@/stores/auth'

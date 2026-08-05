@@ -73,7 +73,7 @@
 </template>
 
 <script setup>
-import { Plus, MessageSquare, Trash2, Pencil } from 'lucide-vue-next'
+import { Plus, MessageSquare, Trash2, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import { useAIStore } from '@/stores/ai'
 import { useConfirmStore } from '@/stores/confirm'

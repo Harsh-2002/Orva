@@ -1221,7 +1221,7 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from 'lucide-vue-next'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
@@ -2051,7 +2051,7 @@ const runDeploy = async () => {
             fnId.value = fn.id
             buildLogs.value.push(`Function already exists: ${fnId.value}`)
           } else {
-            throw new Error('Function name conflict but not found in list')
+            throw new Error('Function name conflict but not found in list', { cause: err })
           }
         } else {
           throw err

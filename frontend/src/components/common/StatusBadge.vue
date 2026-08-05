@@ -14,7 +14,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { CheckCircle2, XCircle, Clock, Circle } from 'lucide-vue-next'
+import { CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
 
 // StatusBadge consolidates the small colored pill that Deployments,
 // InvocationsLog, and FunctionsList all rendered with their own copies

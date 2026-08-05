@@ -615,7 +615,7 @@ import {
   Info,
   Copy,
   MessagesSquare,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import AISettingsPanel from '@/components/ai/AISettingsPanel.vue'
 import Button from '@/components/common/Button.vue'
 import { useConfirmStore } from '@/stores/confirm'

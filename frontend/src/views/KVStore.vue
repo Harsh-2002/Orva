@@ -413,7 +413,7 @@
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onActivated, onDeactivated } from 'vue'
 import { useRoute } from 'vue-router'
-import { Search, RefreshCw, Plus, Trash2 } from 'lucide-vue-next'
+import { Search, RefreshCw, Plus, Trash2 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Drawer from '@/components/common/Drawer.vue'

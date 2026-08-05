@@ -343,7 +343,7 @@ import { computed, h, onMounted, onActivated, ref, defineComponent } from 'vue'
 import {
   Plus, RefreshCw, ShieldAlert, ShieldOff, ShieldCheck,
   AlertTriangle, Globe, Globe2, Asterisk, Hash, Trash2,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'

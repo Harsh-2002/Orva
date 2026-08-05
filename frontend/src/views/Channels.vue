@@ -336,7 +336,7 @@
 defineOptions({ name: 'ChannelsView' })
 
 import { ref, computed, onMounted } from 'vue'
-import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle } from 'lucide-vue-next'
+import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import FunctionPickerModal from '@/components/channels/FunctionPickerModal.vue'

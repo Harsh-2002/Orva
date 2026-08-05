@@ -336,7 +336,7 @@
 <script setup>
 import { EMPTY } from '@/utils/format'
 import { computed, onMounted, onUnmounted, h } from 'vue'
-import { Activity, Boxes, TrendingUp, Snowflake, Plus } from 'lucide-vue-next'
+import { Activity, Boxes, TrendingUp, Snowflake, Plus } from '@lucide/vue'
 import { useSystemStore } from '@/stores/system'
 import Button from '@/components/common/Button.vue'
 

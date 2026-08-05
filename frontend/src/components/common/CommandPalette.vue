@@ -122,7 +122,7 @@ import {
   Search, Gauge, Boxes, CalendarClock, ListChecks, Activity, ListTree,
   Network, Fingerprint, Plug, Webhook, ShieldHalf, Settings as SettingsIcon,
   LibraryBig, Plus,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 
 const router = useRouter()
 const open = ref(false)

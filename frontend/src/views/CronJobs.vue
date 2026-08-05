@@ -432,7 +432,7 @@
 <script setup>
 import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
-import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from 'lucide-vue-next'
+import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Modal from '@/components/common/Modal.vue'

@@ -273,7 +273,7 @@
 <script setup>
 import { EMPTY } from '@/utils/format'
 import { ref, onMounted } from 'vue'
-import { KeyRound, Copy, Check, X, Trash2 } from 'lucide-vue-next'
+import { KeyRound, Copy, Check, X, Trash2 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import { listApiKeys, createApiKey, deleteApiKey } from '@/api/endpoints'

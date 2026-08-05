@@ -41,7 +41,7 @@
 </template>
 
 <script setup>
-import { AlertTriangle, RotateCcw } from 'lucide-vue-next'
+import { AlertTriangle, RotateCcw } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 
 defineProps({ message: { type: String, default: '' } })
