@@ -71,9 +71,9 @@ Edited via `PUT /api/v1/pool/config` — no restart needed.
 |-------|---------|------|
 | `min_warm` | 1 | Idle workers floor — pool never shrinks below this |
 | `max_warm` | 50 | Hard ceiling on warm pool size |
-| `idle_ttl_s` | 120 | Worker idle this long gets reaped |
+| `idle_ttl_seconds` | 120 | Worker idle this long gets reaped |
 | `target_concurrency` | 10 | Requests per worker before scale-up triggers |
-| `scale_to_zero` | 0 | `1` = pool can drain to 0 (cold-start on next request) |
+| `scale_to_zero` | `false` | `true` = pool can drain to 0 (cold-start on next request) |
 
 ```bash
 curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \

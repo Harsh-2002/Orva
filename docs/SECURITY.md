@@ -53,7 +53,7 @@ them.
 User code sees `getuid() == 0`. **It is NOT root on the host.**
 
 The mechanism is `CLONE_NEWUSER` + UID mapping. nsjail's `-Mo` flag
-(`internal/sandbox/sandbox.go:154`) creates a new user namespace where
+(`internal/sandbox/sandbox.go`, `buildArgs()`) creates a new user namespace where
 inside-UID 0 is mapped to host-UID 65534 (`nobody`). All capability
 checks happen against the user-namespace's UID, but actions that cross
 the namespace boundary (writing to a file owned by host-root,
@@ -166,7 +166,8 @@ Per-function caps are enforced in two places:
 - **Per-process**: `--rlimit_as max` preserves the service user's existing
   hard address-space limit; it is a fallback, not the declared function
   memory budget.
-- **Per-cgroup** (when cgroup v2 delegation is available, sandbox.go:170-194):
+- **Per-cgroup** (when cgroup v2 delegation is available — the
+  `cgroupv2Delegate()` branch of `sandbox.go`'s `buildArgs()`):
   - `memory.max` at **1.5×** the declared `memory_mb`. The 0.5×
     headroom lets the kernel reclaim via PSI pressure before OOM-killing.
     The 1.5× factor matches the autoscaler's per-worker admission budget.
@@ -295,7 +296,7 @@ function still runs in the user-namespace-isolated sandbox at runtime.
 > "Can a function read another function's secrets?"
 
 No. Secrets are decrypted by orvad and injected as `--env KEY=VAL`
-flags at sandbox spawn time (sandbox.go:204-209). Each sandbox sees
+flags at sandbox spawn time (`sandbox.go`, `buildArgs()`). Each sandbox sees
 only its own function's secrets in its environment; the secret
 material never leaves orvad and is never readable from any sandbox
 filesystem.
@@ -309,7 +310,7 @@ read-only. There is no shared `/functions/` mount.
 
 > "What happens if a function tries to fork-bomb?"
 
-cgroup `pids.max` (default 64) caps the process tree. Spawning past
+cgroup `pids.max` (default 32) caps the process tree. Spawning past
 that limit fails with `EAGAIN` inside the sandbox. The orvad scheduler
 also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see

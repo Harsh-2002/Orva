@@ -1,6 +1,6 @@
 # Function runtimes
 
-Orva ships four runtimes, all with the same handler protocol. Inside
+Orva ships two runtimes, both with the same handler protocol. Inside
 the sandbox your function file is at `/code/<entrypoint>` (default
 `handler.js` for Node, `handler.py` for Python). The Orva-provided
 adapter wraps your handler and speaks a JSON frame protocol over
@@ -152,7 +152,7 @@ Functions can write freely to `/tmp` (it's wiped when the worker exits).
 ## Resource limits
 
 Set via `PUT /api/v1/functions/{id}` (or onboard with `memory_mb` and
-`cpus`). Defaults: 128 MB memory, 0.5 CPUs. Both can be overridden at
+`cpus`). Defaults: 64 MB memory, 0.5 CPUs. Both can be overridden at
 deploy time.
 
 - Memory cap is **1.5×** the declared `memory_mb` at the cgroup level.
@@ -160,7 +160,7 @@ deploy time.
   OOM-killing.
 - CPU is enforced as bandwidth (`cpu.max`), not affinity — so the
   scheduler can load-balance freely.
-- `pids.max` defaults to 64 per spawn. Fork-bombing fails with `EAGAIN`.
+- `pids.max` defaults to 32 per spawn. Fork-bombing fails with `EAGAIN`.
 
 ## Cold starts vs warm hits
 

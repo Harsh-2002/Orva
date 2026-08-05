@@ -38,19 +38,21 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 | `NOT_ACTIVE` | 409 | function status is `error` or `inactive` | no — redeploy or activate |
 | `PAYLOAD_TOO_LARGE` | 413 | body exceeds `cfg.Server.MaxBodyBytes` (default 6 MB) | no — split or raise the cap |
 | `TOO_MANY_REQUESTS` | 429 | host-wide concurrency cap reached during TryAcquire grace | **yes** — back off briefly |
-| `RATE_LIMITED` | 429 | per-function rate limit (reserved; not yet emitted) | yes |
+| `RATE_LIMITED` | 429 | per-function rate limit exceeded (`rate_limit_per_min`, counted per client IP) | **yes** — `Retry-After: 60` |
+| `FUNCTION_BUSY` | 429 | function at its own `max_concurrency` cap under the `reject` policy | **yes** — `Retry-After: 1`, or raise `max_concurrency` / switch the policy to `queue` |
 
 ### 5xx — server / platform errors
 
 | code | HTTP | when | retry? |
 |---|---|---|---|
 | `INTERNAL` | 500 | unmapped server fault | no — file a bug with `request_id` |
-| `BUILD_FAILED` | 502 | last build was bad and there's no prior version to fall back to | no — fix code/deps and redeploy |
+| `BUILD_ERROR` | 500 | the deploy's build failed; the function is left in `error` status | no — check `/api/v1/deployments/<id>/logs` for the npm/pip error, fix, redeploy |
 | `WORKER_CRASHED` | 502 | adapter exited unexpectedly (`process.exit`, OOM-kill, syntax error in handler) | no — fix the function |
 | `BUILDING` | 503 | first deploy in flight; no prior code to serve | **yes** — `Retry-After: 5` |
 | `BUILD_QUEUE_FULL` | 503 | build queue at channel capacity | yes — `Retry-After: depth × 30s` |
 | `POOL_AT_CAPACITY` | 503 | function pool at `dynamicMax` and ctx fired waiting | yes — `Retry-After: 5` |
 | `MEMORY_EXHAUSTED` | 503 | host memory budget at 80% reservation | yes — `Retry-After: 30` |
+| `INSUFFICIENT_DISK` | 503 | not enough free disk on the data volume to start the build | no — free space or lower `system_config.min_free_disk_mb` |
 | `SHUTTING_DOWN` | 503 | server is closing down | no, on this host — redirect |
 | `SANDBOX_ERROR` | 503 | unmapped sandbox / dispatch failure | no — investigate |
 | `TIMEOUT` | 504 | function exceeded its `timeout_ms` | no — raise it or optimize handler |

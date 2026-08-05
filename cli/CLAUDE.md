@@ -157,9 +157,10 @@ bash test/cli/install-cli-test.sh ubuntu24
 bash test/cli/upgrade-test.sh
 ```
 
-CI runs unit and cross-build checks on relevant pull requests. Installer and
-upgrade legs run for published releases, manual dispatches, and the weekly
-schedule; macOS/Windows installer legs are additionally path-gated on PRs.
+CI (`.github/workflows/ci.yml`) runs the CLI unit, cross-build, and installer
+legs on every push to `main`; on pull requests they are gated by the `changes`
+path router (`cli` / `cli_installers` filters). The `cli-upgrade` round-trip
+runs only for published releases, manual dispatches, and the weekly schedule.
 
 ## Adding a new subcommand
 

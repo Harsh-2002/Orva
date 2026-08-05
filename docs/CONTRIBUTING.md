@@ -13,16 +13,18 @@ make build-all    # production binary (server + embedded UI) → ./build/orva
 make test         # go test ./...
 ```
 
-All build/dev/test workflows go through the `Makefile` — see `make help`-able
-targets in it (`build`, `build-all`, `cli`, `embed`, `adapters-embed`, …).
+All build/dev/test workflows go through the `Makefile` — read it for the full
+target list (`build`, `build-all`, `cli`, `cli-all`, `embed`, `adapters-embed`,
+`docs-embed`, `test`, `lint`, `ui`, `dev`, `clean`).
 
 Requires:
 
 - **Go 1.26+** (the embedded AI gateway requires it)
 - **Node 24+**
-- **nsjail** on PATH — easy install: `make build-nsjail` (clones
-  google/nsjail, builds with apt deps; needs `libprotobuf-dev`,
-  `libnl-route-3-dev`, `bison`, `flex`).
+- **nsjail** on PATH — build it from source (clone google/nsjail and run
+  `make`; needs `libprotobuf-dev`, `libnl-route-3-dev`, `bison`, `flex`),
+  or let `scripts/install.sh` fetch the prebuilt release binary. The Docker
+  image already ships it at `/usr/local/bin/nsjail`.
 - **Linux host** with cgroup v2 + unprivileged user namespaces. Mac /
   Windows: use the Docker image (`docker compose up`); native dev
   isn't supported because nsjail is Linux-only.
@@ -121,7 +123,7 @@ done
 
 # Lighter follow-ups:
 bash test/install/failure-modes.sh        # --cli-only + reinstall idempotency
-bash test/install/gvisor-flow.sh          # gVisor (runsc) compat — skipped if runsc absent
+bash test/install/kata-flow.sh            # Kata Containers compat — skipped if the runtime is absent
 ```
 
 Requires Docker with `--privileged` allowed and `/sys/fs/cgroup`

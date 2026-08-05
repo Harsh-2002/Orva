@@ -316,10 +316,15 @@ orva kv delete greeter visits
 `kv put --value` accepts an inline string, `@file`, or `@-` (stdin).
 Values are JSON, capped at 64 KB.
 
-> The CLI exposes only `get / put / list / delete`. Atomic counters
-> (`incr`) and compare-and-swap (`cas`) live on the internal SDK path —
-> they require a per-process internal token the CLI does not hold — so
-> use them from inside a function via the runtime SDK.
+Atomic counters and compare-and-swap are available too:
+
+```bash
+orva kv incr <fn> <key> --by 1 --ttl 3600
+orva kv cas  <fn> <key> --expected '{"n":1}' --new '{"n":2}' --ttl 3600
+```
+
+`cas` takes JSON for both `--expected` and `--new`; pass `null` to `--expected`
+to insert only if the key is absent.
 
 ### Per-function secrets
 
@@ -388,14 +393,19 @@ orva diff greeter
 
 # Pin both sides explicitly (deployment IDs come from the dashboard's
 # Versions modal or `orva functions get greeter` deployment history).
-orva diff greeter --from dep_…01 --to dep_…07
+orva diff greeter \
+    --from 019df210-1234-7000-8000-deadbeef0001 \
+    --to   019df210-1234-7000-8000-deadbeef0007
 
 # Strip color for log capture or pipe to `less -R` for paging.
 orva diff greeter --no-color | tee greeter.diff
 orva diff greeter | less -R
 
 # Structured output for scripting (file list + raw before/after blobs).
-orva diff greeter --from dep_…01 --to dep_…07 -o json | jq '.files[].path'
+orva diff greeter \
+    --from 019df210-1234-7000-8000-deadbeef0001 \
+    --to   019df210-1234-7000-8000-deadbeef0007 \
+    -o json | jq '.files[].path'
 ```
 
 The unified output skips `node_modules` / `__pycache__` and TypeScript
@@ -432,7 +442,7 @@ orva keys revoke key_…                    # prompts; pass --yes to skip
 ```bash
 # Bundle N functions under a name + a static bearer token. Presenting
 # that token at /mcp exposes only those functions as MCP tools.
-orva channels create --name customer-support \
+orva channels create customer-support \
     --description "Tools the support agent can use" \
     --functions lookup-user,refund,resend-receipt
 
@@ -613,7 +623,8 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | `orva logs <name> [--follow \| --exec-id]` | Execution history, live tail, or single-row drill-down |
 | `orva deployments list / get / logs` | Deployment history + per-deploy build logs |
 | `orva rollback <fn> [id \| --code-hash]` | Roll back to a prior deployment |
-| `orva kv get / put / list / delete` | Per-function key/value store with optional TTL |
+| `orva kv get / put / list / delete / incr / cas` | Per-function key/value store with optional TTL, atomic counters, and compare-and-swap |
+| `orva executions list / get / logs / delete / prune / replay` | Execution records across functions; `prune` is bulk-destructive and needs `--older-than`, `--status`, or `--function` |
 | `orva secrets set / list / delete` | Per-function encrypted secrets (AES-256-GCM) |
 | `orva fixtures list / get / save / delete / test` | Reusable request presets per function |
 | `orva cron create / list / update / delete` | Per-function schedules with timezone support |

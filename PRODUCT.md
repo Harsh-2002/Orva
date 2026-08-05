@@ -12,7 +12,7 @@ The job to be done is the same loop they would otherwise pay a cloud provider fo
 
 ## Product Purpose
 
-Orva is a self-hosted Function-as-a-Service for homelab and on-premises use. It deploys JavaScript (Node 22/24), Python (3.13/3.14), and TypeScript functions into nsjail sandboxes and exposes them over HTTP, with a built-in dashboard, CLI, and MCP server.
+Orva is a self-hosted Function-as-a-Service for homelab and on-premises use. It deploys JavaScript (Node.js 24), Python (3.14), and TypeScript functions into nsjail sandboxes and exposes them over HTTP, with a built-in dashboard, CLI, MCP server, and an in-product AI assistant.
 
 Success looks like this: an operator brings up the container, writes a function in the editor, hits Deploy, and the first invocation lands in single-digit milliseconds. They never have to leave the dashboard for the day-2 surface, jobs, cron, secrets, KV, webhooks, firewall, traces. The control plane feels like a serious piece of infrastructure they actually want to keep running, not a hobby project they tolerate.
 

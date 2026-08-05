@@ -1,12 +1,12 @@
 # Supported platforms
 
 Orva runs on any Linux distro with kernel 5.10+ that ships unprivileged
-user namespaces and cgroup v2. The installer suite in the consolidated
-`e2e` workflow (`test/install/`) exercises the 6 distros below
-end-to-end on every pull request affecting `scripts/install.sh` and every `main` push
-and against every published release.
+user namespaces and cgroup v2. The `install-matrix` job in the consolidated
+`CI` workflow (`.github/workflows/ci.yml`, harness at `test/install/`)
+exercises the 6 distros below end-to-end on every pull request affecting
+`scripts/install.sh`, on every `main` push, and against every published release.
 
-End-to-end means the workflow does, per distro:
+End-to-end means the job does, per distro:
 
 1. Spin up a privileged container with the distro's init system (systemd
    on most, OpenRC on Alpine).

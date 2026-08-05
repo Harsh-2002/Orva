@@ -21,7 +21,7 @@ Five fields to look at first:
 |---|---|
 | `host.num_goroutines` | 50–500 idle, scales with active invokes |
 | `host.mem_reserved_mb` / `host.mem_total_mb` | should stay under 80% |
-| `sandbox.active` | <= `cfg.Sandbox.MaxConcurrent` (default 500) |
+| `sandbox.active` | <= `cfg.Sandbox.MaxConcurrent` (derived: `NumCPU × 64`, floor 200) |
 | `latency_ms.p99` | <= 5 × `latency_ms.p50`. If p99 is 10× p50 the pool is saturated |
 | `pools[].idle` for each pool | <= `pools[].dynamic_max`. If exceeded, the pool stability fix didn't deploy |
 
@@ -31,13 +31,13 @@ Full catalog in [ERRORS.md](ERRORS.md). The ones operators see most:
 
 | code | what's happening | what to do |
 |---|---|---|
-| `429 TOO_MANY_REQUESTS` | host-wide concurrency cap hit | client should back off + retry; or raise `sandbox.max_concurrent` |
+| `429 TOO_MANY_REQUESTS` | host-wide concurrency cap hit | client should back off + retry. The ceiling is derived from CPU count (`NumCPU × 64`, floor 200) and is not operator-tunable today — add CPUs to raise it |
 | `503 POOL_AT_CAPACITY` | this function's pool at `dynamic_max` and ctx fired waiting | raise `pool_config.max_warm` for that fn, or accept the backpressure |
 | `503 MEMORY_EXHAUSTED` | host RAM at 80% reservation | scale-down idle pools, increase host RAM, or reduce per-fn `memory_mb` |
 | `502 WORKER_CRASHED` | function process exited mid-request (panic, OOM kill, syntax error) | check the execution's stderr in the dashboard or `execution_logs` table |
 | `504 TIMEOUT` | exceeded fn `timeout_ms` | raise it (`PUT /api/v1/functions/{id}` with `{"timeout_ms": 60000}`) or optimize the handler |
 | `503 BUILD_QUEUE_FULL` | too many parallel deploys | wait + retry; queue holds 64 jobs |
-| `502 BUILD_FAILED` | last build broke and there's no prior version to fall back to | check `/api/v1/deployments/<id>/logs` for the actual npm/pip error |
+| `500 BUILD_ERROR` | the deploy's build broke; the function is left in `error` status | check `/api/v1/deployments/<id>/logs` for the actual npm/pip error |
 | `503 INSUFFICIENT_DISK` | data dir < `min_free_disk_mb` (default 500 MB) | free space, lower `versions_to_keep`, or increase `min_free_disk_mb` |
 | `410 VERSION_GCD` | rollback target was pruned | redeploy the original code or rollback to a more recent hash |
 

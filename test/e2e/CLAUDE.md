@@ -108,7 +108,7 @@ This suite is meant to **grow on every change**:
   via `CLIRunner`, confirming slim-CLI ↔ full-server command parity.
 - **nsjail-dependent** scenarios (real function **deploy-build** + **invoke**) skip
   when an ordinary local container cannot provide nested sandboxing. Set
-  `ORVA_REQUIRE_SANDBOX=1` (as the GitHub `e2e` workflow does on its provisioned VM)
+  `ORVA_REQUIRE_SANDBOX=1` (as the `e2e` job in `.github/workflows/ci.yml` does on its runner)
   to turn any such skip into a hard failure.
 - **Function lookup:** REST `GET /functions/{id}` resolves by **UUID only**
   (capture the id from create responses); `DELETE` and most other id-taking

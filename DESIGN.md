@@ -319,7 +319,7 @@ The rest of the Don'ts apply across every register:
 
 - **Don't** use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses. Also no `--`. The recent header standardisation pass left ≈16 in template bodies and more in JS-built strings; sweep them.
 - **Don't** reach for raw Tailwind palette colours (`bg-blue-500/70`, `text-emerald-300`, `bg-amber-500/15`, `text-sky-300`) as a substitute for status meaning. The codebase has 125 of these and every one is a pending palette migration.
-- **Don't** hex-code colours inside a Vue component's scoped CSS. `Firewall.vue:900–902` and `Docs.vue` carry hex literals; map them to `var(--color-…)` so a future theme change works.
+- **Don't** hex-code colours inside a Vue component's scoped CSS. `Docs.vue` still carries hex literals (its Python/Node brand-logo SVG stops, which are a legitimate exemption); map any non-brand hex to `var(--color-…)` so a future theme change works. `Firewall.vue` has already been migrated to the semantic status tokens — use it as the reference.
 - **Don't** use `#000` or `#fff`. Foreground should tint toward the brand violet (target `#F4F2FA`); background and surfaces are already correctly tinted.
 - **Don't** use `backdrop-blur` decoratively. The three glassmorphic icon chips on Onboarding are the exact pattern PRODUCT.md's Vercel/Railway anti-reference rejects. Blur is reserved for "the page underneath is no longer interactive".
 - **Don't** lay out three or four identical icon-+-heading-+-paragraph cards in a feature grid. That template is the absolute ban "identical card grids" by name; PRODUCT.md flags the same shape under "Vercel / Railway / landing-page onboarding panels".

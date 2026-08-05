@@ -13,7 +13,7 @@ Measured on a 2-CPU / 12 GB host (see [CAPACITY.md](CAPACITY.md)):
 - **Idle**: ~50 MB RSS for the orvad process. Each warm worker takes
   ~18 MB when idle. 20 deployed-but-unused functions cost ~50 MB total.
 - **Under sustained c=500**: ~880 req/s aggregate, 35% returning fast
-  `429 TOO_MANY_REQUESTS` once `sandbox.max_concurrent` is hit. p50 of
+  `429 TOO_MANY_REQUESTS` once the host-wide sandbox concurrency cap is hit. p50 of
   successful invocations: ~500 ms.
 
 For a single-host deploy, **2 CPU + 4 GB RAM** is plenty for ~50
@@ -231,7 +231,9 @@ Retry logic at the caller (or the SDK) handles it.
 
 Not supported. Orva is single-host by design. Two patterns to scale:
 
-- **Vertical**: bigger box, raise `sandbox.max_concurrent`, more RAM.
+- **Vertical**: bigger box, more RAM. The host-wide sandbox concurrency
+  ceiling scales automatically with CPU count (`NumCPU × 64`, floor 200),
+  so adding CPUs raises it.
   This is the easy answer for sub-1000-req/s aggregate workloads.
 - **Stamp out copies**: run multiple independent Orva instances,
   shard functions across them at the LB layer (deterministic hash on

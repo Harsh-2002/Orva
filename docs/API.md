@@ -106,11 +106,19 @@ List all functions. Optional `?status=active|inactive`, `?runtime=...`.
 Single function record.
 
 ### `PUT /api/v1/functions/{id}`
-Partial update. Whitelisted fields: `name`, `entrypoint`, `timeout_ms`,
-`memory_mb`, `cpus`, `env_vars`, `network_mode`, `status`.
+Partial update. Whitelisted fields: `name`, `description`, `entrypoint`,
+`timeout_ms`, `memory_mb`, `cpus`, `env_vars`, `network_mode`,
+`max_concurrency`, `concurrency_policy`, `auth_mode`, `rate_limit_per_min`,
+`status`.
 
 `status` accepts only `active` | `inactive`. Setting `inactive` causes
 `POST /fn/<id>` to return 409 NOT_ACTIVE.
+
+`auth_mode` accepts `public` | `platform_key` | `signed` and governs how
+`POST /fn/<id>` is authorized. `concurrency_policy` accepts `reject` | `queue`
+and decides what happens once `max_concurrency` is reached (`reject` returns
+429 FUNCTION_BUSY). `rate_limit_per_min` is a per-client-IP cap; exceeding it
+returns 429 RATE_LIMITED with `Retry-After: 60`.
 
 ### `DELETE /api/v1/functions/{id}`
 Removes the row + the on-disk versions dir. Irreversible.
@@ -147,8 +155,8 @@ the Editor view.
 
 ### `GET /api/v1/functions/{id}/diff?from=<dep_id>&to=<dep_id>&format=json|unified`
 Compares the handler source + dependency manifest between two past
-**succeeded** deployments. Both `from` and `to` must be deployment IDs
-(`dep_…`) belonging to this function.
+**succeeded** deployments. Both `from` and `to` must be deployment UUIDs
+belonging to this function.
 
 - `format=json` (default — dashboard `Compare versions` view) returns
   `{from, to, files: [{path, kind:"handler"|"manifest", before, after,
@@ -284,7 +292,7 @@ List custom routes.
 ```
 
 `methods` accepts `*` for all methods or comma-separated (`GET,POST`).
-Reserved prefixes (`/api/`, `/fn/`, `/mcp/`, `/web/`, `/_orva/`) are rejected.
+Reserved prefixes (`/api/`, `/auth/`, `/web/`, `/_orva/`) are rejected.
 
 ### `DELETE /api/v1/routes?path=/webhooks/stripe`
 Remove a route.
