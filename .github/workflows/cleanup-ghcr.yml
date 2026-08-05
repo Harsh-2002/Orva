@@ -1,13 +1,14 @@
 name: cleanup-ghcr
 
 # Destructive release maintenance is intentionally isolated from Release.
-# It observes the consolidated CI workflow and runs only after the released-
-# artifact suite itself concludes success, so the CLI upgrade leg can use the
-# previous release and cleanup never makes the validation workflow red.
+# Only workflow_dispatch: GITHUB_TOKEN-triggered workflow_dispatch calls are
+# the one event GitHub always delivers regardless of which token triggered
+# them, so CI's artifacts suite dispatches this directly once every released-
+# artifact job succeeds (see ci.yml's `dispatch-cleanup` job). A workflow_run
+# watcher was tried first but GITHUB_TOKEN-triggered runs are documented to
+# never fire workflow_run for anything downstream — confirmed empirically
+# before switching to direct dispatch.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -28,18 +29,12 @@ permissions:
 jobs:
   prune:
     name: prune old release state
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'workflow_dispatch' &&
-       github.event.workflow_run.display_title == 'CI / artifacts')
     runs-on: ubuntu-24.04
     steps:
       - name: validate released-artifact cleanup target
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REQUESTED_TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           target="$REQUESTED_TAG"
