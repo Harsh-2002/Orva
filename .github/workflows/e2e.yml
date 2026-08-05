@@ -221,6 +221,9 @@ jobs:
   cli-cross-build:
     name: CLI cross-compile matrix
     needs: cli-unit
+    # Do not inherit the PR-only `changes` job's skipped state through
+    # cli-unit: run whenever the direct CLI unit-test gate actually passed.
+    if: always() && needs.cli-unit.result == 'success'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -440,6 +443,17 @@ jobs:
   cli-upgrade:
     name: released CLI upgrade round-trip
     needs: cli-install-linux
+    # cli-install-linux itself depends on the PR-only `changes` router and uses
+    # always() so it can run for releases. Without an explicit status guard
+    # here, GitHub propagates that skipped ancestor and silently skips this job
+    # even after both Linux installer matrix legs succeed.
+    if: >-
+      always() &&
+      needs.cli-install-linux.result == 'success' &&
+      (github.event_name == 'release' ||
+       (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'cli' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
     runs-on: ubuntu-24.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
