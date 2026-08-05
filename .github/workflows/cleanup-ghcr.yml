@@ -1,9 +1,13 @@
 name: cleanup-ghcr
 
 # Destructive release maintenance is intentionally isolated from Release.
-# The consolidated E2E workflow dispatches it only after every released-
-# artifact job succeeds, so the CLI upgrade leg can use the previous release.
+# It observes the consolidated CI workflow and runs only after the released-
+# artifact suite itself concludes success, so the CLI upgrade leg can use the
+# previous release and cleanup never makes the validation workflow red.
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -24,8 +28,33 @@ permissions:
 jobs:
   prune:
     name: prune old release state
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch' &&
+       github.event.workflow_run.display_title == 'CI / artifacts')
     runs-on: ubuntu-24.04
     steps:
+      - name: validate released-artifact cleanup target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          target="$REQUESTED_TAG"
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)
+          [ -n "$target" ] || target="$current"
+          [[ "$target" =~ ^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}$ ]] || {
+            echo "::error::cleanup tag must use stable date format vYYYY.MM.DD"
+            exit 1
+          }
+          [ "$target" = "$current" ] || {
+            echo "::error::artifact E2E tag $target is not the latest release $current"
+            exit 1
+          }
+          echo "CLEANUP_TAG=$target" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v4
 
       - name: prune everything outside the current latest manifest
@@ -131,13 +160,12 @@ jobs:
       - name: enforce one active GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DISPATCH_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
 
           current_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)
-          if [ -n "$DISPATCH_TAG" ] && [ "$DISPATCH_TAG" != "$current_tag" ]; then
-            echo "::error::artifact E2E tag $DISPATCH_TAG is not the latest release $current_tag"
+          if [ "$CLEANUP_TAG" != "$current_tag" ]; then
+            echo "::error::artifact E2E tag $CLEANUP_TAG is not the latest release $current_tag"
             exit 1
           fi
 

@@ -67,12 +67,14 @@ Dockerfile        Multi-stage image (dev and production — single file)
 
 **Two-stage policy: verify on push/PR, ship on tag.** The release workflow does
 **no testing** — it gates on the tagged commit's checks already being green, then builds and
-publishes. For code changes, `ci` (workflow lint, shellcheck, go vet/test/build, UI lint/build,
-dependency audit, and a running-container smoke test) plus `e2e` run on PRs and pushes to
-`main`; docs-only changes skip `ci` but still run `e2e`. The same `e2e` workflow also owns
-CLI + bare-metal installer jobs on relevant PRs and every `main` push, plus exact downloaded
-installer assets after publication. Registry pruning is isolated in `cleanup-ghcr`, which
-runs only after released-artifact E2E succeeds.
+publishes. All verification lives in one consolidated `CI` workflow (`.github/workflows/ci.yml`):
+workflow lint, shellcheck, go vet/test/build, UI lint/build, dependency audit, a running-container
+smoke test, plus the full E2E suites (source API/sandbox, CLI cross-build/installers, bare-metal
+server installers, native runtime) all run on PRs and every push to `main`. Docs-only changes skip
+only the fast lint/go/ui/docker jobs (path-filtered internally); the source/CLI/installer/sandbox
+jobs always run on every `main` push. `CI` also owns exact downloaded installer/asset validation
+after publication (its `artifacts` suite). Registry pruning is isolated in `cleanup-ghcr`, which
+runs only after released-artifact validation succeeds.
 
 GitHub-hosted E2E runs Orva directly on the VM, provisions nsjail plus Node/Python rootfs
 trees, and sets `ORVA_REQUIRE_SANDBOX=1`; real deploy/invoke is therefore mandatory and a
@@ -83,23 +85,23 @@ kernel boundary manually.
 **One active release at a time** — never delete the old release *before* the new one is live
 (that opens a window where `install.sh`/`install-cli.sh` resolve "latest" → 404). The flow:
 
-1. **Merge to `main`** and wait for **CI** + **e2e** to go green on the merge commit. This is the
+1. **Merge to `main`** and wait for **CI** to go green on the merge commit. This is the
    verification — the release will not re-run it.
 2. **Tag today's date and push** (zero-padded `vYYYY.MM.DD`):
    ```bash
    git tag -a v2026.05.03 -m "Orva v2026.05.03" && git push origin v2026.05.03
    ```
-   The Release workflow's **`gate`** job confirms `CI` + `e2e` already concluded `success` for
+   The Release workflow's **`gate`** job confirms `CI` already concluded `success` for
    that exact commit (a status lookup — seconds, not a test run; it polls briefly if you tag
-   right after the merge). It **refuses to build** if either is missing or red. On pass it builds
+   right after the merge). It **refuses to build** if it is missing or red. On pass it builds
    + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
    checksums, and the GitHub Release. Every build job `needs: gate`; a successful Release then
-   dispatches released-artifact E2E; its success triggers the separate `cleanup-ghcr` workflow.
+   dispatches released-artifact CI; its success triggers the separate `cleanup-ghcr` workflow.
    *Emergency only:* `workflow_dispatch` with `force=true` skips the gate, but still
    checks out and builds the exact stable date tag supplied to the workflow.
-3. **On release publish**, dispatch the `e2e` workflow's `artifacts` suite against the
+3. **On release publish**, dispatch `CI`'s `artifacts` suite against the
    freshly-published CLI + server assets (a `GITHUB_TOKEN`-created release does not auto-fire
-   downstream workflows, so Release calls `gh workflow run e2e.yml -f suite=artifacts`). The CLI
+   downstream workflows, so Release calls `gh workflow run ci.yml -f suite=artifacts`). The CLI
    upgrade leg uses the previous active release when present and skips cleanly when there is none.
 4. **After** released-artifact E2E confirms the new version, `cleanup-ghcr` prunes stale
    container versions plus every previous published GitHub release/tag, leaving exactly one

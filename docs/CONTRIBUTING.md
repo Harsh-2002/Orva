@@ -127,7 +127,7 @@ bash test/install/gvisor-flow.sh          # gVisor (runsc) compat — skipped if
 Requires Docker with `--privileged` allowed and `/sys/fs/cgroup`
 mountable. Output goes to `test/install/logs/<distro>-*.log`.
 
-The same harness drives the installer jobs in `.github/workflows/e2e.yml`.
+The same harness drives the installer jobs in `.github/workflows/ci.yml`.
 
 ## Adding a new error code
 
@@ -167,30 +167,32 @@ The same harness drives the installer jobs in `.github/workflows/e2e.yml`.
 
 ## CI
 
-Two stages: **verify on push/PR, ship on tag.** All testing lives in CI/E2E;
-the release workflow does no testing.
+Two stages: **verify on push/PR, ship on tag.** All testing lives in the
+consolidated `CI` workflow; the release workflow does no testing.
 
 Verification (on push to `main` + every PR):
 
-- **`ci.yml`** — shellcheck + go vet/test/build, frontend build, docker
-  smoke build. Path-filtered (skips docs-only changes).
-- **`e2e.yml`** — full programmatic E2E plus CLI build/install and bare-metal
-  installer matrices on every `main` push (path-selected on PRs). Its `artifacts`
-  suite validates every published CLI/server asset on Linux, macOS, Windows,
-  amd64, and arm64.
+- **`ci.yml`** — a single workflow covering both the fast gate (shellcheck,
+  go vet/test/build, frontend build, docker smoke build — path-filtered
+  internally, so docs-only changes skip only these jobs) and the full E2E
+  suites: programmatic source API/sandbox tests plus CLI build/install and
+  bare-metal installer matrices on every `main` push (path-selected on PRs).
+  Its `artifacts` suite validates every published CLI/server asset on Linux,
+  macOS, Windows, amd64, and arm64.
 
 Ship (on `v*` tag push):
 
-- **`release.yml`** — a fast **`gate`** job verifies the tagged commit's `ci` +
-  `e2e` already concluded `success` (a status lookup, not a re-run), then builds
+- **`release.yml`** — a fast **`gate`** job verifies the tagged commit's `CI`
+  already concluded `success` (a status lookup, not a re-run), then builds
   the multi-arch Docker image, all CLI binaries, rootfs tarballs, and checksums,
   and publishes the GitHub Release + `ghcr.io/harsh-2002/orva`. **No tests run in
   the release** — it trusts the already-green checks on that exact SHA. A
   `workflow_dispatch` with `force=true` bypasses the gate only for an emergency
   rebuild and still checks out the exact stable date tag supplied to the workflow.
 - **`cleanup-ghcr.yml`** — destructive registry pruning, isolated from Release;
-  runs only after released-artifact E2E succeeds or by explicit manual dispatch,
-  then removes previous published releases/tags to enforce one active release.
+  runs only after released-artifact validation succeeds or by explicit manual
+  dispatch, then removes previous published releases/tags to enforce one
+  active release.
 
 ## Releasing
 
@@ -198,7 +200,7 @@ Ship (on `v*` tag push):
 one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
 "latest" → 404). The flow:
 
-1. **Merge to `main`** and wait for **`ci`** + **`e2e`** to go green on the merge
+1. **Merge to `main`** and wait for **`CI`** to go green on the merge
    commit. This is the verification — the release will not re-run it.
 2. **Tag today's date (zero-padded) and push:**
 
@@ -207,18 +209,18 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    git push origin v$(date -u +%Y.%m.%d)
    ```
 
-   The release's `gate` confirms `ci` + `e2e` already passed for that commit
+   The release's `gate` confirms `CI` already passed for that commit
    (seconds, not a test run; it polls briefly if you tag right after the merge)
-   and refuses to build if either is missing or red. On pass it builds + publishes
-   everything. Released-artifact E2E triggers the separate cleanup only after
-   validation succeeds; the arm64 rootfs builds are the slowest leg.
+   and refuses to build if it is missing or red. On pass it builds + publishes
+   everything. Released-artifact validation triggers the separate cleanup only
+   after it succeeds; the arm64 rootfs builds are the slowest leg.
 3. **On release publish**, `release.yml` automatically dispatches the consolidated
    released-artifact suite (a `GITHUB_TOKEN`-created release does not auto-fire
    downstream workflows, so the release job performs the dispatch explicitly).
    Use this command only to retry that suite manually:
 
    ```bash
-   gh workflow run e2e.yml -f suite=artifacts -f tag=vYYYY.MM.DD
+   gh workflow run ci.yml -f suite=artifacts -f tag=vYYYY.MM.DD
    ```
 
 4. **After** the new release is confirmed live, `cleanup-ghcr` automatically removes

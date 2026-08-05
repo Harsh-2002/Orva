@@ -82,7 +82,7 @@ and `orva upgrade` details.
 | macOS | ✓ | ✓ | `orva-cli-darwin-{amd64,arm64}` | `/usr/local/bin/orva` |
 | Windows | ✓ | ✓ | `orva-cli-windows-{amd64,arm64}.exe` | `%LocalAppData%\Programs\orva\orva.exe` |
 
-CI: `.github/workflows/e2e.yml` runs every released CLI asset natively on
+CI: `.github/workflows/ci.yml` runs every released CLI asset natively on
 Ubuntu 24.04, macOS 26, and Windows 2025/11 Arm (amd64 + arm64) after every
 release and weekly.
 

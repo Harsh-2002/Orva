@@ -53,13 +53,14 @@ env:
 jobs:
   # ── 0. Gate — verify, don't re-test ──────────────────────────────────
   # The release pipeline does NOT run tests. All verification (shellcheck,
-  # go vet/test/build, ui build, docker smoke, full e2e) already ran on the
-  # PR and on the push to main. This job only CONFIRMS the tagged commit is
-  # green — a status lookup, not a test run — so the release stays fast while
-  # a tag can still never ship code whose tests failed. Every build job
-  # `needs: gate`. `workflow_dispatch` with force=true is emergency-only.
+  # go vet/test/build, ui build, docker smoke, full E2E suites) already ran
+  # on the PR and on the push to main via the consolidated CI workflow. This
+  # job only CONFIRMS the tagged commit is green — a status lookup, not a
+  # test run — so the release stays fast while a tag can still never ship
+  # code whose tests failed. Every build job `needs: gate`. `workflow_dispatch`
+  # with force=true is emergency-only.
   gate:
-    name: gate (verify CI + e2e already passed)
+    name: gate (verify CI already passed)
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -84,7 +85,7 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "gating on commit $SHA"
 
-      - name: require CI + e2e success on that commit
+      - name: require CI success on that commit
         if: ${{ github.event.inputs.force != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -94,10 +95,11 @@ jobs:
           # Confirm the tagged commit's verification is green — a status lookup,
           # not a test run. Poll until the workflow completes (handles tagging
           # right after the merge push), bounded so a stuck check can't hang the
-          # release. `hard` = must exist and succeed; `soft` = must succeed IF it
-          # ran (ci.yml is path-filtered, so a docs-only release commit may have
-          # no CI run — e2e always runs on a main push and actually builds + runs
-          # the server, so it's the hard gate).
+          # release. CI is a single consolidated workflow: job-level path
+          # filtering skips only its fast lint/go/ui/docker jobs internally for
+          # docs-only commits, so the workflow run itself always exists for a
+          # push to main and its overall conclusion reflects only the jobs that
+          # actually ran — one hard check on ci.yml suffices.
           check() {
             local wf="$1" mode="$2" deadline=$((SECONDS + 1200))  # ~20 min cap
             while :; do
@@ -116,8 +118,7 @@ jobs:
               echo "… $wf is '$status' for $SHA — waiting"; sleep 20
             done
           }
-          check e2e.yml hard
-          check ci.yml  soft
+          check ci.yml hard
           echo "gate passed: verification is green for $SHA"
 
   # ── 1. Go binary: matrix amd64 + arm64 ───────────────────────────────
@@ -598,7 +599,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.v.outputs.tag }}
         run: |
-          gh workflow run e2e.yml --ref "$RELEASE_TAG" \
+          gh workflow run ci.yml --ref "$RELEASE_TAG" \
             -f suite=artifacts \
             -f tag="$RELEASE_TAG"
 
