@@ -69,23 +69,32 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-24.04
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      code: ${{ steps.code.outputs.code }}
       cli: ${{ steps.filter.outputs.cli }}
       cli_installers: ${{ steps.filter.outputs.cli_installers }}
       server_install: ${{ steps.filter.outputs.server_install }}
     steps:
       - uses: actions/checkout@v7
+      # Separate step: 'code' needs the 'every' quantifier so its patterns
+      # combine as pure exclusions (picomatch inverts each '!'-prefixed
+      # pattern's own match, then 'every' ANDs them — a file counts as
+      # 'code' only if it evades every exclusion). The filters below use
+      # the default 'some' quantifier (any pattern match = included), which
+      # 'every' would break.
       - uses: dorny/paths-filter@v4
-        id: filter
+        id: code
         with:
-          predicate-quantifier: 'some-with-excludes'
+          predicate-quantifier: 'every'
           filters: |
             code:
-              - '**'
-              - '!**.md'
+              - '!**/*.md'
               - '!docs/screenshots/**'
               - '!LICENSE'
               - '!.github/ISSUE_TEMPLATE/**'
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
             cli:
               - 'cli/**'
               - 'internal/client/**'
