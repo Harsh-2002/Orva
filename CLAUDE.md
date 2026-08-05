@@ -73,8 +73,12 @@ smoke test, plus the full E2E suites (source API/sandbox, CLI cross-build/instal
 server installers, native runtime) all run on PRs and every push to `main`. Docs-only changes skip
 only the fast lint/go/ui/docker jobs (path-filtered internally); the source/CLI/installer/sandbox
 jobs always run on every `main` push. `CI` also owns exact downloaded installer/asset validation
-after publication (its `artifacts` suite). Registry pruning is isolated in `cleanup-ghcr`, which
-runs only after released-artifact validation succeeds.
+after publication (its `artifacts` suite).
+
+There are exactly two workflows, and no others should be added without good reason:
+`ci.yml` (all testing and validation) and `release.yml` (build and publish). Old releases,
+tags, and untagged GHCR manifests are intentionally **not** pruned automatically — prune them
+by hand from the Releases page / GHCR package settings if they ever accumulate enough to matter.
 
 GitHub-hosted E2E runs Orva directly on the VM, provisions nsjail plus Node/Python rootfs
 trees, and sets `ORVA_REQUIRE_SANDBOX=1`; real deploy/invoke is therefore mandatory and a
@@ -82,8 +86,10 @@ sandbox skip fails the gate. Local Docker runs may still skip when their host fo
 namespaces. Use the same environment flag on a provisioned target node when validating the
 kernel boundary manually.
 
-**One active release at a time** — never delete the old release *before* the new one is live
-(that opens a window where `install.sh`/`install-cli.sh` resolve "latest" → 404). The flow:
+Releases accumulate; `install.sh`/`install-cli.sh` always resolve GitHub's "latest", which is
+the newest published release. If you ever delete an old release by hand, publish the new one
+**first** — deleting the current release before its replacement is live opens a window where
+"latest" resolves to 404. The flow:
 
 1. **Merge to `main`** and wait for **CI** to go green on the merge commit. This is the
    verification — the release will not re-run it.
@@ -96,20 +102,14 @@ kernel boundary manually.
    right after the merge). It **refuses to build** if it is missing or red. On pass it builds
    + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
    checksums, and the GitHub Release. Every build job `needs: gate`; a successful Release then
-   dispatches released-artifact CI; its success triggers the separate `cleanup-ghcr` workflow.
+   dispatches released-artifact CI.
    *Emergency only:* `workflow_dispatch` with `force=true` skips the gate, but still
    checks out and builds the exact stable date tag supplied to the workflow.
 3. **On release publish**, dispatch `CI`'s `artifacts` suite against the
    freshly-published CLI + server assets (a `GITHUB_TOKEN`-created release does not auto-fire
    downstream workflows, so Release calls `gh workflow run ci.yml -f suite=artifacts`). The CLI
-   upgrade leg uses the previous active release when present and skips cleanly when there is none.
-4. **After** released-artifact E2E confirms the new version, `cleanup-ghcr` prunes every
-   previous published GitHub release/tag, leaving exactly one active release; this half always
-   runs with `GITHUB_TOKEN`. GHCR container-version pruning is a second, independent step in the
-   same workflow: this repo is a personal account, not an org, and GitHub's package-versions API
-   only supports classic PATs for that ownership type, so it self-skips with a warning unless a
-   `GHCR_CLEANUP_PAT` repo secret (classic PAT, `read:packages`+`delete:packages`) is configured.
-   Manual cleanup is available from the Actions tab.
+   upgrade leg uses the previous release when present and skips cleanly when there is none.
+   That green `artifacts` run is the end of the pipeline — nothing runs after it.
 
 ### Build-time identity
 

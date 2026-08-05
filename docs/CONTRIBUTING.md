@@ -189,20 +189,16 @@ Ship (on `v*` tag push):
   the release** — it trusts the already-green checks on that exact SHA. A
   `workflow_dispatch` with `force=true` bypasses the gate only for an emergency
   rebuild and still checks out the exact stable date tag supplied to the workflow.
-- **`cleanup-ghcr.yml`** — destructive release maintenance, isolated from Release;
-  runs only after released-artifact validation succeeds or by explicit manual
-  dispatch. Release/tag pruning (the half that enforces one active release)
-  always runs with `GITHUB_TOKEN`. GHCR container-version pruning is separate
-  and needs a `GHCR_CLEANUP_PAT` repo secret (classic PAT, `read:packages`+
-  `delete:packages`) — GitHub's package-versions API only supports classic
-  PATs for personal-account-owned packages like this repo's, so it self-skips
-  with a warning when that secret isn't configured.
+Those two are the only workflows — `ci.yml` tests, `release.yml` ships. Nothing
+prunes old releases, tags, or untagged GHCR manifests automatically; delete them
+by hand from the Releases page / GHCR package settings if they ever pile up.
 
 ## Releasing
 
-**One active release at a time** — never delete the old release *before* the new
-one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
-"latest" → 404). The flow:
+Releases accumulate, and `install.sh` / `install-cli.sh` always resolve GitHub's
+"latest" (the newest published release). If you do delete an old release by hand,
+publish the new one *first* — removing the current release before its replacement
+is live opens a window where "latest" resolves to 404. The flow:
 
 1. **Merge to `main`** and wait for **`CI`** to go green on the merge
    commit. This is the verification — the release will not re-run it.
@@ -216,8 +212,7 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    The release's `gate` confirms `CI` already passed for that commit
    (seconds, not a test run; it polls briefly if you tag right after the merge)
    and refuses to build if it is missing or red. On pass it builds + publishes
-   everything. Released-artifact validation triggers the separate cleanup only
-   after it succeeds; the arm64 rootfs builds are the slowest leg.
+   everything; the arm64 rootfs builds are the slowest leg.
 3. **On release publish**, `release.yml` automatically dispatches the consolidated
    released-artifact suite (a `GITHUB_TOKEN`-created release does not auto-fire
    downstream workflows, so the release job performs the dispatch explicitly).
@@ -227,9 +222,7 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    gh workflow run ci.yml -f suite=artifacts -f tag=vYYYY.MM.DD
    ```
 
-4. **After** the new release is confirmed live, `cleanup-ghcr` automatically removes
-   older published releases/tags — last, not first. Stale container versions are
-   pruned too, but only if `GHCR_CLEANUP_PAT` is configured (see above).
+4. That green `artifacts` run is the end of the pipeline — nothing runs after it.
 
 The full policy (gate internals, force bypass, build-time identity stamping) lives
 in the root `CLAUDE.md`.

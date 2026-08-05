@@ -22,9 +22,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="scripts/install.sh"
-# Empty CLI_VERSION → the installer resolves the latest release itself, which
-# survives the "one active release at a time" policy (a pinned tag would 404
-# once the next release deletes it). Set CLI_VERSION=vX.Y.Z to pin.
+# Empty CLI_VERSION → the installer resolves the latest release itself, so the
+# matrix keeps working as releases roll forward (a pinned tag would 404 if that
+# release were ever removed). Set CLI_VERSION=vX.Y.Z to pin.
 CLI_VERSION="${CLI_VERSION:-}"
 REAL_CLI="${REAL_CLI:-0}"
 
