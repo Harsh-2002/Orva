@@ -192,7 +192,7 @@ jobs:
           name: orva-${{ matrix.goarch }}
           path: dist/orva-linux-${{ matrix.goarch }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   # ── 1b. Standalone CLI binaries (Linux + macOS + Windows × amd64/arm64) ──
   # Slim CLI built from the dedicated ./cli/cmd/orva entry point — no
@@ -267,7 +267,7 @@ jobs:
           name: orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/orva-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   # ── 2. nsjail: per-arch standalone binary (release asset only) ───────
   # The container image's nsjail comes from inside the unified Dockerfile
@@ -334,7 +334,7 @@ jobs:
           name: nsjail-${{ matrix.goarch }}
           path: /tmp/nsjail/nsjail-linux-${{ matrix.goarch }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   # ── 3. Language rootfs tarballs ───────────────────────────────────────
   build-rootfs:
@@ -385,7 +385,7 @@ jobs:
           name: rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}
           path: rootfs-${{ matrix.runtime }}-${{ matrix.goarch }}.tar.zst
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   # ── 4. Collate + compute checksums + publish GitHub Release ───────────
   release:
@@ -761,3 +761,50 @@ jobs:
       - name: inspect
         run: |
           docker buildx imagetools inspect ${{ env.IMAGE_NAME }}:latest
+
+  # ── 7. Purge this run's build intermediates ──────────────────────────
+  # Release is the only workflow allowed to upload artifacts, and it does so
+  # purely to hand binaries between build jobs — every one of them is also
+  # published as a release asset, so retaining them just burns storage for
+  # `retention-days`. Delete them as soon as the release + manifest are live
+  # so no run leaves downloadable artifacts behind. Runs last and never fails
+  # the release: the artifacts are disposable, so a cleanup hiccup must not
+  # mark an otherwise-good release red.
+  purge-build-artifacts:
+    name: purge build artifacts
+    needs: [release, docker-manifest]
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: delete every artifact produced by this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          ids=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+            --jq '.artifacts[].id' || true)
+          if [ -z "$ids" ]; then
+            echo "no artifacts to purge"
+            exit 0
+          fi
+          deleted=0
+          failed=0
+          for id in $ids; do
+            if gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+              deleted=$((deleted + 1))
+            else
+              echo "::warning::could not delete artifact $id"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "purged $deleted artifact(s), $failed failure(s)"
+          {
+            echo "## Build artifact purge"
+            echo ""
+            echo "- deleted: $deleted"
+            echo "- failed:  $failed"
+          } >> "$GITHUB_STEP_SUMMARY"
