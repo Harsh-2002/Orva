@@ -1,0 +1,4 @@
+# Vite bundles third-party grammars that intentionally contain whitespace-only
+# template-literal lines. They are generated and byte-for-byte embedded, so do
+# not flag those lines as source whitespace errors in `git diff --check`.
+backend/internal/server/ui_dist/** whitespace=-trailing-space
