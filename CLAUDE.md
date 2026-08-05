@@ -103,9 +103,13 @@ kernel boundary manually.
    freshly-published CLI + server assets (a `GITHUB_TOKEN`-created release does not auto-fire
    downstream workflows, so Release calls `gh workflow run ci.yml -f suite=artifacts`). The CLI
    upgrade leg uses the previous active release when present and skips cleanly when there is none.
-4. **After** released-artifact E2E confirms the new version, `cleanup-ghcr` prunes stale
-   container versions plus every previous published GitHub release/tag, leaving exactly one
-   active release. Manual cleanup is available from the Actions tab.
+4. **After** released-artifact E2E confirms the new version, `cleanup-ghcr` prunes every
+   previous published GitHub release/tag, leaving exactly one active release; this half always
+   runs with `GITHUB_TOKEN`. GHCR container-version pruning is a second, independent step in the
+   same workflow: this repo is a personal account, not an org, and GitHub's package-versions API
+   only supports classic PATs for that ownership type, so it self-skips with a warning unless a
+   `GHCR_CLEANUP_PAT` repo secret (classic PAT, `read:packages`+`delete:packages`) is configured.
+   Manual cleanup is available from the Actions tab.
 
 ### Build-time identity
 

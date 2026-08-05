@@ -8,6 +8,18 @@ name: cleanup-ghcr
 # watcher was tried first but GITHUB_TOKEN-triggered runs are documented to
 # never fire workflow_run for anything downstream — confirmed empirically
 # before switching to direct dispatch.
+#
+# GitHub Release/tag pruning (the invariant that actually matters — it's what
+# keeps install.sh/install-cli.sh's "latest" resolution from 404ing) uses
+# plain repo-scoped endpoints and works with GITHUB_TOKEN. GHCR container-
+# version pruning is separate: this repo is a personal-account repo, not an
+# org, and GitHub's REST docs for /users/{username}/packages/.../versions
+# list only classic PATs (read:packages/delete:packages) as supported
+# authentication — GITHUB_TOKEN cannot manage user-account-owned package
+# versions regardless of the `permissions:` block, confirmed empirically
+# (the list call came back empty). That step reads a GHCR_CLEANUP_PAT repo
+# secret and skips itself with a warning, rather than failing the run, when
+# that secret isn't configured — release/tag cleanup still always runs.
 on:
   workflow_dispatch:
     inputs:
@@ -24,7 +36,6 @@ concurrency:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   prune:
@@ -32,6 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: validate released-artifact cleanup target
+        id: validate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REQUESTED_TAG: ${{ inputs.tag }}
@@ -54,11 +66,16 @@ jobs:
 
       - name: prune everything outside the current latest manifest
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_PAT }}
           PKG_OWNER: Harsh-2002
           PKG_NAME: orva
         run: |
           set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::GHCR_CLEANUP_PAT secret not configured — skipping GHCR container-version pruning. GITHUB_TOKEN cannot manage user-account-owned package versions on this personal repo (only orgs support that); add a classic PAT with read:packages+delete:packages scope as the GHCR_CLEANUP_PAT repo secret to enable this step."
+            exit 0
+          fi
 
           image="ghcr.io/${PKG_OWNER}/${PKG_NAME}"
           root_manifest="$RUNNER_TEMP/current-manifest.json"
@@ -153,6 +170,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: enforce one active GitHub release
+        # Independent of GHCR pruning above: run whenever tag validation
+        # succeeded, regardless of whether the (PAT-gated, best-effort) GHCR
+        # step succeeded, failed, or short-circuited on a missing secret.
+        if: always() && steps.validate.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

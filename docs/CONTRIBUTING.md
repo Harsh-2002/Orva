@@ -189,10 +189,14 @@ Ship (on `v*` tag push):
   the release** — it trusts the already-green checks on that exact SHA. A
   `workflow_dispatch` with `force=true` bypasses the gate only for an emergency
   rebuild and still checks out the exact stable date tag supplied to the workflow.
-- **`cleanup-ghcr.yml`** — destructive registry pruning, isolated from Release;
+- **`cleanup-ghcr.yml`** — destructive release maintenance, isolated from Release;
   runs only after released-artifact validation succeeds or by explicit manual
-  dispatch, then removes previous published releases/tags to enforce one
-  active release.
+  dispatch. Release/tag pruning (the half that enforces one active release)
+  always runs with `GITHUB_TOKEN`. GHCR container-version pruning is separate
+  and needs a `GHCR_CLEANUP_PAT` repo secret (classic PAT, `read:packages`+
+  `delete:packages`) — GitHub's package-versions API only supports classic
+  PATs for personal-account-owned packages like this repo's, so it self-skips
+  with a warning when that secret isn't configured.
 
 ## Releasing
 
@@ -224,7 +228,8 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    ```
 
 4. **After** the new release is confirmed live, `cleanup-ghcr` automatically removes
-   older published releases/tags and stale container versions — last, not first.
+   older published releases/tags — last, not first. Stale container versions are
+   pruned too, but only if `GHCR_CLEANUP_PAT` is configured (see above).
 
 The full policy (gate internals, force bypass, build-time identity stamping) lives
 in the root `CLAUDE.md`.
