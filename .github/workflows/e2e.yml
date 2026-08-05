@@ -501,6 +501,7 @@ jobs:
           echo "ORVA_VERSION=$tag" >> "$GITHUB_ENV"
           echo "ORVA_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
       - name: run install + smoke + uninstall
+        id: installer
         env:
           ORVA_BROWSER_LEG: "0"
         run: bash test/install/run-distro.sh ${{ matrix.distro }}
@@ -516,9 +517,24 @@ jobs:
             echo "## installer: ${{ matrix.distro }}"
             echo ""
             echo "Result: **$result**"
-            echo ""
-            echo "Detailed output is available in this job's log."
           } >> "$GITHUB_STEP_SUMMARY"
+          install_log="test/install/logs/${{ matrix.distro }}-install.log"
+          if [ "${{ steps.installer.outcome }}" = "failure" ] && [ -s "$install_log" ]; then
+            {
+              echo ""
+              echo "<details><summary>installer log tail</summary>"
+              echo ""
+              echo '```text'
+              tail -60 "$install_log"
+              echo '```'
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+            failure_tail=$(tail -40 "$install_log")
+            failure_tail=${failure_tail//'%'/'%25'}
+            failure_tail=${failure_tail//$'\r'/'%0D'}
+            failure_tail=${failure_tail//$'\n'/'%0A'}
+            echo "::error title=${{ matrix.distro }} installer log::$failure_tail"
+          fi
 
   native-engine:
     name: native systemd + Node/Python engine (${{ matrix.arch }})

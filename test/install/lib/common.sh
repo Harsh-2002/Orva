@@ -63,10 +63,10 @@ start_distro_container() {
     )
 
     if [[ "$DISTRO_INIT" == "systemd" ]]; then
-        # systemd-enabled images: init binary path varies. jrei/* and rocky
-        # images ship /sbin/init; lopsided/archlinux ships systemd at
-        # /lib/systemd/systemd only. Per-distro DISTRO_INIT_CMD picks the
-        # right one.
+        # systemd-enabled images: init binary path varies. jrei/* and Rocky
+        # ship /sbin/init; the official Arch image exposes
+        # /usr/lib/systemd/systemd. Per-distro DISTRO_INIT_CMD picks the right
+        # one.
         docker run -d "${args[@]}" "$DISTRO_IMAGE" "$DISTRO_INIT_CMD" >/dev/null \
             || die "container start failed for $distro"
     else
