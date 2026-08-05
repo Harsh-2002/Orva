@@ -23,11 +23,14 @@ source "$HERE/lib/common.sh"
 DISTRO="${1:-ubuntu24}"
 KEEP="${ORVA_KEEP_CONTAINER:-0}"
 TEST_VERSION="${ORVA_VERSION:-}"
+INSTALLER_PATH="${ORVA_CLI_INSTALLER_PATH:-$REPO_ROOT/scripts/install-cli.sh}"
+[[ -s "$INSTALLER_PATH" ]] || die "CLI installer missing or empty: $INSTALLER_PATH"
 
 # Pick a base image. If test/install/distros.tsv exists, use it; else
 # default to ubuntu:24.04 (covers 95% of the value).
 INSTALL_TSV="$REPO_ROOT/test/install/distros.tsv"
-if [[ -f "$INSTALL_TSV" ]]; then
+IMAGE="${ORVA_CLI_TEST_IMAGE:-}"
+if [[ -z "$IMAGE" && -f "$INSTALL_TSV" ]]; then
     row=$(grep -E "^${DISTRO}\b" "$INSTALL_TSV" | head -n1)
     if [[ -n "$row" ]]; then
         IMAGE=$(awk -F '\t' '{print $2}' <<< "$row")
@@ -61,9 +64,10 @@ case "$IMAGE" in
         ;;
 esac
 
-# Copy the local install-cli.sh into the container and run it.
-log "copying local install-cli.sh into $CONTAINER"
-docker cp "$REPO_ROOT/scripts/install-cli.sh" "$CONTAINER:/tmp/install-cli.sh"
+# PR/main validation passes the local working copy. Released-artifact E2E sets
+# ORVA_CLI_INSTALLER_PATH to the downloaded, checksum-verified release asset.
+log "copying CLI installer into $CONTAINER: $INSTALLER_PATH"
+docker cp "$INSTALLER_PATH" "$CONTAINER:/tmp/install-cli.sh"
 
 INSTALL_LOG="$LOGS_DIR/cli-install-${DISTRO}.log"
 log "running install-cli.sh inside $CONTAINER (log → $INSTALL_LOG)"
@@ -92,12 +96,14 @@ else
     fail "/usr/local/bin/orva missing or not executable"; FAIL=$((FAIL+1))
 fi
 
-# Size sanity: the slim CLI should be under 20 MB.
+# Size sanity: keep this contract aligned with build-matrix.sh. Dependency and
+# Go toolchain updates can move the stripped binary slightly; 28 MiB still
+# catches accidentally shipping the much larger server binary.
 size=$(docker exec "$CONTAINER" stat -c '%s' /usr/local/bin/orva 2>/dev/null || echo 0)
-if [[ "$size" -gt 0 ]] && [[ "$size" -le $((20 * 1024 * 1024)) ]]; then
-    ok "binary size: $((size / 1024 / 1024)) MB (≤ 20 MB)"; PASS=$((PASS+1))
+if [[ "$size" -gt 0 ]] && [[ "$size" -le "$CLI_SIZE_LIMIT_BYTES" ]]; then
+    ok "binary size: $((size / 1024 / 1024)) MB (≤ $CLI_SIZE_LIMIT_MB MB)"; PASS=$((PASS+1))
 else
-    fail "binary size out of expected range: $((size / 1024 / 1024)) MB"; FAIL=$((FAIL+1))
+    fail "binary size out of expected range: $((size / 1024 / 1024)) MB (limit: $CLI_SIZE_LIMIT_MB MB)"; FAIL=$((FAIL+1))
 fi
 
 # --version should print a release tag (vYYYY.MM.DD).

@@ -72,16 +72,14 @@ done
 # deliberate ~8 MB add that puts the binaries in the ~18-20 MB range. The
 # ceiling keeps headroom while still catching accidental server-package bloat.
 log "verifying binary sizes"
-SIZE_LIMIT_MB=28
-SIZE_LIMIT_BYTES=$((SIZE_LIMIT_MB * 1024 * 1024))
 for f in "$OUT"/orva-cli-*; do
     [[ -f "$f" ]] || continue
     size=$(stat -c '%s' "$f" 2>/dev/null || stat -f '%z' "$f" 2>/dev/null || echo 0)
-    if [[ "$size" -le "$SIZE_LIMIT_BYTES" ]]; then
-        ok "$(basename "$f"): $((size / 1024 / 1024)) MB (≤ ${SIZE_LIMIT_MB} MB)"
+    if [[ "$size" -le "$CLI_SIZE_LIMIT_BYTES" ]]; then
+        ok "$(basename "$f"): $((size / 1024 / 1024)) MB (≤ ${CLI_SIZE_LIMIT_MB} MB)"
         PASS=$((PASS+1))
     else
-        fail "$(basename "$f"): $((size / 1024 / 1024)) MB exceeds ${SIZE_LIMIT_MB} MB ceiling"
+        fail "$(basename "$f"): $((size / 1024 / 1024)) MB exceeds ${CLI_SIZE_LIMIT_MB} MB ceiling"
         FAIL=$((FAIL+1))
     fi
 done

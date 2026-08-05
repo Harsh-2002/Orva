@@ -12,7 +12,9 @@ on:
         type: string
 
 concurrency:
-  group: cleanup-ghcr
+  # Share the release lock so publishing :latest/assets and destructive
+  # pruning can never mutate release state concurrently.
+  group: orva-release-state
   cancel-in-progress: false
 
 permissions:
@@ -32,12 +34,36 @@ jobs:
           PKG_OWNER: Harsh-2002
           PKG_NAME: orva
         run: |
-          set -eu
+          set -euo pipefail
 
-          docker buildx imagetools inspect \
-            "ghcr.io/${PKG_OWNER}/${PKG_NAME}:latest" --raw \
-            | jq -r '..|.digest? // empty' \
-            | sort -u > /tmp/keep_digests.txt
+          image="ghcr.io/${PKG_OWNER}/${PKG_NAME}"
+          root_manifest="$RUNNER_TEMP/current-manifest.json"
+          docker buildx imagetools inspect "$image:latest" --raw > "$root_manifest"
+
+          # Walk every manifest/index edge. BuildKit provenance attestations
+          # appear as unknown-platform manifests and must remain alongside the
+          # two runtime architectures; old untagged manifests are not retained.
+          root_children="$RUNNER_TEMP/current-manifest-children.txt"
+          jq -r '.manifests[]?.digest' "$root_manifest" > "$root_children"
+          mapfile -t queue < "$root_children"
+          : > /tmp/keep_digests.txt
+          cursor=0
+          while [ "$cursor" -lt "${#queue[@]}" ]; do
+            digest=${queue[$cursor]}
+            cursor=$((cursor + 1))
+            if grep -qx "$digest" /tmp/keep_digests.txt; then
+              continue
+            fi
+            echo "$digest" >> /tmp/keep_digests.txt
+            child_manifest="$RUNNER_TEMP/manifest-${digest#sha256:}.json"
+            docker buildx imagetools inspect "$image@$digest" --raw > "$child_manifest"
+            child_digests="$RUNNER_TEMP/manifest-${digest#sha256:}-children.txt"
+            jq -r '.manifests[]?.digest' "$child_manifest" > "$child_digests"
+            while IFS= read -r child; do
+              [ -z "$child" ] || queue+=("$child")
+            done < "$child_digests"
+          done
+          sort -u -o /tmp/keep_digests.txt /tmp/keep_digests.txt
           test -s /tmp/keep_digests.txt || {
             echo "::error::could not resolve the current :latest manifest tree"
             exit 1
@@ -48,6 +74,10 @@ jobs:
             --paginate \
             --jq '.[] | "\(.id)|\(.name)|\((.metadata.container.tags // []) | join(","))"' \
             > /tmp/versions.txt
+          test -s /tmp/versions.txt || {
+            echo "::error::GHCR API returned no package versions after :latest resolved"
+            exit 1
+          }
 
           total=$(wc -l < /tmp/versions.txt)
           deleted=0
@@ -58,10 +88,6 @@ jobs:
               keep_reason="latest"
             elif grep -qx "$digest" /tmp/keep_digests.txt; then
               keep_reason="current manifest tree"
-            elif [ -z "$tags" ]; then
-              # Attestations and per-architecture manifests may be untagged.
-              # Preserve them unless GitHub exposes a reliable parent edge.
-              keep_reason="untagged dependency"
             fi
 
             if [ -n "$keep_reason" ]; then
@@ -77,6 +103,23 @@ jobs:
             deleted=$((deleted + 1))
           done < /tmp/versions.txt
 
+          gh api -H 'Accept: application/vnd.github+json' \
+            "/users/${PKG_OWNER}/packages/container/${PKG_NAME}/versions?per_page=100" \
+            --paginate \
+            --jq '.[] | "\(.id)|\(.name)|\((.metadata.container.tags // []) | join(","))"' \
+            > "$RUNNER_TEMP/versions-after.txt"
+          test -s "$RUNNER_TEMP/versions-after.txt" || {
+            echo "::error::GHCR cleanup removed every package version"
+            exit 1
+          }
+          while IFS='|' read -r id digest tags; do
+            if echo ",$tags," | grep -q ',latest,' || grep -qx "$digest" /tmp/keep_digests.txt; then
+              continue
+            fi
+            echo "::error::stale GHCR version remains after cleanup: id=$id digest=$digest tags=$tags"
+            exit 1
+          done < "$RUNNER_TEMP/versions-after.txt"
+
           {
             echo "## GHCR cleanup"
             echo ""
@@ -90,7 +133,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DISPATCH_TAG: ${{ inputs.tag }}
         run: |
-          set -eu
+          set -euo pipefail
 
           current_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)
           if [ -n "$DISPATCH_TAG" ] && [ "$DISPATCH_TAG" != "$current_tag" ]; then
@@ -98,20 +141,60 @@ jobs:
             exit 1
           fi
 
+          releases_file="$RUNNER_TEMP/releases-before.txt"
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.draft == false) | "\(.id)|\(.tag_name)"' \
+            > "$releases_file"
+          test -s "$releases_file" || {
+            echo "::error::release API returned no non-draft releases"
+            exit 1
+          }
+          current_matches=$(awk -F '|' -v tag="$current_tag" '$2 == tag { count++ } END { print count + 0 }' "$releases_file")
+          [ "$current_matches" -eq 1 ] || {
+            echo "::error::expected latest tag $current_tag exactly once in the release list (found $current_matches)"
+            exit 1
+          }
+
           deleted=0
           while IFS='|' read -r release_id release_tag; do
             [ -n "$release_id" ] || continue
             [ "$release_tag" = "$current_tag" ] && continue
             echo "delete release $release_tag (id=$release_id)"
+            encoded_tag=$(jq -rn --arg value "$release_tag" '$value | @uri')
+            response_file="$RUNNER_TEMP/tag-delete-response.json"
+            status=$(curl -sS -o "$response_file" -w '%{http_code}' \
+              --request DELETE \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/tags/${encoded_tag}")
+            case "$status" in
+              204) ;;
+              404) echo "::warning::release $release_tag was deleted but its tag was already absent" ;;
+              *)
+                echo "::error::failed to delete tag $release_tag (HTTP $status)"
+                cat "$response_file" >&2
+                exit 1
+                ;;
+            esac
             gh api --method DELETE \
               "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
-            gh api --method DELETE \
-              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${release_tag}" \
-              || echo "::warning::release $release_tag was deleted but its tag was already absent"
             deleted=$((deleted + 1))
-          done < <(gh api --paginate \
+          done < "$releases_file"
+
+          releases_after="$RUNNER_TEMP/releases-after.txt"
+          gh api --paginate \
             "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[] | select(.draft == false) | "\(.id)|\(.tag_name)"')
+            --jq '.[] | select(.draft == false) | .tag_name' \
+            > "$releases_after"
+          if [ "$(wc -l < "$releases_after")" -ne 1 ] ||
+             [ "$(cat "$releases_after")" != "$current_tag" ]; then
+              echo "::error::cleanup postcondition failed; expected only $current_tag"
+              cat "$releases_after" >&2
+              exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${current_tag}" >/dev/null
 
           {
             echo "## GitHub release cleanup"

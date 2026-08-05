@@ -7,9 +7,9 @@
 #
 # old_version defaults to the second-newest release tag fetched from
 # GitHub at runtime (so the test stays meaningful without manual pins).
-# distro defaults to ubuntu24 (only Linux/macOS via docker — Windows
-# self-upgrade is exercised by the consolidated E2E workflow's windows-2022
-# job, not here).
+# distro defaults to ubuntu24. This script owns the previous-to-current Linux
+# round-trip; the consolidated E2E macOS and Windows jobs exercise their native
+# replacement paths with `orva upgrade --force` on both supported architectures.
 
 set -uo pipefail
 
@@ -20,6 +20,8 @@ source "$HERE/lib/common.sh"
 REPO="${ORVA_REPO:-Harsh-2002/Orva}"
 OLD_VERSION="${1:-}"
 DISTRO="${2:-ubuntu24}"
+INSTALLER_PATH="${ORVA_CLI_INSTALLER_PATH:-$REPO_ROOT/scripts/install-cli.sh}"
+[[ -s "$INSTALLER_PATH" ]] || die "CLI installer missing or empty: $INSTALLER_PATH"
 
 CONTAINER="orva-cli-upgrade-${DISTRO}"
 
@@ -61,7 +63,7 @@ docker run -d --name "$CONTAINER" ubuntu:24.04 sleep 900 >/dev/null
 
 docker exec "$CONTAINER" sh -c 'apt-get update -qq && apt-get install -y -q curl ca-certificates >/dev/null'
 
-docker cp "$REPO_ROOT/scripts/install-cli.sh" "$CONTAINER:/tmp/install-cli.sh"
+docker cp "$INSTALLER_PATH" "$CONTAINER:/tmp/install-cli.sh"
 
 PASS=0; FAIL=0
 

@@ -7,6 +7,6 @@
 ubuntu24	jrei/systemd-ubuntu:24.04	systemd	/sbin/init
 debian12	jrei/systemd-debian:12	systemd	/sbin/init
 rocky9	geerlingguy/docker-rockylinux9-ansible:latest	systemd	/sbin/init
-fedora41	jrei/systemd-fedora:41	systemd	/sbin/init
+fedora44	jrei/systemd-fedora:44	systemd	/sbin/init
 arch	lopsided/archlinux:devel	systemd	/lib/systemd/systemd
 alpine321	alpine:3.21	openrc	-

@@ -67,6 +67,34 @@ warn() { printf '\033[1;33m!!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxxx\033[0m %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+containerized_host() {
+    [ -f /.dockerenv ] ||
+        [ -f /run/.containerenv ] ||
+        [ -f /run/systemd/container ] ||
+        grep -qaE '(lxc|container)' /proc/1/cgroup 2>/dev/null
+}
+
+# Pacman 7 downloads as the unprivileged `alpm` user by default. That is the
+# right security posture on a real Arch host, but its downloader sandbox cannot
+# create temporary database/package files in some Docker/systemd-container
+# filesystems (including the installer E2E image). Use a temporary config that
+# keeps every repository/signature setting while disabling only DownloadUser,
+# and only when we have positively detected a container. Never weaken pacman's
+# sandbox on a normal bare-metal host.
+pacman_run() {
+    if containerized_host && [ -r /etc/pacman.conf ] &&
+       grep -q '^[[:space:]]*DownloadUser[[:space:]]*=' /etc/pacman.conf; then
+        (
+            pr_conf=$(mktemp) || exit 1
+            trap 'rm -f "$pr_conf"' EXIT INT TERM
+            sed '/^[[:space:]]*DownloadUser[[:space:]]*=/d' /etc/pacman.conf > "$pr_conf"
+            pacman --config "$pr_conf" "$@"
+        )
+        return $?
+    fi
+    pacman "$@"
+}
+
 usage() {
     cat <<EOF
 Orva installer — install the server (Docker or bare-metal) or just the CLI.
@@ -483,14 +511,14 @@ ensure_downloader() {
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl ;;
         alpine) apk add --no-cache ca-certificates curl ;;
         fedora|rhel|centos|rocky|almalinux|amzn) { have dnf && dnf install -y curl; } || yum install -y curl ;;
-        arch|manjaro|endeavouros) pacman -Sy --noconfirm --needed curl ;;
+        arch|manjaro|endeavouros) pacman_run -Sy --noconfirm --needed curl ;;
         opensuse-leap|opensuse-tumbleweed|sles) zypper --non-interactive install curl ;;
         *)
             case "$DISTRO_LIKE" in
                 *debian*|*ubuntu*) DEBIAN_FRONTEND=noninteractive apt-get update -qq
                     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl ;;
                 *rhel*|*fedora*) { have dnf && dnf install -y curl; } || yum install -y curl ;;
-                *arch*) pacman -Sy --noconfirm --needed curl ;;
+                *arch*) pacman_run -Sy --noconfirm --needed curl ;;
                 *suse*) zypper --non-interactive install curl ;;
                 *) die "curl is required to download the release — install it and re-run" ;;
             esac ;;
@@ -549,9 +577,9 @@ install_prereqs() {
                 || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
         arch|manjaro|endeavouros)
             # shellcheck disable=SC2086
-            pacman -Syu --noconfirm --needed $ip_pkgs
+            pacman_run -Syu --noconfirm --needed $ip_pkgs
             # shellcheck disable=SC2086
-            pacman -S --noconfirm --needed $ip_opt || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
+            pacman_run -S --noconfirm --needed $ip_opt || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
         opensuse-leap|opensuse-tumbleweed|sles)
             # shellcheck disable=SC2086
             zypper --non-interactive install $ip_pkgs
@@ -567,7 +595,7 @@ install_prereqs() {
                     { have dnf && dnf install -y $ip_pkgs; } || yum install -y $ip_pkgs ;;
                 *arch*)
                     # shellcheck disable=SC2086
-                    pacman -Syu --noconfirm --needed $ip_pkgs ;;
+                    pacman_run -Syu --noconfirm --needed $ip_pkgs ;;
                 *suse*)
                     # shellcheck disable=SC2086
                     zypper --non-interactive install $ip_pkgs ;;
@@ -607,7 +635,7 @@ check_kernel_features() {
         ckf_missing="userns ${ckf_missing#userns }"
         [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=1
     fi
-    if [ -f /.dockerenv ] || [ -f /run/systemd/container ] || grep -qaE '(lxc|container)' /proc/1/cgroup 2>/dev/null; then
+    if containerized_host; then
         warn "containerized host detected — using nsjail's setcap fallback"
         [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=1
     fi
@@ -812,7 +840,9 @@ install_unit() {
         SVC_KIND="systemd"
         log "installing systemd unit"
         install -m 0644 "$PREFIX/share/orva/scripts/orva.service" /etc/systemd/system/orva.service
-        [ -d /run/systemd/system ] && systemctl daemon-reload
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload
+        fi
     elif [ -d /etc/init.d ] && have rc-update; then
         SVC_KIND="openrc"
         log "installing OpenRC unit"

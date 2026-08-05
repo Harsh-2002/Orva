@@ -115,7 +115,7 @@ matrix.
 bash test/install/run-distro.sh ubuntu24
 
 # Full matrix (sequential, ~35 min):
-for d in ubuntu24 debian12 alpine321 rocky9 fedora41 arch; do
+for d in ubuntu24 debian12 alpine321 rocky9 fedora44 arch; do
   bash test/install/run-distro.sh "$d"
 done
 
@@ -174,9 +174,10 @@ Verification (on push to `main` + every PR):
 
 - **`ci.yml`** — shellcheck + go vet/test/build, frontend build, docker
   smoke build. Path-filtered (skips docs-only changes).
-- **`e2e.yml`** — full programmatic E2E plus path-selected CLI build/install and
-  bare-metal installer matrices. Its `artifacts` suite validates every published
-  CLI/server asset on Linux, macOS, Windows, amd64, and arm64.
+- **`e2e.yml`** — full programmatic E2E plus CLI build/install and bare-metal
+  installer matrices on every `main` push (path-selected on PRs). Its `artifacts`
+  suite validates every published CLI/server asset on Linux, macOS, Windows,
+  amd64, and arm64.
 
 Ship (on `v*` tag push):
 
@@ -185,7 +186,8 @@ Ship (on `v*` tag push):
   the multi-arch Docker image, all CLI binaries, rootfs tarballs, and checksums,
   and publishes the GitHub Release + `ghcr.io/harsh-2002/orva`. **No tests run in
   the release** — it trusts the already-green checks on that exact SHA. A
-  `workflow_dispatch` with `force=true` bypasses the gate for emergency/rc builds.
+  `workflow_dispatch` with `force=true` bypasses the gate only for an emergency
+  rebuild and still checks out the exact stable date tag supplied to the workflow.
 - **`cleanup-ghcr.yml`** — destructive registry pruning, isolated from Release;
   runs only after released-artifact E2E succeeds or by explicit manual dispatch,
   then removes previous published releases/tags to enforce one active release.
@@ -210,8 +212,10 @@ one is live (that opens a window where `install.sh` / `install-cli.sh` resolve
    and refuses to build if either is missing or red. On pass it builds + publishes
    everything. Released-artifact E2E triggers the separate cleanup only after
    validation succeeds; the arm64 rootfs builds are the slowest leg.
-3. **On release publish**, dispatch the consolidated released-artifact suite (a
-   `GITHUB_TOKEN`-created release does not auto-fire downstream workflows):
+3. **On release publish**, `release.yml` automatically dispatches the consolidated
+   released-artifact suite (a `GITHUB_TOKEN`-created release does not auto-fire
+   downstream workflows, so the release job performs the dispatch explicitly).
+   Use this command only to retry that suite manually:
 
    ```bash
    gh workflow run e2e.yml -f suite=artifacts -f tag=vYYYY.MM.DD

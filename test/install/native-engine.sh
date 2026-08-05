@@ -4,12 +4,14 @@ set -euo pipefail
 # Native hosted-VM gate for the real installed systemd service. Unlike the
 # privileged container matrix, sandbox failures are never advisory here.
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
+installer_path="${ORVA_INSTALLER_PATH:-$repo_root/scripts/install.sh}"
+[[ -s "$installer_path" ]] || { echo "server installer missing or empty: $installer_path" >&2; exit 1; }
 version_args=()
 if [[ -n "${RELEASE_TAG:-}" ]]; then
     version_args=(--version "$RELEASE_TAG")
 fi
 
-sh "$repo_root/scripts/install.sh" --bare-metal --yes --start "${version_args[@]}"
+sh "$installer_path" --bare-metal --yes --start "${version_args[@]}"
 systemctl is-active --quiet orva
 
 endpoint=http://127.0.0.1:8443

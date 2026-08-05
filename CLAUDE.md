@@ -70,8 +70,9 @@ Dockerfile        Multi-stage image (dev and production — single file)
 publishes. For code changes, `ci` (workflow lint, shellcheck, go vet/test/build, UI lint/build,
 dependency audit, and a running-container smoke test) plus `e2e` run on PRs and pushes to
 `main`; docs-only changes skip `ci` but still run `e2e`. The same `e2e` workflow also owns
-CLI + bare-metal installer jobs on relevant PRs and against released artifacts. Registry
-pruning is isolated in `cleanup-ghcr`, which runs only after released-artifact E2E succeeds.
+CLI + bare-metal installer jobs on relevant PRs and every `main` push, plus exact downloaded
+installer assets after publication. Registry pruning is isolated in `cleanup-ghcr`, which
+runs only after released-artifact E2E succeeds.
 
 GitHub-hosted E2E runs Orva directly on the VM, provisions nsjail plus Node/Python rootfs
 trees, and sets `ORVA_REQUIRE_SANDBOX=1`; real deploy/invoke is therefore mandatory and a
@@ -94,7 +95,8 @@ kernel boundary manually.
    + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
    checksums, and the GitHub Release. Every build job `needs: gate`; a successful Release then
    dispatches released-artifact E2E; its success triggers the separate `cleanup-ghcr` workflow.
-   *Emergency/rc only:* `workflow_dispatch` with `force=true` skips the gate.
+   *Emergency only:* `workflow_dispatch` with `force=true` skips the gate, but still
+   checks out and builds the exact stable date tag supplied to the workflow.
 3. **On release publish**, dispatch the `e2e` workflow's `artifacts` suite against the
    freshly-published CLI + server assets (a `GITHUB_TOKEN`-created release does not auto-fire
    downstream workflows, so Release calls `gh workflow run e2e.yml -f suite=artifacts`). The CLI

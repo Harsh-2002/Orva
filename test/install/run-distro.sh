@@ -6,7 +6,7 @@
 #   bash test/install/run-distro.sh <distro>
 #
 # Where <distro> is a row in test/install/distros.tsv (ubuntu24, debian12,
-# alpine321, rocky9, fedora41, arch).
+# alpine321, rocky9, fedora44, arch).
 #
 # Outputs:
 #   test/install/logs/<distro>-install.log
@@ -37,6 +37,8 @@ fi
 
 DISTRO="$1"
 KEEP="${ORVA_KEEP_CONTAINER:-0}"
+INSTALLER_PATH="${ORVA_INSTALLER_PATH:-$REPO_ROOT/scripts/install.sh}"
+[[ -s "$INSTALLER_PATH" ]] || die "server installer missing or empty: $INSTALLER_PATH"
 
 # Derive a stable host port per-distro so the matrix can run in parallel.
 PORT_BASE=19443
@@ -58,8 +60,8 @@ start_distro_container "$DISTRO" "$PORT" >/dev/null
 wait_for_init "$CONTAINER" 60 || die "init failed"
 
 # ── 2. Copy install.sh and run it for real (not dryrun) ───────────────────
-log "copying install.sh into $CONTAINER"
-docker cp "$REPO_ROOT/scripts/install.sh" "$CONTAINER:/root/install.sh"
+log "copying server installer into $CONTAINER: $INSTALLER_PATH"
+docker cp "$INSTALLER_PATH" "$CONTAINER:/root/install.sh"
 
 log "running install.sh inside $CONTAINER (log → $INSTALL_LOG)"
 INSTALL_ENV=()

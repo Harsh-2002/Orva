@@ -17,8 +17,9 @@ name: Release
 # All release assets are attached to the GitHub Release and linked from
 # install.sh via https://github.com/Harsh-2002/Orva/releases/latest/download/...
 #
-# Manual trigger (workflow_dispatch) is allowed for rc builds — they publish
-# to the Release draft; the Docker image is still only :latest.
+# Manual trigger (workflow_dispatch) is reserved for retrying an exact stable
+# date tag or for an explicitly forced emergency rebuild. It still checks out
+# that tag; the dispatch branch/ref is never used as release source.
 
 on:
   push:
@@ -26,16 +27,16 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "release tag (e.g. v0.3.0) — required for workflow_dispatch"
+        description: "stable date tag (vYYYY.MM.DD) — required for workflow_dispatch"
         required: true
       force:
-        description: "skip the verification gate (emergency / rc only)"
+        description: "skip the verification gate (emergency only)"
         type: boolean
         default: false
 
 # Two release runs must never race while mutating :latest or release assets.
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref }}
+  group: orva-release-state
   cancel-in-progress: false
 
 permissions:
@@ -56,7 +57,7 @@ jobs:
   # PR and on the push to main. This job only CONFIRMS the tagged commit is
   # green — a status lookup, not a test run — so the release stays fast while
   # a tag can still never ship code whose tests failed. Every build job
-  # `needs: gate`. `workflow_dispatch` with force=true skips it (rc/emergency).
+  # `needs: gate`. `workflow_dispatch` with force=true is emergency-only.
   gate:
     name: gate (verify CI + e2e already passed)
     runs-on: ubuntu-24.04
@@ -71,11 +72,14 @@ jobs:
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.tag }}"
-            SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha 2>/dev/null || true)"
-            [ -z "$SHA" ] && SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha 2>/dev/null || true)"
           else
-            SHA="${GITHUB_SHA}"
+            TAG="${GITHUB_REF#refs/tags/}"
           fi
+          [[ "$TAG" =~ ^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}$ ]] || {
+            echo "::error::release tag must use stable date format vYYYY.MM.DD"
+            exit 1
+          }
+          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha 2>/dev/null || true)"
           [ -n "$SHA" ] || { echo "::error::could not resolve a commit SHA to gate on"; exit 1; }
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "gating on commit $SHA"
@@ -126,6 +130,8 @@ jobs:
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v7
         with:
@@ -160,7 +166,7 @@ jobs:
           else
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
-          echo "commit=${GITHUB_SHA::7}"               >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
           echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: go build
@@ -215,6 +221,8 @@ jobs:
             ext: ".exe"
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v7
         with:
@@ -231,7 +239,7 @@ jobs:
           else
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
-          echo "commit=${GITHUB_SHA::7}"               >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
           echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: go build (slim cli)
@@ -344,6 +352,8 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: install zstd
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
@@ -389,6 +399,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: resolve version
         id: v
@@ -472,7 +484,7 @@ jobs:
           tag_name: ${{ steps.v.outputs.tag }}
           name: Orva ${{ steps.v.outputs.tag }}
           draft: false
-          prerelease: ${{ contains(steps.v.outputs.tag, '-rc') || contains(steps.v.outputs.tag, '-beta') }}
+          prerelease: false
           fail_on_unmatched_files: true
           files: |
             dist/*
@@ -621,6 +633,8 @@ jobs:
       digest_arm64: ${{ steps.digest_out.outputs.arm64 }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: resolve build identity
         id: v
@@ -630,7 +644,7 @@ jobs:
           else
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
-          echo "commit=${GITHUB_SHA::7}"               >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
           echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4

@@ -38,8 +38,10 @@ on:
     - cron: "0 4 * * 0" # released CLI installers
 
 jobs:
-  # PR-only path routing keeps expensive platform/install jobs scoped to the
-  # files they cover. Release, schedule, and manual routing is event-driven.
+  # PR path routing keeps expensive platform/install jobs scoped to the files
+  # they cover. Every main push runs all source + installer gates so a later
+  # docs-only commit cannot inherit unverified installer changes. Release,
+  # schedule, and manual routing is event-driven.
   changes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
@@ -66,10 +68,13 @@ jobs:
               - 'scripts/install-cli.ps1'
               - 'test/cli/install-cli-test.sh'
               - 'test/cli/upgrade-test.sh'
+              - 'test/cli/lib/**'
+              - 'test/release/**'
               - '.github/workflows/e2e.yml'
             server_install:
               - 'scripts/install.sh'
               - 'test/install/**'
+              - 'test/release/**'
               - '.github/workflows/e2e.yml'
 
   e2e:
@@ -195,7 +200,8 @@ jobs:
     needs: changes
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.cli == 'true') ||
        (github.event_name == 'workflow_dispatch' &&
@@ -228,56 +234,116 @@ jobs:
         run: bash test/cli/command-tree.sh
 
   cli-install-linux:
-    name: released CLI installer (Linux)
+    name: CLI installer (Linux/${{ matrix.arch }})
     needs: changes
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.cli_installers == 'true') ||
        github.event_name == 'release' ||
        (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0') ||
        (github.event_name == 'workflow_dispatch' &&
         (inputs.suite == 'cli' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
+      ORVA_CLI_TEST_IMAGE: ubuntu:24.04
+      EXPECTED_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v7
       - name: install jq + curl
         run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+      - name: test release-asset verifier
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest="$RUNNER_TEMP/release-verifier/install-cli.sh"
+          tag=$(sh test/release/download-verified-asset.sh install-cli.sh "$latest")
+          test -n "$tag"
+          test -s "$latest"
+      - name: fetch exact released installer
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          installer="$RUNNER_TEMP/release-assets/install-cli.sh"
+          tag=$(sh test/release/download-verified-asset.sh install-cli.sh "$installer")
+          echo "ORVA_VERSION=$tag" >> "$GITHUB_ENV"
+          echo "ORVA_CLI_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
       - name: run install-cli-test.sh
-        run: bash test/cli/install-cli-test.sh ubuntu24
+        run: |
+          case "$EXPECTED_ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64|arm64:arm64) ;;
+            *) echo "unexpected runner architecture: $(uname -m) (wanted $EXPECTED_ARCH)" >&2; exit 1 ;;
+          esac
+          bash test/cli/install-cli-test.sh ubuntu24
 
   cli-install-macos:
-    name: released CLI installer (macOS)
+    name: CLI installer (macOS/${{ matrix.arch }})
     needs: changes
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.cli_installers == 'true') ||
        github.event_name == 'release' ||
        (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0') ||
        (github.event_name == 'workflow_dispatch' &&
         (inputs.suite == 'cli' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: macos-26-intel
+          - arch: arm64
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
+      EXPECTED_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v7
+      - name: fetch exact released installer
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          installer="$RUNNER_TEMP/release-assets/install-cli.sh"
+          tag=$(sh test/release/download-verified-asset.sh install-cli.sh "$installer")
+          echo "ORVA_VERSION=$tag" >> "$GITHUB_ENV"
+          echo "ORVA_CLI_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
       - name: run installer against released artifact
         run: |
+          case "$EXPECTED_ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:arm64) ;;
+            *) echo "unexpected runner architecture: $(uname -m) (wanted $EXPECTED_ARCH)" >&2; exit 1 ;;
+          esac
           mkdir -p /tmp/orva-test-bin
           export ORVA_CLI_PATH=/tmp/orva-test-bin/orva
           export ORVA_INSTALL_COMPLETION=0
-          sh scripts/install-cli.sh
+          sh "${ORVA_CLI_INSTALLER_PATH:-scripts/install-cli.sh}"
           test -x /tmp/orva-test-bin/orva
-          /tmp/orva-test-bin/orva --version
+          version_before=$(/tmp/orva-test-bin/orva --version)
           /tmp/orva-test-bin/orva completion zsh > /tmp/orva-test-bin/_orva
           test -s /tmp/orva-test-bin/_orva
+          /tmp/orva-test-bin/orva upgrade --force
+          version_after=$(/tmp/orva-test-bin/orva --version)
+          test "$version_after" = "$version_before"
       - name: confirm slim CLI lacks serve
         run: |
           if /tmp/orva-test-bin/orva serve --help >/dev/null 2>&1; then
@@ -287,38 +353,86 @@ jobs:
           echo "OK: slim CLI on macOS correctly lacks 'serve'"
 
   cli-install-windows:
-    name: released CLI installer (Windows)
+    name: CLI installer (Windows/${{ matrix.arch }})
     needs: changes
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.cli_installers == 'true') ||
        github.event_name == 'release' ||
        (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 0') ||
        (github.event_name == 'workflow_dispatch' &&
         (inputs.suite == 'cli' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
-    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
+      EXPECTED_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v7
+      - name: fetch exact released installer
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:ORVA_VERSION
+          if (-not $tag) {
+            $tag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName
+          }
+          if (-not $tag) { throw "could not resolve release tag" }
+          $dir = Join-Path $env:RUNNER_TEMP "release-assets"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --dir $dir `
+            --pattern install-cli.ps1 --pattern checksums.txt
+          if ($LASTEXITCODE -ne 0) { throw "release asset download failed" }
+          $installer = Join-Path $dir "install-cli.ps1"
+          $checksums = Join-Path $dir "checksums.txt"
+          $line = Get-Content $checksums | Where-Object { $_ -match '\s\*?install-cli\.ps1$' } | Select-Object -First 1
+          if (-not $line) { throw "checksum entry missing for install-cli.ps1" }
+          $want = ($line.Trim() -split '\s+')[0].ToLowerInvariant()
+          $got = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+          if ($want -ne $got) { throw "checksum mismatch for install-cli.ps1" }
+          "ORVA_VERSION=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ORVA_CLI_INSTALLER_PATH=$installer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: run installer
         shell: pwsh
         run: |
+          if ($env:PROCESSOR_ARCHITECTURE.ToLowerInvariant() -ne $env:EXPECTED_ARCH) {
+            throw "unexpected runner architecture: $env:PROCESSOR_ARCHITECTURE (wanted $env:EXPECTED_ARCH)"
+          }
           $env:ORVA_CLI_DIR = "$env:RUNNER_TEMP\orva-test-bin"
           $env:ORVA_INSTALL_COMPLETION = "0"
-          pwsh -NoProfile -File scripts/install-cli.ps1
+          $installer = if ($env:ORVA_CLI_INSTALLER_PATH) { $env:ORVA_CLI_INSTALLER_PATH } else { "scripts/install-cli.ps1" }
+          pwsh -NoProfile -File $installer
+          if ($LASTEXITCODE -ne 0) { throw "install-cli.ps1 exited with code $LASTEXITCODE" }
           $exe = Join-Path $env:ORVA_CLI_DIR "orva.exe"
           if (-not (Test-Path $exe)) { throw "orva.exe not installed at $exe" }
-          & $exe --version
+          $versionBeforeUpgrade = & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "orva --version exited with code $LASTEXITCODE" }
+          & $exe upgrade --force
+          if ($LASTEXITCODE -ne 0) { throw "orva upgrade --force exited with code $LASTEXITCODE" }
+          $versionAfterUpgrade = & $exe --version
+          if ($LASTEXITCODE -ne 0 -or $versionAfterUpgrade -ne $versionBeforeUpgrade) {
+            throw "post-upgrade version mismatch: before=$versionBeforeUpgrade after=$versionAfterUpgrade"
+          }
           $serveOut = & $exe serve --help 2>&1
           if ($LASTEXITCODE -eq 0) {
             throw "slim CLI on Windows unexpectedly has 'serve' subcommand"
           }
           Write-Host "OK: slim CLI on Windows correctly lacks 'serve'"
           & $exe completion powershell | Out-File -FilePath "$env:RUNNER_TEMP\orva-completion.ps1"
+          if ($LASTEXITCODE -ne 0) { throw "powershell completion generation failed" }
           if ((Get-Item "$env:RUNNER_TEMP\orva-completion.ps1").Length -lt 100) {
             throw "completion script too small — likely failed"
           }
@@ -329,10 +443,19 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v7
       - name: install jq + curl
         run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+      - name: fetch exact released installer
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          installer="$RUNNER_TEMP/release-assets/install-cli.sh"
+          ORVA_VERSION="$RELEASE_TAG" sh test/release/download-verified-asset.sh install-cli.sh "$installer" >/dev/null
+          echo "ORVA_CLI_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
       - name: run upgrade-test.sh
         run: bash test/cli/upgrade-test.sh
 
@@ -341,7 +464,8 @@ jobs:
     needs: changes
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.server_install == 'true') ||
        github.event_name == 'release' ||
@@ -349,7 +473,6 @@ jobs:
        (github.event_name == 'workflow_dispatch' &&
         (inputs.suite == 'install' || inputs.suite == 'artifacts' || inputs.suite == 'all')))
     runs-on: ubuntu-24.04
-    continue-on-error: ${{ matrix.distro == 'arch' || matrix.distro == 'alpine321' }}
     strategy:
       fail-fast: false
       matrix:
@@ -358,18 +481,28 @@ jobs:
           - debian12
           - alpine321
           - rocky9
-          - fedora41
+          - fedora44
           - arch
+    env:
+      ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v7
       - name: install jq + curl
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y jq curl
+      - name: fetch exact released installer
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          installer="$RUNNER_TEMP/release-assets/install.sh"
+          tag=$(sh test/release/download-verified-asset.sh install.sh "$installer")
+          echo "ORVA_VERSION=$tag" >> "$GITHUB_ENV"
+          echo "ORVA_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
       - name: run install + smoke + uninstall
         env:
           ORVA_BROWSER_LEG: "0"
-          ORVA_VERSION: ${{ inputs.tag || github.event.release.tag_name }}
         run: bash test/install/run-distro.sh ${{ matrix.distro }}
       - name: summarize result
         if: always()
@@ -392,7 +525,8 @@ jobs:
     needs: changes
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.server_install == 'true') ||
        github.event_name == 'release' ||
@@ -409,16 +543,99 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v7
       - name: install jq
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends jq
-      - name: install and invoke both runtimes
+      - name: fetch exact released installer
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
-          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
-        run: sudo --preserve-env=RELEASE_TAG bash test/install/native-engine.sh
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          installer="$RUNNER_TEMP/release-assets/install.sh"
+          tag=$(sh test/release/download-verified-asset.sh install.sh "$installer")
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "ORVA_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
+      - name: install and invoke both runtimes
+        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH bash test/install/native-engine.sh
+
+  released-container:
+    name: released container (${{ matrix.arch }})
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 3 * * 0') ||
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'install' || inputs.suite == 'artifacts' || inputs.suite == 'all'))
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: read
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      IMAGE: ghcr.io/harsh-2002/orva:latest
+      EXPECTED_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: verify manifest and build identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected="$RELEASE_TAG"
+          if [ -z "$expected" ]; then
+            expected=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          test -n "$expected"
+          commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$expected" --jq .sha)
+          short_commit=${commit:0:7}
+          test -n "$short_commit"
+
+          case "$EXPECTED_ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64|arm64:arm64) ;;
+            *) echo "unexpected runner architecture: $(uname -m) (wanted $EXPECTED_ARCH)" >&2; exit 1 ;;
+          esac
+
+          docker manifest inspect "$IMAGE" > "$RUNNER_TEMP/orva-manifest.json"
+          jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64", "arm64"]' \
+            "$RUNNER_TEMP/orva-manifest.json"
+
+          docker pull "$IMAGE"
+          label_version=$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')
+          label_commit=$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+          test "$label_version" = "$expected"
+          test "$label_commit" = "$short_commit"
+
+          docker run -d --name orva-released -p 127.0.0.1:18443:8443 "$IMAGE"
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18443/api/v1/system/health > "$RUNNER_TEMP/orva-health.json"; then
+              break
+            fi
+            sleep 1
+          done
+          jq -e --arg version "$expected" --arg commit "$short_commit" \
+            '.version == $version and .commit == $commit' \
+            "$RUNNER_TEMP/orva-health.json"
+      - name: stop released container
+        if: always()
+        run: |
+          docker logs orva-released 2>&1 || true
+          docker rm -f orva-released >/dev/null 2>&1 || true
 
   dispatch-cleanup:
     name: dispatch post-release cleanup
@@ -429,6 +646,7 @@ jobs:
       - cli-upgrade
       - install-matrix
       - native-engine
+      - released-container
     if: >-
       always() &&
       (github.event_name == 'release' ||
@@ -438,7 +656,8 @@ jobs:
       needs.cli-install-windows.result == 'success' &&
       needs.cli-upgrade.result == 'success' &&
       needs.install-matrix.result == 'success' &&
-      needs.native-engine.result == 'success'
+      needs.native-engine.result == 'success' &&
+      needs.released-container.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       actions: write

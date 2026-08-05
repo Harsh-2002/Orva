@@ -57,9 +57,11 @@ jobs:
         run: |
           dash -n scripts/install.sh
           dash -n scripts/install-cli.sh
+          dash -n test/release/download-verified-asset.sh
           shellcheck -s sh -S warning \
             scripts/install.sh \
-            scripts/install-cli.sh
+            scripts/install-cli.sh \
+            test/release/download-verified-asset.sh
 
       # bash scripts — entrypoint + every test suite. Failing builds here
       # gate the consolidated E2E workflow's installer and CLI jobs.

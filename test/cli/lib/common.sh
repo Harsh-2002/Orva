@@ -21,6 +21,15 @@ fail() { printf "${c_red}✗${c_reset} %s\n" "$*" >&2; }
 die()  { fail "$*"; exit 1; }
 dim()  { printf "${c_dim}%s${c_reset}\n" "$*"; }
 
+# One ceiling for both source builds and downloaded release binaries. Keep
+# enough headroom for normal Go/dependency movement while catching accidental
+# inclusion of the much larger server package.
+CLI_SIZE_LIMIT_MB="${ORVA_CLI_MAX_SIZE_MB:-28}"
+[[ "$CLI_SIZE_LIMIT_MB" =~ ^[1-9][0-9]*$ ]] \
+    || die "ORVA_CLI_MAX_SIZE_MB must be a positive integer"
+# shellcheck disable=SC2034  # consumed by scripts that source this library
+CLI_SIZE_LIMIT_BYTES=$((CLI_SIZE_LIMIT_MB * 1024 * 1024))
+
 # Six release targets the CLI ships on.
 # shellcheck disable=SC2034  # consumed by consumer scripts after source
 CLI_TARGETS=(
