@@ -28,9 +28,12 @@ go build -ldflags='-X main.Version=tree-test' \
     -o "$OUT/orva-server" "$REPO_ROOT/backend/cmd/orva" || die "server build failed"
 
 # enumerate_commands <binary> > out
-# Walks the cobra tree by parsing `<bin> --help` recursively. Cobra's
-# default help template lists subcommands as "  <name>   <desc>" lines
-# under an "Available Commands:" header.
+# Walks the Cobra tree by parsing `<bin> --help` recursively. Orva groups
+# top-level commands under domain headings (rather than Cobra's default
+# "Available Commands:" heading), while nested commands use the default.
+# Treat every non-indented heading that ends in ':' as a possible command
+# section, then accept only indented command/description rows. Usage/examples
+# and flag sections explicitly turn collection off.
 enumerate_commands() {
     local bin="$1"
     local prefix="$2"
@@ -40,10 +43,9 @@ enumerate_commands() {
 
     "$bin" $prefix --help 2>/dev/null \
         | awk '
-            /^Available Commands:/ { in_cmds = 1; next }
-            /^Flags:/              { in_cmds = 0 }
-            /^Global Flags:/       { in_cmds = 0 }
-            in_cmds && /^[[:space:]]+[a-zA-Z]/ {
+            /^(Usage|Examples|Flags|Global Flags):/ { in_cmds = 0; next }
+            /^[^[:space:]].*:$/                    { in_cmds = 1; next }
+            in_cmds && /^  [a-zA-Z0-9][^[:space:]]*[[:space:]][[:space:]]/ {
                 # First non-whitespace token = command name.
                 gsub(/^[[:space:]]+/, "")
                 split($0, a, /[[:space:]]+/)
@@ -66,11 +68,22 @@ enumerate_commands() {
 enumerate_commands "$OUT/orva-cli"    "" 0 | sort -u > "$OUT/slim.txt"
 enumerate_commands "$OUT/orva-server" "" 0 | sort -u > "$OUT/server.txt"
 
+# Fail closed: an empty/partial parser result must never let two equally empty
+# snapshots impersonate a passing command-surface comparison.
+slim_count=$(wc -l < "$OUT/slim.txt")
+server_count=$(wc -l < "$OUT/server.txt")
+[[ "$slim_count" -ge 50 ]] || die "enumerated only $slim_count slim CLI commands; help parser is incomplete"
+[[ "$server_count" -ge $((slim_count + 3)) ]] || \
+    die "enumerated only $server_count server commands for $slim_count client commands"
+for required in activity deploy functions invoke login system upgrade; do
+    grep -qx "$required" "$OUT/slim.txt" || die "required top-level command missing from snapshot: $required"
+done
+
 # Server has additional serve/setup/init top-level commands; strip them
 # before diffing so we compare the client-side surface only.
 grep -vE '^(serve|setup|init)( |$)' "$OUT/server.txt" > "$OUT/server-client-only.txt"
 
-log "slim CLI commands: $(wc -l < "$OUT/slim.txt")"
+log "slim CLI commands: $slim_count"
 log "server CLI commands (server-only filtered): $(wc -l < "$OUT/server-client-only.txt")"
 
 if diff -u "$OUT/slim.txt" "$OUT/server-client-only.txt" > "$OUT/diff.txt"; then

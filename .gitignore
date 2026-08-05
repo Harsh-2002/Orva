@@ -44,6 +44,7 @@ test/install/results-*.tsv
 test/install/logs/*.log
 test/install/logs/*.txt
 test/install/logs/*.json
+test/cli/logs/
 test/kata-bench/runc/
 test/kata-bench/kata/
 test/kata-bench/kata-clh/
