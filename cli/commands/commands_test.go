@@ -34,7 +34,7 @@ func TestCommandTree(t *testing.T) {
 		{"firewall"}, {"firewall", "list"}, {"firewall", "add"}, {"firewall", "enable"}, {"firewall", "disable"}, {"firewall", "delete"}, {"firewall", "resolve"},
 		{"dns"}, {"dns", "get"}, {"dns", "set"},
 		{"pool"}, {"pool", "get"}, {"pool", "set"},
-		{"system"}, {"system", "health"}, {"system", "metrics"}, {"system", "storage"}, {"system", "vacuum"},
+		{"system"}, {"system", "health"}, {"system", "metrics"}, {"system", "storage"}, {"system", "db-stats"}, {"system", "vacuum"},
 		{"activity"},
 		{"backup"}, {"backup", "download"}, {"backup", "restore"},
 		{"diff"},

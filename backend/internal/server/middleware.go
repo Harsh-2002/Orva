@@ -319,6 +319,17 @@ func bodySizeMiddleware(maxBytes int64, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Function deploys ship the code archive (CLI multipart via
+		// POST .../deploy, dashboard JSON via .../deploy-inline). The 6MB
+		// JSON body cap would reject any function larger than ~6MB even
+		// though the handler already limits uploads to Functions.MaxCodeSize
+		// (50MB) via ParseMultipartForm + the builder's size check. Exempt
+		// them so that real cap governs, not this middleware's default.
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/functions/") &&
+			(strings.HasSuffix(r.URL.Path, "/deploy") || strings.HasSuffix(r.URL.Path, "/deploy-inline")) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		// Cheap up-front check: if the client sent a Content-Length we
 		// trust and it already exceeds the cap, fail before the body is
 		// streamed at all.

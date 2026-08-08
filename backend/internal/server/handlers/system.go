@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -29,6 +30,11 @@ type SystemHandler struct {
 	BuildQueue *builder.Queue
 	Registry   *registry.Registry
 	StartTime  time.Time
+
+	// NsjailBin is the configured nsjail path, checked by Health() as an
+	// informational sandbox-readiness signal (never a hard failure — Orva
+	// starts without nsjail on purpose). Empty disables the check.
+	NsjailBin string
 }
 
 // MetricsJSONShape is the structured snapshot the UI consumes. The text
@@ -103,6 +109,14 @@ type poolBlock struct {
 }
 
 // Health handles GET /api/v1/system/health.
+//
+// The database is the single HARD liveness gate: if a `SELECT 1` fails (locked,
+// corrupt, or unmounted orva.db) the endpoint returns 503 + status "degraded"
+// so Docker HEALTHCHECK, install.sh's wait loop, and any orchestrator actually
+// react instead of keeping a dead instance in rotation. Sandbox reachability is
+// reported but never flips the status — Orva intentionally starts before nsjail
+// is present (invocations fail until it is installed) and CI boots the server
+// without a sandbox on the ready-poll, so a missing nsjail must stay a 200.
 func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(h.StartTime).Seconds()
 
@@ -114,24 +128,48 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
+	// Hard gate: probe the DB with a bounded timeout so a wedged database can't
+	// hang the health probe itself.
+	dbStatus := "ok"
+	overall := "healthy"
+	httpStatus := http.StatusOK
+	if h.DB != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := h.DB.Ping(ctx); err != nil {
+			dbStatus = "error"
+			overall = "degraded"
+			httpStatus = http.StatusServiceUnavailable
+		}
+	}
+
+	// Informational only — never changes httpStatus (see doc comment).
+	sandboxRuntime := "ok"
+	if h.NsjailBin != "" {
+		if _, err := os.Stat(h.NsjailBin); err != nil {
+			sandboxRuntime = "unavailable"
+		}
+	}
+
 	// v0.7: surface the full build identity so Settings → Build info has
 	// what it needs in one round trip. `image` is derived from Version so
 	// operators can copy "ghcr.io/harsh-2002/orva:v2026.05.15" straight
 	// out of the dashboard. Unstamped binaries render as ":dev" which is
 	// honest about not being from a release.
 	resp := map[string]any{
-		"status":         "healthy",
+		"status":         overall,
 		"version":        version.Version,
 		"commit":         version.Commit,
 		"build_time":     version.BuildTime,
 		"image":          "ghcr.io/harsh-2002/orva:" + version.Version,
 		"uptime_seconds": int(uptime),
 		"database": map[string]any{
-			"status": "ok",
+			"status": dbStatus,
 		},
 		"sandbox": map[string]any{
 			"active_executions":   active,
 			"lifetime_executions": total,
+			"runtime":             sandboxRuntime,
 		},
 		"host": map[string]any{
 			"num_cpu":     runtime.NumCPU(),
@@ -140,14 +178,22 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	respond.JSON(w, http.StatusOK, resp)
+	respond.JSON(w, httpStatus, resp)
 }
 
-// writeHistogram emits Prometheus-format cumulative histogram lines for
-// the given metric prefix. Format: `<name>_bucket{le="..."} <count>` for
-// every boundary plus `+Inf`, then `<name>_count` and `<name>_sum`. The
-// `_sum` value is in milliseconds (matches the `_ms` in the metric name).
-func writeHistogram(w http.ResponseWriter, name string, h metrics.HistogramSnapshot) {
+// promHeader emits the Prometheus `# HELP`/`# TYPE` preamble for a metric
+// family. Every family must carry exactly one TYPE line for strict
+// OpenMetrics/Prometheus parsers to accept the exposition.
+func promHeader(w http.ResponseWriter, name, mtype, help string) {
+	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n", name, help, name, mtype)
+}
+
+// writeHistogram emits a Prometheus histogram family (`# HELP`/`# TYPE
+// histogram` then `<name>_bucket{le="..."}` for every boundary plus `+Inf`,
+// then `<name>_count` and `<name>_sum`). The `_sum` value is in milliseconds
+// (matches the `_ms` in the metric name).
+func writeHistogram(w http.ResponseWriter, name, help string, h metrics.HistogramSnapshot) {
+	promHeader(w, name, "histogram", help)
 	for i, le := range h.BucketsMS {
 		fmt.Fprintf(w, "%s_bucket{le=\"%g\"} %d\n", name, le, h.BucketCounts[i])
 	}
@@ -169,30 +215,31 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
+	promHeader(w, "orva_invocations_total", "counter", "Total function invocations served.")
 	fmt.Fprintf(w, "orva_invocations_total %d\n", snap.TotalInvocations)
+	promHeader(w, "orva_cold_starts_total", "counter", "Invocations that required a cold sandbox spawn.")
 	fmt.Fprintf(w, "orva_cold_starts_total %d\n", snap.ColdStarts)
+	promHeader(w, "orva_warm_hits_total", "counter", "Invocations served by a warm pooled worker.")
 	fmt.Fprintf(w, "orva_warm_hits_total %d\n", snap.WarmHits)
+	promHeader(w, "orva_builds_total", "counter", "Total function builds attempted.")
 	fmt.Fprintf(w, "orva_builds_total %d\n", snap.TotalBuilds)
+	promHeader(w, "orva_build_errors_total", "counter", "Builds that ended in failure.")
 	fmt.Fprintf(w, "orva_build_errors_total %d\n", snap.BuildErrors)
+	promHeader(w, "orva_active_requests", "gauge", "Invocations currently in flight.")
 	fmt.Fprintf(w, "orva_active_requests %d\n", snap.ActiveRequests)
-	// Summary-style quantile lines kept for backwards compatibility with
-	// the existing Grafana dashboard. Operators are encouraged to migrate
-	// to the histogram lines below — they let Grafana draw heatmaps and
-	// recompute quantiles over arbitrary windows via histogram_quantile().
-	fmt.Fprintf(w, "orva_invocation_duration_ms{quantile=\"0.5\"} %d\n", snap.P50MS)
-	fmt.Fprintf(w, "orva_invocation_duration_ms{quantile=\"0.95\"} %d\n", snap.P95MS)
-	fmt.Fprintf(w, "orva_invocation_duration_ms{quantile=\"0.99\"} %d\n", snap.P99MS)
-	// Histogram-shape duration metric. Cumulative counts: each bucket
-	// includes every sample with le ≤ its boundary, plus a +Inf bucket
-	// that mirrors the total count. _sum and _count complete the
-	// Prometheus histogram convention.
-	writeHistogram(w, "orva_invocation_duration_ms", h.Metrics.SnapshotInvocationHistogram())
-	// Sandbox spawn-duration histogram. Populated from the pool layer
-	// once a worker comes up. Until that wiring lands all buckets
-	// remain 0 — the lines are still emitted so dashboards can be
-	// pre-built without if-exists guards.
-	writeHistogram(w, "orva_sandbox_spawn_duration_ms", h.Metrics.SnapshotSpawnHistogram())
+	// Invocation latency is exposed as a single histogram family. (The former
+	// orva_invocation_duration_ms{quantile=...} summary series were dropped:
+	// declaring the same family name as BOTH a summary and a histogram is
+	// invalid OpenMetrics and made strict scrapers reject the whole exposition.
+	// p50/p95/p99 remain available on GET /api/v1/system/metrics.json, and
+	// Prometheus can recompute them from the buckets via histogram_quantile().)
+	writeHistogram(w, "orva_invocation_duration_ms", "Invocation wall-clock duration in milliseconds.", h.Metrics.SnapshotInvocationHistogram())
+	// Sandbox spawn-duration histogram, populated by the pool layer on every
+	// successful worker spawn.
+	writeHistogram(w, "orva_sandbox_spawn_duration_ms", "nsjail sandbox spawn duration in milliseconds.", h.Metrics.SnapshotSpawnHistogram())
+	promHeader(w, "orva_sandbox_active", "gauge", "Sandboxes currently executing.")
 	fmt.Fprintf(w, "orva_sandbox_active %d\n", active)
+	promHeader(w, "orva_sandbox_total", "counter", "Lifetime sandbox executions.")
 	fmt.Fprintf(w, "orva_sandbox_total %d\n", total)
 	// Job queue depth — pending jobs that the runner hasn't claimed yet.
 	// Cheap COUNT per scrape; the metrics endpoint isn't on the hot
@@ -203,13 +250,26 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		if rdb := h.DB.ReadDB(); rdb != nil {
 			_ = rdb.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status='pending'`).Scan(&depth)
 		}
+		promHeader(w, "orva_jobs_queue_depth", "gauge", "Pending jobs not yet claimed by the runner.")
 		fmt.Fprintf(w, "orva_jobs_queue_depth %d\n", depth)
 	}
 
 	// Per-function warm pool stats — exposed so operators can see which
 	// functions are hot, which keep getting killed (OOMing, crashing), and
-	// the cold-start rate per fn.
+	// the cold-start rate per fn. TYPE/HELP are emitted once here; the series
+	// themselves are labelled per function inside the loop.
 	if h.PoolMgr != nil {
+		promHeader(w, "orva_pool_idle", "gauge", "Idle warm workers per function.")
+		promHeader(w, "orva_pool_busy", "gauge", "Busy workers per function.")
+		promHeader(w, "orva_pool_spawned_total", "counter", "Workers spawned per function.")
+		promHeader(w, "orva_pool_killed_total", "counter", "Workers killed per function.")
+		promHeader(w, "orva_pool_scale_events_total", "counter", "Autoscaler scale events per function and direction.")
+		promHeader(w, "orva_pool_rate_ewma", "gauge", "EWMA of request rate per function.")
+		promHeader(w, "orva_pool_latency_ewma_ms", "gauge", "EWMA of invocation latency per function (ms).")
+		promHeader(w, "orva_pool_max_dynamic", "gauge", "Dynamic max pool size per function.")
+		promHeader(w, "orva_pool_target_concurrency", "gauge", "Target concurrency per function.")
+		promHeader(w, "orva_pool_mem_used_avg_bytes", "gauge", "EWMA of memory used per invocation (bytes).")
+		promHeader(w, "orva_pool_cpu_frac_avg", "gauge", "EWMA of CPU fraction per invocation.")
 		for _, s := range h.PoolMgr.Stats() {
 			fmt.Fprintf(w, "orva_pool_idle{function_id=%q} %d\n", s.FunctionID, s.Idle)
 			fmt.Fprintf(w, "orva_pool_busy{function_id=%q} %d\n", s.FunctionID, s.Busy)
@@ -229,8 +289,11 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		tot, avail, res := h.PoolMgr.HostMemStats()
+		promHeader(w, "orva_host_mem_total_bytes", "gauge", "Total host memory (bytes).")
 		fmt.Fprintf(w, "orva_host_mem_total_bytes %d\n", tot)
+		promHeader(w, "orva_host_mem_available_bytes", "gauge", "Available host memory (bytes).")
 		fmt.Fprintf(w, "orva_host_mem_available_bytes %d\n", avail)
+		promHeader(w, "orva_host_mem_reserved_bytes", "gauge", "Host memory reserved by warm pools (bytes).")
 		fmt.Fprintf(w, "orva_host_mem_reserved_bytes %d\n", res)
 	}
 }

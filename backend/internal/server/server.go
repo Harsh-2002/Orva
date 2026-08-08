@@ -49,6 +49,12 @@ type Server struct {
 }
 
 func New(cfg *config.Config, db *database.Database) *Server {
+	// One authoritative process start time, shared by the router's
+	// SystemHandler (health/uptime) and the SSE metrics publisher. Previously
+	// each captured its own time.Now(), so the dashboard's live uptime and the
+	// /health uptime came from two different clocks.
+	startTime := time.Now()
+
 	reg := registry.New(db)
 	bld := builder.New()
 	bld.DataDir = cfg.Data.Dir
@@ -136,6 +142,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			RootfsDir:      cfg.Sandbox.RootfsDir,
 			DataDir:        cfg.Data.Dir,
 			DefaultSeccomp: cfg.Sandbox.SeccompPolicy,
+			DefaultMaxPids: cfg.Functions.DefaultMaxPids,
 			InternalToken:  internalToken,
 			APIBaseURL:     apiBase,
 			Metrics:        met,
@@ -203,7 +210,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// to the hub. The HTTP handler GET /api/v1/system/metrics.json still
 	// returns a fresh snapshot for curl clients — this just adds a push
 	// path for the dashboard.
-	go runMetricsPublisher(context.Background(), hub, db, met, limiter, poolMgr, buildQueue, reg)
+	go runMetricsPublisher(context.Background(), hub, db, met, limiter, poolMgr, buildQueue, reg, startTime)
 
 	// Egress firewall manager. Started immediately so the initial nft
 	// rules are in place before any function can run. If nft isn't
@@ -223,6 +230,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		EventHub:      hub,
 		Firewall:      fw,
 		InternalToken: internalToken,
+		StartTime:     startTime,
 	}
 
 	router := NewRouter(cfg, db, deps)
@@ -514,7 +522,18 @@ func (s *Server) Start(addr string) error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	// Drain HTTP first so no new requests hit the pool while we quit workers.
+	// Close the SSE hub FIRST. http.Server.Shutdown waits for open connections
+	// to go idle, but an SSE stream (open dashboard tab, `orva logs -f`,
+	// `orva activity -f`) never idles — its handler loop blocks until either the
+	// request context is cancelled or its hub channel closes. Without closing
+	// the hub, every SIGTERM with one live stream would hang the full 30s
+	// deadline and then hard-cancel the pool/gateway mid-write (a guaranteed
+	// SIGKILL under Docker's 10s stop-timeout). Closing the hub unblocks those
+	// loops so the drain below completes promptly.
+	if s.EventHub != nil {
+		s.EventHub.Close()
+	}
+	// Drain HTTP so no new requests hit the pool while we quit workers.
 	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 		slog.Warn("http shutdown error", "err", err)
 	}
@@ -551,6 +570,7 @@ func runMetricsPublisher(
 	poolMgr *pool.Manager,
 	buildQueue *builder.Queue,
 	reg *registry.Registry,
+	startTime time.Time,
 ) {
 	// Reuse the existing handler's snapshot builder so the SSE payload is
 	// always identical to the GET endpoint — no drift between push and pull.
@@ -561,7 +581,7 @@ func runMetricsPublisher(
 		PoolMgr:    poolMgr,
 		BuildQueue: buildQueue,
 		Registry:   reg,
-		StartTime:  time.Now(),
+		StartTime:  startTime,
 	}
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()

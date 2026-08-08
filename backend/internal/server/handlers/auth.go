@@ -3,17 +3,31 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
+// loginAttemptsPerMin bounds POST /api/v1/auth/login per client IP. Login sits
+// behind the /api/v1/auth/ auth-middleware bypass, so without this a caller
+// could brute-force credentials as fast as bcrypt allows. 10/min/IP is
+// comfortable for a human (mistyped passwords) and throttles automated
+// guessing to a crawl; bcrypt's cost is the second brake.
+const loginAttemptsPerMin = 10
+
 // AuthHandler handles user authentication endpoints.
 type AuthHandler struct {
 	DB                *database.Database
 	SecureCookies     bool // set when Orva is behind an HTTPS reverse proxy
 	SessionMaxAgeSecs int  // 0 → default 7 days
+
+	// loginLimiter throttles login attempts per client IP. Lazily built so
+	// existing tests that construct AuthHandler with zero-value fields keep
+	// working (mirrors InvokeHandler's rateLimiter pattern).
+	loginLimiterOnce sync.Once
+	loginLimiter     *rateLimiter
 }
 
 func (h *AuthHandler) sessionMaxAge() int {
@@ -92,6 +106,20 @@ func (h *AuthHandler) Onboard(w http.ResponseWriter, r *http.Request) {
 
 // Login handles POST /auth/login — authenticates and returns session cookie.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	// Per-IP brute-force throttle. This endpoint bypasses the API-key
+	// middleware, so the limiter is the only rate control in front of the
+	// password check.
+	h.loginLimiterOnce.Do(func() { h.loginLimiter = newRateLimiter() })
+	if !h.loginLimiter.Allow("login", clientIP(r), loginAttemptsPerMin) {
+		respond.ErrorWithDetail(w, http.StatusTooManyRequests, respond.ErrorOpts{
+			Code:        "RATE_LIMITED",
+			Message:     "too many login attempts, slow down",
+			RequestID:   r.Header.Get("X-Request-ID"),
+			RetryAfterS: 60,
+		})
+		return
+	}
+
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -238,6 +266,19 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to update password", "")
+		return
+	}
+
+	// Revoke every OTHER session for this user so a password change actually
+	// evicts anyone holding a stolen session cookie. The current session
+	// (cookie.Value) is kept so the operator making the change stays logged in.
+	// Best-effort: a revocation failure must not fail the (already-committed)
+	// password change.
+	if _, err := h.DB.DeleteUserSessionsExcept(user.ID, cookie.Value); err != nil {
+		respond.JSON(w, http.StatusOK, map[string]string{
+			"status":  "password_changed",
+			"warning": "password updated but other sessions could not be revoked",
+		})
 		return
 	}
 

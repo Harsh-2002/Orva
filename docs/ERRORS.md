@@ -38,7 +38,7 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 | `NOT_ACTIVE` | 409 | function status is `error` or `inactive` | no — redeploy or activate |
 | `PAYLOAD_TOO_LARGE` | 413 | body exceeds `cfg.Server.MaxBodyBytes` (default 6 MB) | no — split or raise the cap |
 | `TOO_MANY_REQUESTS` | 429 | host-wide concurrency cap reached during TryAcquire grace | **yes** — back off briefly |
-| `RATE_LIMITED` | 429 | per-function rate limit exceeded (`rate_limit_per_min`, counted per client IP) | **yes** — `Retry-After: 60` |
+| `RATE_LIMITED` | 429 | rate limit exceeded — per-function invoke limit (`rate_limit_per_min`, per client IP) or too many login attempts (per client IP) | **yes** — `Retry-After: 60` |
 | `FUNCTION_BUSY` | 429 | function at its own `max_concurrency` cap under the `reject` policy | **yes** — `Retry-After: 1`, or raise `max_concurrency` / switch the policy to `queue` |
 
 ### 5xx — server / platform errors

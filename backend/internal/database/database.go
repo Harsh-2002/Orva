@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -98,6 +99,16 @@ func (db *Database) Close() error {
 	db.asyncWG.Wait()
 	db.read.Close()
 	return db.write.Close()
+}
+
+// Ping verifies the database is reachable and answering queries by running a
+// trivial `SELECT 1` against the read pool. The health endpoint uses this as
+// its hard liveness gate — a locked, corrupt, or unmounted orva.db surfaces
+// here instead of being masked behind a hardcoded "ok". Returns nil when the
+// query succeeds.
+func (db *Database) Ping(ctx context.Context) error {
+	var one int
+	return db.read.QueryRowContext(ctx, "SELECT 1").Scan(&one)
 }
 
 func (db *Database) WriteDB() *sql.DB {

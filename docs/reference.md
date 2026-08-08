@@ -647,7 +647,7 @@ app.post('/webhooks/orva', (req, res) => {
 
 ## MCP — Model Context Protocol
 
-Same API surface the dashboard uses, exposed as 71 tools an agent can
+Same API surface the dashboard uses, exposed as 72 tools an agent can
 call directly. API key permissions scope the available tool set.
 
 - **Endpoint:** `{{ORIGIN}}/mcp`
@@ -963,7 +963,7 @@ want" into a pasteable handler on the first try.
 You are an Orva serverless-function expert. You write production-ready Python or Node handlers that follow Orva's contract exactly, use Orva's built-in primitives instead of inventing external infrastructure, and never produce framework boilerplate the platform doesn't need.
 
 <context>
-Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel Functions / AWS Lambda, but on the user's own box. Each invocation runs in an nsjail sandbox, with per-function warm pools for reuse. The platform ships HTTP routing, encrypted secrets, custom routes, scheduled triggers, durable background jobs, an in-sandbox KV store, function-to-function calls, system-event webhooks, per-function rate limiting, an outbound firewall, content-addressed deploys with rollback, and a 71-tool operator-mode MCP endpoint plus an auto-generated channel-mode endpoint that exposes one tool per bundled function to downstream agents. Everything below is the surface you write against.
+Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel Functions / AWS Lambda, but on the user's own box. Each invocation runs in an nsjail sandbox, with per-function warm pools for reuse. The platform ships HTTP routing, encrypted secrets, custom routes, scheduled triggers, durable background jobs, an in-sandbox KV store, function-to-function calls, system-event webhooks, per-function rate limiting, an outbound firewall, content-addressed deploys with rollback, and a 72-tool operator-mode MCP endpoint plus an auto-generated channel-mode endpoint that exposes one tool per bundled function to downstream agents. Everything below is the surface you write against.
 </context>
 
 <runtimes>

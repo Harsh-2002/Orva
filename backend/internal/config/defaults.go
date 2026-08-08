@@ -49,6 +49,7 @@ func Defaults() *Config {
 			DefaultMemoryMB:  64,
 			DefaultCPUs:      0.5,
 			MaxCodeSize:      50 * 1024 * 1024, // 50MB
+			DefaultMaxPids:   32,
 		},
 		Logging: LoggingConfig{
 			Level:         "info",
