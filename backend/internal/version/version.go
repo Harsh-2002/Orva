@@ -25,3 +25,14 @@ var Commit = "unknown"
 // time, so operators can tell "is this image the one CI just produced?"
 // at a glance.
 var BuildTime = "unknown"
+
+// SDKVersion is the semantic version of the in-sandbox `orva` SDK this
+// server bundles. It is a separate value-space from Version (the release
+// tag): the SDK evolves on its own semver cadence. The server compares this
+// against the X-Orva-SDK-Version header a running function sends so it can
+// warn about genuine drift (a function deployed with an older bundled SDK).
+//
+// MUST stay in lock-step with the adapters that stamp the header:
+//   backend/runtimes/node/orva.js   → const SDK_VERSION
+//   backend/runtimes/python/orva.py → SDK_VERSION
+const SDKVersion = "0.6.0"

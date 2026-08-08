@@ -14,14 +14,19 @@ how many are at their defaults.
 | env | default | what |
 |-----|---------|------|
 | `ORVA_DATA_DIR` | `~/.orva` (dev) / `/var/lib/orva` (Docker) | Root for SQLite DB, function code, and rootfs trees. DB and rootfs paths are derived automatically. |
+| `ORVA_HOST` | `0.0.0.0` | Bind address for the HTTP listener. Set to `127.0.0.1` to listen on loopback only (recommended behind a reverse proxy). |
 | `ORVA_PORT` | `8443` | Listen port — plain HTTP, no TLS. Set to `8080` when a reverse proxy owns 8443. |
 | `ORVA_WRITE_TIMEOUT_SEC` | `60` | Response write timeout. Must exceed your longest function `timeout_ms` or Orva will cut the response. |
+| `ORVA_MAX_BODY_BYTES` | `6291456` | Max request body (bytes) for `/api/v1/*` JSON endpoints. Function code uploads (`/deploy`, `/deploy-inline`) and `/restore` are exempt — those are bounded by the 50 MB code-size cap instead. |
+| `ORVA_CORS_ORIGINS` | `*` | Comma-separated allow-list of browser origins for the API/dashboard. Default allows all; set an explicit list (e.g. `https://orva.example`) to lock it down. |
+| `ORVA_SECCOMP_POLICY` | `default` | Seccomp policy applied to every sandbox: `default` / `strict` / `permissive` / `disabled`. An unrecognized value is ignored (stays `default`). |
 | `ORVA_DEFAULT_TIMEOUT_MS` | `30000` | Per-invocation timeout applied to new functions that don't set one explicitly. Exceeded → `504 TIMEOUT`. |
 | `ORVA_DEFAULT_MEMORY_MB` | `64` | cgroup memory cap applied to new functions. Tune to your host's available RAM. |
 | `ORVA_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `ORVA_LOG_RETENTION_DAYS` | `7` | Execution and build log retention in days. Logs older than this are pruned on startup. |
 | `ORVA_SECURE_COOKIES` | `false` | Set to `true` when Orva is behind an HTTPS reverse proxy. Adds the `Secure` flag to session cookies. |
 | `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Single-operator instances can set this to `30`. |
+| `ORVA_PPROF_ADDR` | (unset) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
 
 ---
 

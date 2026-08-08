@@ -304,14 +304,21 @@ func (h *InvokeHandler) publishExecution(id string, fn *database.Function, statu
 	})
 }
 
-// hasPriorCode returns true if the function has a built code directory from
-// a previous successful deploy. Used during redeploys so live traffic keeps
-// hitting the old code until the new build succeeds.
+// hasPriorCode returns true if the function has a built, active code version
+// from a previous successful deploy. Used during a redeploy-after-failure so
+// live traffic keeps hitting the last-good version instead of 503ing while the
+// new build runs.
+//
+// The active version is the `current` symlink → versions/<hash>. os.Stat
+// follows the symlink, so this is true iff a built version is live. (The
+// pre-versioning layout used a flat `code/` dir; that path no longer exists,
+// so the old `.../code` check was dead — this branch always fell through to a
+// 503 even when a prior version was available to serve.)
 func hasPriorCode(dataDir, fnID string) bool {
 	if dataDir == "" {
 		return false
 	}
-	st, err := os.Stat(dataDir + "/functions/" + fnID + "/code")
+	st, err := os.Stat(dataDir + "/functions/" + fnID + "/current")
 	return err == nil && st.IsDir()
 }
 

@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof" // registers /debug/pprof/* on http.DefaultServeMux (not Orva's mux)
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/config"
@@ -15,6 +18,25 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/spf13/cobra"
 )
+
+// maybeStartPprof starts a debug pprof/expvar listener when ORVA_PPROF_ADDR is
+// set (e.g. "127.0.0.1:6060"). It serves http.DefaultServeMux, which the
+// net/http/pprof import populates; Orva's real API runs on its own mux, so
+// pprof is NEVER exposed on the main port. Bind it to loopback only — the
+// endpoints leak goroutine stacks, heap profiles, and env-dependent internals.
+func maybeStartPprof() {
+	addr := os.Getenv("ORVA_PPROF_ADDR")
+	if addr == "" {
+		return
+	}
+	slog.Warn("pprof debug listener enabled — bind to loopback only, never expose publicly", "addr", addr)
+	go func() {
+		srv := &http.Server{Addr: addr, ReadHeaderTimeout: 5 * time.Second}
+		if err := srv.ListenAndServe(); err != nil {
+			slog.Warn("pprof listener stopped", "error", err)
+		}
+	}()
+}
 
 // newServeCmd constructs the `orva serve` subcommand. Server binary only.
 func newServeCmd() *cobra.Command {
@@ -40,6 +62,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 
 	setupLogger(cfg.Logging)
+
+	maybeStartPprof()
 
 	if len(cfg.ActiveEnvVars) > 0 {
 		slog.Info("config", "active_env_vars", len(cfg.ActiveEnvVars),
