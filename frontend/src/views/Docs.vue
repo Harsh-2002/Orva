@@ -597,7 +597,7 @@
             MCP: Model Context Protocol
           </h2>
           <p class="doc-lede">
-            Same API surface the dashboard uses, exposed as 72 tools an agent
+            Same API surface the dashboard uses, exposed as 73 tools an agent
             can call directly. API key permissions scope the available tool
             set.
           </p>
@@ -1508,7 +1508,7 @@ const runtimes = [
 const configRows = [
   { field: 'env_vars',           purpose: 'Plain config',    body: 'Plaintext config stored on the function record. Use for feature flags and non-secret settings.', icon: Variable, iconClass: 'text-violet-300' },
   { field: '/secrets',           purpose: 'Encrypted',       body: 'AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time.',             icon: KeyRound, iconClass: 'text-emerald-300' },
-  { field: 'network_mode',       purpose: 'Egress control',  body: 'none = isolated loopback. egress = outbound HTTPS allowed; firewall blocklist applies.',          icon: Globe,    iconClass: 'text-sky-300' },
+  { field: 'network_mode',       purpose: 'Egress control',  body: 'none = isolated loopback. egress = outbound HTTPS allowed, filtered by the sandbox egress policy.', icon: Globe,    iconClass: 'text-sky-300' },
   { field: 'auth_mode',          purpose: 'Invoke gate',     body: 'none = public. platform_key = require Orva API key. signed = require HMAC.',                       icon: Lock,     iconClass: 'text-violet-300' },
   { field: 'rate_limit_per_min', purpose: 'Per-IP throttle', body: 'Optional cap for public or webhook-facing functions. Exceeding it returns 429.',                  icon: Gauge,    iconClass: 'text-amber-300' },
 ]
@@ -1998,7 +1998,7 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'Claude Code',
     lang: 'bash',
-    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 72 tools.',
+    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 73 tools.',
     code: `claude mcp add --transport http --scope user orva ${origin.value}/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {

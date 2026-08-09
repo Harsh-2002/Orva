@@ -39,14 +39,14 @@ go vet ./...
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `secrets` | AES-256-GCM encrypted secrets per function |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
-| `mcp` | MCP server (go-sdk); 71 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. |
+| `mcp` | MCP server (go-sdk); 73 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. |
 | `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps` and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`. |
 | `auth` | Shared `Principal` type (Kind=api_key / oauth / channel + ID/Label/Perms/Channel). Both REST middleware and MCP auth resolve the inbound bearer to a `*Principal`; downstream code (activity log, MCP tool registration) consumes the Kind directly. |
 | `trace` | Causal-trace collector + span lifecycle (W3C `traceparent` interop, outlier detection). See `docs/TRACING.md`. |
 | `urlhint` | Per-request `BaseURL(r)` helper. One source of truth for OAuth issuer URLs, MCP `invoke_url` fields, and audience-bound token validation. |
 
 **Agent channels** — bundle N functions under a name + a static bearer token; presenting that token at `/mcp` exposes ONLY those functions as MCP tools (snake_case names, invoke-only). Operator-managed at `/api/v1/channels` (`Channels` page in the dashboard). Token format: `orva_chn_<32 hex>`. Channel tokens are explicitly rejected with 401 at `/api/v1/*` — they have no Orva-management authority.
-| `firewall` | nftables outbound allow-list per function (lazy `sync.Once` probe) |
+| `firewall` | Sandbox egress policy. Compiles `egress_blocklist` into nsjail NSTUN `user_net { rule4/rule6 }` rules, publishes each as an immutable generation under `<dataDir>/firewall/policy/`, and retires warm egress pools when the generation changes. Also serves sandbox DNS (`resolv.conf` + `hosts`). **No nftables, no host table.** Carve-outs (NSTUN gateway, control plane, DNS) MUST precede rejects — NSTUN is default-ALLOW + first-match-wins, and its own rule parsing is fail-open, so every value is validated and canonicalised here rather than trusted to nsjail. `Policy.Blocks` exposes the same rule set to orvad's own dialer so daemon and sandboxes cannot drift. |
 | `server` | HTTP router + middleware chain + all handlers |
 | `server/events` | SSE event hub + outbound webhook fanout |
 | `server/handlers` | One file per resource group; `respond/` sub-package |

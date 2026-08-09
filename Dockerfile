@@ -78,7 +78,7 @@ LABEL org.opencontainers.image.title="Orva" \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tini curl libprotobuf32 libnl-route-3-200 libcap2-bin \
-      nftables iproute2 \
+      iproute2 \
       python3-pip nodejs npm \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /var/lib/orva/functions

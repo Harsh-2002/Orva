@@ -403,6 +403,16 @@ jobs:
           getcap /usr/local/bin/nsjail || true
           sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
           sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
+          # network_mode "egress" sandboxes get a TAP device from /dev/net/tun
+          # via nsjail's NSTUN backend. The runner does not always have the
+          # module loaded, and a missing device only shows up as an opaque
+          # "Couldn't initialize net namespace" much later in the suite.
+          [ -c /dev/net/tun ] || sudo modprobe tun || true
+          if [ ! -c /dev/net/tun ]; then
+            echo "::error title=/dev/net/tun missing::egress sandboxes cannot spawn without the tun device"
+            exit 1
+          fi
+          ls -l /dev/net/tun
           # Ubuntu 24.04 hosted runners restrict unprivileged user namespaces.
           # Exercise Orva's setcap fallback while keeping every other nsjail
           # namespace and the mandatory real invocation gate enabled.

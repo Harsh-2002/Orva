@@ -162,6 +162,28 @@ func syscallSupportedOnArch(name, goarch string) bool {
 	return goarch != "arm64" || !arm64UnsupportedSyscalls[name]
 }
 
+// SeccompAllowForNetworkMode returns the extra syscalls a sandbox needs when the
+// operator has granted it outbound network access.
+//
+// The base policies deliberately permit only the socket calls Node's internal
+// IPC needs — `connect` is NOT among them (see defaultSyscalls). Those calls
+// live in networkSyscalls, which previously reached a sandbox only by switching
+// the entire instance to the `permissive` base via ORVA_SECCOMP_POLICY.
+//
+// That made network_mode=egress a per-function toggle whose effect depended on a
+// global env var: flipping it looked like it worked, but the function could not
+// open an outbound connection at all, and seccomp killed the attempt long before
+// the egress policy was consulted. Granting these syscalls per function, driven
+// by the same field that grants the network namespace, is what makes the toggle
+// mean what it says. What the function may then *reach* is decided by the
+// compiled NSTUN egress policy, which is the control that belongs in that role.
+func SeccompAllowForNetworkMode(mode string) []string {
+	if mode != "egress" {
+		return nil
+	}
+	return append([]string(nil), networkSyscalls...)
+}
+
 // BuildSeccompPolicy generates a Kafel seccomp policy string.
 // base is one of: "default", "strict", "permissive", "disabled".
 // allow adds syscalls to the base. block removes syscalls (takes precedence).

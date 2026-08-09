@@ -5,13 +5,15 @@
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="max-w-2xl">
           <h1 class="text-xl font-semibold text-white tracking-tight">
-            Firewall &amp; DNS
+            Egress controls
           </h1>
           <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
             Decide what your functions are allowed to talk to. Each switch
             below blocks one destination; turn one on and your functions
-            can no longer reach it; turn it off and they can. DNS settings
-            below control how your functions look hostnames up.
+            can no longer reach it; turn it off and they can. Blocks compile
+            into a sandbox egress policy that nsjail loads per sandbox —
+            nothing on the host is reconfigured. DNS settings below control
+            how your functions look hostnames up.
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -32,21 +34,70 @@
         </div>
       </div>
 
-      <!-- Status strip — single line, calm, mirrors the Docs/Logs aesthetic. -->
+      <!-- Status strip — calm, mirrors the Docs/Logs aesthetic. "Stale" is kept
+           apart from "not enforced" on purpose: a stale policy still has the
+           last known-good generation loaded in every sandbox. -->
       <div
-        class="flex items-center gap-3 text-xs px-3 py-2 rounded-md border"
+        class="flex items-start gap-3 text-xs px-3 py-2 rounded-md border"
         :class="statusBannerClass"
       >
         <component
           :is="statusIcon"
-          class="w-4 h-4 shrink-0"
+          class="w-4 h-4 shrink-0 mt-0.5"
         />
-        <span class="flex-1 min-w-0">{{ statusBannerText }}</span>
+        <div class="flex-1 min-w-0 space-y-1">
+          <p class="leading-snug">
+            {{ statusBannerText }}
+          </p>
+          <!-- The daemon's own words, never paraphrased. -->
+          <p
+            v-if="status.last_error"
+            class="font-mono text-[11px] leading-snug break-words opacity-90"
+          >
+            {{ status.last_error }}
+          </p>
+          <p
+            v-if="statusRemedy"
+            class="leading-snug opacity-80"
+          >
+            {{ statusRemedy }}
+          </p>
+        </div>
         <span
-          v-if="status.nftables_available"
+          v-if="status.enforced"
           class="text-foreground-muted hidden sm:inline shrink-0"
         >
-          {{ enabledRulesCount }} active · {{ disabledRulesCount }} off
+          {{ enforcedRulesCount }} enforced · {{ disabledRulesCount }} off
+        </span>
+      </div>
+
+      <!-- What is actually loaded into the sandboxes right now. -->
+      <div class="policy-meta">
+        <span class="policy-chip">
+          <span class="policy-chip-k">Backend</span>
+          <span class="policy-chip-v">{{ status.backend || 'nstun' }}</span>
+        </span>
+        <span class="policy-chip">
+          <span class="policy-chip-k">Generation</span>
+          <span class="policy-chip-v">{{ status.policy_generation || 'none' }}</span>
+        </span>
+        <span class="policy-chip">
+          <span class="policy-chip-k">Compiled rules</span>
+          <span class="policy-chip-v">{{ ruleCountsText }}</span>
+        </span>
+        <span
+          v-if="controlPlaneText"
+          class="policy-chip"
+        >
+          <span class="policy-chip-k">SDK carve-out</span>
+          <span class="policy-chip-v">{{ controlPlaneText }}</span>
+        </span>
+        <span
+          v-if="appliedAt"
+          class="policy-chip"
+        >
+          <span class="policy-chip-k">Applied</span>
+          <span class="policy-chip-v">{{ appliedAt }}</span>
         </span>
       </div>
     </header>
@@ -210,6 +261,30 @@
       title="Blocklist"
       :subtitle="blocklistSubtitle"
     >
+      <!-- Stored but not in the compiled policy. Listed in full (not just as a
+           count) because the previous UI implied these were blocking. -->
+      <div
+        v-if="unenforcedNotices.length"
+        class="unenforced-note"
+      >
+        <AlertTriangle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+        <div class="min-w-0">
+          <p>
+            {{ unenforcedNotices.length === 1
+              ? 'One stored rule is not part of the compiled policy and blocks nothing:'
+              : `${unenforcedNotices.length} stored rules are not part of the compiled policy and block nothing:` }}
+          </p>
+          <ul>
+            <li
+              v-for="u in unenforcedNotices"
+              :key="u.id"
+            >
+              <code>{{ u.value }}</code> — {{ u.reason }}
+            </li>
+          </ul>
+        </div>
+      </div>
+
       <!-- Filter tabs -->
       <div class="rule-filterbar">
         <button
@@ -258,6 +333,7 @@
           :key="firewallRule.id"
           :rule="firewallRule"
           :status="status"
+          :unenforced-reason="unenforcedReason(firewallRule)"
           :busy="busyId === firewallRule.id"
           :readonly-edit="firewallRule.kind !== 'custom'"
           @toggle="toggle(firewallRule)"
@@ -276,13 +352,15 @@
       <div class="space-y-4">
         <p class="text-xs text-foreground-muted leading-snug">
           Pick what you're blocking: a single IP, a network range, or a hostname.
-          Once added, your functions can no longer reach it.
+          Once added, your functions can no longer reach it. Wildcard patterns
+          like *.example.com are not supported — the policy matches addresses,
+          not names.
         </p>
         <div>
           <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">
             What is it?
           </label>
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-2 gap-2">
             <button
               v-for="opt in typeOptions"
               :key="opt.value"
@@ -305,9 +383,15 @@
         </div>
         <Input
           v-model="newRule.value"
-          :label="newRule.rule_type === 'wildcard' ? 'Pattern' : (newRule.rule_type === 'hostname' ? 'Hostname' : 'IP or network')"
+          :label="newRule.rule_type === 'hostname' ? 'Hostname' : 'IP or network'"
           :placeholder="placeholderForType"
         />
+        <p
+          v-if="wildcardAttempt"
+          class="text-[11px] text-danger-fg leading-snug"
+        >
+          {{ WILDCARD_REASON }}
+        </p>
         <Input
           v-model="newRule.label"
           label="Why? (optional)"
@@ -327,7 +411,7 @@
         </Button>
         <Button
           :loading="creating"
-          :disabled="!newRule.value.trim()"
+          :disabled="!newRule.value.trim() || wildcardAttempt"
           @click="submitCreate"
         >
           <Plus class="w-4 h-4" /> Block it
@@ -353,7 +437,20 @@ import { useConfirmStore } from '@/stores/confirm'
 const confirmStore = useConfirmStore()
 
 const rules = ref([])
-const status = ref({ ipv4: [], ipv6: [], hostname_map: {}, nftables_available: true, last_error: '' })
+
+// Mirrors firewall.Snapshot. Seeded with the "nothing compiled yet" shape so
+// the page never renders an enforced-looking state before the first load, and
+// so optional fields the server omits (last_error, unenforced_rules) always
+// exist as empty values.
+const emptyStatus = () => ({
+  ipv4: [], ipv6: [], hostname_map: {}, last_error: '',
+  backend: 'nstun', enforced: false, policy_generation: '',
+  policy_rule_counts: { v4: 0, v6: 0, allow: 0, reject: 0 },
+  policy_stale: false, last_compile_error: '', last_success_at: '',
+  control_plane_allow: { addrs: [], port: 0 },
+  unenforced_rules: [],
+})
+const status = ref(emptyStatus())
 const busyId = ref(null)
 const showCreate = ref(false)
 const creating = ref(false)
@@ -493,6 +590,40 @@ const saveDNS = async () => {
 
 const customRules    = computed(() => rules.value.filter((r) => r.kind === 'custom'))
 
+// Rules the compiler deliberately left out of the policy, keyed by rule id.
+const unenforcedById = computed(() => {
+  const m = new Map()
+  for (const u of status.value.unenforced_rules || []) m.set(u.id, u.reason)
+  return m
+})
+
+// A packet carries an address, not a name, so a wildcard can never be a rule.
+// Stored wildcard rows stay in the table untouched; the API refuses new ones.
+const WILDCARD_REASON = 'Wildcard patterns are not enforceable: the egress policy matches IPs and CIDRs, not DNS names. Block a CIDR or an exact hostname instead.'
+
+// The daemon only compiles ENABLED rows, so a disabled wildcard never shows up
+// in unenforced_rules — the rule_type check is what keeps those rows honest.
+const unenforcedReason = (rule) =>
+  unenforcedById.value.get(rule.id)
+  || (rule.rule_type === 'wildcard' ? WILDCARD_REASON : '')
+
+const isUnenforced = (rule) => unenforcedReason(rule) !== ''
+
+// Every rule the operator must not mistake for an active block, in one list so
+// the section can state them outright rather than only tinting a card.
+const unenforcedNotices = computed(() => {
+  const byId = new Map()
+  for (const u of status.value.unenforced_rules || []) {
+    byId.set(u.id, { id: u.id, value: u.value, reason: u.reason })
+  }
+  for (const r of rules.value) {
+    if (r.rule_type === 'wildcard' && !byId.has(r.id)) {
+      byId.set(r.id, { id: r.id, value: r.value, reason: WILDCARD_REASON })
+    }
+  }
+  return [...byId.values()]
+})
+
 // Plain-language explanations for shipped (default + suggested) rules. The
 // table values are stable identifiers in the migration so we can key on
 // them. Each entry gives a human title and a one-sentence "why this matters"
@@ -518,89 +649,158 @@ const friendlyWhy = (rule) => {
   return friendlyMap[rule.value]?.why || ''
 }
 
-// Filter state — default to "On" so the operator's first scan is "what's
-// currently blocking my functions." All / On / Off / Yours.
-const filter = ref('on')
+// Filter state — default to "Enforced" so the operator's first scan is "what's
+// actually blocking my functions." All / Enforced / Off / Not enforced / Yours.
+const filter = ref('enforced')
 
-const filterTabs = computed(() => [
-  { id: 'all',  label: 'All',    count: rules.value.length },
-  { id: 'on',   label: 'On',     count: rules.value.filter((r) => r.enabled).length },
-  { id: 'off',  label: 'Off',    count: rules.value.filter((r) => !r.enabled).length },
-  { id: 'yours', label: 'Yours', count: customRules.value.length },
-])
+const filterTabs = computed(() => {
+  const tabs = [
+    { id: 'all',      label: 'All',      count: rules.value.length },
+    { id: 'enforced', label: 'Enforced', count: enforcedRulesCount.value },
+    { id: 'off',      label: 'Off',      count: disabledRulesCount.value },
+  ]
+  // Only surfaced when something is actually excluded — a permanent 0 tab would
+  // just be noise on a healthy instance.
+  if (unenforcedRules.value.length) {
+    tabs.push({ id: 'unenforced', label: 'Not enforced', count: unenforcedRules.value.length })
+  }
+  tabs.push({ id: 'yours', label: 'Yours', count: customRules.value.length })
+  return tabs
+})
 
 const visibleRules = computed(() => {
-  // Within whichever filter, sort: enabled first, then default → suggested → custom,
-  // then by friendly name. Stable order across renders keeps toggles from jumping.
+  // Within whichever filter, sort: enforceable first, then enabled, then
+  // default → suggested → custom, then by friendly name. Stable order across
+  // renders keeps toggles from jumping.
   const kindRank = { default: 0, suggested: 1, custom: 2 }
   const list = rules.value.filter((r) => {
-    if (filter.value === 'on')   return r.enabled
-    if (filter.value === 'off')  return !r.enabled
-    if (filter.value === 'yours') return r.kind === 'custom'
+    if (filter.value === 'enforced')   return r.enabled && !isUnenforced(r)
+    if (filter.value === 'off')        return !r.enabled
+    if (filter.value === 'unenforced') return isUnenforced(r)
+    if (filter.value === 'yours')      return r.kind === 'custom'
     return true
   })
   return [...list].sort((a, b) => {
+    const au = isUnenforced(a)
+    const bu = isUnenforced(b)
+    if (au !== bu) return au ? 1 : -1
     if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
     if (kindRank[a.kind] !== kindRank[b.kind]) return kindRank[a.kind] - kindRank[b.kind]
     return friendlyTitle(a).localeCompare(friendlyTitle(b))
   })
 })
 
-const enabledRulesCount = computed(() => rules.value.filter((r) => r.enabled).length)
+// "Enforced" is enabled AND in the compiled policy — an enabled wildcard is
+// neither, and counting it as active is the lie this page used to tell.
+const enforcedRulesCount = computed(() => rules.value.filter((r) => r.enabled && !isUnenforced(r)).length)
 const disabledRulesCount = computed(() => rules.value.filter((r) => !r.enabled).length)
+const unenforcedRules = computed(() => rules.value.filter((r) => isUnenforced(r)))
 
 const blocklistSubtitle = computed(() => {
   if (!rules.value.length) return 'Nothing in the blocklist yet.'
-  const on = enabledRulesCount.value
+  const on = enforcedRulesCount.value
   const off = disabledRulesCount.value
-  return `${on} block${on === 1 ? '' : 's'} active · ${off} available to turn on · ${customRules.value.length} you added`
+  const parts = [
+    // "enforced" would be a lie while no policy is loaded: the same rules are
+    // only staged until one compiles.
+    status.value.enforced
+      ? `${on} block${on === 1 ? '' : 's'} enforced`
+      : `${on} block${on === 1 ? '' : 's'} staged, none enforced`,
+    `${off} available to turn on`,
+    `${customRules.value.length} you added`,
+  ]
+  if (unenforcedRules.value.length) parts.push(`${unenforcedRules.value.length} not enforceable`)
+  return parts.join(' · ')
 })
 
 const typeOptions = [
   { value: 'cidr',     label: 'IP / Range', icon: Hash },
   { value: 'hostname', label: 'Hostname',   icon: Globe },
-  { value: 'wildcard', label: 'Pattern',    icon: Asterisk },
 ]
 
-const placeholderForType = computed(() => {
-  switch (newRule.value.rule_type) {
-    case 'hostname': return 'api.internal.corp'
-    case 'wildcard': return '*.corp.com'
-    default:         return '192.168.1.0/24'
-  }
-})
+const placeholderForType = computed(() =>
+  newRule.value.rule_type === 'hostname' ? 'api.internal.corp' : '192.168.1.0/24')
 
 const typeHint = computed(() => {
-  switch (newRule.value.rule_type) {
-    case 'hostname': return 'A specific website or service name. We resolve it to IPs and block those.'
-    case 'wildcard': return 'Match an entire domain and its subdomains. Use *.example.com for everything under example.com.'
-    default:         return 'A single IP (e.g. 1.2.3.4) or a CIDR range (e.g. 10.0.0.0/8) to block all addresses inside it.'
+  if (newRule.value.rule_type === 'hostname') {
+    return 'A specific website or service name. We resolve it to IPs and block those, re-resolving on every refresh.'
+  }
+  return 'A single IP (e.g. 1.2.3.4) or a CIDR range (e.g. 10.0.0.0/8) to block all addresses inside it.'
+})
+
+// The API rejects wildcards outright, so explain it here rather than let the
+// operator earn a 400.
+const wildcardAttempt = computed(() => newRule.value.value.includes('*'))
+
+// Policy state — four cases, kept apart because each asks for different action.
+// Order matters: stale means a good policy IS still loaded, so it must be
+// tested before the generic error case.
+const policyState = computed(() => {
+  if (status.value.enforced && status.value.policy_stale) return 'stale'
+  if (!status.value.enforced) return 'unenforced'
+  if (status.value.last_error) return 'degraded'
+  return 'ok'
+})
+
+const statusBannerClass = computed(() => {
+  switch (policyState.value) {
+    case 'unenforced': return 'border-danger-ring bg-danger-tint text-danger-fg'
+    case 'stale':
+    case 'degraded':   return 'border-warning-ring bg-warning-tint text-warning-fg'
+    default:           return 'border-success-ring bg-success-tint text-foreground-muted'
+  }
+})
+const statusIcon = computed(() => (policyState.value === 'ok' ? ShieldCheck : AlertTriangle))
+const statusBannerText = computed(() => {
+  switch (policyState.value) {
+    case 'unenforced':
+      return 'No egress policy is compiled, so nothing below is in force. Orva fails closed: functions with outbound network enabled cannot start until a policy compiles.'
+    case 'stale':
+      return `Enforcing the last known-good policy (generation ${status.value.policy_generation}). The newest recompile failed, so recent changes are not live yet.`
+    case 'degraded':
+      return 'The policy is in force, but the last refresh reported a problem.'
+    default:
+      return `Enforced per sandbox by nsjail NSTUN, generation ${status.value.policy_generation}. Applies to every function with outbound network enabled.`
+  }
+})
+// Nothing to install: enforcement rides along with nsjail. The two real failure
+// modes are the policy not compiling and nsjail having no tun device to attach
+// the sandbox network to.
+const statusRemedy = computed(() => {
+  switch (policyState.value) {
+    case 'unenforced':
+      return 'Hit Apply now to recompile. There is nothing to install: if invocations fail with a sandbox error instead, nsjail needs /dev/net/tun (Docker: --device /dev/net/tun).'
+    case 'stale':
+    case 'degraded':
+      return 'Fix the reported rule or resolver, then hit Apply now to recompile.'
+    default:
+      return ''
   }
 })
 
-// Status banner branching — three states.
-const statusBannerClass = computed(() => {
-  if (status.value.last_error) return 'border-danger-ring bg-danger-tint text-danger-fg'
-  if (!status.value.nftables_available) return 'border-warning-ring bg-warning-tint text-warning-fg'
-  return 'border-success-ring bg-success-tint text-foreground-muted'
+const ruleCountsText = computed(() => {
+  const c = status.value.policy_rule_counts || {}
+  return `${c.v4 ?? 0} v4 · ${c.v6 ?? 0} v6 · ${c.reject ?? 0} reject · ${c.allow ?? 0} allow`
 })
-const statusIcon = computed(() => {
-  if (status.value.last_error) return AlertTriangle
-  if (!status.value.nftables_available) return AlertTriangle
-  return ShieldCheck
+
+const controlPlaneText = computed(() => {
+  const cp = status.value.control_plane_allow || {}
+  const addrs = cp.addrs || []
+  if (!addrs.length) return ''
+  return `${addrs.join(', ')}${cp.port ? `:${cp.port}` : ''}`
 })
-const statusBannerText = computed(() => {
-  if (status.value.last_error) return status.value.last_error
-  if (!status.value.nftables_available) {
-    return 'nftables unavailable on this host. Packet-level enforcement is disabled. Sandbox-level isolation still works.'
-  }
-  return 'Active. Rules apply to every function with outbound network enabled.'
+
+const appliedAt = computed(() => {
+  const raw = status.value.last_success_at
+  if (!raw) return ''
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? raw : d.toLocaleTimeString()
 })
 
 const load = async () => {
   const res = await apiClient.get('/firewall/rules')
   rules.value = res.data.rules || []
-  status.value = res.data.status || { ipv4: [], ipv6: [] }
+  status.value = { ...emptyStatus(), ...(res.data.status || {}) }
 }
 
 const toggle = async (rule) => {
@@ -713,6 +913,11 @@ const PanelSection = defineComponent({
 // aren't networking experts shouldn't have to decode 169.254.0.0/16).
 // Footer: the actual rule value in mono so the technical user can still
 // see what's enforced.
+//
+// The card has four visual states, and only one of them may look active:
+// enforced (in the compiled policy), off (operator turned it off), unenforced
+// (stored but excluded from the policy), and pending (enabled, but no policy is
+// in force at all). The last two are never green.
 const KIND_PILLS = {
   default:   { label: 'Recommended', cls: 'kind-recommended' },
   suggested: { label: 'Optional',    cls: 'kind-optional' },
@@ -722,10 +927,11 @@ const KIND_PILLS = {
 const RuleCard = defineComponent({
   name: 'RuleCard',
   props: {
-    rule:         { type: Object,  required: true },
-    status:       { type: Object,  required: true },
-    busy:         { type: Boolean, default: false },
-    readonlyEdit: { type: Boolean, default: false },
+    rule:             { type: Object,  required: true },
+    status:           { type: Object,  required: true },
+    unenforcedReason: { type: String,  default: '' },
+    busy:             { type: Boolean, default: false },
+    readonlyEdit:     { type: Boolean, default: false },
   },
   emits: ['toggle', 'delete'],
   setup(p, { emit }) {
@@ -745,25 +951,63 @@ const RuleCard = defineComponent({
     const why = computed(() => friendlyWhy(p.rule))
     const pill = computed(() => KIND_PILLS[p.rule.kind] || KIND_PILLS.custom)
 
+    const state = computed(() => {
+      if (p.unenforcedReason) return 'unenforced'
+      if (!p.rule.enabled) return 'off'
+      return p.status.enforced ? 'on' : 'pending'
+    })
+    // Turning an unenforceable rule ON is refused by the API, so the switch
+    // stays dead rather than inviting a 400. Turning one off is still allowed
+    // (that is how the operator retires a stored wildcard).
+    const toggleBlocked = computed(() => state.value === 'unenforced' && !p.rule.enabled)
+    const toggleTitle = computed(() => {
+      if (toggleBlocked.value) return 'Cannot be enforced — see the reason on this card'
+      return p.rule.enabled ? 'Click to allow' : 'Click to block'
+    })
+
     return () =>
       h('div', {
-        class: ['rule-card', p.rule.enabled ? 'is-on' : 'is-off'],
+        class: ['rule-card', `is-${state.value}`],
       }, [
-        // Top row: title + pill + toggle
+        // Top row: title + pill(s) + toggle
         h('div', { class: 'rule-card-row' }, [
           h('div', { class: 'rule-card-titlewrap' }, [
             h('div', { class: 'rule-card-title' }, title.value),
-            h('span', { class: ['rule-kind-pill', pill.value.cls] }, pill.value.label),
+            h('div', { class: 'rule-card-pills' }, [
+              h('span', { class: ['rule-kind-pill', pill.value.cls] }, pill.value.label),
+              state.value === 'unenforced'
+                ? h('span', { class: 'rule-kind-pill kind-inert' }, 'Not enforced')
+                : null,
+              state.value === 'pending'
+                ? h('span', { class: 'rule-kind-pill kind-inert' }, 'Not in force')
+                : null,
+            ]),
           ]),
           h('button', {
-            class: ['rule-toggle', p.rule.enabled ? 'on' : 'off', p.busy ? 'busy' : '', 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background'],
-            disabled: p.busy,
-            title: p.rule.enabled ? 'Click to allow' : 'Click to block',
+            class: [
+              'rule-toggle',
+              // Only a genuinely enforced rule gets the green "on" treatment;
+              // an unenforceable or not-yet-in-force rule shows its stored
+              // position in an inert colour so it cannot read as active.
+              state.value === 'on' ? 'on'
+                : state.value === 'off' ? 'off'
+                  : ['inert', p.rule.enabled ? 'is-set' : ''],
+              p.busy ? 'busy' : '',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+            ],
+            disabled: p.busy || toggleBlocked.value,
+            title: toggleTitle.value,
             onClick: () => emit('toggle'),
           }, [
             h('span', { class: 'rule-toggle-knob' }),
           ]),
         ]),
+
+        // Why this rule is not in force — the operator's most important line
+        // when it applies, so it sits above the "why it matters" blurb.
+        p.unenforcedReason
+          ? h('p', { class: 'rule-card-warn' }, p.unenforcedReason)
+          : null,
 
         // Why this matters (default + suggested rules only).
         why.value
@@ -839,6 +1083,66 @@ const RuleCard = defineComponent({
   color: var(--color-foreground-muted);
 }
 
+/* Compiled-policy facts under the status strip. Chips rather than a table:
+   the operator scans them, and a table would out-weigh the rule grid. */
+.policy-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.policy-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: 11px;
+}
+.policy-chip-k {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+  white-space: nowrap;
+}
+.policy-chip-v {
+  font-family: var(--font-mono);
+  color: white;
+  overflow-wrap: anywhere;
+}
+
+/* Stored-but-not-enforced callout above the rule grid. Danger tone, not
+   warning: a rule the operator believes is blocking and isn't is a
+   correctness problem, not a caution. */
+.unenforced-note {
+  display: flex;
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-danger-ring);
+  background: var(--color-danger-tint);
+  color: var(--color-danger-fg);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.unenforced-note ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.unenforced-note code {
+  font-family: var(--font-mono);
+  color: white;
+}
+
 .rule-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -866,6 +1170,16 @@ const RuleCard = defineComponent({
 .rule-card.is-off:hover {
   opacity: 1;
   border-color: var(--color-foreground-muted);
+}
+/* Never green: the rule is stored but excluded from the compiled policy. */
+.rule-card.is-unenforced {
+  border-style: dashed;
+  border-color: var(--color-danger-ring);
+}
+/* Enabled, but no policy is in force yet — it will apply once one compiles. */
+.rule-card.is-pending {
+  border-style: dashed;
+  border-color: var(--color-warning-ring);
 }
 
 .rule-card-row {
@@ -907,6 +1221,17 @@ const RuleCard = defineComponent({
 .kind-recommended { color: var(--color-success-fg); border-color: var(--color-success-ring); background: var(--color-success-tint); }
 .kind-optional    { color: var(--color-info-fg);    border-color: var(--color-info-ring);    background: var(--color-info-tint); }
 .kind-yours       { color: var(--color-warning-fg); border-color: var(--color-warning-ring); background: var(--color-warning-tint); }
+/* "Not enforced" / "Not in force" — danger tone so it out-reads the kind pill
+   sitting beside it. */
+.kind-inert       { color: var(--color-danger-fg);  border-color: var(--color-danger-ring);  background: var(--color-danger-tint); }
+
+/* Kind pill + state pill share a wrapping row so a narrow card stacks them
+   instead of overflowing. */
+.rule-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
 
 /* Pill toggle — distinct on/off colour states so the meaning is obvious. */
 .rule-toggle {
@@ -926,8 +1251,18 @@ const RuleCard = defineComponent({
   background: rgba(34, 197, 94, 0.4);
   border-color: rgba(34, 197, 94, 0.55);
 }
+/* Stored position of a rule that is not actually in force. Same knob travel as
+   .on so the operator still sees which way the switch is set, without the
+   green that would claim the block is live. */
+.rule-toggle.inert {
+  background: var(--color-background);
+  border-color: var(--color-danger-ring);
+}
 .rule-toggle.busy {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+.rule-toggle:disabled {
   cursor: not-allowed;
 }
 .rule-toggle-knob {
@@ -943,10 +1278,22 @@ const RuleCard = defineComponent({
   background: white;
   transform: translateX(16px);
 }
+.rule-toggle.inert .rule-toggle-knob {
+  background: var(--color-danger-fg);
+}
+.rule-toggle.inert.is-set .rule-toggle-knob {
+  transform: translateX(16px);
+}
 
 .rule-card-why {
   font-size: 12px;
   color: var(--color-foreground-muted);
+  line-height: 1.55;
+  margin: 0;
+}
+.rule-card-warn {
+  font-size: 11.5px;
+  color: var(--color-danger-fg);
   line-height: 1.55;
   margin: 0;
 }

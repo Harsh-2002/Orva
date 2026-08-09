@@ -298,9 +298,15 @@ func validateEventNames(events []string) error {
 }
 
 // validateWebhookURL ensures we have a full http(s) URL pointing to a
-// hostname (not a bare path). The delivery worker uses the operator's
-// firewall blocklist at egress so we don't re-validate against private
-// ranges here — operators may legitimately POST to internal endpoints.
+// hostname (not a bare path). Private ranges are deliberately allowed:
+// operators legitimately POST to internal endpoints, and whether a
+// destination may be reached is the egress policy's decision, not this
+// function's. That decision is enforced at delivery time — the scheduler's
+// delivery client dials through firewall.NewHTTPClient, whose Control hook
+// checks the resolved address against the same policy the sandboxes get
+// (see scheduler.SetEgressGuard). Checking here instead would be weaker
+// anyway: a name that passes validation can resolve elsewhere by the time
+// the delivery goes out.
 func validateWebhookURL(s string) error {
 	if s == "" {
 		return errors.New("url is required")

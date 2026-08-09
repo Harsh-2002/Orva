@@ -52,6 +52,7 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 | `BUILD_QUEUE_FULL` | 503 | build queue at channel capacity | yes — `Retry-After: depth × 30s` |
 | `POOL_AT_CAPACITY` | 503 | function pool at `dynamicMax` and ctx fired waiting | yes — `Retry-After: 5` |
 | `MEMORY_EXHAUSTED` | 503 | host memory budget at 80% reservation | yes — `Retry-After: 30` |
+| `EGRESS_POLICY_UNAVAILABLE` | 503 | a `network_mode=egress` function was invoked while no sandbox egress policy had compiled; the spawn is refused rather than run unfiltered | yes — `Retry-After: 10` (the manager recompiles every 10s), but a bad rule must be fixed first |
 | `INSUFFICIENT_DISK` | 503 | not enough free disk on the data volume to start the build | no — free space or lower `system_config.min_free_disk_mb` |
 | `SHUTTING_DOWN` | 503 | server is closing down | no, on this host — redirect |
 | `SANDBOX_ERROR` | 503 | unmapped sandbox / dispatch failure | no — investigate |
@@ -66,6 +67,7 @@ Every transient error includes a `hint` field telling the operator what to chang
 - `MEMORY_EXHAUSTED`: "deploy fewer concurrent functions or increase host RAM; see /api/v1/system/metrics.json host.mem_*"
 - `BUILD_QUEUE_FULL`: "wait for current builds to drain; consider raising NumCPU or staggering deploys"
 - `WORKER_CRASHED`: "check stderr in the latest execution log; common causes: process.exit, OOM, syntax error in handler"
+- `EGRESS_POLICY_UNAVAILABLE`: "see GET /api/v1/firewall/status (last_compile_error) — fix the offending rule, then POST /api/v1/firewall/resolve". nsjail's NSTUN stack is default-**allow**, so a missing policy would mean no egress filtering at all; Orva fails the invocation closed instead. `GET /api/v1/firewall/status` reports `enforced`, `policy_generation`, `policy_stale` and `unenforced_rules`.
 
 ## Backward-compatibility
 
@@ -81,6 +83,8 @@ Wire-level mapping lives in `internal/server/handlers/errmap.go` (`invokeError`,
 - `internal/pool/pool.go`: `ErrManagerClosed`, `ErrPoolAtCapacity`, `ErrMemoryExhausted`
 - `internal/sandbox/limiter.go`: `ErrTooManyRequests`
 - `internal/sandbox/worker.go`: `ErrWorkerExited`
+- `internal/sandbox/sandbox.go`: `ErrEgressPolicyMissing`
+- `internal/firewall/policy.go`: `ErrPolicyUnavailable`
 - `internal/builder/queue.go`: `ErrQueueFull`, `ErrQueueStopping`
 
 Adding a new code: define a sentinel, return it from the relevant code path, add a case to `invokeError` (or `deployError`), append a row to the table above.

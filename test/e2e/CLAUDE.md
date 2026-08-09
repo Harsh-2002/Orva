@@ -44,7 +44,8 @@ python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.
 | `CHECKLIST.md` | Living result record — regenerated every run. |
 
 ### How the isolated environment works (`env.py`)
-`docker build -t orva:e2e .` → `docker run` with `--cap-add SYS_ADMIN/NET_ADMIN`,
+`docker build -t orva:e2e .` → `docker run` with `--cap-add SYS_ADMIN` (no
+`NET_ADMIN` — nsjail makes the TAP device inside its own user namespace),
 `--cgroupns=host --pid=host`, `seccomp/apparmor=unconfined`, a `/sys/fs/cgroup`
 mount, and `--add-host host.docker.internal:host-gateway` (so a test's host-side
 mock LLM is reachable from inside the container). A fresh named volume gives each

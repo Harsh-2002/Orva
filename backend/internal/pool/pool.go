@@ -763,7 +763,11 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				// 32 (the historical sandbox.Execute default) if unset.
 				MaxPids:       maxPidsOr(tmpl.DefaultMaxPids, 32),
 				Env:           env,
-				SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, nil, nil),
+				SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp,
+					// Outbound network access needs the socket syscalls the base
+					// policies withhold; what it may reach is decided by the
+					// compiled egress policy, not by seccomp.
+					sandbox.SeccompAllowForNetworkMode(fn.NetworkMode), nil),
 				NetworkMode:   fn.NetworkMode,
 				// Operator-managed DNS for egress sandboxes; written by
 				// internal/firewall on every refresh tick. Bound at

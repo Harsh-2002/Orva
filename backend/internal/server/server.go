@@ -271,11 +271,21 @@ func New(cfg *config.Config, db *database.Database) *Server {
 
 	router := NewRouter(cfg, db, deps)
 
+	// orvad's own egress is filtered by the same policy the sandboxes get. The
+	// old nftables table hooked `output` and so covered every process in this
+	// netns, orvad included; the NSTUN policy that replaced it is per-sandbox,
+	// which would leave the daemon as the one unfiltered path out of the box.
+	// Wired before either subsystem starts serving.
+	if router.ai != nil {
+		router.ai.SetEgressGuard(fw)
+	}
+
 	// Scheduler runs cron triggers (P1) + future TTL/queue ticks. Started
 	// later in serve.go after the HTTP listener is up so health probes
 	// pass first.
 	sched := scheduler.New(db, poolMgr, cfg.Data.Dir, hub)
 	sched.SetMetrics(met)
+	sched.SetEgressGuard(fw)
 
 	// WebhookFanout subscribes to the Hub and writes webhook_deliveries
 	// rows for every event that any operator-configured subscription

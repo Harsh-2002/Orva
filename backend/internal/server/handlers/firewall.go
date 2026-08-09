@@ -15,15 +15,23 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
-// FirewallHandler exposes the egress blocklist as a REST resource. The
-// blocklist itself lives in the egress_blocklist table; the firewall
-// Manager polls that table every 10s and re-applies nftables rules.
-// Each mutation here optionally calls Manager.ForceRefresh so the
-// operator gets immediate feedback instead of waiting for the next tick.
+// FirewallHandler exposes the sandbox egress policy as a REST resource. The
+// stored rules live in the egress_blocklist table; the firewall Manager polls
+// that table every 10s, compiles it into an nsjail NSTUN policy, and publishes
+// it as an immutable generation that each egress sandbox loads at spawn. A new
+// generation retires the warm egress pools so running workers roll forward.
+// Each mutation here optionally calls Manager.ForceRefresh so the operator gets
+// immediate feedback instead of waiting for the next tick.
 type FirewallHandler struct {
 	DB      *database.Database
 	Manager *firewall.Manager
 }
+
+// wildcardUnenforceable is the single reason string behind every wildcard
+// refusal. It mirrors the compiler's own `unenforced_rules` reason (see
+// firewall.compile) so an operator reading the rejection and an operator
+// reading the status snapshot are told the same thing.
+const wildcardUnenforceable = "wildcard hostnames cannot be enforced: the egress policy matches IP/CIDR, not DNS names. Use a CIDR or an exact hostname."
 
 type listFirewallResponse struct {
 	Rules    []*database.BlocklistRule `json:"rules"`
@@ -45,8 +53,25 @@ func (h *FirewallHandler) List(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, resp)
 }
 
+// Status handles GET /api/v1/firewall/status. Same snapshot that rides inside
+// "status" on the rules/resolve responses, on its own so a monitor can poll
+// whether a policy is actually in force — enforced, policy_generation,
+// policy_stale, unenforced_rules — without pulling the whole rule table.
+func (h *FirewallHandler) Status(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	if h.Manager == nil {
+		// Reporting an empty snapshot here would read as "nothing is blocked",
+		// which is indistinguishable from a healthy empty policy. Say instead
+		// that enforcement state is unknown.
+		respond.Error(w, http.StatusServiceUnavailable, "FIREWALL_DISABLED",
+			"firewall manager not initialized", reqID)
+		return
+	}
+	respond.JSON(w, http.StatusOK, h.Manager.Snapshot())
+}
+
 type createFirewallRequest struct {
-	RuleType string `json:"rule_type"` // 'cidr' | 'hostname' | 'wildcard'
+	RuleType string `json:"rule_type"` // 'cidr' | 'hostname' ('wildcard' exists in the table but is refused here)
 	Value    string `json:"value"`
 	Label    string `json:"label"`
 	Enabled  *bool  `json:"enabled"` // optional, default true
@@ -63,7 +88,9 @@ func (h *FirewallHandler) Create(w http.ResponseWriter, r *http.Request) {
 	req.RuleType = strings.TrimSpace(req.RuleType)
 	req.Value = strings.TrimSpace(req.Value)
 	if req.RuleType == "" {
-		// Auto-detect: '/' → CIDR, '*.' → wildcard, else hostname.
+		// Auto-detect: '/' → CIDR, '*.' → wildcard (refused just below, with
+		// the reason, rather than silently downgraded to a hostname), else
+		// hostname.
 		switch {
 		case strings.Contains(req.Value, "/"):
 			req.RuleType = database.BlocklistTypeCIDR
@@ -85,7 +112,15 @@ func (h *FirewallHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if !database.ValidBlocklistRuleType(req.RuleType) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION",
-			"rule_type must be one of: cidr, hostname, wildcard", reqID)
+			"rule_type must be one of: cidr, hostname", reqID)
+		return
+	}
+	// A wildcard is stored-but-never-enforced (the compiler drops it into
+	// status.unenforced_rules), so accepting a new one would hand the operator a
+	// rule that looks armed and blocks nothing. Refuse at the door. Legacy rows
+	// stay readable and deletable — only creating and enabling are closed off.
+	if req.RuleType == database.BlocklistTypeWildcard {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", wildcardUnenforceable, reqID)
 		return
 	}
 	if req.Value == "" {
@@ -103,12 +138,6 @@ func (h *FirewallHandler) Create(w http.ResponseWriter, r *http.Request) {
 					"value must be an IP or CIDR (e.g. 192.168.1.0/24)", reqID)
 				return
 			}
-		}
-	case database.BlocklistTypeWildcard:
-		if !strings.HasPrefix(req.Value, "*.") {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"wildcard rules must start with '*.' (e.g. *.corp.com)", reqID)
-			return
 		}
 	}
 
@@ -157,6 +186,20 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Toggle enabled is allowed regardless of kind.
 	if req.Enabled != nil {
+		// Enabling a wildcard would arm a rule the compiler cannot express as a
+		// packet filter. Disabling one stays allowed — that is how an operator
+		// retires a legacy row without us ever rewriting it behind their back.
+		if *req.Enabled {
+			existing, err := h.DB.GetBlocklistRule(id)
+			if err != nil {
+				respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
+				return
+			}
+			if existing.RuleType == database.BlocklistTypeWildcard {
+				respond.Error(w, http.StatusBadRequest, "VALIDATION", wildcardUnenforceable, reqID)
+				return
+			}
+		}
 		if err := h.DB.SetBlocklistRuleEnabled(id, *req.Enabled); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
@@ -188,7 +231,15 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		if !database.ValidBlocklistRuleType(ruleType) {
 			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"rule_type must be one of: cidr, hostname, wildcard", reqID)
+				"rule_type must be one of: cidr, hostname", reqID)
+			return
+		}
+		// Catches both "switch this rule to wildcard" and "edit the value of an
+		// existing wildcard row" (ruleType carries over from the stored row).
+		// A legacy wildcard is therefore disable-or-delete only; there is no
+		// edit that leaves it enforceable.
+		if ruleType == database.BlocklistTypeWildcard {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION", wildcardUnenforceable, reqID)
 			return
 		}
 		if err := h.DB.UpdateBlocklistRuleValue(id, ruleType, value, label); err != nil {
@@ -321,11 +372,13 @@ func (h *FirewallHandler) PutDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ForceRefresh re-renders resolv.conf immediately. Sandboxes spawned
-	// after this point pick up the new file. Existing warm workers keep
-	// their old resolv.conf (mounted at spawn) — the operator can drain
-	// them by toggling network_mode off and on again, or wait for them
-	// to age out via idle TTL.
+	// ForceRefresh re-renders resolv.conf and hosts immediately; sandboxes
+	// spawned after this point mount the new files. A resolver change also
+	// shifts the compiled policy (resolvers get an explicit allow), so it
+	// publishes a new generation and the warm egress pools are retired for
+	// us. A search-domain- or records-only edit does not move the policy, so
+	// existing warm workers keep the files they were spawned with until they
+	// age out via idle TTL.
 	if h.Manager != nil {
 		_ = h.Manager.ForceRefresh()
 	}

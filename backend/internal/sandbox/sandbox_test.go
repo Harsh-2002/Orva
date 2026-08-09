@@ -349,3 +349,38 @@ func TestResolveRuntimeRejectsIncompleteRootfs(t *testing.T) {
 		t.Fatalf("complete rootfs was rejected: %v", err)
 	}
 }
+
+// TestEgressGrantsOutboundSocketSyscalls guards the footgun that made
+// network_mode=egress a toggle with no effect.
+//
+// The base policies withhold `connect` on purpose (the default set permits only
+// the socket calls Node's internal IPC needs). Before this, those syscalls
+// reached a sandbox only by switching the whole instance to the `permissive`
+// base, so an operator could flip a function to egress, see it accepted, and
+// have every outbound call killed by seccomp before the egress policy was ever
+// consulted.
+func TestEgressGrantsOutboundSocketSyscalls(t *testing.T) {
+	for _, base := range []string{"default", "strict", "permissive"} {
+		t.Run(base, func(t *testing.T) {
+			egress := BuildSeccompPolicy(base, SeccompAllowForNetworkMode("egress"), nil)
+			if !strings.Contains(egress, "connect") {
+				t.Errorf("base %q + egress must allow connect, policy was:\n%s", base, egress)
+			}
+		})
+	}
+}
+
+// TestNonEgressWithholdsConnect is the other half: granting the network
+// syscalls per function must not leak them to functions that were never given
+// network access.
+func TestNonEgressWithholdsConnect(t *testing.T) {
+	for _, mode := range []string{"", "none"} {
+		if got := SeccompAllowForNetworkMode(mode); len(got) != 0 {
+			t.Errorf("network mode %q must grant no extra syscalls, got %v", mode, got)
+		}
+		policy := BuildSeccompPolicy("default", SeccompAllowForNetworkMode(mode), nil)
+		if strings.Contains(policy, "connect") {
+			t.Errorf("network mode %q must not allow connect", mode)
+		}
+	}
+}

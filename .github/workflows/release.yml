@@ -498,7 +498,7 @@ jobs:
             ```
             docker run -d --name orva --restart unless-stopped \
               -p 8443:8443 --pid=host \
-              --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+              --cap-add SYS_ADMIN \
               --security-opt seccomp=unconfined \
               --cgroupns=host --device /dev/net/tun \
               -v orva-data:/var/lib/orva \

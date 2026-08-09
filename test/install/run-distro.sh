@@ -95,8 +95,13 @@ if [[ "$DISTRO_INIT" == "systemd" ]]; then
     ok "orva.service active"
 
     unit=$(docker exec "$CONTAINER" systemctl cat orva)
-    [[ "$unit" == *"AmbientCapabilities=CAP_NET_ADMIN"* ]] \
-        || die "orva.service is missing required ambient capabilities"
+    # The daemon must hold no capabilities of its own: egress is enforced inside
+    # each nsjail (NSTUN), and an ambient set could not survive execve of a
+    # binary carrying file capabilities anyway.
+    [[ "$unit" != *"AmbientCapabilities="* ]] \
+        || die "orva.service still grants ambient capabilities to the daemon"
+    # The bounding set must remain a superset of nsjail's file capabilities, or
+    # execve(nsjail) itself fails with EPERM.
     [[ "$unit" == *"CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE"* ]] \
         || die "orva.service bounding set would prevent nsjail exec"
     [[ "$unit" == *"Environment=ORVA_DISABLE_USERNS="* ]] \

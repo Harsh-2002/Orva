@@ -180,7 +180,7 @@ docker pull ghcr.io/harsh-2002/orva:latest
 docker stop orva && docker rm orva
 docker run -d --name orva -p 8443:8443 \
   --pid host --cgroupns host \
-  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+  --cap-add SYS_ADMIN \
   --security-opt seccomp=unconfined \
   --security-opt apparmor=unconfined \
   --security-opt systempaths=unconfined \
@@ -261,6 +261,13 @@ to Prometheus for small deployments.
 - [ ] HTTPS terminator in front (caddy / nginx / traefik / cloudflared)
 - [ ] `network_mode: none` is the default — verify your functions
       stayed on it (operator can opt into `egress` per-function for outbound HTTPS)
+- [ ] Egress policy reviewed on the Egress controls page. Note that it also filters
+      orvad's own outbound calls, so enabling a broad RFC1918 rule
+      (`10.0.0.0/8` and friends) blocks internal package mirrors, LAN-hosted AI
+      providers, and internal webhook targets too — block a narrower CIDR
+      instead. `status.enforced` must be `true`; if it is `false`, egress
+      functions will not spawn at all
+      ([`SECURITY.md`](SECURITY.md#sandbox-egress-policy))
 - [ ] Bootstrap admin key rotated — issue a new key via the dashboard
       and delete the bootstrap one (or move `.admin-key` out-of-band)
 - [ ] API keys for clients have only the permissions they need

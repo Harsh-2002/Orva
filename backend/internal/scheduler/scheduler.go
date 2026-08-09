@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
@@ -95,6 +96,7 @@ type Scheduler struct {
 
 	// httpClient delivers webhook POSTs. 10s timeout — receivers
 	// should ack quickly or fail; long blocking would tie up workers.
+	// Replaced by SetEgressGuard with a policy-filtered client at boot.
 	httpClient *http.Client
 
 	// stop signals the loop to exit. Closed by Stop().
@@ -110,6 +112,23 @@ type Scheduler struct {
 // feed per-function baselines and get an outlier flag back-written.
 // Optional — leave unset in tests where metrics aren't relevant.
 func (s *Scheduler) SetMetrics(m *metrics.Metrics) { s.metrics = m }
+
+// SetEgressGuard puts webhook delivery behind the operator's egress policy.
+// Call before Start — the delivery loop reads httpClient from its own
+// goroutines, and this is the only writer.
+//
+// Deliveries are the daemon's own outbound traffic, so they used to be filtered
+// by the host-wide nftables output chain. The NSTUN policy that replaced it is
+// per-sandbox, and handlers.validateWebhookURL still (correctly) accepts
+// private-range URLs on the assumption that egress is where the decision is
+// made — so without this a blocked address is reachable via a webhook.
+//
+// Delivery is the scheduler's only daemon-side egress: cron fires and job runs
+// reach the network from inside their sandbox, where the same policy is already
+// loaded as an nsjail --config.
+func (s *Scheduler) SetEgressGuard(g firewall.Guard) {
+	s.httpClient = firewall.NewHTTPClient(g, firewall.SubsystemWebhook, 10*time.Second)
+}
 
 // New constructs a Scheduler. Wire by passing the running database +
 // pool manager from server.New. hub may be nil — the scheduler still
@@ -782,6 +801,17 @@ func (s *Scheduler) deliverWebhook(parent context.Context, d *database.WebhookDe
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
+		// A policy refusal is not a flaky receiver: say so on the delivery row
+		// and in the log, or the operator debugs the subscriber URL for an hour
+		// before finding their own blocklist rule. Retries still happen — the
+		// policy is editable, so the next attempt may legitimately succeed.
+		if errors.Is(err, firewall.ErrBlockedByEgressPolicy) {
+			slog.Warn("webhook: delivery refused by the egress policy",
+				"delivery", d.ID, "subscription", sub.ID, "url", sub.URL, "err", err)
+			s.handleDeliveryFailure(d, sub, "blocked by egress policy: "+err.Error(), 0)
+			s.publishWebhookActivity(d, sub, 0, started, "blocked by egress policy")
+			return
+		}
 		s.handleDeliveryFailure(d, sub, "transport: "+err.Error(), 0)
 		s.publishWebhookActivity(d, sub, 0, started, "transport error")
 		return

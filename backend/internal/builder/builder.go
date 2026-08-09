@@ -393,6 +393,14 @@ func extractTarGz(archivePath, destDir string) error {
 //     Packages land at /code/<pkg> and the Python adapter adds /code to sys.path.
 //
 // Both commands run on the host (not inside nsjail) during the build phase.
+//
+// They are therefore NOT subject to the operator's egress policy. That policy is
+// an nsjail NSTUN rule set loaded per sandbox, and orvad filters its own Go
+// clients with firewall.NewHTTPClient — neither mechanism can reach a child
+// process's sockets. npm and pip talk to whatever registry their own config
+// names, and a blocklist rule covering it will not stop them. Restricting
+// registry access is a host-level concern (npm/pip config, or a firewall outside
+// Orva) until builds themselves run in a sandbox.
 func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, entrypoint string) (string, error) {
 	switch {
 	case isNodeRuntime(runtime):

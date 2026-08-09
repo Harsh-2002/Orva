@@ -191,10 +191,12 @@ genuinely needs to call out.
 
 `network_mode: egress` — opt-in per function. Adds nsjail's
 `--user_net` flag, which gives the sandbox a userspace TCP/UDP stack
-that NATs out via the host. **Host network interfaces are still not
-exposed**; the function can dial outbound but can't see (or be seen by)
-other tenants on the same node. Use this for handlers that talk to
-Stripe, OpenAI, your DB, or any external API.
+(the bundled NSTUN backend) that NATs out via the host. **Host network
+interfaces are still not exposed**; the function can dial outbound but
+can't see (or be seen by) other tenants on the same node. Use this for
+handlers that talk to Stripe, OpenAI, your DB, or any external API. Every
+egress worker also carries the compiled egress policy described below —
+it cannot spawn without one.
 
 Switching the toggle drains the warm pool so the next invocation
 respawns with the new mode within seconds. The Functions list in the UI
@@ -204,47 +206,135 @@ at a glance which functions can talk to the network.
 Future modes (`egress+allowlist` / `private`) would extend the same
 field without another schema migration.
 
-### Egress blocklist (firewall)
+### Sandbox egress policy
 
-When a function is in `egress` mode, a global blocklist applies on top:
-specific IPs/CIDRs/hostnames that no function can reach regardless of
-the per-function toggle. The list is managed entirely from the UI at
-`/web/firewall` (or via `POST /api/v1/firewall/rules`) — there is no
-config file. Rules live in the `egress_blocklist` SQLite table and
-orvad re-applies them via nftables on every change + every 10 s tick.
+When a function is in `egress` mode, an instance-wide blocklist applies
+on top: IPs/CIDRs/hostnames that no function can reach regardless of the
+per-function toggle. The list is managed from the dashboard's **Egress
+controls** page (`/web/firewall`), or via `POST /api/v1/firewall/rules` /
+`orva firewall add` — there is no config file. Rules live in the
+`egress_blocklist` SQLite table.
 
-**Coexisting with existing nftables rules.** orvad creates and owns
-exactly one nftables table named `inet orva_firewall`. It does **not**
-touch any other table on the host. If you already run nftables for
-your own purposes (host firewall, fail2ban, k8s CNI), our rules sit
-alongside yours — Linux's nftables evaluates every matching rule in
-the OUTPUT chain regardless of which table they're in.
+Enforcement is **per sandbox**, inside nsjail. `internal/firewall`
+compiles the enabled rows into nsjail NSTUN `user_net { rule4 / rule6 }`
+rules, writes them to an immutable generation file under
+`<dataDir>/firewall/policy/egress-<gen>.cfg`, and every egress worker is
+spawned with that file as `--config` (argv[0..1], before any other flag —
+nsjail's config loader overwrites everything set earlier). There is no
+host firewall table, no `nft` invocation, and no packet filter outside the
+sandbox's own network namespace.
 
-```bash
-sudo nft list ruleset
-# Look for:
-#   table inet orva_firewall { ... }
-# next to whatever else you're running.
-```
+**Rule order is a security control.** NSTUN is default-ALLOW and
+first-match-wins, so the compiler emits carve-outs before rejects:
 
-orvad will rebuild only its own table on each refresh; your tables are
-untouched. The bare-metal install script (`scripts/install.sh`) detects
-existing nftables config at install time and prints an info line so
-you know they coexist.
+1. nsjail's own NSTUN gateway (`10.255.255.1`, `fc00::1`) — it lives
+   inside `10.0.0.0/8`, so a private-network reject would otherwise cut
+   the guest off from its own default route.
+2. The **control plane**: orvad's internal SDK address, exact host, exact
+   port, TCP only (see the bug fix below).
+3. The configured DNS resolvers, port 53, UDP + TCP.
+4. The operator's blocklist, as REJECT rules.
+5. A blanket IPv6 REJECT when the host has no global IPv6 address *and*
+   the policy contains no IPv6 rule of its own — otherwise a destination
+   blocked over IPv4 could be reached over IPv6 instead.
 
-**When nftables is unavailable.** If `nft` isn't installed or the
-kernel can't load `nf_tables` (rare modern distros, OpenWrt, BSD), the
-install script logs a warning and the firewall feature degrades:
+Every address is re-parsed and canonicalised by Orva before it reaches
+the config file, and anything ambiguous is refused rather than emitted.
+That is not defensive politeness: NSTUN's rule compilation is **fail-open**
+— an out-of-range prefix yields a zero mask, and a zero mask matches every
+address. A malformed rule in nsjail does not become a stricter rule, it
+becomes a wildcard.
 
-- Per-function `network_mode: egress` still works — functions still get
-  an isolated net namespace + nstun userspace networking.
-- The Firewall page still loads; you can manage rules in the DB.
-- The page shows an amber **"nftables unavailable"** banner.
-- **No packets are filtered** — host-level iptables / cloud security
-  group / VPC firewall is your fallback.
+**Fail-closed.** If no policy has compiled successfully, an egress sandbox
+refuses to start (`sandbox.ErrEgressPolicyMissing` — the invocation fails
+rather than running unfiltered; see [`ERRORS.md`](ERRORS.md) for the slug).
+`status.enforced: false` is the signal to watch for. If a *recompile* fails,
+the last known-good generation stays in force and the status reports
+`policy_stale: true` with `last_compile_error`. A malformed config is fatal
+to nsjail (exit 255), so a corrupt policy also fails closed.
 
-This is intentional: orva will run regardless of host firewall state,
-and the operator gets a clear yes/no signal at install time.
+**Policy is fixed at worker start.** NSTUN reads its rules once, at spawn.
+Editing a rule publishes a new generation and retires the warm egress
+pools so the next spawn picks it up; an in-flight worker keeps the exact
+generation it started with. Recycles are rate-limited to one per 60 s, so
+a flapping DNS answer behind a hostname rule cannot turn into a cold-start
+storm. Expect a few seconds — and a cold start — between saving a rule and
+seeing it applied.
+
+Where to look: `GET /api/v1/firewall/rules` returns a `status` object with
+`backend` (always `nstun`), `enforced`, `policy_generation`,
+`policy_rule_counts`, `policy_stale`, `control_plane_allow`, and
+`unenforced_rules`. The old `nftables_available` field is **gone**, with no
+compatibility alias — see [`API.md`](API.md#firewall-status).
+
+**What changed from the nftables-based build.** This replaced a host-wide
+`nft` implementation. The differences are behavioural, not cosmetic:
+
+- **Scope narrowed.** The old build installed a host table
+  (`inet orva_firewall`) with an `output` hook, which filtered *every*
+  process in the daemon's network namespace. The new policy only exists
+  inside each egress sandbox.
+- **The daemon is filtered separately.** So that narrowing does not become
+  a hole, orvad's own outbound connections are checked at the dialer
+  against the same compiled rule set, in the same order — outbound
+  webhooks, builder package installs (`npm install` / `pip install`), the
+  AI gateway's provider calls, and anything a cron trigger causes. Loopback
+  and the control plane are always exempt so orvad cannot cut off its own
+  internal calls.
+- **Blocked destinations now report `ECONNREFUSED`**, not `EHOSTUNREACH`.
+  Handlers (and log-scraping alerts) that string-match the old errno need
+  updating.
+- **Wildcard rules are unsupported and rejected.** Creating or enabling a
+  `*.example.com` rule fails with `400 VALIDATION`. Packets carry
+  addresses, not names. The old build silently resolved only the domain
+  apex — it blocked `example.com` and none of its subdomains while the UI
+  claimed otherwise. Rows that already exist are left exactly as they are
+  (their `enabled` flag is never rewritten), excluded from the compiled
+  policy, and listed in `status.unenforced_rules` with a reason. Use a CIDR
+  or an exact hostname instead.
+- **A silent breakage is fixed.** Enabling any RFC1918 suggestion used to
+  break `orva.kv`, `orva.jobs`, and function-to-function `orva.invoke`,
+  because the internal SDK base handed to sandboxes is deliberately a
+  *non-loopback* address (from inside the jail, `127.0.0.1` is the jail's
+  own loopback) and is normally RFC1918. A narrow control-plane ALLOW —
+  exact address, exact port, TCP — now precedes the blocklist. If that
+  address cannot be determined at startup, the policy refuses to compile
+  rather than shipping one that breaks the SDK.
+
+**Sharp edge — the RFC1918 suggestions now also apply to orvad.**
+Because the daemon is filtered by the same rules, enabling the shipped
+`suggested` rules — `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+`100.64.0.0/10` — blocks **orvad's own** outbound calls to those ranges as
+well as your functions'. That breaks, for example:
+
+- an internal npm or PyPI mirror used at build time,
+- a LAN-hosted LLM endpoint configured as an AI provider,
+- an outbound webhook target on your private network.
+
+The data model is a pure blocklist: there is no allow-exception rule you
+can add on top. The remedy is a **narrower CIDR** — block the subnet you
+actually want denied instead of the whole RFC1918 range (e.g.
+`10.42.0.0/16` rather than `10.0.0.0/8`). All four suggestions ship
+**disabled** — opt in deliberately, and check that nothing orvad needs lives
+in the range first. The two `default` rules that ship *enabled*
+(`169.254.0.0/16`, `fd00:ec2::254/128` — cloud metadata) are addresses
+nothing on the platform needs.
+
+**Honest note on the previous behaviour.** Egress enforcement in the nftables
+build was **a silent no-op on any host without the `nftables` package or
+without `CAP_NET_ADMIN`** — the rules were stored, the UI listed them, and
+nothing filtered packets. It had
+**never** worked on Alpine/OpenRC at all: the shipped OpenRC service
+granted no capabilities, so orvad could not program nftables there under
+any configuration. Availability also gated the manager's poll loop, which
+meant operator DNS changes stopped reaching sandboxes on those hosts too,
+while boot-time behaviour made it look like they had applied.
+
+The NSTUN policy has no such host dependency: it needs `/dev/net/tun`
+(already required by `network_mode: egress` itself) and nothing else. If you
+relied on the Egress controls page for filtering on a host in either
+category, treat this release as the point where it started working — not as a
+change to a working feature.
 
 ## What Orva itself runs as
 
@@ -260,7 +350,6 @@ The container itself is launched with:
 --pid host
 --cgroupns host
 --cap-add SYS_ADMIN
---cap-add NET_ADMIN
 --security-opt seccomp=unconfined
 --security-opt apparmor=unconfined
 --security-opt systempaths=unconfined
@@ -271,6 +360,18 @@ The container itself is launched with:
 host cgroup hierarchy (per-function `memory.max` / `cpu.max`); without them
 sandbox spawn fails. On the `kata-clh` runtime the guest kernel provides this
 delegation, so those two are not needed there.
+
+`--device /dev/net/tun` exists for nsjail's `--user_net`: it opens the TUN
+device and configures the interface inside each sandbox's fresh network
+namespace. It is not used to program a host firewall — orvad does not touch
+host network configuration at all.
+
+`NET_ADMIN` is deliberately **not** granted. nsjail creates the TAP device
+inside its own user namespace, where it already holds the capability, so the
+container never needs it. Verified by running the sandbox with `SYS_ADMIN` and
+the TUN device only. The one exception is forcing `ORVA_DISABLE_USERNS=1`
+inside a container: that removes the user namespace, and `TUNSETIFF` then
+requires real `CAP_NET_ADMIN` from the initial namespace.
 
 These apply **only to the orva container**, not to functions. Within
 the container, only the orvad process and its child nsjails benefit;

@@ -647,7 +647,7 @@ app.post('/webhooks/orva', (req, res) => {
 
 ## MCP — Model Context Protocol
 
-Same API surface the dashboard uses, exposed as 72 tools an agent can
+Same API surface the dashboard uses, exposed as 73 tools an agent can
 call directly. API key permissions scope the available tool set.
 
 - **Endpoint:** `{{ORIGIN}}/mcp`
@@ -691,7 +691,7 @@ call directly. API key permissions scope the available tool set.
 
 ### MCP — Claude Code
 
-> Anthropic's `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva's 71 operator-mode tools.
+> Anthropic's `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva's 73 operator-mode tools.
 
 ```bash
 claude mcp add --transport http --scope user orva {{ORIGIN}}/mcp --header "Authorization: Bearer <YOUR_ORVA_TOKEN>"
@@ -1143,7 +1143,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - NO subprocess execution (subprocess / child_process disabled). NO raw sockets. NO listening ports — the platform owns the HTTP server.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
 - orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — the editor's deploy step will warn you when the import meets `none`.
-- When egress IS enabled, the operator can further restrict it via the firewall + DNS allowlist (Firewall page). Assume best-effort; handle failures.
+- When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
 - Concurrency: each warm worker handles one request at a time. The pool autoscales workers up to the function's max_concurrent setting. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>
 

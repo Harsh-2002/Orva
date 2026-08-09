@@ -16,7 +16,7 @@ Human-maintained reference documentation. Keep these in sync when changing API s
 | `KATA.md` | Kata Containers runtime evaluation — supported configurations + measured cost |
 | `OPERATIONS.md` | Day-2 ops: backup/restore, VACUUM, log rotation, upgrades |
 | `RUNTIMES.md` | Per-runtime handler contract, streaming (generators/async iterables), TypeScript |
-| `SECURITY.md` | Threat model, nsjail sandbox isolation, network firewall (nftables) |
+| `SECURITY.md` | Threat model, nsjail sandbox isolation, per-sandbox egress policy (nsjail NSTUN) |
 | `SUPPORT.md` | Support matrix — distros, kernels, container runtimes |
 | `TRACING.md` | Causal trace model, propagation, W3C interop, outlier detection |
 | `reference.md` | **Canonical** Orva reference (~68 KB GFM markdown) — single source of truth shipped to the dashboard's Copy-as-Markdown button (via `frontend/public/docs.md`), the `get_orva_docs` MCP tool (via `backend/internal/mcp/reference.md`), and the slim CLI's `orva docs` command (via `cli/commands/reference.md`). `make docs-embed` syncs all three copies. Uses `{{ORIGIN}}` placeholders that consumers substitute at runtime. |

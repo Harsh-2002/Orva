@@ -73,10 +73,12 @@ class Instance:
             "-v", f"{VOLUME}:/var/lib/orva",
             # Reach the host's mock LLM from inside the container.
             "--add-host", "host.docker.internal:host-gateway",
-            # Capabilities nsjail needs for sandboxed deploy/invoke. If the
+            # SYS_ADMIN is all nsjail needs for sandboxed deploy/invoke: each
+            # sandbox's TAP device is created inside nsjail's own user
+            # namespace, so egress needs no NET_ADMIN on the container. If the
             # host kernel won't allow nested sandboxing, those scenarios skip
             # themselves; everything else still runs.
-            "--cap-add", "SYS_ADMIN", "--cap-add", "NET_ADMIN",
+            "--cap-add", "SYS_ADMIN",
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
             "--cgroupns=host", "--pid=host",

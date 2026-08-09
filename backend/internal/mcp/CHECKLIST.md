@@ -1,6 +1,7 @@
 # MCP tool checklist (read before adding a new tool)
 
-Every tool registered with `mcpsdk.AddTool` must satisfy these rules. They
+Every tool registered via `regAddTool` (never bare `mcpsdk.AddTool` — that
+skips the in-process agent registry) must satisfy these rules. They
 exist so the same MCP server works identically against Claude Code,
 ChatGPT custom connectors, Cursor, Codex, Gemini, and any future
 spec-conformant client — without per-client schema tweaks.

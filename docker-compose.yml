@@ -31,10 +31,12 @@ services:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
 
     # SYS_ADMIN: nsjail creates user namespaces / mounts / cgroup delegations.
-    # NET_ADMIN: egress firewall manager applies nftables rules via `nft`.
+    # NET_ADMIN is deliberately absent: each sandbox's TAP device is created
+    # inside nsjail's own user namespace, so the kernel checks ns_capable()
+    # there rather than the container's capability set. Forcing
+    # ORVA_DISABLE_USERNS=1 removes that namespace and does need NET_ADMIN back.
     cap_add:
       - SYS_ADMIN
-      - NET_ADMIN
 
     # Lifted so nsjail can apply its own per-function seccomp + namespaces.
     security_opt:
@@ -42,7 +44,8 @@ services:
       - apparmor=unconfined
       - systempaths=unconfined
 
-    # Per-function `network_mode: egress` uses nsjail's --user_net (open()s /dev/net/tun).
+    # Per-function `network_mode: egress` uses nsjail's --user_net, which opens
+    # /dev/net/tun. No capability substitutes for the device node.
     devices:
       - /dev/net/tun:/dev/net/tun
 

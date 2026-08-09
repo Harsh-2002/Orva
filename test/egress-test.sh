@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# egress-test.sh — verify per-function network_mode toggle.
+# egress-test.sh — verify per-function network_mode toggle + egress policy
+# enforcement.
 #
 # Asserts:
 #  - Default function (network_mode=none) cannot resolve / connect outbound.
 #  - PUT network_mode=egress unlocks outbound; warm pool drains and respawns.
 #  - PUT back to none re-isolates.
 #  - Invalid network_mode is rejected with 400 VALIDATION.
-#  - Toggle latency overhead is bounded (sanity check on pasta startup).
+#  - Toggle latency overhead is bounded (sanity check on NSTUN startup).
+#  - The compiled NSTUN policy is published (backend=nstun + a generation).
+#  - A blocklist rule for the destination actually REFUSES the connection,
+#    and deleting the rule restores reachability.
 
 set -euo pipefail
 
@@ -20,6 +24,41 @@ check() {
     local label="$1" cond="$2"
     if [ "$cond" = "ok" ]; then echo "ok	$label"; PASS=$((PASS+1))
     else echo "fail	$label	${3-}"; FAIL=$((FAIL+1)); fi
+}
+
+# Everything this script creates is torn down on any exit path. A leaked
+# blocklist rule would keep blocking example.com for every later run, so it
+# must not survive a mid-script failure.
+fid=""; rule_id=""
+cleanup() {
+    if [ -n "$rule_id" ]; then
+        curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+            -X DELETE "$BASE/api/v1/firewall/rules/$rule_id" || true
+    fi
+    if [ -n "$fid" ]; then
+        curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+            -X DELETE "$BASE/api/v1/functions/$fid" || true
+    fi
+}
+trap cleanup EXIT
+
+# Retire the warm pool so the next invoke spawns under the current policy
+# generation. nsjail loads NSTUN rules once per worker, and the policy-driven
+# recycle is rate-limited to one per 60s — a PUT that touches the spawn config
+# drains the pool now instead.
+cold_start() {
+    "${CURL[@]}" -X PUT "$BASE/api/v1/functions/$1" \
+        -H "Content-Type: application/json" -d '{"memory_mb":128}' > /dev/null
+    sleep 1
+}
+
+# The `.ok` field of the handler's own response: true = the outbound HTTPS GET
+# completed, false = it was refused.
+probe_ok() {
+    "${CURL[@]}" -X POST "$BASE/fn/${1#fn_}/" -d '{}' | jq -r '.ok'
+}
+probe_err() {
+    "${CURL[@]}" -X POST "$BASE/fn/${1#fn_}/" -d '{}' | jq -r '.err'
 }
 
 # 1. Create + deploy fn that does an outbound HTTPS GET and reports the
@@ -121,12 +160,64 @@ t0=$(date +%s%N)
 t1=$(date +%s%N)
 warm_ms=$(( (t1 - t0) / 1000000 ))
 # Generous bound — example.com round-trip dominates. We're checking
-# pasta isn't catastrophically broken (>5s would indicate a hang).
+# the NSTUN stack isn't catastrophically broken (>5s would indicate a hang).
 check "warm-pool egress latency < 5000 ms" \
     "$([ "$warm_ms" -lt 5000 ] && echo ok || echo fail)" "warm_ms=$warm_ms"
 
-# Cleanup.
-"${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$fid" > /dev/null
+# 7. Egress policy enforcement. The function stays in egress mode from step 6,
+#    so a blocklist rule covering its destination is the only variable: if the
+#    invoke still succeeds, the compiled NSTUN policy is a no-op.
+status=$("${CURL[@]}" "$BASE/api/v1/firewall/status")
+backend=$(echo "$status" | jq -r '.backend')
+gen_before=$(echo "$status" | jq -r '.policy_generation')
+check "egress policy backend == nstun" \
+    "$([ "$backend" = nstun ] && echo ok || echo fail)" "got=$backend"
+check "a policy generation is published" \
+    "$([ -n "$gen_before" ] && [ "$gen_before" != null ] && echo ok || echo fail)" \
+    "gen=$gen_before"
+
+# Idempotency: a leftover rule from an interrupted run would 409 the create.
+stale_id=$("${CURL[@]}" "$BASE/api/v1/firewall/rules" \
+    | jq -r '[.rules[]? | select(.kind=="custom" and .value=="example.com") | .id][0] // empty')
+if [ -n "$stale_id" ]; then
+    curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+        -X DELETE "$BASE/api/v1/firewall/rules/$stale_id"
+fi
+
+# A hostname rule is resolved by the daemon and compiled into REJECT rules for
+# every address it answers with — which is exactly what this function fetches.
+rule=$("${CURL[@]}" -X POST "$BASE/api/v1/firewall/rules" \
+    -H "Content-Type: application/json" \
+    -d '{"rule_type":"hostname","value":"example.com","label":"egress-test"}')
+rule_id=$(echo "$rule" | jq -r '.id')
+check "blocklist rule created" \
+    "$([ -n "$rule_id" ] && [ "$rule_id" != null ] && echo ok || echo fail)" \
+    "resp=$(echo "$rule" | head -c 160)"
+
+gen_after=$("${CURL[@]}" "$BASE/api/v1/firewall/status" | jq -r '.policy_generation')
+check "new rule publishes a new policy generation" \
+    "$([ -n "$gen_after" ] && [ "$gen_after" != "$gen_before" ] && echo ok || echo fail)" \
+    "before=$gen_before after=$gen_after"
+
+cold_start "$fid"
+ok_blocked=$(probe_ok "$fid")
+check "blocklist rule refuses the outbound connection" \
+    "$([ "$ok_blocked" = false ] && echo ok || echo fail)" "ok=$ok_blocked"
+err_blocked=$(probe_err "$fid")
+# NSTUN REJECT synthesizes a refusal rather than blackholing the packet, so a
+# blocked function fails immediately instead of hanging until its timeout.
+check "refusal surfaces as ECONNREFUSED" \
+    "$([ "$err_blocked" = ECONNREFUSED ] && echo ok || echo fail)" "err=$err_blocked"
+
+# 8. Deleting the rule restores reachability — proves the block came from the
+#    policy and not from a broken sandbox.
+curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+    -X DELETE "$BASE/api/v1/firewall/rules/$rule_id"
+rule_id=""
+cold_start "$fid"
+ok_restored=$(probe_ok "$fid")
+check "deleting the rule restores reachability" \
+    "$([ "$ok_restored" = true ] && echo ok || echo fail)" "ok=$ok_restored"
 
 echo
 echo "=== egress-test: $PASS passed, $FAIL failed ==="

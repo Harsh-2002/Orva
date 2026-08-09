@@ -154,7 +154,9 @@ const items = [
   { id: 'go-keys',     label: 'API Keys',          icon: Fingerprint,  action: () => router.push('/api-keys') },
   { id: 'go-channels', label: 'Channels',          icon: Plug,         action: () => router.push('/channels') },
   { id: 'go-hooks',    label: 'Webhooks',          icon: Webhook,      action: () => router.push('/webhooks') },
-  { id: 'go-fw',       label: 'Firewall',          icon: ShieldHalf,   action: () => router.push('/firewall') },
+  // keywords keeps this reachable by its old name; the page was "Firewall"
+  // before enforcement moved to the per-sandbox egress policy.
+  { id: 'go-fw',       label: 'Egress controls',   icon: ShieldHalf,   action: () => router.push('/firewall'), keywords: 'firewall blocklist dns' },
   { id: 'go-settings', label: 'Settings',          icon: SettingsIcon, action: () => router.push('/settings') },
   { id: 'go-docs',     label: 'Docs',              icon: LibraryBig,   action: () => router.push('/docs') },
   { id: 'go-overview', label: 'Overview',          icon: Gauge,        action: () => router.push('/') },
@@ -163,7 +165,8 @@ const items = [
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return items
-  return items.filter((it) => it.label.toLowerCase().includes(q))
+  return items.filter((it) =>
+    it.label.toLowerCase().includes(q) || (it.keywords || '').includes(q))
 })
 
 watch(filtered, () => { selectedIdx.value = 0 })
