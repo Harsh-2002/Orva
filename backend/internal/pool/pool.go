@@ -51,6 +51,11 @@ type SandboxTemplate struct {
 	DataDir        string
 	DefaultSeccomp string
 
+	// DefaultMaxPids is the per-sandbox process-count cap passed to nsjail
+	// (--cgroup_pids_max). Must be > 0 — a 0 value disables the cap, which is
+	// how warm workers used to launch (the field was simply never set here).
+	DefaultMaxPids int
+
 	// SecretsLookup is consulted at every worker spawn to inject decrypted
 	// secrets as env vars. nil means "function has no secrets layer wired
 	// up." On secret upsert/delete, the secret handler triggers
@@ -75,6 +80,15 @@ type SandboxTemplate struct {
 	// Optional so unit tests that wire pools without a metrics instance
 	// don't have to fake one.
 	Metrics *metrics.Metrics
+}
+
+// maxPidsOr returns v when it is positive, else the fallback. Guards against a
+// zero DefaultMaxPids reaching nsjail as `--cgroup_pids_max 0` (no cap).
+func maxPidsOr(v, fallback int) int {
+	if v > 0 {
+		return v
+	}
+	return fallback
 }
 
 // Manager owns all function-scoped pools.
@@ -675,6 +689,10 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				CodeDir:       codeDir,
 				MemoryMB:      int(fn.MemoryMB),
 				MaxCPUs:       fn.CPUs,
+				// Without this the warm-pool spawn passed MaxPids=0 →
+				// `--cgroup_pids_max 0` (fork-bomb cap disabled). Fall back to
+				// 32 (the historical sandbox.Execute default) if unset.
+				MaxPids:       maxPidsOr(tmpl.DefaultMaxPids, 32),
 				Env:           env,
 				SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, nil, nil),
 				NetworkMode:   fn.NetworkMode,

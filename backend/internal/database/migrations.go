@@ -369,15 +369,15 @@ CREATE TABLE IF NOT EXISTS inbound_webhooks (
 CREATE INDEX IF NOT EXISTS idx_inbound_webhooks_fn ON inbound_webhooks(function_id);
 
 -- Seed system config (ignore if already exists)
+-- NOTE: keys that duplicate a config field are intentionally NOT seeded here.
+-- max_total_containers, default_timeout_ms, default_memory_mb,
+-- max_code_size_bytes, max_request_body_bytes, log_retention_days,
+-- reap_interval_seconds, and replenish_interval_seconds were previously
+-- seeded but never read by any Go code — the live values come from
+-- config.Config (env-overridable, see docs/CONFIG.md). Seeding them created
+-- phantom knobs an operator could edit with no effect, so they were removed.
+-- Only keys that are actually read at runtime are seeded below.
 INSERT OR IGNORE INTO system_config (key, value) VALUES
-    ('max_total_containers', '100'),
-    ('default_timeout_ms', '30000'),
-    ('default_memory_mb', '64'),
-    ('max_code_size_bytes', '52428800'),
-    ('max_request_body_bytes', '6291456'),
-    ('log_retention_days', '7'),
-    ('reap_interval_seconds', '30'),
-    ('replenish_interval_seconds', '5'),
     ('versions_to_keep', '5'),
     ('gc_interval_seconds', '300'),
     ('min_free_disk_mb', '500'),

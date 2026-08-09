@@ -597,7 +597,7 @@
             MCP: Model Context Protocol
           </h2>
           <p class="doc-lede">
-            Same API surface the dashboard uses, exposed as 71 tools an agent
+            Same API surface the dashboard uses, exposed as 72 tools an agent
             can call directly. API key permissions scope the available tool
             set.
           </p>
@@ -1998,7 +1998,7 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'Claude Code',
     lang: 'bash',
-    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 71 tools.',
+    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 72 tools.',
     code: `claude mcp add --transport http --scope user orva ${origin.value}/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {

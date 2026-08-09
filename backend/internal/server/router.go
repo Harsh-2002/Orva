@@ -58,7 +58,8 @@ type RouterDeps struct {
 	PoolMgr       *pool.Manager
 	EventHub      *events.Hub
 	Firewall      *firewall.Manager
-	InternalToken string // Per-process token for kv/jobs/F2F SDK auth (Phase 3+).
+	InternalToken string    // Per-process token for kv/jobs/F2F SDK auth (Phase 3+).
+	StartTime     time.Time // Shared process start time (health/uptime). Zero → time.Now().
 }
 
 func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Router {
@@ -76,7 +77,10 @@ func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Rout
 		eventHub:      deps.EventHub,
 		firewall:      deps.Firewall,
 		internalToken: deps.InternalToken,
-		startTime:     time.Now(),
+		startTime:     deps.StartTime,
+	}
+	if r.startTime.IsZero() {
+		r.startTime = time.Now()
 	}
 	r.setupRoutes()
 	r.buildMiddlewareChain()
@@ -107,6 +111,7 @@ func (r *Router) setupRoutes() {
 		BuildQueue: r.buildQueue,
 		Registry:   r.registry,
 		StartTime:  r.startTime,
+		NsjailBin:  r.cfg.Sandbox.NsjailBin,
 	}
 	r.mux.HandleFunc("GET /api/v1/system/health", sysHandler.Health)
 	r.mux.HandleFunc("GET /api/v1/system/metrics", sysHandler.GetMetrics)
@@ -539,7 +544,7 @@ func (r *Router) buildMiddlewareChain() {
 	// Build chain from inside out: Handler -> Logger -> RequestID -> Auth -> BodySize -> CORS
 	chain := loggerMiddleware(r.db, r.eventHub, r.mux)
 	chain = requestIDMiddleware(chain)
-	chain = authMiddleware(r.db, &r.keyCache, chain)
+	chain = authMiddleware(r.db, &r.keyCache, r.internalToken, chain)
 	chain = bodySizeMiddleware(maxBody, chain)
 	chain = corsMiddleware(origins, chain)
 

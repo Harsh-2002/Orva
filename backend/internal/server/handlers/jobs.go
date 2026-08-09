@@ -22,20 +22,26 @@ type JobsHandler struct {
 	InternalToken string
 }
 
-// authorize accepts either the standard middleware-stamped auth (already
-// validated upstream when present) OR a worker's internal token. Returns
-// true when the request is permitted.
+// authorize accepts either a worker's internal token OR the standard
+// middleware-stamped session/API-key auth. Returns true when permitted.
+//
+// This handler independently constant-time-compares the internal token as
+// its own defense-in-depth check — it does NOT rely on the middleware for
+// the SDK path. For the public (session/API-key) path it does rely on
+// authMiddleware, which only forwards /api/v1/* requests to handlers after
+// a valid session cookie or API key. Note that authMiddleware requires the
+// internal-token header to MATCH the per-process secret before it will skip
+// the API-key gate (a merely-present header falls through to normal auth),
+// so an unauthenticated caller can never reach this point — the `return
+// true` below is the genuinely-authenticated public path, not a bypass.
 func (h *JobsHandler) authorize(r *http.Request) bool {
 	// Internal token path — workers calling the SDK.
 	got := r.Header.Get("X-Orva-Internal-Token")
 	if h.InternalToken != "" && subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) == 1 {
 		return true
 	}
-	// Public path — middleware has already enforced session/API-key when
-	// the request reached us; presence of the X-Orva-User-* OR
-	// X-Orva-Authed marker would tell us. The current middleware
-	// short-circuits unauth'd /api/v1/* requests before they reach
-	// handlers, so reaching here means "authorized via session or key".
+	// Public path — authMiddleware already enforced session/API-key auth
+	// before forwarding this request.
 	return true
 }
 

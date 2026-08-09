@@ -201,6 +201,21 @@ func (db *Database) DeleteSession(token string) error {
 	return err
 }
 
+// DeleteUserSessionsExcept revokes every session for the user except the one
+// identified by keepToken (pass "" to revoke all). Used after a password change
+// so a compromised credential's stolen sessions are invalidated immediately
+// while the operator performing the change stays logged in. Returns the number
+// of sessions revoked.
+func (db *Database) DeleteUserSessionsExcept(userID int64, keepToken string) (int64, error) {
+	res, err := db.write.Exec(
+		"DELETE FROM sessions WHERE user_id = ? AND token != ?", userID, keepToken)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // ErrWrongPassword is returned by UpdateUserPassword when the supplied
 // current password does not match the stored hash.
 var ErrWrongPassword = errors.New("wrong password")

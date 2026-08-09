@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -27,7 +28,7 @@ const sessionCacheTTL = 30 * time.Second
 // owned by the Router and shared so the keys handler can evict an entry the
 // instant a key is deleted — otherwise a revoked key would keep authenticating
 // until process restart (it is only otherwise dropped on expiry).
-func authMiddleware(db *database.Database, keyCache *sync.Map, next http.Handler) http.Handler {
+func authMiddleware(db *database.Database, keyCache *sync.Map, internalToken string, next http.Handler) http.Handler {
 	var sessionCache sync.Map // token -> sessionCacheEntry
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,10 +63,19 @@ func authMiddleware(db *database.Database, keyCache *sync.Map, next http.Handler
 			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 			return
 		}
-		// Worker SDK requests bearing a non-empty internal token bypass
-		// the public auth gate; the handler validates the token. This
-		// lets jobs.enqueue() / dashboard share the /api/v1/jobs route.
-		if r.Header.Get("X-Orva-Internal-Token") != "" {
+		// Worker SDK requests bearing the CORRECT internal token bypass the
+		// public auth gate; this lets jobs.enqueue() from inside a sandbox
+		// share the /api/v1/jobs route with the dashboard. The token MUST
+		// match the per-process secret — a merely-present header is not
+		// enough (a non-empty check would let any value skip authentication
+		// entirely, and the downstream handler trusts this middleware to
+		// have authenticated). On mismatch we do NOT short-circuit: fall
+		// through to normal session/API-key auth, so a stray header on a
+		// real request still authenticates and a bogus-token-only request
+		// gets a 401 like any other unauthenticated caller.
+		if got := r.Header.Get("X-Orva-Internal-Token"); got != "" &&
+			internalToken != "" &&
+			subtle.ConstantTimeCompare([]byte(got), []byte(internalToken)) == 1 {
 			caller := r.Header.Get("X-Orva-Caller-Function")
 			actor := &Actor{Source: "sdk", Type: "internal_token", ID: caller, Label: caller}
 			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))

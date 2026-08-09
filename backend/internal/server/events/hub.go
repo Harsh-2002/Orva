@@ -43,6 +43,7 @@ const (
 type Hub struct {
 	mu          sync.RWMutex
 	subscribers map[*subscription]struct{}
+	closed      bool
 }
 
 type subscription struct {
@@ -58,15 +59,25 @@ func NewHub() *Hub {
 // if the producer outpaces the consumer, the hub drops events for that
 // subscriber on Publish (see comment there). Caller MUST call unsubscribe
 // when done — typically with `defer`.
+//
+// If the hub is already closed (server shutting down) the returned
+// subscription's channel is closed immediately, so the handler's read loop
+// exits at once rather than hanging a fresh SSE connection through shutdown.
 func (h *Hub) subscribe() *subscription {
 	s := &subscription{ch: make(chan Event, 32)}
 	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		close(s.ch)
+		return s
+	}
 	h.subscribers[s] = struct{}{}
 	h.mu.Unlock()
 	return s
 }
 
-// unsubscribe removes a client and closes its channel. Safe to call twice.
+// unsubscribe removes a client and closes its channel. Safe to call twice,
+// and safe after Close (the channel is already closed there).
 func (h *Hub) unsubscribe(s *subscription) {
 	h.mu.Lock()
 	if _, ok := h.subscribers[s]; ok {
@@ -74,6 +85,25 @@ func (h *Hub) unsubscribe(s *subscription) {
 		close(s.ch)
 	}
 	h.mu.Unlock()
+}
+
+// Close shuts the hub down: it marks the hub closed and closes every current
+// subscriber's channel, which unblocks each SSE handler loop (they exit on the
+// closed channel) so an in-flight `orva logs -f` or open dashboard tab does not
+// hold http.Server.Shutdown open until its 30s deadline. Idempotent. After
+// Close, Publish is a no-op and new subscribe() calls return an already-closed
+// channel.
+func (h *Hub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	h.closed = true
+	for s := range h.subscribers {
+		delete(h.subscribers, s)
+		close(s.ch)
+	}
 }
 
 // Publish fans out an event to every current subscriber. Slow subscribers
