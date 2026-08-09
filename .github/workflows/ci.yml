@@ -227,6 +227,12 @@ jobs:
               -X github.com/Harsh-2002/Orva/backend/internal/version.BuildTime=${BUILD_TIME}" \
             -o build/orva ./backend/cmd/orva
           ./build/orva --help >/dev/null
+
+      - name: govulncheck (Go vulnerability scan)
+        # The Go analog of the ui job's `npm audit`: fail the build on a
+        # call-reachable Go/stdlib vulnerability. Pinned like actionlint above —
+        # never @latest. Default source mode keeps it low-noise (reachable only).
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
           ./build/orva --version | grep -F "ci-${GITHUB_SHA::7}"
 
   ui:

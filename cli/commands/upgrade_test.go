@@ -9,10 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/creativeprojects/go-selfupdate"
 )
 
 func sha256Hex(b []byte) string {
@@ -35,6 +34,41 @@ func TestUpgradeAction(t *testing.T) {
 		if got := upgradeAction(c.versionNewer, c.rebuilt, c.force); got != c.want {
 			t.Errorf("upgradeAction(newer=%v,rebuilt=%v,force=%v) = %v, want %v",
 				c.versionNewer, c.rebuilt, c.force, got, c.want)
+		}
+	}
+}
+
+// TestLessOrEqual guards the version-compare semantics AND the dev-build
+// no-panic contract (the old code panicked on semver.MustParse("dev")).
+func TestLessOrEqual(t *testing.T) {
+	cases := []struct {
+		latestTag, current string
+		want               bool // latest <= current (i.e. NOT strictly newer)
+	}{
+		{"v2026.08.05", "2026.08.05", true},  // equal
+		{"v2026.08.06", "2026.08.05", false}, // latest newer
+		{"v2026.08.04", "2026.08.05", true},  // latest older
+		{"v2026.08.05", "dev", false},        // dev current -> latest is "newer", offer upgrade (no panic)
+		{"nonsense", "2026.08.05", true},      // unparseable latest -> not newer
+	}
+	for _, c := range cases {
+		if got := lessOrEqual(c.latestTag, c.current); got != c.want {
+			t.Errorf("lessOrEqual(%q,%q) = %v, want %v", c.latestTag, c.current, got, c.want)
+		}
+	}
+}
+
+// TestUpgradeAssetName pins the exact os-arch asset name (incl. the Windows
+// .exe suffix) so a wrong-OS asset can never be selected.
+func TestUpgradeAssetName(t *testing.T) {
+	cases := []struct{ goos, goarch, want string }{
+		{"linux", "amd64", "orva-cli-linux-amd64"},
+		{"darwin", "arm64", "orva-cli-darwin-arm64"},
+		{"windows", "amd64", "orva-cli-windows-amd64.exe"},
+	}
+	for _, c := range cases {
+		if got := upgradeAssetName(c.goos, c.goarch); got != c.want {
+			t.Errorf("upgradeAssetName(%q,%q) = %q, want %q", c.goos, c.goarch, got, c.want)
 		}
 	}
 }
@@ -122,7 +156,7 @@ func TestRemoteBuildDiffers(t *testing.T) {
 	t.Run("equal -> not stale, known", func(t *testing.T) {
 		srv := serve(localSHA + "  " + asset + "\n")
 		defer srv.Close()
-		rel := &selfupdate.Release{ValidationAssetURL: srv.URL, AssetName: asset}
+		rel := &releaseInfo{ChecksumsURL: srv.URL, AssetName: asset}
 		differs, known := remoteBuildDiffers(context.Background(), rel, exe)
 		if !known || differs {
 			t.Errorf("equal sha: differs=%v known=%v, want differs=false known=true", differs, known)
@@ -132,7 +166,7 @@ func TestRemoteBuildDiffers(t *testing.T) {
 	t.Run("different -> stale, known", func(t *testing.T) {
 		srv := serve("0000000000000000000000000000000000000000000000000000000000000000  " + asset + "\n")
 		defer srv.Close()
-		rel := &selfupdate.Release{ValidationAssetURL: srv.URL, AssetName: asset}
+		rel := &releaseInfo{ChecksumsURL: srv.URL, AssetName: asset}
 		differs, known := remoteBuildDiffers(context.Background(), rel, exe)
 		if !known || !differs {
 			t.Errorf("different sha: differs=%v known=%v, want differs=true known=true", differs, known)
@@ -142,18 +176,179 @@ func TestRemoteBuildDiffers(t *testing.T) {
 	t.Run("asset absent -> unknown", func(t *testing.T) {
 		srv := serve(localSHA + "  some-other-asset\n")
 		defer srv.Close()
-		rel := &selfupdate.Release{ValidationAssetURL: srv.URL, AssetName: asset}
+		rel := &releaseInfo{ChecksumsURL: srv.URL, AssetName: asset}
 		_, known := remoteBuildDiffers(context.Background(), rel, exe)
 		if known {
 			t.Error("absent asset: want known=false")
 		}
 	})
 
-	t.Run("no validation url -> unknown", func(t *testing.T) {
-		rel := &selfupdate.Release{AssetName: asset}
+	t.Run("no checksums url -> unknown", func(t *testing.T) {
+		rel := &releaseInfo{AssetName: asset}
 		_, known := remoteBuildDiffers(context.Background(), rel, exe)
 		if known {
-			t.Error("no validation url: want known=false")
+			t.Error("no checksums url: want known=false")
 		}
 	})
+}
+
+// TestDetectLatest resolves the platform asset from a canned GitHub
+// releases/latest payload, and confirms wrong-OS assets are ignored.
+func TestDetectLatest(t *testing.T) {
+	wantAsset := upgradeAssetName(runtime.GOOS, runtime.GOARCH)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/orva/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		// A full matrix plus checksums.txt; only the running platform's asset
+		// should be selected.
+		fmt.Fprintf(w, `{
+			"tag_name": "v2026.08.09",
+			"assets": [
+				{"name": "orva-cli-linux-amd64", "browser_download_url": "http://dl/linux-amd64"},
+				{"name": "orva-cli-linux-arm64", "browser_download_url": "http://dl/linux-arm64"},
+				{"name": "orva-cli-darwin-amd64", "browser_download_url": "http://dl/darwin-amd64"},
+				{"name": "orva-cli-darwin-arm64", "browser_download_url": "http://dl/darwin-arm64"},
+				{"name": "orva-cli-windows-amd64.exe", "browser_download_url": "http://dl/win-amd64"},
+				{"name": "orva-cli-windows-arm64.exe", "browser_download_url": "http://dl/win-arm64"},
+				{"name": %q, "browser_download_url": "http://dl/THIS"},
+				{"name": "checksums.txt", "browser_download_url": "http://dl/checksums"}
+			]
+		}`, wantAsset)
+	})
+	mux.HandleFunc("/repos/acme/empty/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		// No asset for any real platform.
+		fmt.Fprint(w, `{"tag_name":"v1.0.0","assets":[{"name":"README.md","browser_download_url":"http://dl/readme"}]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	old := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = old })
+
+	rel, found, err := detectLatest(context.Background(), "acme/orva")
+	if err != nil {
+		t.Fatalf("detectLatest: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if rel.Tag != "v2026.08.09" {
+		t.Errorf("tag = %q, want v2026.08.09", rel.Tag)
+	}
+	if rel.AssetName != wantAsset {
+		t.Errorf("asset = %q, want %q", rel.AssetName, wantAsset)
+	}
+	if rel.AssetURL != "http://dl/THIS" {
+		t.Errorf("asset url = %q, want the exact-name match", rel.AssetURL)
+	}
+	if rel.ChecksumsURL != "http://dl/checksums" {
+		t.Errorf("checksums url = %q, want http://dl/checksums", rel.ChecksumsURL)
+	}
+
+	// A release with no asset for this platform → found=false, no error.
+	if _, found, err := detectLatest(context.Background(), "acme/empty"); err != nil || found {
+		t.Errorf("empty release: found=%v err=%v, want found=false err=nil", found, err)
+	}
+}
+
+// TestDownloadVerifyApply is the core security test: verify-before-swap, a
+// tampered checksum leaves the target intact, and a symlinked target updates
+// the real file.
+func TestDownloadVerifyApply(t *testing.T) {
+	const asset = "orva-cli-test"
+	newBytes := []byte("the NEW binary bytes v2\n")
+	goodSum := sha256Hex(newBytes)
+
+	// One server serves the asset and a checksums.txt; the checksum body is
+	// swapped per subtest.
+	var checksumsBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/asset", func(w http.ResponseWriter, r *http.Request) { w.Write(newBytes) })
+	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, checksumsBody) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rel := &releaseInfo{AssetName: asset, AssetURL: srv.URL + "/asset", ChecksumsURL: srv.URL + "/checksums"}
+
+	t.Run("good checksum swaps the binary", func(t *testing.T) {
+		dir := t.TempDir()
+		exe := filepath.Join(dir, "orva")
+		if err := os.WriteFile(exe, []byte("OLD binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		checksumsBody = goodSum + "  " + asset + "\n"
+		if err := downloadVerifyApply(context.Background(), rel, exe); err != nil {
+			t.Fatalf("downloadVerifyApply: %v", err)
+		}
+		got, _ := os.ReadFile(exe)
+		if string(got) != string(newBytes) {
+			t.Errorf("target not swapped: got %q", got)
+		}
+		assertNoSwapLeftovers(t, dir)
+	})
+
+	t.Run("bad checksum leaves target intact", func(t *testing.T) {
+		dir := t.TempDir()
+		exe := filepath.Join(dir, "orva")
+		if err := os.WriteFile(exe, []byte("OLD binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		checksumsBody = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef00  " + asset + "\n"
+		if err := downloadVerifyApply(context.Background(), rel, exe); err == nil {
+			t.Fatal("expected a checksum-mismatch error")
+		}
+		got, _ := os.ReadFile(exe)
+		if string(got) != "OLD binary" {
+			t.Errorf("target must be untouched on checksum mismatch, got %q", got)
+		}
+		assertNoSwapLeftovers(t, dir)
+	})
+
+	t.Run("resolved symlink updates the real file, leaves the link", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink semantics differ on Windows")
+		}
+		dir := t.TempDir()
+		real := filepath.Join(dir, "orva-real")
+		link := filepath.Join(dir, "orva")
+		if err := os.WriteFile(real, []byte("OLD binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatal(err)
+		}
+		// runUpgrade resolves the symlink via executablePath() BEFORE the swap
+		// (update.Apply does not resolve symlinks — it would overwrite the link
+		// itself). Mirror that: resolve, then apply on the real target.
+		resolved, err := filepath.EvalSymlinks(link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved != real {
+			t.Fatalf("EvalSymlinks(link) = %q, want %q", resolved, real)
+		}
+		checksumsBody = goodSum + "  " + asset + "\n"
+		if err := downloadVerifyApply(context.Background(), rel, resolved); err != nil {
+			t.Fatalf("downloadVerifyApply on resolved target: %v", err)
+		}
+		got, _ := os.ReadFile(real)
+		if string(got) != string(newBytes) {
+			t.Errorf("real target not updated: got %q", got)
+		}
+		if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("symlink should still be a symlink after upgrade (err=%v)", err)
+		}
+	})
+}
+
+// assertNoSwapLeftovers fails if update.Apply left a temp/.old/.new artifact.
+func assertNoSwapLeftovers(t *testing.T, dir string) {
+	t.Helper()
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		n := e.Name()
+		if strings.HasSuffix(n, ".new") || strings.HasSuffix(n, ".old") || strings.HasPrefix(n, ".orva") {
+			t.Errorf("unexpected swap leftover: %s", n)
+		}
+	}
 }
