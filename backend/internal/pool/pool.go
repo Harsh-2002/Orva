@@ -70,10 +70,24 @@ type SandboxTemplate struct {
 	InternalToken string
 
 	// APIBaseURL is the base URL the adapter uses when making outbound
-	// calls to Orva's own internal endpoints (KV / F2F / jobs). Worker
-	// sandboxes can always reach localhost on the host port via the
-	// loopback network, even with network_mode=none.
+	// calls to Orva's own internal endpoints (KV / F2F / jobs).
+	//
+	// This is deliberately NOT a loopback address: from inside the jail
+	// 127.0.0.1 is the sandbox's own loopback, so it cannot reach orvad.
+	// detectInternalAPIBase probes for a routable address instead, which is
+	// normally RFC1918 — hence the control-plane carve-out the egress policy
+	// compiles ahead of the operator's block rules. Functions with
+	// network_mode=none have no network stack at all and cannot use the SDK.
 	APIBaseURL string
+
+	// EgressPolicy is consulted at every network_mode=egress spawn and returns
+	// the compiled NSTUN policy to run the worker under. Returning an error
+	// aborts the spawn: NSTUN allows anything no rule matches, so a worker
+	// started without a policy would be entirely unfiltered.
+	//
+	// nil means no policy layer is wired (unit tests), in which case egress
+	// spawns proceed without a policy exactly as they did before this existed.
+	EgressPolicy func() (path, gen string, err error)
 
 	// Metrics, when non-nil, receives sandbox spawn-duration samples on
 	// every successful Spawn so the /metrics histogram has data to draw.
@@ -166,6 +180,43 @@ type PoolStats struct {
 // pool manager (typical wiring order in server.New).
 func (m *Manager) SetSecretsLookup(fn func(fnID string) map[string]string) {
 	m.tmpl.SecretsLookup = fn
+}
+
+// SetEgressPolicy wires the compiled-policy accessor into the pool template
+// after construction, mirroring SetSecretsLookup: the firewall manager is
+// built later than the pool manager in server.New.
+func (m *Manager) SetEgressPolicy(fn func() (string, string, error)) {
+	m.tmpl.EgressPolicy = fn
+}
+
+// RetireEgressPools retires every network_mode=egress pool generation, leaving
+// network_mode=none pools untouched. Called when a new egress policy
+// generation is published.
+//
+// NSTUN loads its rules once at worker start, so an already-warm worker keeps
+// the policy it was spawned with. That makes a policy change exactly the class
+// of change retirePool exists for — the same one a network_mode flip uses —
+// so this reuses that single primitive rather than adding a second
+// worker-lifecycle mechanism with its own lock ordering.
+func (m *Manager) RetireEgressPools() int {
+	var fnIDs []string
+	m.pools.Range(func(k, _ any) bool {
+		id, ok := k.(string)
+		if !ok {
+			return true
+		}
+		fn, err := m.reg.Get(id)
+		if err != nil || fn == nil || fn.NetworkMode != "egress" {
+			return true // "" and "none" are unaffected by egress policy
+		}
+		fnIDs = append(fnIDs, id)
+		return true
+	})
+	// Retire outside Range: retirePool takes poolMu and mutates the same map.
+	for _, id := range fnIDs {
+		m.retirePool(id)
+	}
+	return len(fnIDs)
 }
 
 // HostMemStats returns the (total, available, reserved) bytes for the
@@ -683,12 +734,30 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				env["ORVA_INTERNAL_TOKEN"] = m.tmpl.InternalToken
 				env["ORVA_API_BASE"] = m.tmpl.APIBaseURL
 			}
+			// Resolve the egress policy for this spawn. Read off m (not the
+			// local tmpl copy) so a late SetEgressPolicy is visible to pools
+			// that already exist — same reason as SecretsLookup above.
+			//
+			// The path is a concrete generation file, never a moving symlink,
+			// so a policy change mid-spawn cannot alter what this worker runs
+			// under. Pools are retired separately to roll workers forward.
+			var policyPath, policyGen string
+			if fn.NetworkMode == "egress" {
+				if getPolicy := m.tmpl.EgressPolicy; getPolicy != nil {
+					p, g, perr := getPolicy()
+					if perr != nil {
+						return nil, perr // fail closed: no policy, no worker
+					}
+					policyPath, policyGen = p, g
+				}
+			}
+
 			start := time.Now()
 			w, err := sandbox.Spawn(ctx, sandbox.ExecConfig{
-				Language:      sandbox.Language(fn.Runtime),
-				CodeDir:       codeDir,
-				MemoryMB:      int(fn.MemoryMB),
-				MaxCPUs:       fn.CPUs,
+				Language: sandbox.Language(fn.Runtime),
+				CodeDir:  codeDir,
+				MemoryMB: int(fn.MemoryMB),
+				MaxCPUs:  fn.CPUs,
 				// Without this the warm-pool spawn passed MaxPids=0 →
 				// `--cgroup_pids_max 0` (fork-bomb cap disabled). Fall back to
 				// 32 (the historical sandbox.Execute default) if unset.
@@ -701,9 +770,12 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				// /etc/resolv.conf and /etc/hosts when present.
 				ResolvConfPath: dataDir + "/firewall/resolv.conf",
 				HostsPath:      dataDir + "/firewall/hosts",
-				NsjailBin:      tmpl.NsjailBin,
-				RootfsDir:      tmpl.RootfsDir,
-				Timeout:        time.Duration(fn.TimeoutMS) * time.Millisecond,
+				// Compiled NSTUN egress policy (empty for network_mode=none).
+				EgressPolicyPath: policyPath,
+				EgressPolicyGen:  policyGen,
+				NsjailBin:        tmpl.NsjailBin,
+				RootfsDir:        tmpl.RootfsDir,
+				Timeout:          time.Duration(fn.TimeoutMS) * time.Millisecond,
 			})
 			if err == nil && m.tmpl.Metrics != nil {
 				m.tmpl.Metrics.RecordSpawnDuration(time.Since(start))

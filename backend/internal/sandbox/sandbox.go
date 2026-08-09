@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -54,8 +55,9 @@ type ExecConfig struct {
 	// NetworkMode controls the sandbox's network access. "" or "none"
 	// keeps the function in an isolated net namespace with only loopback
 	// (the safe default — blocks egress and exfil). "egress" adds nsjail's
-	// --use_pasta flag, which gives the sandbox a userspace TCP/UDP stack
-	// that NATs out via the host without exposing host interfaces.
+	// --user_net flag, which gives the sandbox a userspace TCP/UDP stack
+	// (the bundled "nstun" backend) that NATs out via the host without
+	// exposing host interfaces, filtered by the compiled egress policy.
 	NetworkMode string
 
 	// ResolvConfPath, when non-empty AND NetworkMode=="egress", is the
@@ -71,10 +73,29 @@ type ExecConfig struct {
 	// system_config.dns_records.
 	HostsPath string
 
+	// EgressPolicyPath is the nsjail --config file holding the compiled NSTUN
+	// user_net rules. REQUIRED when NetworkMode=="egress": an empty path is a
+	// spawn error, never a silent fall-through.
+	//
+	// This deliberately does NOT follow the skip-if-missing posture used for
+	// ResolvConfPath/HostsPath above. Missing DNS config degrades a sandbox;
+	// missing egress policy would run it completely unfiltered, because NSTUN
+	// allows anything no rule matches.
+	EgressPolicyPath string
+
+	// EgressPolicyGen identifies the policy generation, for logs and metrics.
+	EgressPolicyGen string
+
 	// Paths (populated from config at startup).
 	NsjailBin string
 	RootfsDir string // e.g. ~/.orva/rootfs
 }
+
+// ErrEgressPolicyMissing means an egress sandbox was asked to start without a
+// compiled policy. This is fail-closed by design: NSTUN allows any destination
+// no rule matches, so spawning without a policy would run the function with no
+// filtering at all — strictly worse than not running it.
+var ErrEgressPolicyMissing = errors.New("egress policy config missing: refusing to start an unfiltered sandbox")
 
 // ExecResult holds the outcome of a sandboxed execution.
 type ExecResult struct {
@@ -97,7 +118,10 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 		return &ExecResult{Error: err, Duration: time.Since(start)}
 	}
 
-	args := buildArgs(cfg, rootfs, entrypoint)
+	args, err := buildArgs(cfg, rootfs, entrypoint)
+	if err != nil {
+		return &ExecResult{Error: err, Duration: time.Since(start)}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout+5*time.Second)
 	defer cancel()
@@ -187,7 +211,7 @@ func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
 	return rootfs, entrypoint, nil
 }
 
-func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
+func buildArgs(cfg ExecConfig, rootfs, entrypoint string) ([]string, error) {
 	// Prefer user namespaces for nsjail's mount/chroot setup. On hosts that
 	// restrict unprivileged user namespaces, the bare-metal installer grants
 	// the nsjail executable the narrow capability set it needs and exports
@@ -196,14 +220,38 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
 	// NOTE: --time_limit intentionally dropped; Go-side context.WithTimeout
 	// + Worker.Kill() handles timeouts with millisecond resolution and
 	// avoids the skew from nsjail's whole-second limit.
-	args := []string{
+	var args []string
+
+	// The compiled egress policy is loaded via --config, which MUST be the
+	// very first argument. nsjail's config loader does a CopyFrom onto the
+	// config message, and CopyFrom CLEARS the destination first — so every
+	// njc-backed flag parsed before it is silently destroyed, including --env
+	// (i.e. every secret and ORVA_API_BASE), --seccomp_string, the --cgroup_*
+	// and --rlimit_* flags, and all bind mounts. Flags parsed AFTER it survive
+	// and take precedence, which is what we want. Verified empirically: an
+	// --env before --config arrives empty in the jail.
+	//
+	// There is no CLI flag for NSTUN rules, so a config file is the only way
+	// to express policy at all.
+	if cfg.NetworkMode == "egress" {
+		if cfg.EgressPolicyPath == "" {
+			return nil, ErrEgressPolicyMissing
+		}
+		args = append(args, "--config", cfg.EgressPolicyPath)
+	}
+
+	args = append(args,
 		"-Mo",
 		"--chroot", rootfs,
-		"-R", cfg.CodeDir + ":/code",
+		"-R", cfg.CodeDir+":/code",
 		"-T", "/tmp",
 		"--rlimit_as", "max",
-		"-Q",
-	}
+		// -q (WARNING), not -Q (FATAL): nsjail gates rule-compilation errors
+		// behind ERROR, so -Q made every malformed-policy diagnostic invisible.
+		// NSTUN is default-allow, so a silently dropped rule is a security
+		// failure we must be able to see.
+		"-q",
+	)
 	if os.Getenv("ORVA_DISABLE_USERNS") == "1" {
 		args = append(args, "--disable_clone_newuser")
 	}
@@ -299,7 +347,7 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
 		args = append(args, "/opt/orva/adapter.js")
 	}
 
-	return args
+	return args, nil
 }
 
 var (

@@ -40,28 +40,107 @@ func TestBuildArgs_NoEgressByDefault(t *testing.T) {
 				CodeDir:     "/tmp/code",
 				NetworkMode: tc.mode,
 			}
-			args := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+			args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+			if err != nil {
+				t.Fatalf("buildArgs: %v", err)
+			}
 			if containsArg(args, "--user_net") {
 				t.Fatalf("expected no --user_net with NetworkMode=%q, got: %s",
+					tc.mode, strings.Join(args, " "))
+			}
+			// A non-egress sandbox must never be handed an egress policy.
+			if containsArg(args, "--config") {
+				t.Fatalf("expected no --config with NetworkMode=%q, got: %s",
 					tc.mode, strings.Join(args, " "))
 			}
 		})
 	}
 }
 
-// TestBuildArgs_EgressAddsUsePasta asserts that NetworkMode == "egress"
+// TestBuildArgs_EgressAddsUserNet asserts that NetworkMode == "egress"
 // adds the --user_net flag, which lights up nsjail's userspace TCP/UDP
-// stack and lets the sandbox reach external APIs.
-func TestBuildArgs_EgressAddsUsePasta(t *testing.T) {
+// stack (the nstun backend) and lets the sandbox reach external APIs.
+func TestBuildArgs_EgressAddsUserNet(t *testing.T) {
+	cfg := ExecConfig{
+		Language:         Node,
+		CodeDir:          "/tmp/code",
+		NetworkMode:      "egress",
+		EgressPolicyPath: "/var/lib/orva/firewall/policy/egress-abc.cfg",
+	}
+	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	if !containsArg(args, "--user_net") {
+		t.Fatalf("expected --user_net in args for egress mode, got: %s",
+			strings.Join(args, " "))
+	}
+}
+
+// TestBuildArgs_EgressWithoutPolicyPathIsAnError is the fail-closed guard.
+// NSTUN allows every destination no rule matches, so starting an egress
+// sandbox with no policy would run the function completely unfiltered. That
+// must be an error, NOT the skip-if-missing behaviour used for DNS files.
+func TestBuildArgs_EgressWithoutPolicyPathIsAnError(t *testing.T) {
 	cfg := ExecConfig{
 		Language:    Node,
 		CodeDir:     "/tmp/code",
 		NetworkMode: "egress",
 	}
-	args := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
-	if !containsArg(args, "--user_net") {
-		t.Fatalf("expected --user_net in args for egress mode, got: %s",
-			strings.Join(args, " "))
+	if _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js"); !errors.Is(err, ErrEgressPolicyMissing) {
+		t.Fatalf("want ErrEgressPolicyMissing, got %v", err)
+	}
+}
+
+// TestBuildArgs_ConfigFlagIsFirst pins argv ordering, which is load-bearing
+// rather than cosmetic: nsjail's config loader CopyFroms onto the config
+// message and clears everything already set, so any flag before --config is
+// silently discarded — including --env, i.e. every secret and ORVA_API_BASE.
+func TestBuildArgs_ConfigFlagIsFirst(t *testing.T) {
+	cfg := ExecConfig{
+		Language:         Node,
+		CodeDir:          "/tmp/code",
+		NetworkMode:      "egress",
+		EgressPolicyPath: "/var/lib/orva/firewall/policy/egress-abc.cfg",
+		Env:              map[string]string{"SECRET": "value"},
+		SeccompPolicy:    "POLICY x { ALLOW { read } }",
+	}
+	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	if len(args) < 2 || args[0] != "--config" || args[1] != cfg.EgressPolicyPath {
+		t.Fatalf("--config must be argv[0..1], got: %s", strings.Join(args, " "))
+	}
+	// Everything that would be wiped by a late --config must come after it.
+	for _, flag := range []string{"--env", "--seccomp_string", "-R", "--chroot"} {
+		idx := -1
+		for i, a := range args {
+			if a == flag {
+				idx = i
+				break
+			}
+		}
+		if idx == 0 {
+			t.Fatalf("%s must not precede --config", flag)
+		}
+	}
+}
+
+// TestBuildArgs_UsesWarningLogLevel guards the observability fix: nsjail gates
+// rule-compilation errors behind ERROR, and -Q (FATAL) suppressed them
+// entirely, making a silently-dropped policy rule invisible.
+func TestBuildArgs_UsesWarningLogLevel(t *testing.T) {
+	cfg := ExecConfig{Language: Python, CodeDir: "/tmp/code"}
+	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+	if containsArg(args, "-Q") {
+		t.Fatalf("-Q hides nsjail rule-parse errors; want -q. got: %s", strings.Join(args, " "))
+	}
+	if !containsArg(args, "-q") {
+		t.Fatalf("expected -q in args, got: %s", strings.Join(args, " "))
 	}
 }
 
@@ -72,7 +151,10 @@ func TestBuildArgs_AlwaysHasOnceMode(t *testing.T) {
 		Language: Python,
 		CodeDir:  "/tmp/code",
 	}
-	args := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
 	if !containsArg(args, "-Mo") {
 		t.Fatalf("expected -Mo in args, got: %s", strings.Join(args, " "))
 	}

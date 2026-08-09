@@ -212,11 +212,47 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// path for the dashboard.
 	go runMetricsPublisher(context.Background(), hub, db, met, limiter, poolMgr, buildQueue, reg, startTime)
 
-	// Egress firewall manager. Started immediately so the initial nft
-	// rules are in place before any function can run. If nft isn't
-	// available (no NET_ADMIN, BSD host, etc.) the manager logs a
-	// warning and the API surfaces it via /firewall/rules → status.
-	fw := firewall.NewManager(db, cfg.Data.Dir)
+	// Sandbox egress policy manager. Started before any function can run so
+	// the first egress worker already has a compiled policy.
+	//
+	// The control-plane carve-out is derived from apiBase: sandboxes reach
+	// orvad on a NON-loopback address, which is normally RFC1918, so without
+	// an explicit allow ahead of the operator's block rules the internal SDK
+	// (kv, jobs, function-to-function) would break the moment anyone enabled
+	// the shipped private-network suggestions.
+	//
+	// A failure here is not fatal: the policy simply never compiles, egress
+	// functions refuse to start (fail-closed — NSTUN defaults to allow, so
+	// running them unfiltered would be worse), and network_mode=none keeps
+	// working. The error surfaces on /firewall/status.
+	controlPlane, cpErr := firewall.ParseControlPlane(apiBase, cfg.Server.Port)
+	if cpErr != nil {
+		slog.Error("egress policy: control-plane address unresolved; egress functions will refuse to start",
+			"err", cpErr, "api_base", apiBase)
+	}
+	ipv6Egress := firewall.HostHasGlobalIPv6()
+	slog.Info("egress policy configured",
+		"control_plane", controlPlane.Addrs, "port", controlPlane.Port,
+		"ipv6_egress", ipv6Egress)
+
+	fw := firewall.NewManager(db, cfg.Data.Dir, controlPlane, ipv6Egress)
+
+	// Every egress spawn resolves the current policy generation. Wired before
+	// Start so the initial compile cannot publish into an unwired manager.
+	poolMgr.SetEgressPolicy(fw.EgressPolicy)
+
+	// NSTUN reads its rules once at worker start, so a policy change cannot
+	// affect an already-warm worker. Retiring the egress pools is what rolls
+	// them forward; network_mode=none pools are untouched.
+	fw.SetOnPolicyChange(func(gen string) {
+		retired := poolMgr.RetireEgressPools()
+		slog.Info("egress policy applied", "generation", gen, "retired_pools", retired)
+		hub.Publish("firewall.policy_applied", map[string]any{
+			"generation":    gen,
+			"retired_pools": retired,
+		})
+	})
+
 	fw.Start(context.Background())
 
 	deps := RouterDeps{
