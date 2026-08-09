@@ -117,6 +117,39 @@ jobs:
               - 'test/release/**'
               - '.github/workflows/ci.yml'
 
+  # ── Agent-doc mirror guard ─────────────────────────────────────────────
+  # Every directory with a CLAUDE.md must also have an AGENTS.md symlink -> it,
+  # so Codex/opencode (which discover AGENTS.md) get the same per-directory
+  # context Claude Code gets from CLAUDE.md. Runs unconditionally (NOT behind
+  # the `code` path filter) because adding a CLAUDE.md without its AGENTS.md is
+  # a docs-only change that would otherwise skip the lint job. Also catches a
+  # symlink that got committed as literal text (e.g. a Windows checkout).
+  agent-docs:
+    name: agent-doc mirror (AGENTS.md ↔ CLAUDE.md)
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: every CLAUDE.md dir has an AGENTS.md symlink -> CLAUDE.md
+        run: |
+          fail=0
+          for f in $(git ls-files '*CLAUDE.md'); do
+            d=$(dirname "$f")
+            case "$d" in .) a="AGENTS.md" ;; *) a="$d/AGENTS.md" ;; esac
+            mode=$(git ls-files -s "$a" | awk '{print $1}')
+            if [ "$mode" != "120000" ]; then
+              echo "::error file=$a::missing or not a symlink (git mode '${mode:-none}', want 120000). Run: (cd $d && ln -s CLAUDE.md AGENTS.md)"
+              fail=1; continue
+            fi
+            tgt=$(git show ":$a")
+            if [ "$tgt" != "CLAUDE.md" ]; then
+              echo "::error file=$a::points at '$tgt', want 'CLAUDE.md' (single-hop sibling symlink)"
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ] && echo "OK: every CLAUDE.md dir mirrors an AGENTS.md -> CLAUDE.md symlink"
+          exit $fail
+
   # ── Fast lint/build/unit gate ──────────────────────────────────────────
   lint:
     name: workflow + shell lint

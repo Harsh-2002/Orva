@@ -3,6 +3,11 @@
 Orva is in active development. PRs welcome — for bug fixes especially,
 and for the items called out as "not yet shipped" in the README.
 
+> The canonical build/test commands, CI gates, ports, and must-not-break
+> invariants live in [`../CONTRACT.md`](../CONTRACT.md) (the repo's agent/operator
+> contract). This guide is the human-onboarding companion; where they overlap,
+> `CONTRACT.md` is the source of truth.
+
 ## Dev setup
 
 ```bash
@@ -167,67 +172,15 @@ The same harness drives the installer jobs in `.github/workflows/ci.yml`.
 - **Vue**: composition API + `<script setup>`. Pinia for store state.
   No vuex. No options API in new code.
 
-## CI
+## CI & releasing
 
-Two stages: **verify on push/PR, ship on tag.** All testing lives in the
-consolidated `CI` workflow; the release workflow does no testing.
-
-Verification (on push to `main` + every PR):
-
-- **`ci.yml`** — a single workflow covering both the fast gate (shellcheck,
-  go vet/test/build, frontend build, docker smoke build — path-filtered
-  internally, so docs-only changes skip only these jobs) and the full E2E
-  suites: programmatic source API/sandbox tests plus CLI build/install and
-  bare-metal installer matrices on every `main` push (path-selected on PRs).
-  Its `artifacts` suite validates every published CLI/server asset on Linux,
-  macOS, Windows, amd64, and arm64.
-
-Ship (on `v*` tag push):
-
-- **`release.yml`** — a fast **`gate`** job verifies the tagged commit's `CI`
-  already concluded `success` (a status lookup, not a re-run), then builds
-  the multi-arch Docker image, all CLI binaries, rootfs tarballs, and checksums,
-  and publishes the GitHub Release + `ghcr.io/harsh-2002/orva`. **No tests run in
-  the release** — it trusts the already-green checks on that exact SHA. A
-  `workflow_dispatch` with `force=true` bypasses the gate only for an emergency
-  rebuild and still checks out the exact stable date tag supplied to the workflow.
-Those two are the only workflows — `ci.yml` tests, `release.yml` ships. Nothing
-prunes old releases, tags, or untagged GHCR manifests automatically; delete them
-by hand from the Releases page / GHCR package settings if they ever pile up.
-
-## Releasing
-
-Releases accumulate, and `install.sh` / `install-cli.sh` always resolve GitHub's
-"latest" (the newest published release). If you do delete an old release by hand,
-publish the new one *first* — removing the current release before its replacement
-is live opens a window where "latest" resolves to 404. The flow:
-
-1. **Merge to `main`** and wait for **`CI`** to go green on the merge
-   commit. This is the verification — the release will not re-run it.
-2. **Tag today's date (zero-padded) and push:**
-
-   ```bash
-   git tag -a v$(date -u +%Y.%m.%d) -m "Orva v$(date -u +%Y.%m.%d)"
-   git push origin v$(date -u +%Y.%m.%d)
-   ```
-
-   The release's `gate` confirms `CI` already passed for that commit
-   (seconds, not a test run; it polls briefly if you tag right after the merge)
-   and refuses to build if it is missing or red. On pass it builds + publishes
-   everything; the arm64 rootfs builds are the slowest leg.
-3. **On release publish**, `release.yml` automatically dispatches the consolidated
-   released-artifact suite (a `GITHUB_TOKEN`-created release does not auto-fire
-   downstream workflows, so the release job performs the dispatch explicitly).
-   Use this command only to retry that suite manually:
-
-   ```bash
-   gh workflow run ci.yml -f suite=artifacts -f tag=vYYYY.MM.DD
-   ```
-
-4. That green `artifacts` run is the end of the pipeline — nothing runs after it.
-
-The full policy (gate internals, force bypass, build-time identity stamping) lives
-in the root `CLAUDE.md`.
+The CI/release model — two workflows (`ci.yml` verifies, `release.yml` ships),
+verify-on-push/PR + ship-on-`vYYYY.MM.DD`-tag, the `gate` job, the
+publish-before-delete "latest 404" rule, and build-time identity stamping — is the
+canonical operating contract and lives in one place: [`../CONTRACT.md`](../CONTRACT.md)
+(§6 Definition of Done, §7 CI/release model). It is intentionally **not** restated
+here so it can't drift. The deeper release-policy walkthrough (tag/gate/artifacts
+steps) is in the root [`CLAUDE.md`](../CLAUDE.md).
 
 ## Filing issues
 
