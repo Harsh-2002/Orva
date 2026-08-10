@@ -78,7 +78,22 @@ var validSample = map[string]string{
 // TestEverySupportedEnvVarIsRead guards the phantom-knob regression: a name
 // advertised in SupportedEnvVars (and therefore in docs/CONFIG.md) that
 // applyEnvOverrides never reads is a knob an operator can set with no effect.
-func TestEverySupportedEnvVarIsRead(t *testing.T) {
+// TestEverySupportedEnvVarIsAppliedByTheLoader checks that every advertised
+// variable is actually consumed by applyEnvOverrides — i.e. that a supported
+// name is not simply ignored.
+//
+// It does NOT prove the variable has a runtime effect, and it would NOT have
+// caught the three phantom knobs this package just deleted
+// (ORVA_DEFAULT_MEMORY_MB, ORVA_DEFAULT_TIMEOUT_MS, ORVA_LOG_RETENTION_DAYS).
+// Those were read by the loader and recorded in ActiveEnvVars exactly like a
+// working knob; what made them phantoms is that nothing OUTSIDE this package
+// ever read the struct field they set. That is a property of the whole
+// codebase, not of the loader, so no unit test here can assert it — the guard
+// is the rule stated at the top of docs/CONFIG.md ("every variable below has
+// an observable runtime effect") plus review of the consuming call site.
+//
+// Do not describe this test as a phantom-knob guard. It is not one.
+func TestEverySupportedEnvVarIsAppliedByTheLoader(t *testing.T) {
 	for _, name := range SupportedEnvVars {
 		t.Run(name, func(t *testing.T) {
 			sample, ok := validSample[name]
@@ -96,7 +111,7 @@ func TestEverySupportedEnvVarIsRead(t *testing.T) {
 					return
 				}
 			}
-			t.Errorf("%s=%q is declared supported but applyEnvOverrides never read it", name, sample)
+			t.Errorf("%s=%q is declared supported but applyEnvOverrides never read it (this checks parsing only, not runtime effect)", name, sample)
 		})
 	}
 }

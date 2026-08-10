@@ -75,7 +75,14 @@ func (db *Database) purgeOnce() {
 		return
 	}
 	if removed := before - after; removed > 0 {
-		slog.Info("execution retention: purged old history",
-			"removed", removed, "retention_days", days, "remaining", after)
+		// Warn, not Info: this is the only scheduled job that destroys
+		// operator-visible data, and the first sweep on an instance with a
+		// long history can remove a lot of it at once. Name the setting and
+		// how to switch it off in the message itself, so an operator who
+		// notices does not have to go looking for what did it.
+		slog.Warn("execution retention: deleted execution history older than the retention window",
+			"removed", removed, "retention_days", days, "remaining", after,
+			"setting", RetentionSettingKey,
+			"disable", "set system_config."+RetentionSettingKey+" to 0 to keep everything")
 	}
 }

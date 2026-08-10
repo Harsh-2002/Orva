@@ -133,7 +133,7 @@ to change.
 Dependency installs run inside an nsjail build jail whose `/tmp` is thrown away
 after every build. To stop each deploy re-downloading every dependency, Orva
 keeps npm's and pip's caches in a **per-function** directory at
-`<data-dir>/build-cache/<function-id>/{npm,pip}`, mounted at `/cache` in the
+`<data-dir>/build-cache/<function-id>/{npm,pip}`, mounted at `/tmp/cache` in the
 build jail.
 
 The cache is per-function on purpose and must not be made shared: npm keeps the

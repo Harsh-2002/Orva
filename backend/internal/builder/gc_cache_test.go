@@ -278,3 +278,76 @@ func TestGCCacheSizeMemoTracksMtime(t *testing.T) {
 		t.Errorf("a new mtime must force a re-measure: got %d, previous %d", got, first)
 	}
 }
+
+// TestGCNeverSweepsWhenTheDatabaseHasNoFunctions is the guard for a
+// reproduced data-loss bug: an empty function table made the orphan sweep
+// treat EVERY directory under functions/ as garbage and RemoveAll it,
+// destroying the only on-disk copy of the operator's source.
+//
+// `complete := res.Total <= len(res.Functions)` does not catch this, because
+// 0 <= 0 is true. An empty table is not evidence that the disk is garbage —
+// it is the signature of a lost, recreated, or older-restored database, which
+// is exactly when the source tree matters most. That data survives a lost DB
+// on main and must keep surviving one.
+func TestGCNeverSweepsWhenTheDatabaseHasNoFunctions(t *testing.T) {
+	data := t.TempDir()
+	db := newGCTestDB(t) // deliberately empty: no insertFn
+
+	// A function tree on disk with no DB row, old enough to clear every grace.
+	tree := filepath.Join(data, functionsDirName, "019e8415-f071-76d1-be98-f59da0a05aa6")
+	if err := os.MkdirAll(filepath.Join(tree, "versions", "abc123"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(tree, "versions", "abc123", "handler.js")
+	if err := os.WriteFile(src, []byte("exports.handler=async()=>({statusCode:200})"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-30 * 24 * time.Hour)
+	for _, p := range []string{src, filepath.Dir(src), filepath.Join(tree, "versions"), tree} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	NewGC(data, db).tick(t.Context())
+
+	if !exists(tree) {
+		t.Fatal("the GC deleted a function's source tree because the database was empty — " +
+			"a lost or restored DB must never be read as 'everything on disk is garbage'")
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("source file destroyed: %v", err)
+	}
+}
+
+// TestGCStillSweepsOrphansWhenFunctionsExist keeps the guard above honest: it
+// must not disable reclamation in the normal case.
+func TestGCStillSweepsOrphansWhenFunctionsExist(t *testing.T) {
+	data := t.TempDir()
+	db := newGCTestDB(t)
+	insertFn(t, db, "live-fn")
+
+	liveTree := filepath.Join(data, functionsDirName, "live-fn")
+	orphanTree := filepath.Join(data, functionsDirName, "deleted-fn")
+	old := time.Now().Add(-30 * 24 * time.Hour)
+	for _, p := range []string{liveTree, orphanTree} {
+		if err := os.MkdirAll(filepath.Join(p, "versions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(filepath.Join(p, "versions"), old, old); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	NewGC(data, db).tick(t.Context())
+
+	if !exists(liveTree) {
+		t.Error("a live function's tree must never be swept")
+	}
+	if exists(orphanTree) {
+		t.Error("an orphan must still be reclaimed when the DB is non-empty")
+	}
+}

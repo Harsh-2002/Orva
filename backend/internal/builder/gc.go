@@ -120,6 +120,26 @@ func (g *GC) tick(ctx context.Context) {
 		}
 		return
 	}
+
+	// An empty function table is NOT evidence that every directory on disk is
+	// garbage — it is the signature of a lost, recreated, or older-restored
+	// database. `complete` does not catch it (0 <= 0 is true), so without this
+	// the sweep below would treat every function's versions/ tree as an orphan
+	// and delete the only on-disk copy of the operator's source, minutes after
+	// boot, from a single INFO line. That data survives a lost DB today; it
+	// must keep surviving one.
+	//
+	// The cost of being wrong here is asymmetric: skipping leaves reclaimable
+	// bytes on disk until a function exists again, which is recoverable;
+	// sweeping is not.
+	if len(live) == 0 {
+		if entries, err := os.ReadDir(filepath.Join(g.dataDir, functionsDirName)); err == nil && len(entries) > 0 {
+			slog.Warn("gc: database reports zero functions but directories exist on disk; "+
+				"skipping orphan sweeps (a lost or restored database looks exactly like this)",
+				"dirs_on_disk", len(entries))
+		}
+		return
+	}
 	g.sweepBuildCaches(ctx, live)
 	g.sweepOrphanFunctionDirs(ctx, live)
 }
@@ -258,6 +278,11 @@ func (g *GC) cachedSize(fnID, path string, mtime time.Time) int64 {
 // window between the function listing above and this scan, where a function
 // created in between would look like an orphan.
 func (g *GC) sweepOrphanFunctionDirs(ctx context.Context, live map[string]struct{}) {
+	// Never resolve relative to the working directory — this call recursively
+	// removes whatever it finds. listBuildCaches guards the same way.
+	if g.dataDir == "" || len(live) == 0 {
+		return
+	}
 	root := filepath.Join(g.dataDir, functionsDirName)
 	entries, err := os.ReadDir(root)
 	if err != nil {

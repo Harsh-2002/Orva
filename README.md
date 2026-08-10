@@ -77,7 +77,7 @@ Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)
 - **Built-in primitives** — per-function KV store, background jobs (retries + backoff), cron schedules, function-to-function calls, encrypted secrets, custom routes, and signed inbound webhooks.
 - **Distributed tracing** — every HTTP → F2F → job chain shares one trace, with a waterfall view and zero code changes.
 - **Versioning** — content-hashed deploys with one-click (or one-command) rollback and side-by-side diffs.
-- **MCP + AI** — a 72-tool operator MCP server at `/mcp` and a built-in agentic AI assistant (dashboard or `orva chat`) that operate your instance with your own provider key. → [AI & MCP](#ai--mcp)
+- **MCP + AI** — a 73-tool operator MCP server at `/mcp` and a built-in agentic AI assistant (dashboard or `orva chat`) that operate your instance with your own provider key. → [AI & MCP](#ai--mcp)
 - **Templates** — 21 starters (Stripe/GitHub webhooks, JWT/OAuth, CSV→JSON, URL shortener, …) in the editor.
 
 ---
