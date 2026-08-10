@@ -975,3 +975,50 @@ If the result above is empty or unexpected, Read this file BEFORE diagnosing —
 To re-run with edited post-processing: Workflow({scriptPath: '/home/dev/.claude/projects/-home-dev-Orva/542dbe1e-4f99-4b28-b651-69f1765d5492/workflows/scripts/authoring-testing-md-wf_02ffcf5d-488.js', resumeFromRunId: 'wf_02ffcf5d-488'}) — agents whose (prompt, opts) are unchanged replay from cache.</diagnostics>
 <usage><agent_count>8</agent_count><agents_done>8</agents_done><agents_error>0</agents_error><agents_skipped>0</agents_skipped><agents_empty_result>0</agents_empty_result><subagent_tokens>1355718</subagent_tokens><tool_uses>714</tool_uses><duration_ms>5765941</duration_ms></usage>
 </task-notification>
+
+---
+
+<task-notification>
+<task-id>aa1a0a39aec7d78cd</task-id>
+<tool-use-id>toolu_01NE5GN7cF6xwtjEU6tK6Lok</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/cef92ed3-2f22-41ca-96c3-e13c1985c6eb/tasks/aa1a0a39aec7d78cd.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix TESTING.md verification findings" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All seven findings are fixed in `/home/dev/Orva/docs/TESTING.md` (the only file I touched). Nothing was committed; the live dev instance on :3000 was never restarted and holds no test data.
+
+## What I changed
+
+**F1 — safety (the CLI ignores `$B`/`$K`).** Added a warning block at the top of §4 and rewrote **every** CLI invocation in §2.6(c), §2.8, and §4.1–§4.14 to `orva --endpoint "$B" --api-key "$K" …` (29 command lines, plus the prose references in §4.9 KV, §4.11 `firewall resolve`, §4.13 `orva chat`). I deliberately did **not** use an alias/wrapper: I found that a wrapper only lives in one shell, and this harness does not carry shell state between commands — a wrapper defined once in §4 would evaporate and every later line would hit the real instance.
+
+I also found a hole the finding did not mention and documented it in three places (§2.6(c), §4 preamble, §10): **empty flag values fall back to `~/.orva/config.yaml` silently.** `orva --endpoint "" --api-key "" functions list` listed the live dev instance's functions and exited 0. So the flags only protect you when the variables are set in the same shell. §4's preamble now also gives the scratch-instance bring-up, teardown, and a "confirm what you're pointed at before the first mutation" check; §4.7 gained the `cron delete` cleanup command and §4.11 an explicit "this is instance-global" warning.
+
+**F2 — run-all.sh contradiction.** §3.4's export block now targets a scratch instance (`127.0.0.1:18443` + `.admin-key`) instead of `localhost:3000`, with a warning naming the three non-read-only suites. `#### run-all.sh in detail` opens with a scratch-only warning explaining that `atscale.sh`'s `hey` guard is the *only* thing masking the litter today. The `run-all.sh`/`egress-test.sh` rows in §3.4 and §10 and the §10 "Never do these" table say the same.
+
+**F3 — `test_security.py` reclassified.** Removed from "Safe", given its own paragraph: best-effort cleanup, `c.delete()`'s status discarded inside `except Exception: pass`, observed leaving `e2e-sec-bigdeploy` at status `error` after a green `ALL PASSED — 8 checks`.
+
+**F4 — expected output.** (a) §3.5 now gives the formula `1 + 5 × (images that run)` (6 checks with `REAL_CLI=1`), notes the image list is hardcoded in `matrix.sh` and *not* `distros.tsv`, and reports 31 for the full list / 16 for a 3-image subset with both timings; §9's "mode 0644" → **664**. (b) §4.1's transcript is now the full 6 lines + JSON block verbatim, plus the two traps I found while reproducing it: `Deploy submitted`/`"status":"queued"` print *after* `Build succeeded.`, and the status lines go to stderr while the JSON goes to stdout. (c) §5.1 rows carry real enveloped bodies with a lead-in saying the `jq` path is `.error.code`; I fixed the same defect in §2.6(c)'s FORBIDDEN/401 rows. (d) §2.6(c) shows the real 3-line human output and a separate `-o json` example.
+
+**F5 — overclaim withdrawn, point kept.** §8.1's "seven registered" paragraph is replaced by one explaining CONTRACT §7 governs repo-authored workflow *files* and is correct, then sharpening the real finding (`check ci.yml hard` — one call — so CodeQL can never block a release). The §9 "Documentation that is wrong" row is removed and replaced by an explicit **"One entry withdrawn from that table"** note below it, so the retraction is visible rather than silently deleted.
+
+**F6 — onboarding-flow upgraded from `[UNVERIFIED]`.** §3.4's table row and the run-all bullet now carry the virgin-DB recipe (the one extra `./build/orva serve` it costs), all 13 `ok` lines verbatim, and `onboarding-flow pass=13 fail=0`. The §9 "nobody has verified" list now scopes the remaining gap to the `/web/onboarding` **UI** leg only, and the CAPACITY.md row was corrected — its `13/13` is right, just missing the virgin-DB precondition.
+
+**F7 — §2.8 rows 10–11.** Added a runnable four-command recipe with observed output, and a forward-reference to §4.5.
+
+## Commands I ran to confirm
+
+Scratch instances (`ORVA_DATA_DIR=/tmp/orva-doccheck ORVA_PORT=18446` and `/tmp/orva-virgin` on 18444), both killed and `rm -rf`'d afterwards:
+
+- `orva --endpoint … --api-key … keys create --name ci --permissions read` and the `-o json` variant
+- `deploy ./demo --follow` (also with `2&gt;/dev/null` / `2&gt;&amp;1 1&gt;/dev/null` to prove the stream split), `invoke`, `logs`, `executions list`
+- `secrets set` / `secrets list` + `curl …/secrets` + a redeploy proving `process.env.QA_SECRET` reaches the jail
+- `cron create` / `cron list` / `cron delete --yes`; `firewall add` / `firewall list`
+- the read-key permission table (200 / 403 / DELETE 200 / 401)
+- all eight §5.1 error cases via `curl -w '%{http_code}'`
+- `BASE_URL=http://127.0.0.1:18444 bash test/onboarding-flow.sh` → `pass=13 fail=0`, exit 0, 0.276 s
+- `time bash test/install/matrix.sh` → `passed=31 failed=0` in 18.6 s (all six images warm)
+- `grep -c DELETE test/atscale.sh` → 0; `ls -la test/install/matrix.sh` → mode 664; `ls .github/workflows/` → `ci.yml`, `release.yml` only; `sed -n '90,125p' .github/workflows/release.yml` → `check ci.yml hard`
+
+Post-run audit of `localhost:3000` confirmed no leftover functions, crons, firewall rules, or API keys. One caveat worth relaying: the only contact I had with the live instance was two read-only `functions list` calls — which are themselves the evidence for the empty-flag fallback now documented in §4.</result>
+<usage><subagent_tokens>176302</subagent_tokens><tool_uses>105</tool_uses><duration_ms>864795</duration_ms></usage>
+</task-notification>
