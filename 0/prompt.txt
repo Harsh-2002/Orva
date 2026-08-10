@@ -923,3 +923,13 @@ does that ai gateway have codex sdk suppsoe so we can use codex sunscription in 
 ---
 
 yeah no issue - work on PR.
+
+---
+
+<task-notification>
+<task-id>bi300dmrq</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/cef92ed3-2f22-41ca-96c3-e13c1985c6eb/tasks/bi300dmrq.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll CI on PR #40" completed (exit code 0)</summary>
+</task-notification>
