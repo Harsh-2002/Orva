@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bi2fx6cs1</task-id>
+<tool-use-id>toolu_0191fJtfv4c7egUV8729Znfj</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/2902e625-4ac6-4f6e-82c3-7c87cf749e19/tasks/bi2fx6cs1.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR #34 checks until terminal (background)" completed (exit code 0)</summary>
+</task-notification>
