@@ -540,3 +540,51 @@ If you decide to leave it alone, that is a defensible call and you should say so
 ---
 
 follow what experts agenrs are syaing ok.
+
+---
+
+<task-notification>
+<task-id>a59c77b9c0b660dad</task-id>
+<tool-use-id>toolu_01UYHBfGAhvyZzYBpvPpVPpD</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a59c77b9c0b660dad.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement per-function build cache" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Everything is green. Implementation complete.
+
+## What was done
+
+**Phase 0 — bug fixes**
+- **Orva now owns the cache env vars** (`backend/internal/sandbox/build.go`). `npm_config_cache`, `PIP_CACHE_DIR`, `npm_config_logs_dir` are set *after* the caller-env merge, and `setOwnedEnv` deletes every case spelling first (npm folds `NPM_CONFIG_CACHE`/`npm_config_cache` onto one key and resolves collisions by env iteration order). An operator with `npm_config_cache=/root/.npm` on orvad no longer gets an unexplained EROFS.
+- **Boot sweep** of stale `build-tmp/build-*` (`builder.SweepBuildScratch`, called from `backend/cmd/orva/serve.go`).
+
+**Phase 1 — per-function cache** (`backend/internal/builder/buildcache.go`, new)
+- `&lt;dataDir&gt;/build-cache/&lt;fnID&gt;/{npm,pip}`, `BuildConfig.CacheDir` (empty = exactly today's throwaway behaviour), 0777 like the scratch dir, HOME still throwaway, `npm_config_logs_dir` pointed at `/tmp/npm-logs`.
+- All three bounds: `build_cache_max_age_days` (14) and `build_cache_max_mb` (2048, whole-directory LRU) in the existing GC tick, plus purge on delete and `DELETE /api/v1/functions/{id}/build-cache`. Eviction uses `TryLock` on `FnLock` (wired into the GC from `poolMgr.FunctionLock`) plus a 15-minute mtime grace; `PrepareBuildCache` stamps the dir mtime each build so LRU order is real last-use. `checkFreeDisk` now reports cache usage and evicts idle caches before returning `ErrInsufficientDisk`.
+- CLI: `orva functions purge-cache` — a subcommand under the existing group, no new top-level command; command-tree golden diff still zero (107 = 107).
+
+**One design change forced by the live run:** the cache mounts at `/tmp/cache`, not `/cache`. nsjail must create the mount point inside the chroot, and the rootfs is read-only and owned by another user — `scripts/build-rootfs.sh` pre-creates only `/code` and `/tmp`. A top-level `/cache` failed **every build** with `mkdir('/…/root//cache'): Permission denied` on all currently deployed rootfs trees. Persistence is decided host-side by the bind, so nothing else changes. `TestBuildJailArgs_CacheMountPointIsInsideTheScratchMount` pins it.
+
+**Extra scope (function-dir leak):** `Delete` now calls `builder.PurgeFunctionFiles` after the DB delete, non-fatally. Path construction goes through `fnScopedPath`, which rejects empty ids, separators, `.`/`..`, and anything where `filepath.Base(id) != id` — with `TestFnScopedPathRefusesEscape` covering it specifically. The GC also sweeps orphaned `functions/&lt;id&gt;` dirs, gated three ways: `TryLock`, a 15-min "last write" grace (max of the dir's and `versions/`'s mtime, since a parent dir's mtime doesn't move on redeploy), and a **hard skip when the function listing is truncated** (`res.Total &gt; len(res.Functions)`) — without that, functions past the page limit would look deleted.
+
+## Measured, on my own instance (`ORVA_DATA_DIR=&lt;tmp&gt; ORVA_PORT=18777`, killed and cleaned up)
+
+| | mean cold | mean warm | saved |
+|---|---|---|---|
+| node, 8 deps (3 alternating pairs) | 4.3 s | 2.7 s | 1.6 s (38%) |
+| python, 5 deps | 5.8 s | 5.5 s | 0.3 s (5%) |
+
+Python matches your prediction that most of pip's time is unpacking. Reuse was proven behaviourally, not by timing: I snapshotted npm's `_cacache/content-v2` (path+size+mtime of all 82 blobs) around a warm build — **byte-for-byte identical afterwards**, i.e. npm downloaded nothing. Cache: 9.0 MB npm / 3.8 MB pip; dirs 0777; no `_logs` in the persistent tree.
+
+Also verified live: size-cap eviction (`build cache gc evicted=1 freed_mb=8 max_mb=1`), boot sweep (`swept stale build scratch dirs count=1 freed_mb=12`, unrelated dir untouched), and delete removing both `functions/&lt;id&gt;` and `build-cache/&lt;id&gt;`.
+
+## Commands run
+`make lint` (clean), `go test ./... -count=1` (all pass), `-race` on builder/sandbox/handlers (clean), `bash test/cli/command-tree.sh` (PASS), `shellcheck test/build-cache-test.sh` (clean), and the new `test/build-cache-test.sh` against the live instance: **10 passed, 0 failed**.
+
+## Notes
+- `backend/internal/database/database_test.go` needed its seed-row count bumped 14 → 16 for the two new `system_config` keys.
+- `installDependencies`/`maybeCompileTypeScript` gained an `fnID` parameter; the two existing call sites in `buildjail_test.go` pass `""`, which exercises the no-cache path — their assertions are unchanged.
+- Three modified files in `git status` are **not mine**: `backend/internal/sandbox/seccomp.go`, `sandbox_test.go`, `test/install/native-engine.sh` (your concurrent seccomp-alias work).
+- Not done: `ORVA_DISABLE_USERNS=1` is untested live (my instance runs unprivileged) — the cache dir gets exactly the same 0777+chmod treatment as the existing scratch dir. `PIP_NO_CACHE_DIR` in orvad's env would silently disable the pip half; I left it alone as an explicit operator opt-out rather than overriding it. No MCP tool for the purge (would touch the 73-tool registry and its documented count) — say the word if you want one.</result>
+<usage><subagent_tokens>228284</subagent_tokens><tool_uses>149</tool_uses><duration_ms>1786675</duration_ms></usage>
+</task-notification>
