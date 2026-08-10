@@ -919,3 +919,7 @@ continue
 ---
 
 does that ai gateway have codex sdk suppsoe so we can use codex sunscription in oir directley ? or not - just asking
+
+---
+
+yeah no issue - work on PR.
