@@ -1,0 +1,98 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   The conversation covered six sequential tasks on the Orva repo (`/home/dev/Orva`, a self-hosted Go + Vue FaaS platform):
+   - **Task 1 — Codebase analysis:** Analyze the whole codebase (product, structure, GitHub Actions workflows), read the docs, understand it.
+   - **Task 2 — Plan fixes:** Give H/M/L findings + improvements and plan to fix and test them.
+   - **Task 3 — Implement + ship:** Implement the approved security/reliability sweep, then "commit push merge and verify the workflows."
+   - **Task 4 — Fix two notes:** "fix both whatcher is the issue two notes you sueggsted take best action" — Note 1 (dependencies) and Note 2 (dev instance :3000 running old vulnerable binary). Mid-task the user pointed at Dependabot PR #34.
+   - **Task 5 — Expert panel for openpgp vuln (GO-2026-5932):** Convene 2-3 expert Go agents (framed as senior devs with 8 yrs experience), get their feedback, make a concrete plan, work on it, "respect the design and architecture."
+   - **Task 6 (most recent) — Agent-docs multi-agent compatibility + CONTRACT.md:** Improve docs so the repo works with multiple AI agents; create CONTRACT.md; find the gap for using any AI agent; do web research. Then NARROWED to: "focus for only codex/claude/opencode ai agents not gemini/cursor/windsurf or others." And "Be smart, follow the best practices that ... expert people who are developing with the help of AI ... follow."
+
+2. Key Technical Concepts:
+   - Orva: self-hosted FaaS; Go 1.26 backend, Vue 3 frontend, nsjail sandboxes, node/python runtimes, SQLite WAL, embedded UI via `//go:embed ui_dist`, MCP server (72 tools), in-product AI agent (Bifrost gateway), warm-pool autoscaler (Knative-KPA).
+   - CI/release model: exactly two workflows — `ci.yml` (all verification) + `release.yml` (build/publish, no tests); verify-on-push/PR, ship-on-`vYYYY.MM.DD`-tag; a `gate` job confirms CI green on the exact SHA.
+   - Auth: `X-Orva-Internal-Token` middleware bypass (the critical bug fixed in Task 3).
+   - Go vuln tooling: `govulncheck`, `go mod why`, `go mod tidy`, package-level reachability.
+   - go-selfupdate v1.6.0: openpgp pulled unconditionally via top-level `validate.go`/`PGPValidator`; the `update` subpackage (`update.Apply`) is openpgp-free.
+   - AGENTS.md open standard vs CLAUDE.md; nested/hierarchical instruction discovery; Codex 32 KiB combined-chain cap (`project_doc_max_bytes`); opencode.json `instructions` glob; Claude `@path` import; git symlinks (mode 120000).
+   - Workflow tool for parallel research/review fan-out (ultracode on); plan-mode with Explore/Plan agents.
+
+3. Files and Code Sections (most recent Task 6 in full; earlier tasks are already merged to main):
+
+   **Task 6 (agent-docs) — all merged in PR #38, main @ 1adf6a2a:**
+   - `backend/AGENTS.md`, `cli/AGENTS.md`, `frontend/AGENTS.md`, `docs/AGENTS.md`, `scripts/AGENTS.md`, `test/AGENTS.md`, `test/e2e/AGENTS.md` — NEW symlinks, each `→ CLAUDE.md` (git mode 120000, identical blob to root `AGENTS.md`). Created via `(cd <dir> && ln -s CLAUDE.md AGENTS.md)`. Closes the #1 gap: Codex/opencode get nested per-directory context.
+   - `CONTRACT.md` — NEW (~8.4 KB, root). The single canonical operating contract with 10 sections: (1) Toolchain pins (Go 1.26+, Node 24, Python 3.14, nsjail; single go.mod; internal/ids+internal/client at repo-root internal/), (2) Canonical commands (make targets table), (3) Build invariants (adapters-embed before bare go build; UI //go:embed staleness — make build reuses last snapshot, use build-all/embed), (4) Docs single source (docs/reference.md → 3 byte-identical copies via make docs-embed), (5) Ports & data (server 8443, Docker 3000→8443, frontend 5173, shell-test 18443, e2e 8443; data /var/lib/orva; env-only server config; ~/.orva/config.yaml CLI), (6) Definition of Done (make lint+test fast; full E2E needs REDACTED), (7) CI/release model, (8) CLI hard constraints (no backend/internal imports, no CGO, no os.Exit, register in RegisterClient + command-tree tests), (9) Must-not-break invariants (additive-only migrations, execution_requests no-FK, TS Entrypoint rewrite, nsjail cmd.Wait centralized in Spawn, AI defaultSystemPrompt backtick-free, one-turn-per-conversation lock, destructive-tail edits, entrypoint adapter overwrite, installer no-fail-open), (10) Code style (slog not log.Printf, %w wrapping, Vue composition-API). Includes a Windows note: clone with `core.symlinks=true`.
+   - `opencode.json` — NEW (root):
+     ```json
+     { "$schema": "https://opencode.ai/config.json",
+       "instructions": ["CONTRACT.md", "**/CLAUDE.md"] }
+     ```
+   - `CLAUDE.md` (root) — MODIFIED: after the intro paragraph, added a blockquote prose pointer ("**Operational contract:** read [`CONTRACT.md`](CONTRACT.md) **before proposing changes**...") plus a standalone `@CONTRACT.md` line (Claude auto-import).
+   - `docs/CONTRIBUTING.md` — MODIFIED: added a top-of-file pointer blockquote to `../CONTRACT.md`; replaced the entire duplicated `## CI` + `## Releasing` sections with a single `## CI & releasing` pointer to `../CONTRACT.md` (§6/§7) — removed the twice-stated Release policy drift hazard.
+   - `.github/workflows/ci.yml` — MODIFIED: added a new always-run `agent-docs` job (outside the `code` path-filter) before the `lint` job:
+     ```yaml
+     agent-docs:
+       name: agent-doc mirror (AGENTS.md ↔ CLAUDE.md)
+       if: github.event_name == 'pull_request' || github.event_name == 'push'
+       runs-on: ubuntu-24.04
+       steps:
+         - uses: actions/checkout@v7
+         - name: every CLAUDE.md dir has an AGENTS.md symlink -> CLAUDE.md
+           run: |
+             fail=0
+             for f in $(git ls-files '*CLAUDE.md'); do
+               d=$(dirname "$f")
+               case "$d" in .) a="AGENTS.md" ;; *) a="$d/AGENTS.md" ;; esac
+               mode=$(git ls-files -s "$a" | awk '{print $1}')
+               if [ "$mode" != "120000" ]; then echo "::error file=$a::missing or not a symlink (git mode '${mode:-none}', want 120000). Run: (cd $d && ln -s CLAUDE.md AGENTS.md)"; fail=1; continue; fi
+               tgt=$(git show ":$a")
+               if [ "$tgt" != "CLAUDE.md" ]; then echo "::error file=$a::points at '$tgt', want 'CLAUDE.md'"; fail=1; fi
+             done
+             [ "$fail" = 0 ] && echo "OK: ..."
+             exit $fail
+     ```
+
+   **Earlier tasks (all merged to main, for context):**
+   - PR #35 (main @ 5e13d702): `middleware_auth.go` (auth-bypass fix — constant-time compare of internal token), `system.go` (health DB ping → 503), `events/hub.go` (Close), `pool.go`/`config` (MaxPids), `middleware.go` (deploy body-cap exemption), `auth.go`+`users.go` (login rate-limit, password-change session revoke), `invoke.go` (hasPriorCode→current symlink), plus L-tier (metrics TYPE/HELP, SDK-version const, system_config prune, config env knobs ORVA_HOST/CORS_ORIGINS/MAX_BODY_BYTES/SECCOMP_POLICY/PPROF_ADDR, reference.md 71→72). Plus nanoid 3.3.16→3.3.18.
+   - PR #34 (Dependabot Go bumps, fixes GO-2026-5970 x/text), PR #36 (goldmark v1.7.13→v1.7.17, GO-2026-5320).
+   - PR #37 (main @ 71349512): `cli/commands/upgrade.go` rewritten — dropped top-level go-selfupdate import, added `detectLatest()` via GitHub API, `releaseInfo` struct, semver compare with dev-panic guard, `executablePath()` with EvalSymlinks, `downloadVerifyApply()` using `update.Apply`; `cli/commands/upgrade_test.go` migrated + new tests; `.github/workflows/ci.yml` added pinned `govulncheck@v1.6.0 ./...` gate to the go job.
+   - Memory files updated: `auth-internal-token-bypass.md` (marked FIXED+MERGED), `dev-instance-login.md` (deploy steps + version v2026.08.05-12-g71349512, govulncheck 0).
+
+4. Errors and fixes:
+   - **PR #35 CI nanoid failure:** `ui build` job's `npm audit` flagged a high-severity nanoid advisory (transitive via postcss). Fixed with `npm audit fix` (3.3.16→3.3.18); only package-lock.json changed. Pre-existing, not from my code.
+   - **PR #37 CI go-job failure:** The govulncheck step's command was mangled — `origin/main`'s "go build" step had a trailing `./build/orva --version | grep -F "ci-..."` line my Edit's `old_string` didn't include, so it got orphaned into my single-line govulncheck `run:` scalar. Fixed by restoring the `--version` line into the go-build step and leaving a clean govulncheck step. A CI-config merge artifact, not a code problem.
+   - **H2 health-check test false assumption:** My test assumed no nsjail on the box, but `/usr/local/bin/nsjail` exists there. Relaxed the server-package test; added a handler-level test with a bogus NsjailBin path to guard the nsjail-absent→200 CI contract.
+   - **openpgp `go mod why` still showed it after the code fix:** Because `upgrade_test.go` still imported the parent go-selfupdate package. Migrated the test to `releaseInfo`; then `go mod why golang.org/x/crypto/openpgp` → "does not need."
+   - **TestDownloadVerifyApply symlink subtest failure:** `update.Apply` does NOT resolve symlinks (it replaced the symlink itself). Fixed the test to mirror the real flow: resolve via `filepath.EvalSymlinks` first (as `executablePath()` does), then apply to the real target.
+   - User feedback that changed direction: (a) narrowed docs scope to "only codex/claude/opencode"; (b) "Be smart, follow best practices"; (c) chose "Reuse update subpkg" for the openpgp swap strategy.
+
+5. Problem Solving:
+   Solved: confirmed a live auth bypass and fixed it; navigated a 62-commits-behind local checkout by re-verifying every finding against origin/main; eliminated all three Go vulnerabilities that had fixes (x/text, goldmark, openpgp) and added a govulncheck CI gate; deployed fixed binaries to the live :3000 systemd service (closing the bypass live); made the repo agent-agnostic for Codex/Claude/opencode with zero-drift symlink mirroring + a CONTRACT.md + a CI drift-guard. All PRs merged with green CI + CodeQL.
+
+6. All user messages:
+   - "I want you to anal analyze this code base and understand all the things like what is this project and what it does, the structure of this code base, and things like that. The workflow, the GitHub Action workflow, and all those things. Ready the docs and understand the code base"
+   - (/plan) "what was you high/medium/low findings on this and improvemnets ? and plan it out to fix and test it."
+   - (AskUserQuestion answers) scope="Everything incl. Low", PR structure="Single bundled PR"
+   - "commit push merge and verify the owrkflows."
+   - "fix both whatcher is the issue two notes you sueggsted take best action for them to be fixed."
+   - "i hope you are working on this PR - https://github.com/Harsh-2002/Orva/pull/34"
+   - (/plan, openpgp) "...I want you to gather the export of agents to fix this issue. Imagine you are a senior software developer with 8 years of experience who has in-depth working in system design and performance-related task and optimization and in Golang specifically. So, I want to arrange expert of agents, two or three agents, and what is the best way to solve this issue? ... take the feedback and suggestion from the all together agents, create a concrete plan and work on it. Make sure to respect the design and architecture of this project"
+   - (AskUserQuestion answer) swap strategy="Reuse update subpkg (recommended)"
+   - (/plan, docs) "i want you to improve the docs for all types of AI agenst liek codex and claude and opencode what you can do to improve the agentic based devlopement also i think we should create CONTRACT.md as well and we have symlink of AGNETS.md to CLAUDE.md which is good - but what is th gap so i we can work on this codebase with AI ? ... so I can I should be or any other people use should be able to use any other AI agent without any problem. So yeah, I want you to analyze it do the web research."
+   - "we need CONTRACT.md also focus for only codex/claude/opencode ai agents not gemini/cursor/windsurf or others . underatood tell this to agent."
+   - "Be smart, follow the best practices that other people and developers, expert people who are developing with the help of AI, they follow right"
+   Security-relevant constraints preserved: dev instance :3000 login is `orva` / `OrvaDev2026!`; sudo is passwordless on this box; :3000 is a systemd service (binary /opt/orva/bin/orva, ORVA_DATA_DIR=/var/lib/orva, ORVA_PORT=3000); dev-merge-gate rule: before dev→main merge, review the PR AND deploy+live-test the real build on :3000; docs-before-release gate: bring CLAUDE.md agentic docs current before cutting a release.
+
+7. Pending Tasks:
+   None. All six tasks are complete and merged to main with green CI. The most recent task (agent-docs / CONTRACT.md, PR #38) is fully done: merged to main @ 1adf6a2a, and the just-completed background watcher confirmed post-merge main CI is green (`CI: success`, `CodeQL: success`).
+
+8. Current Work:
+   Immediately before this summary I had merged PR #38 ("docs(agents): agent-ready for Codex/Claude/opencode + CONTRACT.md") into main @ 1adf6a2a, confirmed all 8 AGENTS.md symlinks + CONTRACT.md + opencode.json are on main, and launched a background watcher for the post-merge main CI. The final task notification (byfmegvev) returned: "=== MAIN CI TERMINAL (1adf6a2ac1afab6a03e34c103000ead690924f09) === completed success CodeQL / completed success CI / all success/skipped". So the agent-docs work is fully complete and green on main. The repo now serves Codex (nested AGENTS.md chain), Claude (CLAUDE.md + @CONTRACT.md), and opencode (opencode.json instructions), with a CI `agent-docs` guard enforcing the AGENTS.md↔CLAUDE.md mirror.
+
+9. Optional Next Step:
+   None required — the task is concluded (PR #38 merged, main CI + CodeQL green). The only remaining action is to report to the user that the post-merge main CI is green and the agent-docs/CONTRACT.md work is fully complete. I should not start any new work without an explicit user request, since all previously requested tasks are finished and verified.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/dev/.claude/projects/-home-dev-Orva/542dbe1e-4f99-4b28-b651-69f1765d5492.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
