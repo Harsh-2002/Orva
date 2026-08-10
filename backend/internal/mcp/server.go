@@ -81,12 +81,22 @@ func NewHandler(deps Deps) http.Handler {
 		reqDeps := deps
 		reqDeps.BaseURL = urlhint.BaseURL(r)
 
-		// Resolve the caller's permissions from the request. If the
-		// header is missing or invalid, we still return a server
-		// instance so the SDK can produce a clean 401 via the auth
-		// gate — refusing to construct one here would cause the SDK
-		// to surface a less useful "internal error".
-		principal, _ := authenticateRequest(reqDeps.DB, r)
+		// Reuse the principal the auth gate already resolved for this
+		// request rather than resolving a second time. Resolving is not
+		// free and not side-effect free: it hashes the token, hits the
+		// DB, and queues an api_keys.last_used_at write. Under the old
+		// stateful transport getServer ran once per SESSION, so the
+		// duplicate cost was amortised; stateless mode runs it on every
+		// single request, which would have doubled the DB work and the
+		// last-used writes on the MCP hot path.
+		//
+		// The fallback still resolves, so this stays correct if the SDK
+		// ever calls getServer with a request that did not come through
+		// the gate below. If the header is missing or invalid we still
+		// return a server instance so the SDK can produce a clean 401
+		// via that gate — refusing to construct one here would surface a
+		// less useful "internal error".
+		principal, _ := principalForRequest(reqDeps.DB, r)
 
 		// Channel mode: register exactly the bundled functions as
 		// MCP tools. Skip every operator-management register call —
@@ -101,9 +111,9 @@ func NewHandler(deps Deps) http.Handler {
 					Version: deps.Version,
 					Title:   "Orva — " + principal.Channel.Name,
 				},
-				&mcpsdk.ServerOptions{Instructions: instr},
+				&mcpsdk.ServerOptions{Instructions: instr, SchemaCache: schemaCache},
 			)
-			s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal))
+			s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal), cacheScopeMiddleware())
 			registerChannelTools(s, reqDeps, principal.Channel)
 			return s
 		}
@@ -126,6 +136,13 @@ func NewHandler(deps Deps) http.Handler {
 			},
 			&mcpsdk.ServerOptions{
 				Instructions: serverInstructions,
+				// Statelessness means a Server -- and therefore all ~73 tool
+				// registrations -- is built per request instead of per session.
+				// Each AddTool reflects over its input type to derive a JSON
+				// schema; without a shared cache that reflection would run on
+				// every single MCP request. The cache is safe for concurrent
+				// use and is the SDK's documented answer for exactly this.
+				SchemaCache: schemaCache,
 			},
 		)
 
@@ -134,7 +151,7 @@ func NewHandler(deps Deps) http.Handler {
 		// feed even though the underlying transport is one streaming
 		// POST to /mcp. The HTTP-level loggerMiddleware would otherwise
 		// only show the streaming request itself.
-		s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal))
+		s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal), cacheScopeMiddleware())
 
 		// Every operator-tool family is registered through a regCtx so the
 		// exact same tool definitions feed both the external MCP server (here)
@@ -170,7 +187,31 @@ func NewHandler(deps Deps) http.Handler {
 		return s
 	}
 
-	mcpHandler := mcpsdk.NewStreamableHTTPHandler(getServer, &mcpsdk.StreamableHTTPOptions{})
+	mcpHandler := mcpsdk.NewStreamableHTTPHandler(getServer, &mcpsdk.StreamableHTTPOptions{
+		// Serve the 2026-07-28 protocol. The SDK refuses that version on any
+		// non-stateless server (streamable.go), so with the default options
+		// Orva answered every 2026-07-28 client with HTTP 400 -- "protocol
+		// version is only supported on stateless HTTP servers" -- while still
+		// speaking the older version fine. This one field is what makes the
+		// new protocol reachable at all.
+		//
+		// Orva keeps no session state of its own to give up: there is no
+		// session map here, Deps is rebuilt per request (BaseURL comes from
+		// urlhint.BaseURL(r)), and the bearer token is re-resolved to a
+		// Principal on every request by the auth gate below. The only session
+		// state was the SDK's own.
+		//
+		// It also closes a real gap. In stateful mode getServer ran once per
+		// session, so the registered tool set froze at the permissions the key
+		// held when the session opened; a permission downgrade mid-session was
+		// not re-gated. Rebuilding per request means the catalog always matches
+		// the caller's current perms.
+		//
+		// Legacy clients are unaffected: a stateless server still accepts the
+		// old initialize handshake and negotiates the older version, it simply
+		// issues no Mcp-Session-Id. GET and DELETE on /mcp become 405.
+		Stateless: true,
+	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Origin validation — spec mandates this for the Streamable
@@ -185,13 +226,17 @@ func NewHandler(deps Deps) http.Handler {
 		// Auth gate. We do this BEFORE handing off to the SDK so that
 		// unauthenticated requests get a clean 401 with a JSON error
 		// envelope matching the rest of the REST API.
-		if _, ok := authenticateRequest(deps.DB, r); !ok {
+		principal, ok := authenticateRequest(deps.DB, r)
+		if !ok {
 			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
 				"missing or invalid bearer token")
 			return
 		}
 
-		mcpHandler.ServeHTTP(w, r)
+		// Hand the resolved principal to getServer instead of making it
+		// repeat the lookup. See principalForRequest.
+		mcpHandler.ServeHTTP(w, r.WithContext(
+			context.WithValue(r.Context(), principalCtxKey{}, principal)))
 	})
 }
 
@@ -338,6 +383,30 @@ func originAllowed(_ string) bool { return true }
 // — which is how channel calls show up as `actor_type=channel`
 // instead of being misattributed to api_key like the older synth-
 // APIKey hack used to do.
+// principalCtxKey carries the request's already-resolved principal from the
+// auth gate to getServer. Unexported empty-struct key so nothing outside this
+// package can set or spoof it.
+type principalCtxKey struct{}
+
+// principalForRequest returns the principal the auth gate resolved for this
+// request, falling back to a fresh resolution if it is absent.
+func principalForRequest(db *database.Database, r *http.Request) (*authpkg.Principal, bool) {
+	if p, ok := r.Context().Value(principalCtxKey{}).(*authpkg.Principal); ok && p != nil {
+		return p, true
+	}
+	return authenticateRequest(db, r)
+}
+
+// schemaCache is process-wide on purpose.
+//
+// It memoises the JSON schema derived by reflection from each tool's input
+// type, keyed by reflect.Type. Those types are compile-time constants, so the
+// derived schema is identical for every request, every principal and every
+// channel -- there is nothing per-caller in it to leak. Sharing it is what
+// keeps per-request server construction (see Stateless in NewHandler) from
+// re-reflecting ~73 tool signatures on every MCP call.
+var schemaCache = mcpsdk.NewSchemaCache()
+
 func activityMiddleware(deps Deps, principal *authpkg.Principal) mcpsdk.Middleware {
 	return func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {

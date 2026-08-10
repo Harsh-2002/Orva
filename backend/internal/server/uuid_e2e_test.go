@@ -213,7 +213,15 @@ func TestE2E_MCPListFunctionsIncludesInvokeURL(t *testing.T) {
 	// Mint an OAuth bearer via the helper from oauth_e2e_test.go.
 	access := mintOAuthGrant(t, tc, cookie, "MCP URL Test Client")
 
-	// Initialize MCP session.
+	// Legacy handshake leg. A pre-2026-07-28 client still opens with
+	// initialize and must still be answered, so keep proving that — but
+	// it gets no session id anymore. /mcp runs the SDK's Streamable HTTP
+	// handler with Stateless:true (mcp.NewHandler), which is the only
+	// mode in which the SDK will serve protocol 2026-07-28 at all; a
+	// stateless server negotiates the old version fine and simply issues
+	// no Mcp-Session-Id. Asserting the header is ABSENT is the tripwire:
+	// if statefulness ever comes back, every 2026-07-28 client starts
+	// getting HTTP 400 again and this fails first.
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}`
 	req = httptest.NewRequest("POST", "/mcp", strings.NewReader(initBody))
 	req.Header.Set("Authorization", "Bearer "+access)
@@ -224,18 +232,22 @@ func TestE2E_MCPListFunctionsIncludesInvokeURL(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("mcp initialize: status=%d body=%s", w.Code, w.Body.String())
 	}
-	sessionID := w.Header().Get("Mcp-Session-Id")
-	if sessionID == "" {
-		t.Fatalf("no Mcp-Session-Id in initialize response")
+	if !strings.Contains(w.Body.String(), `"protocolVersion":"2025-11-25"`) {
+		t.Fatalf("legacy initialize did not negotiate 2025-11-25; body=%s",
+			truncate(w.Body.String(), 500))
+	}
+	if sid := w.Header().Get("Mcp-Session-Id"); sid != "" {
+		t.Fatalf("stateless /mcp issued Mcp-Session-Id %q — statefulness is back and 2026-07-28 clients will 400", sid)
 	}
 
-	// Call list_functions.
+	// Call list_functions. No session id to carry: the OAuth bearer alone
+	// is what admits the call, because a stateless server re-resolves the
+	// token to a Principal and rebuilds the tool set on every request.
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_functions","arguments":{}}}`
 	req = httptest.NewRequest("POST", "/mcp", strings.NewReader(listBody))
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("Mcp-Session-Id", sessionID)
 	w = httptest.NewRecorder()
 	tc.srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

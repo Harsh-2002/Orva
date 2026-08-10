@@ -569,7 +569,27 @@ Persist the dashboard's active provider/model/thinking selection.
 
 `POST /mcp` is the Streamable HTTP MCP endpoint. Operator API keys expose
 the management tools; channel tokens expose only the functions bundled into
-that channel. OAuth-capable MCP clients discover and authorize through:
+that channel.
+
+The transport is **stateless** and speaks MCP **2026-07-28**, negotiating down
+for older clients (`server/discover` reports every supported version). Three
+things follow that are visible on the wire:
+
+- **No `initialize` handshake is required.** A 2026-07-28 request carries
+  `protocolVersion` and `clientCapabilities` in `params._meta` (`clientInfo` is
+  optional). The legacy handshake still works and still returns `200`.
+- **No `Mcp-Session-Id` is issued**, and none is read. Any request may be served
+  by any instance.
+- **`GET /mcp` and `DELETE /mcp` return `405`.** There is no session to resume
+  or terminate, and no long-lived server→client stream to attach to.
+
+List results carry the new `ttlMs` and `cacheScope` hints. Orva returns
+`cacheScope: "private"` — the tool catalog is scoped to the caller's permissions
+and to their channel, so it is never safe for an intermediary to share — and
+`ttlMs: 0`, because the catalog changes on any deploy, channel edit, or
+permission change.
+
+OAuth-capable MCP clients discover and authorize through:
 
 - `GET /.well-known/oauth-protected-resource[/mcp]`
 - `GET /.well-known/oauth-authorization-server[/mcp]`

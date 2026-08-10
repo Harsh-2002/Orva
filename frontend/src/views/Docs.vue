@@ -631,7 +631,13 @@
           </div>
           <div class="doc-card-body">
             <code class="doc-chip">Streamable HTTP</code>
-            <code class="doc-chip">MCP 2025-11-25</code>
+            <code class="doc-chip">Stateless</code>
+            <code class="doc-chip">MCP 2026-07-28</code>
+            <p class="mt-1.5 text-foreground-muted">
+              Older clients negotiate down —
+              <code class="doc-chip">server/discover</code> advertises
+              2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05.
+            </p>
           </div>
         </div>
       </div>
@@ -650,6 +656,57 @@
         Orva REST integration. Internally both paths SHA-256-hash the
         token and look it up against the same
         <code class="doc-chip">api_keys</code> table.
+      </Callout>
+
+      <Callout
+        :icon="Globe"
+        title="No handshake, no session"
+      >
+        The transport is stateless. There is no
+        <code class="doc-chip">initialize</code> step to perform first, no
+        <code class="doc-chip">Mcp-Session-Id</code> is ever issued, and
+        <code class="doc-chip">GET /mcp</code> /
+        <code class="doc-chip">DELETE /mcp</code> — the SSE-resume and
+        session-teardown verbs of the older session transport — return
+        <code class="doc-chip">405</code>. Every POST carries its own bearer
+        token and is answered on its own; a legacy client that still sends
+        <code class="doc-chip">initialize</code> gets a normal reply with its
+        own <code class="doc-chip">protocolVersion</code> echoed back, and
+        simply never receives a session header. A request that opts into
+        2026-07-28 sends the headers
+        <code class="doc-chip">Mcp-Protocol-Version</code> and
+        <code class="doc-chip">Mcp-Method</code>, plus
+        <code class="doc-chip">io.modelcontextprotocol/protocolVersion</code>
+        and
+        <code class="doc-chip">io.modelcontextprotocol/clientCapabilities</code>
+        in <code class="doc-chip">params._meta</code> (a
+        <code class="doc-chip">clientInfo</code> key is optional). Every POST
+        must send
+        <code class="doc-chip">Accept: application/json, text/event-stream</code>;
+        the reply is one SSE <code class="doc-chip">message</code> event.
+      </Callout>
+
+      <Callout
+        :icon="Lock"
+        title="List results are private and immediately stale"
+      >
+        <code class="doc-chip">tools/list</code>,
+        <code class="doc-chip">resources/list</code>,
+        <code class="doc-chip">prompts/list</code>,
+        <code class="doc-chip">resources/read</code> and
+        <code class="doc-chip">server/discover</code> results carry
+        <code class="doc-chip">ttlMs</code> and
+        <code class="doc-chip">cacheScope</code>. Orva returns
+        <code class="doc-chip">cacheScope: "private"</code> because the tool
+        catalog is permission-scoped (a full-permission key lists 73 tools; a
+        <code class="doc-chip">read</code>-only key lists 27) and
+        channel-specific (a channel token sees only that channel's
+        functions) — a shared cache entry would hand one caller another
+        caller's tool surface. <code class="doc-chip">ttlMs</code> is
+        <code class="doc-chip">0</code> because the catalog changes on any
+        deploy, channel edit, or permission change, and statelessness removed
+        the session a <code class="doc-chip">tools/list_changed</code>
+        notification would have travelled over. Re-list instead of caching.
       </Callout>
 
       <!-- Token bar -->
@@ -2004,19 +2061,29 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'curl',
     lang: 'bash',
-    note: 'Talk to MCP directly. Step 1 returns a session id (Mcp-Session-Id) that Step 2 references.',
-    code: `curl -sD - -X POST ${origin.value}/mcp \\
+    note: 'Talk to MCP directly — no handshake, no session id. Step 1 asks the server what it supports; Step 2 lists the tools. Each reply is one SSE `message` event.',
+    code: `curl -sN -X POST ${origin.value}/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
   -H 'Accept: application/json, text/event-stream' \\
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+  -H 'Mcp-Protocol-Version: 2026-07-28' \\
+  -H 'Mcp-Method: server/discover' \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 
-curl -sX POST ${origin.value}/mcp \\
+curl -sN -X POST ${origin.value}/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
   -H 'Accept: application/json, text/event-stream' \\
-  -H 'Mcp-Session-Id: <SID>' \\
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'`,
+  -H 'Mcp-Protocol-Version: 2026-07-28' \\
+  -H 'Mcp-Method: tools/list' \\
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"}}}}'
+
+# Older clients need none of that — a bare list still returns all 73 tools:
+curl -sN -X POST ${origin.value}/mcp \\
+  -H 'Authorization: Bearer ${T.value}' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Accept: application/json, text/event-stream' \\
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}'`,
   },
 ])
 
