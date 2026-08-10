@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZNX71ZJ06SRBEY0ZPRDJ082",
+  "strategy": "manual-commit",
+  "branch": "feat/remove-nftables-nstun",
+  "checkpoints_count": 4,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "frontend/src/utils/aiPrompts.js"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1537,
+    "cache_creation_tokens": 4638283,
+    "cache_read_tokens": 371542626,
+    "output_tokens": 803517,
+    "api_call_count": 772
+  }
+}
