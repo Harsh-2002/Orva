@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZNTVSQGQ2QRM8VN8V5HGCP2",
+  "strategy": "manual-commit",
+  "branch": "feat/remove-nftables-nstun",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "backend/CLAUDE.md",
+    "backend/internal/builder/builder.go",
+    "backend/internal/builder/buildjail_test.go",
+    "backend/internal/sandbox/build.go",
+    "backend/internal/sandbox/build_test.go",
+    "backend/internal/sandbox/sandbox.go",
+    "backend/internal/sandbox/sandbox_test.go",
+    "backend/internal/sandbox/seccomp.go",
+    "backend/internal/server/server.go",
+    "test/nstun-policy-bench.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1457,
+    "cache_creation_tokens": 4584753,
+    "cache_read_tokens": 341694255,
+    "output_tokens": 770729,
+    "api_call_count": 732
+  }
+}
