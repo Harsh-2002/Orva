@@ -11,6 +11,10 @@ human clicking around.
 > instance. **This** suite is the comprehensive, isolated, self-spinning one and is
 > the source of truth for "does everything still work as spec'd".
 
+> [`docs/TESTING.md`](../../docs/TESTING.md) is the end-to-end verification guide:
+> environment bring-up, the module/skip protocol and its failure messages, which
+> modules are unsafe to point at a shared instance, and how to triage a red run.
+
 ## How to run
 
 ```bash
@@ -25,6 +29,9 @@ python3 run.py --keep             # leave the container up afterward (debugging)
 python3 run.py --filter ai        # only modules whose filename contains "ai"
 
 # Against an already-running instance (no Docker) — e.g. the host dev service:
+# The bootstrap key is only written to <data-dir>/.admin-key on a first boot that
+# had no user; an instance you onboarded through the dashboard has no such file.
+# Use a key from `orva keys create` (or ~/.orva/config.yaml) if it is absent.
 python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.admin-key)"
 ```
 
@@ -106,7 +113,10 @@ This suite is meant to **grow on every change**:
   traces, system, backup, auth — plus the **AI** assistant (chat, providers,
   settings, conversations, approval, perms).
 - **CLI:** the shared client subcommands (`orva deploy/invoke/functions/logs/kv/…`)
-  via `CLIRunner`, confirming slim-CLI ↔ full-server command parity.
+  via `CLIRunner`. Note this does NOT prove slim-CLI parity by itself: `ORVA_BIN`
+  defaults to the full server binary, so the same build provides both surfaces
+  unless you point it at a `make cli` artifact. The command-tree golden diff
+  (`test/cli/command-tree.sh`) is what actually pins parity.
 - **nsjail-dependent** scenarios (real function **deploy-build** + **invoke**) skip
   when an ordinary local container cannot provide nested sandboxing. Set
   `ORVA_REQUIRE_SANDBOX=1` (as the `e2e` job in `.github/workflows/ci.yml` does on its runner)

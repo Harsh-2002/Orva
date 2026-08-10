@@ -81,6 +81,11 @@ docs/               human-readable docs (this folder)
 
 ## Running tests
 
+[`TESTING.md`](TESTING.md) is the full end-to-end verification guide — which
+layer answers which question, the real user journeys with expected output, what
+should fail, how to triage a red run, and which harnesses here are currently
+stale or destructive. Read it before trusting a green suite.
+
 ```bash
 # unit tests (Go)
 make test
@@ -105,9 +110,12 @@ The umbrella covers:
 - `rollback-test.sh` — deploy A, deploy B, rollback to A, roll forward
 - `onboarding-flow.sh` — first-run admin creation + login + refresh
 - `egress-test.sh` — outbound HTTPS reachable in egress mode, blocked in none
-- `auth-test.sh` — API key scopes, session expiry, OAuth flows
+- `auth-test.sh` — per-function `auth_mode` (none / platform_key / signed HMAC)
+  and `rate_limit_per_min`. It does not touch API-key scopes, sessions or OAuth.
 - `tracing-test.sh` — trace IDs propagate across F2F invokes and job enqueues
-- `atscale.sh` — concurrent c=25 hammering for capacity confirmation
+- `build-cache-test.sh` — the per-function npm/pip cache and its eviction bounds
+- `atscale.sh` — concurrent c=25 hammering for capacity confirmation. Needs `hey`,
+  and issues no DELETEs: it leaves every function it deploys behind.
 
 ## Install + bare-metal lifecycle tests
 

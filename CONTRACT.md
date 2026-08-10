@@ -20,7 +20,9 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
 
 - **Go 1.26+** (the embedded Bifrost AI gateway requires it), **Node.js 24**,
   **Python 3.14**.
-- **nsjail** on `PATH` (Linux only). The server starts without it, but **every
+- **nsjail** at the hardcoded path `/usr/local/bin/nsjail` (Linux only) — `PATH` is
+  never consulted and there is no env override (`config/defaults.go` `NsjailBin`,
+  pinned by `config_test.go`). The server starts without it, but **every
   function invocation fails until nsjail is installed**. The Docker image ships it
   at `/usr/local/bin/nsjail`.
 - One **`go.mod` at the repo root**, module `github.com/Harsh-2002/Orva`, spanning
@@ -61,7 +63,8 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
 to three consumers (using `{{ORIGIN}}` placeholders substituted at runtime):
 
 - `backend/internal/mcp/reference.md` — embedded by the `get_orva_docs` MCP tool
-- `frontend/public/docs.md` — served at `/docs.md` (dashboard "Copy as Markdown")
+- `frontend/public/docs.md` — served at `/web/docs.md` (dashboard "Copy as Markdown").
+  It is a Vite `public/` asset, so it ships under the UI base path; `/docs.md` is a 404
 - `cli/commands/reference.md` — embedded by `orva docs`
 
 **Edit `docs/reference.md`, then run `make docs-embed`. Never edit a copy directly.**
@@ -76,7 +79,7 @@ hand-maintained view — update it alongside if content changes.)
 | Docker compose host map | **3000 → 8443** |
 | Frontend dev server | **5173** |
 | Shell tests (`test/`) default `BASE_URL` | **18443** |
-| Python E2E (`test/e2e/`) | **8443** |
+| Python E2E (`test/e2e/`) | **8443** in-container, published on host **8455** (`ORVA_E2E_PORT`, `env.py`) |
 
 - **Data dir** `/var/lib/orva` (env `ORVA_DATA_DIR`) — `orva.db` (SQLite WAL) +
   `functions/<id>/versions/`.
@@ -88,11 +91,16 @@ hand-maintained view — update it alongside if content changes.)
 - **Fast, host-only** (always run before proposing a change):
   `make lint` && `make test`.
 - **Authoritative** (the CI gate): the full E2E suite `test/e2e/run.py` (isolated
-  Docker; needs a built `build/orva`) plus the shell suites (`test/run-all.sh`
-  against a live instance). These require **Docker + nsjail + `ORVA_REQUIRE_SANDBOX=1`**
-  on a provisioned Linux host, where **real deploy/invoke is mandatory and a sandbox
-  skip is a hard failure**. If you cannot run these locally, say so — do not claim a
-  change is verified on `make test` alone.
+  Docker; needs a built `build/orva`). It requires **Docker + nsjail +
+  `ORVA_REQUIRE_SANDBOX=1`** on a provisioned Linux host, where **real deploy/invoke
+  is mandatory and a sandbox skip is a hard failure**. If you cannot run it locally,
+  say so — do not claim a change is verified on `make test` alone.
+- **Supplementary, NOT gated**: the shell suites (`test/run-all.sh` against a live
+  instance). No CI job executes them — `ci.yml` only *shellchecks* `test/*.sh`. They
+  are useful ad-hoc checks, and several mutate or litter the instance they run
+  against, so point them at a scratch instance rather than one you care about.
+- **How to actually do it:** [`docs/TESTING.md`](docs/TESTING.md) — bring-up, what each
+  testing layer can and cannot prove, expected output per journey, and triage.
 
 ## 7. CI / release model
 
