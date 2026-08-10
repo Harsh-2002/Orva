@@ -1,0 +1,861 @@
+<task-notification>
+<task-id>bt62nlnpy</task-id>
+<tool-use-id>toolu_01ExhT3pf6zeNaxEV6D1JzEG</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/bt62nlnpy.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for CI to conclude on PR 39" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+updated all teh docs and readme all rlated things ? yoi teste eveyrhting mnaully or not via cli and UI/UX all up todate what the url so i can also test ans validate laos mcp tool are thins andi ntern docs are laos up to date ?
+
+---
+
+npm and pip install need interned right in any case right to install depls it can be under restrcued egress correct ? - Still not covered, so you know
+
+Two things remain untested rather than fixed: builder npm/pip egress is unfiltered (host subprocesses — a real regression vs the old host chain, documented in code and the PR), and the NSTUN 1024-flow cap plus per-connection O(rules) policy cost are unbenchmarked. Neither blocks the feature; both are honest limits.
+
+One housekeeping note: the PR body's "Not verified" section is now stale — the installer matrix, full e2e, container-without-NET_ADMIN, and IPv6 items all got closed since I wrote it. Want me to refresh it and take #39 out of draft? - so what are you suggestion be short and ismple and quick
+
+---
+
+the question is can we seprate builder by restricting itor not ? that is the question npm i is a process right when run and process can be isloated in nsjail - correct ?
+
+---
+
+Since I already found what we need to do and we have to complete this migration properly and everything. So for all the three points, take the best approach and things.
+
+---
+
+Also one more goal you need to understand. We need to keep the configuration like we have a lot of ENVs we do have, right? Most of them does not make sense, right? So we need to reduce the ENVs which we don't need, or that does not make sense. So I want you to spin the agent and work on it, like which in which we don't need at all. Keep only the required ENVs
+
+---
+
+<task-notification>
+<task-id>a889729edde37f06d</task-id>
+<tool-use-id>toolu_01XmS3UdD1WBddGu7k61cnpL</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a889729edde37f06d.output</output-file>
+<status>completed</status>
+<summary>Agent "Audit and reduce env var surface" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Done and verified. Cleaned up my temp dirs and left no stray processes.
+
+## 1. Inventory — all 73 `ORVA_*` names, by category
+
+**Category 1 — server config (read by `backend/internal/config`): 13 → 10**
+
+| Variable | Read | Set by shipped artifacts | Verdict |
+|---|---|---|---|
+| `ORVA_DATA_DIR` | config.go:105 | Dockerfile, install.sh, ci.yml | **KEEP** |
+| `ORVA_HOST` | config.go | — | **KEEP** — loopback bind behind proxy |
+| `ORVA_PORT` | config.go | install.sh | **KEEP** |
+| `ORVA_WRITE_TIMEOUT_SEC` | config.go | compose | **KEEP** |
+| `ORVA_MAX_BODY_BYTES` | config.go → router.go:538 | — | **KEEP** — real effect |
+| `ORVA_CORS_ORIGINS` | config.go → router.go:543 | — | **KEEP** — security |
+| `ORVA_SECCOMP_POLICY` | config.go → router.go:208 | — | **KEEP** — security |
+| `ORVA_LOG_LEVEL` | config.go → serve.go:143 | — | **KEEP** |
+| `ORVA_SECURE_COOKIES` | config.go → router.go:341 | compose | **KEEP** |
+| `ORVA_SESSION_DAYS` | config.go → router.go:342 | compose | **KEEP** |
+| `ORVA_DEFAULT_TIMEOUT_MS` | config.go only | — | **REMOVED** — phantom |
+| `ORVA_DEFAULT_MEMORY_MB` | config.go only | compose `"128"` | **REMOVED** — phantom |
+| `ORVA_LOG_RETENTION_DAYS` | config.go only | compose `"30"` | **REMOVED** — phantom |
+
+**Category 1b — server knobs read outside the loader (2):** `ORVA_PPROF_ADDR` (serve.go:28 — **not dead**, your suspicion was wrong, it is live and documented); `ORVA_INTERNAL_API_BASE` (server.go:454 — live, **undocumented**).
+
+**Category 2 — sandbox-injected / runtime SDK (13, all KEEP):** `ORVA_API_BASE`, `ORVA_INTERNAL_TOKEN`, `ORVA_FUNCTION_ID`, `ORVA_MEMORY_MB`, `ORVA_ENTRYPOINT` (set in pool.go); `ORVA_EXECUTION_ID`, `ORVA_TIMEOUT_MS`, `ORVA_TRACE_ID`, `ORVA_SPAN_ID` (set in proxy.go); `ORVA_CALL_DEPTH` (adapter-internal); `ORVA_SIGNING_SECRET` (a per-function *secret name*, not an operator knob); plus two latent ones below.
+
+**Category 3 — CLI (5, KEEP):** `ORVA_ENDPOINT`, `ORVA_API_KEY`, `ORVA_CONFIG`, `ORVA_UPGRADE_REPO`, `ORVA_CHAT_NO_GLAMOUR`.
+
+**Category 4 — installer/packaging (14):** `ORVA_REPO`, `ORVA_VERSION`, `ORVA_PREFIX`, `ORVA_CLI_PATH`, `ORVA_COMPOSE_DIR`, `ORVA_DOCKER_RUNTIME`, `ORVA_INSTALL_DRYRUN`, `ORVA_NO_PKG`, `ORVA_SELF_URL`, `ORVA_BOOTSTRAPPED`, `ORVA_CLI_DIR`, `ORVA_INSTALL_COMPLETION`, `ORVA_IMAGE` — all KEEP. `ORVA_ROOTFS_DIR` — **REMOVED** (dead).
+
+**Category 5 — test/CI harness (17, KEEP):** `ORVA_REQUIRE_SANDBOX`, `ORVA_CONTAINER`, `ORVA_BIN`, `ORVA_URL`, `ORVA_E2E_{CONTAINER,DATA_DIR,IMAGE,PORT}`, `ORVA_BROWSER_LEG`, `ORVA_KEEP_CONTAINER`, `ORVA_INSTALLER_PATH`, `ORVA_CLI_INSTALLER_PATH`, `ORVA_CLI_TEST_IMAGE`, `ORVA_CLI_MAX_SIZE_MB`, `ORVA_GATEWAY_PORT` + 2 dead ones below.
+
+**Category 6 — operational/sandbox (2, KEEP):** `ORVA_DISABLE_USERNS` (sandbox.go:264), `ORVA_CGROUPV2_MOUNT` (sandbox.go:373, set by entrypoint.sh:84).
+
+**Category 7 — not env vars at all (7):** `ORVA_LOG_JSON__` (substring of the `__ORVA_LOG_JSON__` stderr magic prefix), `ORVA_TOKEN` (substring of the `&lt;YOUR_ORVA_TOKEN&gt;` docs placeholder), `ORVA_CG`/`ORVA_TEMPS` (shell locals), `ORVA_SYSTEM_PROMPT`/`ORVA_OPENING_USER_MESSAGE` (JS consts in aiPrompts.js), `ORVA_SKIP_VERIFY` (mentioned in scripts/CLAUDE.md **only to state it does not exist** — correct, leave it).
+
+## 2. Server config surface: 13 → 10
+
+Your headline number was right for the wrong reason: the surface was already lean, but **3 of the 13 were phantom knobs**, and two of them were being actively set by our own `docker-compose.yml`.
+
+- `ORVA_DEFAULT_MEMORY_MB` writes `cfg.Functions.DefaultMemoryMB` — **read by nothing**. New functions get a hardcoded `64` at `handlers/functions.go:210`. Our compose shipped `"128"` and CONFIG.md told operators to "tune to your host's available RAM". It did nothing.
+- `ORVA_DEFAULT_TIMEOUT_MS` — same story; hardcoded `30000` at `handlers/functions.go:207`.
+- `ORVA_LOG_RETENTION_DAYS` — writes `cfg.Logging.RetentionDays`, **read by nothing**. `database.PurgeOldExecutions()` exists but **is never called from anywhere**. Compose shipped `"30"`; docs promised "pruned on startup". Log retention is simply not implemented.
+
+## 3. What I changed (6 files, +103/−86)
+
+- `backend/internal/config/{config,defaults}.go` — dropped the 3 loader blocks, their struct fields (`Functions.DefaultTimeoutMS/DefaultMemoryMB`, `Logging.RetentionDays`), their defaults, and their `SupportedEnvVars` entries; fixed the stale "applies the 9 supported env vars" comment.
+- `backend/internal/config/config_test.go` — updated counts (13→10, ActiveEnvVars 8→5), rebuilt the invalid-numeric test on live vars, and added **`TestEverySupportedEnvVarIsRead`**: a table-driven guard that every advertised name is actually consumed by the loader, so this drift can't silently return.
+- `docs/CONFIG.md` — removed the 3 rows; fixed "9 supported" → 10. Also fixed a pre-existing contradiction: the "What's hardcoded (not configurable)" table listed **bind address, request body cap, CORS origins, and seccomp policy as non-configurable** while the table directly above documented env vars for all four. Added a real `PUT /api/v1/functions/{id}` example (verified against docs/API.md:110 — it's PUT, not PATCH) showing where per-function timeout/memory actually live.
+- `docker-compose.yml` — dropped the two no-op env entries.
+- `scripts/install.sh` — dropped `export ORVA_ROOTFS_DIR` from the OpenRC unit: nothing reads it, the rootfs path is derived from `ORVA_DATA_DIR`, and the systemd unit never set it (asymmetry proved it was vestigial).
+
+## 4. Deliberately left alone
+
+- **`ORVA_INTERNAL_API_BASE`** — live and useful (overlay/swarm/k8s escape hatch) but **undocumented**. Documenting it is the right fix; it's read in `server.go`, which is off-limits. No code change needed — just a CONFIG.md row once server.go settles. **Recommend adding it.**
+- **Unimplemented log retention** — I removed the lying knob, not the missing feature. Wiring `PurgeOldExecutions` up would **delete execution rows older than 7 days on every boot** by default; shipping that as a side effect of a config-cleanup task would be reckless. Flagging for a human: either implement it deliberately (with a safe default) or delete the dead `PurgeOldExecutions` helper.
+- **`ORVA_MAX_CONCURRENT`** — `test/loadtest.sh:72` sets it to 500 expecting a higher ceiling; **nothing reads it**, so every load test has silently run at the `cpu_count × 64` default. `test/` is off-limits per your instructions. One-line fix, real effect on load-test validity.
+- **`ORVA_NETWORK_MODE`** — `test/egress-test.sh:104` reads it in function code, but orvad never injects it, so that assertion always sees `null`. Also in `test/`.
+- **`ORVA_FUNCTION_NAME` / `ORVA_MAX_REQUESTS`** — read by both runtime adapters, **set by nothing**. So `ctx.functionName` is always `""` and worker request-count recycling is permanently disabled. These are runtime-SDK surface, not operator knobs; per your guidance I did not touch them, but both look like unfinished plumbing worth a decision.
+- `Functions.DefaultCPUs` / `Functions.MaxCodeSize` — dead struct fields (builder uses its own `DefaultMaxCodeSize` const). Not env vars, and removing them would drag the diff into `middleware.go`. Left for a tight diff.
+
+## 5. Commands run and real outcomes
+
+| Command | Result |
+|---|---|
+| `go build ./...` | pass |
+| `go vet ./backend/internal/config/` | pass |
+| `go test ./backend/internal/config/ ./backend/internal/server/... -count=1` | **all pass** (config, server, events, handlers) |
+| `make lint` / `make test` | both clean, exit 0 |
+| `bash -n scripts/install.sh` | pass |
+| `docker compose -f docker-compose.yml config` | pass |
+| Re-grep for the 4 removed names | zero references (only the intentional explanatory sentence in CONFIG.md) |
+| `make build` + boot | **health 200**, `"status":"healthy"`, **zero ERROR lines**, startup log confirms `"supported":10` |
+
+Two boot-test notes: port **19555 was already occupied** by another agent's `python3` mock provider, so I moved to **19731** (verified free first). `make build` internally invokes `docs-embed`; it was a no-op — `git status` shows exactly my 6 intended files and no `reference.md` copies touched. My test process is terminated; the `./build/orva serve` still running as pid 613970 is another agent's, not mine.</result>
+<usage><subagent_tokens>114635</subagent_tokens><tool_uses>58</tool_uses><duration_ms>584251</duration_ms></usage>
+</task-notification>
+
+---
+
+Three things I did not touch — your call
+
+1. Execution retention isn't implemented. I removed the lying knob, not the missing feature. Wiring PurgeOldExecutions up would start deleting execution rows on every boot — shipping that as a side effect of a config cleanup would be reckless. Either implement it deliberately with a safe default, or delete the dead helper.
+2. ORVA_MAX_CONCURRENT doesn't exist, but test/loadtest.sh sets it to 500. So your published load-test numbers were measured at the default ceiling, not 500. Either add the knob or fix the script — but the existing numbers are suspect either way.
+3. ctx.functionName is always empty in both runtimes, and adapter-side request recycling is permanently off, because nothing injects ORVA_FUNCTION_NAME / ORVA_MAX_REQUESTS. Both look like unfinished plumbing.
+
+None are migration-related; all predate this branch. Builder and benchmark agents are still running — I'll fold everything together and validate before touching the PR. - take best approch for this project going forward and no backward compaitibilty needed.
+
+---
+
+<task-notification>
+<task-id>ad2ec6d05f6f22f5e</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/ad2ec6d05f6f22f5e.output</output-file>
+<status>completed</status>
+<summary>Agent "Sandbox builder npm/pip installs" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Done. Cleanup complete — only the two pre-existing server instances remain untouched.
+
+## What changed
+
+| File | Change |
+|---|---|
+| `backend/internal/sandbox/build.go` (new) | `RunBuild(ctx, BuildConfig) ([]byte, error)` — the build-jail entry point, plus `buildJailArgs`, `resolveBuildRuntime`, and the exported in-jail path `BuildCodeDir`. |
+| `backend/internal/sandbox/seccomp.go` | New `buildSyscalls`/`buildSet` profile + internal base `"build"` + `BuildJailSeccompPolicy(mode)`; 8 new catalog entries; 4 new arm64 exclusions. |
+| `backend/internal/sandbox/sandbox.go` | Extracted `egressConfigArgs` / `egressNetArgs` from `buildArgs` so worker and build jails share **one** fail-closed `--config` implementation. Worker behaviour byte-identical. |
+| `backend/internal/builder/builder.go` | npm / pip / tsc now run via `sandbox.RunBuild`; `NsjailBin`/`RootfsDir`/`EgressPolicy` fields + `SetEgressPolicy`; `runBuildStep`, `resolveEgressPolicy` (fail-closed), `withRegistryEnv`. The old "registry access is a host-level concern" comment is replaced by the truth. |
+| `backend/internal/server/server.go` | `bld.NsjailBin/RootfsDir` from `cfg.Sandbox`; `bld.SetEgressPolicy(fw.EgressPolicy)` beside the pool's. |
+| `backend/internal/sandbox/build_test.go`, `backend/internal/builder/buildjail_test.go` (new) | Arg/config construction, fail-closed, no-deps, seccomp, arm64, env-forwarding tests. |
+| `backend/internal/sandbox/sandbox_test.go` | Fixed `policySyscalls` helper (it silently swallowed the first syscall since the `ERRNO(38)` prefix landed in front of `ALLOW {`). |
+| `backend/CLAUDE.md` | One-line builder description updated. |
+
+Installs use `egress` + policy (fail closed); `tsc` runs jailed with **no** network and therefore needs no policy. Code dir is `-B` (rw), a throwaway `&lt;dataDir&gt;/build-tmp/build-*` is `-B` at `/tmp` and carries `HOME=/tmp/home`, `--cwd /code`, `--rlimit_fsize max`, `--rlimit_nofile max` (nsjail defaults are 1 MB and 32 fds — each fatal on its own), `--time_limit 0`, 2048 MB / 256 pids via cgroup v2, `ORVA_DISABLE_USERNS` honoured. No nsjail-absent branching anywhere.
+
+## Build seccomp profile = `default` + network + 17
+
+**Proven by one-at-a-time removal against real installs:**
+- `symlink` — npm: `npm error code EPERM` (writes `node_modules/.bin` links)
+- `listxattr`, `utimensat` — pip: `ERROR: Exception:` (CPython `shutil.copystat` → `os.listxattr` / `os.utime`; it tolerates ENOTSUP/ENODATA/EINVAL/EACCES but **not** EPERM)
+- `fsync` — pip: `Could not install packages due to an OSError: [Errno 1] Operation not permitted`
+
+**Architecture parity** (aarch64 glibc routes the observed operation through these; the base set has no aarch64-valid `rename` path at all, and the traced install renamed 617×): `symlinkat`, `linkat`, `renameat`.
+
+**Observed in trace, not strictly required on amd64:** `pwritev` (529 calls; libuv falls back on EPERM), `link` (1 call), `vfork` (esbuild's postinstall shell) + `fork`; plus symmetric `preadv`, `fdatasync`. `fork`/`vfork` are strictly weaker than the already-permitted `clone`.
+
+**Contained process control:** `kill`, `tgkill` — not exercised by the validated workloads; included because a postinstall that cannot signal its own children (or `abort()`) hangs, and both are confined to the jail's PID namespace.
+
+**Log hygiene, proven:** `sched_getparam`, `sched_getscheduler` — nsjail's NSTUN threads call `pthread_getschedparam`; denying it sprayed `[mutex.cc:955] RAW: pthread_getschedparam failed: 1` into build output. Allowing them removed it.
+
+Not needed: `chown`/`fchown*` — a root-run install (the Docker case) traced identically, no chown. `capget`, `io_uring_*`, `clone3` stay denied; both runtimes handle it. Enumeration was `strace -ff` of real jailed `npm install` (lodash+axios+typescript+esbuild-with-postinstall) and `pip install` (requests+pydantic), as both uid 1000 and root.
+
+## Real runs
+
+- `make lint`, `make test` (`go test -count=1 ./...`) — green.
+- Negative control: `pip install` under the *unmodified* `default` profile → `OSError: [Errno 1] Operation not permitted`. The build profile is necessary, not decorative.
+- Live instance (`ORVA_DATA_DIR=/var/tmp/orva-bj ORVA_PORT=18777`): node+lodash → build ok, invoke `{"ok":true,"chunked":[[1,2],[3,4]]}`; python+requests → invoke `{"ok": true, "requests_version": "2.34.2"}`; **no-dependency** node fn → unaffected, invoke ok; TypeScript (npm install + jailed tsc) → `compiled to dist/handler.js`, invoke `{"ok":true,"sum":6,"ts":true}`.
+- **Blocked-registry proof.** `orva firewall add registry.npmjs.org` → 26 REJECT rules compiled → deploying a new node dep failed in-jail: `npm error code ECONNREFUSED … request to https://registry.npmjs.org/ms failed`. Same for `pypi.org` + `files.pythonhosted.org` → `Connection refused` ×5 retries → `No matching distribution found for idna`. Deleting the three rules and redeploying: both build **and invoke** succeed again. Under the old host-exec path neither block had any effect.
+- Second instance as **root with `ORVA_DISABLE_USERNS=1`** (bare-metal installer / CI e2e config): node, python and TS deploys all built and invoked.
+- No leftover nsjail processes; `build-tmp` empty after every build.
+
+## Risks / not done
+
+1. **arm64 never executed** — no hardware here. Mitigated by `TestBuildProfileCompilesOnArm64` and by only naming syscalls present in the asm-generic table; a wrong name is a Kafel compile error that would take *every* arm64 build down. Worth one arm64 CI run before release.
+2. **Per-deploy package cache is gone.** HOME is a throwaway dir per step, so npm/pip no longer reuse a cache across deploys (Docker root previously had `/root/.npm`; bare metal's `--no-create-home` orva user likely never did). Repeat deploys re-download. Fix would be binding a persistent `&lt;dataDir&gt;/build-cache` and setting `npm_config_cache`/`PIP_CACHE_DIR` — deliberately **not** done: it is a shared mutable directory across mutually-distrusting builds and I could not validate that trade-off in scope.
+3. **`~/.npmrc` / `pip.conf` no longer apply** (fresh HOME). Mitigated by forwarding `NPM_CONFIG_*`, `npm_config_*`, `PIP_*` and the proxy vars from orvad's environment; daemon secrets are not forwarded (tested).
+4. **Install timeouts unchanged** — I deliberately did not impose `build_timeout_seconds` on installs (that would newly fail slow large installs); `--time_limit 0` keeps nsjail's own 600 s default from introducing a cutoff that did not exist before. tsc keeps its existing timeout, now via `sandbox.ErrBuildTimedOut`.
+5. Build memory/pids are constants (2048 MB / 256), enforced only where cgroup v2 is delegated — same caveat the worker path already has.
+6. I did **not** run the authoritative suites (`test/e2e/run.py`, `test/run-all.sh`) — verification here is `make lint`/`make test` plus the live-instance evidence above.
+7. Pre-existing, untouched: `setpriority` is in `defaultSyscalls` but absent from the syscall catalog, so it is silently dropped from every policy; `server.go`/`pool.go` are not gofmt-clean at HEAD.</result>
+<usage><subagent_tokens>272751</subagent_tokens><tool_uses>121</tool_uses><duration_ms>2169536</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a63cf2f574bcea5cd</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a63cf2f574bcea5cd.output</output-file>
+<status>completed</status>
+<summary>Agent "Benchmark NSTUN flow cap and rule cost" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Cleanup complete: bench instance stopped, all bench rules/functions deleted, scratch dir removed, port 3000 untouched (still 200).
+
+## Deliverable
+
+**`/home/dev/Orva/test/nstun-policy-bench.py`** — stdlib-only, `BASE_URL`/`API_KEY` from env, executable, clearly labelled a benchmark in its docstring with an explicit "must not be added to run-all.sh". Not wired into `run-all.sh`; I did not touch `test/CLAUDE.md` (docs were off-limits). It creates a probe function + up to 1000 rules and removes every one of them via `try/finally` + `atexit` + SIGINT/SIGTERM handlers. Knobs: `BENCH_RULE_STEPS`, `BENCH_ROUNDS`, `BENCH_SAMPLES`, `BENCH_SKIP_FLOWCAP`. It must run on the same host as orvad — it binds its probe listeners to the control-plane address from `/firewall/status`, the one address a sandbox is guaranteed to route to.
+
+## Methodology
+
+Own instance on :18544, `make build`, tmpdir with a `rootfs` symlink. Probe target = a listener on the daemon's control-plane address on a fresh port, so a connect walks the *entire* rule vector (the control-plane allow has a `dport` that doesn't match, so evaluation continues) and lands on NSTUN's default-ALLOW. Timing is `process.hrtime.bigint()` around `net.connect` inside the handler, hundreds of samples per invocation.
+
+Steady-state warm workers: after each rule-count change I drain the pool with a `PUT memory_mb` (the trick `egress-test.sh` uses — the 60 s policy-recycle rate limit doesn't apply), then run a throwaway invocation, then measure. Each measured worker's generation is confirmed by reading `--config` out of the live nsjail argv and matching it against `/firewall/status.policy_generation` (printed as `gen_in_worker=True` on every row). Levels are visited in a rotated order each round so drift can't align with the ladder.
+
+Two independent estimators of scan cost: the **allow path** (matches nothing → full walk), and **reject depth** — inside one policy, compare a destination matched by the *first* reject rule (`169.254.169.254`, position 8) against one matched by the *last* (`198.18.3.99`, position 1007). Same worker, same policy; only walk depth differs.
+
+Two false starts, both corrected: my first probe listener held connections open and never read, which I initially misread as nstun slowness — it was actually the Q2 flow-cap effect leaking into the Q1 rig. Q1 now runs against a server that closes on accept (flow map stays empty).
+
+## Q1 — per-connection policy cost
+
+3 rounds × 400 samples/level, ms, medians across rounds (`a_` = allow path, `rej1` = first reject rule, `rejN` = last reject rule):
+
+| rules | policy v4 | a_min | a_p50 | a_p90 | a_p95 | rej1_min | rej1_p50 | rejN_min | rejN_p50 |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 7 | 0.115 | 0.196 | 0.298 | 0.397 | 0.094 | 0.114 | – | – |
+| 50 | 57 | 0.115 | 0.188 | 0.388 | 0.633 | 0.102 | 0.144 | 0.090 | 0.128 |
+| 200 | 207 | 0.120 | 0.185 | 0.354 | 0.506 | 0.092 | 0.119 | 0.089 | 0.094 |
+| 500 | 507 | 0.124 | 0.181 | 0.496 | 0.701 | 0.101 | 0.139 | 0.120 | 0.127 |
+| 1000 | 1007 | 0.123 | 0.156 | 0.404 | 0.780 | 0.098 | 0.136 | 0.123 | 0.130 |
+
+Confirmed by a separate 5-round × 1000-sample paired run (7 vs 1007 rules): allow min 0.101 → 0.106; rej1 min 0.091 → 0.095; rejN min at 1007 rules = 0.100. All 5400 reject probes returned `ECONNREFUSED`, so the policy was demonstrably loaded and enforced throughout.
+
+**Per-rule cost ≈ 5 ns.** Both estimators agree: walking 999 extra rules costs ~5 µs (reject-depth: 0.095 → 0.100 ms; allow path: 0.101 → 0.106 ms). p50/p95 wander by ±0.1 ms with no ordering by rule count — the 50-rule row is often the slowest.
+
+**Verdict: noise.** 1000 rules add ~5 µs to a connect that costs ≥100 µs on the fastest possible path and 10–100 ms to any real internet destination — 0.005–0.05%. You'd need ~200,000 rules to add 1 ms. The nftables set-lookup → NSTUN linear-scan change is not a measurable regression at any blocklist size an operator would plausibly enter. Operator-side cost is the larger effect and still small: `POST /firewall/rules` goes 2.8 ms → 15.8 ms p50 as the table grows to 1000 (each write recompiles + republishes the whole policy); 1000 adds took 10.4 s; `GET /firewall/status` 1.0 ms, `GET /firewall/rules` 9.3 ms.
+
+## Q2 — the flow cap
+
+The concern is **confirmed at the mechanism level**, reproduced both through Orva and by driving nsjail directly with the published policy generation.
+
+- **Cap is exactly 1024 TCP flows per nsjail process** (per warm worker — the log line is tagged with the nsjail pid/tid). Flooding held precisely 1024; the 1025th onward produced `[W] handle_tcp4():822 Maximum number of TCP flows (1024) reached, dropping`, once per dropped SYN.
+- **At the cap a REJECT rule stops failing fast.** `169.254.169.254` (a shipped `default` reject) answers `ECONNREFUSED` in **0.9–4.4 ms** below the cap, and at the cap returns **nothing at all** — 2 s, 3 s and 6 s probe timeouts all expired with no RST. A fresh *allowed* connection behaves identically. From inside the guest, blocked and allowed are indistinguishable: everything just hangs. With no application timeout the guest would wait out the kernel's SYN retries (~130 s).
+- **The fd limit is not a defence.** Orva doesn't pass `--rlimit_nofile`, so the guest inherits nsjail's default of 32 (`Max open files 32 32`); a Node handler gets **14 concurrent sockets before EMFILE**. But saturation needs only *one* fd at a time: a plain sequential loop of connect → close, against a peer that doesn't close first, saturated after exactly **1025 connections in 2.4 s** (2.5 s / 3.7 s / 25.6 s across runs). That is well within one warm worker's lifetime.
+- **Who closes first decides everything.** Against a server that closes on accept, 2000 sequential connects completed in 3.1 s with zero drops and flat latency across all 20 bins — flows are freed immediately. Against a peer that never closes, the map fills and stays full.
+- **Recovery is slow but automatic.** After saturation, a blocked destination stayed unanswered for 40–56 s of complete idle before flipping back to `ECONNREFUSED` (55 s and 56 s in the two scripted runs). Releasing 200 held sockets produced no relief within 200 ms; under continued churn ~8% of connects stall ~2 s.
+- **Not a regression from this branch.** `origin/main` already spawned egress sandboxes with `--user_net` (NSTUN), so the 1024 cap and the drop-at-cap behaviour predate the nftables removal. What changed is only *where* the REJECT decision lives — and on either implementation the SYN never reached the deciding layer once the cap was hit.
+
+**Verdict: real, but bounded and not caused by the blocklist.** It is a genuine gap between documented behaviour (`ECONNREFUSED` for blocked destinations) and behaviour under saturation, reachable by a single-threaded function doing &gt;1024 short-lived outbound connections to keep-alive-style peers inside ~55 s. It self-heals, it is per-worker (one function can't wedge another), and it is unaffected by blocklist size since the cap is checked before policy evaluation. My recommendation is documentation plus, if anything, per-worker connection-churn observability — raising `--rlimit_nofile` would make it *easier* to hit, not harder.
+
+## Not measured
+
+- Whether real HTTPS traffic accumulates flows — undici/fetch keep-alive and registry/CDN close behaviour decide it, and I only tested synthetic peers.
+- Whether a large `npm install`/`pip install` can hit the cap. This now matters more: a parallel change (visible in `backend/CLAUDE.md`/`builder`) runs build-time installs under the same NSTUN policy. Untested, and a plausible &gt;1024-connection workload.
+- UDP and ICMP flow maps — separate caps with their own `Maximum number of ... flows` messages, not exercised.
+- IPv6 scan cost: no v6 egress route on this host, and the policy carried only 2 v6 rules.
+- Host was 4 CPUs (not 2), idle throughout; the probe is one connect at a time, so nothing here is CPU-bound.</result>
+<usage><subagent_tokens>187081</subagent_tokens><tool_uses>83</tool_uses><duration_ms>2678816</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b2i22xlln</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/b2i22xlln.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for CI to conclude after rerun" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+One real arm64 CI run. The build seccomp profile is the risk: a wrong syscall name is a Kafel compile error that would take down every arm64 build. There's a test asserting the profile compiles for arm64, but no hardware here executed it.
+
+A decision on the build package cache. Builds now get a per-build HOME, so npm/pip re-download on every deploy. I deliberately didn't add a shared cache — it's a mutable directory shared across mutually-distrusting builds, which is a poisoning surface that deserves its own design. - did you ask exprts of agnets for best approch we can take ?
+
+---
+
+latest bianry runnin and UI as well can i test ?
+
+---
+
+<task-notification>
+<task-id>a08d9e8a46ddb07af</task-id>
+<tool-use-id>toolu_01HcoPrj2EeVoW1WyKcwKE8r</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a08d9e8a46ddb07af.output</output-file>
+<status>completed</status>
+<summary>Agent "Expert: arm64 build-jail coverage" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I read `CONTRACT.md`, root `CLAUDE.md`, `test/CLAUDE.md`, the seccomp/build code, every candidate test script, and the live CI run for this branch. **No files were modified.**
+
+---
+
+## Headline: the risk is worse than stated, and `native-engine.sh` cannot close it
+
+Two things change the answer:
+
+**1. The build-jail seccomp profile has never been compiled by Kafel in CI on *any* architecture — not just arm64.**
+No CI job deploys a function with dependencies against a build of the branch's own code:
+- `test/e2e/` — zero hits for `dependencies` / `requirements.txt` / `package.json` / `lodash` / `requests` across all 28 modules (`grep -rl` over `test/e2e/**/*.py` returns nothing).
+- `test/install/native-engine.sh:63-79` writes a bare `handler.js` and `handler.py`, no manifests — your premise is correct.
+- `test/heavy-deploy-test.sh:56` *does* do a real `pip install requests==2.31.0`, but `test/*.sh` appears in `ci.yml` only at line 200, inside shellcheck. It is never executed by CI.
+- `test/install/smoke-flow.sh:160` writes a `package.json`, and `builder.go:432-439` triggers `npm install` on *presence* of `package.json` regardless of whether it declares deps — so this is the one CI path that reaches the build jail. But it deploys without `--follow` (line 164), and an inactive function is downgraded to `warn` + `PASS` (lines 186-192, "nested-container limitation"). It cannot fail on a broken build jail.
+
+**2. `native-engine.sh` installs the *released* binary, not the branch.**
+`ci.yml:875` runs it; the script calls `sh "$installer_path" --bare-metal` (`native-engine.sh:14`), and `scripts/install.sh:684-690` unconditionally fetches `orva-linux-$ARCH` from a GitHub release — there is no local-binary hook. Confirmed from the live log of job `93458935276` on this PR:
+
+```
+==&gt; resolving latest release from GitHub
+==&gt; version: v2026.08.05
+==&gt; downloading orva + nsjail (linux-arm64)
+```
+
+So the currently-green arm64 leg is validating **v2026.08.05**, which predates `buildSyscalls` entirely. Adding a deps deploy there gives a *post-publication canary*, never a merge gate.
+
+The one useful thing this proves: the pre-existing arm64 machinery — `kafelRuntimeAliases` (`seccomp.go:203`, added unconditionally *after* the arch filter at `seccomp.go:308-310`) and the `clone(orva_clone_flags)` rule (`seccomp.go:336-339`) — is confirmed good on aarch64 Kafel. `git diff main...HEAD -- seccomp.go` shows neither is new. The unverified surface is exactly the 13 names this branch added to a policy for the first time: `renameat, utimensat, listxattr, preadv, pwritev, tgkill, sched_getparam, sched_getscheduler, symlinkat, linkat, fsync, fdatasync, kill`.
+
+---
+
+## Q2 — the existing unit test proves almost nothing
+
+`TestBuildProfileCompilesOnArm64` (`backend/internal/sandbox/build_test.go:272-285`) does **not** compile anything. It calls `policySyscalls()`, which is a string splitter over Orva's own generated policy (`sandbox_test.go:268-287`) — it slices between `ALLOW { ` and ` } }` and splits on commas. Kafel is never invoked; nsjail is never spawned. No Go test in the repo spawns nsjail (`builder/buildjail_test.go` only exercises the fail-closed policy gate).
+
+Precisely:
+- **Proves:** `arm64UnsupportedSyscalls` is applied to the build base, and the five `*at` forms survive.
+- **Does not prove:** that any name in the emitted policy exists in Kafel's aarch64 catalog. It is a tautology over `arm64UnsupportedSyscalls` — the same map drives the code and the test's expectation, so a name that aarch64 lacks *and* that nobody thought to add to the map passes both.
+- **Does not prove:** risk B at all — that the compiled filter permits what an install actually needs on aarch64 (glibc's `symlink`→`symlinkat`, `rename`→`renameat` routing, CPython `shutil.copystat`→`utimensat`/`listxattr`).
+
+Coverage validity note: `ci.yml:387`, `Dockerfile:38`, and `release.yml:47` all pin nsjail at `5ebcc30bef4af60d6e28f012dd8bf7b99b8b0acf`, so a source-built nsjail in CI carries the same Kafel catalogs that ship.
+
+---
+
+## Q1 + Q3 — recommendation
+
+**Change A (the gate — required). Two files.**
+
+*`test/e2e/tests/test_deploy_invoke.py`* — add a dependency-install case. `deploy-inline` already supports it with no new API: `functions.go:634-682` writes the `dependencies` string as `package.json` for node and `requirements.txt` for python.
+
+```python
+# node: forces npm to create node_modules/.bin/semver -&gt; symlinkat on aarch64
+deps = '{"name":"e2e-deps","version":"1.0.0","dependencies":{"semver":"7.6.3"}}'
+code = 'const s=require("semver");exports.handler=async()=&gt;({statusCode:200,body:JSON.stringify({v:s.valid("1.2.3")})})'
+# assert deployment status == "succeeded"  (NOT a soft skip)
+# assert invoke body == {"v":"1.2.3"}
+
+# python: pure-python wheel, no binary extension (see Q5 caveat)
+deps = "urllib3==2.2.3\n"
+code = 'import urllib3, json\ndef handler(e,c): return {"statusCode":200,"body":json.dumps({"v":urllib3.__version__})}'
+# assert "succeeded" + body v == "2.2.3"
+```
+
+The two assertions are load-bearing and must be **hard failures**, unlike the soft skips in `test_firewall.py:576-580`. `deployment status == "succeeded"` catches risk A (Kafel refuses the policy → nsjail exits 255 → `installDependencies` returns an error → deployment `failed`). The invoke body catches risk B *and* proves the installed tree is loadable by the worker.
+
+*`.github/workflows/ci.yml`* — give the `e2e` job (line 351) an arch matrix:
+
+```yaml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+```
+
+This is the **only** job that builds the branch (`ci.yml:378`), provisions real nsjail + rootfs (`ci.yml:380-401`), and sets `ORVA_REQUIRE_SANDBOX=1` (`ci.yml:446`). Everything in it is already arch-portable: `scripts/build-rootfs.sh:22-24` pulls multi-arch `node:24-slim` / `python:3.14-slim`; nsjail's build deps are arch-any; `released-container` (`ci.yml:892`) already proves Docker works on `ubuntu-24.04-arm`. The `/dev/net/tun` guard this branch added (`ci.yml:406-413`) is required for the build jail too — `builder.go:518` marks every install step `network: "egress"` — and it comes along for free with the matrix.
+
+If you want to keep the arm64 blast radius small, run the arm64 leg scoped: `run.py` supports `--filter` (`test/e2e/run.py:162`), so `--filter deploy` runs only `test_deploy_invoke`. I'd start there and widen later.
+
+**Change B (cheap canary — recommended, not sufficient alone). One file.**
+Add the same two deps functions to `test/install/native-engine.sh` alongside the existing dependency-free ones (lines 82-104), reusing `--follow`, which is documented to exit non-zero on build failure (`cli/commands/deploy.go:44`). This gates the *published artifact* on both arches when `ci.yml`'s `artifacts` suite fires post-release. It is a second net, not the primary one.
+
+---
+
+## Q4 — cost
+
+Measured from run `31388961761` (this branch, today), via the REST jobs API:
+
+| Job | Wall |
+|---|---|
+| `e2e` total | **2m 23s** (of a 60-min timeout, `ci.yml:359`) |
+| — provision nsjail | 38s |
+| — provision rootfs | 15s |
+| — run E2E suite | 61s |
+| `native-engine (arm64)` total | **21s** (install+deploy+invoke step: 13s) |
+
+- Change A: the arm64 leg costs ~2.5–4 min of runner time, running **in parallel** with amd64. Critical path today is `install-matrix (rocky9)` finishing at 12:52 vs. run start 12:38 → ~14 min total; a 3-min parallel leg adds **~0 wall clock**. The deps case itself adds ~20-40s per leg (one small npm package + one pure-python wheel).
+- Change B: +~30s per arch on a 21-34s job with a 30-min timeout (`ci.yml:856`).
+- Total: ~+4 min runner time, ~0 min wall. Comfortably inside every existing budget.
+
+**What it catches:** Kafel rejecting a name in the aarch64 catalog (total arm64 build outage); a missing syscall on the aarch64 glibc path (`symlinkat`/`linkat`/`renameat`, `utimensat`/`listxattr`); the same two on amd64, which today also have zero coverage; any future addition to `buildSyscalls` that breaks either arch.
+
+**What it does not catch:** syscalls reached only by *other* packages — postinstall scripts, `node-gyp`, prebuilt-binary packages like esbuild. The original profile was traced against lodash+axios+typescript+esbuild and requests+pydantic (`seccomp.go:91-95`); a two-package CI install is a much thinner trace. It also does not cover the `tsc` step's no-network profile — though `BuildJailSeccompPolicy("")` is a strict name-subset of the `"egress"` form (`seccomp.go:257-259`), so risk A there is fully implied; only risk B for `tsc` specifically stays uncovered. Adding a tsconfig case is optional and costs a ~6s `typescript` install.
+
+---
+
+## Q5 — other arm64 exposure
+
+1. **`--platform manylinux2014_x86_64` is hardcoded in the pip argv** (`backend/internal/builder/builder.go:486`), combined with `--only-binary=:all:` (line 488). On an aarch64 host this installs **x86_64 wheels**. `git diff main...HEAD` shows the flag was *moved*, not introduced — it is a pre-existing bug, not this branch's. But it now lives inside the changed code and it is a live trap for the test you're about to write: pick a dependency whose whole tree is `py3-none-any` (hence `urllib3`, not `requests` — `requests` pulls `charset-normalizer`, which ships mypyc-compiled manylinux wheels and would be resolved as x86_64). Worth filing separately; the correct fix is deriving the platform from `runtime.GOARCH`.
+2. **`kafelRuntimeAliases` is never arch-filtered** — `seccomp.go:308-310` appends `newfstat`/`newuname` *after* the `syscallSupportedOnArch` loop. This is fine (proven green on aarch64 by the released-binary native-engine leg), but it is a structural hole: any future alias added there bypasses the arch guard entirely and would take down *every* sandbox on arm64, not just builds.
+3. **Rootfs toolchain is fine.** `release.yml:340-352` builds rootfs tarballs per-arch on native runners, and `scripts/build-rootfs.sh:22-24` pulls multi-arch base images. No cross-arch toolchain skew.
+4. **Egress/NSTUN path is arch-neutral.** `git diff main...HEAD` over `backend/`, `cli/`, `scripts/`, `test/` shows exactly one `+` line touching an arch token outside seccomp comments/tests: the `manylinux` line above. `cloneNamespaceFlags` (`seccomp.go:211`) is numeric precisely so it compiles identically on both targets, and `clone`'s arg0 is `flags` on both x86_64 and aarch64.
+
+---
+
+## Rejected alternatives
+
+- **`docker buildx` / QEMU aarch64.** Rejected on correctness, not just speed. An aarch64 nsjail under qemu-user *would* surface the Kafel compile error, but the seccomp BPF it then installs validates `AUDIT_ARCH_AARCH64` while the syscalls qemu actually issues arrive as x86_64 — the filter's arch check misses and everything falls through to `DEFAULT ERRNO(1)` (`seccomp.go:344`). You get a guaranteed false-red on risk B and a valid answer only for risk A. A free native `ubuntu-24.04-arm` runner gives you both halves for the same money.
+- **Relying on `native-engine.sh` alone.** It runs on real arm64 hardware but on the released binary (proven above). Post-publication only. Keep it as Change B; it cannot be the gate.
+- **A new dedicated arm64 job.** Permitted — CONTRACT §7 restricts *workflows*, not jobs — but pointless: provisioning (nsjail 38s + rootfs 15s) dominates, so a scoped job costs essentially what the full matrix leg costs. The matrix leg buys strictly more for the same price.
+- **A new workflow.** Not proposed; CONTRACT §7 forbids it and nothing here needs it.
+- **Making the existing unit test call Kafel.** Requires linking nsjail's Kafel from Go — a CGO dependency, and `make test` must stay pure-Go host-only (CONTRACT §6). Rejected.</result>
+<usage><subagent_tokens>139586</subagent_tokens><tool_uses>48</tool_uses><duration_ms>498288</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a317451513fc29251</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a317451513fc29251.output</output-file>
+<status>completed</status>
+<summary>Agent "Expert: build package cache design" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I did not modify any file. Here is the advisory.
+
+---
+
+# Build cache: recommendation
+
+**Recommendation: Option B — a per-function cache — implemented as a *separate* persistent mount so only the two package caches persist, not `HOME`. Do it in two phases; phase 0 is a bug fix you want regardless. Reject C and D outright. Your instinct is right, but the reason you gave for it is wrong, and the wrong reason matters because it would have led you to accept a shared cache the moment someone quoted npm's integrity guarantees at you.**
+
+---
+
+## 1. What the code actually does (evidence)
+
+- Jail mounts: `-B &lt;codeDir&gt;:/code` (**read-write**) and `-B &lt;scratch&gt;:/tmp` — `backend/internal/sandbox/build.go:215-216`. The chroot itself is the runtime rootfs and is **read-only** (no `--rw` anywhere in `backend/internal/sandbox/`).
+- `HOME=/tmp/home`, `TMPDIR=/tmp`, fixed `PATH` — `build.go:252-256`. `buildHomeDir = buildTmpDir + "/home"` (`build.go:44`), i.e. HOME is inside the one throwaway mount.
+- The scratch dir is created per build under `&lt;dataDir&gt;/build-tmp` (`builder.go:548-551`), `chmod 0777` (`build.go:142`), and **`defer os.RemoveAll(scratch)`** (`build.go:138`). That single line is the whole regression: npm's cacache and pip's `http-v2` live there and are deleted at the end of every build.
+- Env forwarded from orvad: `NPM_CONFIG_*`, `npm_config_*`, `PIP_*`, plus the six proxy vars — `builder.go:580-585`, applied in `withRegistryEnv` (`builder.go:589-617`), and caller env overrides the structural env (`build.go:257-262`).
+- Concurrency: `NumCPU` workers, 64-deep channel (`queue.go:71-79`). Builds of the *same* function are serialised by `FnLock` (`queue.go:158-162`), wired in production at `server.go:204`. Different functions build concurrently.
+- Already-free case: identical tarball hash short-circuits the whole install (`builder.go:135-145`). So the cache only matters when **code changed but dependencies did not** — which is precisely the iteration loop.
+- `flock`, `rename`, `renameat2`, `link`/`linkat` are all in the build seccomp set (`seccomp.go:35-37`, `seccomp.go:119-125`), so no seccomp work is needed for either cache.
+
+## 2. Threat model, plainly
+
+The only actor who can influence a build is someone who can deploy — i.e. the operator or a credential holder, so this is not a multi-tenant build farm. The realistic attacker is a **malicious or compromised npm package in function A's transitive dependency tree**, whose `postinstall` script runs as arbitrary code inside A's build jail. The question is therefore not "can tenants attack each other" but "when one function's dependency tree goes bad, does it stay contained to that function, or does it get to write into something function B reads" — and lateral movement to a function that never depended on the bad package is a real escalation worth one cheap design decision, but not worth an architecture.
+
+Two asymmetries matter. **Only node builds contain an attacker.** Orva runs pip with `--only-binary=:all:` (`builder.go:489`), so no `setup.py` executes and the python build jail contains nothing but pip itself. And isolation between builds today is by **bind mount, not by uid** — every jail runs as the same host uid; the only reason A cannot touch B is that B's directory is not mounted. A shared cache would be the *first and only* writable surface two mutually distrusting builds share.
+
+## 3. The crux — and your premise is wrong
+
+You wrote that npm's cache is content-addressed and integrity-verified, so a poisoned entry would simply miss. That is true of the *content store* and false of the *cache as a whole*. I tested both installers on this box rather than reasoning about it.
+
+**npm, content tampering — your model holds.** I appended junk to every blob under `_cacache/content-v2/`. npm detected it, printed `cached data ... seems to be corrupted. Refreshing cache`, refetched, and installed clean bytes. Poisoned content at an authentic integrity path is a SHA-512 second preimage; that door is shut.
+
+**npm, metadata forgery — your model breaks.** The packument is cached *in the same cacache*, keyed by URL, and its index entry is `sha1(entry)\t{json}` (`cacache/lib/entry-index.js:134,257,295-307`) — an unkeyed corruption checksum, forgeable by anyone who can write the directory. I forged a `dayjs@1.11.11` packument whose `dist.integrity` matched a poisoned tarball I placed in the content store. Result:
+
+```
+added 1 package in 349ms
+module.exports = "MALICIOUS_PAYLOAD";
+```
+
+That was a **default `npm install`** — no `--prefer-offline` — because the attacker also controls the cached `resHeaders`, so I set `cache-control: public, immutable, max-age=31557600` and npm never revalidated. The victim's freshly generated `package-lock.json` recorded the *poisoned* integrity as truth. Content-addressing does not help when the trust anchor lives in the same attacker-writable store.
+
+The one real defence: with an **authentic `package-lock.json` already in the tarball**, the same poisoned cache was rejected and npm installed genuine dayjs. So npm is safe only for users who commit a lockfile — which Orva neither requires nor checks.
+
+**pip — worse, and pip says so itself.** The cache is `sha224(url)` → `&lt;path&gt;` + `&lt;path&gt;.body` (`SafeFileCache._get_cache_path`, `pip/_internal/network/cache.py:62-68`), with **no content verification on read**. Poisoning only the wheel body fails loudly, because `req.hashes(trust_internet=True)` (`prepare.py:338-368`) supplies the `sha256` from the simple index. But the index response is in the same URL-keyed cache. I patched the index JSON's `sha256` to match a poisoned `idna` wheel:
+
+```
+Successfully installed idna-3.7
+MALICIOUS_PIP_PAYLOAD = True
+```
+
+No warning. And there is no lockfile escape hatch in practice — `requirements.txt` carries hashes only if the user writes `--hash=` lines, and Orva does not pass `--require-hashes`. pip's own docstring states the assumption a hostile writer breaks: *"we assume that the server will only ever return the same data for the same URL"* (`cache.py:43-55`). Its cache metadata is `cc=4,` + msgpack of the response headers — trivially rewritten to extend freshness to a year.
+
+**Conclusion: a shared read-write cache is a genuine arbitrary-code-execution channel from any node build into every later build of any language.** Not a theoretical poisoning surface — a demonstrated one, in under an hour, with default flags.
+
+## 4. What Option A actually costs (measured, this host, 14.5 MB/s to the registry)
+
+| Workload | Cold | Warm | Δ |
+|---|---|---|---|
+| npm, 8 deps (typescript, @types/node, pg, redis, express, axios, zod) — 46 MB tarballs → 43 MB `node_modules` | 7.1 / 7.3 / 8.1 / 12.1 s | 3.2 / 3.4 / 3.6 / 4.8 s | **~4 s (≈55%)** |
+| npm, 5 light deps — 15 MB → 16 MB | 3.8–4.4 s | 2.1–2.2 s | ~2 s (≈48%) |
+| pip, requests+pydantic+numpy+pandas — 38 MB wheels → 171 MB installed | 16.0 / 16.4 / 17.7 / 19.8 s | 13.2 / 13.4 / 13.7 / 14.0 s | **~3 s (≈18%)** |
+
+Two honest caveats. This is a fast link, so it is near the *best case for doing nothing*; the delta is essentially download volume, so a homelab on 25 Mbps sees roughly +12 s instead of +4 s for the npm case. And pip's win is small because most of pip's time is unpacking 171 MB, which no HTTP cache touches — Python users get materially less from this than intuition suggests. Note also that builds are async (202 + deployment ID), so this is iteration-loop latency in the deploy progress UI, not request latency.
+
+## 5. Why the alternatives lose
+
+- **A (status quo).** Gives up nothing; costs ~4 s (fast link) to ~15 s (slow link) per node deploy, forever, on the most common developer action. Defensible, and I would accept it — but note you are *already paying the disk write*: npm fills 46 MB of cache inside the scratch dir on the data-dir filesystem and then deletes it. Keeping it is nearly free in I/O; you are throwing away work you already did.
+- **C (shared RW).** Buys cross-function reuse on first deploys. Gives up containment entirely — see §3. Reject.
+- **D (shared RO + writer).** Asymmetric and doesn't work: pip tolerates a read-only cache (writes are swallowed by `suppressed_cache_errors`, `cache.py:28-36`), npm does not — cacache write failures are fatal, and there is no read-only mode. Making it work needs a per-build overlay, which needs mount privileges the daemon does not have, or an out-of-band warmer that must itself resolve every function's dependency graph. High complexity, and the warmer becomes a new trusted component. Reject.
+- **E (registry proxy / verdaccio / devpi).** This is the *architecturally correct* answer — the cache lives in a process nobody else can write, and it would also cut registry flows. It is also a whole new daemon, with HTTPS interception or a rewritten registry URL that breaks lockfile `resolved` fields, plus egress-policy interaction. Wildly disproportionate for a single-operator homelab FaaS. Correct answer if Orva ever becomes multi-tenant; wrong answer today.
+- **E-variant (seed `node_modules` from the previous version dir).** Faster than a package cache in principle, but a hardlinked or copied tree that npm then mutates in place is a correctness hazard, and copying 43–171 MB can cost more than the download saved. Not worth the risk.
+- **B (per-function).** Buys ~55% of node deploy time and ~18% of pip deploy time on exactly the workflow that matters (edit code → redeploy, deps unchanged). Gives up **nothing across functions**: `&lt;dataDir&gt;/build-cache/&lt;fnID&gt;/` is written and read only by builds of that function, and `FnLock` (`queue.go:158-162`) already serialises those, so there is no concurrent-writer question at all. The only residual property given up is *persistence within one function*: a dependency that poisoned function A's cache survives A's author removing the dependency. That is real and needs a purge control, but it is bounded to a function that was already compromised.
+
+## 6. Implementation sketch
+
+**Phase 0 (do regardless, ~30 lines, no security question):**
+
+1. In `buildJailArgs`, set `npm_config_cache`, `npm_config_logs_dir`, and `PIP_CACHE_DIR` explicitly, *after* the forwarded env wins today. Right now an operator with `npm_config_cache=/root/.npm` in orvad's environment has that forwarded (`builder.go:580`) into a jail where the chroot is read-only and the path is unmounted — builds break with a confusing EROFS. Orva must own these three variables.
+2. Sweep stale `&lt;dataDir&gt;/build-tmp/build-*` on boot. `defer os.RemoveAll` (`build.go:138`) only covers a live process; a crash leaks tens of MB per in-flight build, permanently.
+
+**Phase 1 (the cache):**
+
+- Directory: `&lt;dataDir&gt;/build-cache/&lt;functionID&gt;/{npm,pip}`. Deliberately **not** under `functions/&lt;id&gt;/` — see §8; that tree is already orphaned on delete, so putting it there inherits an existing leak.
+- Mount: a *third* bind, `-B &lt;cacheDir&gt;:/cache`, alongside the existing `-B &lt;scratch&gt;:/tmp`. Keep `HOME` throwaway. This is the design point — persisting all of HOME would persist npm logs, the update-notifier stamp, and anything a postinstall script drops in `~`. Persist exactly two cache trees and nothing else. Add a `BuildConfig.CacheDir` field; empty keeps today's behaviour (important for the unit tests in `buildjail_test.go`).
+- Env: `npm_config_cache=/cache/npm`, `PIP_CACHE_DIR=/cache/pip`, `npm_config_logs_dir=/tmp/npm-logs` (npm's `logs-dir` defaults to `${cache}/_logs` and would otherwise accumulate in the persistent dir). Set these in the structural block of `buildJailArgs` and let them win over forwarded values.
+- Bounds — three of them, none optional:
+  1. `build_cache_max_age_days` (default 14) — sweep any per-function cache dir untouched for longer. Slots into the existing `GC.tick` in `builder/gc.go`, same `GetSystemConfigInt` pattern as `versions_to_keep`/`min_free_disk_mb` (`migrations.go:381-383`).
+  2. `build_cache_max_mb` (default 2048) — global cap, evict whole per-function dirs LRU by mtime. Evicting a whole dir, never files within one, keeps both caches internally consistent.
+  3. Explicit purge: `DELETE /api/v1/functions/{id}/build-cache` + `orva functions purge-cache`, and drop the dir when a function is deleted. Without this there is no clean recovery from a compromised build, which is the one property Option B gives up.
+- Rough sizing: 15–46 MB per node function, ~38 MB per python function. 20 functions ≈ 1 GB — hence the cap.
+
+**Restart / egress:** the data dir is a persistent volume and `scripts/entrypoint.sh` only refreshes the rootfs adapters (`entrypoint.sh:26-40`), so the cache survives restarts by construction — which is exactly why eviction is mandatory rather than nice-to-have. For nstun: a cache strictly *reduces* concurrent registry flows (npm's parallel tarball fetches are the bulk of them), so it moves away from the 1024 cap, never toward it. Neutral-to-helpful; not a factor in the decision.
+
+## 7. What could still go wrong, and what I'd test
+
+- **A cache that silently doesn't work.** Both installers fail soft on an unwritable cache dir — pip swallows the OSError outright. Assert cache reuse behaviourally: build twice, assert the second build's `build_logs` show no tarball fetches (or assert wall-clock), and assert `&lt;dataDir&gt;/build-cache/&lt;fn&gt;/npm/_cacache/content-v2` is non-empty. A test that only checks the flags were passed will pass while the feature is dead.
+- **Cache dir permissions under `ORVA_DISABLE_USERNS=1`** — the existing scratch dir needs `0777` for exactly this reason (`build.go:139-143`); the cache dir needs the same treatment, and a bare-metal install is the case that catches it.
+- **Eviction racing an in-flight build.** Take the function's `FnLock` before removing its cache dir, or skip dirs with a recent mtime.
+- **Disk-cap interaction** with `min_free_disk_mb` (`builder.go:243-263`) — the pre-flight check should account for the cache, and eviction should be triggerable by low disk, not only by the timer.
+- **Regression guard on isolation:** a test asserting the jail args contain exactly one cache bind, scoped to the building function's ID. That is the invariant that stops someone "simplifying" this into a shared dir in six months.
+
+## 8. Two adjacent bugs found while reading
+
+- **Deleting a function never deletes its disk tree.** `FunctionHandler.Delete` (`functions.go:471-493`) → `Registry.Delete` (`registry/registry.go:110-122`) → `DeleteFunction` (`database/functions.go:212`) is DB-only. `&lt;dataDir&gt;/functions/&lt;id&gt;/versions/**` is orphaned permanently, and the version GC iterates `ListFunctions` (`gc.go:63-78`), so it never revisits it either. Given you just fixed unbounded execution history, this is the same class of bug already live on disk.
+- **`&lt;dataDir&gt;/build-tmp` leaks on crash** — as above.
+
+## 9. Honest verdict
+
+Do it, but only as Option B, and only with the eviction and purge controls in the same PR. If you want to defer, defer to a follow-up ticket rather than shipping half of it — "cache with no bound" is strictly worse than "no cache."
+
+If you decide to leave it alone, that is a defensible call and you should say so in `build.go`'s header comment in one sentence — "installs are hermetic; no package cache persists between builds" is a real security property that a future contributor will otherwise 'fix' without realising it was a choice. What you should **not** do is leave the current comment's implication that the throwaway HOME is merely incidental. And whichever way you go, correct the premise in your own head: npm and pip caches are *not* self-authenticating. A shared build cache in this codebase would be an ACE channel between functions, and I have a reproducer.</result>
+<usage><subagent_tokens>125192</subagent_tokens><tool_uses>54</tool_uses><duration_ms>925979</duration_ms></usage>
+</task-notification>
+
+---
+
+follow what experts agenrs are syaing ok.
+
+---
+
+<task-notification>
+<task-id>a59c77b9c0b660dad</task-id>
+<tool-use-id>toolu_01UYHBfGAhvyZzYBpvPpVPpD</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a59c77b9c0b660dad.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement per-function build cache" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Everything is green. Implementation complete.
+
+## What was done
+
+**Phase 0 — bug fixes**
+- **Orva now owns the cache env vars** (`backend/internal/sandbox/build.go`). `npm_config_cache`, `PIP_CACHE_DIR`, `npm_config_logs_dir` are set *after* the caller-env merge, and `setOwnedEnv` deletes every case spelling first (npm folds `NPM_CONFIG_CACHE`/`npm_config_cache` onto one key and resolves collisions by env iteration order). An operator with `npm_config_cache=/root/.npm` on orvad no longer gets an unexplained EROFS.
+- **Boot sweep** of stale `build-tmp/build-*` (`builder.SweepBuildScratch`, called from `backend/cmd/orva/serve.go`).
+
+**Phase 1 — per-function cache** (`backend/internal/builder/buildcache.go`, new)
+- `&lt;dataDir&gt;/build-cache/&lt;fnID&gt;/{npm,pip}`, `BuildConfig.CacheDir` (empty = exactly today's throwaway behaviour), 0777 like the scratch dir, HOME still throwaway, `npm_config_logs_dir` pointed at `/tmp/npm-logs`.
+- All three bounds: `build_cache_max_age_days` (14) and `build_cache_max_mb` (2048, whole-directory LRU) in the existing GC tick, plus purge on delete and `DELETE /api/v1/functions/{id}/build-cache`. Eviction uses `TryLock` on `FnLock` (wired into the GC from `poolMgr.FunctionLock`) plus a 15-minute mtime grace; `PrepareBuildCache` stamps the dir mtime each build so LRU order is real last-use. `checkFreeDisk` now reports cache usage and evicts idle caches before returning `ErrInsufficientDisk`.
+- CLI: `orva functions purge-cache` — a subcommand under the existing group, no new top-level command; command-tree golden diff still zero (107 = 107).
+
+**One design change forced by the live run:** the cache mounts at `/tmp/cache`, not `/cache`. nsjail must create the mount point inside the chroot, and the rootfs is read-only and owned by another user — `scripts/build-rootfs.sh` pre-creates only `/code` and `/tmp`. A top-level `/cache` failed **every build** with `mkdir('/…/root//cache'): Permission denied` on all currently deployed rootfs trees. Persistence is decided host-side by the bind, so nothing else changes. `TestBuildJailArgs_CacheMountPointIsInsideTheScratchMount` pins it.
+
+**Extra scope (function-dir leak):** `Delete` now calls `builder.PurgeFunctionFiles` after the DB delete, non-fatally. Path construction goes through `fnScopedPath`, which rejects empty ids, separators, `.`/`..`, and anything where `filepath.Base(id) != id` — with `TestFnScopedPathRefusesEscape` covering it specifically. The GC also sweeps orphaned `functions/&lt;id&gt;` dirs, gated three ways: `TryLock`, a 15-min "last write" grace (max of the dir's and `versions/`'s mtime, since a parent dir's mtime doesn't move on redeploy), and a **hard skip when the function listing is truncated** (`res.Total &gt; len(res.Functions)`) — without that, functions past the page limit would look deleted.
+
+## Measured, on my own instance (`ORVA_DATA_DIR=&lt;tmp&gt; ORVA_PORT=18777`, killed and cleaned up)
+
+| | mean cold | mean warm | saved |
+|---|---|---|---|
+| node, 8 deps (3 alternating pairs) | 4.3 s | 2.7 s | 1.6 s (38%) |
+| python, 5 deps | 5.8 s | 5.5 s | 0.3 s (5%) |
+
+Python matches your prediction that most of pip's time is unpacking. Reuse was proven behaviourally, not by timing: I snapshotted npm's `_cacache/content-v2` (path+size+mtime of all 82 blobs) around a warm build — **byte-for-byte identical afterwards**, i.e. npm downloaded nothing. Cache: 9.0 MB npm / 3.8 MB pip; dirs 0777; no `_logs` in the persistent tree.
+
+Also verified live: size-cap eviction (`build cache gc evicted=1 freed_mb=8 max_mb=1`), boot sweep (`swept stale build scratch dirs count=1 freed_mb=12`, unrelated dir untouched), and delete removing both `functions/&lt;id&gt;` and `build-cache/&lt;id&gt;`.
+
+## Commands run
+`make lint` (clean), `go test ./... -count=1` (all pass), `-race` on builder/sandbox/handlers (clean), `bash test/cli/command-tree.sh` (PASS), `shellcheck test/build-cache-test.sh` (clean), and the new `test/build-cache-test.sh` against the live instance: **10 passed, 0 failed**.
+
+## Notes
+- `backend/internal/database/database_test.go` needed its seed-row count bumped 14 → 16 for the two new `system_config` keys.
+- `installDependencies`/`maybeCompileTypeScript` gained an `fnID` parameter; the two existing call sites in `buildjail_test.go` pass `""`, which exercises the no-cache path — their assertions are unchanged.
+- Three modified files in `git status` are **not mine**: `backend/internal/sandbox/seccomp.go`, `sandbox_test.go`, `test/install/native-engine.sh` (your concurrent seccomp-alias work).
+- Not done: `ORVA_DISABLE_USERNS=1` is untested live (my instance runs unprivileged) — the cache dir gets exactly the same 0777+chmod treatment as the existing scratch dir. `PIP_NO_CACHE_DIR` in orvad's env would silently disable the pip half; I left it alone as an explicit operator opt-out rather than overriding it. No MCP tool for the purge (would touch the 73-tool registry and its documented count) — say the word if you want one.</result>
+<usage><subagent_tokens>228284</subagent_tokens><tool_uses>149</tool_uses><duration_ms>1786675</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>boq7uy66j</task-id>
+<tool-use-id>toolu_01CmEZrpsfo75sS3KTQivuKv</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/boq7uy66j.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for CI on the fix commit" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+I want to ask you a simple question. We are all good to push and update the PR and review the PR and merge it to main. Are we there or not?
+
+---
+
+So, start the PR review. Like, I want you to basically spin an agent which will do the complete PR review, right?
+
+---
+
+run the update version on local 3000 - understaood ?
+
+---
+
+<task-notification>
+<task-id>abd8d42dd9b971c08</task-id>
+<tool-use-id>toolu_01WFXwmQ3WzkX7yTbT3DXYY3</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/abd8d42dd9b971c08.output</output-file>
+<status>completed</status>
+<summary>Agent "Adversarial security review of PR 39" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Confirmed. Here is my adversarial review.
+
+---
+
+# Adversarial security review — PR #39 (`feat/remove-nftables-nstun`)
+
+I ran a throwaway instance (port 19870, isolated data dir, killed and cleaned up — the user's `:3000` and an unrelated agent's `:19882` were left untouched) and drove nsjail directly with policy files the daemon actually produced. The migration is largely sound: build-jail escape attempts failed (EROFS/EACCES/ENOENT), per-function cache isolation holds, the spawn path is genuinely fail-closed (no policy → `ErrEgressPolicyMissing`), and `fnScopedPath`'s delete guards are solid. But the PR's **central, repeated safety claim** — *"every value is parsed with netip … unspecified addresses refused … so a malformed rule cannot become a wildcard"* — is **materially false for two of the three input paths** that feed addresses into the compiled policy. Both are reproducible and both are reachable by a non-admin `write`-scoped API key.
+
+First, the nsjail fail-open the PR describes is real and I reproduced it: `dst_ip: "0.0.0.0/32"` matches **every** address, not just 0.0.0.0 (nsjail treats an all-zero dst as "unset = match-any", the /32 notwithstanding). The compiler's guard against this (`parseTarget`, `policy.go:338/343`) is applied **only to CIDR blocklist rules**. The DNS-server path and the hostname path never call it.
+
+## Finding 1 — [Medium] Zero DNS-resolver compiles to a match-any ALLOW on port 53 (silent partial blocklist bypass)
+- **Breaks:** "unspecified addresses refused… a corrupted ALLOW is allow-everything, with no log line" and "every value is validated here."
+- **Where:** `backend/internal/firewall/manager.go:495-507` (`dnsServerAddrs`, no unspecified filter) → `backend/internal/firewall/policy.go:208-217` (DNS carve-out emits `hostPrefix(s)` with no `IsUnspecified` check). Accepted at the API by `handlers/firewall.go` `PutDNS` because `net.ParseIP("0.0.0.0") != nil`.
+- **Reproducer:** `PUT /api/v1/firewall/dns {"servers":["0.0.0.0"]}` (200, works with a `read,write` key — no admin needed). The daemon compiles an `ALLOW … dst_ip "0.0.0.0/32" dport 53` rule that precedes all REJECTs. Enforcing that exact file:
+  ```
+  1.1.1.1:53  -&gt; CONNECT   (1.1.1.0/24 is in the blocklist)
+  1.1.1.1:443 -&gt; REFUSED
+  ```
+  Every blocklisted destination becomes reachable on TCP/UDP 53 — a textbook DNS-exfil/C2 channel. `GET /firewall/status` reports `enforced: true`, lists a benign-looking `"0.0.0.0/32"`, and raises **no** `unenforced` entry. `::` does the same for IPv6.
+
+## Finding 2 — [Medium] Hostname rule `0.0.0.0` compiles to a match-any REJECT (silent full egress DoS)
+- **Breaks:** same claim; also "a malformed rule doesn't become stricter, it becomes a wildcard" — the PR says it prevents exactly this.
+- **Where:** `backend/internal/firewall/policy.go:244-255` (hostname branch: no `IsUnspecified`/`Is4In6` guard). The API's hostname branch does no IP validation, and `net.LookupHost("0.0.0.0")` returns `["0.0.0.0"]`.
+- **Reproducer:** `POST /api/v1/firewall/rules {"rule_type":"hostname","value":"0.0.0.0"}` (201, `write` key). Produces `REJECT … dst_ip "0.0.0.0/32"` proto ANY = match-any. Enforcing the daemon's file:
+  ```
+  8.8.8.8:443 -&gt; REFUSED
+  93.184.216.34:80 -&gt; REFUSED   (everything blackholed)
+  ```
+  One request from a non-admin key silently severs **all** egress for every `network_mode=egress` function, while the dashboard shows the policy as healthily enforced — an operator will burn hours before suspecting their own rule.
+
+Both findings share one root cause and one-line fix: route DNS-server addresses and hostname-resolved addresses through the same `IsUnspecified`/`Is4In6`/canonicalization gate `parseTarget` already applies to CIDRs (drop-and-report, don't emit).
+
+## Finding 3 — [Low→Medium] Daemon-side exemption is broader than the sandbox carve-out ("cannot drift apart" is false)
+- **Breaks:** `policy.go:437-440` / `manager.go` claim that `Policy.Blocks` "walks the same rules… the sandbox gets, so the daemon and sandboxes cannot drift apart."
+- **Where:** the sandbox control-plane rule is **port-scoped** (`policy.go:201-204`, TCP `dport: cp.Port`), but the daemon's exempt set is the **bare address on all ports** (`manager.go:245` `exempt: m.cp.Addrs`; `policy.go:451-455` compares address only, ignores port), plus loopback is unconditionally exempt (`policy.go:448`).
+- **Reproducer:** with `10.1.1.20/32` (the control-plane host) in the blocklist, a webhook delivery to `http://10.1.1.20:19871/` **succeeded (200)** from the daemon, while a sandbox to `10.1.1.20:19871` was **REFUSED**. So the operator's blocklist does not cover the daemon for *any* port on the control-plane host, nor for loopback. On single-node installs the control-plane address is the box's own LAN IP — precisely what an operator would want protected from SSRF-via-webhook. Webhook creation only needs `write`, so this is an SSRF hole for a non-admin key, not just admins. Fix: scope the daemon exemption to the SDK port (mirror the compiled carve-out) rather than exempting the whole address.
+
+## Finding 4 — [Informational] `egressConfigArgs` stat is content-blind; a rules-less-but-parseable config runs unfiltered
+- `sandbox.go:347` only `os.Stat`s the policy file. I confirmed that a config which parses but omits the `user_net` block, combined with the CLI `--user_net` (which is appended unconditionally for egress), starts nsjail and yields **fully unfiltered** egress. An *empty* file fails closed (nsjail rejects it), and Orva only ever writes complete files atomically, so this is **not reachable through Orva's own code** — but the "fail-closed" guarantee rests on that invariant, not on the stat. A cheap hardening: have the manager assert `countRuleBlocks(rendered) &gt; 0` (it already exists) and/or have `egressConfigArgs` reject a zero-length/no-`user_net` file. Not blocking.
+
+## Things I tried that held up (no finding)
+- Build-jail escape via `postinstall`: `/opt/orva`, `/etc` → EROFS; `/etc/shadow` → EACCES; `/var/lib/orva` → ENOENT; runs as jailed uid 1000; only `/code` and `/tmp/cache` writable (by design). Per-function cache isolation confirmed on disk (`build-cache/&lt;fnID&gt;/…`).
+- Over-wide CIDR (`10.0.0.0/64`, `/33`) and `::ffff:1.2.3.4` are correctly rejected (`netip.ParsePrefix` + the `Is4In6` guard). `0.0.0.0/0`, `0.0.0.0` bare, `::/0` correctly land in `unenforced`.
+- Spawn fail-closed path: egress mode with no policy → `ErrEgressPolicyMissing` → `503 EGRESS_POLICY_UNAVAILABLE`. Builder is fail-closed too (`resolveEgressPolicy` errors on nil).
+- `X-Orva-Internal-Token: junk` → 401 (the memory-noted bypass is **not** present on this branch; the check is a constant-time compare against the real token).
+- Privilege removal (`NET_ADMIN` from docker/systemd): nsjail's TAP is made in its own userns; egress deploy+invoke+block enforcement all worked on my host without `NET_ADMIN`. `CapabilityBoundingSet` correctly keeps `CAP_NET_ADMIN` for nsjail's file-cap execve. No consumer left behind.
+- Policy retire rate-limiting/coalescing behaves as documented; immutable generation files mean in-flight workers keep a stable policy.
+
+## Verdict
+**Safe to merge with specific fixes.** The nftables→NSTUN migration itself is well-built and the fail-closed spawn path is real. But Findings 1 and 2 defeat/contradict the PR's headline safety claim, are silent (reported as `enforced`), and are triggerable by a non-admin `write` key or a plausible operator typo — I'd treat them as **fix-before-merge** (both are one-line guards: apply the existing `parseTarget` unspecified/family checks to the DNS-server and hostname paths). Finding 3 is a real daemon-side SSRF drift that should be fixed but is lower-impact and can be a fast follow. Finding 4 is defense-in-depth, nice-to-have. None of these rise to "do not merge," but shipping 1+2 unfixed means the one control this entire PR exists to provide can be silently bypassed (port 53) or silently self-destructed (all egress) without a single log line.</result>
+<usage><subagent_tokens>221671</subagent_tokens><tool_uses>103</tool_uses><duration_ms>1444916</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a3584651f8b9d6ae4</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a3584651f8b9d6ae4.output</output-file>
+<status>completed</status>
+<summary>Agent "Operability and claim-verification review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Cleanup done — my test servers are gone, the dev instance on :3000 is untouched, and the repo has no tracked-file changes.
+
+## Review: PR #39 — replace host nftables with per-sandbox NSTUN policy
+
+The security core of this PR is real and well-built. I verified the headline enforcement claims end-to-end against my own instance and they hold up. The problems are in the *adjacent* work the PR bolted on ("Beyond the migration") — one of which will destroy user source code.
+
+---
+
+### BLOCKING
+
+**1. The orphan sweep deletes every function's source tree when the `functions` table is empty.**
+`backend/internal/builder/gc.go:115` — `complete := res.Total &lt;= len(res.Functions)` is `true` for an empty DB (`0 &lt;= 0`), so `live` is empty and `sweepOrphanFunctionDirs` (`gc.go:260-296`) treats *every* directory under `functions/` as an orphan and `os.RemoveAll`s it (`gc.go:287`). The three guards the PR advertises all exist and work — but none covers the zero case. There is no `if len(live) == 0 { return }`.
+
+I reproduced this live: deployed a function, deleted `orva.db` (a lost DB, a restore from an empty/older backup, or a data dir whose DB was recreated), restarted. At the first GC tick:
+
+```
+"msg":"removed orphaned function dirs","count":1,"freed_mb":0
+```
+
+`functions/&lt;id&gt;/versions/&lt;hash&gt;/` — the only on-disk copy of user source, what `GetSource` and `diff` read — was gone, ~5 minutes after boot, from one `INFO` line. On `origin/main` that data survived a lost DB and was recoverable. Restoring a week-old DB backup is the same class: it deletes the code of every function created since.
+
+Related asymmetry: `listBuildCaches` explicitly guards `dataDir == ""` (`buildcache.go:196-199`) but `sweepOrphanFunctionDirs` does not, so `filepath.Join("", "functions")` would resolve relative to CWD. Not currently reachable, but it should be closed given what the function does.
+
+**2. A PR-body claim about test coverage is false.** The PR says `TestEverySupportedEnvVarIsRead` "now fails if an advertised variable isn't consumed." It does not. `backend/internal/config/config_test.go:81-102` only asserts the var appears in `cfg.ActiveEnvVars` — i.e. that it was *parsed*. On `origin/main` all three removed phantom knobs appended themselves to `active` (`config.go:156-176`), so this test would have **passed** on exactly the bugs it is presented as guarding. The stated regression guard doesn't exist.
+
+---
+
+### HIGH
+
+**3. Retention deletes history by default, at boot, with no supported way to turn it off.** Default 30 days (`retention.go:30`), first purge fires immediately at startup (`serve.go:107` → `retention.go:41`). But `SetSystemConfig` is called only for the three DNS keys — there is no API, CLI, MCP tool, or UI to set `execution_retention_days`. Meanwhile `docs/CONFIG.md:119-122` justifies the DB-backed design by saying it is "in the same category as the DNS resolvers and the egress blocklist," both of which *are* settable. There is also no seeded row, so `SELECT * FROM system_config` gives an operator no signal that a deletion policy is active. Someone upgrading with two years of history cannot opt out before the first destructive sweep without hand-editing SQLite — which no doc shows.
+
+**4. Retention misses the two fastest-growing tables.** `PurgeOldExecutions` (`executions.go:522-548`) covers `execution_logs`, `execution_requests`, `executions`. `execution_log_entries` and `user_spans` have **no `DELETE` anywhere in the tree** (grep-verified) — not in retention, not in `DeleteExecution`, not on function delete. So `docs/CONFIG.md:114`'s "Delete executions, their logs and their captured requests" is wrong about what the dashboard's Logs and Traces views read, and rows are left dangling against deleted execution ids.
+
+**5. The purge is unbatched on the single write connection.** Three `DELETE`s with no `LIMIT`, no batching, no ctx. `db.write` is `SetMaxOpenConns(1)` (`database.go:64`), so every other writer *blocks* behind it rather than hitting `busy_timeout`. Each statement is one implicit transaction, so on a large first sweep the WAL must grow to hold every dirty page — on the exact instance whose disk problem motivated the feature. Also two full `SELECT COUNT(*) FROM executions` scans purely for a log line (`retention.go:66,72`), and no `VACUUM`, so the file never shrinks.
+
+---
+
+### MEDIUM
+
+**6. `EvictIdleBuildCaches` can delete another function's cache mid-build.** `buildcache.go:293` passes `nil` as the tryLock where the GC paths correctly pass `g.tryFnLock` (`gc.go:183,210`). The only protection left is the 15-minute mtime grace — and that mtime is stamped once at build start (`buildcache.go:126-131`); npm/pip write into nested subdirectories, so the directory mtime never advances. A build running &gt;15 min looks idle. The doc comment at `buildcache.go:285` ("Caches a build may still be using are left alone") overstates the guarantee.
+
+**7. `docs/CONFIG.md:136` says the cache mounts at `/cache`.** It is `/tmp/cache` (`sandbox/build.go:47,64`). `backend/CLAUDE.md:97` — same PR — explains at length that a top-level `/cache` *cannot* work and fails every build. Two PR-authored docs contradict each other; CONFIG.md is the wrong one.
+
+**8. MCP tool count.** I counted **73** live over `/mcp` — the PR's number is right. But three places still say 72: `README.md:80`, `frontend/src/utils/aiPrompts.js:19`, and `docs/reference.md:966`. That last one is a self-contradiction *inside the canonical file* (which says 73 at lines 650/694), and because `docs-embed` byte-copies, it ships identically to the `get_orva_docs` MCP tool, `orva docs`, and the dashboard.
+
+**9. API/CLI doc gaps for endpoints this PR added.** `GET /api/v1/firewall/status` is absent from `docs/API.md` even though `docs/ERRORS.md:70` tells operators to go look at it. `DELETE /functions/{id}/build-cache` is absent from API.md entirely, and `orva functions purge-cache` is absent from `docs/CLI.md`.
+
+**10. `docs/DEPLOYMENT.md:151-153` is now false** — still reads "The `system_config.log_retention_days` knob is a placeholder — automatic prune isn't implemented yet." That is the page an operator reads when planning disk and backups.
+
+---
+
+### LOW
+
+**11.** A hostname blocklist rule that fails to resolve on a **cold** boot silently produces no rules and is *not* reported as unenforced (`policy.go:242-254`; `manager.go:447`'s retained-address cache is empty on first boot). Every other unenforceable rule is surfaced, so this is the one silent gap in an otherwise good "report what isn't enforced" story.
+
+**12.** `docs/OPERATIONS.md` calls the nftables build "pre-release." It shipped in real releases. The substance is correct — I confirmed `origin/main`'s `Manager.Stop` calls `nftablesFlush` (`manager.go:114`), and `install.sh` restarts gracefully, so a normal upgrade genuinely leaves nothing behind — but an operator on the current release may read "pre-release" and skip the exception that applies to them after a hard kill or reboot.
+
+**13.** Removed env vars are ignored with no warning. Verified an old compose file (`ORVA_DEFAULT_MEMORY_MB`, `ORVA_LOG_RETENTION_DAYS`, `ORVA_DEFAULT_TIMEOUT_MS`, `ORVA_ROOTFS_DIR` all set) boots to `health=200` — no upgrade break, but no signal either.
+
+---
+
+## Claims I checked
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| A blocklist rule actually refuses a connection, as `ECONNREFUSED` | **TRUE** | `test/egress-test.sh` **15/15** against my instance, including "blocklist rule refuses the outbound connection" and "refusal surfaces as ECONNREFUSED" |
+| Fail-closed: missing policy file → `503 EGRESS_POLICY_UNAVAILABLE`, recovers | **TRUE** | Hid the *current* generation, forced a cold egress spawn → `503 EGRESS_POLICY_UNAVAILABLE` with `retry_after_s:10`; restored → `200`. `network_mode=none` served `200` throughout. (My first two attempts hid a *stale* generation and got 200 — the check is on the live generation only, which is correct.) |
+| `GET /api/v1/firewall/status` returns what docs say | **TRUE** | Live response matches `docs/API.md:437-468` field-for-field; `backend: nstun`, `enforced: true`, `nftables_available` genuinely gone |
+| Build cache is reused on a second deploy | **TRUE** | Cache populated to 2,234,517 bytes, byte-identical across redeploys, emptied by `DELETE …/build-cache`, repopulated to the same size. `test/build-cache-test.sh` **10/10** |
+| Deps install inside the jail under the egress policy ("registry blocked → build fails") | **TRUE** | Blocked `registry.npmjs.org` → deploy `failed`; unblocked + purged cache → `succeeded` |
+| **Node 8-dep install 4.3s → 2.7s (38%)** | **NOT REPRODUCED** | 3 alternating purge/cold/warm pairs, 8 deps: cold 2890/5614/2917 ms vs warm 4809/4724/4382 ms — warm *slower* in 2 of 3, mean cold 3807 ms vs warm 4638 ms. Mechanism is real; the number is a single-sample figure with no method or variance stated, and doesn't hold on this host (4 vCPU, data dir on tmpfs) |
+| **29 orphaned dirs / 63 MB reclaimed on the dev instance** | **UNVERIFIABLE** | Post-hoc. Current state is *consistent* (5 dirs on disk, 5 functions in DB, trees map to live functions) but not re-derivable, and the arithmetic doesn't obviously close: 88 MB − 63 MB = 25 MB vs 4.8 MB actually present |
+| `ORVA_DEFAULT_MEMORY_MB` / `_TIMEOUT_MS` / `LOG_RETENTION_DAYS` / `ROOTFS_DIR` were phantom knobs | **TRUE (all four)** | Traced on `origin/main`: creation hardcodes 64 MB (`handlers/functions.go:209`) and 30000 ms (`:206`); `Logging.RetentionDays` read nowhere; `ROOTFS_DIR` was never in `SupportedEnvVars` — `RootfsDir` is derived from `ORVA_DATA_DIR` (`config.go:109`) |
+| Nothing still sets/references the removed vars | **TRUE** | Only two intentional "this was removed" notes, `docs/CONFIG.md:66,124` |
+| `TestEverySupportedEnvVarIsRead` fails if a var isn't consumed | **FALSE** | See blocking #2 |
+| Config surface 13 → 10 | **TRUE** | Startup logs `"supported":10` |
+| `nft`/`nftables`/`NET_ADMIN` fully removed | **TRUE** | Zero `nftables` in Dockerfile/installer; every remaining mention is a correct explanatory or historical note. `CapabilityBoundingSet` keeps `CAP_NET_ADMIN` (nsjail's requirement) and `run-distro.sh:98-106` correctly inverts to assert *no* `AmbientCapabilities=` |
+| "Nothing to clean up" upgrading from nftables | **TRUE** (wording aside) | `origin/main` `Manager.Stop` → `nftablesFlush` removes the table on graceful shutdown; `install.sh:897-899` restarts gracefully. See low #12 on "pre-release" |
+| `install.sh` still parses and behaves | **TRUE** | `bash -n` clean, `shellcheck` exit 0, `--dry-run` completes and prints the new `Sandbox egress:` line |
+| Exactly two workflows; nothing references the old `e2e` job name | **TRUE** | Only `ci.yml` + `release.yml`. `release.yml`'s gate keys on the **workflow file** conclusion (`repos/…/workflows/ci.yml/runs`), not job names, so the rename is safe |
+| `release.yml` coherent with capability removal | **TRUE** | `--cap-add NET_ADMIN` dropped from the published `docker run` snippet (`release.yml:501`) |
+| Docs single-source: 4 copies byte-identical | **TRUE** | All five (incl. the `ui_dist` snapshot) share `md5 4fdba7b71f079dff7a3970890b7d1164` |
+| MCP live: 73 tools | **TRUE** | Counted 73 unique tool names over `/mcp` |
+| CI green / `make lint` + `make test` | **TRUE** | Both clean on my run |
+
+---
+
+## Verdict
+
+**Not ready to merge.** The firewall migration itself — the actual subject of the PR — is solid work and I could not break its enforcement, fail-closed behaviour, or privilege claims. The Docker and bare-metal upgrade paths are clean: no dangling capability or package reference, installer parses and dry-runs, unit refresh does `daemon-reload` + conditional restart, and an old compose file still boots.
+
+**Blocking:**
+1. `gc.go:115` — add the `len(live) == 0` guard (plus ideally a two-tick confirmation or a quarantine rename instead of `RemoveAll`). This is silent, unrecoverable loss of user source on an ordinary DB-restore scenario.
+2. Fix or drop the PR-body claim about `TestEverySupportedEnvVarIsRead` — as written it asserts a guarantee the test does not provide.
+3. Give `execution_retention_days` a supported way to be set (route/CLI/MCP, or at minimum a seeded row plus documented SQL) before shipping a destructive default that fires at boot. Shipping "we delete your history in 30 days" with no off switch an operator can reach is the wrong order of operations.
+
+**Should fix before the release that carries this:** retention's missing tables (#4), the unbatched boot purge (#5), the `nil` tryLock in `EvictIdleBuildCaches` (#6).
+
+**Follow-ups:** the doc corrections (#7–#10, #12), the cold-boot hostname gap (#11).
+
+Two notes on the PR's own epistemics, since it invites that scrutiny: the enforcement claims are unusually well-supported and I confirmed the ones I could reach, but the **38% cache speedup did not reproduce** on my host (warm was slower in 2 of 3 alternating pairs), and the disk-reclaim numbers are stated as measured fact while being unverifiable after the fact and not quite self-consistent. Those should be softened to "directionally faster, environment-dependent" rather than presented as measurements.</result>
+<usage><subagent_tokens>157841</subagent_tokens><tool_uses>77</tool_uses><duration_ms>2301644</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a76e0bd9c3765070a</task-id>
+<tool-use-id>toolu_015338qhGfGSRcfPfACcABit</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a76e0bd9c3765070a.output</output-file>
+<status>completed</status>
+<summary>Agent "Independent validation of PR 39 findings" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Validation complete. Worktrees removed; the PR was not modified.
+
+---
+
+```
+Verdict: REQUEST CHANGES
+Base SHA:    1adf6a2ac1afab6a03e34c103000ead690924f09  (origin/main)
+PR head SHA: 3db1e6edb59a20fe8afa755a26e0beb93f6fefa1  (moved twice mid-review:
+             bc0b77fe → 3db1e6ed; all findings re-confirmed against 3db1e6ed)
+Date:        2026-08-10
+```
+
+The head moved twice while I worked. `bc0b77fe` ("close review findings") and `3db1e6ed` ("guard the orphan sweep") are genuine responses to prior review. I verified every claimed fix by reverting it and confirming the test fails — three do. Two claimed fixes are incomplete, and two findings are untouched.
+
+| # | Finding | Result | Sev | Evidence |
+|---|---|---|---|---|
+| 1 | Concurrent refresh restores older policy | **Fixed-but-untested** | P2 | `firewall/manager.go:210` `refreshMu` now spans read→resolve→compile→publish→Store. Race was real: I reproduced published reject-count going **backwards** 3/3 runs with the lock removed. Zero tests in PR cover it. |
+| 2 | Warm workers keep old policy ~60s | **Confirmed** (status-only fix) | P2 | `manager.go:52` `minRetireInterval=60s`; `notifyPolicyChange:295` coalesces. New `pending_recycle` field exists **only** in `manager.go:393/426` — absent from frontend, CLI, docs, reference.md, and untested. |
+| 3 | Mutation APIs 200 while enforcement failed | **Partially confirmed** | P2 | HTTP fixed (`handlers/firewall.go:52-61` logs Warn). **MCP still discards silently**: `mcp/tools_firewall.go:153, 174, 243` `_ = deps.Firewall.ForceRefresh()`. |
+| 4 | Control-plane exemption allows every port | **Fixed-and-covered** | P1→resolved | `policy.go:488` now `e.Unmap()==addr &amp;&amp; port==p.exemptPort`. Reverted it → `TestDaemonExemptionIsPortScopedLikeTheSandboxRule` fails on ports 80/443/22/9200. |
+| 5 | Legacy nftables cleanup missing | **Partially confirmed** (docs defect) | P2 | Code argument is sound. `docs/OPERATIONS.md:249` says "**pre-release**" — false. `v2026.08.05` is the *only published release* and is the nftables+`CAP_NET_ADMIN` build. |
+| 6 | Bifrost DNS rebinding | **False** as described; narrow residual | P3 | Bifrost v1.7.5 `providerUtils.ConfigureDialer` re-resolves and rejects link-local/unspecified/RFC1918 **at every dial**, incl. redirects+streaming. Metadata rebinding not exploitable. |
+| 7 | Registry credentials in process argv | **Confirmed, NEW in this PR** | P2 | `sandbox/build.go:359` `args = append(args,"--env",k+"="+v)`; allowlist is `NPM_CONFIG_`/`npm_config_`/`PIP_`/proxy — the credential-bearing set. |
+| 8 | Unresolved enabled rule → permissive, unreported | **Confirmed, unfixed** | P1 | `policy.go:259-271`: `for range resolve(r.Value)` iterates zero times → 0 rejects, **0 unenforced entries**. Reproduced. |
+
+---
+
+## Detail
+
+**#1 — race was real, fix is correct, nothing tests it.** I wrote a monotonicity test (rules only ever added ⇒ published reject count must never decrease). With `refreshMu` removed: `[3 4 5 6 **5** 6 7 9 …]` — an older DB snapshot publishing after a newer one, reproducible 3/3. Restored: clean 3/3. Every `ForceRefresh` call in `manager_test.go` is sequential; `git show bc0b77fe -- '*_test.go'` touched only buildcache/retention/policy tests. *Fix:* add my monotonicity test to `manager_test.go`.
+
+**#2 — real window, honestly narrower than claimed.** `retirePool` (`pool/pool.go:429-449`) is decisive when it fires: pool removed from map, idle workers killed, busy killed on release — so no stale-generation checkout after retirement. The window is purely coalescing, and only when a change lands within 60s of a previous retire (first change after a quiet minute is immediate). Worst case ≈60s + 10s poll tick. It **does** apply to operator security changes, not just DNS. The `pending_recycle` fix is real but invisible: `frontend/src/views/Firewall.vue` never reads it.
+
+**#3 — the MCP gap matters.** MCP is the in-product AI assistant's path. `delete_firewall_rule`'s own description asserts "recycles the warm egress workers, so traffic the rule was blocking is reachable again within seconds" — stated as fact while the error is dropped. *Fix:* route all three through the same `refreshEnforcement` helper.
+
+**#8 — the one I'd hold the merge for.** An enabled exact-hostname rule that resolves to nothing (NXDOMAIN, typo, resolver down at boot) contributes no rules **and** no `unenforced_rules` entry. `Firewall.vue:594-610` builds its entire "Not enforced" surface from `unenforced_rules` plus a hardcoded wildcard check, so the rule renders as an ordinary active block. Mitigating: `resolveHostname` retains prior answers for 30 min and the 10s poll re-resolves, so it self-heals once DNS works — the durable cases are boot-before-resolver and a permanently bad hostname. *Fix:* in the hostname branch, if the resolved-and-usable set is empty, append an `UnenforcedRule{Reason: "hostname did not resolve to any usable address"}`.
+
+**#7 — a genuine widening introduced here.** On `main`, npm/pip ran on the host with `cmd.Env` inherited → `/proc/&lt;pid&gt;/environ`, mode 0400. This PR moves them to argv → `/proc/&lt;pid&gt;/cmdline`, mode **0444**. `docker-compose.yml` sets `pid: host` and the image has no `USER`, so any local host user can `ps` them. nsjail's `--env KEY` (no `=`) pass-through form was verified working and orvad's env is already inherited, so the fix is ~10 lines. No test asserts secrets are absent from argv; two existing tests assert the `KEY=VALUE` form and would need updating.
+
+**#6 — false as described, with three real sub-points.** Not exploitable for metadata/private rebinding. Residual: (a) operator-blocklisted **public** CIDRs can be rebound to within a turn (one preflight covers up to 25 iterations); (b) `gemini` is absent from `defaultRoot`, so with a default base URL **no preflight runs at all**; (c) `docs/SECURITY.md:281-287` wrongly claims the AI gateway's provider calls are dialer-checked. Requires admin, who can just delete the rule — hence P3.
+
+## Scope
+
+Substantial beyond the migration. **Build sandboxing should stay** — the deleted nft `output` hook did filter host `npm`/`pip`, so splitting it ships a release where installers are the one path around the blocklist. **CI strengthens** the gate (amd64+arm64 e2e is the only place the new Kafel profile compiles); `CONTRACT.md` §7 holds — still exactly two workflows. Docs copies are byte-identical (md5 `4fdba7b7…` across all four).
+
+**Execution retention is the item to split.** `3db1e6ed` improved it (key now seeded in `migrations.go`, purge logs at Warn naming the disable path), which removes the trap where `UPDATE` was a silent no-op. But it remains default `30`, on by default, and `serve.go:107` → `purgeOnce()` runs **immediately at boot with no delay** — before the operator can see the warning it emits. There is no REST route, MCP tool, CLI command, or dashboard control for it. Rollback restores the binary and zero rows; every other change in these 160 files is undone by `git revert`. That asymmetry, not unrelatedness, is the argument.
+
+The orphan-dir sweep was the other data-loss risk and `3db1e6ed` fixed it well: an empty function table no longer authorises deleting every function's `versions/` tree, with `TestGCNeverSweepsWhenTheDatabaseHasNoFunctions` covering it.
+
+## Blockers (all small)
+
+1. **#8** — report unresolved hostname rules as unenforced.
+2. **#3** — MCP paths must log the refresh failure.
+3. **#7** — pass forwarded registry/proxy vars as `--env KEY`, not `KEY=VALUE`.
+4. **#5** — `docs/OPERATIONS.md:249`: "pre-release" → name `v2026.08.05` and bare-metal systemd.
+5. **Retention** — split it, or default to `0` for existing databases.
+
+**Non-blocking:** regression test for #1; surface `pending_recycle` in the UI; add `gemini` to `defaultRoot`; fix `docs/SECURITY.md:281-287` and `docs/DEPLOYMENT.md:151` (still says retention is an unimplemented placeholder).
+
+**Validation run:** `go vet ./...` clean; `go test -count=1 ./...` fully green; `go test -race` green on firewall/builder/database/sandbox at `3db1e6ed`. Revert-experiments confirmed the three new tests are load-bearing. **Not tested:** the full `test/e2e/run.py` and `test/run-all.sh` suites (need Docker + nsjail + `ORVA_REQUIRE_SANDBOX=1`), real nsjail NSTUN packet enforcement, the bare-metal upgrade path with a seeded stale nftables table, and cross-arch build-jail compilation — so I cannot claim this change is verified beyond host-only checks.
+
+**Recommendation:** do not merge as-is. The five blockers are each a handful of lines; #8 and #7 are the substantive ones, and retention deserves its own PR.</result>
+<usage><subagent_tokens>163721</subagent_tokens><tool_uses>62</tool_uses><duration_ms>962825</duration_ms></usage>
+</task-notification>
