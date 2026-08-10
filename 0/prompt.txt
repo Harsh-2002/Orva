@@ -1,0 +1,130 @@
+<task-notification>
+<task-id>a40c16d5b9c69162b</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/2902e625-4ac6-4f6e-82c3-7c87cf749e19/tasks/a40c16d5b9c69162b.output</output-file>
+<status>completed</status>
+<summary>Agent "Go expert: clean-architecture root fix" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything I need. I traced the exact surface Orva uses from go-selfupdate, the atomic-swap algorithm inside it (`update.Apply`), the executable-path/symlink resolution, the GitHub detect logic, the full transitive dependency subtree, and confirmed the vuln chain. Here is my recommendation.
+
+---
+
+## Recommendation: replace go-selfupdate with a small in-repo `internal/selfupdate` package (Candidate 1)
+
+`go mod why golang.org/x/crypto/openpgp` confirms the chain is `cli/commands → go-selfupdate → x/crypto/openpgp`, and it is imported **unconditionally** in the library's `validate.go` (the `PGPValidator` type links `openpgp.CheckDetachedSignature`). There is no build tag to strip it and no upstream fix. So any solution that keeps go-selfupdate on the graph keeps the vuln.
+
+The decisive fact is **how little of the library Orva actually uses**, and that Orva already re-implements most of it:
+
+- **Asset resolution** = list GitHub releases, pick greatest semver whose asset matches `^orva-cli-&lt;os&gt;-&lt;arch&gt;`, plus find `checksums.txt`. (go-selfupdate does this via `go-github`; ~40 lines with `net/http` + `encoding/json`.)
+- **Download + verify** = fetch the asset, sha256 it, compare against `checksums.txt`. Orva **already owns** `fileSHA256`, `parseChecksums`, `remoteAssetSHA`, `remoteBuildDiffers`, and `scripts/install.sh`'s `verify()` does the identical thing.
+- **Atomic swap** = the classic write-`.new` / rename-old / rename-new / remove-or-hide-old dance in `update.Apply` — about 30 lines, and Orva's release assets are **raw uncompressed binaries** (`orva-cli-linux-amd64`, `...windows-amd64.exe`), so the entire tar/zip/xz/bz2 decompression machinery is dead weight for us.
+
+Removing the single import in `upgrade.go` drops the whole subtree — I verified none of these are referenced anywhere else in the repo (only in `/pkg/mod`): `go-github/v86`, `code.gitea.io/sdk/gitea`, `gitlab-org/api/client-go`, `hashicorp/go-retryablehttp`, `42wim/httpsig`, `go-fed/httpsig`, `davidmz/go-pageant`, `ulikunitz/xz`, and `x/crypto/openpgp`. `x/crypto` itself **stays** (backend uses `x/crypto/bcrypt`), but the openpgp package becomes unreachable → govulncheck clears. Because `upgrade.go` is bundled into the server binary too, this removes openpgp from **both** binaries in one edit.
+
+**Why not the alternatives:**
+- **Fork + `replace` (2):** You still carry the entire heavy tree (go-github, gitea, gitlab, retryablehttp, httpsig, pageant, xz), you must split `PGPValidator` into a build-tagged file (a real upstream-diverging patch since it's imported unconditionally), and you own a fork you must rebase forever — all to keep code you never call. Strictly more maintenance than owning ~150 lines you fully understand.
+- **Accept + suppress (3):** Leaves deprecated, unmaintained PGP crypto linked into a security-sensitive serverless platform's server binary, and every future `govulncheck` run re-flags it. Doesn't touch the root cause.
+
+Candidate 1 is the only option that removes the root cause *and* shrinks the attack/dependency surface, and the code we take ownership of is small, stable, and already partially ours.
+
+---
+
+## Package &amp; file structure
+
+New repo-root package `internal/selfupdate/` — same tier as `internal/client` and `internal/ids` (the established precedent for shared, self-contained, well-tested utilities that both binaries link). It is the right home specifically because it needs OS-build-tagged files, which would be noise inside `cli/commands` (which has none today), and it gets its own focused test target. `cli/commands/upgrade.go` stays as the thin Cobra adapter.
+
+```
+internal/selfupdate/
+  selfupdate.go     # public API: Config, Release, DetectLatest, Download, Apply, ExecutablePath
+  github.go         # GitHub REST v3: listReleases(owner,repo) -&gt; []release JSON; GITHUB_TOKEN/GH_TOKEN auth
+  checksums.go      # parseChecksums, fileSHA256, remoteAssetSHA, remoteBuildDiffers  (moved verbatim)
+  apply.go          # atomic replace (write .new / rename / rollback / remove-or-hide old)
+  hide_other.go     # //go:build !windows  -&gt; hideFile no-op
+  hide_windows.go   # //go:build windows   -&gt; SetFileAttributesW via syscall (no x/sys dep)
+  selfupdate_test.go / apply_test.go / checksums_test.go
+```
+
+Clean separation for unit-testing — each stage is a pure function with an injectable `*http.Client`:
+
+```go
+type Config struct {
+    Repo         string       // "owner/name" (from ORVA_UPGRADE_REPO or default)
+    OS, Arch     string
+    AssetFilter  string       // "^orva-cli-&lt;os&gt;-&lt;arch&gt;", compiled to regexp
+    ChecksumFile string       // "checksums.txt"
+    HTTP         *http.Client // injectable for tests
+}
+
+type Release struct {
+    Tag          string           // raw "v2026.05.30"
+    Version      *semver.Version  // parsed for comparison
+    AssetName    string           // "orva-cli-linux-amd64"
+    AssetURL     string           // browser_download_url
+    ChecksumsURL string           // browser_download_url of checksums.txt  (== old ValidationAssetURL)
+}
+func (r *Release) VersionString() string          // semver String(), matches old .Version()
+func (r *Release) LessOrEqual(current string) bool // mirrors old semver compare
+
+func DetectLatest(ctx context.Context, cfg Config) (*Release, bool, error)
+func Download(ctx context.Context, r *Release, http *http.Client) ([]byte, error) // fetch + sha256-verify vs checksums
+func Apply(newBinary []byte, targetPath string) error                             // atomic swap
+func ExecutablePath() (string, error)                                             // os.Executable + EvalSymlinks
+```
+
+`DetectLatest` replicates go-selfupdate's semantics exactly: list releases (first page, `per_page=100`), skip drafts/prereleases, extract semver via `\d+\.\d+\.\d+` from the tag, keep the release whose asset name matches the anchored filter, pick the greatest version, and capture the `checksums.txt` asset URL from that same release. Honor `GITHUB_TOKEN` (and `GH_TOKEN`) so the CI upgrade round-trip keeps its authenticated rate limit — the existing `test/cli/upgrade-test.sh` passes those through.
+
+**Keep Masterminds/semver/v3** (currently indirect) as a direct dependency for `Release.Version`. It's pure-Go, tiny, actively maintained, and preserves *identical* comparison semantics (including the leading-zero leniency the `vYYYY.MM.DD` tags rely on and the `String()` normalization the current "is available" line already prints). Re-deriving date-tag comparison by hand is a needless correctness risk when the vuln is openpgp, not semver.
+
+---
+
+## Reuse vs replace
+
+**Reuse (move as-is, they are already Orva's):** `fileSHA256`, `parseChecksums`, `remoteAssetSHA`, `remoteBuildDiffers` → into `internal/selfupdate/checksums.go` (now used by *both* the download-verify step and the same-tag-rebuilt probe). `upgradeAction`, `assertWritable`, `upgradeAssetFilter` **stay in `cli/commands/upgrade.go`** (command-tier decision/UX). The `remoteBuildDiffers` signature changes only its param type from `*selfupdate.Release` (library) to our `*selfupdate.Release`, and it reads `r.ChecksumsURL`/`r.AssetName` instead of `ValidationAssetURL`/`AssetName`.
+
+**Replace (were the go-selfupdate surface):** `NewGitHubSource`/`NewUpdater`/`DetectLatest`/`ParseSlug` → `DetectLatest`; `ChecksumValidator` → verify inside `Download` (reusing `parseChecksums`); `Release.{Version,LessOrEqual,ValidationAssetURL,AssetName}` → our `Release`; `ExecutablePath` → ours; `UpdateTo` → `Download` + `Apply`.
+
+`runUpgrade` orchestration becomes: `DetectLatest` → compute `versionNewer` / `remoteBuildDiffers` → `upgradeAction` (unchanged truth table) → `ExecutablePath` → `assertWritable` (sudo hint unchanged) → `Download` → `Apply`. **Preserve the exact output strings** the black-box shell test greps for: `"Upgrading"`, `"Upgraded to"`, `"already the latest"`, `"up to date"`, plus the check-mode and rebuilt-mode lines.
+
+---
+
+## Atomic-replace design (per OS)
+
+Reimplement `update.Apply`'s proven sequence in `apply.go`, into the **same directory** as the target (rename can't cross filesystems, and same-dir siblings guarantee that):
+
+1. Stat the target to capture its current mode (default `0o755`).
+2. Write `&lt;dir&gt;/.&lt;name&gt;.new` (`O_CREATE|O_WRONLY|O_TRUNC`, captured mode), copy bytes, **`Close()` before renaming** (Windows won't rename an open file).
+3. `os.Remove(&lt;dir&gt;/.&lt;name&gt;.old)` (stale cleanup; required on Windows where rename fails if dest exists).
+4. `os.Rename(target, .old)` — **works on Windows even for the running exe** (Windows permits renaming a running image; it only forbids deleting/overwriting it). This is the key cross-platform property.
+5. `os.Rename(.new, target)`. On failure, roll back `os.Rename(.old, target)`; if rollback also fails, return a distinguishable error advising manual recovery.
+6. `os.Remove(.old)`; if that fails (Windows running-exe lock), `hideFile(.old)` — `SetFileAttributesW(FILE_ATTRIBUTE_HIDDEN)` via `syscall.NewLazyDLL` on Windows, no-op elsewhere. This reproduces the "rename-and-hide" behavior the requirements call out, with **no `x/sys/windows` dependency** (matches go-update's own approach).
+
+`ExecutablePath` = `os.Executable()` then `filepath.EvalSymlinks` on all platforms. Symlink resolution is **load-bearing**: `install.sh --bare-metal` symlinks `/usr/local/bin/orva → /opt/orva/bin/orva`, so `orva upgrade` must replace the real target, not the symlink. (`EvalSymlinks` is correct cross-platform in modern Go; I'm intentionally dropping go-selfupdate's Windows `GetFinalPathNameByHandle` path to keep one code path and avoid `x/sys` — a documented, minor behavioral simplification for exotic mapped-drive cases.)
+
+Optional hardening worth noting: `assertWritable` currently probes the *file* for `O_WRONLY`, but atomic replace really needs the *directory* writable (it creates `.new`/`.old` there). I'd keep the file-probe for UX parity but add a directory-writability check behind the same sudo-hint — a strict improvement, not a regression.
+
+---
+
+## Test migration
+
+- `cli/commands/upgrade_test.go`: `TestUpgradeAction` **stays** (pure decision, still in `commands`). `TestFileSHA256`, `TestParseChecksums`, `TestRemoteAssetSHA`, `TestRemoteBuildDiffers` **move** to `internal/selfupdate/checksums_test.go`; drop the `github.com/creativeprojects/go-selfupdate` import — the `selfupdate.Release{ValidationAssetURL, AssetName}` literals become our `selfupdate.Release{ChecksumsURL, AssetName}`.
+- `cli/commands/commands_test.go::TestUpgradeAssetFilterPinsOSArch` **stays unchanged** (the anchored filter is still produced by `upgradeAssetFilter`); only its doc comment referencing go-selfupdate needs a cosmetic update.
+- **New** `internal/selfupdate` tests: `DetectLatest` against an `httptest` server returning a canned `/repos/.../releases` JSON payload (assert it picks the greatest matching-asset release and captures the checksums URL, skips drafts/prereleases, respects the arch-pinned filter); `Download` against an `httptest` asset + checksums (pass on match, error on mismatch/absent); and a real temp-dir `Apply` test (seed a fake binary, apply new bytes, assert content swapped, mode preserved, `.old` cleaned).
+- `test/cli/upgrade-test.sh` and `test/cli/build-matrix.sh`: **unchanged** — black-box; they pass as long as output strings and the pure-Go/CGO-free static build hold. The macOS/Windows `--force` E2E legs already exercise the native replacement paths, which now cover *our* `Apply` on real hardware.
+- `go mod tidy` after the edit removes go-selfupdate and its subtree and promotes `Masterminds/semver/v3` to a direct require; `govulncheck ./...` then reports zero.
+
+---
+
+## Honest trade-offs
+
+**You now own cross-platform binary replacement forever.** That's the real cost, and it's concentrated in ~40 lines of `Apply` + `hideFile`. Mitigating factors specific to Orva: the algorithm is the long-battle-tested inconshreveable/go-update logic (I'm transcribing, not inventing); the risky surfaces — Windows running-exe rename+hide, symlink resolution for the bare-metal symlink, partial-write rollback — are all handled by that sequence; and Orva already runs OS-native upgrade E2E on all three platforms plus the Linux round-trip, so regressions surface in CI. Residual risks you inherit are inherent to *any* self-updater regardless of library: antivirus false-positives on live-exe rename, and a cross-device target (mitigated by same-dir siblings). Set against that: the alternative is shipping deprecated, unmaintained OpenPGP crypto in your server binary indefinitely with **no upstream fix path**, plus ~8 transitive dependencies (a full GitHub/GitLab/Gitea SDK stack) you don't use. For a self-hosted serverless platform, owning a small, auditable updater is the more defensible long-term posture than depending on an abandoned one. The one dependency I deliberately *keep* is Masterminds/semver/v3 — buying exact version-compare parity for a trivial, well-maintained, pure-Go cost.
+
+Net: one import removed from `upgrade.go` clears the vuln in both binaries; the code Orva takes on is small, mostly already written, fully testable, and CGO-free/pure-Go static as `cli/CLAUDE.md` requires.
+
+### Critical Files for Implementation
+- /home/dev/Orva/cli/commands/upgrade.go
+- /home/dev/Orva/cli/commands/upgrade_test.go
+- /home/dev/Orva/cli/commands/commands_test.go
+- /home/dev/Orva/scripts/install.sh
+- /home/dev/Orva/go.mod</result>
+<usage><subagent_tokens>98458</subagent_tokens><tool_uses>18</tool_uses><duration_ms>329569</duration_ms></usage>
+</task-notification>
