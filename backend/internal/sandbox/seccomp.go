@@ -81,6 +81,49 @@ var networkSyscalls = []string{
 	"epoll_create1", "epoll_ctl", "epoll_wait", "epoll_pwait",
 }
 
+// buildSyscalls is the allowlist for a dependency-install jail (see
+// build.go). It is deliberately a superset of defaultSyscalls rather than a
+// separate hand-rolled list: a build runs the same two language runtimes, it
+// just also mutates the filesystem it was handed.
+//
+// Every entry below was chosen from a syscall trace of a real `npm install`
+// (lodash + axios + typescript + esbuild, the last with a postinstall script)
+// and a real `pip install` (requests + pydantic) executed inside the jail.
+// The extras fall into four groups:
+//
+//   - Proven required — the install fails with EPERM without them:
+//     symlink (npm writes node_modules/.bin links), listxattr and utimensat
+//     (CPython's shutil.copystat, which pip uses for every installed file and
+//     which does NOT tolerate EPERM from either call), fsync (pip's durable
+//     write of each unpacked file).
+//   - Architecture parity — glibc on aarch64 implements the legacy call via
+//     its *at form, so the pair must be allowed together or the build breaks
+//     on exactly one architecture: symlinkat, linkat, renameat. (renameat
+//     matters most: the traced install renamed 617 times, and the base policy
+//     carries only rename + renameat2, neither of which exists on aarch64.)
+//   - Same-class companions with no new capability: link, fdatasync, preadv,
+//     pwritev (libuv's positional I/O — 529 calls in the traced install), and
+//     fork/vfork, which are strictly weaker than the clone already permitted.
+//   - Contained process control: kill and tgkill. A postinstall script is
+//     arbitrary code that spawns children; it lives in its own PID namespace,
+//     so these can only signal the build's own processes. tgkill is also what
+//     glibc's raise()/abort() uses.
+//
+// sched_getparam/sched_getscheduler are not the build's own calls: nsjail's
+// NSTUN backend runs pthread_getschedparam on its threads, and denying it
+// makes abseil spray "RAW: pthread_getschedparam failed" into build_logs.
+//
+// Network syscalls are NOT baked in — they are layered per step via
+// SeccompAllowForNetworkMode, so the TypeScript compile step (which needs no
+// network) does not get them.
+var buildSyscalls = append(append([]string(nil), defaultSyscalls...),
+	"symlink", "symlinkat", "link", "linkat", "renameat",
+	"utimensat", "listxattr", "fsync", "fdatasync",
+	"pwritev", "preadv",
+	"fork", "vfork", "kill", "tgkill",
+	"sched_getparam", "sched_getscheduler",
+)
+
 var strictSyscalls = []string{
 	// File I/O (read-only)
 	"read", "write", "open", "openat", "close", "newfstatat",
@@ -125,11 +168,15 @@ func init() {
 	for _, s := range networkSyscalls {
 		permissiveSet[s] = true
 	}
+	for _, s := range buildSyscalls {
+		buildSet[s] = true
+	}
 }
 
 var defaultSet = make(map[string]bool)
 var strictSet = make(map[string]bool)
 var permissiveSet = make(map[string]bool)
+var buildSet = make(map[string]bool)
 
 // arm64 deliberately omits several legacy, non-*at syscalls and arch_prctl.
 // Kafel treats an unknown syscall name as a policy compilation error, which
@@ -141,6 +188,11 @@ var arm64UnsupportedSyscalls = map[string]bool{
 	"epoll_wait": true, "mkdir": true, "open": true, "pipe": true,
 	"poll": true, "readlink": true, "rename": true, "rmdir": true,
 	"select": true, "unlink": true,
+	// Reached only via the build profile; aarch64's generic syscall table
+	// has no non-*at link/symlink and no fork/vfork (glibc routes them
+	// through linkat/symlinkat/clone), so naming them here would fail
+	// Kafel compilation and take every build on arm64 down with it.
+	"fork": true, "link": true, "symlink": true, "vfork": true,
 }
 
 // Kafel's amd64 and aarch64 catalogs use the kernel-internal names
@@ -191,6 +243,21 @@ func BuildSeccompPolicy(base string, allow, block []string) string {
 	return buildSeccompPolicyForArch(base, allow, block, runtime.GOARCH)
 }
 
+// seccompBaseBuild names the dependency-install profile. It is deliberately
+// absent from ValidatePolicy/ListPolicies: it is chosen by RunBuild for build
+// jails, never by an operator for worker sandboxes (ORVA_SECCOMP_POLICY is
+// validated against the four public names, so this one cannot be selected
+// there even by typo).
+const seccompBaseBuild = "build"
+
+// BuildJailSeccompPolicy returns the Kafel policy a build jail runs under.
+// mode is the build step's network mode, so the outbound socket syscalls are
+// granted to the dependency installs that need a registry and withheld from
+// the compile step that does not.
+func BuildJailSeccompPolicy(mode string) string {
+	return BuildSeccompPolicy(seccompBaseBuild, SeccompAllowForNetworkMode(mode), nil)
+}
+
 func buildSeccompPolicyForArch(base string, allow, block []string, goarch string) string {
 	if base == "disabled" || base == "" {
 		return ""
@@ -205,6 +272,10 @@ func buildSeccompPolicyForArch(base string, allow, block []string, goarch string
 		}
 	case "permissive":
 		for k, v := range permissiveSet {
+			allowed[k] = v
+		}
+	case seccompBaseBuild:
+		for k, v := range buildSet {
 			allowed[k] = v
 		}
 	default: // "default"
@@ -458,6 +529,17 @@ var allSyscalls = map[string]SyscallInfo{
 	"rseq":              {Name: "rseq", Number: 334, Category: "sync", Description: "Restartable sequence"},
 	"linkat":            {Name: "linkat", Number: 265, Category: "file_io", Description: "Create hard link relative to dir"},
 	"symlinkat":         {Name: "symlinkat", Number: 266, Category: "file_io", Description: "Create symlink relative to dir"},
+
+	// Reached only through the build profile (see buildSyscalls). Listed here
+	// because BuildSeccompPolicy drops any name this catalog does not know.
+	"renameat":           {Name: "renameat", Number: 264, Category: "file_io", Description: "Rename file relative to dir"},
+	"utimensat":          {Name: "utimensat", Number: 280, Category: "file_io", Description: "Set file timestamps"},
+	"listxattr":          {Name: "listxattr", Number: 194, Category: "file_io", Description: "List extended attributes"},
+	"preadv":             {Name: "preadv", Number: 295, Category: "file_io", Description: "Read into multiple buffers at offset"},
+	"pwritev":            {Name: "pwritev", Number: 296, Category: "file_io", Description: "Write from multiple buffers at offset"},
+	"tgkill":             {Name: "tgkill", Number: 234, Category: "signal", Description: "Send signal to a thread"},
+	"sched_getparam":     {Name: "sched_getparam", Number: 143, Category: "process", Description: "Get scheduling parameters"},
+	"sched_getscheduler": {Name: "sched_getscheduler", Number: 145, Category: "process", Description: "Get scheduling policy"},
 
 	// Dangerous syscalls — blocked by all policies except "disabled"
 	"pivot_root":        {Name: "pivot_root", Number: 155, Category: "dangerous", Description: "Change root filesystem"},

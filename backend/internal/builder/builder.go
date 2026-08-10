@@ -2,7 +2,6 @@ package builder
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
@@ -14,13 +13,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
 // BuildResult holds the output of a successful build.
@@ -66,11 +65,34 @@ type Builder struct {
 	Logger interface {
 		Append(stream, line string)
 	}
+
+	// NsjailBin / RootfsDir locate the sandbox every dependency install runs
+	// in. Same values the pool uses for workers, so a function is built with
+	// the very toolchain it will later run under.
+	NsjailBin string
+	RootfsDir string
+
+	// EgressPolicy resolves the compiled NSTUN policy a dependency install
+	// runs under, exactly as pool.Manager does for workers. Late-bound from
+	// the firewall manager in server.New (see SetEgressPolicy).
+	//
+	// Unlike the pool's, a nil accessor here is NOT "no policy layer wired,
+	// carry on": an install reaches a package registry, so running it without
+	// a policy is precisely the unfiltered egress this exists to prevent.
+	// Builds that install nothing never consult it.
+	EgressPolicy func() (path, gen string, err error)
 }
 
 // New creates a new Builder.
 func New() *Builder {
 	return &Builder{}
+}
+
+// SetEgressPolicy wires the compiled-policy accessor in after construction,
+// mirroring pool.Manager.SetEgressPolicy: the firewall manager is built later
+// than the builder in server.New.
+func (b *Builder) SetEgressPolicy(fn func() (string, string, error)) {
+	b.EgressPolicy = fn
 }
 
 // Build extracts the code archive into a content-addressed version directory,
@@ -392,15 +414,18 @@ func extractTarGz(archivePath, destDir string) error {
 //   - python: if requirements.txt is present, runs `pip install -t <codeDir>`.
 //     Packages land at /code/<pkg> and the Python adapter adds /code to sys.path.
 //
-// Both commands run on the host (not inside nsjail) during the build phase.
+// Every one of those commands runs inside nsjail, under the same compiled NSTUN
+// egress policy a function worker gets (see sandbox.RunBuild). This is not
+// decoration: `npm install` executes whatever postinstall script a package
+// ships, and both installers fetch from a registry, so a host-side build was
+// the one path out of the box the operator's blocklist could not touch. The
+// installs therefore fail closed — no compiled policy, no install — while a
+// function with no dependencies never invokes an installer at all and deploys
+// exactly as before.
 //
-// They are therefore NOT subject to the operator's egress policy. That policy is
-// an nsjail NSTUN rule set loaded per sandbox, and orvad filters its own Go
-// clients with firewall.NewHTTPClient — neither mechanism can reach a child
-// process's sockets. npm and pip talk to whatever registry their own config
-// names, and a blocklist rule covering it will not stop them. Restricting
-// registry access is a host-level concern (npm/pip config, or a firewall outside
-// Orva) until builds themselves run in a sandbox.
+// The toolchain comes from the runtime's own rootfs, not the host, which also
+// closes a latent skew: Orva used to build with the host's npm/pip and run the
+// result under the rootfs's node/python.
 func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, entrypoint string) (string, error) {
 	switch {
 	case isNodeRuntime(runtime):
@@ -413,10 +438,24 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 			return b.maybeCompileTypeScript(ctx, codeDir, entrypoint)
 		}
 		slog.Info("installing node dependencies", "dir", codeDir)
-		cmd := exec.CommandContext(ctx, "npm", "install", "--prefix", codeDir, "--no-audit", "--no-fund")
-		cmd.Dir = codeDir
-		out, err := cmd.CombinedOutput()
-		logLines(b, "npm", out)
+		out, err := b.runBuildStep(ctx, buildStep{
+			language: sandbox.Node,
+			codeDir:  codeDir,
+			stream:   "npm",
+			// --prefix is redundant now that the jail's cwd is the code dir,
+			// but it keeps the resolved install root explicit and matches
+			// what operators see in the build log.
+			argv: []string{nodeNpmBin, "install", "--prefix", sandbox.BuildCodeDir, "--no-audit", "--no-fund"},
+			env: map[string]string{
+				// The "New major version of npm available" banner is pure
+				// noise in a deploy log the user is watching. It only showed
+				// up once builds moved into the jail, because npm's notifier
+				// state lives in HOME and HOME is now thrown away each time.
+				"NO_UPDATE_NOTIFIER":         "1",
+				"npm_config_update_notifier": "false",
+			},
+			network: buildNetworkEgress,
+		})
 		if err != nil {
 			return entrypoint, fmt.Errorf("npm install failed: %w\n%s", err, string(out))
 		}
@@ -429,34 +468,152 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 			return entrypoint, nil
 		}
 		slog.Info("installing python dependencies", "dir", codeDir, "runtime", runtime)
-		// Cross-install wheels for the sandbox's Python version (not the
-		// host's). --only-binary=:all: forces wheels so we never execute
-		// setup.py with the wrong interpreter.
+		// Wheels are still resolved explicitly for the sandbox's Python
+		// version and platform. The build now runs on that interpreter, so
+		// this is belt-and-braces rather than a cross-install — but pinning
+		// it keeps wheel selection identical to what shipped before.
+		// --only-binary=:all: forces wheels so we never execute a setup.py.
 		pyVer := pythonVersionFor(runtime)
-		baseArgs := []string{
-			"install", "-r", reqTxt, "-t", codeDir,
-			"--python-version", pyVer,
-			"--platform", "manylinux2014_x86_64",
-			"--implementation", "cp",
-			"--only-binary=:all:",
-			"--quiet",
-			// Suppress pip's "Running pip as the 'root' user" warning.
-			// We're inside a single-tenant container — there's no
-			// alternative user to switch to and the warning was the
-			// only line showing up in the deploy progress UI.
-			"--root-user-action=ignore",
-		}
-		cmd := exec.CommandContext(ctx, "pip", baseArgs...)
-		cmd.Env = append(os.Environ(), "PIP_DISABLE_PIP_VERSION_CHECK=1")
-		cmd.Dir = codeDir
-		out, err := cmd.CombinedOutput()
-		logLines(b, "pip", out)
+		out, err := b.runBuildStep(ctx, buildStep{
+			language: sandbox.Python,
+			codeDir:  codeDir,
+			stream:   "pip",
+			argv: []string{
+				pythonPipBin,
+				"install", "-r", sandbox.BuildCodeDir + "/requirements.txt",
+				"-t", sandbox.BuildCodeDir,
+				"--python-version", pyVer,
+				"--platform", "manylinux2014_x86_64",
+				"--implementation", "cp",
+				"--only-binary=:all:",
+				"--quiet",
+				// Suppress pip's "Running pip as the 'root' user" warning.
+				// We're inside a single-tenant container — there's no
+				// alternative user to switch to and the warning was the
+				// only line showing up in the deploy progress UI.
+				"--root-user-action=ignore",
+			},
+			env:     map[string]string{"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+			network: buildNetworkEgress,
+		})
 		if err != nil {
 			return entrypoint, fmt.Errorf("pip install failed: %w\n%s", err, string(out))
 		}
 		slog.Info("pip install complete")
 	}
 	return entrypoint, nil
+}
+
+// Toolchain paths inside the runtime rootfs images.
+const (
+	nodeNpmBin   = "/usr/local/bin/npm"
+	nodeNpxBin   = "/usr/local/bin/npx"
+	pythonPipBin = "/usr/local/bin/pip"
+)
+
+// buildNetworkEgress marks a step that must reach a package registry. Note it
+// is a property of the STEP, not of the function: a function with
+// network_mode=none still has to download its dependencies to exist at all.
+// What that download may reach is the operator's egress policy to decide.
+const buildNetworkEgress = "egress"
+
+// buildStep is one jailed command in the deploy pipeline.
+type buildStep struct {
+	language sandbox.Language
+	codeDir  string
+	argv     []string
+	env      map[string]string
+	stream   string // build_logs label: "npm" / "pip" / "tsc"
+	network  string // buildNetworkEgress, or "" for no network
+	timeout  time.Duration
+}
+
+// runBuildStep resolves the egress policy (when the step needs one), runs the
+// command in nsjail, and streams its output into build_logs — preserving the
+// old behaviour of logging everything the subprocess printed on both the
+// success and failure paths.
+func (b *Builder) runBuildStep(ctx context.Context, step buildStep) ([]byte, error) {
+	cfg := sandbox.BuildConfig{
+		Language:    step.language,
+		CodeDir:     step.codeDir,
+		Argv:        step.argv,
+		Env:         withRegistryEnv(step.env),
+		NetworkMode: step.network,
+		Timeout:     step.timeout,
+		NsjailBin:   b.NsjailBin,
+		RootfsDir:   b.RootfsDir,
+	}
+	if b.DataDir != "" {
+		// The jail's HOME/TMPDIR lives beside the code it is building so the
+		// two share a filesystem (no EXDEV on rename, no tmpfs RAM cost).
+		cfg.ScratchBase = filepath.Join(b.DataDir, "build-tmp")
+		cfg.ResolvConfPath = filepath.Join(b.DataDir, "firewall", "resolv.conf")
+		cfg.HostsPath = filepath.Join(b.DataDir, "firewall", "hosts")
+	}
+
+	if step.network == buildNetworkEgress {
+		path, gen, err := b.resolveEgressPolicy()
+		if err != nil {
+			return nil, err
+		}
+		cfg.EgressPolicyPath, cfg.EgressPolicyGen = path, gen
+	}
+
+	out, err := sandbox.RunBuild(ctx, cfg)
+	logLines(b, step.stream, out)
+	return out, err
+}
+
+// resolveEgressPolicy is the fail-closed gate on every dependency install.
+func (b *Builder) resolveEgressPolicy() (path, gen string, err error) {
+	if b.EgressPolicy == nil {
+		return "", "", fmt.Errorf("%w: builder has no egress policy source", sandbox.ErrEgressPolicyMissing)
+	}
+	return b.EgressPolicy()
+}
+
+// registryEnvPrefixes are the environment variables forwarded from orvad's own
+// environment into a build jail. A jailed build gets a fresh HOME, so an
+// operator's ~/.npmrc or pip.conf no longer applies; the env-var form of the
+// same settings (the one the Docker deployment uses) still does. Proxy vars are
+// included because a private registry usually sits behind one.
+var registryEnvPrefixes = []string{"NPM_CONFIG_", "npm_config_", "PIP_"}
+
+var registryEnvNames = []string{
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+}
+
+// withRegistryEnv layers the forwarded registry/proxy configuration under the
+// step's own environment (the step wins on collision).
+func withRegistryEnv(stepEnv map[string]string) map[string]string {
+	env := make(map[string]string, len(stepEnv)+8)
+	for _, kv := range os.Environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		forward := false
+		for _, name := range registryEnvNames {
+			if k == name {
+				forward = true
+				break
+			}
+		}
+		for _, prefix := range registryEnvPrefixes {
+			if strings.HasPrefix(k, prefix) {
+				forward = true
+				break
+			}
+		}
+		if forward {
+			env[k] = v
+		}
+	}
+	for k, v := range stepEnv {
+		env[k] = v
+	}
+	return env
 }
 
 // maybeCompileTypeScript runs `tsc --project tsconfig.json` when the code
@@ -491,29 +648,29 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoin
 			timeoutSec = 300
 		}
 	}
-	tscCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-	defer cancel()
-
 	slog.Info("compiling typescript", "dir", codeDir, "timeout_sec", timeoutSec)
 	// `--no-install` keeps us from quietly fetching tsc when it's missing —
 	// npm install above should have placed it. If the operator has air-
 	// gapped their box this preserves the failure mode.
-	cmd := exec.CommandContext(tscCtx, "npx", "--no-install", "tsc", "--project", "tsconfig.json")
-	cmd.Dir = codeDir
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	stdoutBytes, runErr := cmd.Output()
-	logLines(b, "tsc", stdoutBytes)
-	logLines(b, "tsc", stderrBuf.Bytes())
-	if tscCtx.Err() == context.DeadlineExceeded {
+	//
+	// No network: tsc compiles what npm already put on disk, so this step gets
+	// no --user_net and needs no egress policy. It is still jailed, because
+	// tsc and everything tsconfig.json pulls in is third-party code.
+	out, runErr := b.runBuildStep(ctx, buildStep{
+		language: sandbox.Node,
+		codeDir:  codeDir,
+		stream:   "tsc",
+		argv:     []string{nodeNpxBin, "--no-install", "tsc", "--project", "tsconfig.json"},
+		timeout:  time.Duration(timeoutSec) * time.Second,
+	})
+	if errors.Is(runErr, sandbox.ErrBuildTimedOut) {
 		return entrypoint, fmt.Errorf("tsc timed out after %ds", timeoutSec)
 	}
 	if runErr != nil {
-		// tsc prints diagnostics to stdout (TS6059, TS2322, …) — surface
-		// both streams so the user sees the actual type error in the
+		// tsc prints diagnostics to stdout (TS6059, TS2322, …) — surface the
+		// captured output so the user sees the actual type error in the
 		// build log.
-		combined := strings.TrimSpace(string(stdoutBytes) + "\n" + stderrBuf.String())
-		return entrypoint, fmt.Errorf("tsc failed: %w\n%s", runErr, combined)
+		return entrypoint, fmt.Errorf("tsc failed: %w\n%s", runErr, strings.TrimSpace(string(out)))
 	}
 
 	outDir := readTSConfigOutDir(tsConfigPath)

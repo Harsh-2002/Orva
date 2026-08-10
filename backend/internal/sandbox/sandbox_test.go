@@ -267,8 +267,14 @@ func TestARM64SeccompFiltersUnsupportedLegacySyscalls(t *testing.T) {
 
 func policySyscalls(policy string) map[string]bool {
 	result := make(map[string]bool)
-	const prefix = "POLICY orva { ALLOW { "
-	body := strings.TrimPrefix(policy, prefix)
+	// The policy opens with an ERRNO block before ALLOW, so anchor on the
+	// ALLOW list itself rather than a fixed prefix — otherwise the first
+	// syscall in the list is silently swallowed by the header.
+	const marker = "ALLOW { "
+	body := policy
+	if start := strings.Index(body, marker); start >= 0 {
+		body = body[start+len(marker):]
+	}
 	if end := strings.Index(body, " } }"); end >= 0 {
 		body = body[:end]
 	}

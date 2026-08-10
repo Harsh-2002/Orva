@@ -59,6 +59,10 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	bld := builder.New()
 	bld.DataDir = cfg.Data.Dir
 	bld.DB = db
+	// Dependency installs run in nsjail against the runtime rootfs, so the
+	// builder needs the same sandbox paths the pool uses for workers.
+	bld.NsjailBin = cfg.Sandbox.NsjailBin
+	bld.RootfsDir = cfg.Sandbox.RootfsDir
 	met := metrics.New()
 
 	// Warm per-function baselines from recent successful warm executions
@@ -238,6 +242,12 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// Every egress spawn resolves the current policy generation. Wired before
 	// Start so the initial compile cannot publish into an unwired manager.
 	poolMgr.SetEgressPolicy(fw.EgressPolicy)
+	// Dependency installs are jailed the same way and answer to the same
+	// policy — that is the only thing that puts `npm install`'s postinstall
+	// scripts and both installers' registry traffic under the operator's
+	// blocklist. Fail-closed: no policy, no install (a function with no
+	// dependencies never asks).
+	bld.SetEgressPolicy(fw.EgressPolicy)
 
 	// NSTUN reads its rules once at worker start, so a policy change cannot
 	// affect an already-warm worker. Retiring the egress pools is what rolls

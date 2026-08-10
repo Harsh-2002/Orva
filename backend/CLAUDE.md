@@ -32,7 +32,7 @@ go vet ./...
 | `config` | Config struct; env var + YAML loading |
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
-| `builder` | Deploy pipeline: tarball → `npm install` / `pip install` → optional `tsc` → register |
+| `builder` | Deploy pipeline: tarball → `npm install` / `pip install` → optional `tsc` → register. Every one of those commands runs **inside nsjail** via `sandbox.RunBuild`, using the runtime rootfs's own toolchain and the same compiled NSTUN egress policy a worker gets — the installs fail closed without one. A function with no dependencies runs no installer and needs no policy. |
 | `pool` | Warm-sandbox pool manager (`pool.Manager`) per function |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx` |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
