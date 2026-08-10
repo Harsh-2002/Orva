@@ -305,8 +305,17 @@ func buildSeccompPolicyForArch(base string, allow, block []string, goarch string
 			delete(allowed, name)
 		}
 	}
+	// Aliases bypass ValidSyscallName by design — they are Kafel's internal
+	// names, deliberately absent from the user-facing catalog. They must NOT
+	// bypass the architecture check as well: Kafel treats an unknown name as a
+	// COMPILE error, so a single alias missing from one arch's catalog would
+	// stop every sandbox on that architecture from starting at all, rather
+	// than degrading it. Both current entries are valid on amd64 and arm64;
+	// this guard is here so the next one added cannot quietly break arm64.
 	for _, name := range kafelRuntimeAliases {
-		allowed[name] = true
+		if syscallSupportedOnArch(name, goarch) {
+			allowed[name] = true
+		}
 	}
 
 	// Build sorted syscall list for deterministic output.

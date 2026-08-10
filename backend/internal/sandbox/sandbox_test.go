@@ -493,3 +493,38 @@ func TestBuildArgs_EgressPolicyFileMustExist(t *testing.T) {
 		t.Errorf("error should name the missing path so an operator can act on it: %v", err)
 	}
 }
+
+// TestKafelAliasesRespectTheArchFilter guards a structural hole rather than a
+// current bug: the Kafel runtime aliases are appended after the arch filter
+// because they deliberately bypass ValidSyscallName (they are Kafel-internal
+// names, absent from the user-facing catalog). Bypassing the ARCH check too
+// would mean a future alias missing from one architecture's Kafel catalog
+// fails policy compilation — and an unknown name is a compile error, so every
+// sandbox on that arch would fail to start rather than merely lose a syscall.
+func TestKafelAliasesRespectTheArchFilter(t *testing.T) {
+	// Both current aliases are valid on both targets, so the policy must carry
+	// them on each. This is the baseline the guard protects.
+	for _, arch := range []string{"amd64", "arm64"} {
+		policy := buildSeccompPolicyForArch("default", nil, nil, arch)
+		for _, alias := range kafelRuntimeAliases {
+			if !strings.Contains(policy, alias) {
+				t.Errorf("%s: policy is missing Kafel alias %q", arch, alias)
+			}
+		}
+	}
+
+	// And an alias that an architecture does not support must be dropped for
+	// that arch instead of reaching Kafel. "open" stands in for a future alias
+	// on aarch64's unsupported list.
+	prev := kafelRuntimeAliases
+	kafelRuntimeAliases = append(append([]string(nil), prev...), "open")
+	t.Cleanup(func() { kafelRuntimeAliases = prev })
+
+	arm := buildSeccompPolicyForArch("strict", nil, nil, "arm64")
+	for _, tok := range strings.Split(arm, ",") {
+		if strings.TrimSpace(tok) == "open" {
+			t.Fatal("an arm64-unsupported alias reached the compiled policy; " +
+				"Kafel would fail to compile it and no sandbox would start")
+		}
+	}
+}
