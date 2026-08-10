@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZPKB3Q3CRDMAFEPX5BE6HE6",
+  "strategy": "manual-commit",
+  "branch": "feat/mcp-2026-07-28-ai-gateway",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "backend/internal/mcp/server.go",
+    "backend/internal/server/channel_e2e_test.go",
+    "backend/internal/server/router.go",
+    "backend/internal/server/uuid_e2e_test.go",
+    "docs/API.md",
+    "docs/reference.md",
+    "frontend/src/views/Docs.vue"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2206,
+    "cache_creation_tokens": 6524092,
+    "cache_read_tokens": 551742755,
+    "output_tokens": 1072392,
+    "api_call_count": 1108
+  }
+}
