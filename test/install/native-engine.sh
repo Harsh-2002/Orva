@@ -105,6 +105,22 @@ fi
 
 # Dependency installs — the post-release canary for the build jail.
 #
+# Gated OFF by default because this script installs the PUBLISHED binary. Until
+# a release ships the build jail, dependency installs here run npm on the host
+# as the orva service user against /home/orva/.npm — which is not writable by
+# it, so npm fails EACCES. That is a real defect in the current release (the
+# build jail fixes it by giving npm a writable HOME inside the sandbox), but it
+# is not something a PR can fix, so gating on it would redden every PR for a
+# bug already shipped. ci.yml sets ORVA_DEPS_CANARY=1 only for release /
+# schedule / workflow_dispatch runs, i.e. once the artifact under test can
+# actually contain the fix.
+if [ "${ORVA_DEPS_CANARY:-0}" != "1" ]; then
+    echo "native installed service: Node and Python invocations passed" \
+         "(dependency canary skipped — set ORVA_DEPS_CANARY=1 to run it)"
+    exit 0
+fi
+
+#
 # This script installs the PUBLISHED binary, so it cannot gate a merge; the
 # e2e job's arch matrix does that against the branch. What this adds is
 # coverage of the shipped artifact on real amd64 AND arm64 hardware, which is

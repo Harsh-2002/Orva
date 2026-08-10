@@ -629,8 +629,17 @@ def main():
             block_id = None
         force_cold_start(c, egress_fid)
         rc2, restored = probe(c, egress_fid, BLOCK_TARGET)
-        check(f"{BLOCK_TARGET}:443 reachable again after delete",
-              rc2 == 200 and restored.get("result") == "connected",
+        # Assert the POLICY stopped refusing, not that the runner can reach the
+        # internet. A refusal by the compiled policy is ECONNREFUSED (NSTUN
+        # answers with a RST); a timeout means the destination simply did not
+        # answer, which is a property of the network the test happens to run
+        # on. Asserting "connected" made this leg depend on a public host being
+        # reachable from a CI runner — it failed on amd64 with ETIMEDOUT while
+        # arm64 passed the identical assertion on the same commit.
+        restored_code = (restored or {}).get("code")
+        check(f"{BLOCK_TARGET}:443 no longer refused after delete",
+              rc2 == 200 and restored.get("result") != "refused"
+              and restored_code != "ECONNREFUSED",
               f"status {rc2}: {str(restored)[:200]}")
 
         section("RFC1918 suggestions keep the internal SDK reachable")

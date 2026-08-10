@@ -887,7 +887,14 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
           echo "ORVA_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
       - name: install and invoke both runtimes
-        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH bash test/install/native-engine.sh
+        env:
+          # The dependency-install canary exercises the build jail, which only
+          # exists in a PUBLISHED artifact from the release that introduced it.
+          # Enable it once the thing under test can actually contain the fix;
+          # on a PR this script installs the current release, where npm runs on
+          # the host as the orva user and fails EACCES on /home/orva/.npm.
+          ORVA_DEPS_CANARY: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH,ORVA_DEPS_CANARY bash test/install/native-engine.sh
 
   released-container:
     name: released container (${{ matrix.arch }})
