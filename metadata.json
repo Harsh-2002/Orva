@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZNSNNN27RHZ85M5E9F1JH0R",
+  "strategy": "manual-commit",
+  "branch": "feat/remove-nftables-nstun",
+  "checkpoints_count": 8,
+  "files_touched": [
+    "backend/cmd/orva/serve.go",
+    "backend/internal/config/config.go",
+    "backend/internal/config/config_test.go",
+    "backend/internal/config/defaults.go",
+    "backend/internal/pool/pool.go",
+    "docker-compose.yml",
+    "docs/CONFIG.md",
+    "scripts/install.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1433,
+    "cache_creation_tokens": 4565124,
+    "cache_read_tokens": 333181878,
+    "output_tokens": 760065,
+    "api_call_count": 720
+  }
+}
