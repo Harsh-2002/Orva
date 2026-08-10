@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"regexp"
@@ -34,11 +35,31 @@ type FirewallHandler struct {
 const wildcardUnenforceable = "wildcard hostnames cannot be enforced: the egress policy matches IP/CIDR, not DNS names. Use a CIDR or an exact hostname."
 
 type listFirewallResponse struct {
-	Rules    []*database.BlocklistRule `json:"rules"`
-	Status   firewall.Snapshot         `json:"status"`
+	Rules  []*database.BlocklistRule `json:"rules"`
+	Status firewall.Snapshot         `json:"status"`
 }
 
 // List handles GET /api/v1/firewall/rules.
+// refreshEnforcement recompiles the egress policy after a rule or DNS change.
+//
+// The mutation itself has already committed, so a failure here does not make
+// the response wrong about the write — but it does mean the change the
+// operator just made is NOT in force. Discarding the error silently (which
+// this did) left them believing a security rule had taken effect when the
+// previous policy was still the one running. The compile failure is recorded
+// on the status snapshot (policy_stale + last_compile_error); this makes it
+// visible in the log at the moment it happens too, naming the operation.
+func (h *FirewallHandler) refreshEnforcement(r *http.Request) {
+	if h.Manager == nil {
+		return
+	}
+	if err := h.Manager.ForceRefresh(); err != nil {
+		slog.Warn("egress policy not refreshed after a change; the change is saved but NOT in force",
+			"err", err, "method", r.Method, "path", r.URL.Path,
+			"hint", "see GET /api/v1/firewall/status (last_compile_error)")
+	}
+}
+
 func (h *FirewallHandler) List(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	rules, err := h.DB.ListBlocklistRules()
@@ -156,7 +177,7 @@ func (h *FirewallHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Manager != nil {
-		_ = h.Manager.ForceRefresh()
+		h.refreshEnforcement(r)
 	}
 	respond.JSON(w, http.StatusCreated, rule)
 }
@@ -249,7 +270,7 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.Manager != nil {
-		_ = h.Manager.ForceRefresh()
+		h.refreshEnforcement(r)
 	}
 
 	rule, err := h.DB.GetBlocklistRule(id)
@@ -273,7 +294,7 @@ func (h *FirewallHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Manager != nil {
-		_ = h.Manager.ForceRefresh()
+		h.refreshEnforcement(r)
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{"status": "deleted", "id": id})
 }
@@ -380,7 +401,7 @@ func (h *FirewallHandler) PutDNS(w http.ResponseWriter, r *http.Request) {
 	// existing warm workers keep the files they were spawned with until they
 	// age out via idle TTL.
 	if h.Manager != nil {
-		_ = h.Manager.ForceRefresh()
+		h.refreshEnforcement(r)
 	}
 
 	respond.JSON(w, http.StatusOK, firewall.LoadDNSConfig(h.DB))

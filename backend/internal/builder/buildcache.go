@@ -283,14 +283,23 @@ func BuildCacheUsageBytes(dataDir string) int64 {
 // and returns the bytes reclaimed. This is the low-disk lever: a build cache
 // is pure optimisation, so it must never be the reason a deploy fails for want
 // of space. Caches a build may still be using are left alone.
-func EvictIdleBuildCaches(dataDir string) int64 {
+// EvictIdleBuildCaches reclaims caches no build has touched within
+// buildCacheGrace. tryLock is the per-function try-lock; passing nil evicts
+// without it, which is only safe when no build can be running.
+//
+// The mtime grace alone is NOT sufficient protection: PrepareBuildCache stamps
+// the directory once at build START and never again, so an install running
+// longer than the grace looks idle while it is actively using the cache. This
+// runs on the deploy path, where concurrent builds of other functions are
+// normal, so it must hold the lock as the GC does.
+func EvictIdleBuildCaches(dataDir string, tryLock func(fnID string) (func(), bool)) int64 {
 	cutoff := time.Now().Add(-buildCacheGrace)
 	var freed int64
 	for _, e := range listBuildCaches(dataDir, nil) {
 		if e.mtime.After(cutoff) {
 			continue
 		}
-		if evictBuildCache(e, nil) {
+		if evictBuildCache(e, tryLock) {
 			freed += e.bytes
 		}
 	}

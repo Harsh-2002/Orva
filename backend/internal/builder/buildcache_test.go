@@ -196,7 +196,7 @@ func TestEvictIdleBuildCachesSpareInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if freed := EvictIdleBuildCaches(data); freed < 4096 {
+	if freed := EvictIdleBuildCaches(data, nil); freed < 4096 {
 		t.Errorf("freed = %d, want at least the idle cache's 4096 bytes", freed)
 	}
 	if _, err := os.Stat(idle); !os.IsNotExist(err) {
@@ -216,5 +216,31 @@ func TestBuildCacheUsageBytes(t *testing.T) {
 	mkTree(t, filepath.Join(data, "build-cache", "b", "pip"), 2048)
 	if got := BuildCacheUsageBytes(data); got < 3072 {
 		t.Errorf("usage = %d, want >= 3072", got)
+	}
+}
+
+// TestEvictIdleBuildCachesRespectsTheFunctionLock covers the deploy path
+// specifically. The mtime grace alone does not protect a build in progress:
+// PrepareBuildCache stamps the directory once at build START, so an install
+// running longer than the grace looks idle while it is actively using the
+// cache — and this runs on the deploy path, where builds of other functions
+// are concurrent by design.
+func TestEvictIdleBuildCachesRespectsTheFunctionLock(t *testing.T) {
+	data := t.TempDir()
+	held := filepath.Join(data, "build-cache", "busy-fn")
+	mkTree(t, filepath.Join(held, "npm"), 4096)
+	old := time.Now().Add(-2 * time.Hour) // idle by mtime, but locked
+	if err := os.Chtimes(held, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	// A try-lock that always reports "someone else holds it".
+	locked := func(string) (func(), bool) { return nil, false }
+
+	if freed := EvictIdleBuildCaches(data, locked); freed != 0 {
+		t.Errorf("freed %d bytes from a locked cache; a running build would lose its cacache", freed)
+	}
+	if _, err := os.Stat(held); err != nil {
+		t.Errorf("a locked cache must survive eviction: %v", err)
 	}
 }

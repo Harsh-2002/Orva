@@ -447,7 +447,7 @@ func buildPolicy(t *testing.T, rules []*database.BlocklistRule, dns []netip.Addr
 	}
 	return &Policy{
 		rules4: c.rules4, rules6: c.rules6,
-		exempt: testCP().Addrs,
+		exemptAddrs: testCP().Addrs, exemptPort: uint16(testCP().Port),
 	}
 }
 
@@ -515,4 +515,94 @@ func extractField(block, name string) string {
 		}
 	}
 	return ""
+}
+
+// ── unspecified addresses must never reach a rule, from ANY input path ──
+//
+// These cover a real defect found in adversarial review. parseTarget guarded
+// operator-typed CIDRs against unspecified addresses, but the DNS-server and
+// hostname paths fed already-parsed addresses straight into rules, bypassing
+// it. NSTUN reads an all-zero dst_ip as "unset" = match-any, so:
+//   - a 0.0.0.0 DNS server became ALLOW match-any on port 53, silently opening
+//     every blocked destination on that port
+//   - a hostname resolving to 0.0.0.0 became REJECT match-any, silently
+//     severing all egress
+// Both were reachable with a non-admin write-scoped key and both reported
+// enforced:true with nothing in unenforced_rules.
+
+func TestUnspecifiedDNSServerNeverBecomesAWildcardAllow(t *testing.T) {
+	for _, bad := range []string{"0.0.0.0", "::"} {
+		dns := []netip.Addr{netip.MustParseAddr(bad)}
+		_, out := mustCompile(t, []*database.BlocklistRule{cidrRule(1, "1.1.1.0/24")}, dns)
+
+		for _, b := range allRuleBlocks(string(out)) {
+			if !strings.Contains(b, "action: ALLOW") {
+				continue
+			}
+			dst := extractField(b, "dst_ip")
+			if dst == "" {
+				t.Errorf("%s: ALLOW with no dst_ip is match-any:\n%s", bad, b)
+				continue
+			}
+			p, err := netip.ParsePrefix(dst)
+			if err != nil {
+				t.Errorf("%s: unparseable dst_ip %q", bad, dst)
+				continue
+			}
+			if p.Addr().IsUnspecified() {
+				t.Errorf("%s: unspecified DNS server compiled to a match-any ALLOW "+
+					"(every blocked destination reachable on that port):\n%s", bad, b)
+			}
+		}
+	}
+}
+
+func TestUnspecifiedHostnameResolutionNeverBecomesAWildcardReject(t *testing.T) {
+	rules := []*database.BlocklistRule{{
+		ID: 5, Kind: "custom", RuleType: database.BlocklistTypeHostname,
+		Value: "0.0.0.0", Enabled: true,
+	}}
+	// net.LookupHost("0.0.0.0") really does return ["0.0.0.0"], which is how
+	// this reached the compiler in the first place.
+	c, err := compile(rules, func(string) []string { return []string{"0.0.0.0", "::"} },
+		testCP(), DefaultGuestNet(), nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	out := render(c, DefaultGuestNet())
+
+	for _, b := range allRuleBlocks(string(out)) {
+		dst := extractField(b, "dst_ip")
+		if dst == "" {
+			t.Errorf("rule with no dst_ip is match-any:\n%s", b)
+			continue
+		}
+		if p, err := netip.ParsePrefix(dst); err == nil && p.Addr().IsUnspecified() {
+			t.Errorf("a hostname resolving to an unspecified address compiled to a "+
+				"match-any rule (severs ALL egress):\n%s", b)
+		}
+	}
+}
+
+// TestDaemonExemptionIsPortScopedLikeTheSandboxRule pins the other half of the
+// review finding. The compiled carve-out is ALLOW TCP <addr> dport=<port>, so
+// exempting the whole address daemon-side made orvad strictly less restricted
+// than a sandbox — on a single-node install the control-plane address is the
+// host's own LAN IP, so an operator who blocklisted it still had webhook
+// deliveries reaching every other port on that host.
+func TestDaemonExemptionIsPortScopedLikeTheSandboxRule(t *testing.T) {
+	cp := testCP()
+	addr := cp.Addrs[0]
+	// Blocklist the control-plane host itself.
+	p := buildPolicy(t, []*database.BlocklistRule{cidrRule(1, addr.String()+"/32")}, nil)
+
+	if p.Blocks(addr, uint16(cp.Port)) {
+		t.Error("the SDK port must stay reachable or orvad cannot serve its own internal API")
+	}
+	for _, other := range []uint16{80, 443, 22, 9200} {
+		if !p.Blocks(addr, other) {
+			t.Errorf("port %d on a blocklisted control-plane host must be blocked "+
+				"daemon-side; exempting the whole address is an SSRF hole", other)
+		}
+	}
 }

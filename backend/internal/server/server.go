@@ -20,7 +20,6 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/proxy"
@@ -30,21 +29,22 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 type Server struct {
-	httpServer *http.Server
-	router     *Router
-	cfg        *config.Config
-	db         *database.Database
-	Pool       *sandbox.Limiter
-	PoolMgr    *pool.Manager
-	Registry   *registry.Registry
-	Metrics    *metrics.Metrics
-	BuildQueue *builder.Queue
-	EventHub   *events.Hub
-	Firewall   *firewall.Manager
-	Scheduler  *scheduler.Scheduler
+	httpServer    *http.Server
+	router        *Router
+	cfg           *config.Config
+	db            *database.Database
+	Pool          *sandbox.Limiter
+	PoolMgr       *pool.Manager
+	Registry      *registry.Registry
+	Metrics       *metrics.Metrics
+	BuildQueue    *builder.Queue
+	EventHub      *events.Hub
+	Firewall      *firewall.Manager
+	Scheduler     *scheduler.Scheduler
 	WebhookFanout *events.WebhookFanout
 }
 
@@ -130,7 +130,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// host-wide ceiling and spawns per-function worker pools lazily.
 	poolMgr := pool.NewManager(
 		pool.ManagerConfig{
-			DefaultMin:     1,
+			DefaultMin: 1,
 			// Operator soft cap; autoscaler still clamps further by memory
 			// + CPU headroom at runtime. Was 5 (static dumb default); the
 			// autoscaler now reads load signals so this only matters as a
@@ -202,6 +202,10 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// runtime.NumCPU() workers is enough for the single-box target.
 	buildQueue := builder.NewQueue(bld, db, reg)
 	buildQueue.FnLock = poolMgr.FunctionLock
+	// The builder reclaims idle build caches when disk runs low on the deploy
+	// path; it needs the same per-function lock the GC uses so it cannot
+	// delete a cache out from under a concurrent build of another function.
+	bld.FnLock = poolMgr.FunctionLock
 	buildQueue.PublishEvent = hub.Publish
 	buildQueue.Start()
 
@@ -351,7 +355,7 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 			keyHash := hex.EncodeToString(hash[:])
 
 			if _, err := db.GetAPIKeyByHash(keyHash); err == nil {
-				printBootstrapKey(plaintext, "(loaded from " + keyPath + ")")
+				printBootstrapKey(plaintext, "(loaded from "+keyPath+")")
 				return
 			}
 			// Keyfile present but DB row missing — re-insert.
@@ -367,7 +371,7 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 				return
 			}
 			slog.Info("restored bootstrap admin key from keyfile", "path", keyPath)
-			printBootstrapKey(plaintext, "(restored from " + keyPath + ")")
+			printBootstrapKey(plaintext, "(restored from "+keyPath+")")
 			return
 		}
 	}
@@ -419,7 +423,7 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 		slog.Warn("failed to persist admin key file (key still in DB; copy now)", "error", err)
 	}
 
-	printBootstrapKey(plaintextKey, "(saved at " + keyPath + ")")
+	printBootstrapKey(plaintextKey, "(saved at "+keyPath+")")
 }
 
 func printBootstrapKey(key, note string) {
@@ -449,14 +453,14 @@ func printBootstrapKey(key, note string) {
 //  2. Probe a list of candidate IPs against orvad's own health
 //     endpoint at the configured port. First candidate that returns
 //     200 within a short timeout wins. Candidates, in order:
-//        - "127.0.0.1" — works on bare-metal AND
-//          `network_mode: host`. Cheapest probe.
-//        - every non-loopback non-link-local IPv4 on the host —
-//          inside Docker this enumerates bridge / user-defined
-//          network interfaces; bare-metal it's the host's NICs.
-//        - the default-route gateway from /proc/net/route — last
-//          resort for old-style `8443:8443` mappings where orvad
-//          and the host share a port.
+//     - "127.0.0.1" — works on bare-metal AND
+//     `network_mode: host`. Cheapest probe.
+//     - every non-loopback non-link-local IPv4 on the host —
+//     inside Docker this enumerates bridge / user-defined
+//     network interfaces; bare-metal it's the host's NICs.
+//     - the default-route gateway from /proc/net/route — last
+//     resort for old-style `8443:8443` mappings where orvad
+//     and the host share a port.
 //
 //  3. Fallback: if every probe fails (orvad isn't listening yet,
 //     network stack confused), default to `127.0.0.1` so the SDK

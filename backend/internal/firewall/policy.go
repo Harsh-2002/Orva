@@ -18,11 +18,18 @@ package firewall
 //   - a rule is routed by address family so a v6 literal can never land in
 //     rule4 (where it would parse as nothing and match everything)
 //   - an unspecified network address (0.0.0.0/x, ::/x) is refused, because
-//     NSTUN cannot distinguish it from "field unset" = match any
+//     NSTUN cannot distinguish it from "field unset" = match any. This applies
+//     to EVERY path that produces a rule target — operator CIDRs, resolver
+//     answers, and configured DNS servers — via usableTarget/parseTarget. An
+//     earlier revision guarded only the CIDR path; the other two fed
+//     already-parsed addresses straight through, so a 0.0.0.0 DNS server
+//     compiled to a match-any ALLOW on port 53 and a hostname resolving to
+//     0.0.0.0 compiled to a match-any REJECT that severed all egress. Add a
+//     new address source only through those helpers.
 //   - ports must be 1..65535; nsjail narrows uint32 to uint16 silently, and
 //     treats 0 as "unset" = match all ports
-//   - "match everything" is only ever expressed by omitting dst_ip on a rule
-//     that explicitly asks for it (matchAll), never by an accidental zero
+//   - there is no way to express "match everything": every emitted rule
+//     carries a concrete dst_ip
 
 import (
 	"crypto/sha256"
@@ -106,8 +113,16 @@ type Policy struct {
 	// rules backs Blocks() for daemon-side enforcement. Same rule set and
 	// same first-match-wins order the sandbox gets.
 	rules4, rules6 []nstunRule
-	// exempt is never blocked daemon-side: loopback plus the control plane.
-	exempt []netip.Addr
+	// exemptAddrs/exemptPort are never blocked daemon-side. They mirror the
+	// compiled control-plane carve-out EXACTLY, including its port: the
+	// sandbox rule is ALLOW TCP <addr> dport=<port>, so exempting the whole
+	// address here would make the daemon strictly less restricted than a
+	// sandbox. On a single-node install the control-plane address is the
+	// box's own LAN IP, so that gap was an SSRF hole — an operator who
+	// blocklists their own host still had webhook deliveries reaching every
+	// other port on it.
+	exemptAddrs []netip.Addr
+	exemptPort  uint16
 }
 
 type ruleAction uint8
@@ -178,10 +193,10 @@ func compile(
 
 	// 1. NSTUN's own gateway. Inside 10.0.0.0/8, so it must outrank any
 	//    private-network reject.
-	if gn.GW4.IsValid() {
+	if usableTarget(gn.GW4) {
 		c.add4(nstunRule{act: actionAllow, pr: protoAny, dst: hostPrefix(gn.GW4)})
 	}
-	if gn.GW6.IsValid() {
+	if usableTarget(gn.GW6) {
 		c.add6(nstunRule{act: actionAllow, pr: protoAny, dst: hostPrefix(gn.GW6)})
 	}
 
@@ -195,8 +210,8 @@ func compile(
 		return compiled{}, fmt.Errorf("control-plane port %d out of range", cp.Port)
 	}
 	for _, a := range cp.Addrs {
-		if !a.IsValid() {
-			return compiled{}, errors.New("control-plane address is invalid")
+		if !usableTarget(a) {
+			return compiled{}, errors.New("control-plane address is invalid or unspecified")
 		}
 		c.addByFamily(nstunRule{
 			act: actionAllow, pr: protoTCP,
@@ -206,7 +221,7 @@ func compile(
 
 	// 3. DNS resolvers: exact host, port 53, UDP and TCP.
 	for _, s := range dnsServers {
-		if !s.IsValid() {
+		if !usableTarget(s) {
 			continue
 		}
 		for _, p := range []ruleProto{protoUDP, protoTCP} {
@@ -244,9 +259,10 @@ func compile(
 		case database.BlocklistTypeHostname:
 			for _, ipStr := range resolve(r.Value) {
 				a, err := netip.ParseAddr(ipStr)
-				if err != nil || !a.IsValid() {
+				if err != nil || !usableTarget(a) {
 					continue
 				}
+				a = a.Unmap()
 				if a.Is4() {
 					v4Blocks = append(v4Blocks, hostPrefix(a))
 				} else {
@@ -307,6 +323,23 @@ func (c *compiled) count(r nstunRule) {
 // hostPrefix returns the single-address prefix for a (/32 or /128).
 func hostPrefix(a netip.Addr) netip.Prefix {
 	return netip.PrefixFrom(a, a.BitLen())
+}
+
+// usableTarget reports whether a resolved address may be turned into a rule.
+//
+// NSTUN cannot distinguish an all-zero dst_ip from an absent one, so an
+// unspecified address does not produce the narrow rule it looks like — it
+// matches EVERY destination. As an ALLOW that silently voids the blocklist for
+// whatever ports the rule covers; as a REJECT it silently severs all egress.
+// Neither is reported as unenforced, because from the compiler's point of view
+// the rule compiled fine.
+//
+// parseTarget applies this to operator-typed CIDRs. This is the same gate for
+// addresses that arrive already parsed — resolver answers and configured DNS
+// servers — which previously bypassed it entirely.
+func usableTarget(a netip.Addr) bool {
+	a = a.Unmap()
+	return a.IsValid() && !a.IsUnspecified()
 }
 
 // parseTarget accepts a bare address or a CIDR and returns a canonical masked
@@ -445,11 +478,14 @@ func (p *Policy) Blocks(addr netip.Addr, port uint16) bool {
 		return false
 	}
 	addr = addr.Unmap()
+	// Loopback stays unconditionally exempt: orvad must never be able to cut
+	// off calls to itself, and a sandbox cannot reach the host's loopback
+	// anyway (from inside the jail 127.0.0.1 is the jail's own).
 	if addr.IsLoopback() {
 		return false
 	}
-	for _, e := range p.exempt {
-		if e.Unmap() == addr {
+	for _, e := range p.exemptAddrs {
+		if e.Unmap() == addr && port == p.exemptPort {
 			return false
 		}
 	}

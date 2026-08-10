@@ -93,44 +93,97 @@ func TestPurgeOnceUsesTheConfiguredWindow(t *testing.T) {
 	}
 }
 
-// TestPurgeCascadesToLogsAndCapturedRequests guards the manual cascade:
-// execution_requests deliberately has no FK to executions, so a purge that only
-// deleted the parent rows would orphan them forever.
-func TestPurgeCascadesToLogsAndCapturedRequests(t *testing.T) {
+// TestPurgeCascadesToEveryExecutionChildTable is the guard that the previous
+// version of this test failed to be.
+//
+// Only execution_logs has ON DELETE CASCADE; the other three child tables are
+// cleaned up by hand in PurgeOldExecutions. A table missing from that list is
+// not merely un-purged — once the parent executions row is gone nothing can
+// join the rows back, so they are permanently unreachable.
+//
+// The earlier version seeded execution_requests with only (execution_id, body),
+// which violates three NOT NULL columns. The insert error was swallowed by
+// t.Logf and the assertion was gated on the row count being non-zero, so it
+// passed with nothing seeded and nothing checked — and that is exactly why
+// user_spans and execution_log_entries were missed. Every seed here is a hard
+// failure, and every table is asserted empty afterwards.
+func TestPurgeCascadesToEveryExecutionChildTable(t *testing.T) {
 	db := newTestDB(t)
-	seedExecution(t, db, "old-with-children", 90)
+	const id = "old-with-children"
+	seedExecution(t, db, id, 90)
 
-	if _, err := db.write.Exec(
-		`INSERT INTO execution_logs (execution_id, stdout, stderr)
-		 VALUES ('old-with-children', 'hello', '')`,
-	); err != nil {
-		t.Fatalf("seed execution log: %v", err)
+	seeds := map[string]string{
+		"execution_logs": `INSERT INTO execution_logs (execution_id, stdout, stderr)
+			VALUES ('` + id + `', 'out', 'err')`,
+		"execution_requests": `INSERT INTO execution_requests
+			(execution_id, method, path, headers_json, body, captured_at)
+			VALUES ('` + id + `', 'POST', '/', '{}', 'x', 0)`,
+		"user_spans": `INSERT INTO user_spans
+			(id, trace_id, parent_span_id, execution_id, name, started_at, duration_ms)
+			VALUES ('span-1', 'tr-1', '', '` + id + `', 'work', datetime('now'), 5)`,
+		"execution_log_entries": `INSERT INTO execution_log_entries
+			(execution_id, ts, level, message)
+			VALUES ('` + id + `', datetime('now'), 'info', 'hello')`,
 	}
-	// execution_requests deliberately carries NO foreign key to executions
-	// (async insert ordering), which is exactly why the purge has to delete it
-	// by hand rather than relying on ON DELETE CASCADE.
-	if _, err := db.write.Exec(
-		`INSERT INTO execution_requests (execution_id, body) VALUES ('old-with-children', 'x')`,
-	); err != nil {
-		t.Logf("execution_requests seed skipped (shape differs): %v", err)
+	for table, stmt := range seeds {
+		if _, err := db.write.Exec(stmt); err != nil {
+			t.Fatalf("seed %s: %v", table, err)
+		}
+	}
+	// Prove the seeds landed, so the post-purge assertion cannot pass vacuously.
+	for table := range seeds {
+		if n := countRows(t, db, table, id); n == 0 {
+			t.Fatalf("seed %s inserted nothing; the assertion below would be vacuous", table)
+		}
 	}
 
 	if err := db.PurgeOldExecutions(DefaultRetentionDays); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
 
-	var logs int
-	if err := db.read.QueryRow(
-		"SELECT COUNT(*) FROM execution_logs WHERE execution_id = 'old-with-children'").Scan(&logs); err != nil {
-		t.Fatal(err)
+	for table := range seeds {
+		if n := countRows(t, db, table, id); n != 0 {
+			t.Errorf("purge left %d orphaned row(s) in %s — unreachable forever, "+
+				"since the parent executions row is gone", n, table)
+		}
 	}
-	if logs != 0 {
-		t.Errorf("purge left %d orphaned log rows behind", logs)
-	}
+}
 
-	var reqs int
-	if err := db.read.QueryRow(
-		"SELECT COUNT(*) FROM execution_requests WHERE execution_id = 'old-with-children'").Scan(&reqs); err == nil && reqs != 0 {
-		t.Errorf("purge left %d orphaned captured-request rows behind (no FK exists to clean them up)", reqs)
+// TestEveryExecutionChildTableIsPurged fails when a new table keyed by
+// execution_id is added to the schema without being added to the purge.
+func TestEveryExecutionChildTableIsPurged(t *testing.T) {
+	db := newTestDB(t)
+	rows, err := db.read.Query(`
+		SELECT m.name FROM sqlite_master m
+		JOIN pragma_table_info(m.name) p
+		WHERE m.type = 'table' AND p.name = 'execution_id' AND m.name != 'executions'`)
+	if err != nil {
+		t.Skipf("cannot introspect schema in this build: %v", err)
 	}
+	defer rows.Close()
+
+	covered := map[string]bool{}
+	for _, t2 := range executionChildTables {
+		covered[t2] = true
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		if !covered[name] {
+			t.Errorf("table %q is keyed by execution_id but is not in "+
+				"executionChildTables; retention would orphan its rows permanently", name)
+		}
+	}
+}
+
+func countRows(t *testing.T, db *Database, table, execID string) int {
+	t.Helper()
+	var n int
+	if err := db.read.QueryRow(
+		"SELECT COUNT(*) FROM "+table+" WHERE execution_id = ?", execID).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
 }

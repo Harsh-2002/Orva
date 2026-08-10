@@ -77,6 +77,15 @@ type Manager struct {
 	lastSuccess time.Time
 	stale       bool
 
+	// refreshMu serializes compile -> publish -> policy.Store. ForceRefresh is
+	// reachable from every firewall mutation handler and from PUT /firewall/dns
+	// while the poll loop calls refresh every 10s, so without this two
+	// refreshes can interleave: they share one fixed "<gen>.cfg.tmp" path, so
+	// one WriteFile's O_TRUNC can race the other's Rename (leaving the
+	// published file briefly truncated and failing the loser with ENOENT), and
+	// with different generations the later Store can be the older compile.
+	refreshMu sync.Mutex
+
 	policy         atomic.Pointer[Policy]
 	onPolicyChange func(gen string)
 	lastRetire     time.Time
@@ -198,6 +207,9 @@ func (m *Manager) ForceRefresh() error {
 // refresh reads the enabled rules, resolves hostnames, compiles, and publishes
 // a new generation when the result differs from the current one.
 func (m *Manager) refresh() error {
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+
 	rules, err := m.db.ListEnabledBlocklistRules()
 	if err != nil {
 		return fmt.Errorf("read blocklist: %w", err)
@@ -242,7 +254,7 @@ func (m *Manager) refresh() error {
 			Allows: c.allows, Rejects: c.rejects,
 			CompiledAt: time.Now().UTC(),
 			rules4:     c.rules4, rules6: c.rules6,
-			exempt: m.cp.Addrs,
+			exemptAddrs: m.cp.Addrs, exemptPort: uint16(m.cp.Port),
 		}
 		m.policy.Store(p)
 		slog.Info("egress policy published",
@@ -283,7 +295,11 @@ func (m *Manager) notifyPolicyChange(gen string) {
 	if !m.lastRetire.IsZero() && since < minRetireInterval {
 		m.pendingRetire = true
 		m.mu.Unlock()
-		slog.Debug("egress policy: recycle coalesced", "generation", gen,
+		// Info, not Debug: without this the operator sees "egress policy
+		// published" with no matching "applied" for up to a minute and no
+		// explanation. Two rule saves in a row is an ordinary dashboard action.
+		slog.Info("egress policy: worker recycle coalesced, new policy not yet in force on warm workers",
+			"generation", gen,
 			"retry_in", (minRetireInterval - since).String())
 		return
 	}
@@ -365,11 +381,16 @@ type Snapshot struct {
 	HostnameMap map[string][]string `json:"hostname_map"`
 	LastError   string              `json:"last_error,omitempty"`
 
-	Backend          string           `json:"backend"`  // always "nstun"
-	Enforced         bool             `json:"enforced"` // a policy is compiled and in use
-	PolicyGeneration string           `json:"policy_generation,omitempty"`
-	PolicyRuleCounts RuleCounts       `json:"policy_rule_counts"`
-	PolicyStale      bool             `json:"policy_stale"`
+	Backend          string     `json:"backend"`  // always "nstun"
+	Enforced         bool       `json:"enforced"` // a policy is compiled and in use
+	PolicyGeneration string     `json:"policy_generation,omitempty"`
+	PolicyRuleCounts RuleCounts `json:"policy_rule_counts"`
+	PolicyStale      bool       `json:"policy_stale"`
+	// PendingRecycle is true when a newer generation has been published but
+	// warm egress workers are still running the previous one, because the
+	// recycle was rate-limited. Without this the status says enforced with the
+	// new generation while the old policy is still what running workers apply.
+	PendingRecycle   bool             `json:"pending_recycle"`
 	LastCompileError string           `json:"last_compile_error,omitempty"`
 	LastSuccessAt    string           `json:"last_success_at,omitempty"`
 	ControlPlane     ControlPlaneInfo `json:"control_plane_allow"`
@@ -396,12 +417,13 @@ func (m *Manager) Snapshot() Snapshot {
 	defer m.mu.RUnlock()
 
 	out := Snapshot{
-		IPv4:        append([]string(nil), m.resolvedV4...),
-		IPv6:        append([]string(nil), m.resolvedV6...),
-		HostnameMap: map[string][]string{},
-		LastError:   m.lastError,
-		Backend:     "nstun",
-		PolicyStale: m.stale,
+		IPv4:           append([]string(nil), m.resolvedV4...),
+		IPv6:           append([]string(nil), m.resolvedV6...),
+		HostnameMap:    map[string][]string{},
+		LastError:      m.lastError,
+		Backend:        "nstun",
+		PolicyStale:    m.stale,
+		PendingRecycle: m.pendingRetire,
 		ControlPlane: ControlPlaneInfo{
 			Addrs: addrsToStrings(m.cp.Addrs),
 			Port:  m.cp.Port,
@@ -499,7 +521,9 @@ func dnsServerAddrs(cfg DNSConfig) []netip.Addr {
 	}
 	out := make([]netip.Addr, 0, len(servers))
 	for _, s := range servers {
-		if a, err := netip.ParseAddr(s); err == nil {
+		// An unspecified resolver would compile to a match-any ALLOW on port
+		// 53, opening every blocked destination on that port. See usableTarget.
+		if a, err := netip.ParseAddr(s); err == nil && usableTarget(a) {
 			out = append(out, a.Unmap())
 		}
 	}

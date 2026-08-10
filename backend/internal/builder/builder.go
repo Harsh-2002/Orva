@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -48,6 +49,10 @@ var ErrInsufficientDisk = errors.New("insufficient free disk space for deploy")
 
 // Builder handles building function code for nsjail execution.
 type Builder struct {
+	// FnLock is the per-function build mutex, shared with the build queue and
+	// the GC. Optional: nil means no concurrent build can exist (unit tests).
+	FnLock func(fnID string) *sync.Mutex
+
 	// BuildFunc can be injected to override behavior. For nsjail this is
 	// typically a no-op since code just needs to be extracted, not built.
 	BuildFunc func(ctx context.Context, dockerfilePath, contextDir, imageTag string) (int64, error)
@@ -267,7 +272,7 @@ func (b *Builder) checkFreeDisk() error {
 	cacheMB := BuildCacheUsageBytes(b.DataDir) / (1024 * 1024)
 	slog.Warn("free disk below floor for deploy; reclaiming build caches",
 		"free_mb", freeMB, "floor_mb", floorMB, "build_cache_mb", cacheMB, "dir", b.DataDir)
-	if freed := EvictIdleBuildCaches(b.DataDir); freed > 0 {
+	if freed := EvictIdleBuildCaches(b.DataDir, b.tryFnLock); freed > 0 {
 		if err := syscall.Statfs(b.DataDir, &st); err == nil {
 			freeMB = int64(st.Bavail) * int64(st.Bsize) / (1024 * 1024)
 		}
@@ -818,6 +823,20 @@ func logLines(b *Builder, stream string, out []byte) {
 		}
 		b.Logger.Append(stream, line)
 	}
+}
+
+// tryFnLock takes the per-function build lock without blocking, mirroring the
+// GC. Returns a no-op release and true when no lock source is wired (unit
+// tests), since there is no concurrent build to protect against there.
+func (b *Builder) tryFnLock(fnID string) (func(), bool) {
+	if b.FnLock == nil {
+		return func() {}, true
+	}
+	lk := b.FnLock(fnID)
+	if lk == nil || !lk.TryLock() {
+		return nil, false
+	}
+	return lk.Unlock, true
 }
 
 // pipPlatformTag is the manylinux wheel platform pip resolves against.

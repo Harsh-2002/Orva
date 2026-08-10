@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
 
@@ -28,13 +29,13 @@ type Execution struct {
 	// jobs) from the same top-level invocation. ParentSpanID chains them
 	// into a tree. Trigger captures how this span was started; one of
 	// "http" / "cron" / "job" / "f2f" / "webhook" / "inbound" / "replay".
-	TraceID            string `json:"trace_id,omitempty"`
-	SpanID             string `json:"span_id,omitempty"`
-	ParentSpanID       string `json:"parent_span_id,omitempty"`
-	Trigger            string `json:"trigger,omitempty"`
-	ParentFunctionID   string `json:"parent_function_id,omitempty"`
-	IsOutlier          bool   `json:"is_outlier"`
-	BaselineP95MS      *int64 `json:"baseline_p95_ms,omitempty"`
+	TraceID          string `json:"trace_id,omitempty"`
+	SpanID           string `json:"span_id,omitempty"`
+	ParentSpanID     string `json:"parent_span_id,omitempty"`
+	Trigger          string `json:"trigger,omitempty"`
+	ParentFunctionID string `json:"parent_function_id,omitempty"`
+	IsOutlier        bool   `json:"is_outlier"`
+	BaselineP95MS    *int64 `json:"baseline_p95_ms,omitempty"`
 }
 
 // TraceContext bundles the four pieces of trace state that flow with a
@@ -519,28 +520,44 @@ func (db *Database) DeleteExecution(id string) error {
 	return err
 }
 
+// executionChildTables are every table keyed by execution_id. Only
+// execution_logs has ON DELETE CASCADE; the rest are cleaned up by hand here,
+// deliberately, so the purge does not depend on PRAGMA foreign_keys being on
+// for the writer connection.
+//
+// Keep this list exhaustive. A child table missing from it is not merely
+// un-purged: once its parent executions row is deleted nothing can ever join
+// the rows back, so they become permanently unreachable garbage that no later
+// purge, DeleteExecution, or query will reclaim. user_spans and
+// execution_log_entries — the two tables user code writes to via
+// orva.trace.span() and orva.log.* — were missed exactly that way, which meant
+// retention left the fastest-growing tables growing.
+var executionChildTables = []string{
+	"execution_logs",
+	"execution_requests",
+	"user_spans",
+	"execution_log_entries",
+}
+
 func (db *Database) PurgeOldExecutions(retentionDays int) error {
-	_, err := db.write.Exec(`
-		DELETE FROM execution_logs WHERE execution_id IN (
-			SELECT id FROM executions WHERE started_at < datetime('now', '-' || ? || ' days')
-		)`, retentionDays)
-	if err != nil {
+	// One cutoff for the whole purge. Evaluating datetime('now', …) per
+	// statement lets a row cross the boundary mid-purge and orphan its
+	// children.
+	var cutoff string
+	if err := db.read.QueryRow(
+		"SELECT datetime('now', '-' || ? || ' days')", retentionDays).Scan(&cutoff); err != nil {
 		return err
 	}
-	// v0.4 A3: same explicit cleanup for the captured-request rows so
-	// PurgeOldExecutions doesn't rely on PRAGMA foreign_keys being on
-	// for the writer connection.
-	_, err = db.write.Exec(`
-		DELETE FROM execution_requests WHERE execution_id IN (
-			SELECT id FROM executions WHERE started_at < datetime('now', '-' || ? || ' days')
-		)`, retentionDays)
-	if err != nil {
-		return err
+
+	for _, table := range executionChildTables {
+		if _, err := db.write.Exec(
+			"DELETE FROM "+table+" WHERE execution_id IN ("+
+				"SELECT id FROM executions WHERE started_at < ?)", cutoff); err != nil {
+			return fmt.Errorf("purge %s: %w", table, err)
+		}
 	}
-	_, err = db.write.Exec(
-		"DELETE FROM executions WHERE started_at < datetime('now', '-' || ? || ' days')",
-		retentionDays,
-	)
+
+	_, err := db.write.Exec("DELETE FROM executions WHERE started_at < ?", cutoff)
 	return err
 }
 
@@ -605,5 +622,5 @@ func scanExecutionFields(s rowScanner) (*Execution, error) {
 	return &exec, nil
 }
 
-func scanExecution(row *sql.Row) (*Execution, error)     { return scanExecutionFields(row) }
+func scanExecution(row *sql.Row) (*Execution, error)       { return scanExecutionFields(row) }
 func scanExecutionRows(rows *sql.Rows) (*Execution, error) { return scanExecutionFields(rows) }
