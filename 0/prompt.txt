@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>butlnfv3l</task-id>
+<tool-use-id>toolu_01YX5XGX55tV427sQn4bQ1Jx</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/2902e625-4ac6-4f6e-82c3-7c87cf749e19/tasks/butlnfv3l.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll post-merge main CI until terminal (background)" completed (exit code 0)</summary>
+</task-notification>
