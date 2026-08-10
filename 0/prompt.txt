@@ -1,0 +1,81 @@
+<task-notification>
+<task-id>ae68fa0bbc3911e42</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/2902e625-4ac6-4f6e-82c3-7c87cf749e19/tasks/ae68fa0bbc3911e42.output</output-file>
+<status>completed</status>
+<summary>Agent "Go expert: security/supply-chain lens" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>The `Write` tool isn't available to me (this is a read-only planning role), so I'll deliver the full analysis directly. All findings below are grounded in files I read.
+
+---
+
+# GO-2026-5932 (`x/crypto/openpgp`) in Orva — security/supply-chain verdict
+
+## (a) Reachability / exploitability verdict: **linked, not exploitable — dead-code linkage**
+
+The chain is real at the *link* layer and empty at the *call* layer. Evidence:
+
+- **Orva constructs only `ChecksumValidator`.** `cli/commands/upgrade.go:70-78` builds the updater with `Validator: &amp;selfupdate.ChecksumValidator{UniqueFilename: "checksums.txt"}`. That is the only validator Orva ever instantiates.
+- **Orva never references PGP anywhere.** Repo-wide grep for `PGPValidator|openpgp|PatternValidator|NewChecksumWithPGP` across all non-test `.go` files returns **zero** hits. Orva's own code contains no path that constructs a `PGPValidator` or calls into openpgp.
+- **The import is unconditional in the library, so openpgp is linked regardless.** `go-selfupdate@v1.6.0/validate.go:17` imports `golang.org/x/crypto/openpgp` at package scope — no build tag, no file split. openpgp symbols are used only inside `PGPValidator.Validate` / `WithArmoredKeyRing` / `NewChecksumWithPGPValidator` (validate.go:293-362). Because Go links at **package granularity**, importing *any* `selfupdate` symbol (e.g. `NewUpdater`) pulls the whole package object, which transitively links `x/crypto/openpgp`. I confirmed openpgp actually ships in the resolved `golang.org/x/crypto@v0.54.0` (source present in module cache), so this is real linked code, not a phantom.
+- **The server binary is affected too.** `backend/cmd/orva/main.go:12` imports `github.com/Harsh-2002/Orva/cli/commands`, so the bundled server binary links the same openpgp code. Correct trace; both binaries carry it.
+
+**govulncheck "reachable" vs real reachability.** The openpgp advisory class ("unsafe by design," no fixed version) is a whole-package deprecation with essentially no meaningful *symbol* guard — govulncheck flags it because the **package is in the import graph**, i.e. linked, not because Orva *calls* a dangerous function. The dangerous functions (`ReadArmoredKeyRing`, `CheckDetachedSignature`, `CheckArmoredDetachedSignature`) are reachable *in the call graph only through `PGPValidator`*, which nothing in Orva constructs. The "unsafe by design" risk is a **parser-on-untrusted-input** risk: it only bites when attacker-controlled PGP bytes flow into openpgp. Orva feeds openpgp **no bytes, ever**. To validate this against the tool rather than asserting it, run `govulncheck -show traces ./...` and inspect the leaf: the trace will bottom out at `PGPValidator.*` with no Orva-owned caller, i.e. an over-approximation from package-level linkage.
+
+**Verdict: not exploitable in Orva.** Zero runtime attack surface. The finding is a supply-chain hygiene signal (you ship unmaintained crypto), not a live vulnerability.
+
+## (b) Recommended remediation, ranked by security-value-per-unit-risk
+
+**1 (do immediately, today): Accept + suppress *defensibly* AND add a govulncheck CI gate.** Zero implementation risk, and it fixes the *actual* systemic gap: there is **no Go vuln scanning in CI at all** today — `.github/workflows/ci.yml:253` runs only `npm audit --audit-level=moderate` in the `ui` job. A future *reachable* Go CVE would ship silently. This step is correct regardless of what you do about the updater, so it's not "giving up" — it's closing the bigger hole. Details in (d)/(e).
+
+**2 (the real fix, schedule it): Remove `go-selfupdate`; write a small in-repo updater.** This is the only option that *eliminates* the finding and deletes unmaintained crypto from both binaries — highest security value. The marginal risk is **well-bounded** because Orva already owns the hard, security-critical half:
+- Already implemented in `upgrade.go`: `fileSHA256`, `remoteAssetSHA`, `parseChecksums` (handles two-space + `*` binary-mode), `upgradeAssetFilter` (anchored `^orva-cli-&lt;os&gt;-&lt;arch&gt;`), `assertWritable` (incl. the Windows sharing-violation carve-out), and the whole version/staleness decision (`upgradeAction`, `remoteBuildDiffers`).
+- What you'd replace: (i) GitHub release/asset resolution — a single `GET /repos/{owner}/{repo}/releases/latest` over HTTPS with stdlib `net/http`, no new deps; (ii) the atomic swap — ~40 lines mirroring `go-selfupdate/update/apply.go` (write `.new`, rename target→`.old`, rename `.new`→target, rollback, Windows hide-old). **Orva's assets are raw binaries** (`orva-cli-&lt;os&gt;-&lt;arch&gt;[.exe]`, release.yml:436-441), and `DecompressCommand` returns the reader unchanged when there's no archive extension (decompress.go:53) — so you inherit **no** decompression/zip-slip surface. Result: pure-Go, no CGO, no new deps → fully compliant with `cli/CLAUDE.md` ("no backend imports, no CGO, pure-Go static"), and it *shrinks* the slim CLI by dropping go-selfupdate's Masterminds/semver + gitea/gitlab source tree. Preserves every behavior the constraints demand (`--check/--force`, staleness detection, `ORVA_UPGRADE_REPO`, sudo hint, Windows). Gate this on the invariants in (c).
+
+**3 (reject): `replace` → personal fork.** Supply-chain *smell*, not a fix. You'd pin the build to a non-canonical module you now must maintain and patch forever; reproducibility and CI trust degrade. And go-selfupdate has no build tag to exclude openpgp, so the fork requires actual surgery (split `PGPValidator` into an optional subpackage) — the same work as writing your own updater, but with worse provenance. Strictly dominated by option 2.
+
+**Optional community path:** upstream a PR that moves `PGPValidator` behind a build tag / into a subpackage so openpgp links only on opt-in. Correct long-term, but depends on maintainer velocity (v1.6.0 is latest; unknown cadence). Treat as a nice-to-have, not the plan.
+
+**Bottom line:** ship #1 now (suppress + govulncheck gate), execute #2 (custom updater) as the durable fix, then drop the suppression. A useful reinforcement for the "remove it" case: openpgp gives Orva *nothing it uses* — the trust model is sha256 `checksums.txt` over HTTPS and always has been. If you ever want defense-in-depth (independent artifact signing), the maintained path is ECDSA/minisign/cosign over `checksums.txt` (go-selfupdate even ships `ECDSAValidator`), **not** PGP. So removing openpgp costs zero capability and doesn't foreclose future signing.
+
+## (c) Security invariants the custom download→verify→swap MUST guarantee (each with a concrete test)
+
+- **I1 — Transport authenticity.** All fetches (release JSON, asset, checksums) over HTTPS with default cert verification; never disable TLS; follow redirects only to `https`; keep the bounded context timeout already used (`remoteAssetSHA` uses 10s). *Test:* an `httptest.NewTLSServer` with an untrusted cert, and an `http://` asset URL — both must abort with no filesystem change.
+- **I2 — Verify-before-swap ordering.** Hash the **fully-downloaded** asset bytes and match `checksums.txt` **before any mutation** of the target path. *Test (tampered checksum):* serve asset bytes that don't match the checksum entry → expect a mismatch error, target binary **byte-for-byte unchanged**, and **no `.new`/`.old` leftovers**.
+- **I3 — Completeness / no truncation.** Install exactly the bytes you hashed; a short/truncated download must fail the hash and be rejected. *Test (truncated download):* server closes early → hash mismatch → no swap, non-zero exit, target intact.
+- **I4 — Correct artifact for this platform.** Keep the anchored `^orva-cli-&lt;goos&gt;-&lt;goarch&gt;` token (with `.exe` on Windows) so a wrong-OS/arch asset can never be selected (this is the fix for the historical intermittent "exec format error" documented in `upgrade.go:26-34`); optionally verify ELF/Mach-O/PE magic vs `runtime.GOOS` before swap. *Test (wrong-arch asset):* release lists only `orva-cli-darwin-arm64` on a linux/amd64 host → "no matching asset", no foreign download, no swap; plus the two-assets-present case selecting linux/amd64 deterministically.
+- **I5 — Atomic replace, never a partial executable.** Write to a temp file **in the target's own directory** (same filesystem → atomic rename), `fsync`, `chmod 0755`, then `rename(tmp,target)`; **never truncate-in-place** the running binary; on rename failure, roll back by restoring the saved old binary. *Test:* fault-inject the final rename (mirror go-selfupdate's overridable `openFile` var, or make the dir read-only after temp write) → assert rollback restores the original and **no truncated file** ever sits at the target (size&gt;0 and hash==old at every failure point); happy path: post-swap hash == downloaded-asset hash, mode 0755.
+- **I6 — Safe temp creation.** Create temp with `O_CREATE|O_EXCL` (0600→0755) in the target dir (not `/tmp` — avoids cross-device rename + world-writable TOCTOU); remove temp on any error. *Test:* pre-place a hostile `.orva.new` → `O_EXCL` fails safe / picks a fresh name; assert temp cleaned up on error.
+- **I7 — Symlink / TOCTOU resolution.** Resolve the target's symlinks **once** (as go-selfupdate does via `Lstat` + `ResolvePath`, update.go:52-62) and run **both** the writable probe and the rename against that same resolved real path. *Test:* install `orva` as a symlink → real file; upgrade updates the real target, leaves the symlink intact; assert probe-path == swap-path.
+- **I8 — Least privilege, never auto-elevate.** Preserve `assertWritable`: if the resolved path isn't writable, exit non-zero with the sudo *hint*; **never** shell out to `sudo`/re-exec elevated. *Test (non-writable path):* strip write on the install dir → expect the "re-run with sudo" error, non-zero exit, no partial download persisted, no elevation attempt.
+- **I9 — Windows exe-lock.** The running `.exe` can't be unlinked; use rename-old→hide + rename-new (mirror `hide_windows.go`); keep accepting `ERROR_SHARING_VIOLATION` on the probe (already in `assertWritable:242-244`). *Test:* the existing `cli-install-windows` leg runs `orva upgrade --force` — keep it green; add a unit test around the "rename fails → hide old" branch where feasible.
+- **I10 — Decision logic unchanged.** Only the swap engine changes; `upgradeAction`, `remoteBuildDiffers`, `--check/--force`, `ORVA_UPGRADE_REPO`, same-tag rebuild detection stay intact. *Test:* existing `TestUpgradeAction`, `TestRemoteBuildDiffers`, `TestParseChecksums`, `TestRemoteAssetSHA` must pass **unchanged**.
+
+Add one **hermetic integration test**: an `httptest` server serving a fake release JSON + asset + `checksums.txt`, exercising the whole download→verify→swap in `go test` with fault-injection for I2/I3/I5 — so the swap path is covered without network. Keep `test/cli/upgrade-test.sh` (install vN-1 → upgrade → verify vN) and the per-OS installer legs as the real end-to-end gate.
+
+## (d) Add govulncheck to CI (Go analog of the existing npm audit)
+
+Today CI has **no** Go vuln scan (only `npm audit` at `ci.yml:253`). Add a gate:
+
+- **Where:** a step in the existing `go` job (already builds embeds + runs vet/test), or a small `go-vuln` job gated by the same `needs: changes` / `code` path filter as the other fast jobs. Also run it on the `release` event so a vuln can't ship even if `main` was green earlier.
+- **What:** `go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...` — **pin the version** (the repo already pins tools, e.g. `actionlint@v1.7.12` at `ci.yml:141`; don't use `@latest`). Default source-reachability mode keeps it low-noise: it fails on **call-reachable** vulns.
+- **Handling the one known finding:** govulncheck has no native ignore file. Two clean options: (i) **remove the dep first** so the gate is simply clean (preferred — pairs with remediation #2); or (ii) until removal lands, run `govulncheck -json ./... | &lt;jq that fails on any id != GO-2026-5932&gt;`, or adopt **`osv-scanner`** whose `osv-scanner.toml` `[[IgnoredVulns]]` supports `id` + `reason` + `ignoreUntil`. I'd keep **govulncheck** as the primary Go gate (best call-graph analysis) and use the jq-allowlist wrapper for the single accepted ID with an expiry comment, so any *other* Go vuln still hard-fails.
+
+## (e) If removal is deferred, how to document/suppress the residual defensibly
+
+1. **VEX (machine-readable, industry standard).** Publish an OpenVEX doc (govulncheck can emit/consume VEX: `-format openvex`) with `status: not_affected`, justification `vulnerable_code_not_in_execute_path`, and an impact statement citing the evidence: *"go-selfupdate confines `x/crypto/openpgp` to `PGPValidator`; Orva constructs only `ChecksumValidator` (`cli/commands/upgrade.go:72`); repo-wide there is no reference to `PGPValidator`/openpgp; no attacker-controlled data reaches openpgp."* This is the defensible, auditable, tooling-consumable record.
+2. **`osv-scanner.toml` `[[IgnoredVulns]]`** for `GO-2026-5932` with `reason` + an `ignoreUntil` review date (~90 days) so it re-surfaces and can't rot.
+3. **SECURITY.md note.** `docs/SECURITY.md` exists and `docs/CLAUDE.md` mandates updating it on security-boundary changes — add a short "Known non-exploitable advisories" subsection recording the ID, the reachability analysis, the sha256-checksums trust model (never PGP), and the removal plan.
+4. **Scoped CI gate** (from (d)) that allows *exactly* this ID with an expiry and fails on any new Go vuln — so the suppression is bounded, not a blanket mute.
+5. **Tracking issue** to remove `go-selfupdate`, making "accept" explicitly temporary.
+
+Honesty note for the record: checksum-over-HTTPS gives integrity + transport auth but **not** independent signing — a compromised GitHub release/token could publish a matching binary+`checksums.txt`. That's equally true with go-selfupdate today; the custom updater doesn't worsen it. If you later want that defense-in-depth, sign `checksums.txt` with cosign/minisign/ECDSA — an openpgp-free path — which further confirms openpgp is dead weight.
+
+### Critical Files for Implementation
+- /home/dev/Orva/cli/commands/upgrade.go  (self-updater; already owns checksum + decision + writable logic — the swap engine is what changes)
+- /home/dev/Orva/cli/commands/upgrade_test.go  (existing invariant tests to preserve + extend with tamper/truncation/fault-injection cases)
+- /home/dev/Orva/.github/workflows/ci.yml  (add the govulncheck gate; today only `npm audit` at line 253)
+- /home/dev/Orva/go.mod  (drop `github.com/creativeprojects/go-selfupdate` on removal)
+- /home/dev/Orva/docs/SECURITY.md  (record the VEX/reachability note if the residual is accepted)</result>
+<usage><subagent_tokens>80242</subagent_tokens><tool_uses>20</tool_uses><duration_ms>317155</duration_ms></usage>
+</task-notification>
