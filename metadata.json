@@ -1,0 +1,24 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZP2DVA9030K23R2NC91ZXK0",
+  "strategy": "manual-commit",
+  "branch": "feat/remove-nftables-nstun",
+  "checkpoints_count": 4,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1652,
+    "cache_creation_tokens": 4722403,
+    "cache_read_tokens": 418978159,
+    "output_tokens": 858694,
+    "api_call_count": 830
+  }
+}
