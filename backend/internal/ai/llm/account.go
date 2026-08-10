@@ -21,7 +21,10 @@ type KeyResolver interface {
 }
 
 // account adapts a KeyResolver to Bifrost's schemas.Account interface.
-type account struct{ resolver KeyResolver }
+type account struct {
+	resolver KeyResolver
+	priv     privateHostCache
+}
 
 func (a *account) GetConfiguredProviders() ([]schemas.ModelProvider, error) {
 	names := a.resolver.Providers()
@@ -51,6 +54,11 @@ func (a *account) GetConfigForProvider(providerKey schemas.ModelProvider) (*sche
 	}
 	if _, baseURL, err := a.resolver.Resolve(string(providerKey)); err == nil && baseURL != "" {
 		cfg.NetworkConfig.BaseURL = baseURL
+		// Bifrost's dialer refuses every RFC1918 destination unless this is
+		// set, which made a LAN-hosted endpoint unreachable no matter what the
+		// operator configured. See privatenet.go for why this is delegated to
+		// the configured base URL rather than simply turned on.
+		cfg.NetworkConfig.AllowPrivateNetwork = a.priv.allow(baseURL)
 	}
 	return cfg, nil
 }
