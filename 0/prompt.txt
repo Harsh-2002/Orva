@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bv30ujf5w</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/2902e625-4ac6-4f6e-82c3-7c87cf749e19/tasks/bv30ujf5w.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR #35 checks (run 2) until terminal" completed (exit code 0)</summary>
+</task-notification>
