@@ -38,12 +38,27 @@ ISOLATED_FN = "e2e-fw-isolated"
 # Anycast addresses with TCP/443 open, used as literal probe targets so the
 # assertions never depend on DNS inside the sandbox.
 #
-# 9.9.9.9 (Quad9) is the one we block: it is NOT one of Orva's default
-# resolvers (1.1.1.1 / 8.8.8.8), so a REJECT rule for it cannot disturb sandbox
-# DNS. 8.8.8.8 is the control — the policy allows it on :53 only, so at :443 no
-# rule matches it and NSTUN's default-allow must keep it reachable.
-BLOCK_TARGET = "9.9.9.9"
-BLOCK_RULE = "9.9.9.9/32"
+# The blocked target is chosen at runtime from these candidates: the first one
+# the sandbox can actually reach wins. Every candidate is an anycast resolver
+# with TCP/443 (DoH) open, and none is one of Orva's default resolvers
+# (1.1.1.1 / 8.8.8.8), so a REJECT rule for any of them cannot disturb sandbox
+# DNS.
+#
+# This is a list rather than one host because the baseline leg is the single
+# assertion here that genuinely requires the destination to be reachable — you
+# cannot prove a rule blocked something that was never reachable in the first
+# place. Pinning it to one public IP made the entire enforcement suite depend
+# on that IP answering a CI runner: 9.9.9.9:443 timed out on the amd64 runner
+# while arm64 passed the identical assertion on the same commit. Rotating
+# candidates keeps the proof (reachable before -> refused after) without
+# betting it on a single host.
+BLOCK_CANDIDATES = ("9.9.9.9", "149.112.112.112", "208.67.222.222", "94.140.14.14")
+BLOCK_RULES = tuple(f"{h}/32" for h in BLOCK_CANDIDATES)
+
+# 8.8.8.8 is the control, and is deliberately NOT drawn from the candidates:
+# the policy allows it on :53 only, so at :443 no rule matches it and NSTUN's
+# default-allow must keep it reachable. That is the assertion — a DNS allow
+# must not widen into a general allow for that host.
 CONTROL_TARGET = "8.8.8.8"
 
 # Shipped `suggested` rules (seeded disabled). Enabling them used to sever the
@@ -352,7 +367,7 @@ def cleanup(c):
         for r in rules:
             # Only ever touch what this module creates.
             if r.get("kind") == "custom" and r.get("value") in (
-                    HOST_VALUE, CIDR_VALUE, POLICY_CIDR, BLOCK_RULE):
+                    HOST_VALUE, CIDR_VALUE, POLICY_CIDR) + BLOCK_RULES:
                 c.req("DELETE", f"/api/v1/firewall/rules/{r['id']}", expect=range(200, 599))
     except Exception:
         pass
@@ -580,10 +595,23 @@ def main():
         check("egress invoke -> 200", wc_code == 200, str(warm)[:200])
 
         section("baseline reachability (no rule yet)")
-        bc1, before = probe(c, egress_fid, BLOCK_TARGET)
-        base_ok = check(f"{BLOCK_TARGET}:443 reachable before the rule",
-                        bc1 == 200 and before.get("result") == "connected",
-                        f"status {bc1}: {str(before)[:200]}")
+        block_target, bc1, before = None, None, None
+        for candidate in BLOCK_CANDIDATES:
+            bc1, before = probe(c, egress_fid, candidate)
+            before = before or {}
+            if bc1 == 200 and before.get("result") == "connected":
+                block_target = candidate
+                break
+            if before.get("code") == "EPERM":
+                # Not a reachability problem: the seccomp policy denied
+                # connect() outright, so no candidate can succeed. Stop here so
+                # the diagnosis below is about seccomp, not about the network.
+                break
+        base_ok = check("a blockable destination is reachable before any rule",
+                        block_target is not None,
+                        f"none of {list(BLOCK_CANDIDATES)} reachable; "
+                        f"last status {bc1}: {str(before)[:200]}")
+        block_rule = f"{block_target}/32" if block_target else None
         if not base_ok:
             # Without outbound TCP from the sandbox there is nothing to block,
             # so the enforcement assertions cannot mean anything here.
@@ -604,12 +632,12 @@ def main():
 
         section("a rule actually blocks the destination")
         brc, brule = c.req("POST", "/api/v1/firewall/rules",
-                           {"value": BLOCK_RULE, "label": LABEL}, expect=range(200, 599))
+                           {"value": block_rule, "label": LABEL}, expect=range(200, 599))
         check("block rule created -> 201", brc == 201, f"status {brc}: {str(brule)[:200]}")
         block_id = (brule or {}).get("id") if isinstance(brule, dict) else None
         force_cold_start(c, egress_fid)
 
-        ac, after = probe(c, egress_fid, BLOCK_TARGET)
+        ac, after = probe(c, egress_fid, block_target)
         check("blocked destination is refused", ac == 200 and after.get("result") != "connected",
               f"status {ac}: {str(after)[:200]}")
         # NSTUN REJECT synthesizes a refusal instead of blackholing the packet,
@@ -628,7 +656,7 @@ def main():
             check("block rule deleted -> 200", dc3 == 200, f"status {dc3}")
             block_id = None
         force_cold_start(c, egress_fid)
-        rc2, restored = probe(c, egress_fid, BLOCK_TARGET)
+        rc2, restored = probe(c, egress_fid, block_target)
         # Assert the POLICY stopped refusing, not that the runner can reach the
         # internet. A refusal by the compiled policy is ECONNREFUSED (NSTUN
         # answers with a RST); a timeout means the destination simply did not
@@ -637,7 +665,7 @@ def main():
         # reachable from a CI runner — it failed on amd64 with ETIMEDOUT while
         # arm64 passed the identical assertion on the same commit.
         restored_code = (restored or {}).get("code")
-        check(f"{BLOCK_TARGET}:443 no longer refused after delete",
+        check(f"{block_target}:443 no longer refused after delete",
               rc2 == 200 and restored.get("result") != "refused"
               and restored_code != "ECONNREFUSED",
               f"status {rc2}: {str(restored)[:200]}")
