@@ -18,6 +18,11 @@ package sandbox
 //     because npm and pip both insist on a writable cache. It lives under the
 //     data dir rather than in /tmp so it shares a filesystem with the code dir
 //     (no EXDEV on rename) and does not consume RAM on a tmpfs.
+//   - optionally a SECOND writable mount at /cache holding the installer
+//     caches, which unlike /tmp survives the build (see BuildConfig.CacheDir).
+//     HOME stays throwaway on purpose: persisting it would also persist npm's
+//     logs, its update-notifier stamp, and whatever a postinstall script chose
+//     to drop in ~.
 //   - --cwd is inside the jail, so argv must name in-jail paths (BuildCodeDir)
 //   - the limits are an order of magnitude above an invoke's
 
@@ -42,6 +47,25 @@ const (
 	buildTmpDir = "/tmp"
 	// buildHomeDir lives inside buildTmpDir so one mount covers both.
 	buildHomeDir = buildTmpDir + "/home"
+	// buildCacheDir is where the installer caches live inside the jail.
+	//
+	// It sits UNDER the scratch mount for a mechanical reason: nsjail has to
+	// create each mount point inside the chroot, and a runtime rootfs is
+	// read-only and owned by another user — the image pre-creates exactly
+	// /code and /tmp for this (scripts/build-rootfs.sh), so a top-level
+	// /cache cannot be mounted on any rootfs already deployed. The scratch
+	// directory is ours and world-writable, so a mount point inside it always
+	// works.
+	//
+	// Whether this path persists is decided entirely on the host side: with
+	// BuildConfig.CacheDir set, a host directory is bound OVER it and its
+	// contents outlive the build; without, it is an ordinary directory in the
+	// scratch tree and is deleted with it. HOME is throwaway either way.
+	buildCacheDir = buildTmpDir + "/cache"
+	// buildNpmLogsDir keeps npm's debug logs OUT of the cache root. npm derives
+	// logs-dir from ${cache}/_logs by default, which against a persistent cache
+	// would accumulate one log per build forever.
+	buildNpmLogsDir = buildTmpDir + "/npm-logs"
 )
 
 // Build jail resource defaults. An install is nothing like an invocation:
@@ -88,6 +112,21 @@ type BuildConfig struct {
 	// ScratchBase is the directory the throwaway HOME/TMPDIR is created under.
 	// Empty falls back to the OS temp dir.
 	ScratchBase string
+
+	// CacheDir is a host directory bound read-write at buildCacheDir and NOT
+	// deleted afterwards, holding npm's cacache and pip's http cache so a
+	// redeploy does not re-download every dependency.
+	//
+	// It MUST be private to the function being built. npm caches the packument
+	// alongside the tarball in the same cacache, keyed by URL and protected
+	// only by an unkeyed corruption checksum, and pip's http cache is
+	// URL-keyed with no content verification at all — so a shared cache would
+	// let one function's dependency poison every later build of every other
+	// function, and `npm install` runs postinstall scripts.
+	//
+	// Empty means "no persistent cache": the installers get a throwaway cache
+	// inside the scratch mount, which is exactly the pre-cache behaviour.
+	CacheDir string
 
 	// Timeout bounds the step. Zero means "no deadline of our own" — the
 	// caller's context still applies.
@@ -145,6 +184,24 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 	if err := os.MkdirAll(filepath.Join(scratch, "home"), 0o777); err != nil {
 		return nil, fmt.Errorf("create build home dir: %w", err)
 	}
+	// The mount point for buildCacheDir has to exist before nsjail runs: it
+	// cannot create one itself inside the read-only rootfs. Created
+	// unconditionally so the in-jail path is the same whether or not a
+	// persistent cache is bound over it.
+	if err := os.MkdirAll(filepath.Join(scratch, "cache"), 0o777); err != nil {
+		return nil, fmt.Errorf("create build cache mount point: %w", err)
+	}
+
+	// A cache is an optimisation, never a precondition: if it cannot be
+	// prepared, drop it and build with a throwaway one rather than failing a
+	// deploy over a directory nothing depends on.
+	if cfg.CacheDir != "" {
+		if err := prepareCacheDirs(cfg.CacheDir); err != nil {
+			slog.Warn("build cache unusable, falling back to a throwaway cache",
+				"dir", cfg.CacheDir, "err", err)
+			cfg.CacheDir = ""
+		}
+	}
 
 	args, err := buildJailArgs(cfg, rootfs, scratch)
 	if err != nil {
@@ -168,6 +225,25 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 		return out, fmt.Errorf("%w after %s", ErrBuildTimedOut, cfg.Timeout)
 	}
 	return out, runErr
+}
+
+// prepareCacheDirs creates the per-installer cache subdirectories. Same 0777
+// as the scratch dir and for the same reason: with ORVA_DISABLE_USERNS=1 there
+// is no user namespace, so nsjail may drop to a different uid inside the jail
+// and would otherwise be unable to write here.
+func prepareCacheDirs(cacheDir string) error {
+	for _, dir := range []string{cacheDir, filepath.Join(cacheDir, "npm"), filepath.Join(cacheDir, "pip")} {
+		if err := os.MkdirAll(dir, 0o777); err != nil {
+			return fmt.Errorf("create build cache dir: %w", err)
+		}
+		// MkdirAll applies the process umask, so the mode above is a request,
+		// not a guarantee — chmod is what actually makes it group/other
+		// writable.
+		if err := os.Chmod(dir, 0o777); err != nil {
+			return fmt.Errorf("prepare build cache dir: %w", err)
+		}
+	}
+	return nil
 }
 
 // resolveBuildRuntime validates the rootfs and that argv[0] actually exists in
@@ -214,6 +290,14 @@ func buildJailArgs(cfg BuildConfig, rootfs, scratch string) ([]string, error) {
 		// populate node_modules/ or the pip target directory.
 		"-B", cfg.CodeDir+":"+BuildCodeDir,
 		"-B", scratch+":"+buildTmpDir,
+	)
+	// Exactly one cache mount, and only when the caller named one. Any change
+	// here that mounts a directory shared between functions reintroduces the
+	// cross-function poisoning channel BuildConfig.CacheDir exists to avoid.
+	if cfg.CacheDir != "" {
+		args = append(args, "-B", cfg.CacheDir+":"+buildCacheDir)
+	}
+	args = append(args,
 		"--cwd", BuildCodeDir,
 		"--rlimit_as", "max",
 		// nsjail defaults RLIMIT_FSIZE to 1 MB and RLIMIT_NOFILE to 32. Both
@@ -260,6 +344,17 @@ func buildJailArgs(cfg BuildConfig, rootfs, scratch string) ([]string, error) {
 		}
 		env[k] = v
 	}
+
+	// ...except the cache locations, which Orva owns outright. These name
+	// paths that exist only inside the jail, so a forwarded value cannot be
+	// right: an operator with npm_config_cache=/root/.npm in orvad's
+	// environment would otherwise point npm at a path that is not mounted and
+	// sits on the read-only chroot, and the build dies with a bare EROFS that
+	// says nothing about why.
+	setOwnedEnv(env, "npm_config_cache", buildCacheDir+"/npm")
+	setOwnedEnv(env, "PIP_CACHE_DIR", buildCacheDir+"/pip")
+	setOwnedEnv(env, "npm_config_logs_dir", buildNpmLogsDir)
+
 	for k, v := range env {
 		args = append(args, "--env", k+"="+v)
 	}
@@ -267,4 +362,18 @@ func buildJailArgs(cfg BuildConfig, rootfs, scratch string) ([]string, error) {
 	args = append(args, "--")
 	args = append(args, cfg.Argv...)
 	return args, nil
+}
+
+// setOwnedEnv sets key, first removing every case-insensitive spelling of it
+// already in the map. npm folds NPM_CONFIG_CACHE and npm_config_cache onto the
+// same config key and resolves a collision by environment iteration order, and
+// pip is equally case-insensitive about PIP_*, so deleting our own value's
+// variants is the only way "Orva wins" is deterministic.
+func setOwnedEnv(env map[string]string, key, value string) {
+	for k := range env {
+		if strings.EqualFold(k, key) {
+			delete(env, k)
+		}
+	}
+	env[key] = value
 }

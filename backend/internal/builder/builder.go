@@ -162,7 +162,7 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	if err := ValidateArchive(scratchDir, fn.Runtime, fn.Entrypoint); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
 	}
-	resolvedEntrypoint, err := b.installDependencies(ctx, scratchDir, fn.Runtime, fn.Entrypoint)
+	resolvedEntrypoint, err := b.installDependencies(ctx, fn.ID, scratchDir, fn.Runtime, fn.Entrypoint)
 	if err != nil {
 		return nil, fmt.Errorf("install dependencies: %w", err)
 	}
@@ -256,6 +256,22 @@ func (b *Builder) checkFreeDisk() error {
 		return nil
 	}
 	freeMB := int64(st.Bavail) * int64(st.Bsize) / (1024 * 1024)
+	if freeMB >= int64(floorMB) {
+		return nil
+	}
+
+	// Below the floor. Before refusing the deploy, reclaim the build caches:
+	// they are a pure optimisation, so a rebuildable cache must never be the
+	// reason a deploy fails for want of space. Caches a build may still be
+	// using are left alone (EvictIdleBuildCaches).
+	cacheMB := BuildCacheUsageBytes(b.DataDir) / (1024 * 1024)
+	slog.Warn("free disk below floor for deploy; reclaiming build caches",
+		"free_mb", freeMB, "floor_mb", floorMB, "build_cache_mb", cacheMB, "dir", b.DataDir)
+	if freed := EvictIdleBuildCaches(b.DataDir); freed > 0 {
+		if err := syscall.Statfs(b.DataDir, &st); err == nil {
+			freeMB = int64(st.Bavail) * int64(st.Bsize) / (1024 * 1024)
+		}
+	}
 	if freeMB < int64(floorMB) {
 		slog.Warn("insufficient free disk for deploy", "free_mb", freeMB, "floor_mb", floorMB, "dir", b.DataDir)
 		return ErrInsufficientDisk
@@ -427,7 +443,7 @@ func extractTarGz(archivePath, destDir string) error {
 // The toolchain comes from the runtime's own rootfs, not the host, which also
 // closes a latent skew: Orva used to build with the host's npm/pip and run the
 // result under the rootfs's node/python.
-func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, entrypoint string) (string, error) {
+func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtime, entrypoint string) (string, error) {
 	switch {
 	case isNodeRuntime(runtime):
 		pkgJSON := filepath.Join(codeDir, "package.json")
@@ -436,11 +452,12 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 			// tsconfig.json-only directory through to the TS step so a
 			// user with a globally available tsc can be told clearly
 			// that they need to declare typescript as a dep.
-			return b.maybeCompileTypeScript(ctx, codeDir, entrypoint)
+			return b.maybeCompileTypeScript(ctx, fnID, codeDir, entrypoint)
 		}
 		slog.Info("installing node dependencies", "dir", codeDir)
 		out, err := b.runBuildStep(ctx, buildStep{
 			language: sandbox.Node,
+			fnID:     fnID,
 			codeDir:  codeDir,
 			stream:   "npm",
 			// --prefix is redundant now that the jail's cwd is the code dir,
@@ -461,7 +478,7 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 			return entrypoint, fmt.Errorf("npm install failed: %w\n%s", err, string(out))
 		}
 		slog.Info("npm install complete", "output", strings.TrimSpace(string(out)))
-		return b.maybeCompileTypeScript(ctx, codeDir, entrypoint)
+		return b.maybeCompileTypeScript(ctx, fnID, codeDir, entrypoint)
 
 	case isPythonRuntime(runtime):
 		reqTxt := filepath.Join(codeDir, "requirements.txt")
@@ -477,6 +494,7 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 		pyVer := pythonVersionFor(runtime)
 		out, err := b.runBuildStep(ctx, buildStep{
 			language: sandbox.Python,
+			fnID:     fnID,
 			codeDir:  codeDir,
 			stream:   "pip",
 			argv: []string{
@@ -521,6 +539,7 @@ const buildNetworkEgress = "egress"
 // buildStep is one jailed command in the deploy pipeline.
 type buildStep struct {
 	language sandbox.Language
+	fnID     string // scopes the persistent installer cache; "" = no cache
 	codeDir  string
 	argv     []string
 	env      map[string]string
@@ -534,24 +553,7 @@ type buildStep struct {
 // old behaviour of logging everything the subprocess printed on both the
 // success and failure paths.
 func (b *Builder) runBuildStep(ctx context.Context, step buildStep) ([]byte, error) {
-	cfg := sandbox.BuildConfig{
-		Language:    step.language,
-		CodeDir:     step.codeDir,
-		Argv:        step.argv,
-		Env:         withRegistryEnv(step.env),
-		NetworkMode: step.network,
-		Timeout:     step.timeout,
-		NsjailBin:   b.NsjailBin,
-		RootfsDir:   b.RootfsDir,
-	}
-	if b.DataDir != "" {
-		// The jail's HOME/TMPDIR lives beside the code it is building so the
-		// two share a filesystem (no EXDEV on rename, no tmpfs RAM cost).
-		cfg.ScratchBase = filepath.Join(b.DataDir, "build-tmp")
-		cfg.ResolvConfPath = filepath.Join(b.DataDir, "firewall", "resolv.conf")
-		cfg.HostsPath = filepath.Join(b.DataDir, "firewall", "hosts")
-	}
-
+	cfg := b.buildConfigFor(step)
 	if step.network == buildNetworkEgress {
 		path, gen, err := b.resolveEgressPolicy()
 		if err != nil {
@@ -563,6 +565,42 @@ func (b *Builder) runBuildStep(ctx context.Context, step buildStep) ([]byte, err
 	out, err := sandbox.RunBuild(ctx, cfg)
 	logLines(b, step.stream, out)
 	return out, err
+}
+
+// buildConfigFor translates a step into the jail configuration. Split out from
+// runBuildStep so the cache-scoping invariant is testable without nsjail: the
+// cache directory handed to a step is derived from the id of the function
+// being built and from nothing else.
+func (b *Builder) buildConfigFor(step buildStep) sandbox.BuildConfig {
+	cfg := sandbox.BuildConfig{
+		Language:    step.language,
+		CodeDir:     step.codeDir,
+		Argv:        step.argv,
+		Env:         withRegistryEnv(step.env),
+		NetworkMode: step.network,
+		Timeout:     step.timeout,
+		NsjailBin:   b.NsjailBin,
+		RootfsDir:   b.RootfsDir,
+	}
+	if b.DataDir == "" {
+		return cfg
+	}
+	// The jail's HOME/TMPDIR lives beside the code it is building so the
+	// two share a filesystem (no EXDEV on rename, no tmpfs RAM cost).
+	cfg.ScratchBase = filepath.Join(b.DataDir, buildScratchDirName)
+	cfg.ResolvConfPath = filepath.Join(b.DataDir, "firewall", "resolv.conf")
+	cfg.HostsPath = filepath.Join(b.DataDir, "firewall", "hosts")
+
+	// The installer cache is private to this function — see buildcache.go for
+	// why sharing one is a code-execution channel between functions. Failure
+	// to prepare it degrades to the throwaway cache; it never fails a build.
+	cacheDir, err := PrepareBuildCache(b.DataDir, step.fnID)
+	if err != nil {
+		slog.Warn("build cache unavailable for this step", "fn", step.fnID, "err", err)
+		return cfg
+	}
+	cfg.CacheDir = cacheDir
+	return cfg
 }
 
 // resolveEgressPolicy is the fail-closed gate on every dependency install.
@@ -624,7 +662,7 @@ func withRegistryEnv(stepEnv map[string]string) map[string]string {
 // invocation time. Returns the post-compile entrypoint
 // (`<outDir>/<stem>.js`); when no tsconfig.json is present it returns the
 // original entrypoint unchanged so existing .js-only deploys are untouched.
-func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoint string) (string, error) {
+func (b *Builder) maybeCompileTypeScript(ctx context.Context, fnID, codeDir, entrypoint string) (string, error) {
 	tsConfigPath := filepath.Join(codeDir, "tsconfig.json")
 	if _, err := os.Stat(tsConfigPath); os.IsNotExist(err) {
 		return entrypoint, nil
@@ -659,6 +697,7 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoin
 	// tsc and everything tsconfig.json pulls in is third-party code.
 	out, runErr := b.runBuildStep(ctx, buildStep{
 		language: sandbox.Node,
+		fnID:     fnID,
 		codeDir:  codeDir,
 		stream:   "tsc",
 		argv:     []string{nodeNpxBin, "--no-install", "tsc", "--project", "tsconfig.json"},

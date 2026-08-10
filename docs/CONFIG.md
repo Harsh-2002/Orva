@@ -126,6 +126,48 @@ to change.
 > and no purge ever ran, so history accumulated forever. The variable is gone
 > and the behaviour it promised is now real.
 
+---
+
+## Runtime-tunable: build cache
+
+Dependency installs run inside an nsjail build jail whose `/tmp` is thrown away
+after every build. To stop each deploy re-downloading every dependency, Orva
+keeps npm's and pip's caches in a **per-function** directory at
+`<data-dir>/build-cache/<function-id>/{npm,pip}`, mounted at `/cache` in the
+build jail.
+
+The cache is per-function on purpose and must not be made shared: npm keeps the
+packument in the same URL-keyed cache as the tarball behind an unkeyed
+corruption checksum, pip's HTTP cache has no content verification at all, and
+`npm install` runs whatever postinstall script a package ships. A shared cache
+would let one function's bad dependency poison every later build of every other
+function.
+
+| Setting (`system_config` key) | Default | Meaning |
+|---|---|---|
+| `build_cache_max_age_days` | `14` | Delete a function's build cache once it has gone this many days without a build. **`0` disables the age sweep** (the size cap still applies). |
+| `build_cache_max_mb` | `2048` | Total size ceiling across all functions. Over it, Orva evicts **whole per-function caches**, least-recently-used first — never individual files, which would leave a cache internally inconsistent. **`0` disables the size cap.** |
+
+Both bounds are enforced by the same background pass that prunes old version
+directories (`gc_interval_seconds`, default 300 s), and both settings are re-read
+on every pass, so changing them takes effect without restarting the server. A
+cache is also dropped when its function is deleted, and when free disk falls
+below `min_free_disk_mb` — a rebuildable cache is never the reason a deploy
+fails for want of space.
+
+To drop one function's cache by hand — the clean recovery from a build that
+installed a bad package, since the cache is the only place those bytes persist
+between deploys:
+
+```bash
+orva functions purge-cache greeter
+
+curl -X DELETE -H "X-Orva-API-Key: $KEY" \
+  http://localhost:8443/api/v1/functions/greeter/build-cache
+```
+
+The next deploy of that function refetches its dependencies and is slower once.
+
 ## Build identity
 
 The server binary stamps three values at link time and exposes them at `GET /api/v1/system/health` + Settings → Build info in the dashboard.

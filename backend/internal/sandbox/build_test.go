@@ -78,6 +78,164 @@ func TestBuildJailArgs_WritableHomeAndCwd(t *testing.T) {
 	}
 }
 
+// countPairs returns how many times flag appears immediately followed by a
+// value satisfying match.
+func countPairs(args []string, flag string, match func(string) bool) int {
+	n := 0
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && match(args[i+1]) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestBuildJailArgs_CacheBindIsSingleAndFunctionScoped is the regression guard
+// on the whole point of the per-function cache: EXACTLY ONE directory is
+// mounted at /cache, and it is the one the caller named for the function being
+// built. Anything that turns this into a second, or a shared, mount
+// reintroduces the cross-function poisoning channel — npm's packument lives in
+// the same URL-keyed cacache as the tarball behind an unkeyed checksum, pip's
+// http cache has no content verification at all, and `npm install` runs
+// postinstall scripts.
+func TestBuildJailArgs_CacheBindIsSingleAndFunctionScoped(t *testing.T) {
+	cfg := testBuildConfig(t)
+	cfg.CacheDir = "/data/build-cache/019df200-7b00-7e00-9c00-aab1cd2e3f40"
+	args, err := buildJailArgs(cfg, "/rootfs/node", "/scratch")
+	if err != nil {
+		t.Fatalf("buildJailArgs: %v", err)
+	}
+
+	mounts := countPairs(args, "-B", func(v string) bool {
+		return strings.HasSuffix(v, ":"+buildCacheDir)
+	})
+	if mounts != 1 {
+		t.Fatalf("want exactly 1 bind at %s, got %d: %s", buildCacheDir, mounts, strings.Join(args, " "))
+	}
+	if !hasPair(args, "-B", cfg.CacheDir+":"+buildCacheDir) {
+		t.Fatalf("the cache mount must be the caller's per-function dir: %s", strings.Join(args, " "))
+	}
+	// Read-write, or npm cannot populate it.
+	if hasPair(args, "-R", cfg.CacheDir+":"+buildCacheDir) {
+		t.Error("the cache must be bound read-write")
+	}
+	// HOME stays throwaway: persisting it would also persist npm's logs, its
+	// update-notifier stamp, and whatever a postinstall script drops in ~.
+	if !hasPair(args, "--env", "HOME="+buildHomeDir) {
+		t.Error("HOME must stay inside the throwaway scratch mount")
+	}
+	for _, want := range [][2]string{
+		{"--env", "npm_config_cache=" + buildCacheDir + "/npm"},
+		{"--env", "PIP_CACHE_DIR=" + buildCacheDir + "/pip"},
+		// npm derives logs-dir from ${cache}/_logs, which would accumulate one
+		// debug log per build inside a directory we keep forever.
+		{"--env", "npm_config_logs_dir=" + buildNpmLogsDir},
+	} {
+		if !hasPair(args, want[0], want[1]) {
+			t.Errorf("want %s %s, got: %s", want[0], want[1], strings.Join(args, " "))
+		}
+	}
+}
+
+// TestBuildJailArgs_NoCacheDirIsThrowaway: an empty CacheDir must behave
+// exactly as before the cache existed — no extra mount, and both installers
+// pointed inside the scratch directory that is deleted after the build.
+func TestBuildJailArgs_NoCacheDirIsThrowaway(t *testing.T) {
+	args, err := buildJailArgs(testBuildConfig(t), "/rootfs/node", "/scratch")
+	if err != nil {
+		t.Fatalf("buildJailArgs: %v", err)
+	}
+	if n := countPairs(args, "-B", func(v string) bool { return strings.HasSuffix(v, ":"+buildCacheDir) }); n != 0 {
+		t.Fatalf("no CacheDir must mean no cache mount, got %d: %s", n, strings.Join(args, " "))
+	}
+	for _, want := range []string{
+		"npm_config_cache=" + buildCacheDir + "/npm",
+		"PIP_CACHE_DIR=" + buildCacheDir + "/pip",
+	} {
+		if !hasPair(args, "--env", want) {
+			t.Errorf("want --env %s, got: %s", want, strings.Join(args, " "))
+		}
+		// With nothing bound over it, the cache path is an ordinary directory
+		// in the scratch tree and dies with it.
+		if !strings.HasPrefix(strings.SplitN(want, "=", 2)[1], buildTmpDir+"/") {
+			t.Errorf("the fallback cache must live inside the throwaway mount: %s", want)
+		}
+	}
+}
+
+// TestBuildJailArgs_CacheMountPointIsInsideTheScratchMount pins the mechanical
+// constraint the live run found: nsjail creates each mount point inside the
+// chroot, and a runtime rootfs is read-only and owned by another user. The
+// image pre-creates exactly /code and /tmp (scripts/build-rootfs.sh), so a
+// top-level /cache fails with "mkdir(...): Permission denied" on every rootfs
+// already deployed. The mount point must therefore live under /tmp, which is
+// our own world-writable scratch directory.
+func TestBuildJailArgs_CacheMountPointIsInsideTheScratchMount(t *testing.T) {
+	if !strings.HasPrefix(buildCacheDir, buildTmpDir+"/") {
+		t.Fatalf("cache mount point %q must live under the scratch mount %q", buildCacheDir, buildTmpDir)
+	}
+	cfg := testBuildConfig(t)
+	cfg.CacheDir = "/data/build-cache/fn"
+	args, err := buildJailArgs(cfg, "/rootfs/node", "/scratch")
+	if err != nil {
+		t.Fatalf("buildJailArgs: %v", err)
+	}
+	// Order matters: the scratch mount has to be in place before something is
+	// mounted inside it.
+	scratchAt, cacheAt := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] != "-B" {
+			continue
+		}
+		switch args[i+1] {
+		case "/scratch:" + buildTmpDir:
+			scratchAt = i
+		case cfg.CacheDir + ":" + buildCacheDir:
+			cacheAt = i
+		}
+	}
+	if scratchAt < 0 || cacheAt < 0 {
+		t.Fatalf("both mounts must be present: %s", strings.Join(args, " "))
+	}
+	if scratchAt > cacheAt {
+		t.Errorf("the scratch mount must precede the cache mount nested inside it")
+	}
+}
+
+// TestBuildJailArgs_OrvaOwnsTheCacheEnv: these variables name paths that exist
+// only inside the jail, so a value forwarded from orvad's environment cannot
+// be right. An operator with npm_config_cache=/root/.npm set on the daemon
+// would otherwise have npm pointed at an unmounted path on the read-only
+// chroot, and the build dies with a bare EROFS.
+func TestBuildJailArgs_OrvaOwnsTheCacheEnv(t *testing.T) {
+	cfg := testBuildConfig(t)
+	cfg.CacheDir = "/data/build-cache/fn"
+	cfg.Env = map[string]string{
+		"npm_config_cache":    "/root/.npm",
+		"NPM_CONFIG_CACHE":    "/root/.npm",
+		"PIP_CACHE_DIR":       "/root/.cache/pip",
+		"pip_cache_dir":       "/root/.cache/pip",
+		"npm_config_logs_dir": "/root/.npm/_logs",
+		// A legitimately forwarded setting must still survive.
+		"NPM_CONFIG_REGISTRY": "https://registry.internal/",
+	}
+	args, err := buildJailArgs(cfg, "/rootfs/node", "/scratch")
+	if err != nil {
+		t.Fatalf("buildJailArgs: %v", err)
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "/root/") || strings.Contains(arg, "=/root/") {
+			t.Fatalf("a host cache path leaked into the jail env: %q", arg)
+		}
+	}
+	if !hasPair(args, "--env", "npm_config_cache="+buildCacheDir+"/npm") {
+		t.Errorf("Orva's cache path must win: %s", strings.Join(args, " "))
+	}
+	if !hasPair(args, "--env", "NPM_CONFIG_REGISTRY=https://registry.internal/") {
+		t.Error("forwarding a private registry must still work")
+	}
+}
+
 // TestBuildJailArgs_RaisesInstallLimits pins the limits an install needs and an
 // invocation does not. nsjail's defaults (RLIMIT_FSIZE 1 MB, RLIMIT_NOFILE 32,
 // time_limit 600s) each break a real dependency install on their own.

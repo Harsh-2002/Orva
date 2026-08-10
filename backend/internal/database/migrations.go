@@ -381,6 +381,13 @@ INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('versions_to_keep', '5'),
     ('gc_interval_seconds', '300'),
     ('min_free_disk_mb', '500'),
+    -- Per-function npm/pip caches under <dataDir>/build-cache/<fn>/. Both
+    -- bounds are enforced by the version GC's tick: drop a function's cache
+    -- once it has gone unused this many days (0 = never), and keep the total
+    -- under this many MB by evicting whole per-function caches, least
+    -- recently used first (0 = no size cap).
+    ('build_cache_max_age_days', '14'),
+    ('build_cache_max_mb', '2048'),
     -- Global DNS for sandboxed functions with network_mode=egress.
     -- Comma-separated list of resolver IPs (v4 or v6). Empty = use the
     -- host's /etc/resolv.conf. Operator-editable from the Firewall page.

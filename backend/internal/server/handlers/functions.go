@@ -489,7 +489,53 @@ func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if h.PoolDrain != nil {
 		h.PoolDrain(fnID)
 	}
+	// Reclaim the function's disk state now that the row is gone: its code
+	// tree AND its build cache. This used to be left behind forever — the
+	// version GC only walks functions that still exist in the database, so an
+	// orphaned tree was never revisited.
+	//
+	// After the DB delete, and never fatal: the function IS deleted at this
+	// point, so a failed unlink must not report a failed delete. The GC's
+	// orphan sweep retries.
+	if err := builder.PurgeFunctionFiles(h.DataDir, fnID); err != nil {
+		slog.Warn("delete function: on-disk cleanup incomplete", "fn", fnID, "err", err)
+	}
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": fnID})
+}
+
+// PurgeBuildCache handles DELETE /api/v1/functions/{fn_id}/build-cache.
+//
+// The per-function dependency cache is the one part of the caching design that
+// can hold attacker-influenced bytes (a poisoned tarball fetched by a previous
+// build), so an operator needs a way to drop it without deleting the function.
+// The next deploy simply refetches.
+func (h *FunctionHandler) PurgeBuildCache(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	rawID := r.PathValue("fn_id")
+	if rawID == "" {
+		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing function ID", reqID)
+		return
+	}
+	fnID, ok := h.resolveFnID(rawID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
+
+	// Serialize against a build of the same function: removing the cache npm
+	// is reading from mid-install would fail that deploy.
+	if h.FnLock != nil {
+		lk := h.FnLock(fnID)
+		lk.Lock()
+		defer lk.Unlock()
+	}
+	if err := builder.PurgeBuildCache(h.DataDir, fnID); err != nil {
+		slog.Warn("purge build cache failed", "fn", fnID, "err", err)
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to purge build cache", reqID)
+		return
+	}
+	slog.Info("build cache purged", "fn", fnID)
+	respond.JSON(w, http.StatusOK, map[string]string{"status": "purged", "id": fnID})
 }
 
 // GetSource handles GET /api/v1/functions/{fn_id}/source.

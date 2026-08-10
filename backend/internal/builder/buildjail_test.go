@@ -34,7 +34,7 @@ func TestInstallDependencies_NoDepsNeedsNoPolicy(t *testing.T) {
 			// EgressPolicy deliberately nil: reaching for it here would mean
 			// we had started an installer that has nothing to install.
 			b := &Builder{DataDir: t.TempDir()}
-			got, err := b.installDependencies(t.Context(), dir, tc.runtime, tc.entrypoint)
+			got, err := b.installDependencies(t.Context(), "", dir, tc.runtime, tc.entrypoint)
 			if err != nil {
 				t.Fatalf("dependency-free build must not need a policy: %v", err)
 			}
@@ -67,7 +67,7 @@ func TestInstallDependencies_FailsClosedWithoutPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			b := &Builder{DataDir: t.TempDir()}
-			_, err := b.installDependencies(t.Context(), dir, d.runtime, d.entrypoint)
+			_, err := b.installDependencies(t.Context(), "", dir, d.runtime, d.entrypoint)
 			if !errors.Is(err, sandbox.ErrEgressPolicyMissing) {
 				t.Fatalf("want ErrEgressPolicyMissing, got %v", err)
 			}
@@ -81,7 +81,7 @@ func TestInstallDependencies_FailsClosedWithoutPolicy(t *testing.T) {
 			boom := errors.New("no policy compiled yet")
 			b := &Builder{DataDir: t.TempDir()}
 			b.SetEgressPolicy(func() (string, string, error) { return "", "", boom })
-			_, err := b.installDependencies(t.Context(), dir, d.runtime, d.entrypoint)
+			_, err := b.installDependencies(t.Context(), "", dir, d.runtime, d.entrypoint)
 			if !errors.Is(err, boom) {
 				t.Fatalf("the firewall's own error must reach the build log, got %v", err)
 			}

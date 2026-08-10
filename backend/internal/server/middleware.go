@@ -219,6 +219,8 @@ func summaryFor(method, path string, status int) string {
 			return "create function"
 		case method == http.MethodPost && strings.HasSuffix(path, "/deployments"):
 			return "deploy " + extractFnID(path)
+		case method == http.MethodDelete && strings.HasSuffix(path, "/build-cache"):
+			return "purge build cache " + extractFnID(path)
 		case method == http.MethodDelete:
 			return "delete " + extractFnID(path)
 		case method == http.MethodPut:

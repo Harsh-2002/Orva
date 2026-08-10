@@ -207,8 +207,13 @@ func New(cfg *config.Config, db *database.Database) *Server {
 
 	// Round-G: prune archived version dirs in the background. Always
 	// preserves the actively-served version; tunable via
-	// system_config.versions_to_keep + gc_interval_seconds.
-	go builder.NewGC(cfg.Data.Dir, db).Run(context.Background())
+	// system_config.versions_to_keep + gc_interval_seconds. The same tick
+	// bounds the per-function build caches and reclaims orphaned function
+	// dirs — both take the build queue's per-function lock (try-only) so
+	// nothing an in-flight build is writing is ever removed underneath it.
+	gc := builder.NewGC(cfg.Data.Dir, db)
+	gc.FnLock = poolMgr.FunctionLock
+	go gc.Run(context.Background())
 
 	// Background ticker: snapshot system metrics every 5 s and publish
 	// to the hub. The HTTP handler GET /api/v1/system/metrics.json still
