@@ -832,6 +832,9 @@ func buildEnv(fn *database.Function) map[string]string {
 		env[k] = v
 	}
 	env["ORVA_FUNCTION_ID"] = fn.ID
+	// Both adapters expose this to user code as ctx.functionName. Nothing
+	// injected it before, so that field was permanently the empty string.
+	env["ORVA_FUNCTION_NAME"] = fn.Name
 	env["ORVA_MEMORY_MB"] = fmt.Sprintf("%d", fn.MemoryMB)
 	// Tell the Node / Python adapter which file to load. The builder
 	// rewrites this during a TypeScript build to "<outDir>/<stem>.js"

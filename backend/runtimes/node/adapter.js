@@ -446,10 +446,11 @@ async function readFrame() {
 }
 
 (async () => {
-  // Optional recycle cap: after MAX_REQUESTS dispatches, exit so the pool
-  // respawns and we avoid any slow memory creep in user code.
-  const maxReqs = Number(process.env.ORVA_MAX_REQUESTS || 0);
-  let served = 0;
+  // Worker recycling is owned by the pool (SandboxTemplate DefaultMaxUses →
+  // functionPool.maxUses), which retires a worker after N dispatches. This
+  // adapter deliberately has no second, self-managed recycle counter: the pool
+  // is the single lifecycle authority, and a worker that exits on its own
+  // schedule races the pool's accounting.
 
   for (;;) {
     const frame = await readFrame();
@@ -566,11 +567,6 @@ async function readFrame() {
       } catch {}
     }
 
-    served++;
-    if (maxReqs > 0 && served >= maxReqs) {
-      writeFrame({ type: 'bye' });
-      process.exit(0);
-    }
   }
 })().catch((err) => {
   try {

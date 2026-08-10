@@ -11,11 +11,8 @@ import (
 var SupportedEnvVars = []string{
 	"ORVA_CORS_ORIGINS",
 	"ORVA_DATA_DIR",
-	"ORVA_DEFAULT_MEMORY_MB",
-	"ORVA_DEFAULT_TIMEOUT_MS",
 	"ORVA_HOST",
 	"ORVA_LOG_LEVEL",
-	"ORVA_LOG_RETENTION_DAYS",
 	"ORVA_MAX_BODY_BYTES",
 	"ORVA_PORT",
 	"ORVA_SECCOMP_POLICY",
@@ -65,10 +62,8 @@ type SandboxConfig struct {
 }
 
 type FunctionsConfig struct {
-	DefaultTimeoutMS int
-	DefaultMemoryMB  int
-	DefaultCPUs      float64
-	MaxCodeSize      int64
+	DefaultCPUs float64
+	MaxCodeSize int64
 	// DefaultMaxPids caps the number of processes a sandbox may spawn
 	// (nsjail --cgroup_pids_max), bounding fork bombs. 0 would disable the
 	// cap, so it must always be positive on the warm-pool spawn path.
@@ -76,9 +71,8 @@ type FunctionsConfig struct {
 }
 
 type LoggingConfig struct {
-	Level         string
-	Format        string
-	RetentionDays int
+	Level  string
+	Format string
 }
 
 type SecurityConfig struct {
@@ -97,8 +91,10 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// applyEnvOverrides applies the 9 supported env vars and returns the names
-// of those that were found set (for startup logging).
+// applyEnvOverrides applies the supported env vars (SupportedEnvVars) and
+// returns the names of those that were found set (for startup logging).
+// Every var here must have an observable runtime effect — a knob an operator
+// can set with no consequence is worse than no knob at all.
 func applyEnvOverrides(cfg *Config) []string {
 	var active []string
 
@@ -153,27 +149,9 @@ func applyEnvOverrides(cfg *Config) []string {
 			cfg.Server.WriteTimeoutSec = n
 		}
 	}
-	if v := os.Getenv("ORVA_DEFAULT_TIMEOUT_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			active = append(active, "ORVA_DEFAULT_TIMEOUT_MS")
-			cfg.Functions.DefaultTimeoutMS = n
-		}
-	}
-	if v := os.Getenv("ORVA_DEFAULT_MEMORY_MB"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			active = append(active, "ORVA_DEFAULT_MEMORY_MB")
-			cfg.Functions.DefaultMemoryMB = n
-		}
-	}
 	if v := os.Getenv("ORVA_LOG_LEVEL"); v != "" {
 		active = append(active, "ORVA_LOG_LEVEL")
 		cfg.Logging.Level = v
-	}
-	if v := os.Getenv("ORVA_LOG_RETENTION_DAYS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			active = append(active, "ORVA_LOG_RETENTION_DAYS")
-			cfg.Logging.RetentionDays = n
-		}
 	}
 	if v := os.Getenv("ORVA_SECURE_COOKIES"); v == "true" || v == "1" {
 		active = append(active, "ORVA_SECURE_COOKIES")

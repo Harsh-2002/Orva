@@ -814,7 +814,6 @@ output_log="/var/log/orva.log"
 error_log="/var/log/orva.log"
 
 export ORVA_DATA_DIR="${DATA_DIR}"
-export ORVA_ROOTFS_DIR="${DATA_DIR}/rootfs"
 export ORVA_DISABLE_USERNS="${SERVICE_DISABLE_USERNS}"
 
 depend() {

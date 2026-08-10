@@ -96,6 +96,11 @@ func runServe(cmd *cobra.Command, args []string) {
 	// versions/<hash>/ layout. Idempotent — no-op on subsequent boots.
 	builder.MigrateLegacyCodeDirs(cfg.Data.Dir, db)
 
+	// Trim execution history so the database does not grow without bound.
+	// Runs once now and daily thereafter; the window is the system_config key
+	// database.RetentionSettingKey (0 disables it).
+	db.StartRetention(context.Background())
+
 	srv := server.New(cfg, db)
 
 	// Load the active function set into the registry cache, then kick off

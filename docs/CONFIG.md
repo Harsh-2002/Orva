@@ -4,8 +4,12 @@ Orva is configured entirely through environment variables. There is no
 config file — every knob that needs operator input is an env var. A bare
 `docker run` with no env set works out of the box.
 
-On startup, Orva logs which of the 9 supported env vars it found set and
+On startup, Orva logs which of the 10 supported env vars it found set and
 how many are at their defaults.
+
+Every variable below has an observable runtime effect. A knob that an
+operator can set with no consequence is worse than no knob at all, so
+names that stopped doing anything are deleted rather than deprecated.
 
 ---
 
@@ -20,13 +24,11 @@ how many are at their defaults.
 | `ORVA_MAX_BODY_BYTES` | `6291456` | Max request body (bytes) for `/api/v1/*` JSON endpoints. Function code uploads (`/deploy`, `/deploy-inline`) and `/restore` are exempt — those are bounded by the 50 MB code-size cap instead. |
 | `ORVA_CORS_ORIGINS` | `*` | Comma-separated allow-list of browser origins for the API/dashboard. Default allows all; set an explicit list (e.g. `https://orva.example`) to lock it down. |
 | `ORVA_SECCOMP_POLICY` | `default` | Seccomp policy applied to every sandbox: `default` / `strict` / `permissive` / `disabled`. An unrecognized value is ignored (stays `default`). |
-| `ORVA_DEFAULT_TIMEOUT_MS` | `30000` | Per-invocation timeout applied to new functions that don't set one explicitly. Exceeded → `504 TIMEOUT`. |
-| `ORVA_DEFAULT_MEMORY_MB` | `64` | cgroup memory cap applied to new functions. Tune to your host's available RAM. |
 | `ORVA_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `ORVA_LOG_RETENTION_DAYS` | `7` | Execution and build log retention in days. Logs older than this are pruned on startup. |
 | `ORVA_SECURE_COOKIES` | `false` | Set to `true` when Orva is behind an HTTPS reverse proxy. Adds the `Secure` flag to session cookies. |
 | `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Single-operator instances can set this to `30`. |
 | `ORVA_PPROF_ADDR` | (unset) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
+| `ORVA_INTERNAL_API_BASE` | (auto-detected) | The base URL sandboxed functions use to reach Orva's own internal SDK endpoints (KV, jobs, function-to-function). Orva probes for a routable address at startup — from inside a sandbox `127.0.0.1` is the sandbox's own loopback, so this is deliberately **not** a loopback address. Set it only on network setups the probe gets wrong (overlay networks, Swarm, k8s), as `http://host:port`. The compiled egress policy emits a narrow allow rule for exactly this address and port, so an operator blocking private ranges does not cut off the SDK. |
 
 ---
 
@@ -37,18 +39,32 @@ deployment and exposing them as knobs would only create confusion:
 
 | what | value |
 |------|-------|
-| Bind address | `0.0.0.0` |
 | HTTP read timeout | 30 s |
-| Request body cap | 6 MB |
 | nsjail binary | `/usr/local/bin/nsjail` |
-| Rootfs dir | `${ORVA_DATA_DIR}/rootfs` |
-| DB path | `${ORVA_DATA_DIR}/orva.db` |
-| CORS origins | `*` |
+| Rootfs dir | `${ORVA_DATA_DIR}/rootfs` (derived) |
+| DB path | `${ORVA_DATA_DIR}/orva.db` (derived) |
+| New-function timeout | `30000` ms — change per function, see below |
+| New-function memory | `64` MB — change per function, see below |
 | Default function CPUs | `0.5` |
 | Deploy tarball cap | 50 MB |
-| Seccomp policy | `default` |
 | Log format | `json` |
 | Max concurrent invocations | `cpu_count × 64` (min 200) |
+| Max processes per sandbox | 32 (`--cgroup_pids_max`) |
+
+Timeout and memory are **per-function**, not per-instance: the values above
+are only what a function gets when it is created without an explicit one.
+Change them on the function itself and the change applies immediately, with
+no restart:
+
+```bash
+curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \
+  http://localhost:8443/api/v1/functions/my-fn \
+  -d '{"timeout_ms":60000,"memory_mb":256}'
+```
+
+There is deliberately no instance-wide override for these — one existed as
+`ORVA_DEFAULT_TIMEOUT_MS` / `ORVA_DEFAULT_MEMORY_MB` and was removed because
+nothing read it, so setting it silently did nothing.
 
 ---
 
@@ -56,10 +72,9 @@ deployment and exposing them as knobs would only create confusion:
 
 ```yaml
 environment:
-  ORVA_DEFAULT_MEMORY_MB: "128"   # tune to host RAM
   ORVA_WRITE_TIMEOUT_SEC: "90"    # headroom above your longest function timeout
   ORVA_SESSION_DAYS: "30"         # single-operator instance
-  ORVA_LOG_RETENTION_DAYS: "30"   # keep a month of logs
+  ORVA_SECURE_COOKIES: "true"     # behind an HTTPS reverse proxy
 ```
 
 Orva does not terminate TLS. Run a reverse proxy (nginx, Caddy, Traefik)
@@ -87,6 +102,29 @@ curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \
 ```
 
 ---
+
+## Runtime-tunable: execution history retention
+
+Every invocation writes an `executions` row plus its logs, and — when replay
+capture is enabled — the captured request. Those are trimmed on a schedule so
+the database does not grow without bound.
+
+| Setting (`system_config` key) | Default | Meaning |
+|---|---|---|
+| `execution_retention_days` | `30` | Delete executions, their logs and their captured requests once they are older than this many days. **`0` disables purging entirely** (keep everything). |
+
+The purge runs once at startup and then every 24 hours. The setting is re-read
+on each pass, so changing it takes effect without restarting the server.
+
+This is deliberately **not** an environment variable: it is operational state an
+operator may want to change on a running instance, in the same category as the
+DNS resolvers and the egress blocklist, and an env var would require a restart
+to change.
+
+> Earlier builds shipped an `ORVA_LOG_RETENTION_DAYS` environment variable and
+> documented that old logs were "pruned on startup". Nothing read that variable
+> and no purge ever ran, so history accumulated forever. The variable is gone
+> and the behaviour it promised is now real.
 
 ## Build identity
 

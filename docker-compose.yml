@@ -50,10 +50,8 @@ services:
       - /dev/net/tun:/dev/net/tun
 
     environment:
-      ORVA_DEFAULT_MEMORY_MB: "128"
       ORVA_WRITE_TIMEOUT_SEC: "90"
       ORVA_SESSION_DAYS: "30"
-      ORVA_LOG_RETENTION_DAYS: "30"
       ORVA_SECURE_COOKIES: "true"
 
     healthcheck:

@@ -45,16 +45,13 @@ func Defaults() *Config {
 			SeccompPolicy: "default",
 		},
 		Functions: FunctionsConfig{
-			DefaultTimeoutMS: 30000,
-			DefaultMemoryMB:  64,
-			DefaultCPUs:      0.5,
-			MaxCodeSize:      50 * 1024 * 1024, // 50MB
-			DefaultMaxPids:   32,
+			DefaultCPUs:    0.5,
+			MaxCodeSize:    50 * 1024 * 1024, // 50MB
+			DefaultMaxPids: 32,
 		},
 		Logging: LoggingConfig{
-			Level:         "info",
-			Format:        "json",
-			RetentionDays: 7,
+			Level:  "info",
+			Format: "json",
 		},
 		Security: SecurityConfig{
 			CORSOrigins: []string{"*"},
