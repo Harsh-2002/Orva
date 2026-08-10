@@ -1,0 +1,1 @@
+So, in this update, what we have done, we have removed the NF table support completely, and so to manage it to manage the networking, we need networking control, right? So, we are not going to use NF tables by default. We will use the features NSGL give us natively, right? And have you tested it, validated properly or not ?
