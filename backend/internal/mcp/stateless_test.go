@@ -552,3 +552,71 @@ func sdkPackageDir(t *testing.T) string {
 	}
 	return filepath.Join(root, "mcp")
 }
+
+// TestChannelPathIsAlsoCacheScopedPrivate closes a coverage gap that a reviewer
+// found the hard way.
+//
+// NewHandler builds TWO servers — an operator one and a channel one — and each
+// registers cacheScopeMiddleware separately. Every other test here authenticates
+// with an operator API key, and TestEveryCacheableResultIsScopedPrivate exercises
+// the middleware function in isolation, so removing the middleware from ONLY the
+// channel branch left the whole Go suite green. It was caught by the Python E2E
+// module, which runs in CI but not in `make test`.
+//
+// The channel branch is the worse one to lose. A channel token's catalog is the
+// most tightly scoped surface Orva exposes — one invoke-only tool per bundled
+// function, and nothing else — so a "public" cacheScope there invites an
+// intermediary to serve one tenant's function names to another tenant.
+//
+// The channel is created with no bound functions on purpose: registerChannelTools
+// returns early on an empty FunctionIDs list, which keeps Registry out of the
+// picture, and an empty tool list still carries a cacheScope. The middleware
+// registration is what is under test, not the catalog contents.
+func TestChannelPathIsAlsoCacheScopedPrivate(t *testing.T) {
+	db, err := database.New(filepath.Join(t.TempDir(), "mcp-channel.db"))
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	const token = "orva_chn_0123456789abcdef0123456789abcdef"
+	sum := sha256.Sum256([]byte(token))
+	if err := db.InsertChannel(&database.Channel{
+		ID:          "chan_cachescope",
+		Name:        "cachescope-test",
+		TokenHash:   hex.EncodeToString(sum[:]),
+		TokenPrefix: token[:16],
+	}); err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	handler := NewHandler(Deps{DB: db, Version: "test"})
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp",
+		strings.NewReader(rpcBody(t, 1, "tools/list",
+			map[string]any{"_meta": newProtocolMeta(true)})))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set(hdrProtocolVersion, protocolVersion20260728)
+	req.Header.Set(hdrMethod, "tools/list")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("channel tools/list status = %d, want 200; body=%s",
+			w.Code, truncBody(w.Body.String()))
+	}
+	out := decodeResult[mcpsdk.ListToolsResult](t, decodeRPC(t, w))
+	if out.CacheScope != cacheScopePrivate {
+		t.Fatalf("channel tools/list cacheScope = %q, want %q. cacheScopeMiddleware is "+
+			"registered separately on the channel server in NewHandler and has been "+
+			"dropped from that branch. A channel catalog is the most tightly scoped "+
+			"surface Orva has, so a shareable cache entry here leaks one tenant's "+
+			"function names to another.", out.CacheScope, cacheScopePrivate)
+	}
+}
