@@ -116,3 +116,13 @@ Your headline number was right for the wrong reason: the surface was already lea
 Two boot-test notes: port **19555 was already occupied** by another agent's `python3` mock provider, so I moved to **19731** (verified free first). `make build` internally invokes `docs-embed`; it was a no-op — `git status` shows exactly my 6 intended files and no `reference.md` copies touched. My test process is terminated; the `./build/orva serve` still running as pid 613970 is another agent's, not mine.</result>
 <usage><subagent_tokens>114635</subagent_tokens><tool_uses>58</tool_uses><duration_ms>584251</duration_ms></usage>
 </task-notification>
+
+---
+
+Three things I did not touch — your call
+
+1. Execution retention isn't implemented. I removed the lying knob, not the missing feature. Wiring PurgeOldExecutions up would start deleting execution rows on every boot — shipping that as a side effect of a config cleanup would be reckless. Either implement it deliberately with a safe default, or delete the dead helper.
+2. ORVA_MAX_CONCURRENT doesn't exist, but test/loadtest.sh sets it to 500. So your published load-test numbers were measured at the default ceiling, not 500. Either add the knob or fix the script — but the existing numbers are suspect either way.
+3. ctx.functionName is always empty in both runtimes, and adapter-side request recycling is permanently off, because nothing injects ORVA_FUNCTION_NAME / ORVA_MAX_REQUESTS. Both look like unfinished plumbing.
+
+None are migration-related; all predate this branch. Builder and benchmark agents are still running — I'll fold everything together and validate before touching the PR. - take best approch for this project going forward and no backward compaitibilty needed.
