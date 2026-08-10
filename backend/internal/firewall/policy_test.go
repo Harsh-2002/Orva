@@ -657,3 +657,35 @@ func TestResolvedHostnameRuleIsNotReportedUnenforced(t *testing.T) {
 		}
 	}
 }
+
+// TestPortConversionRejectsOutOfRange guards a silent-truncation hazard that
+// CodeQL flagged as high severity (go/incorrect-integer-conversion).
+//
+// A bare uint16(port) truncates rather than failing: 70000 becomes 4464 and
+// 65536+8443 becomes 8443. Both conversions sit on a security boundary — the
+// compiled control-plane ALLOW and the daemon's exemption — so a truncated
+// value would scope them to a port the operator never exempted, reintroducing
+// the bypass the port-scoping fix closed. Out of range must yield 0, which
+// matches no real port, so the failure direction is "no exemption".
+func TestPortConversionRejectsOutOfRange(t *testing.T) {
+	for _, bad := range []int{0, -1, 65536, 70000, 65536 + 8443, 1 << 20} {
+		if got, ok := portToUint16(bad); ok || got != 0 {
+			t.Errorf("portToUint16(%d) = (%d, %v); out-of-range must fail to 0, "+
+				"never truncate onto a real port", bad, got, ok)
+		}
+	}
+	for _, good := range []int{1, 53, 443, 8443, 65535} {
+		if got, ok := portToUint16(good); !ok || int(got) != good {
+			t.Errorf("portToUint16(%d) = (%d, %v); want (%d, true)", good, got, ok, good)
+		}
+	}
+}
+
+// A control-plane port outside the valid range must fail the compile outright,
+// not silently produce a carve-out on a truncated port.
+func TestCompileRejectsTruncatingControlPlanePort(t *testing.T) {
+	cp := ControlPlane{Addrs: []netip.Addr{netip.MustParseAddr("10.1.1.20")}, Port: 65536 + 8443}
+	if _, err := compile(nil, noResolve, cp, DefaultGuestNet(), nil); err == nil {
+		t.Fatal("a port that truncates onto 8443 must fail the compile, not become an 8443 carve-out")
+	}
+}

@@ -213,9 +213,13 @@ func compile(
 		if !usableTarget(a) {
 			return compiled{}, errors.New("control-plane address is invalid or unspecified")
 		}
+		port, ok := portToUint16(cp.Port)
+		if !ok {
+			return compiled{}, fmt.Errorf("control-plane port %d out of range", cp.Port)
+		}
 		c.addByFamily(nstunRule{
 			act: actionAllow, pr: protoTCP,
-			dst: hostPrefix(a), dport: uint16(cp.Port),
+			dst: hostPrefix(a), dport: port,
 		})
 	}
 
@@ -342,6 +346,22 @@ func (c *compiled) count(r nstunRule) {
 // hostPrefix returns the single-address prefix for a (/32 or /128).
 func hostPrefix(a netip.Addr) netip.Prefix {
 	return netip.PrefixFrom(a, a.BitLen())
+}
+
+// portToUint16 converts a port with the range check local to the conversion.
+//
+// compile rejects an out-of-range control-plane port before any policy is
+// built, so this cannot currently fail — but the conversion sits on a security
+// boundary, and a bare uint16() truncates silently: 70000 becomes 4464, and
+// 65536+8443 becomes 8443. Either would scope the daemon's exemption to a port
+// the operator never exempted, which is precisely the defect the port-scoping
+// fix closed. ok=false yields 0, which matches no real port, so an invalid
+// value produces NO exemption rather than the wrong one.
+func portToUint16(p int) (uint16, bool) {
+	if p < 1 || p > 65535 {
+		return 0, false
+	}
+	return uint16(p), true
 }
 
 // usableTarget reports whether a resolved address may be turned into a rule.

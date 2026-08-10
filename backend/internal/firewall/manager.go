@@ -248,13 +248,16 @@ func (m *Manager) refresh() error {
 			m.markStale(err.Error())
 			return err
 		}
+		exemptPort, _ := portToUint16(m.cp.Port)
 		p := &Policy{
 			Gen: gen, Path: path,
 			Rules4: len(c.rules4), Rules6: len(c.rules6),
 			Allows: c.allows, Rejects: c.rejects,
 			CompiledAt: time.Now().UTC(),
 			rules4:     c.rules4, rules6: c.rules6,
-			exemptAddrs: m.cp.Addrs, exemptPort: uint16(m.cp.Port),
+			// 0 on an out-of-range port: matches nothing, so the daemon gets
+			// no exemption at all rather than one scoped to a truncated port.
+			exemptAddrs: m.cp.Addrs, exemptPort: exemptPort,
 		}
 		m.policy.Store(p)
 		slog.Info("egress policy published",
