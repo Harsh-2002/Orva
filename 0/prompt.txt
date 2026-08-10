@@ -1,0 +1,1 @@
+I want you to anal analyze this code base and understand all the things like what is this project and what it does, the structure of this code base, and things like that. The workflow, the GitHub Action workflow, and all those things. Ready the docs and understand the code base
