@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZNZA0WFVC4ACADZKK8CCS41",
+  "session_id": "542dbe1e-4f99-4b28-b651-69f1765d5492",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-10T13:55:42.203696019Z",
+  "branch": "feat/remove-nftables-nstun",
+  "checkpoints_count": 3,
+  "save_step_count": 1,
+  "files_touched": [
+    "backend/cmd/orva/serve.go",
+    "backend/internal/builder/buildcache.go",
+    "backend/internal/builder/builder.go",
+    "backend/internal/builder/gc.go",
+    "backend/internal/database/database_test.go",
+    "backend/internal/database/migrations.go",
+    "backend/internal/sandbox/build.go",
+    "backend/internal/server/middleware.go",
+    "backend/internal/server/router.go",
+    "backend/internal/server/server.go",
+    "cli/commands/commands_test.go",
+    "docs/CONFIG.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5",
+  "turn_id": "46fa486669b0",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 1580,
+    "cache_creation_tokens": 4676955,
+    "cache_read_tokens": 389056491,
+    "output_tokens": 827267,
+    "api_call_count": 794
+  },
+  "session_metrics": {
+    "turn_count": 20
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-10T13:55:41.079362812Z",
+    "agent_lines": 774,
+    "agent_removed": 29,
+    "human_added": 1020,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1794,
+    "total_lines_changed": 1828,
+    "agent_percentage": 43.927789934354486,
+    "metric_version": 2
+  }
+}
