@@ -191,7 +191,7 @@ const navItems = [
   { path: '/api-keys',    label: 'Keys',        icon: Fingerprint },
   { path: '/channels',  label: 'Channels',  icon: Plug },
   { path: '/webhooks',    label: 'Webhooks',    icon: Webhook },
-  { path: '/firewall',    label: 'Egress controls', icon: ShieldHalf },
+  { path: '/firewall',    label: 'Egress', icon: ShieldHalf },
   { path: '/settings',    label: 'Settings',    icon: Settings },
   { path: '/docs',        label: 'Docs',        icon: LibraryBig },
 ]

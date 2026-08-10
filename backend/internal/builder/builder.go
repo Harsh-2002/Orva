@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -483,7 +484,7 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 				"install", "-r", sandbox.BuildCodeDir + "/requirements.txt",
 				"-t", sandbox.BuildCodeDir,
 				"--python-version", pyVer,
-				"--platform", "manylinux2014_x86_64",
+				"--platform", pipPlatformTag(),
 				"--implementation", "cp",
 				"--only-binary=:all:",
 				"--quiet",
@@ -778,4 +779,18 @@ func logLines(b *Builder, stream string, out []byte) {
 		}
 		b.Logger.Append(stream, line)
 	}
+}
+
+// pipPlatformTag is the manylinux wheel platform pip resolves against.
+//
+// It must track the host architecture. This was hardcoded to
+// manylinux2014_x86_64, which combined with --only-binary=:all: meant an
+// arm64 host silently installed x86_64 wheels — any package with a compiled
+// extension would then fail to import at invoke time, long after the deploy
+// reported success.
+func pipPlatformTag() string {
+	if goruntime.GOARCH == "arm64" {
+		return "manylinux2014_aarch64"
+	}
+	return "manylinux2014_x86_64"
 }

@@ -5,7 +5,7 @@
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="max-w-2xl">
           <h1 class="text-xl font-semibold text-white tracking-tight">
-            Egress controls
+            Egress
           </h1>
           <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
             Decide what your functions are allowed to talk to. Each switch

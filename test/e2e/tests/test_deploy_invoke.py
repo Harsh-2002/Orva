@@ -221,6 +221,98 @@ def handler(event):
             pdel, _ = c.req("DELETE", f"/api/v1/functions/{pyfid}", expect=range(200, 599))
             check("delete python -> 2xx", pdel in (200, 204), f"status {pdel}")
 
+        # ── dependency installs run inside the build jail ──────────────
+        #
+        # This is the ONLY coverage anywhere for the build-jail seccomp
+        # profile. Nothing else in CI deploys a function with dependencies
+        # against a build of this branch, so without these cases a syscall
+        # name that Kafel's catalog does not know would ship undetected —
+        # and on aarch64 that is a policy COMPILE error, i.e. every
+        # dependency build on that architecture fails, not degrades.
+        #
+        # Deliberately hard checks, not skips: by this point the plain
+        # deploy above already went active, so the sandbox demonstrably
+        # works and a failure here is the build jail, not the environment.
+        section("build jail: node dependency install")
+        dep_fid = None
+        try:
+            dcode, dfn = c.req("POST", "/api/v1/functions",
+                               {"name": f"{NAME}-deps", "runtime": "node", "memory_mb": 256},
+                               expect=range(200, 599))
+            dep_fid = (dfn or {}).get("id") if isinstance(dfn, dict) else None
+            check("deps function created", dcode in (200, 201) and bool(dep_fid), f"status {dcode}")
+            if dep_fid:
+                # semver installs a node_modules/.bin symlink, which is the
+                # operation glibc routes through symlinkat on aarch64.
+                ddc, ddep = c.req(
+                    "POST", f"/api/v1/functions/{dep_fid}/deploy-inline",
+                    {"code": ('const s = require("semver");\n'
+                              'exports.handler = async () => ({statusCode: 200,'
+                              ' headers: {"Content-Type": "application/json"},'
+                              ' body: JSON.stringify({valid: s.valid("1.2.3")})});\n'),
+                     "filename": "handler.js",
+                     "dependencies": '{"name":"e2e-deps","version":"1.0.0",'
+                                     '"dependencies":{"semver":"7.6.3"}}'},
+                    expect=range(200, 599))
+                check("deps deploy accepted", ddc in (200, 202), f"status {ddc}: {str(ddep)[:200]}")
+                dstat = wait_active(c, dep_fid, timeout=180)
+                check("jailed npm install succeeded", dstat == "active",
+                      f"final status={dstat!r} — a Kafel/seccomp failure in the build jail "
+                      f"surfaces here as a failed build")
+                if dstat == "active":
+                    dic, dib = c.req("POST", f"/fn/{dep_fid}", {}, expect=range(200, 599))
+                    if isinstance(dib, str):
+                        try:
+                            dib = json.loads(dib)
+                        except Exception:
+                            dib = {}
+                    check("installed dependency is loadable at invoke",
+                          dic == 200 and isinstance(dib, dict) and dib.get("valid") == "1.2.3",
+                          f"status {dic}: {str(dib)[:200]}")
+        finally:
+            if dep_fid:
+                c.req("DELETE", f"/api/v1/functions/{dep_fid}", expect=range(200, 599))
+
+        section("build jail: python dependency install")
+        pdep_fid = None
+        try:
+            pcode2, pfn2 = c.req("POST", "/api/v1/functions",
+                                 {"name": f"{PYTHON_NAME}-deps", "runtime": "python", "memory_mb": 256},
+                                 expect=range(200, 599))
+            pdep_fid = (pfn2 or {}).get("id") if isinstance(pfn2, dict) else None
+            check("python deps function created", pcode2 in (200, 201) and bool(pdep_fid), f"status {pcode2}")
+            if pdep_fid:
+                # urllib3 ships a py3-none-any wheel, so this asserts the build
+                # jail rather than wheel-platform resolution.
+                pdc2, pdep2 = c.req(
+                    "POST", f"/api/v1/functions/{pdep_fid}/deploy-inline",
+                    {"code": ('import json, urllib3\n'
+                              'def handler(event, context):\n'
+                              '    return {"statusCode": 200,'
+                              ' "headers": {"Content-Type": "application/json"},'
+                              ' "body": json.dumps({"v": urllib3.__version__})}\n'),
+                     "filename": "handler.py",
+                     "dependencies": "urllib3==2.2.3\n"},
+                    expect=range(200, 599))
+                check("python deps deploy accepted", pdc2 in (200, 202), f"status {pdc2}: {str(pdep2)[:200]}")
+                pstat2 = wait_active(c, pdep_fid, timeout=180)
+                check("jailed pip install succeeded", pstat2 == "active",
+                      f"final status={pstat2!r} — pip needs listxattr/utimensat/fsync "
+                      f"from the build profile; EPERM on any of them fails the build")
+                if pstat2 == "active":
+                    pic2, pib2 = c.req("POST", f"/fn/{pdep_fid}", {}, expect=range(200, 599))
+                    if isinstance(pib2, str):
+                        try:
+                            pib2 = json.loads(pib2)
+                        except Exception:
+                            pib2 = {}
+                    check("installed python dependency is importable at invoke",
+                          pic2 == 200 and isinstance(pib2, dict) and pib2.get("v") == "2.2.3",
+                          f"status {pic2}: {str(pib2)[:200]}")
+        finally:
+            if pdep_fid:
+                c.req("DELETE", f"/api/v1/functions/{pdep_fid}", expect=range(200, 599))
+
         section("delete + confirm gone")
         delc, _ = c.req("DELETE", f"/api/v1/functions/{fid}", expect=range(200, 599))
         check("delete -> 2xx", delc in (200, 204), f"status {delc}")

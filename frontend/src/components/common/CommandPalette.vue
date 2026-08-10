@@ -156,7 +156,7 @@ const items = [
   { id: 'go-hooks',    label: 'Webhooks',          icon: Webhook,      action: () => router.push('/webhooks') },
   // keywords keeps this reachable by its old name; the page was "Firewall"
   // before enforcement moved to the per-sandbox egress policy.
-  { id: 'go-fw',       label: 'Egress controls',   icon: ShieldHalf,   action: () => router.push('/firewall'), keywords: 'firewall blocklist dns' },
+  { id: 'go-fw',       label: 'Egress',   icon: ShieldHalf,   action: () => router.push('/firewall'), keywords: 'firewall blocklist dns' },
   { id: 'go-settings', label: 'Settings',          icon: SettingsIcon, action: () => router.push('/settings') },
   { id: 'go-docs',     label: 'Docs',              icon: LibraryBig,   action: () => router.push('/docs') },
   { id: 'go-overview', label: 'Overview',          icon: Gauge,        action: () => router.push('/') },
