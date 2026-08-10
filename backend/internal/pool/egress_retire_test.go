@@ -273,6 +273,12 @@ func TestEgressSpawnFailsClosedWhenPolicyUnavailable(t *testing.T) {
 	// The negative above only means something if the same wiring spawns when a
 	// policy IS available — otherwise it would pass for any unrelated reason.
 	policyPath := filepath.Join(t.TempDir(), "egress-abc123def4567890.cfg")
+	// The file must actually exist: buildArgs verifies the generation file is
+	// still on disk, so that a policy whose file vanished fails closed with the
+	// same error as no policy at all.
+	if err := os.WriteFile(policyPath, []byte("mount_proc: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	m.SetEgressPolicy(func() (string, string, error) {
 		calls.Add(1)
 		return policyPath, "abc123def4567890", nil

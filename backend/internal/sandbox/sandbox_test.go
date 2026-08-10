@@ -65,7 +65,7 @@ func TestBuildArgs_EgressAddsUserNet(t *testing.T) {
 		Language:         Node,
 		CodeDir:          "/tmp/code",
 		NetworkMode:      "egress",
-		EgressPolicyPath: "/var/lib/orva/firewall/policy/egress-abc.cfg",
+		EgressPolicyPath: testPolicyFile(t),
 	}
 	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
 	if err != nil {
@@ -101,7 +101,7 @@ func TestBuildArgs_ConfigFlagIsFirst(t *testing.T) {
 		Language:         Node,
 		CodeDir:          "/tmp/code",
 		NetworkMode:      "egress",
-		EgressPolicyPath: "/var/lib/orva/firewall/policy/egress-abc.cfg",
+		EgressPolicyPath: testPolicyFile(t),
 		Env:              map[string]string{"SECRET": "value"},
 		SeccompPolicy:    "POLICY x { ALLOW { read } }",
 	}
@@ -153,7 +153,7 @@ func TestBuildArgs_DisableUsernsTracksTheEnvVar(t *testing.T) {
 			Language:         Node,
 			CodeDir:          "/tmp/code",
 			NetworkMode:      "egress",
-			EgressPolicyPath: "/var/lib/orva/firewall/policy/egress-abc.cfg",
+			EgressPolicyPath: testPolicyFile(t),
 		}
 	}
 
@@ -448,5 +448,42 @@ func TestNonEgressWithholdsConnect(t *testing.T) {
 		if strings.Contains(policy, "connect") {
 			t.Errorf("network mode %q must not allow connect", mode)
 		}
+	}
+}
+
+// testPolicyFile writes a throwaway policy file so buildArgs' on-disk check
+// passes. buildArgs verifies the generation file still exists, so a fabricated
+// path would now be rejected as a missing policy.
+func testPolicyFile(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "egress-test.cfg")
+	if err := os.WriteFile(p, []byte("mount_proc: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestBuildArgs_EgressPolicyFileMustExist covers the second fail-closed arm.
+//
+// A path can be non-empty and still be gone: the manager hands out a concrete
+// generation path, and the file behind it can be deleted or a volume can go
+// missing. nsjail would fail closed anyway (exit 255 on an unreadable
+// --config), but it surfaces as a generic worker crash whose operator hint
+// points at the wrong thing. Catching it here maps both arms — no policy
+// compiled, and a compiled policy whose file vanished — onto one actionable
+// error.
+func TestBuildArgs_EgressPolicyFileMustExist(t *testing.T) {
+	cfg := ExecConfig{
+		Language:         Node,
+		CodeDir:          "/tmp/code",
+		NetworkMode:      "egress",
+		EgressPolicyPath: filepath.Join(t.TempDir(), "does-not-exist.cfg"),
+	}
+	_, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
+	if !errors.Is(err, ErrEgressPolicyMissing) {
+		t.Fatalf("want ErrEgressPolicyMissing for a vanished policy file, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "does-not-exist.cfg") {
+		t.Errorf("error should name the missing path so an operator can act on it: %v", err)
 	}
 }

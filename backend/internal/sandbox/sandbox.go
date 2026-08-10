@@ -237,6 +237,15 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) ([]string, error) {
 		if cfg.EgressPolicyPath == "" {
 			return nil, ErrEgressPolicyMissing
 		}
+		// Confirm the generation file is still on disk. Without this the
+		// failure still fails closed — nsjail exits 255 on an unreadable
+		// --config — but it surfaces as a generic WORKER_CRASHED with an
+		// operator hint pointing at the wrong thing. Catching it here maps
+		// both variants (no policy compiled, and a compiled policy whose file
+		// has gone missing) onto the same actionable error.
+		if _, err := os.Stat(cfg.EgressPolicyPath); err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrEgressPolicyMissing, cfg.EgressPolicyPath)
+		}
 		args = append(args, "--config", cfg.EgressPolicyPath)
 	}
 
