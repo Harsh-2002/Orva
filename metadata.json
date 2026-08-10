@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZNK3YE4A0PH6SYC93HTRD6C",
+  "strategy": "manual-commit",
+  "branch": "feat/remove-nftables-nstun",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "backend/internal/firewall/manager.go",
+    "backend/internal/firewall/nstun_test.go",
+    "backend/internal/firewall/policy.go",
+    "backend/internal/firewall/policy_test.go",
+    "backend/internal/server/server.go"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1299,
+    "cache_creation_tokens": 4463385,
+    "cache_read_tokens": 289637090,
+    "output_tokens": 699027,
+    "api_call_count": 653
+  }
+}
