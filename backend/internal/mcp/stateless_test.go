@@ -214,6 +214,19 @@ func TestStatelessMCP20260728(t *testing.T) {
 						"its whole view of Orva: an empty list means the agent believes the "+
 						"instance exposes no tools at all.", protocolVersion20260728)
 				}
+				// A floor, not an exact count. Asserting exactly 73 would fail on
+				// every legitimate tool addition, but a bare non-empty check is a
+				// floor of ONE: a permission-gating regression in register*Tools
+				// that collapsed the catalog to a handful would have passed it
+				// silently. The admin key seeded above holds all four permissions,
+				// so anything far below the real count means registration broke.
+				const minAdminTools = 50
+				if len(out.Tools) < minAdminTools {
+					t.Errorf("tools/list returned %d tools for a key holding "+
+						"invoke+read+write+admin; expected at least %d. The catalog did not "+
+						"vanish, so this is a registration or permission-gating regression "+
+						"rather than a transport one.", len(out.Tools), minAdminTools)
+				}
 			},
 		},
 		{

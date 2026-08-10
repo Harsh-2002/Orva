@@ -665,14 +665,18 @@ call directly. API key permissions scope the available tool set.
 > token and is answered on its own. A legacy client that still sends
 > `initialize` gets a normal reply (with its own `protocolVersion` echoed back)
 > and simply never receives a session header. Every POST must send
-> `Accept: application/json, text/event-stream`; the reply is a single SSE
-> `message` event.
+> `Accept: application/json, text/event-stream`. A **successful** reply is a
+> single SSE `message` event (`Content-Type: text/event-stream`); a request
+> rejected at the transport layer comes back as plain `application/json` with a
+> 4xx status, so a client has to handle both framings.
 
 > **2026-07-28 request shape.** A client that opts into the new protocol
-> replaces the handshake with two wire headers and two `params._meta` keys:
+> replaces the handshake with wire headers plus two `params._meta` keys:
 > ```jsonc
 > Mcp-Protocol-Version: 2026-07-28   // required once _meta declares a protocolVersion
-> Mcp-Method: tools/list             // required — mirrors the JSON-RPC method
+> Mcp-Method: tools/list             // required — must equal the JSON-RPC method
+> Mcp-Name: <name>                   // required for tools/call, resources/read,
+>                                    // prompts/get — must equal params.name / params.uri
 >
 > "_meta": {
 >   "io.modelcontextprotocol/protocolVersion":    "2026-07-28",   // required
@@ -680,17 +684,30 @@ call directly. API key permissions scope the available tool set.
 >   "io.modelcontextprotocol/clientInfo": { "name": "curl", "version": "0" }  // optional
 > }
 > ```
-> Dropping `clientCapabilities` fails the request with
-> `-32602 missing or invalid _meta field`; dropping either header fails it with
-> `-32020`. Send no `_meta` at all (or an older `protocolVersion`) and the
-> request takes the legacy path instead — a bare `tools/list` with
-> `"params":{}` still returns the full catalog.
+> The headers exist so a proxy or rate-limiter can route on the operation
+> without parsing the body, which is why they must agree with it: a
+> `Mcp-Method` or `Mcp-Name` that disagrees is rejected rather than ignored.
+>
+> Failure modes, all observed:
+>
+> | Mistake | Response |
+> |---|---|
+> | `clientCapabilities` omitted from `_meta` | `400` · `-32602 missing or invalid _meta field` |
+> | `Mcp-Method` omitted, or disagreeing with the body | `400` · `-32020` |
+> | `Mcp-Name` omitted on `tools/call` / `resources/read` / `prompts/get` | `400` · `-32020 missing required Mcp-Name header for method "tools/call"` |
+> | `_meta.protocolVersion` present but `Mcp-Protocol-Version` header absent | `400` · `-32020 Mcp-Protocol-Version header is required for requests carrying "io.modelcontextprotocol/protocolVersion"` |
+>
+> Note the last row: declaring **any** `protocolVersion` in `_meta` — including
+> an older one — commits the request to the header-validated path. It does not
+> fall back. The legacy path is reached by sending no `_meta.protocolVersion` at
+> all, and a bare `tools/list` with `"params":{}` and no protocol headers still
+> returns the full catalog.
 
 > **List results are private and immediately stale.** `tools/list`,
 > `resources/list`, `resources/templates/list`, `prompts/list`,
 > `resources/read` and `server/discover` results carry `ttlMs` and `cacheScope`.
 > Orva returns `cacheScope: "private"` because the catalog is permission-scoped
-> (an API key's `read`/`write`/`admin` grants decide which tools exist) and
+> (a full-permission key lists 73 tools; a `read`-only key lists 27) and
 > channel-specific (a channel token sees only that channel's functions) — a
 > shared cache entry would hand one caller another caller's tool surface.
 > `ttlMs` is `0` because the catalog changes on any deploy, channel edit, or
@@ -766,8 +783,8 @@ curl -sN -X POST {{ORIGIN}}/mcp \
 (`logging`, `resources.listChanged`, `tools.listChanged`), the server
 `instructions`, and `serverInfo` under `result._meta`'s
 `io.modelcontextprotocol/serverInfo` key — everything a client used to learn
-from the `initialize` reply. Older clients need none of it: this one line
-returns the same 73 tools.
+from the `initialize` reply. Older clients need none of it; a bare list with
+no `_meta` returns the same catalog:
 
 ```bash
 curl -sN -X POST {{ORIGIN}}/mcp \
@@ -775,6 +792,20 @@ curl -sN -X POST {{ORIGIN}}/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+Calling a tool needs the third header. `Mcp-Name` must repeat `params.name`, or
+the request is refused with `-32020` before the tool ever runs:
+
+```bash
+curl -sN -X POST {{ORIGIN}}/mcp \
+  -H 'Authorization: Bearer <YOUR_ORVA_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/call' \
+  -H 'Mcp-Name: system_health' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"system_health","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
 ### More clients (Cursor, VS Code, Codex CLI, OpenCode, Zed, Windsurf, ChatGPT)

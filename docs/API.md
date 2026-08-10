@@ -577,7 +577,13 @@ things follow that are visible on the wire:
 
 - **No `initialize` handshake is required.** A 2026-07-28 request carries
   `protocolVersion` and `clientCapabilities` in `params._meta` (`clientInfo` is
-  optional). The legacy handshake still works and still returns `200`.
+  optional), plus `Mcp-Protocol-Version` and `Mcp-Method` headers — and, for
+  `tools/call` / `resources/read` / `prompts/get`, an `Mcp-Name` header equal to
+  the name in the body. The headers let a proxy route on the operation without
+  parsing the body, so one that disagrees with the body is rejected (`-32020`),
+  not ignored. Declaring any `protocolVersion` in `_meta` commits the request to
+  that validated path; the legacy handshake is reached by omitting it, and still
+  returns `200`.
 - **No `Mcp-Session-Id` is issued**, and none is read. Any request may be served
   by any instance.
 - **`GET /mcp` and `DELETE /mcp` return `405`.** There is no session to resume

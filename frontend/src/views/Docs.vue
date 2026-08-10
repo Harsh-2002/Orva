@@ -675,15 +675,24 @@
         simply never receives a session header. A request that opts into
         2026-07-28 sends the headers
         <code class="doc-chip">Mcp-Protocol-Version</code> and
-        <code class="doc-chip">Mcp-Method</code>, plus
+        <code class="doc-chip">Mcp-Method</code> — plus
+        <code class="doc-chip">Mcp-Name</code> for
+        <code class="doc-chip">tools/call</code>,
+        <code class="doc-chip">resources/read</code> and
+        <code class="doc-chip">prompts/get</code>, which must repeat the name
+        from the body — plus
         <code class="doc-chip">io.modelcontextprotocol/protocolVersion</code>
         and
         <code class="doc-chip">io.modelcontextprotocol/clientCapabilities</code>
         in <code class="doc-chip">params._meta</code> (a
-        <code class="doc-chip">clientInfo</code> key is optional). Every POST
-        must send
-        <code class="doc-chip">Accept: application/json, text/event-stream</code>;
-        the reply is one SSE <code class="doc-chip">message</code> event.
+        <code class="doc-chip">clientInfo</code> key is optional). The headers
+        let a proxy route on the operation without parsing the body, so one that
+        disagrees with the body is rejected, not ignored. Every POST must send
+        <code class="doc-chip">Accept: application/json, text/event-stream</code>.
+        A successful reply is one SSE
+        <code class="doc-chip">message</code> event; a request rejected at the
+        transport layer comes back as plain
+        <code class="doc-chip">application/json</code> with a 4xx status.
       </Callout>
 
       <Callout
@@ -692,6 +701,7 @@
       >
         <code class="doc-chip">tools/list</code>,
         <code class="doc-chip">resources/list</code>,
+        <code class="doc-chip">resources/templates/list</code>,
         <code class="doc-chip">prompts/list</code>,
         <code class="doc-chip">resources/read</code> and
         <code class="doc-chip">server/discover</code> results carry
@@ -2061,7 +2071,7 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'curl',
     lang: 'bash',
-    note: 'Talk to MCP directly — no handshake, no session id. Step 1 asks the server what it supports; Step 2 lists the tools. Each reply is one SSE `message` event.',
+    note: 'Talk to MCP directly — no handshake, no session id. Step 1 asks the server what it supports; Step 2 lists the tools. A successful reply is one SSE `message` event; a rejected one is plain JSON with a 4xx.',
     code: `curl -sN -X POST ${origin.value}/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
@@ -2078,7 +2088,18 @@ curl -sN -X POST ${origin.value}/mcp \\
   -H 'Mcp-Method: tools/list' \\
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"}}}}'
 
-# Older clients need none of that — a bare list still returns all 73 tools:
+# Calling a tool needs a third header. Mcp-Name must repeat params.name, or the
+# request is refused with -32020 before the tool runs:
+curl -sN -X POST ${origin.value}/mcp \\
+  -H 'Authorization: Bearer ${T.value}' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Accept: application/json, text/event-stream' \\
+  -H 'Mcp-Protocol-Version: 2026-07-28' \\
+  -H 'Mcp-Method: tools/call' \\
+  -H 'Mcp-Name: system_health' \\
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"system_health","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+
+# Older clients need none of that — a bare list returns the same catalog:
 curl -sN -X POST ${origin.value}/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
