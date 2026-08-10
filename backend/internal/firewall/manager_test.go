@@ -49,7 +49,7 @@ func TestStartWritesDNSFilesEvenWhenNoPolicyCompiles(t *testing.T) {
 	}
 
 	dataDir := t.TempDir()
-	m := NewManager(db, dataDir, uncompilableCP(), true)
+	m := NewManager(db, dataDir, uncompilableCP())
 	m.Start(context.Background())
 	t.Cleanup(func() {
 		if err := m.Stop(context.Background()); err != nil {
@@ -89,7 +89,7 @@ func TestStartWritesDNSFilesEvenWhenNoPolicyCompiles(t *testing.T) {
 func TestPolicyAccessorsFailClosedBeforeFirstCompile(t *testing.T) {
 	// An egress spawn must abort rather than run unfiltered: NSTUN allows
 	// anything no rule matches, so a missing policy is not a strict default.
-	m := NewManager(newManagerTestDB(t), t.TempDir(), uncompilableCP(), true)
+	m := NewManager(newManagerTestDB(t), t.TempDir(), uncompilableCP())
 
 	if _, err := m.CurrentPolicy(); !errors.Is(err, ErrPolicyUnavailable) {
 		t.Fatalf("CurrentPolicy: want ErrPolicyUnavailable, got %v", err)
@@ -105,7 +105,7 @@ func TestPolicyAccessorsFailClosedBeforeFirstCompile(t *testing.T) {
 
 func TestFailedRecompileKeepsLastKnownGoodPolicy(t *testing.T) {
 	dataDir := t.TempDir()
-	m := NewManager(newManagerTestDB(t), dataDir, testCP(), true)
+	m := NewManager(newManagerTestDB(t), dataDir, testCP())
 
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("initial compile: %v", err)
@@ -158,7 +158,7 @@ func TestPolicyChangeCallbackFiresOnlyOnGenerationChange(t *testing.T) {
 	// The poll loop recompiles every 10s. Firing on every recompile rather
 	// than on every *change* would recycle warm egress workers continuously.
 	db := newManagerTestDB(t)
-	m := NewManager(db, t.TempDir(), testCP(), true)
+	m := NewManager(db, t.TempDir(), testCP())
 
 	var fired []string
 	m.SetOnPolicyChange(func(gen string) { fired = append(fired, gen) })
@@ -202,7 +202,7 @@ func TestCoalescedPolicyChangeIsDrainedAfterTheWindow(t *testing.T) {
 	// inside the rate-limit window is published immediately (so new spawns are
 	// correct) and the recycle is deferred to the window boundary.
 	db := newManagerTestDB(t)
-	m := NewManager(db, t.TempDir(), testCP(), true)
+	m := NewManager(db, t.TempDir(), testCP())
 
 	var fired []string
 	m.SetOnPolicyChange(func(gen string) { fired = append(fired, gen) })
@@ -244,7 +244,7 @@ func TestCoalescedPolicyChangeIsDrainedAfterTheWindow(t *testing.T) {
 }
 
 func TestSnapshotReportsNstunBackendAndNoNftablesKey(t *testing.T) {
-	m := NewManager(newManagerTestDB(t), t.TempDir(), testCP(), true)
+	m := NewManager(newManagerTestDB(t), t.TempDir(), testCP())
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestSnapshotReportsStoredWildcardRowAsUnenforced(t *testing.T) {
 		t.Fatalf("insert wildcard row: %v", err)
 	}
 
-	m := NewManager(db, t.TempDir(), testCP(), true)
+	m := NewManager(db, t.TempDir(), testCP())
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -331,5 +331,53 @@ func TestSnapshotReportsStoredWildcardRowAsUnenforced(t *testing.T) {
 	}
 	if !stored.Enabled {
 		t.Error("the manager must never rewrite a stored rule's enabled flag")
+	}
+}
+
+// TestWildcardAddedAfterFirstCompileIsStillReportedUnenforced is the
+// regression guard for a bug live testing found.
+//
+// A wildcard row contributes no rules, so the rendered policy — and therefore
+// the generation hash — is unchanged by adding one. Publication is gated on
+// that hash (deliberately: an unchanged policy must not recycle warm workers).
+// While the unenforced list lived on the published Policy, that gate meant a
+// wildcard added to an already-running instance was NEVER surfaced: the API
+// reported no unenforced rules and the dashboard showed the row as ordinary
+// and active — exactly the false impression this whole mechanism exists to
+// prevent. The sibling test above missed it because on a manager's first
+// compile there is no previous policy, so publication always happens.
+func TestWildcardAddedAfterFirstCompileIsStillReportedUnenforced(t *testing.T) {
+	db := newManagerTestDB(t)
+	m := NewManager(db, t.TempDir(), testCP())
+	if err := m.ForceRefresh(); err != nil {
+		t.Fatalf("initial compile: %v", err)
+	}
+	genBefore := m.Snapshot().PolicyGeneration
+	if genBefore == "" {
+		t.Fatal("expected a published generation after the first compile")
+	}
+
+	// Add the wildcard only AFTER a policy already exists.
+	rule, err := db.InsertCustomBlocklistRule(database.BlocklistTypeWildcard, "*.legacy.example", "legacy", true)
+	if err != nil {
+		t.Fatalf("insert wildcard row: %v", err)
+	}
+	if err := m.ForceRefresh(); err != nil {
+		t.Fatalf("recompile: %v", err)
+	}
+	snap := m.Snapshot()
+
+	if snap.PolicyGeneration != genBefore {
+		t.Fatalf("a wildcard must not move the generation (it compiles to nothing): %s -> %s",
+			genBefore, snap.PolicyGeneration)
+	}
+	var found bool
+	for _, u := range snap.Unenforced {
+		if u.ID == rule.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("wildcard added after the first compile must still be reported unenforced, got %+v", snap.Unenforced)
 	}
 }

@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """Sandbox egress policy + DNS.
 
-Two halves:
+Three parts:
   1. API surface — rule CRUD, wildcard refusal, validation, the NSTUN policy
      status snapshot, and a GET+PUT round-trip of the DNS config (restored).
   2. Enforcement (needs a real sandbox) — a rule actually refuses a
      destination while an unblocked one still connects, the control-plane
      carve-out survives the shipped RFC1918 suggestions (so orva.kv keeps
      working), and a policy change recycles egress pools only.
+  3. Fail-closed (needs a real sandbox AND access to the instance's data dir) —
+     with the compiled policy taken away, an egress worker must refuse to run
+     while a network_mode=none worker keeps serving.
 
-The enforcement half is the part that never existed: without it, egress rules
-could be a silent no-op on every host and CI would still be green.
+Part 2 is the one that never existed: without it, egress rules could be a
+silent no-op on every host and CI would still be green. Part 3 is the one that
+matters most: NSTUN is default-ALLOW, so "no policy" must mean "no worker",
+never "unfiltered worker".
 """
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -196,6 +202,141 @@ def pool_entry(c, fid):
     return None
 
 
+# ── reaching the instance's data dir (fail-closed case only) ─────────────────
+#
+# Taking the compiled policy away from the daemon is something no API can do —
+# by design — so this module has to touch the instance's filesystem. Two
+# backends cover how the suite is actually run: a host process (ci.yml's e2e job
+# runs `orva serve` on the VM under the same user as the suite) and the isolated
+# Docker container spun by env.py. Anything else skips.
+#
+# NOTHING is touched until the candidate is PROVEN to be the instance under
+# test: its first-boot admin key must equal the key this module authenticates
+# with. Sabotaging the wrong Orva would be far worse than skipping.
+
+def _run(cmd, timeout=20):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return None
+
+
+class LocalFiles:
+    """The instance runs on this host and its data dir is ours to write."""
+
+    def __init__(self, data_dir):
+        self.data_dir = data_dir
+        self.where = f"host data dir {data_dir}"
+
+    def _abs(self, rel):
+        return os.path.join(self.data_dir, rel)
+
+    def read(self, rel):
+        try:
+            with open(self._abs(rel)) as f:
+                return f.read()
+        except Exception:
+            return ""
+
+    def exists(self, rel):
+        return os.path.exists(self._abs(rel))
+
+    def move(self, src, dst):
+        try:
+            os.replace(self._abs(src), self._abs(dst))
+            return True
+        except Exception:
+            return False
+
+    def writable(self, rel):
+        return os.access(self._abs(rel), os.W_OK)
+
+
+class DockerFiles:
+    """The instance is the isolated container env.py started."""
+
+    def __init__(self, container, data_dir="/var/lib/orva"):
+        self.container = container
+        self.data_dir = data_dir
+        self.where = f"container {container}:{data_dir}"
+
+    def _abs(self, rel):
+        return self.data_dir + "/" + rel
+
+    def _exec(self, *args):
+        return _run(["docker", "exec", self.container, *args])
+
+    def read(self, rel):
+        p = self._exec("cat", self._abs(rel))
+        return p.stdout if p is not None and p.returncode == 0 else ""
+
+    def exists(self, rel):
+        p = self._exec("test", "-e", self._abs(rel))
+        return p is not None and p.returncode == 0
+
+    def move(self, src, dst):
+        p = self._exec("mv", self._abs(src), self._abs(dst))
+        return p is not None and p.returncode == 0
+
+    def writable(self, rel):
+        p = self._exec("test", "-w", self._abs(rel))
+        return p is not None and p.returncode == 0
+
+
+def _proc_data_dirs():
+    """Data dirs of `orva serve` processes owned by this user (CI's layout:
+    ORVA_DATA_DIR=$RUNNER_TEMP/orva-data, which nothing exports to the suite)."""
+    found = []
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except Exception:
+        return found
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = [a for a in f.read().split(b"\0") if a]
+            if not argv or b"serve" not in argv or not argv[0].endswith(b"orva"):
+                continue
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                for entry in f.read().split(b"\0"):
+                    if entry.startswith(b"ORVA_DATA_DIR="):
+                        found.append(entry.split(b"=", 1)[1].decode(errors="replace"))
+        except Exception:
+            continue
+    return found
+
+
+def instance_files(c):
+    """Return (files backend proven to belong to the instance under test, "")
+    or (None, why-every-candidate-was-refused) for the skip message."""
+    tried = []
+    candidates = []
+    for d in [os.environ.get("ORVA_E2E_DATA_DIR", ""), os.environ.get("ORVA_DATA_DIR", "")]:
+        if d:
+            candidates.append(LocalFiles(d))
+    candidates += [LocalFiles(d) for d in _proc_data_dirs()]
+    candidates.append(LocalFiles("/var/lib/orva"))
+    for name in ("ORVA_E2E_CONTAINER", "ORVA_CONTAINER"):
+        if os.environ.get(name):
+            candidates.append(DockerFiles(os.environ[name]))
+    candidates.append(DockerFiles("orva-e2e"))
+
+    for fs in candidates:
+        key = fs.read(".admin-key").strip()
+        if not key:
+            tried.append(f"{fs.where}: no readable .admin-key")
+            continue
+        if key != (c.key or "").strip():
+            # A real Orva, but not the one under test. Never touch it.
+            tried.append(f"{fs.where}: admin key belongs to a different instance")
+            continue
+        if not fs.writable("firewall/policy"):
+            tried.append(f"{fs.where}: policy dir is not writable by this user")
+            continue
+        return fs, ""
+    return None, "; ".join(tried[:4]) or "no candidate data dir found"
+
+
 def cleanup(c):
     """Silent, best-effort teardown. Nothing here may print: the RESULT
     trailer must stay the last line of stdout for run.py to parse it."""
@@ -217,6 +358,17 @@ def cleanup(c):
         pass
 
 
+def restore_policy_file(hidden):
+    """Put a hidden policy generation back where the daemon published it.
+    Silent and idempotent — also called from the module's finally."""
+    if not hidden:
+        return True
+    fs, hidden_rel, policy_rel = hidden
+    if not fs.exists(hidden_rel):
+        return fs.exists(policy_rel)
+    return fs.move(hidden_rel, policy_rel)
+
+
 def restore_suggested(c, saved):
     """Put the shipped suggested rules back exactly as they were found."""
     for rule_id, enabled in (saved or {}).items():
@@ -236,6 +388,9 @@ def main():
     saved_suggested = {}
     rid = None
     cidr_id = None
+    # (files backend, hidden path, real path) while the compiled policy is
+    # deliberately off disk — always put back, in finally, no matter what.
+    hidden = None
     try:
         section("list rules (built-ins)")
         rules, resp = _rules(c)
@@ -545,9 +700,95 @@ def main():
 
         if policy_rule_id is not None:
             c.status("DELETE", f"/api/v1/firewall/rules/{policy_rule_id}")
+
+        section("fail closed: no compiled policy, no egress worker")
+        # The security posture in one assertion. NSTUN is default-ALLOW, so a
+        # worker that starts without the policy it was supposed to load runs
+        # completely unfiltered — the exact outcome the whole design exists to
+        # prevent. With the compiled generation taken off disk, an egress
+        # function must NOT serve, while a network_mode=none function (which
+        # has no policy to load) must be untouched.
+        #
+        # This induces the "current generation is gone" variant. The other
+        # variant — the daemon holding NO policy at all, which is what maps to
+        # 503 EGRESS_POLICY_UNAVAILABLE — only happens when the very first
+        # compile at boot fails, so reproducing it needs a cold start of the
+        # instance. A test module is a client of an instance it did not launch
+        # and must not restart it mid-suite, so that arm stays unit-covered
+        # (backend/internal/server/handlers/firewall_test.go for the status
+        # mapping, backend/internal/pool/egress_retire_test.go for the refusal
+        # to spawn, backend/internal/sandbox/sandbox_test.go for the argv).
+        # Both variants share the one property asserted here: no policy, no
+        # egress worker.
+        fs, why = instance_files(c)
+        # Flush any pending rule edit into a published generation BEFORE
+        # reading it: a generation change landing mid-section would republish
+        # the file and silently undo the sabotage, leaving a test that passes
+        # while proving nothing.
+        c.req("POST", "/api/v1/firewall/resolve", {}, expect=range(200, 599))
+        gen = (c.get("/api/v1/firewall/status") or {}).get("policy_generation") or ""
+        if fs is None or not gen:
+            reason = why if fs is None else "the instance reports no policy generation"
+            print("  (fail-closed case skipped — this module must take the compiled "
+                  "policy file off the instance's disk, which needs the data dir of "
+                  f"the instance under test: {reason})")
+        else:
+            policy_rel = f"firewall/policy/egress-{gen}.cfg"
+            check("the generation file the worker loads is on disk",
+                  fs.exists(policy_rel), f"{fs.where} :: {policy_rel}")
+            hidden_rel = policy_rel + ".e2e-hidden"
+            if not fs.move(policy_rel, hidden_rel):
+                check("compiled policy could be taken off disk", False,
+                      f"{fs.where} :: mv {policy_rel} failed")
+            else:
+                hidden = (fs, hidden_rel, policy_rel)
+                # Both pools must respawn: NSTUN reads its rules once per
+                # worker, so a warm worker would still be running the policy it
+                # started with and would prove nothing either way.
+                force_cold_start(c, egress_fid)
+                force_cold_start(c, iso_fid)
+
+                fc, fout = probe(c, egress_fid, CONTROL_TARGET)
+                stderr = latest_execution_stderr(c, function_id=egress_fid)
+                detail = f"status {fc}: {str(fout)[:200]} stderr={stderr[:240]!r}"
+                check("egress function does not serve without its policy",
+                      fc != 200, detail)
+                check("egress refusal is a server error, not a silent success",
+                      500 <= fc < 600, detail)
+                # If the worker had started anyway, this is what it would have
+                # done: reach the internet with no rules loaded at all.
+                check("no unfiltered outbound connection was made",
+                      fout.get("result") != "connected", detail)
+
+                ic, iout = invoke(c, iso_fid, {"mode": "noop"})
+                check("network_mode=none keeps serving through the outage",
+                      ic == 200, f"status {ic}: {str(iout)[:200]}")
+
+                # ── recovery (the module may not leave the instance broken) ──
+                restored = restore_policy_file(hidden)
+                hidden = None
+                check("compiled policy restored on disk",
+                      restored and fs.exists(policy_rel), f"{fs.where} :: {policy_rel}")
+                rrc, rrbody = c.req("POST", "/api/v1/firewall/resolve", {},
+                                    expect=range(200, 599))
+                check("forced resolve reports the policy enforced again",
+                      rrc == 200 and isinstance(rrbody, dict)
+                      and (rrbody.get("status") or {}).get("enforced") is True,
+                      f"status {rrc}: {str(rrbody)[:200]}")
+                force_cold_start(c, egress_fid)
+                arc, aout = probe(c, egress_fid, CONTROL_TARGET)
+                check("egress function serves again once the policy is back",
+                      arc == 200 and aout.get("result") == "connected",
+                      f"status {arc}: {str(aout)[:200]}")
     finally:
         # Restore the original DNS config + suggested-rule state so this module
         # leaves no trace. Silent by contract: the RESULT trailer must be last.
+        # The policy file goes back FIRST: leaving it hidden would break egress
+        # for every module that runs after this one.
+        try:
+            restore_policy_file(hidden)
+        except Exception:
+            pass
         restore_suggested(c, saved_suggested)
         if saved_dns is not None:
             try:

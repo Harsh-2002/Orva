@@ -59,16 +59,19 @@ type Manager struct {
 
 	cp    ControlPlane
 	guest GuestNet
-	// v6Intended reports whether IPv6 egress is wanted. When false and the
-	// operator has no IPv6 rules, the compiler denies IPv6 wholesale so a
-	// blocked IPv4 address cannot be reached over IPv6 instead.
-	v6Intended bool
 
 	mu          sync.RWMutex
 	resolvedV4  []string            // effective blocked v4 prefixes (for the API)
 	resolvedV6  []string            // effective blocked v6 prefixes (for the API)
 	hostnameMap map[string][]string // rule.value → resolved IPs (UI display)
 	hostSeen    map[string]map[string]time.Time
+	// unenforced describes STORED rows that are deliberately not in the
+	// compiled policy. It lives here, not on Policy, because it is status
+	// about the table rather than part of the enforced artifact: a wildcard
+	// row contributes no rules, so the policy hash does not move and the
+	// Policy object is not republished — reporting it from there meant a
+	// wildcard added to a running instance was never surfaced at all.
+	unenforced  []UnenforcedRule
 	lastError   string
 	compileErr  string
 	lastSuccess time.Time
@@ -89,13 +92,12 @@ type Manager struct {
 // NewManager builds the policy manager. cp is required: a policy compiled
 // without knowing orvad's own reachable address could block the internal SDK,
 // so compilation fails rather than guessing.
-func NewManager(db *database.Database, dataDir string, cp ControlPlane, v6Intended bool) *Manager {
+func NewManager(db *database.Database, dataDir string, cp ControlPlane) *Manager {
 	return &Manager{
 		db:              db,
 		dataDir:         dataDir,
 		cp:              cp,
 		guest:           DefaultGuestNet(),
-		v6Intended:      v6Intended,
 		hostnameMap:     map[string][]string{},
 		hostSeen:        map[string]map[string]time.Time{},
 		pollInterval:    10 * time.Second,
@@ -204,7 +206,7 @@ func (m *Manager) refresh() error {
 	dnsCfg := LoadDNSConfig(m.db)
 	dnsAddrs := dnsServerAddrs(dnsCfg)
 
-	c, err := compile(rules, m.resolveHostname, m.cp, m.guest, dnsAddrs, m.v6Intended)
+	c, err := compile(rules, m.resolveHostname, m.cp, m.guest, dnsAddrs)
 	if err != nil {
 		// Keep the last known-good policy rather than degrading to NSTUN's
 		// default-allow. If there is no known-good policy, egress spawns will
@@ -239,20 +241,20 @@ func (m *Manager) refresh() error {
 			Rules4: len(c.rules4), Rules6: len(c.rules6),
 			Allows: c.allows, Rejects: c.rejects,
 			CompiledAt: time.Now().UTC(),
-			Unenforced: c.unenforced,
 			rules4:     c.rules4, rules6: c.rules6,
 			exempt: m.cp.Addrs,
 		}
 		m.policy.Store(p)
 		slog.Info("egress policy published",
 			"generation", gen, "rules_v4", p.Rules4, "rules_v6", p.Rules6,
-			"allow", p.Allows, "reject", p.Rejects, "unenforced", len(p.Unenforced))
+			"allow", p.Allows, "reject", p.Rejects, "unenforced", len(c.unenforced))
 	}
 
 	// Cache the effective blocked set for the API/UI.
 	v4, v6 := effectiveBlocked(c)
 	m.mu.Lock()
 	m.resolvedV4, m.resolvedV6 = v4, v6
+	m.unenforced = c.unenforced
 	m.lastError, m.compileErr, m.stale = "", "", false
 	m.lastSuccess = time.Now().UTC()
 	m.mu.Unlock()
@@ -412,13 +414,13 @@ func (m *Manager) Snapshot() Snapshot {
 	for k, v := range m.hostnameMap {
 		out.HostnameMap[k] = append([]string(nil), v...)
 	}
+	out.Unenforced = append([]UnenforcedRule(nil), m.unenforced...)
 	if p := m.policy.Load(); p != nil {
 		out.Enforced = true
 		out.PolicyGeneration = p.Gen
 		out.PolicyRuleCounts = RuleCounts{
 			V4: p.Rules4, V6: p.Rules6, Allow: p.Allows, Reject: p.Rejects,
 		}
-		out.Unenforced = append([]UnenforcedRule(nil), p.Unenforced...)
 	}
 	return out
 }
@@ -478,19 +480,14 @@ func (m *Manager) resolveHostname(host string) []string {
 // API, so what the UI shows is derived from what is actually enforced.
 func effectiveBlocked(c compiled) (v4, v6 []string) {
 	for _, r := range c.rules4 {
-		if r.act == actionReject && !r.matchAll {
+		if r.act == actionReject {
 			v4 = append(v4, r.dst.String())
 		}
 	}
 	for _, r := range c.rules6 {
-		if r.act != actionReject {
-			continue
+		if r.act == actionReject {
+			v6 = append(v6, r.dst.String())
 		}
-		if r.matchAll {
-			v6 = append(v6, "::/0")
-			continue
-		}
-		v6 = append(v6, r.dst.String())
 	}
 	return v4, v6
 }
@@ -523,50 +520,6 @@ func sortStrings(s []string) {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
-}
-
-// HostHasGlobalIPv6 reports whether this host looks capable of IPv6 egress.
-//
-// It decides whether the compiler denies IPv6 wholesale. NSTUN always
-// provisions the guest with an IPv6 address and a default route, so without
-// this a host with no real IPv6 connectivity would still accept v6 rules that
-// can never be exercised — and, worse, a host WITH connectivity would let a
-// blocked IPv4 address be reached over IPv6 instead.
-//
-// Link-local and ULA addresses do not count: neither provides global egress.
-func HostHasGlobalIPv6() bool {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return false
-	}
-	for _, ifc := range ifaces {
-		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := ifc.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			ipnet, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			ip, ok := netip.AddrFromSlice(ipnet.IP)
-			if !ok {
-				continue
-			}
-			ip = ip.Unmap()
-			if !ip.Is6() || !ip.IsGlobalUnicast() {
-				continue
-			}
-			if ip.IsLinkLocalUnicast() || ip.IsPrivate() {
-				continue // ULA (fc00::/7) is not global egress
-			}
-			return true
-		}
-	}
-	return false
 }
 
 // ParseControlPlane derives the carve-out from the internal API base URL the

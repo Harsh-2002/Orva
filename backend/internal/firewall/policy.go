@@ -95,14 +95,13 @@ type UnenforcedRule struct {
 // rewritten, so a worker that captured it keeps exactly that policy for its
 // whole life even across generation swaps.
 type Policy struct {
-	Gen        string           `json:"generation"`
-	Path       string           `json:"-"`
-	Rules4     int              `json:"rules_v4"`
-	Rules6     int              `json:"rules_v6"`
-	Allows     int              `json:"allow_rules"`
-	Rejects    int              `json:"reject_rules"`
-	CompiledAt time.Time        `json:"compiled_at"`
-	Unenforced []UnenforcedRule `json:"unenforced_rules,omitempty"`
+	Gen        string    `json:"generation"`
+	Path       string    `json:"-"`
+	Rules4     int       `json:"rules_v4"`
+	Rules6     int       `json:"rules_v6"`
+	Allows     int       `json:"allow_rules"`
+	Rejects    int       `json:"reject_rules"`
+	CompiledAt time.Time `json:"compiled_at"`
 
 	// rules backs Blocks() for daemon-side enforcement. Same rule set and
 	// same first-match-wins order the sandbox gets.
@@ -144,16 +143,16 @@ func (p ruleProto) String() string {
 	}
 }
 
-// nstunRule is one compiled rule. dst is always a canonical, masked prefix
-// unless matchAll is set, which is the ONLY way this package expresses
-// "every address" — an all-zero prefix is rejected at validation precisely
-// so it can never mean this by accident.
+// nstunRule is one compiled rule. dst is always a canonical, masked prefix:
+// this package has no way to express "every address", because NSTUN treats an
+// absent or all-zero dst_ip as match-any and an accidental one would silently
+// turn a narrow rule into a wildcard. Validation refuses unspecified addresses
+// for exactly that reason.
 type nstunRule struct {
-	act      ruleAction
-	pr       ruleProto
-	dst      netip.Prefix
-	matchAll bool
-	dport    uint16 // 0 = no port constraint
+	act   ruleAction
+	pr    ruleProto
+	dst   netip.Prefix
+	dport uint16 // 0 = no port constraint
 }
 
 // compiled is the intermediate result: ordered rules plus what was dropped.
@@ -168,15 +167,12 @@ type compiled struct {
 // the blocklist or a broad reject will shadow it.
 //
 // resolve is injected so hostname expansion is testable without DNS.
-// v6Intended=false appends a blanket v6 reject, closing the bypass where a
-// blocked IPv4 address is still reachable over IPv6 on a v6-capable host.
 func compile(
 	rules []*database.BlocklistRule,
 	resolve func(host string) []string,
 	cp ControlPlane,
 	gn GuestNet,
 	dnsServers []netip.Addr,
-	v6Intended bool,
 ) (compiled, error) {
 	var c compiled
 
@@ -284,13 +280,6 @@ func compile(
 	}
 	for _, p := range canonPrefixes(v6Blocks) {
 		c.add6(nstunRule{act: actionReject, pr: protoAny, dst: p})
-	}
-
-	// 5. When IPv6 egress is not intended, deny it wholesale so a blocked
-	//    IPv4 address cannot be reached over IPv6 instead. Expressed as an
-	//    explicit matchAll rule, never as an empty prefix.
-	if !v6Intended && len(v6Blocks) == 0 {
-		c.add6(nstunRule{act: actionReject, pr: protoAny, matchAll: true})
 	}
 
 	return c, nil
@@ -409,9 +398,7 @@ func renderRule(b *strings.Builder, field string, r nstunRule, v4 bool) {
 	b.WriteString("    direction: GUEST_TO_HOST\n")
 	fmt.Fprintf(b, "    action: %s\n", r.act)
 	fmt.Fprintf(b, "    proto: %s\n", r.pr)
-	if !r.matchAll {
-		fmt.Fprintf(b, "    dst_ip: %q\n", r.dst.String())
-	}
+	fmt.Fprintf(b, "    dst_ip: %q\n", r.dst.String())
 	if r.dport != 0 {
 		// Both ends set: an omitted dport_end matches every port.
 		fmt.Fprintf(b, "    dport: %d\n", r.dport)
@@ -471,7 +458,7 @@ func (p *Policy) Blocks(addr netip.Addr, port uint16) bool {
 		rules = p.rules6
 	}
 	for _, r := range rules {
-		if !r.matchAll && !r.dst.Contains(addr) {
+		if !r.dst.Contains(addr) {
 			continue
 		}
 		if r.dport != 0 && r.dport != port {

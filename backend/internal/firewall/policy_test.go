@@ -24,11 +24,11 @@ func cidrRule(id int64, v string) *database.BlocklistRule {
 		RuleType: database.BlocklistTypeCIDR, Value: v, Enabled: true}
 }
 
-// mustCompile compiles with v6 "intended" so the blanket v6 reject does not
-// interfere with tests that are only about v4 ordering.
+// mustCompile compiles and renders in one step, since every assertion here is
+// on the rendered bytes.
 func mustCompile(t *testing.T, rules []*database.BlocklistRule, dns []netip.Addr) (compiled, []byte) {
 	t.Helper()
-	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(), dns, true)
+	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(), dns)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -244,14 +244,14 @@ func TestRuleBlockCountMatchesCompiled(t *testing.T) {
 
 func TestCompileFailsWhenControlPlaneUnknown(t *testing.T) {
 	if _, err := compile(nil, noResolve, ControlPlane{Port: 8443},
-		DefaultGuestNet(), nil, true); err == nil {
+		DefaultGuestNet(), nil); err == nil {
 		t.Fatal("expected compile to fail with no control-plane address")
 	}
 }
 
 func TestCompileFailsOnBadControlPlanePort(t *testing.T) {
 	cp := ControlPlane{Addrs: []netip.Addr{netip.MustParseAddr("10.1.2.3")}, Port: 0}
-	if _, err := compile(nil, noResolve, cp, DefaultGuestNet(), nil, true); err == nil {
+	if _, err := compile(nil, noResolve, cp, DefaultGuestNet(), nil); err == nil {
 		t.Fatal("expected compile to fail on out-of-range port")
 	}
 }
@@ -293,7 +293,7 @@ func TestWildcardIsUnenforcedNotApexOnly(t *testing.T) {
 	// emitted an apex-only rule, which blocked the bare domain and none of its
 	// subdomains while the UI claimed the whole domain was covered.
 	c, err := compile(rules, func(string) []string { return []string{"203.0.113.9"} },
-		testCP(), DefaultGuestNet(), nil, true)
+		testCP(), DefaultGuestNet(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestHostnameSnapshotsEveryResolvedAddress(t *testing.T) {
 		Value: "bad.example", Enabled: true,
 	}}
 	resolve := func(string) []string { return []string{"203.0.113.1", "203.0.113.2", "2001:db8::1"} }
-	c, err := compile(rules, resolve, testCP(), DefaultGuestNet(), nil, true)
+	c, err := compile(rules, resolve, testCP(), DefaultGuestNet(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -359,33 +359,35 @@ func TestDisabledRulesAreNotCompiled(t *testing.T) {
 
 // ── IPv6 posture ────────────────────────────────────────────────────────
 
-func TestBlanketV6RejectWhenV6NotIntendedAndNoV6Rules(t *testing.T) {
-	c, err := compile(nil, noResolve, testCP(), DefaultGuestNet(), nil, false)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	_, v6Body := splitRuleSections(t, render(c, DefaultGuestNet()))
+func TestExplicitV6RuleCompilesToRule6Reject(t *testing.T) {
+	// fd00:ec2::254/128 is the GCP IPv6 metadata endpoint and ships as an
+	// ENABLED `default` rule, so dropping v6 rule compilation would silently
+	// remove cloud-metadata protection rather than merely narrowing scope.
+	_, out := mustCompile(t, []*database.BlocklistRule{
+		cidrRule(1, "fd00:ec2::254/128"),
+	}, nil)
 
-	var blanket bool
-	for _, b := range allRuleBlocks(v6Body) {
-		if strings.Contains(b, "action: REJECT") && !strings.Contains(b, "dst_ip:") {
-			blanket = true
-		}
-	}
-	if !blanket {
-		t.Fatalf("expected a blanket v6 REJECT, got:\n%s", v6Body)
+	_, v6Body := splitRuleSections(t, out)
+	block := ruleBlockContaining(t, []byte(v6Body), `dst_ip: "fd00:ec2::254/128"`)
+	if !strings.Contains(block, "action: REJECT") {
+		t.Fatalf("v6 metadata rule must compile to a rule6 REJECT; block:\n%s", block)
 	}
 }
 
-func TestNoBlanketV6RejectWhenV6Intended(t *testing.T) {
-	c, err := compile(nil, noResolve, testCP(), DefaultGuestNet(), nil, true)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	_, v6Body := splitRuleSections(t, render(c, DefaultGuestNet()))
-	for _, b := range allRuleBlocks(v6Body) {
-		if strings.Contains(b, "action: REJECT") && !strings.Contains(b, "dst_ip:") {
-			t.Fatalf("must not deny all v6 when v6 egress is intended:\n%s", v6Body)
+func TestCompileEmitsNoBlanketV6Reject(t *testing.T) {
+	// The policy is a blocklist in both families: a REJECT with no dst_ip is a
+	// deny-all, which would take IPv6 egress offline wholesale.
+	for _, rules := range [][]*database.BlocklistRule{
+		nil,
+		{cidrRule(1, "203.0.113.0/24")},
+		{cidrRule(1, "2001:db8::/32")},
+	} {
+		_, out := mustCompile(t, rules, nil)
+		_, v6Body := splitRuleSections(t, out)
+		for _, b := range allRuleBlocks(v6Body) {
+			if strings.Contains(b, "action: REJECT") && !strings.Contains(b, "dst_ip:") {
+				t.Fatalf("rule6 REJECT with no dst_ip is a deny-all:\n%s", v6Body)
+			}
 		}
 	}
 }
@@ -439,7 +441,7 @@ func TestBlocksNilPolicyIsSafe(t *testing.T) {
 
 func buildPolicy(t *testing.T, rules []*database.BlocklistRule, dns []netip.Addr) *Policy {
 	t.Helper()
-	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(), dns, true)
+	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(), dns)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}

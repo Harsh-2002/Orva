@@ -32,7 +32,7 @@ func TestRenderedConfigIsAcceptedByNsjail(t *testing.T) {
 			Value: "2001:db8::/32", Enabled: true},
 	}
 	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(),
-		[]netip.Addr{netip.MustParseAddr("1.1.1.1")}, true)
+		[]netip.Addr{netip.MustParseAddr("1.1.1.1")})
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}

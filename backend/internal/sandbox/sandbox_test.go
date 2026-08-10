@@ -127,6 +127,72 @@ func TestBuildArgs_ConfigFlagIsFirst(t *testing.T) {
 	}
 }
 
+// TestBuildArgs_DisableUsernsTracksTheEnvVar pins the one deployment
+// combination that silently breaks egress: a container WITHOUT NET_ADMIN plus
+// ORVA_DISABLE_USERNS=1.
+//
+// Why it matters: nsjail creates each sandbox's TAP device inside its own user
+// namespace, so the kernel checks ns_capable() there instead of the container's
+// capability set — that is the whole reason the image needs no NET_ADMIN
+// (docker-compose.yml "cap_add" comment, README.md's runc note). Setting
+// ORVA_DISABLE_USERNS=1 emits --disable_clone_newuser, which removes that user
+// namespace; TUNSETIFF is then charged against the INITIAL namespace and needs
+// real CAP_NET_ADMIN (the bare-metal installer instead grants file caps on the
+// nsjail binary — see scripts/install.sh setcap and the ci.yml e2e job, which
+// runs exactly this configuration).
+//
+// HONEST SCOPE: this pins the arg-building contract only. It proves that the
+// flag which removes the user namespace is emitted exactly when the env var
+// asks for it — it does NOT execute nsjail and therefore does not prove the
+// kernel's capability check. The capability evidence lives in the docs above
+// and in the privileged e2e runs; this test exists so the code cannot drift
+// away from what those docs promise without a test going red.
+func TestBuildArgs_DisableUsernsTracksTheEnvVar(t *testing.T) {
+	newCfg := func() ExecConfig {
+		return ExecConfig{
+			Language:         Node,
+			CodeDir:          "/tmp/code",
+			NetworkMode:      "egress",
+			EgressPolicyPath: "/var/lib/orva/firewall/policy/egress-abc.cfg",
+		}
+	}
+
+	t.Run("enabled", func(t *testing.T) {
+		t.Setenv("ORVA_DISABLE_USERNS", "1")
+		args, err := buildArgs(newCfg(), "/tmp/rootfs", "/tmp/code/handler.js")
+		if err != nil {
+			t.Fatalf("buildArgs: %v", err)
+		}
+		if !containsArg(args, "--disable_clone_newuser") {
+			t.Fatalf("ORVA_DISABLE_USERNS=1 must emit --disable_clone_newuser, got: %s",
+				strings.Join(args, " "))
+		}
+		// The combination is the invariant: this is still an egress sandbox
+		// (--user_net opens /dev/net/tun) and it is now doing so with no user
+		// namespace to be privileged in. Deployments in this state need
+		// CAP_NET_ADMIN from the initial namespace, or file caps on nsjail.
+		if !containsArg(args, "--user_net") {
+			t.Fatalf("egress mode must still emit --user_net, got: %s", strings.Join(args, " "))
+		}
+	})
+
+	// Values other than "1" are not a partial opt-in: the userns path stays on,
+	// which is what lets the shipped compose file drop NET_ADMIN.
+	for _, value := range []string{"", "0", "true", "yes"} {
+		t.Run("disabled/"+value, func(t *testing.T) {
+			t.Setenv("ORVA_DISABLE_USERNS", value)
+			args, err := buildArgs(newCfg(), "/tmp/rootfs", "/tmp/code/handler.js")
+			if err != nil {
+				t.Fatalf("buildArgs: %v", err)
+			}
+			if containsArg(args, "--disable_clone_newuser") {
+				t.Fatalf("ORVA_DISABLE_USERNS=%q must keep the user namespace, got: %s",
+					value, strings.Join(args, " "))
+			}
+		})
+	}
+}
+
 // TestBuildArgs_UsesWarningLogLevel guards the observability fix: nsjail gates
 // rule-compilation errors behind ERROR, and -Q (FATAL) suppressed them
 // entirely, making a silently-dropped policy rule invisible.

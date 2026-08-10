@@ -233,10 +233,14 @@ first-match-wins, so the compiler emits carve-outs before rejects:
 2. The **control plane**: orvad's internal SDK address, exact host, exact
    port, TCP only (see the bug fix below).
 3. The configured DNS resolvers, port 53, UDP + TCP.
-4. The operator's blocklist, as REJECT rules.
-5. A blanket IPv6 REJECT when the host has no global IPv6 address *and*
-   the policy contains no IPv6 rule of its own — otherwise a destination
-   blocked over IPv4 could be reached over IPv6 instead.
+4. The operator's blocklist, as REJECT rules — routed by address family, so
+   an IPv4 target becomes a `rule4` and an IPv6 target a `rule6`. A hostname
+   rule contributes a `/32` per resolved v4 answer and a `/128` per v6 one.
+
+The policy is a **blocklist in both families**: there is no wholesale IPv6
+deny. A destination you block by IPv4 address is not automatically blocked
+over IPv6 — if a service is reachable on both, block both, exactly as you
+would with any other pair of addresses.
 
 Every address is re-parsed and canonicalised by Orva before it reaches
 the config file, and anything ambiguous is refused rather than emitted.

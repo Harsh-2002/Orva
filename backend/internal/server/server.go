@@ -230,12 +230,10 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		slog.Error("egress policy: control-plane address unresolved; egress functions will refuse to start",
 			"err", cpErr, "api_base", apiBase)
 	}
-	ipv6Egress := firewall.HostHasGlobalIPv6()
 	slog.Info("egress policy configured",
-		"control_plane", controlPlane.Addrs, "port", controlPlane.Port,
-		"ipv6_egress", ipv6Egress)
+		"control_plane", controlPlane.Addrs, "port", controlPlane.Port)
 
-	fw := firewall.NewManager(db, cfg.Data.Dir, controlPlane, ipv6Egress)
+	fw := firewall.NewManager(db, cfg.Data.Dir, controlPlane)
 
 	// Every egress spawn resolves the current policy generation. Wired before
 	// Start so the initial compile cannot publish into an unwired manager.
