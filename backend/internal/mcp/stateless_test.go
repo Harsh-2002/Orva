@@ -461,8 +461,10 @@ func TestEveryCacheableResultIsScopedPrivate(t *testing.T) {
 				}
 				if scope := cacheable.GetCacheScope(); scope != cacheScopePrivate {
 					t.Errorf("%s cacheScope = %q, want %q. cachescope.go's switch is missing "+
-						"this type, so it ships the SDK's \"public\" default and any shared "+
-						"cache may serve one principal's answer to another.",
+						"this type. Called in isolation the value is empty because the "+
+						"middleware runs before the SDK's setDefaultCacheableValues; on a real "+
+						"server that default lands and the result ships as \"public\", so any "+
+						"shared cache may serve one principal's answer to another.",
 						name, scope, cacheScopePrivate)
 				}
 			})

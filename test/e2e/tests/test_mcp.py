@@ -300,12 +300,23 @@ def main():
         cnames = tool_names(cmsg)
         check("channel sees exactly one tool per bundled function",
               cnames == [CHAN_TOOL], f"tools={cnames}")
+        # Every no-leak assertion below is guarded on BOTH catalogs being
+        # non-empty. Set-difference checks are trivially true on empty inputs
+        # ([] & [] is no leak; [] == [] is no change), so without the guards a
+        # regression that broke tools/list outright would satisfy them all and
+        # this section would report a clean cross-tenant boundary while
+        # measuring nothing. Verified: under a forced transport failure these
+        # four checks passed while the real catalog was empty.
+        both_listed = len(cnames) > 0 and len(operator_names) > 0
         leaked = sorted(set(cnames) & set(operator_names))
-        check("channel sees NO operator tool", not leaked, f"leaked={leaked}")
+        check("channel sees NO operator tool", both_listed and not leaked,
+              f"leaked={leaked} channel={len(cnames)} operator={len(operator_names)}")
         check("no operator tool name is reachable at all",
-              not any(t in cnames for t in OPERATOR_TOOLS), f"tools={cnames}")
+              len(cnames) > 0 and not any(t in cnames for t in OPERATOR_TOOLS),
+              f"tools={cnames}")
         check("operator catalog does not contain the channel tool",
-              CHAN_TOOL not in operator_names)
+              len(operator_names) > 0 and CHAN_TOOL not in operator_names,
+              f"operator={len(operator_names)} tools")
         check("channel catalog is a strict subset of the operator catalog size",
               len(cnames) < len(operator_names), f"{len(cnames)} vs {len(operator_names)}")
         cres = (cmsg or {}).get("result") or {}
@@ -322,9 +333,9 @@ def main():
 
         section("channel token has no Orva-management authority")
         chan_client = OrvaClient(api_key=chan_tok)
+        fn_status = chan_client.status("GET", "/api/v1/functions")
         check("channel token at /api/v1/functions -> 401",
-              chan_client.status("GET", "/api/v1/functions") == 401,
-              f"status {chan_client.status('GET', '/api/v1/functions')}")
+              fn_status == 401, f"status {fn_status}")
         check("channel token at /api/v1/channels -> 401",
               chan_client.status("GET", "/api/v1/channels") == 401)
         rest = {"Authorization": "Bearer " + chan_tok, "Accept": "application/json"}
@@ -337,8 +348,9 @@ def main():
         ocode, _, omsg = mcp_call(c, "tools/list")
         onames = tool_names(omsg)
         check("operator tools/list still -> 200", ocode == 200, f"status {ocode}")
-        check("operator catalog unchanged by the channel", onames == operator_names,
-              f"delta={sorted(set(onames) ^ set(operator_names))}")
+        check("operator catalog unchanged by the channel",
+              len(onames) > 0 and onames == operator_names,
+              f"n={len(onames)} delta={sorted(set(onames) ^ set(operator_names))}")
 
         section("deleting the channel revokes its token")
         if chan_id:
