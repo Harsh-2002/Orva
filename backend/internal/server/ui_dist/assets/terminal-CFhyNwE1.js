@@ -1,1 +1,0 @@
-import{At as e}from"./index-CkR2WUv9.js";var t=e(`terminal`,[[`path`,{d:`M12 19h8`,key:`baeox8`}],[`path`,{d:`m4 17 6-6-6-6`,key:`1yngyt`}]]);export{t};

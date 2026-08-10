@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -380,4 +382,66 @@ func TestWildcardAddedAfterFirstCompileIsStillReportedUnenforced(t *testing.T) {
 	if !found {
 		t.Fatalf("wildcard added after the first compile must still be reported unenforced, got %+v", snap.Unenforced)
 	}
+}
+
+// TestConcurrentRefreshNeverPublishesAnOlderPolicy is the regression guard for
+// a race an independent reviewer reproduced.
+//
+// refresh() is reachable from the 10s poll loop AND from ForceRefresh, which
+// every firewall mutation handler and PUT /firewall/dns call. Unserialized,
+// refresh A could read an older rule set, lose the CPU, and Store its result
+// after refresh B had already published a newer one — so the live policy would
+// go BACKWARDS, silently dropping a reject the operator had just added. The
+// reviewer saw the published reject count sequence [3 4 5 6 5 6 7 9 …].
+//
+// Rules are only ever added here, so the invariant is monotonicity: the
+// published reject count must never decrease.
+func TestConcurrentRefreshNeverPublishesAnOlderPolicy(t *testing.T) {
+	db := newManagerTestDB(t)
+	m := NewManager(db, t.TempDir(), testCP())
+	if err := m.ForceRefresh(); err != nil {
+		t.Fatalf("initial compile: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// A background refresher, standing in for the poll loop.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = m.ForceRefresh()
+			}
+		}
+	}()
+
+	// Foreground: add rules and refresh, checking the published policy never
+	// regresses. Distinct TEST-NET-3 addresses so every add is a new reject.
+	var highest int
+	for i := 0; i < 40; i++ {
+		if _, err := db.InsertCustomBlocklistRule(
+			database.BlocklistTypeCIDR, fmt.Sprintf("203.0.113.%d/32", i), "", true); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+		_ = m.ForceRefresh()
+
+		p, err := m.CurrentPolicy()
+		if err != nil {
+			t.Fatalf("no policy after refresh %d: %v", i, err)
+		}
+		if p.Rejects < highest {
+			t.Fatalf("published policy went backwards after adding rule %d: "+
+				"reject count %d < %d already published — an older compile overwrote a newer one",
+				i, p.Rejects, highest)
+		}
+		highest = p.Rejects
+	}
+
+	close(stop)
+	wg.Wait()
 }

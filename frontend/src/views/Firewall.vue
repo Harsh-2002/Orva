@@ -85,6 +85,18 @@
           <span class="policy-chip-k">Compiled rules</span>
           <span class="policy-chip-v">{{ ruleCountsText }}</span>
         </span>
+        <!-- A newer generation is published, but the warm-worker recycle is
+             rate-limited to once a minute, so running egress sandboxes are
+             still applying the previous one. Without this chip the page would
+             show the new generation as in force while the old rules are what
+             actually decide a connection. Transient by construction. -->
+        <span
+          v-if="status.pending_recycle"
+          class="policy-chip policy-chip-pending"
+        >
+          <span class="policy-chip-k">Rollout</span>
+          <span class="policy-chip-v">warm workers still on the previous generation</span>
+        </span>
         <span
           v-if="controlPlaneText"
           class="policy-chip"
@@ -446,7 +458,8 @@ const emptyStatus = () => ({
   ipv4: [], ipv6: [], hostname_map: {}, last_error: '',
   backend: 'nstun', enforced: false, policy_generation: '',
   policy_rule_counts: { v4: 0, v6: 0, allow: 0, reject: 0 },
-  policy_stale: false, last_compile_error: '', last_success_at: '',
+  policy_stale: false, pending_recycle: false,
+  last_compile_error: '', last_success_at: '',
   control_plane_allow: { addrs: [], port: 0 },
   unenforced_rules: [],
 })
@@ -1113,6 +1126,15 @@ const RuleCard = defineComponent({
   font-family: var(--font-mono);
   color: white;
   overflow-wrap: anywhere;
+}
+
+/* Warning tone, not danger: the policy is enforced, just not the newest
+   generation yet, and it resolves itself within a minute. */
+.policy-chip-pending {
+  border-color: var(--color-warning, #b45309);
+}
+.policy-chip-pending .policy-chip-v {
+  color: var(--color-warning, #f59e0b);
 }
 
 /* Stored-but-not-enforced callout above the rule grid. Danger tone, not

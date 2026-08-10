@@ -475,7 +475,7 @@ func (m *Manager) checkProviderEgress(ctx context.Context, provider string) erro
 		root = normalizeBaseURL(cfg.BaseURL)
 	}
 	if root == "" {
-		root = defaultRoot(provider)
+		root = defaultPreflightRoot(provider)
 	}
 	if root == "" {
 		return nil
@@ -921,6 +921,26 @@ func normalizeBaseURL(u string) string {
 	u = strings.TrimRight(u, "/")
 	u = strings.TrimSuffix(u, "/v1")
 	return strings.TrimRight(u, "/")
+}
+
+// defaultPreflightRoot is the URL the egress preflight resolves when the
+// operator has set no custom base URL.
+//
+// Deliberately separate from defaultRoot: that one builds API request URLs by
+// appending "/v1/models", so a provider whose OpenAI-compatible path does not
+// fit that shape cannot be added there just to obtain a preflight. The check
+// only needs a host it can resolve. gemini is selectable in the dashboard's
+// provider list but has no defaultRoot, so with a default base URL it was
+// getting no endpoint check at all.
+func defaultPreflightRoot(provider string) string {
+	if r := defaultRoot(provider); r != "" {
+		return r
+	}
+	switch strings.ToLower(provider) {
+	case "gemini":
+		return "https://generativelanguage.googleapis.com"
+	}
+	return ""
 }
 
 // defaultRoot is the provider ROOT (no /v1) used when no custom base URL is set.
