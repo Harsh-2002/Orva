@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>brw25f1ag</task-id>
+<tool-use-id>toolu_019oheHhMgD9piboJxe3Re1Z</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/2902e625-4ac6-4f6e-82c3-7c87cf749e19/tasks/brw25f1ag.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR #35 checks until terminal (background)" completed (exit code 0)</summary>
+</task-notification>
