@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b74vzb5oz</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/2902e625-4ac6-4f6e-82c3-7c87cf749e19/tasks/b74vzb5oz.output</output-file>
+<status>completed</status>
+<summary>Background command "Monitor PR 39 CI checks" completed (exit code 0)</summary>
+</task-notification>
