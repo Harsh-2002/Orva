@@ -30,6 +30,18 @@ const (
 	DefaultRetentionDays = 30
 
 	retentionInterval = 24 * time.Hour
+
+	// firstPurgeDelay keeps the first sweep from running the instant the
+	// process starts.
+	//
+	// This is the only scheduled job that destroys operator-visible data, and
+	// it is asymmetric with everything else in a release: a bad binary is
+	// undone by reinstalling the old one, but rows deleted on boot do not come
+	// back. An operator upgrading into a build that has this enabled should
+	// have a window in which the instance is up, the seeded
+	// execution_retention_days row is visible in system_config, and the
+	// warning below has been logged — all before anything is removed.
+	firstPurgeDelay = time.Hour
 )
 
 // StartRetention purges expired execution history once at boot and then daily
@@ -40,7 +52,23 @@ const (
 // a disk-usage problem, never a reason to stop serving.
 func (db *Database) StartRetention(ctx context.Context) {
 	go func() {
-		db.purgeOnce()
+		days := db.GetSystemConfigInt(RetentionSettingKey, DefaultRetentionDays)
+		if days > 0 {
+			slog.Info("execution retention armed; first sweep is delayed so it can be changed first",
+				"retention_days", days, "first_sweep_in", firstPurgeDelay.String(),
+				"setting", RetentionSettingKey,
+				"disable", "set system_config."+RetentionSettingKey+" to 0 to keep everything")
+		}
+
+		first := time.NewTimer(firstPurgeDelay)
+		defer first.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-first.C:
+			db.purgeOnce()
+		}
+
 		t := time.NewTicker(retentionInterval)
 		defer t.Stop()
 		for {

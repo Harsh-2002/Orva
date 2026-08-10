@@ -148,9 +148,13 @@ Orvad writes to stdout. Three sources:
    table), not on disk.
 3. **Build logs** — same, in `build_logs`.
 
-The SQLite tables grow unbounded today. The `system_config.log_retention_days`
-knob is a **placeholder** — automatic prune isn't implemented yet
-(planned for a future release). Manual prune:
+Execution history is pruned automatically: `system_config.execution_retention_days`
+(default 30; `0` disables it) is applied at startup and every 24 hours, removing
+old `executions` rows together with their logs, captured requests, structured log
+entries and user spans. See [CONFIG.md](CONFIG.md).
+
+Build logs are **not** covered by that sweep and still grow unbounded. Manual
+prune:
 
 ```sql
 -- run periodically (cron):

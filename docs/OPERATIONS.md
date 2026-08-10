@@ -246,9 +246,13 @@ by nsjail, so no build creates a host firewall table any more — there is no
 migration step, no service reconfiguration, and no leftover state on a normal
 upgrade.
 
-The one exception: if you ran a **pre-release** nftables build on a host that
-had `nft` available, and the daemon crashed before it could remove its table,
-delete it by hand once:
+The one exception applies to the **currently published release**, not to some
+older pre-release: `v2026.08.05` is the last nftables-based build, and on
+bare-metal systemd it created `table inet orva_firewall` while running. A clean
+`systemctl stop` (which the installer performs on upgrade) removes it. If that
+daemon was instead SIGKILLed, OOM-killed, or lost to a hard reboot, the table
+survives — the new build no longer manages nftables, so nothing will clear it
+for you. Check and delete it by hand once:
 
 ```bash
 sudo nft delete table inet orva_firewall

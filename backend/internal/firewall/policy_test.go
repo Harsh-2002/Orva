@@ -606,3 +606,54 @@ func TestDaemonExemptionIsPortScopedLikeTheSandboxRule(t *testing.T) {
 		}
 	}
 }
+
+// TestUnresolvedHostnameRuleIsReportedUnenforced covers a silent fail-open.
+//
+// An enabled hostname rule that resolves to nothing contributes no reject
+// rules. Before this it also produced no unenforced_rules entry, and the
+// dashboard builds its whole "not enforced" surface from that list — so the
+// rule rendered as an ordinary active block while the destination was fully
+// reachable. NXDOMAIN, a typo, or a resolver that is down at boot all land here.
+func TestUnresolvedHostnameRuleIsReportedUnenforced(t *testing.T) {
+	rules := []*database.BlocklistRule{{
+		ID: 11, Kind: "custom", RuleType: database.BlocklistTypeHostname,
+		Value: "does-not-resolve.invalid", Enabled: true,
+	}}
+	c, err := compile(rules, func(string) []string { return nil },
+		testCP(), DefaultGuestNet(), nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+
+	var found bool
+	for _, u := range c.unenforced {
+		if u.ID == 11 {
+			found = true
+			if u.Reason == "" {
+				t.Error("unenforced entry must explain why")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("a hostname rule that resolved to nothing must be reported unenforced, "+
+			"or the UI shows it as an active block; got %+v", c.unenforced)
+	}
+}
+
+// A hostname that DOES resolve must not be reported unenforced.
+func TestResolvedHostnameRuleIsNotReportedUnenforced(t *testing.T) {
+	rules := []*database.BlocklistRule{{
+		ID: 12, Kind: "custom", RuleType: database.BlocklistTypeHostname,
+		Value: "bad.example", Enabled: true,
+	}}
+	c, err := compile(rules, func(string) []string { return []string{"203.0.113.7"} },
+		testCP(), DefaultGuestNet(), nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	for _, u := range c.unenforced {
+		if u.ID == 12 {
+			t.Fatalf("a resolvable hostname must not be flagged unenforced: %+v", u)
+		}
+	}
+}

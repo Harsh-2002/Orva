@@ -459,3 +459,52 @@ func TestRunBuildRejectsEmptyCommand(t *testing.T) {
 		t.Fatal("an empty argv must be rejected")
 	}
 }
+
+// TestBuildJailArgs_ForwardedSecretsNeverAppearInArgv is a disclosure guard.
+//
+// The forwarded set (NPM_CONFIG_*, npm_config_*, PIP_*, proxy vars) routinely
+// carries registry tokens and user:pass URLs. argv lands in
+// /proc/<pid>/cmdline at mode 0444 — world-readable, and readable across the
+// whole host because docker-compose runs pid: host with no USER in the image.
+// Before builds were jailed these values only ever sat in
+// /proc/<pid>/environ at 0400, so passing them as arguments would be a
+// disclosure widening caused by jailing the build.
+//
+// nsjail's "--env KEY" form (no '=') forwards the value from its own inherited
+// environment instead, so the value never enters anyone's argv.
+func TestBuildJailArgs_ForwardedSecretsNeverAppearInArgv(t *testing.T) {
+	const secret = "s3cr3t-registry-token"
+	t.Setenv("NPM_CONFIG__AUTH", secret)
+	t.Setenv("HTTPS_PROXY", "http://user:"+secret+"@proxy.internal:3128")
+
+	cfg := BuildConfig{
+		Language:         Node,
+		CodeDir:          "/code-src",
+		NsjailBin:        "/usr/local/bin/nsjail",
+		RootfsDir:        "/rootfs",
+		NetworkMode:      "egress",
+		EgressPolicyPath: testPolicyFile(t),
+		Env: map[string]string{
+			"NPM_CONFIG__AUTH": secret,
+			"HTTPS_PROXY":      "http://user:" + secret + "@proxy.internal:3128",
+		},
+		Argv: []string{"/usr/local/bin/npm", "install"},
+	}
+	args, err := buildJailArgs(cfg, "/rootfs/node", "/scratch")
+	if err != nil {
+		t.Fatalf("buildJailArgs: %v", err)
+	}
+
+	for i, a := range args {
+		if strings.Contains(a, secret) {
+			t.Fatalf("a forwarded secret reached argv at %d (%q) — visible in "+
+				"/proc/<pid>/cmdline to every local user: %s", i, a, strings.Join(args, " "))
+		}
+	}
+	// And it must still reach the jail, by name.
+	for _, name := range []string{"NPM_CONFIG__AUTH", "HTTPS_PROXY"} {
+		if !hasPair(args, "--env", name) {
+			t.Errorf("%s must still be forwarded to the jail via the pass-through form", name)
+		}
+	}
+}

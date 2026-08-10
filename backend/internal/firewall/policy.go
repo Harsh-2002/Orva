@@ -257,17 +257,36 @@ func compile(
 			}
 
 		case database.BlocklistTypeHostname:
+			// A hostname that resolves to nothing usable contributes NO rules.
+			// Silently emitting nothing would render in the dashboard as an
+			// ordinary active block — the UI builds its entire "not enforced"
+			// surface from unenforced_rules — so the operator would believe a
+			// destination was blocked while it was fully reachable. Causes:
+			// NXDOMAIN, a typo, or the resolver being unavailable at boot
+			// before any answer has been cached.
+			var resolved int
 			for _, ipStr := range resolve(r.Value) {
 				a, err := netip.ParseAddr(ipStr)
 				if err != nil || !usableTarget(a) {
 					continue
 				}
 				a = a.Unmap()
+				resolved++
 				if a.Is4() {
 					v4Blocks = append(v4Blocks, hostPrefix(a))
 				} else {
 					v6Blocks = append(v6Blocks, hostPrefix(a))
 				}
+			}
+			if resolved == 0 {
+				c.unenforced = append(c.unenforced, UnenforcedRule{
+					ID:    r.ID,
+					Value: r.Value,
+					Reason: "hostname did not resolve to any usable address, so it " +
+						"blocks nothing right now. Check the name and that the " +
+						"resolver is reachable; this clears itself once resolution " +
+						"succeeds.",
+				})
 			}
 
 		case database.BlocklistTypeWildcard:

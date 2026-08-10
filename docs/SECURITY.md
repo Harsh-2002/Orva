@@ -281,10 +281,18 @@ compatibility alias — see [`API.md`](API.md#firewall-status).
 - **The daemon is filtered separately.** So that narrowing does not become
   a hole, orvad's own outbound connections are checked at the dialer
   against the same compiled rule set, in the same order — outbound
-  webhooks, builder package installs (`npm install` / `pip install`), the
-  AI gateway's provider calls, and anything a cron trigger causes. Loopback
-  and the control plane are always exempt so orvad cannot cut off its own
-  internal calls.
+  webhooks, builder package installs (`npm install` / `pip install`), and
+  anything a cron trigger causes. Loopback and the control-plane address on
+  the internal API port are exempt so orvad cannot cut off its own internal
+  calls.
+
+  The AI gateway is the exception: the embedded Bifrost gateway owns its own
+  transport, so Orva checks a provider endpoint **before** the turn rather
+  than at dial time. Bifrost's own dialer independently re-resolves and
+  refuses link-local, unspecified and RFC1918 destinations on every dial,
+  which is what closes the metadata/private-network rebinding case; a public
+  address the operator has blocklisted could still be reached by rebinding
+  within a turn. Changing that requires provider credentials, i.e. admin.
 - **Blocked destinations now report `ECONNREFUSED`**, not `EHOSTUNREACH`.
   Handlers (and log-scraping alerts) that string-match the old errno need
   updating.

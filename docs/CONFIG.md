@@ -113,7 +113,11 @@ the database does not grow without bound.
 |---|---|---|
 | `execution_retention_days` | `30` | Delete executions, their logs and their captured requests once they are older than this many days. **`0` disables purging entirely** (keep everything). |
 
-The purge runs once at startup and then every 24 hours. The setting is re-read
+The first purge is deliberately delayed by an hour after startup, then runs
+every 24 hours. The delay exists so that an operator upgrading into a build
+that has this enabled can see the setting (it is seeded in `system_config`) and
+the startup log line, and change it, before anything is deleted — deleted rows
+are the one thing a rollback cannot restore. The setting is re-read
 on each pass, so changing it takes effect without restarting the server.
 
 This is deliberately **not** an environment variable: it is operational state an

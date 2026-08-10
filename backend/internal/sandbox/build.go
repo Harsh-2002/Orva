@@ -355,7 +355,29 @@ func buildJailArgs(cfg BuildConfig, rootfs, scratch string) ([]string, error) {
 	setOwnedEnv(env, "PIP_CACHE_DIR", buildCacheDir+"/pip")
 	setOwnedEnv(env, "npm_config_logs_dir", buildNpmLogsDir)
 
+	// Env goes in as one of two forms, and the choice is a disclosure
+	// boundary, not a style preference.
+	//
+	// "--env KEY=VALUE" puts the value in the nsjail process's argv, i.e.
+	// /proc/<pid>/cmdline — mode 0444, world-readable, and readable across the
+	// whole host because docker-compose runs with pid: host and the image sets
+	// no USER. The forwarded set is exactly the credential-bearing one
+	// (NPM_CONFIG_*, npm_config_*, PIP_*, and the proxy vars all routinely
+	// carry registry tokens or user:pass in a URL). Before builds were jailed,
+	// npm and pip ran with an inherited environment, so those values only ever
+	// sat in /proc/<pid>/environ at mode 0400 — owner-only. Passing them as
+	// arguments would be a real widening introduced by jailing the build.
+	//
+	// "--env KEY" (no '=') tells nsjail to forward the value from its OWN
+	// environment, which it inherits from orvad. Same value in the jail, never
+	// in anyone's argv. Use it whenever the value is one we forwarded from our
+	// environment in the first place; Orva-computed values (cache paths) are
+	// not secret and take the explicit form.
 	for k, v := range env {
+		if cur, ok := os.LookupEnv(k); ok && cur == v {
+			args = append(args, "--env", k)
+			continue
+		}
 		args = append(args, "--env", k+"="+v)
 	}
 

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -150,7 +151,7 @@ func registerFirewallTools(rc *regCtx) {
 				return nil, FirewallRuleView{}, err
 			}
 			if deps.Firewall != nil {
-				_ = deps.Firewall.ForceRefresh()
+				refreshEgressPolicy(deps)
 			}
 			return nil, toFirewallRuleView(rule), nil
 		},
@@ -171,7 +172,7 @@ func registerFirewallTools(rc *regCtx) {
 				return nil, DeletedOutput{}, err
 			}
 			if deps.Firewall != nil {
-				_ = deps.Firewall.ForceRefresh()
+				refreshEgressPolicy(deps)
 			}
 			return nil, DeletedOutput{DeletedID: ""}, nil
 		},
@@ -240,7 +241,7 @@ func registerFirewallTools(rc *regCtx) {
 				return nil, GetDNSConfigOutput{}, err
 			}
 			if deps.Firewall != nil {
-				_ = deps.Firewall.ForceRefresh()
+				refreshEgressPolicy(deps)
 			}
 			cfg := firewall.LoadDNSConfig(deps.DB)
 			out := GetDNSConfigOutput{
@@ -253,4 +254,23 @@ func registerFirewallTools(rc *regCtx) {
 			return nil, out, nil
 		},
 	)
+}
+
+// refreshEgressPolicy recompiles the egress policy after an MCP-driven change.
+//
+// The DB write has already committed, so the tool result is not wrong about
+// the mutation — but a failure here means the change is NOT in force, and
+// these tools' own descriptions state the opposite as fact ("recycles the warm
+// egress workers, so traffic the rule was blocking is reachable again within
+// seconds"). Discarding the error silently let the in-product AI assistant
+// report a security change as applied when the previous policy was still
+// running. The detail lands on GET /api/v1/firewall/status.
+func refreshEgressPolicy(deps Deps) {
+	if deps.Firewall == nil {
+		return
+	}
+	if err := deps.Firewall.ForceRefresh(); err != nil {
+		slog.Warn("egress policy not refreshed after an MCP change; the change is saved but NOT in force",
+			"err", err, "hint", "see GET /api/v1/firewall/status (last_compile_error)")
+	}
 }
