@@ -190,3 +190,69 @@ Not needed: `chown`/`fchown*` — a root-run install (the Docker case) traced id
 7. Pre-existing, untouched: `setpriority` is in `defaultSyscalls` but absent from the syscall catalog, so it is silently dropped from every policy; `server.go`/`pool.go` are not gofmt-clean at HEAD.</result>
 <usage><subagent_tokens>272751</subagent_tokens><tool_uses>121</tool_uses><duration_ms>2169536</duration_ms></usage>
 </task-notification>
+
+---
+
+<task-notification>
+<task-id>a63cf2f574bcea5cd</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-dev-Orva/40f511d5-916e-46ec-b7f9-f3f700d84205/tasks/a63cf2f574bcea5cd.output</output-file>
+<status>completed</status>
+<summary>Agent "Benchmark NSTUN flow cap and rule cost" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Cleanup complete: bench instance stopped, all bench rules/functions deleted, scratch dir removed, port 3000 untouched (still 200).
+
+## Deliverable
+
+**`/home/dev/Orva/test/nstun-policy-bench.py`** — stdlib-only, `BASE_URL`/`API_KEY` from env, executable, clearly labelled a benchmark in its docstring with an explicit "must not be added to run-all.sh". Not wired into `run-all.sh`; I did not touch `test/CLAUDE.md` (docs were off-limits). It creates a probe function + up to 1000 rules and removes every one of them via `try/finally` + `atexit` + SIGINT/SIGTERM handlers. Knobs: `BENCH_RULE_STEPS`, `BENCH_ROUNDS`, `BENCH_SAMPLES`, `BENCH_SKIP_FLOWCAP`. It must run on the same host as orvad — it binds its probe listeners to the control-plane address from `/firewall/status`, the one address a sandbox is guaranteed to route to.
+
+## Methodology
+
+Own instance on :18544, `make build`, tmpdir with a `rootfs` symlink. Probe target = a listener on the daemon's control-plane address on a fresh port, so a connect walks the *entire* rule vector (the control-plane allow has a `dport` that doesn't match, so evaluation continues) and lands on NSTUN's default-ALLOW. Timing is `process.hrtime.bigint()` around `net.connect` inside the handler, hundreds of samples per invocation.
+
+Steady-state warm workers: after each rule-count change I drain the pool with a `PUT memory_mb` (the trick `egress-test.sh` uses — the 60 s policy-recycle rate limit doesn't apply), then run a throwaway invocation, then measure. Each measured worker's generation is confirmed by reading `--config` out of the live nsjail argv and matching it against `/firewall/status.policy_generation` (printed as `gen_in_worker=True` on every row). Levels are visited in a rotated order each round so drift can't align with the ladder.
+
+Two independent estimators of scan cost: the **allow path** (matches nothing → full walk), and **reject depth** — inside one policy, compare a destination matched by the *first* reject rule (`169.254.169.254`, position 8) against one matched by the *last* (`198.18.3.99`, position 1007). Same worker, same policy; only walk depth differs.
+
+Two false starts, both corrected: my first probe listener held connections open and never read, which I initially misread as nstun slowness — it was actually the Q2 flow-cap effect leaking into the Q1 rig. Q1 now runs against a server that closes on accept (flow map stays empty).
+
+## Q1 — per-connection policy cost
+
+3 rounds × 400 samples/level, ms, medians across rounds (`a_` = allow path, `rej1` = first reject rule, `rejN` = last reject rule):
+
+| rules | policy v4 | a_min | a_p50 | a_p90 | a_p95 | rej1_min | rej1_p50 | rejN_min | rejN_p50 |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 7 | 0.115 | 0.196 | 0.298 | 0.397 | 0.094 | 0.114 | – | – |
+| 50 | 57 | 0.115 | 0.188 | 0.388 | 0.633 | 0.102 | 0.144 | 0.090 | 0.128 |
+| 200 | 207 | 0.120 | 0.185 | 0.354 | 0.506 | 0.092 | 0.119 | 0.089 | 0.094 |
+| 500 | 507 | 0.124 | 0.181 | 0.496 | 0.701 | 0.101 | 0.139 | 0.120 | 0.127 |
+| 1000 | 1007 | 0.123 | 0.156 | 0.404 | 0.780 | 0.098 | 0.136 | 0.123 | 0.130 |
+
+Confirmed by a separate 5-round × 1000-sample paired run (7 vs 1007 rules): allow min 0.101 → 0.106; rej1 min 0.091 → 0.095; rejN min at 1007 rules = 0.100. All 5400 reject probes returned `ECONNREFUSED`, so the policy was demonstrably loaded and enforced throughout.
+
+**Per-rule cost ≈ 5 ns.** Both estimators agree: walking 999 extra rules costs ~5 µs (reject-depth: 0.095 → 0.100 ms; allow path: 0.101 → 0.106 ms). p50/p95 wander by ±0.1 ms with no ordering by rule count — the 50-rule row is often the slowest.
+
+**Verdict: noise.** 1000 rules add ~5 µs to a connect that costs ≥100 µs on the fastest possible path and 10–100 ms to any real internet destination — 0.005–0.05%. You'd need ~200,000 rules to add 1 ms. The nftables set-lookup → NSTUN linear-scan change is not a measurable regression at any blocklist size an operator would plausibly enter. Operator-side cost is the larger effect and still small: `POST /firewall/rules` goes 2.8 ms → 15.8 ms p50 as the table grows to 1000 (each write recompiles + republishes the whole policy); 1000 adds took 10.4 s; `GET /firewall/status` 1.0 ms, `GET /firewall/rules` 9.3 ms.
+
+## Q2 — the flow cap
+
+The concern is **confirmed at the mechanism level**, reproduced both through Orva and by driving nsjail directly with the published policy generation.
+
+- **Cap is exactly 1024 TCP flows per nsjail process** (per warm worker — the log line is tagged with the nsjail pid/tid). Flooding held precisely 1024; the 1025th onward produced `[W] handle_tcp4():822 Maximum number of TCP flows (1024) reached, dropping`, once per dropped SYN.
+- **At the cap a REJECT rule stops failing fast.** `169.254.169.254` (a shipped `default` reject) answers `ECONNREFUSED` in **0.9–4.4 ms** below the cap, and at the cap returns **nothing at all** — 2 s, 3 s and 6 s probe timeouts all expired with no RST. A fresh *allowed* connection behaves identically. From inside the guest, blocked and allowed are indistinguishable: everything just hangs. With no application timeout the guest would wait out the kernel's SYN retries (~130 s).
+- **The fd limit is not a defence.** Orva doesn't pass `--rlimit_nofile`, so the guest inherits nsjail's default of 32 (`Max open files 32 32`); a Node handler gets **14 concurrent sockets before EMFILE**. But saturation needs only *one* fd at a time: a plain sequential loop of connect → close, against a peer that doesn't close first, saturated after exactly **1025 connections in 2.4 s** (2.5 s / 3.7 s / 25.6 s across runs). That is well within one warm worker's lifetime.
+- **Who closes first decides everything.** Against a server that closes on accept, 2000 sequential connects completed in 3.1 s with zero drops and flat latency across all 20 bins — flows are freed immediately. Against a peer that never closes, the map fills and stays full.
+- **Recovery is slow but automatic.** After saturation, a blocked destination stayed unanswered for 40–56 s of complete idle before flipping back to `ECONNREFUSED` (55 s and 56 s in the two scripted runs). Releasing 200 held sockets produced no relief within 200 ms; under continued churn ~8% of connects stall ~2 s.
+- **Not a regression from this branch.** `origin/main` already spawned egress sandboxes with `--user_net` (NSTUN), so the 1024 cap and the drop-at-cap behaviour predate the nftables removal. What changed is only *where* the REJECT decision lives — and on either implementation the SYN never reached the deciding layer once the cap was hit.
+
+**Verdict: real, but bounded and not caused by the blocklist.** It is a genuine gap between documented behaviour (`ECONNREFUSED` for blocked destinations) and behaviour under saturation, reachable by a single-threaded function doing &gt;1024 short-lived outbound connections to keep-alive-style peers inside ~55 s. It self-heals, it is per-worker (one function can't wedge another), and it is unaffected by blocklist size since the cap is checked before policy evaluation. My recommendation is documentation plus, if anything, per-worker connection-churn observability — raising `--rlimit_nofile` would make it *easier* to hit, not harder.
+
+## Not measured
+
+- Whether real HTTPS traffic accumulates flows — undici/fetch keep-alive and registry/CDN close behaviour decide it, and I only tested synthetic peers.
+- Whether a large `npm install`/`pip install` can hit the cap. This now matters more: a parallel change (visible in `backend/CLAUDE.md`/`builder`) runs build-time installs under the same NSTUN policy. Untested, and a plausible &gt;1024-connection workload.
+- UDP and ICMP flow maps — separate caps with their own `Maximum number of ... flows` messages, not exercised.
+- IPv6 scan cost: no v6 egress route on this host, and the policy carried only 2 v6 rules.
+- Host was 4 CPUs (not 2), idle throughout; the probe is one connect at a time, so nothing here is CPU-bound.</result>
+<usage><subagent_tokens>187081</subagent_tokens><tool_uses>83</tool_uses><duration_ms>2678816</duration_ms></usage>
+</task-notification>
