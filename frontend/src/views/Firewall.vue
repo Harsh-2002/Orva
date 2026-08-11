@@ -8,12 +8,7 @@
             Egress
           </h1>
           <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-            Decide what your functions are allowed to talk to. Each switch
-            below blocks one destination; turn one on and your functions
-            can no longer reach it; turn it off and they can. Blocks compile
-            into a sandbox egress policy that nsjail loads per sandbox —
-            nothing on the host is reconfigured. DNS settings below control
-            how your functions look hostnames up.
+            Control outbound destinations and DNS for function sandboxes.
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -29,7 +24,7 @@
             size="sm"
             @click="showCreate = true"
           >
-            <Plus class="w-4 h-4" /> Block something
+            <Plus class="w-4 h-4" /> Add block
           </Button>
         </div>
       </div>
@@ -52,7 +47,7 @@
           <!-- The daemon's own words, never paraphrased. -->
           <p
             v-if="status.last_error"
-            class="font-mono text-[11px] leading-snug break-words opacity-90"
+            class="font-mono text-xs leading-snug break-words opacity-90"
           >
             {{ status.last_error }}
           </p>
@@ -71,47 +66,52 @@
         </span>
       </div>
 
-      <!-- What is actually loaded into the sandboxes right now. -->
-      <div class="policy-meta">
-        <span class="policy-chip">
-          <span class="policy-chip-k">Backend</span>
-          <span class="policy-chip-v">{{ status.backend || 'nstun' }}</span>
-        </span>
-        <span class="policy-chip">
-          <span class="policy-chip-k">Generation</span>
-          <span class="policy-chip-v">{{ status.policy_generation || 'none' }}</span>
-        </span>
-        <span class="policy-chip">
-          <span class="policy-chip-k">Compiled rules</span>
-          <span class="policy-chip-v">{{ ruleCountsText }}</span>
-        </span>
-        <!-- A newer generation is published, but the warm-worker recycle is
+      <!-- Detailed policy state stays available without competing with status. -->
+      <details class="group">
+        <summary class="cursor-pointer text-xs text-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          Policy details
+        </summary>
+        <div class="policy-meta mt-2">
+          <span class="policy-chip">
+            <span class="policy-chip-k">Backend</span>
+            <span class="policy-chip-v">{{ status.backend || 'nstun' }}</span>
+          </span>
+          <span class="policy-chip">
+            <span class="policy-chip-k">Generation</span>
+            <span class="policy-chip-v">{{ status.policy_generation || 'none' }}</span>
+          </span>
+          <span class="policy-chip">
+            <span class="policy-chip-k">Compiled rules</span>
+            <span class="policy-chip-v">{{ ruleCountsText }}</span>
+          </span>
+          <!-- A newer generation is published, but the warm-worker recycle is
              rate-limited to once a minute, so running egress sandboxes are
              still applying the previous one. Without this chip the page would
              show the new generation as in force while the old rules are what
              actually decide a connection. Transient by construction. -->
-        <span
-          v-if="status.pending_recycle"
-          class="policy-chip policy-chip-pending"
-        >
-          <span class="policy-chip-k">Rollout</span>
-          <span class="policy-chip-v">warm workers still on the previous generation</span>
-        </span>
-        <span
-          v-if="controlPlaneText"
-          class="policy-chip"
-        >
-          <span class="policy-chip-k">SDK carve-out</span>
-          <span class="policy-chip-v">{{ controlPlaneText }}</span>
-        </span>
-        <span
-          v-if="appliedAt"
-          class="policy-chip"
-        >
-          <span class="policy-chip-k">Applied</span>
-          <span class="policy-chip-v">{{ appliedAt }}</span>
-        </span>
-      </div>
+          <span
+            v-if="status.pending_recycle"
+            class="policy-chip policy-chip-pending"
+          >
+            <span class="policy-chip-k">Rollout</span>
+            <span class="policy-chip-v">warm workers still on the previous generation</span>
+          </span>
+          <span
+            v-if="controlPlaneText"
+            class="policy-chip"
+          >
+            <span class="policy-chip-k">SDK carve-out</span>
+            <span class="policy-chip-v">{{ controlPlaneText }}</span>
+          </span>
+          <span
+            v-if="appliedAt"
+            class="policy-chip"
+          >
+            <span class="policy-chip-k">Applied</span>
+            <span class="policy-chip-v">{{ appliedAt }}</span>
+          </span>
+        </div>
+      </details>
     </header>
 
     <!-- DNS — resolvers + host overrides for sandboxed functions. -->
@@ -140,6 +140,7 @@
                 <button
                   class="dns-chip-x"
                   title="Remove"
+                  :aria-label="`Remove resolver ${s}`"
                   @click="removeServer(idx)"
                 >
                   ×
@@ -164,6 +165,7 @@
           <div class="dns-form">
             <input
               v-model="dnsAddInput"
+              aria-label="Resolver address"
               placeholder="1.1.1.1"
               class="dns-input"
               @keydown.enter="addServer"
@@ -178,6 +180,7 @@
             </Button>
             <input
               v-model="dns.search"
+              aria-label="DNS search domain"
               placeholder="search domain"
               class="dns-input narrow"
             >
@@ -205,6 +208,7 @@
               <button
                 class="dns-chip-x"
                 title="Remove"
+                :aria-label="`Remove host override ${rec.host}`"
                 @click="removeRecord(idx)"
               >
                 ×
@@ -220,6 +224,7 @@
           <div class="dns-form">
             <input
               v-model="recordHostInput"
+              aria-label="Override hostname"
               placeholder="api.internal"
               class="dns-input host"
               @keydown.enter="addRecord"
@@ -227,6 +232,7 @@
             <span class="text-foreground-muted text-xs">→</span>
             <input
               v-model="recordIPInput"
+              aria-label="Override IP address"
               placeholder="10.0.5.10"
               class="dns-input"
               @keydown.enter="addRecord"
@@ -245,13 +251,11 @@
         <!-- Save bar -->
         <div class="dns-savebar">
           <span class="dns-hint">
-            Records win over upstream DNS. Anything in the override list bypasses
-            resolution entirely. Existing warm workers keep their previous files;
-            toggle the function's network off and on, or wait for idle TTL, to apply.
+            Overrides bypass upstream DNS. Existing warm workers update after recycle.
           </span>
           <button
             v-if="dns.servers.length || dns.search || dns.records.length"
-            class="text-[11px] text-foreground-muted hover:text-white px-2 py-1 transition-colors"
+            class="text-xs text-foreground-muted hover:text-white px-2 py-1 transition-colors"
             @click="resetDNS"
           >
             Reset
@@ -291,7 +295,7 @@
               v-for="u in unenforcedNotices"
               :key="u.id"
             >
-              <code>{{ u.value }}</code> — {{ u.reason }}
+              <code>{{ u.value }}</code>: {{ u.reason }}
             </li>
           </ul>
         </div>
@@ -322,8 +326,8 @@
         </p>
         <p class="text-xs text-foreground-muted mt-1 max-w-sm">
           {{ filter === 'yours'
-            ? 'Block a specific IP, CIDR, or hostname to keep your functions out of internal infrastructure they shouldn\'t reach.'
-            : 'Try a different filter, or add a custom block above.' }}
+            ? 'Add an IP, network, or hostname.'
+            : 'Try another filter.' }}
         </p>
         <Button
           v-if="filter === 'yours'"
@@ -332,7 +336,7 @@
           variant="secondary"
           @click="showCreate = true"
         >
-          <Plus class="w-3.5 h-3.5" /> Block something
+          <Plus class="w-3.5 h-3.5" /> Add block
         </Button>
       </div>
 
@@ -357,16 +361,13 @@
     <!-- Add-rule modal -->
     <Modal
       v-model="showCreate"
-      title="Block something"
+      title="Add block"
       :icon="ShieldAlert"
       size="md"
     >
       <div class="space-y-4">
         <p class="text-xs text-foreground-muted leading-snug">
-          Pick what you're blocking: a single IP, a network range, or a hostname.
-          Once added, your functions can no longer reach it. Wildcard patterns
-          like *.example.com are not supported — the policy matches addresses,
-          not names.
+          Block an IP, network, or hostname. Wildcards are not supported.
         </p>
         <div>
           <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">
@@ -389,7 +390,7 @@
               {{ opt.label }}
             </button>
           </div>
-          <p class="text-[10.5px] text-foreground-muted mt-1.5 leading-snug">
+          <p class="text-xs text-foreground-muted mt-1.5 leading-snug">
             {{ typeHint }}
           </p>
         </div>
@@ -400,7 +401,7 @@
         />
         <p
           v-if="wildcardAttempt"
-          class="text-[11px] text-danger-fg leading-snug"
+          class="text-xs text-danger-fg leading-snug"
         >
           {{ WILDCARD_REASON }}
         </p>
@@ -409,9 +410,8 @@
           label="Why? (optional)"
           placeholder="e.g. our staging Postgres"
         />
-        <p class="text-[11px] text-foreground-muted leading-snug">
-          Takes effect within seconds. Warm functions are recycled so the
-          new block applies on the very next call.
+        <p class="text-xs text-foreground-muted leading-snug">
+          Applies within seconds and recycles warm functions.
         </p>
       </div>
       <template #footer>
@@ -974,7 +974,7 @@ const RuleCard = defineComponent({
     // (that is how the operator retires a stored wildcard).
     const toggleBlocked = computed(() => state.value === 'unenforced' && !p.rule.enabled)
     const toggleTitle = computed(() => {
-      if (toggleBlocked.value) return 'Cannot be enforced — see the reason on this card'
+      if (toggleBlocked.value) return 'Cannot be enforced. See the reason on this card.'
       return p.rule.enabled ? 'Click to allow' : 'Click to block'
     })
 

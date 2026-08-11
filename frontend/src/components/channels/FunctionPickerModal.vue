@@ -16,14 +16,13 @@
             Pick functions
           </div>
           <div class="text-xs text-foreground-muted mt-0.5 max-w-prose leading-relaxed">
-            Each selected function becomes one MCP tool in this
-            channel. Names with dashes are converted to snake_case
-            (e.g. <code class="text-foreground">stripe-charge</code> → <code class="text-foreground">stripe_charge</code>).
+            Each selection becomes an MCP tool. Dashes become underscores.
           </div>
         </div>
         <button
           class="text-foreground-muted hover:text-white transition-colors"
           title="Dismiss"
+          aria-label="Close function picker"
           @click="$emit('close')"
         >
           <X class="w-4 h-4" />
@@ -35,6 +34,7 @@
         <Search class="w-4 h-4 text-foreground-muted shrink-0" />
         <input
           v-model="search"
+          aria-label="Search functions"
           type="text"
           placeholder="Filter by name, description, or runtime"
           class="flex-1 bg-transparent text-sm text-foreground placeholder-foreground-muted focus:outline-none"

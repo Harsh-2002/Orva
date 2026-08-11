@@ -26,7 +26,7 @@
     :aria-label="title"
     :class="[
       'inline-flex items-center justify-center h-7 w-7 rounded-md transition-colors touch-expand-iconbtn',
-      'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background',
+      'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
       'disabled:opacity-40 disabled:cursor-not-allowed',
       variantClasses,
     ]"
@@ -58,9 +58,9 @@ const props = defineProps({
 const variantClasses = computed(() => {
   switch (props.variant) {
     case 'danger':
-      return 'text-foreground-muted hover:text-danger-fg hover:bg-surface-hover focus:ring-red-500'
+      return 'text-foreground-muted hover:text-danger-fg hover:bg-surface-hover focus-visible:ring-danger'
     case 'success':
-      return 'text-foreground-muted hover:text-success hover:bg-surface-hover focus:ring-green-500'
+      return 'text-foreground-muted hover:text-success hover:bg-surface-hover focus-visible:ring-success'
     // Brand-accent variant: violet instead of green for "this just
     // worked" affordances inside the dashboard chrome (Copy URL, Copy
     // ID, etc.). Green is reserved for genuine semantic-success states
@@ -69,9 +69,9 @@ const variantClasses = computed(() => {
     // as a six-colour zoo. Solid primary-violet text + matching ring
     // on focus, surface-hover background tint to anchor the moment.
     case 'primary':
-      return 'text-primary hover:text-primary-hover bg-primary/10 hover:bg-primary/15 focus:ring-primary'
+      return 'text-primary hover:text-primary-hover bg-primary/10 hover:bg-primary/15 focus-visible:ring-primary'
     default:
-      return 'text-foreground-muted hover:text-foreground hover:bg-surface-hover focus:ring-primary'
+      return 'text-foreground-muted hover:text-foreground hover:bg-surface-hover focus-visible:ring-primary'
   }
 })
 </script>

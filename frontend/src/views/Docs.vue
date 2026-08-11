@@ -1,19 +1,7 @@
 <template>
   <div class="space-y-12 pb-16">
-    <!-- ── Page hero ───────────────────────────────────────────────
-         Richer than a bare <h1>: signals "this is the canonical
-         reference", offers a ToC, and ships a one-click "Copy as
-         Markdown" so operators can paste the whole thing into AI
-         tools or share with teammates. The card uses a subtle
-         primary-tinted gradient + dotted texture so it has visual
-         weight without screaming, and stays inside the dashboard's
-         dark/mono aesthetic. -->
+    <!-- Page heading, section shortcuts, and a full-reference copy action. -->
     <header class="docs-hero">
-      <div
-        class="docs-hero-bg"
-        aria-hidden="true"
-      />
-
       <div class="docs-hero-content">
         <div class="docs-hero-row">
           <div class="docs-hero-text">
@@ -21,9 +9,7 @@
               Documentation
             </h1>
             <p class="docs-hero-sub">
-              Everything you need to write, deploy, and operate
-              functions on Orva. Handler contract, deploy + invoke,
-              SDK, MCP, tracing, error taxonomy.
+              Build, deploy, and operate functions on Orva.
             </p>
           </div>
 
@@ -788,14 +774,7 @@
             System prompt for AI assistants
           </h2>
           <p class="doc-lede">
-            Paste the prompt below into ChatGPT, Claude, Gemini, Cursor,
-            Copilot, or any other AI tool to teach it Orva's full surface
-            Handler contract, runtimes, sandbox limits, the in-sandbox
-            <code class="doc-chip">orva</code>
-            SDK (kv / invoke / jobs), cron triggers, system-event
-            webhooks, auth modes, and production patterns. The model
-            then turns "describe what I want" into a pasteable handler
-            on the first try.
+            Copy Orva's full reference into another AI assistant.
           </p>
         </div>
       </div>
@@ -844,7 +823,7 @@
           class="w-3.5 h-3.5 transition-transform"
           :class="{ 'rotate-180': promptExpanded }"
         />
-        {{ promptExpanded ? 'Collapse system prompt' : 'Expand full system prompt (~400 lines)' }}
+        {{ promptExpanded ? 'Collapse system prompt' : 'Show full system prompt' }}
       </button>
     </section>
 
@@ -1573,11 +1552,11 @@ const runtimes = [
 ]
 
 const configRows = [
-  { field: 'env_vars',           purpose: 'Plain config',    body: 'Plaintext config stored on the function record. Use for feature flags and non-secret settings.', icon: Variable, iconClass: 'text-violet-300' },
-  { field: '/secrets',           purpose: 'Encrypted',       body: 'AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time.',             icon: KeyRound, iconClass: 'text-emerald-300' },
-  { field: 'network_mode',       purpose: 'Egress control',  body: 'none = isolated loopback. egress = outbound HTTPS allowed, filtered by the sandbox egress policy.', icon: Globe,    iconClass: 'text-sky-300' },
-  { field: 'auth_mode',          purpose: 'Invoke gate',     body: 'none = public. platform_key = require Orva API key. signed = require HMAC.',                       icon: Lock,     iconClass: 'text-violet-300' },
-  { field: 'rate_limit_per_min', purpose: 'Per-IP throttle', body: 'Optional cap for public or webhook-facing functions. Exceeding it returns 429.',                  icon: Gauge,    iconClass: 'text-amber-300' },
+  { field: 'env_vars',           purpose: 'Plain config',    body: 'Plaintext config stored on the function record. Use for feature flags and non-secret settings.', icon: Variable, iconClass: 'text-primary' },
+  { field: '/secrets',           purpose: 'Encrypted',       body: 'AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time.',             icon: KeyRound, iconClass: 'text-primary' },
+  { field: 'network_mode',       purpose: 'Egress control',  body: 'none = isolated loopback. egress = outbound HTTPS allowed, filtered by the sandbox egress policy.', icon: Globe,    iconClass: 'text-primary' },
+  { field: 'auth_mode',          purpose: 'Invoke gate',     body: 'none = public. platform_key = require Orva API key. signed = require HMAC.',                       icon: Lock,     iconClass: 'text-primary' },
+  { field: 'rate_limit_per_min', purpose: 'Per-IP throttle', body: 'Optional cap for public or webhook-facing functions. Exceeding it returns 429.',                  icon: Gauge,    iconClass: 'text-primary' },
 ]
 
 const curlCreate = computed(() => `curl -X POST ${origin.value}/api/v1/functions \\
@@ -2376,65 +2355,16 @@ const Callout = defineComponent({
    + a stippled grid behind the content gives it visual weight
    without breaking the dark/mono dashboard aesthetic. */
 .docs-hero {
-  position: relative;
-  border: 1px solid var(--color-border);
-  border-radius: 0.85rem;
-  overflow: hidden;
-  background:
-    radial-gradient(
-      ellipse 60% 80% at 0% 0%,
-      rgba(85, 63, 131, 0.12) 0%,
-      rgba(85, 63, 131, 0) 60%
-    ),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.012) 0%, transparent 100%),
-    var(--color-background);
-}
-.docs-hero-bg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  /* Faint dot grid — just dense enough to register as texture, never
-     so loud it competes with the content. */
-  background-image: radial-gradient(
-    rgba(255, 255, 255, 0.025) 1px,
-    transparent 1px
-  );
-  background-size: 14px 14px;
-  background-position: 0 0;
-  mask-image: linear-gradient(180deg, black 0%, transparent 100%);
-  -webkit-mask-image: linear-gradient(180deg, black 0%, transparent 100%);
+  border-bottom: 1px solid var(--color-border);
 }
 .docs-hero-content {
-  position: relative;
-  padding: 1.6rem 1.5rem 1.2rem;
+  padding: 0 0 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 @media (min-width: 640px) {
-  .docs-hero-content { padding: 2.2rem 2.2rem 1.6rem; gap: 1.4rem; }
-}
-
-.docs-hero-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-}
-.docs-hero-eyebrow-mark {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--color-primary);
-  box-shadow: 0 0 12px rgba(85, 63, 131, 0.6);
-}
-.docs-hero-eyebrow-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--color-foreground-muted);
+  .docs-hero-content { padding-bottom: 1.5rem; gap: 1.25rem; }
 }
 
 .docs-hero-row {
@@ -2455,19 +2385,16 @@ const Callout = defineComponent({
 .docs-hero-title {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 30px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.05;
   color: var(--color-foreground);
 }
-@media (min-width: 640px) {
-  .docs-hero-title { font-size: 38px; }
-}
 .docs-hero-sub {
   margin: 0.6rem 0 0;
   font-family: var(--font-sans);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.55;
   color: var(--color-foreground-muted);
 }
@@ -2916,19 +2843,12 @@ const Callout = defineComponent({
    bottom; expanding removes the cap. Copy button on the prompt
    keeps working either way because it reads the full source.
 
-   Why max-height and not the modern grid-template-rows: 0fr → 1fr
-   idiom: that pattern animates between zero and the natural row
-   height. Here the collapsed state isn't zero, it's 9.5rem (so
-   ~5 lines of preview show through the fade). max-height is the
-   correct primitive for "clamped → expanded" transitions. The
-   one-shot expand on a single user click doesn't generate enough
-   layout-thrash work to be a perceptible issue on real devices. */
+   The prompt opens immediately to avoid animating a large layout. */
 .prompt-collapse {
   position: relative;
   max-height: 9.5rem; /* ~5 lines + the codeblock's bar */
   overflow: hidden;
   border-radius: 0.6rem;
-  transition: max-height 280ms ease;
 }
 .prompt-collapse.expanded {
   max-height: 7000px; /* generous; the codeblock rules its own height */

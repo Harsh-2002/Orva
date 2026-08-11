@@ -466,6 +466,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/ai/chat", aiHandler.ChatStream)
 	r.mux.HandleFunc("GET /api/v1/ai/conversations", aiHandler.ListConversations)
 	r.mux.HandleFunc("POST /api/v1/ai/conversations", aiHandler.CreateConversation)
+	r.mux.HandleFunc("DELETE /api/v1/ai/conversations", aiHandler.DeleteAllConversations)
 	r.mux.HandleFunc("GET /api/v1/ai/conversations/{id}", aiHandler.GetConversation)
 	r.mux.HandleFunc("PATCH /api/v1/ai/conversations/{id}", aiHandler.PatchConversation)
 	r.mux.HandleFunc("DELETE /api/v1/ai/conversations/{id}", aiHandler.DeleteConversation)

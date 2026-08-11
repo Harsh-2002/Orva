@@ -12,11 +12,8 @@
       <h1 class="text-3xl sm:text-4xl font-semibold text-foreground mb-4 leading-tight">
         Page not found.
       </h1>
-      <p class="text-sm text-foreground-muted mb-2">
-        Nothing is mapped to this URL on this Orva instance.
-      </p>
-      <p class="text-sm text-foreground-muted mb-8">
-        You tried:
+      <p class="text-sm text-foreground-muted mb-4">
+        This Orva instance has no page at:
       </p>
 
       <div class="bg-surface border border-border rounded-md px-3 py-2 mb-8 overflow-x-auto">
@@ -25,14 +22,14 @@
 
       <div class="flex flex-wrap gap-3">
         <button
-          class="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-white text-black text-sm font-medium hover:bg-white/90 transition-colors"
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-white text-black text-sm font-medium hover:bg-white/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           @click="goHome"
         >
           <ArrowLeft class="w-4 h-4" />
           Go to Functions
         </button>
         <button
-          class="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm text-foreground hover:bg-surface-hover transition-colors"
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm text-foreground hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           @click="goDocs"
         >
           <BookOpen class="w-4 h-4" />

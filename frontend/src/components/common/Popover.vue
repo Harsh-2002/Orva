@@ -4,8 +4,9 @@
     trigger lives in. The chat composer sits in a bottom footer; a plain
     absolutely-positioned dropdown would be clipped, so on desktop the panel is
     Teleported to <body> and positioned with `position: fixed` computed from the
-    trigger's rect (opening UPWARD, since the composer is page-bottom). On mobile
-    it becomes a Drawer bottom-sheet instead — thumb-reachable, never clipped.
+    trigger's rect. It opens toward the side with usable viewport space, which
+    sends the chat composer upward and Settings controls downward. On mobile it
+    becomes a Drawer bottom-sheet instead — thumb-reachable, never clipped.
 
     Usage:
       <Popover title="Reasoning">
@@ -15,7 +16,7 @@
   -->
   <span
     ref="triggerEl"
-    class="inline-flex"
+    :class="wide ? 'flex w-full' : 'inline-flex'"
   >
     <slot
       name="trigger"
@@ -60,6 +61,7 @@ import Drawer from './Drawer.vue'
 
 defineProps({
   title: { type: String, default: '' },
+  wide: { type: Boolean, default: false },
 })
 
 const isOpen = ref(false)
@@ -76,18 +78,30 @@ function place() {
   const t = triggerEl.value?.firstElementChild || triggerEl.value
   if (!t) return
   const r = t.getBoundingClientRect()
-  // Open upward from the trigger; clamp horizontally into the viewport.
-  const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - 200))
+  const edge = 8
+  const gap = 6
+  const panelWidth = panelEl.value?.offsetWidth || 200
+  const panelHeight = panelEl.value?.offsetHeight || 0
+  const spaceBelow = window.innerHeight - r.bottom - gap - edge
+  const spaceAbove = r.top - gap - edge
+  // Settings triggers usually have room below; composer triggers sit at the
+  // viewport bottom. Choose from real space instead of assuming one context.
+  const opensDown = spaceBelow >= panelHeight || spaceBelow >= spaceAbove
+  const left = Math.max(edge, Math.min(r.left, window.innerWidth - edge - panelWidth))
+  const top = opensDown
+    ? Math.min(r.bottom + gap, window.innerHeight - edge - panelHeight)
+    : Math.max(edge, r.top - gap - panelHeight)
   panelStyle.value = {
     left: `${left}px`,
-    bottom: `${window.innerHeight - r.top + 6}px`,
+    top: `${top}px`,
+    bottom: 'auto',
   }
   // Re-clamp once the panel has a measured width.
   nextTick(() => {
     const p = panelEl.value
     if (!p) return
     const w = p.offsetWidth
-    const clampedLeft = Math.max(8, Math.min(r.left, window.innerWidth - 8 - w))
+    const clampedLeft = Math.max(edge, Math.min(r.left, window.innerWidth - edge - w))
     panelStyle.value = { ...panelStyle.value, left: `${clampedLeft}px` }
   })
 }

@@ -1,11 +1,11 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-8">
     <div>
       <h1 class="text-xl font-semibold text-white tracking-tight">
         Settings
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-        Operator-level controls for the running Orva instance.
+        Instance, access, storage, backups, and AI.
       </p>
     </div>
 
@@ -13,12 +13,13 @@
          troubleshooting: "what release am I actually running?"
          Sourced from /api/v1/system/health (one-shot at page mount;
          these values don't change while the binary is running). -->
-    <div class="bg-background border border-border rounded-lg p-5 space-y-3">
-      <div class="text-sm font-semibold text-white flex items-center gap-2">
+    <details class="group border-b border-border pb-6">
+      <summary class="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
         <Info class="w-4 h-4 text-foreground-muted" />
         Build info
-      </div>
-      <dl class="grid grid-cols-[max-content,1fr] gap-x-6 gap-y-2 text-xs">
+        <span class="ml-auto text-xs font-normal text-foreground-muted group-open:hidden">{{ buildInfo?.version || EMPTY }}</span>
+      </summary>
+      <dl class="mt-4 grid grid-cols-[max-content,1fr] gap-x-6 gap-y-2 text-xs">
         <dt class="text-foreground-muted">
           Version
         </dt>
@@ -49,55 +50,49 @@
             v-if="buildInfo?.image"
             class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors shrink-0"
             title="Copy image reference"
+            aria-label="Copy image reference"
             @click="copyImage"
           >
             <Copy class="w-3.5 h-3.5" />
           </button>
           <span
             v-if="imageCopied"
-            class="text-[10px] text-primary-light shrink-0"
+            class="text-xs text-primary-hover shrink-0"
           >copied</span>
         </dd>
       </dl>
-    </div>
+    </details>
 
     <!-- AI assistant card. Centralized configuration for the in-product AI
          chat: BYO providers + encrypted keys + base URL, and the assistant's
-         defaults (approval policy, tool steps). The active provider/model/
-         reasoning pickers stay in the chat composer (per-conversation controls).
+         defaults (approval policy, tool steps). Provider/model selection is
+         shared with Chat; reasoning remains a conversation-time control.
          The id anchors the chat's "configure" deep-link (#ai). -->
-    <div
+    <section
       id="ai"
-      class="bg-background border border-border rounded-lg p-5 space-y-4 scroll-mt-6"
+      class="scroll-mt-6 space-y-4 border-b border-border pb-8"
     >
       <div>
-        <div class="text-sm font-semibold text-white flex items-center gap-2">
+        <h2 class="text-base font-semibold text-white flex items-center gap-2">
           <MessagesSquare class="w-4 h-4 text-foreground-muted" />
           AI assistant
-        </div>
-        <p class="text-xs text-foreground-muted mt-1 max-w-prose leading-body">
-          Configure the providers, keys, and defaults for the in-product chat assistant.
-        </p>
+        </h2>
       </div>
       <AISettingsPanel />
-    </div>
+    </section>
 
     <!-- Storage card. Shows orva.db / functions tree / WAL sizes plus
          a "Compact" affordance that runs SQLite VACUUM via the
          admin-gated POST /api/v1/system/vacuum endpoint. -->
-    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+    <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <div class="text-sm font-semibold text-white flex items-center gap-2">
+          <h2 class="text-base font-semibold text-white flex items-center gap-2">
             <HardDrive class="w-4 h-4 text-foreground-muted" />
             Storage
-          </div>
+          </h2>
           <p class="text-xs text-foreground-muted mt-1 max-w-prose">
-            On-disk breakdown of the data directory.
-            <code class="text-[11px]">VACUUM</code> rewrites
-            <code class="text-[11px]">orva.db</code>, drops the freelist, and
-            shrinks the file. The operation holds an exclusive lock; writes
-            block briefly while it runs.
+            Data directory usage and database maintenance.
           </p>
         </div>
         <Button
@@ -121,9 +116,9 @@
 
       <div
         v-if="storageError"
-        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+        class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
       >
-        <div class="font-semibold text-red-100 mb-1">
+        <div class="font-semibold mb-1">
           Failed to load storage stats
         </div>
         <div class="font-mono break-all">
@@ -139,19 +134,19 @@
         <div class="h-2 w-full rounded-full overflow-hidden bg-border/60 flex">
           <div
             v-if="dbPct > 0"
-            class="bg-sky-500 h-full"
+            class="bg-info h-full"
             :style="{ width: dbPct + '%' }"
             :title="`orva.db: ${formatBytes(storage.db_bytes)}`"
           />
           <div
             v-if="walPct > 0"
-            class="bg-amber-500 h-full"
+            class="bg-warning h-full"
             :style="{ width: walPct + '%' }"
             :title="`WAL: ${formatBytes(storage.wal_bytes)}`"
           />
           <div
             v-if="fnPct > 0"
-            class="bg-emerald-500 h-full"
+            class="bg-success h-full"
             :style="{ width: fnPct + '%' }"
             :title="`functions/: ${formatBytes(storage.functions_bytes)}`"
           />
@@ -161,14 +156,14 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
           <div class="flex items-center justify-between">
             <span class="flex items-center gap-2 text-foreground-muted">
-              <span class="w-2 h-2 rounded-sm bg-sky-500" />
+              <span class="w-2 h-2 rounded-sm bg-info" />
               orva.db
             </span>
             <span class="font-mono text-white">{{ formatBytes(storage.db_bytes) }}</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="flex items-center gap-2 text-foreground-muted">
-              <span class="w-2 h-2 rounded-sm bg-emerald-500" />
+              <span class="w-2 h-2 rounded-sm bg-success" />
               functions/
             </span>
             <span class="font-mono text-white">{{ formatBytes(storage.functions_bytes) }}</span>
@@ -178,7 +173,7 @@
             class="flex items-center justify-between"
           >
             <span class="flex items-center gap-2 text-foreground-muted">
-              <span class="w-2 h-2 rounded-sm bg-amber-500" />
+              <span class="w-2 h-2 rounded-sm bg-warning" />
               orva.db-wal
             </span>
             <span class="font-mono text-white">{{ formatBytes(storage.wal_bytes) }}</span>
@@ -192,7 +187,7 @@
         <!-- VACUUM hint — only shown when there's something to reclaim. -->
         <div
           v-if="reclaimableBytes > 0"
-          class="text-[11px] text-foreground-muted pt-1 border-t border-border"
+          class="text-xs text-foreground-muted pt-1 border-t border-border"
         >
           {{ formatBytes(reclaimableBytes) }} reclaimable
           ({{ storage.db_free_pages }} free SQLite pages)
@@ -202,49 +197,53 @@
       <!-- Last-vacuum result. Sticks until next vacuum or page reload. -->
       <div
         v-if="lastVacuum"
-        class="rounded-md border border-emerald-700/40 bg-emerald-950/30 p-3 text-xs text-emerald-200"
+        class="rounded-md border border-success-ring bg-success-tint p-3 text-xs text-success-fg"
       >
-        Compacted in {{ lastVacuum.duration_ms }} ms — freed
+        Compacted in {{ lastVacuum.duration_ms }} ms and freed
         <span class="font-mono">{{ formatBytes(lastVacuum.freed_bytes) }}</span>
         ({{ formatBytes(lastVacuum.before_bytes) }} →
         {{ formatBytes(lastVacuum.after_bytes) }}).
       </div>
       <div
         v-if="vacuumError"
-        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+        class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
       >
-        <div class="font-semibold text-red-100 mb-1">
+        <div class="font-semibold mb-1">
           Compact failed
         </div>
         <div class="font-mono break-all">
           {{ vacuumError }}
         </div>
       </div>
-    </div>
+    </section>
 
     <!-- Account card — change password + logout. -->
-    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+    <section class="space-y-4 border-b border-border pb-8">
       <div>
-        <div class="text-sm font-semibold text-white flex items-center gap-2">
+        <h2 class="text-base font-semibold text-white flex items-center gap-2">
           <KeyRound class="w-4 h-4 text-foreground-muted" />
           Account
-        </div>
+        </h2>
         <p class="text-xs text-foreground-muted mt-1">
           Update your password or end your session.
         </p>
       </div>
 
       <form
-        class="space-y-3 pt-2 border-t border-border"
+        class="space-y-3 pt-2"
         @submit.prevent="handleChangePassword"
       >
-        <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide">
+        <h3 class="text-sm font-medium text-foreground">
           Change password
-        </div>
+        </h3>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div class="flex flex-col gap-1">
-            <label class="text-xs text-foreground-muted">Current password</label>
+            <label
+              for="settings-current-password"
+              class="text-xs text-foreground-muted"
+            >Current password</label>
             <input
+              id="settings-current-password"
               v-model="pwForm.current"
               type="password"
               autocomplete="current-password"
@@ -254,8 +253,12 @@
             >
           </div>
           <div class="flex flex-col gap-1">
-            <label class="text-xs text-foreground-muted">New password</label>
+            <label
+              for="settings-new-password"
+              class="text-xs text-foreground-muted"
+            >New password</label>
             <input
+              id="settings-new-password"
               v-model="pwForm.next"
               type="password"
               autocomplete="new-password"
@@ -265,8 +268,12 @@
             >
           </div>
           <div class="flex flex-col gap-1">
-            <label class="text-xs text-foreground-muted">Confirm new password</label>
+            <label
+              for="settings-confirm-password"
+              class="text-xs text-foreground-muted"
+            >Confirm new password</label>
             <input
+              id="settings-confirm-password"
               v-model="pwForm.confirm"
               type="password"
               autocomplete="new-password"
@@ -280,13 +287,13 @@
         <div
           v-if="pwError"
           id="pw-error"
-          class="rounded-md border border-red-700/40 bg-red-950/30 p-2.5 text-xs text-red-200"
+          class="rounded-md border border-danger-ring bg-danger-tint p-2.5 text-xs text-danger-fg"
         >
           {{ pwError }}
         </div>
         <div
           v-if="pwSuccess"
-          class="rounded-md border border-emerald-700/40 bg-emerald-950/30 p-2.5 text-xs text-emerald-200"
+          class="rounded-md border border-success-ring bg-success-tint p-2.5 text-xs text-success-fg"
         >
           Password updated successfully.
         </div>
@@ -311,29 +318,27 @@
           Log out
         </Button>
       </div>
-    </div>
+    </section>
 
     <!-- Connected applications card — OAuth grants from claude.ai
          web, ChatGPT web, etc. Each row maps to one active
          oauth_access_tokens row. Revoke flips revoked_at; the next
          /mcp call from that connector returns 401. -->
-    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+    <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <div class="text-sm font-semibold text-white flex items-center gap-2">
+          <h2 class="text-base font-semibold text-white flex items-center gap-2">
             <Plug class="w-4 h-4 text-foreground-muted" />
             Connected applications
-          </div>
+          </h2>
           <p class="text-xs text-foreground-muted mt-1 max-w-prose">
-            Apps you've granted access to your Orva via OAuth.
-            Connect new ones from the
+            OAuth clients with access to this instance. Add connectors from
             <RouterLink
               to="/docs#mcp"
               class="text-primary hover:underline"
             >
               Docs
             </RouterLink>
-            page.
           </p>
         </div>
         <span
@@ -346,9 +351,9 @@
 
       <div
         v-if="connectedAppsError"
-        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+        class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
       >
-        <div class="font-semibold text-red-100 mb-1">
+        <div class="font-semibold mb-1">
           Failed to load connected apps
         </div>
         <div class="font-mono break-all">
@@ -365,17 +370,10 @@
 
       <div
         v-else-if="connectedApps.length === 0"
-        class="rounded-md border border-dashed border-border p-6 text-center"
+        class="py-3"
       >
-        <Plug class="w-8 h-8 text-foreground-muted mx-auto mb-2 opacity-40" />
         <p class="text-xs text-foreground-muted">
-          No connected applications yet.
-        </p>
-        <p class="text-[11px] text-foreground-muted mt-1">
-          Add Orva as a custom connector in
-          <span class="text-foreground-muted">claude.ai</span> or
-          <span class="text-foreground-muted">ChatGPT</span> and it'll
-          appear here.
+          No connected applications.
         </p>
       </div>
 
@@ -397,7 +395,7 @@
             <div class="text-sm font-medium text-white truncate">
               {{ app.client_name }}
             </div>
-            <div class="text-[11px] text-foreground-muted mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+            <div class="text-xs text-foreground-muted mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
               <span>Authorized {{ formatRelative(app.issued_at) }}</span>
               <span v-if="app.last_used_at">
                 · Last used {{ formatRelative(app.last_used_at) }}
@@ -414,7 +412,7 @@
               <span
                 v-for="s in scopeList(app.scope)"
                 :key="s"
-                class="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                class="text-xs px-1.5 py-0.5 rounded font-mono"
                 :class="scopeBadgeClass(s)"
               >
                 {{ s }}
@@ -423,7 +421,7 @@
           </div>
           <button
             type="button"
-            class="text-xs text-foreground-muted hover:text-red-400 transition-colors flex items-center gap-1 shrink-0 self-center"
+            class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 shrink-0 self-center"
             :disabled="revokingId === app.id"
             @click="revokeApp(app)"
           >
@@ -432,21 +430,20 @@
           </button>
         </li>
       </ul>
-    </div>
+    </section>
 
     <!-- Active sessions card — operator's own browser logins. The
          calling session is flagged `current` and shows no Revoke
          button (use the Logout button in the Account card instead). -->
-    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+    <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <div class="text-sm font-semibold text-white flex items-center gap-2">
+          <h2 class="text-base font-semibold text-white flex items-center gap-2">
             <Monitor class="w-4 h-4 text-foreground-muted" />
             Active sessions
-          </div>
+          </h2>
           <p class="text-xs text-foreground-muted mt-1 max-w-prose">
-            Browsers signed in to this Orva. Revoke a session and that
-            browser will need to log in again on its next request.
+            Browsers signed in to this instance.
           </p>
         </div>
         <span
@@ -459,9 +456,9 @@
 
       <div
         v-if="sessionsError"
-        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+        class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
       >
-        <div class="font-semibold text-red-100 mb-1">
+        <div class="font-semibold mb-1">
           Failed to load sessions
         </div>
         <div class="font-mono break-all">
@@ -480,7 +477,7 @@
         >
           <Monitor
             class="w-5 h-5 mt-0.5 shrink-0"
-            :class="s.current ? 'text-emerald-400' : 'text-foreground-muted'"
+            :class="s.current ? 'text-success-fg' : 'text-foreground-muted'"
           />
           <div class="flex-1 min-w-0">
             <div class="text-sm font-medium text-white flex items-center gap-2 flex-wrap">
@@ -491,12 +488,12 @@
               >{{ maskPrefix(s.prefix) }}</span>
               <span
                 v-if="s.current"
-                class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-medium"
+                class="text-xs px-1.5 py-0.5 rounded bg-success-tint text-success-fg font-medium"
               >
                 current
               </span>
             </div>
-            <div class="text-[11px] text-foreground-muted mt-0.5">
+            <div class="text-xs text-foreground-muted mt-0.5">
               Signed in {{ formatRelative(s.created_at) }}
               · expires {{ formatRelative(s.expires_at) }}
             </div>
@@ -504,7 +501,7 @@
           <button
             v-if="!s.current"
             type="button"
-            class="text-xs text-foreground-muted hover:text-red-400 transition-colors flex items-center gap-1 shrink-0 self-center"
+            class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 shrink-0 self-center"
             :disabled="revokingPrefix === s.prefix"
             @click="revokeOtherSession(s)"
           >
@@ -513,29 +510,21 @@
           </button>
         </li>
       </ul>
-    </div>
+    </section>
 
     <!-- Backup / Restore card. -->
-    <div class="bg-background border border-border rounded-lg p-5 space-y-4">
+    <section class="space-y-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <div class="text-sm font-semibold text-white flex items-center gap-2">
+          <h2 class="text-base font-semibold text-white flex items-center gap-2">
             <DatabaseBackup class="w-4 h-4 text-foreground-muted" />
             Backup &amp; Restore
-          </div>
+          </h2>
           <p class="text-xs text-foreground-muted mt-1 max-w-prose">
-            One self-contained snapshot: the SQLite database
-            (<code class="text-[11px]">VACUUM&nbsp;INTO</code> — fully checkpointed),
-            every deployed function version, the secrets master key, and the bootstrap
-            admin key. Carries a <code class="text-[11px]">manifest.json</code> with
-            sha256 of every file so restore can detect tampering or truncation before
-            touching live state. Restore on a fresh host and the install boots back up
-            byte-faithful — secrets decrypt, the admin login still works.
+            Download or restore a complete instance snapshot.
           </p>
-          <p class="text-[11px] text-amber-300/80 mt-2 max-w-prose">
-            Treat the file as sensitive — it contains your secrets master key. Store
-            it like you would a password manager export (encrypted disk, S3 + SSE,
-            etc.).
+          <p class="text-xs text-warning-fg mt-2 max-w-prose">
+            Backups contain secret keys. Store them securely.
           </p>
         </div>
       </div>
@@ -569,9 +558,9 @@
            the operator needs to know exactly what broke. -->
       <div
         v-if="restoreError"
-        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+        class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
       >
-        <div class="font-semibold text-red-100 mb-1">
+        <div class="font-semibold mb-1">
           Restore failed
         </div>
         <div class="font-mono break-all">
@@ -580,9 +569,9 @@
       </div>
       <div
         v-if="restoreOk"
-        class="rounded-md border border-emerald-700/40 bg-emerald-950/30 p-3 text-xs text-emerald-200"
+        class="rounded-md border border-success-ring bg-success-tint p-3 text-xs text-success-fg"
       >
-        Restore complete. The server is restarting to load the new data — reload in
+        Restore complete. The server is restarting to load the new data. Reload in
         a few seconds.
         <button
           class="underline ml-1"
@@ -591,7 +580,7 @@
           Reload now
         </button>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
@@ -848,17 +837,15 @@ const revokeApp = async (app) => {
 // space-separated per RFC 6749 §3.3.
 const scopeList = (s) => (s || '').split(/\s+/).filter(Boolean)
 
-// Tailwind classes per scope. Severity gradient: read=neutral,
-// invoke=blue, write=amber, admin=red. OIDC scopes (openid/email/
-// profile) get the neutral gray — they're informational.
+// Semantic classes per scope. OIDC scopes remain neutral.
 const scopeBadgeClass = (s) => {
   switch (s) {
     case 'admin':
-      return 'bg-red-500/15 text-red-300'
+      return 'bg-danger-tint text-danger-fg'
     case 'write':
-      return 'bg-amber-500/15 text-amber-300'
+      return 'bg-warning-tint text-warning-fg'
     case 'invoke':
-      return 'bg-sky-500/15 text-sky-300'
+      return 'bg-info-tint text-info-fg'
     case 'read':
       return 'bg-foreground-muted/15 text-foreground-muted'
     default:

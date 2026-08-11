@@ -11,12 +11,7 @@
           Channels
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Bundle deployed functions and expose them as MCP tools to a
-          third-party agent. Each channel has its own bearer token that
-          grants invoke-only access to its functions and nothing else
-          on Orva, but the bundled functions themselves remain as
-          powerful as you've configured them, including any in-sandbox
-          SDK calls they make.
+          Expose selected functions as scoped MCP tools.
         </p>
       </div>
       <Button @click="openCreate">
@@ -38,12 +33,13 @@
             Copy this token now
           </h2>
           <div class="text-xs text-foreground-muted mt-0.5">
-            It will not be shown again. Configure it in your agent's MCP client.
+            Store it securely, then add it to your MCP client.
           </div>
         </div>
         <button
           class="text-foreground-muted hover:text-white transition-colors"
           title="Dismiss"
+          aria-label="Dismiss channel token"
           @click="createdToken = ''"
         >
           <X class="w-4 h-4" />
@@ -66,7 +62,7 @@
           {{ createdCopied ? 'Copied' : 'Copy' }}
         </button>
       </div>
-      <div class="text-[11px] text-foreground-muted flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div class="text-xs text-foreground-muted flex flex-wrap items-center gap-x-3 gap-y-1">
         <span>URL <code class="text-foreground bg-surface px-1.5 py-0.5 rounded">{{ mcpURL }}</code></span>
         <span>Header <code class="text-foreground bg-surface px-1.5 py-0.5 rounded">Authorization: Bearer &lt;token&gt;</code></span>
       </div>
@@ -83,16 +79,24 @@
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Name</label>
+          <label
+            for="channel-name"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Name</label>
           <input
+            id="channel-name"
             v-model="newChannel.name"
             placeholder="e.g. support-bot"
             class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
           >
         </div>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Expires in</label>
+          <label
+            for="channel-expiry"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Expires in</label>
           <select
+            id="channel-expiry"
             v-model="newChannel.expiresInDays"
             class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
           >

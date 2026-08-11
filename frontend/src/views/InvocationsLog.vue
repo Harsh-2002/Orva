@@ -3,10 +3,10 @@
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-xl font-semibold text-white tracking-tight">
-          Invocation Logs
+          Invocations
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Every function execution recorded across HTTP, MCP, cron, and job triggers. Click any row to drill into the captured request, response body, latency breakdown, and handler stderr; replay it against a different version when debugging regressions.
+          Function executions, requests, responses, and logs.
         </p>
       </div>
       <Button
@@ -52,6 +52,7 @@
 
       <select
         v-model="filters.fnId"
+        aria-label="Filter by function"
         class="bg-background border border-border rounded-md pl-2.5 pr-2 py-1.5 text-xs text-foreground-muted hover:text-white focus:outline-none focus:border-white max-w-[180px]"
         @change="onFilterChange"
       >
@@ -69,7 +70,7 @@
 
       <button
         v-if="hasActiveFilter"
-        class="text-[11px] text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
+        class="text-xs text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
         @click="clearFilters"
       >
         Clear

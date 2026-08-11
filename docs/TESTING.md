@@ -704,7 +704,8 @@ call sites. They clean up their functions and leave the conversation and
 message rows.
 
 **All 7 AI modules mutate the shared `ai_settings` singleton** (provider, model,
-approval policy, `max_tool_iterations`). `remove_mock_provider()` restores a
+and approval policy). `max_tool_iterations` remains fixed internally at `25`.
+`remove_mock_provider()` restores a
 snapshot on the normal path; a crash between configure and `finally` leaves the
 instance pointed at a dead `http://127.0.0.1:11434/v1` provider. On an instance
 holding a real provider key this also means real money, so use a throwaway.
@@ -1533,7 +1534,7 @@ curl -X POST $B/api/v1/ai/providers -H "X-Orva-API-Key: $K" -H 'Content-Type: ap
        "base_url":"http://host.docker.internal:11500/v1","enabled":true}'
 curl -X PUT $B/api/v1/ai/settings -H "X-Orva-API-Key: $K" -H 'Content-Type: application/json' \
   -d '{"provider":"openai","model":"gpt-4o","thinking_level":"off",
-       "approval_policy":"auto","max_tool_iterations":10}'
+       "approval_policy":"auto"}'
 
 # FIELD IS "content", NOT "message"
 curl -sN -X POST $B/api/v1/ai/chat -H "X-Orva-API-Key: $K" \

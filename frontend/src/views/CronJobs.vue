@@ -6,7 +6,7 @@
           Scheduled Jobs
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Cron-driven triggers that fire any deployed function on a schedule. Use them for periodic cleanup, daily reports, polling external APIs, anything you'd normally pin to a server's crontab. Orva runs the schedule, captures stdout/stderr, and surfaces failures in the activity feed.
+          Run functions on a cron schedule.
         </p>
       </div>
       <Button @click="showCreateModal = true">
@@ -75,12 +75,11 @@
           v-if="jobs.length === 0"
           class="px-6 py-12 text-center"
         >
-          <Clock class="w-12 h-12 text-foreground-muted mx-auto mb-3 opacity-60" />
           <p class="text-foreground-muted">
             No scheduled jobs yet.
           </p>
           <p class="text-foreground-muted text-xs mt-1">
-            Create your first schedule to automate function execution.
+            Create a schedule to run a function automatically.
           </p>
         </li>
       </ul>
@@ -171,12 +170,11 @@
               colspan="6"
               class="px-6 py-12 text-center"
             >
-              <Clock class="w-12 h-12 text-foreground-muted mx-auto mb-3 opacity-60" />
               <p class="text-foreground-muted">
                 No scheduled jobs yet.
               </p>
               <p class="text-foreground-muted text-xs mt-1">
-                Create your first schedule to automate function execution.
+                Create a schedule to run a function automatically.
               </p>
             </td>
           </tr>

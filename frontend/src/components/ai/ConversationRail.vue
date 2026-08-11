@@ -45,7 +45,7 @@
         </button>
         <button
           type="button"
-          class="touch-expand-xs shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
+          class="touch-expand-iconbtn shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
           title="Rename conversation"
           aria-label="Rename conversation"
           @click.stop="onRename(c)"
@@ -54,7 +54,7 @@
         </button>
         <button
           type="button"
-          class="touch-expand-xs shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-danger-fg focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
+          class="touch-expand-iconbtn shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-danger-fg focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
           title="Delete conversation"
           aria-label="Delete conversation"
           @click.stop="onDelete(c.id)"
@@ -69,17 +69,48 @@
         No conversations yet.
       </p>
     </div>
+    <div
+      v-if="store.conversations.length"
+      class="shrink-0 border-t border-border p-2"
+    >
+      <p
+        v-if="clearError"
+        class="px-2.5 pb-1.5 text-xs leading-snug text-danger-fg"
+        role="alert"
+      >
+        {{ clearError }}
+      </p>
+      <button
+        type="button"
+        class="touch-expand-sm flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-foreground-muted transition-colors hover:bg-surface-hover hover:text-danger-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+        :disabled="clearing"
+        @click="onClearAll"
+      >
+        <LoaderCircle
+          v-if="clearing"
+          class="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+        />
+        <Trash2
+          v-else
+          class="h-3.5 w-3.5 shrink-0"
+        />
+        {{ clearing ? 'Clearing…' : 'Clear all chats' }}
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { Plus, MessageSquare, Trash2, Pencil } from '@lucide/vue'
+import { ref } from 'vue'
+import { Plus, MessageSquare, Trash2, Pencil, LoaderCircle } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import { useAIStore } from '@/stores/ai'
 import { useConfirmStore } from '@/stores/confirm'
 
 const store = useAIStore()
 const confirm = useConfirmStore()
+const clearing = ref(false)
+const clearError = ref('')
 
 async function onRename(c) {
   const title = await confirm.prompt({
@@ -99,6 +130,32 @@ async function onDelete(id) {
     confirmLabel: 'Delete',
   })
   if (ok) store.deleteConversation(id)
+}
+
+async function onClearAll() {
+  const count = store.conversations.length
+  if (!count || clearing.value) return
+  const noun = count === 1 ? 'chat' : 'chats'
+  const ok = await confirm.ask({
+    title: 'Clear all chats?',
+    message: `This permanently deletes all ${count} ${noun} and their messages. This cannot be undone.`,
+    danger: true,
+    confirmLabel: 'Clear all',
+  })
+  if (!ok) return
+
+  clearing.value = true
+  clearError.value = ''
+  try {
+    await store.clearConversations()
+    emit('select')
+  } catch (err) {
+    clearError.value = err?.response?.status === 409
+      ? 'A chat is still responding. Stop it and try again.'
+      : 'Chats could not be cleared. Try again.'
+  } finally {
+    clearing.value = false
+  }
 }
 
 defineProps({

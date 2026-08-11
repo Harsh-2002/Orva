@@ -1,58 +1,114 @@
 # Product
 
-## Register
+<!-- impeccable:product-schema 1 -->
 
-product
+## Platform
+
+web
 
 ## Users
 
-A single technical operator running Orva on hardware they own: homelabbers, indie developers, small self-hosting teams. Most often working alone, after hours, on a single monitor in a dim room. They are comfortable with shell, JSON, and curl, and they expect a control plane that respects that competence rather than abstracting it away.
+The primary user is a technical operator running Orva on hardware they own: a
+homelabber, indie developer, or small on-premises team. They are comfortable
+with shells, JSON, and HTTP APIs, and usually operate one Orva instance from a
+single screen.
 
-The job to be done is the same loop they would otherwise pay a cloud provider for: write a function, deploy it, invoke it from outside, debug when it breaks, schedule it, and persist a little bit of state. Orva replaces the cloud account, not the function. The user already knows what serverless is; they want it on their own box, with the warm-pool latency and dashboards intact.
+Their core loop is to write a function, deploy it, invoke it, inspect failures,
+schedule work, and persist small amounts of state without depending on a cloud
+control plane.
 
 ## Product Purpose
 
-Orva is a self-hosted Function-as-a-Service for homelab and on-premises use. It deploys JavaScript (Node.js 24), Python (3.14), and TypeScript functions into nsjail sandboxes and exposes them over HTTP, with a built-in dashboard, CLI, MCP server, and an in-product AI assistant.
+Orva is a self-hosted Function-as-a-Service for homelab and on-premises use. It
+deploys JavaScript, TypeScript, and Python functions into nsjail sandboxes and
+exposes them over HTTP through a built-in dashboard, CLI, MCP server, and AI
+assistant.
 
-Success looks like this: an operator brings up the container, writes a function in the editor, hits Deploy, and the first invocation lands in single-digit milliseconds. They never have to leave the dashboard for the day-2 surface, jobs, cron, secrets, KV, webhooks, firewall, traces. The control plane feels like a serious piece of infrastructure they actually want to keep running, not a hobby project they tolerate.
+Success means an operator can bring up one instance and complete both the first
+deploy and routine operations without assembling separate control-plane
+services or leaving Orva for common day-two tasks.
 
-## Brand Personality
+## Positioning
 
-Three words: **operator-grade, calm, technical.**
+Orva provides a complete single-host function platform rather than a remote
+cloud account or a collection of loosely connected self-hosted tools. The same
+instance owns sandboxed execution, warm pools, deployment history, schedules,
+jobs, KV state, webhooks, egress policy, observability, CLI access, MCP tools,
+and an AI operator.
 
-The voice is the voice of someone who has run a function platform at scale and is now building one to keep at home. Dry, pragmatic, slightly opinionated. Empty states explain what something is and what it will look like once it has data, not a sales pitch for the feature. Section captions are short, declarative, and do not introduce themselves. Mono font carries data; sans carries prose; nothing carries marketing.
+## Operating Context
 
-Confidence without polish. Linear, Railway, Fly, Tailscale admin: that family. Looks like a tool that an engineer would build for themselves, then realised would also work for the next operator over.
+Orva runs in homelabs and on-premises environments where operators value local
+ownership, predictable behavior, and direct access to their infrastructure.
+They move between the web dashboard, terminal, CI, external HTTP clients, and
+AI/MCP clients. The dashboard is an operating console, not a marketing surface.
 
-## Anti-references
+Most sessions are short and task-oriented: deploy or edit one function, inspect
+an execution, respond to a failure, or adjust one integration. The interface
+must make the next operational action obvious without requiring the operator to
+re-read platform explanations on every visit.
 
-What Orva must not look or feel like:
+## Capabilities and Constraints
 
-- **AWS Console.** Every-feature-on-screen, region selectors, low information density per pixel despite the noise. Orva sits on one host; the UI should feel like one host.
-- **Generic SaaS dashboard with hero-metric tiles.** Big number, small label, supporting stats, gradient accent under the value. Orva surfaces metrics, but they belong on bars and sparklines, not in template-shaped tiles.
-- **Vercel / Railway / landing-page onboarding panels** with diagonal gradient backgrounds, decorative blurred circles, and three identical glassmorphic feature chips (icon + heading + short description, repeated). The onboarding view today still leans on this template; PRODUCT.md keeps the rule even after it is fixed.
-- **Cloud-vendor branding.** Clouds, sky gradients, "scale instantly" copy, planet-scale anything. Orva runs on one box you can touch.
-- **AI-generated control planes.** Purple-on-near-black with violet accents, glowing borders, gradient text headings, animated mesh backgrounds. Orva is dark and uses violet, but the discipline that keeps it from reading as that template comes from the rest of these anti-references.
+- The supported runtimes are Node.js 24, Python 3.14, and TypeScript compiled
+  into the Node runtime. Orva deliberately supports latest-stable runtimes only.
+- Linux function execution is isolated with nsjail. Egress policy is per
+  sandbox and fail-closed.
+- The server is distributed as a single binary with the dashboard embedded.
+- Server configuration is environment-variable based. CLI configuration is
+  stored separately in the operator's home directory.
+- Orva is a single-instance operator product. Multi-tenant administration and
+  fleet-management abstractions are not product goals.
+- Dark mode is the supported visual environment. A light theme is not a current
+  commitment.
+- Existing functionality must remain accessible while the interface uses
+  progressive disclosure to keep routine tasks focused.
 
-## Design Principles
+## Brand Commitments
 
-1. **Operator over operator-of-operators.** Built for the person who runs Orva, not for the team that manages a fleet of operators. No multi-tenant shapes, no role-based abstraction layers in the UI surface. One operator, one console.
+Orva is operator-grade, calm, and technical. Its voice is dry, pragmatic, and
+direct. It assumes competence, uses plain operational language, and avoids
+marketing copy. Inter carries prose; JetBrains Mono is reserved for code, paths,
+identifiers, and comparable measurements.
 
-2. **Density without noise.** Pack signal into every row. A long table beats a paginated card grid. Hidden scrollbars and tight line-height are intentional, not accidents to be fixed.
+The interface must not resemble a cloud-vendor console, a generic SaaS metric
+dashboard, or a decorative AI-generated control plane. Violet is the existing
+identity accent, but restraint, hierarchy, and product-specific content keep it
+from becoming ornamental.
 
-3. **Practice what you preach.** The dashboard runs on the same self-hosted, single-binary ethos that Orva sells. The UI should not require a service the platform itself does not run.
+## Evidence on Hand
 
-4. **Show, don't tell.** Empty states show what the data will look like once it exists (a sample row, a real curl example, a trace shape) rather than marketing copy or icon illustrations.
+- The repository contains the complete runnable product, including the Vue
+  dashboard, Go server, CLI, MCP server, runtime adapters, and automated tests.
+- `CONTRACT.md` is the canonical operational and release contract.
+- `docs/reference.md` is the canonical user-facing product reference.
+- `DESIGN.md` records the incumbent visual system and its constraints.
+- No testimonials, customer logos, usage claims, or external validation assets
+  are supplied. Future work must not fabricate them.
 
-5. **Confidence without polish.** Skip the demo flourishes (gradient backgrounds, decorative blurs, animated heroes). The platform earns trust by looking like the kind of tool the user could have written themselves, not by impressing them.
+## Product Principles
+
+1. **Operational clarity.** The current task and next action should be obvious.
+   Explain a concept once, at the point where the information changes a
+   decision.
+2. **Secure defaults.** Isolation, authentication, secrets, and egress controls
+   should fail safely without turning every screen into a security lecture.
+3. **Low cognitive load.** Preserve complete capability while hiding advanced
+   detail until it is relevant. Use headings and spacing before adding boxes.
+4. **Local ownership.** Core workflows must remain self-hosted and usable
+   without a hosted control plane or third-party design dependency.
+5. **Operator trust.** Show real state, precise errors, and recoverable actions.
+   Avoid decorative data, invented proof, and interface theatrics.
 
 ## Accessibility & Inclusion
 
-Target: WCAG 2.1 AA across the dashboard. Specific commitments:
+Target WCAG 2.1 AA across the dashboard:
 
-- `prefers-reduced-motion` respected; transitions are short (≤150ms) and limited to color and opacity, never layout properties.
-- Every interactive control reachable by keyboard. Focus rings visible against the dark surface. Modal and drawer dialogs implement focus trap and restore.
-- Icon-only buttons carry `aria-label`. Status badges use color plus glyph or text, never colour alone.
-- Heading hierarchy is real (`<h1>` → `<h2>` → `<h3>`), not styled `<div>`s, so screen-reader navigation works.
-- Touch targets meet 44×44 on mobile breakpoints, including filter chips and icon controls.
-- Dark theme is the default and the only theme. A light theme is not a roadmap commitment; the audience and use case both lean dark, and a half-supported toggle is worse than none. Revisit if real user demand emerges.
+- Every interactive control is keyboard reachable with a visible focus state.
+- Labels, hints, errors, and icon-only actions expose programmatic names and
+  relationships.
+- Status never relies on color alone.
+- Heading hierarchy uses semantic `h1`, `h2`, and `h3` elements.
+- Touch targets meet a 44 by 44 pixel effective area on mobile.
+- Reduced-motion preferences preserve understandable state changes without
+  layout animation.

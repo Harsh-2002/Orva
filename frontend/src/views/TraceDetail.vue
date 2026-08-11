@@ -16,8 +16,7 @@
           Trace
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Causal tree of every span produced by this invocation chain.
-          Click any span row to jump to its execution in the Invocations log.
+          Spans in this invocation chain.
         </p>
       </div>
     </div>
@@ -51,6 +50,7 @@
           <button
             class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors"
             title="Copy trace id"
+            aria-label="Copy trace ID"
             @click="copyID"
           >
             <Copy class="w-3.5 h-3.5" />

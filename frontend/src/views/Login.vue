@@ -10,7 +10,7 @@
           </h1>
         </div>
         <p class="text-foreground-muted text-sm">
-          Serverless Platform
+          Sign in to this instance
         </p>
       </div>
 
@@ -25,13 +25,18 @@
           @submit.prevent="handleLogin"
         >
           <div>
-            <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">
+            <label
+              for="login-username"
+              class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2"
+            >
               Username
             </label>
             <input
+              id="login-username"
               v-model="form.username"
               type="text"
               required
+              autocomplete="username"
               class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
               placeholder="Enter your username"
               :disabled="loading"
@@ -39,13 +44,18 @@
           </div>
 
           <div>
-            <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">
+            <label
+              for="login-password"
+              class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2"
+            >
               Password
             </label>
             <input
+              id="login-password"
               v-model="form.password"
               type="password"
               required
+              autocomplete="current-password"
               class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
               placeholder="Enter your password"
               :disabled="loading"
@@ -55,6 +65,7 @@
           <div
             v-if="error"
             class="bg-danger-tint border border-danger-ring rounded-md px-4 py-3 flex items-start gap-2"
+            role="alert"
           >
             <AlertCircle class="w-5 h-5 text-danger-fg shrink-0 mt-0.5" />
             <p class="text-sm text-danger-fg">

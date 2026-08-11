@@ -7,9 +7,7 @@
           Traces
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Causal chains across HTTP, F2F invokes, jobs, cron, and inbound
-          webhooks. One row per trace; click to see the full waterfall of
-          spans.
+          Invocation chains across functions and triggers.
         </p>
       </div>
       <Button
@@ -66,7 +64,7 @@
     <!-- Error / empty / loading -->
     <div
       v-if="error"
-      class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200"
+      class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
     >
       {{ error }}
     </div>
@@ -78,7 +76,7 @@
       <Network class="w-6 h-6 mx-auto mb-3 text-foreground-muted/50" />
       <p>No traces yet.</p>
       <p class="text-xs mt-1 text-foreground-muted/60">
-        Hit a function over HTTP or fire a cron and they'll show up here.
+        HTTP and scheduled invocations appear here.
       </p>
     </div>
 

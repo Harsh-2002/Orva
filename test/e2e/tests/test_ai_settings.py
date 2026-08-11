@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 test_settings.py — AI settings defaults, persistence, and enum validation (pure REST).
-Exercises GET/PUT on /api/v1/ai/settings: confirms factory defaults, that a valid
-PUT round-trips through a subsequent GET, and that invalid enum values are rejected
-with HTTP 400.
+Exercises GET/PUT on /api/v1/ai/settings: confirms factory defaults, that editable
+settings round-trip, that the internal tool budget cannot be overridden, and that
+invalid enum values are rejected with HTTP 400.
 
 Run:  ORVA_API_KEY=$(sudo cat /var/lib/orva/.admin-key) python3 test/ai/test_settings.py
 (or set ORVA_URL/ORVA_API_KEY for any instance).
@@ -50,7 +50,7 @@ def main():
         check("thinking_level is a valid enum", s.get("thinking_level") in THINKING_LEVELS, str(s.get("thinking_level")))
         check("approval_policy is a valid enum", s.get("approval_policy") in APPROVAL_POLICIES, str(s.get("approval_policy")))
         mti = s.get("max_tool_iterations")
-        check("max_tool_iterations >= 1", isinstance(mti, int) and mti >= 1, str(mti))
+        check("max_tool_iterations is the fixed internal budget", mti == 25, str(mti))
         sp = s.get("system_prompt")
         check("system_prompt is non-empty", isinstance(sp, str) and bool(sp.strip()), str(sp)[:80])
 
@@ -70,7 +70,7 @@ def main():
         check("GET reflects model", s2.get("model") == "claude-sonnet-4-6", str(s2.get("model")))
         check("GET reflects thinking_level", s2.get("thinking_level") == "deep", str(s2.get("thinking_level")))
         check("GET reflects approval_policy", s2.get("approval_policy") == "destructive_only", str(s2.get("approval_policy")))
-        check("GET reflects max_tool_iterations", s2.get("max_tool_iterations") == 15, str(s2.get("max_tool_iterations")))
+        check("PUT cannot override the internal tool budget", s2.get("max_tool_iterations") == 25, str(s2.get("max_tool_iterations")))
 
         # ── 3. invalid enum values are rejected with 400 ──────────────────
         section("invalid enum values rejected (HTTP 400)")

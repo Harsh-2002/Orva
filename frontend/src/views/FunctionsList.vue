@@ -15,7 +15,7 @@
           Functions
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Every deployed handler on this Orva instance. Each function runs in its own nsjail sandbox and is reachable via <code class="font-mono text-[11px]">/fn/&lt;id&gt;</code> or any custom route you've attached.
+          Deployed functions and invoke endpoints.
         </p>
       </div>
       <Button @click="router.push('/functions/new')">
@@ -312,10 +312,7 @@
           No functions deployed yet
         </div>
         <div class="text-xs text-foreground-muted max-w-prose mx-auto leading-body">
-          Each function runs in its own nsjail sandbox and is reachable
-          at <code class="font-mono text-[11px]">/fn/&lt;id&gt;</code> the
-          moment it's deployed. Pick a runtime, paste your handler, hit
-          Deploy.
+          Choose a runtime and deploy your first handler.
         </div>
       </div>
       <div>

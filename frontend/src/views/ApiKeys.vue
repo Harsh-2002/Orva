@@ -6,7 +6,7 @@
           API Keys
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Long-lived bearer tokens that authorise REST and MCP calls from CI, scripts, and external services. Plaintext is shown once at creation; the server keeps only a SHA-256 hash.
+          Tokens for REST and MCP clients. Secrets are shown once.
         </p>
       </div>
       <Button @click="openCreate">
@@ -26,12 +26,13 @@
             Copy this key now
           </h2>
           <div class="text-xs text-foreground-muted mt-0.5">
-            It will not be shown again. Anyone with this key can invoke your functions.
+            Store it securely. This secret will not be shown again.
           </div>
         </div>
         <button
           class="text-foreground-muted hover:text-white"
           title="Dismiss"
+          aria-label="Dismiss API key"
           @click="createdKey = ''"
         >
           <X class="w-4 h-4" />
@@ -66,16 +67,24 @@
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Name</label>
+          <label
+            for="api-key-name"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Name</label>
           <input
+            id="api-key-name"
             v-model="newKey.name"
             placeholder="e.g. ci-deployer"
             class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
           >
         </div>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Expires in</label>
+          <label
+            for="api-key-expiry"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Expires in</label>
           <select
+            id="api-key-expiry"
             v-model="newKey.expiresInDays"
             class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
           >
@@ -141,12 +150,12 @@
                 <span v-if="key.last_used_at">used {{ formatRelative(key.last_used_at) }}</span>
                 <span
                   v-else
-                  class="text-amber-400/80"
+                  class="text-warning-fg"
                 >never used</span>
                 <span v-if="!key.expires_at">no expiry</span>
                 <span
                   v-else-if="isExpired(key.expires_at)"
-                  class="text-red-400"
+                  class="text-danger-fg"
                 >expired {{ formatRelative(key.expires_at) }}</span>
                 <span v-else>expires {{ formatRelative(key.expires_at) }}</span>
               </div>
@@ -163,7 +172,7 @@
           v-if="keys.length === 0"
           class="px-6 py-8 text-center text-sm text-foreground-muted"
         >
-          No API keys yet. Tap <span class="text-white">New Key</span> to generate one.
+          No API keys yet.
         </li>
       </ul>
 
@@ -230,7 +239,7 @@
               >{{ formatRelative(key.last_used_at) }}</span>
               <span
                 v-else
-                class="text-amber-400/70 text-xs"
+                class="text-warning-fg text-xs"
               >Never used</span>
             </td>
             <td class="px-6 py-4 hidden lg:table-cell">
@@ -240,7 +249,7 @@
               >Never</span>
               <span
                 v-else-if="isExpired(key.expires_at)"
-                class="text-red-400 text-xs"
+                class="text-danger-fg text-xs"
               >Expired {{ formatRelative(key.expires_at) }}</span>
               <span
                 v-else
@@ -261,7 +270,7 @@
               colspan="6"
               class="px-6 py-8 text-center text-foreground-muted"
             >
-              No API keys yet. Click <span class="text-white">New Key</span> to generate one.
+              No API keys yet.
             </td>
           </tr>
         </tbody>

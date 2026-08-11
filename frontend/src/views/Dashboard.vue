@@ -5,33 +5,29 @@
         System Overview
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-        Live snapshot of what your platform is doing right now.
+        Live platform health and activity.
       </p>
     </div>
 
-    <!-- Top-line numbers — every tile has a one-line "what does this mean" -->
+    <!-- Top-line numbers -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <Tile
         label="Functions"
-        hint="Deployed in this workspace"
         :value="system.functionsCount"
         :icon="Boxes"
       />
       <Tile
         label="In flight"
-        hint="Requests being handled right now"
         :value="m.active_requests ?? 0"
         :icon="Activity"
       />
       <Tile
         label="Invocations"
-        hint="Total calls served since the platform started"
         :value="formatBig(m.totals?.invocations ?? 0)"
         :icon="TrendingUp"
       />
       <Tile
         label="Cold starts"
-        hint="Calls that had to spawn a fresh sandbox"
         :value="formatPct(m.rates?.cold_start_pct)"
         :icon="Snowflake"
       />
@@ -42,11 +38,11 @@
       <!-- Latency -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-1">
         <div class="mb-3">
-          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-sm font-semibold text-white">
             Response time
           </h2>
-          <div class="text-[11px] text-foreground-muted mt-1">
-            How long calls take to come back. p99 is the worst-case 1-in-100.
+          <div class="text-xs text-foreground-muted mt-1">
+            Invocation latency by percentile.
           </div>
         </div>
         <LatencyBars
@@ -59,34 +55,31 @@
       <!-- Host resources — single stacked memory bar tells the whole story -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-2 space-y-5">
         <div>
-          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-sm font-semibold text-white">
             Host machine
           </h2>
-          <div class="text-[11px] text-foreground-muted mt-1">
-            The server Orva is running on: how much of its RAM is actually in use, and how much your warm pools reserve as headroom.
+          <div class="text-xs text-foreground-muted mt-1">
+            Capacity and current memory use.
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">
+            <div class="text-xs uppercase tracking-wider text-foreground-muted">
               CPU cores
             </div>
             <div class="text-lg font-mono text-white mt-0.5">
               {{ m.host?.num_cpu ?? '?' }}
             </div>
-            <div class="text-[11px] text-foreground-muted mt-0.5">
-              available to functions on this host
-            </div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted">
+            <div class="text-xs uppercase tracking-wider text-foreground-muted">
               Memory in use
             </div>
             <div class="text-lg font-mono text-white mt-0.5">
               {{ formatMB(memUsed) }} <span class="text-foreground-muted text-sm">/ {{ formatMB(memTotal) }}</span>
             </div>
-            <div class="text-[11px] text-foreground-muted mt-0.5">
+            <div class="text-xs text-foreground-muted mt-0.5">
               {{ memUsedPct.toFixed(1) }}% used · {{ formatMB(memReserved) }} reserved by warm pools
             </div>
           </div>
@@ -104,7 +97,7 @@
               { label: 'Free', value: memFree, color: 'bg-success/40' },
             ]"
           />
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground-muted">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground-muted">
             <span class="flex items-center gap-1.5">
               <span class="w-2 h-2 rounded-full bg-info/70" />
               {{ formatMB(memUsed) }} in use
@@ -114,7 +107,7 @@
               {{ formatMB(memFree) }} free
             </span>
             <span>
-              {{ formatMB(memReserved) }} reserved by warm pools ({{ memReservedPct.toFixed(1) }}% — held ready, not all in use)
+              {{ formatMB(memReserved) }} reserved for warm pools
             </span>
           </div>
         </div>
@@ -126,35 +119,32 @@
       <!-- Build pipeline -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
         <div>
-          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-sm font-semibold text-white">
             Builds
           </h2>
-          <div class="text-[11px] text-foreground-muted mt-1">
-            Where deploys go: extracted, dependencies installed, then activated.
+          <div class="text-xs text-foreground-muted mt-1">
+            Deployment work in progress.
           </div>
         </div>
         <div class="grid grid-cols-3 gap-3">
           <Stat
             label="In queue"
             :value="m.build_queue?.pending ?? 0"
-            hint="waiting to start"
           />
           <Stat
             label="Build workers"
             :value="m.build_queue?.workers ?? 0"
-            hint="parallel slots"
           />
           <Stat
             label="Built so far"
             :value="formatBig(m.totals?.builds ?? 0)"
-            hint="lifetime total"
           />
         </div>
         <div
           v-if="(m.totals?.build_errors ?? 0) > 0"
-          class="text-xs text-red-400 flex items-center gap-1.5 pt-1"
+          class="text-xs text-danger-fg flex items-center gap-1.5 pt-1"
         >
-          <span class="w-1.5 h-1.5 rounded-full bg-red-400" />
+          <span class="w-1.5 h-1.5 rounded-full bg-danger" />
           {{ m.totals.build_errors }} build{{ m.totals.build_errors === 1 ? ' has' : 's have' }} failed since start
         </div>
       </div>
@@ -162,42 +152,39 @@
       <!-- Sandbox -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
         <div>
-          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-sm font-semibold text-white">
             Sandbox activity
           </h2>
-          <div class="text-[11px] text-foreground-muted mt-1">
-            Each invocation runs inside an isolated nsjail sandbox process.
+          <div class="text-xs text-foreground-muted mt-1">
+            Current sandbox reuse and startup activity.
           </div>
         </div>
         <div class="grid grid-cols-3 gap-3">
           <Stat
             label="Running now"
             :value="m.sandbox?.active ?? 0"
-            hint="serving a request"
           />
           <Stat
             label="Reused"
             :value="formatBig(m.totals?.warm_hits ?? 0)"
-            hint="warm-pool hits"
           />
           <Stat
             label="Spawned fresh"
             :value="formatBig(m.totals?.cold_starts ?? 0)"
-            hint="cold starts"
           />
         </div>
       </div>
     </div>
 
-    <!-- Per-function pool cards — each card explains what it is. -->
+    <!-- Per-function pools: live capacity and the two useful resource signals. -->
     <div v-if="(m.pools || []).length">
       <div class="flex items-baseline justify-between mb-3">
         <div>
-          <h2 class="text-xs font-bold text-white uppercase tracking-wider">
+          <h2 class="text-sm font-semibold text-white">
             Warm pools ({{ m.pools.length }})
           </h2>
-          <div class="text-[11px] text-foreground-muted mt-1">
-            One pool per active function. Sandboxes stay ready so the next call doesn't pay a cold start.
+          <div class="text-xs text-foreground-muted mt-1">
+            Ready sandboxes by function.
           </div>
         </div>
       </div>
@@ -207,96 +194,70 @@
           :key="p.function_id"
           class="bg-background border border-border rounded-lg p-4 space-y-3"
         >
-          <!-- Header -->
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
-              <div class="text-sm font-medium text-white truncate">
-                {{ p.function_name || p.function_id }}
-              </div>
-              <div class="text-[10px] text-foreground-muted font-mono truncate">
+              <router-link
+                v-if="p.function_name"
+                :to="{ name: 'function-detail', params: { name: p.function_name } }"
+                class="block truncate text-sm font-medium text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {{ p.function_name }}
+              </router-link>
+              <div
+                v-else
+                class="truncate font-mono text-sm font-medium text-white"
+              >
                 {{ p.function_id }}
               </div>
             </div>
             <div class="text-right shrink-0">
-              <div class="text-[10px] text-foreground-muted">
-                Target / cap
+              <div class="text-xs text-foreground-muted">
+                Capacity
               </div>
               <div class="text-xs font-mono text-white">
-                {{ p.target }} <span class="text-foreground-muted">/</span> {{ p.dynamic_max }}
+                {{ p.dynamic_max }} max
               </div>
             </div>
           </div>
 
-          <!-- Right-now snapshot -->
           <div class="grid grid-cols-3 gap-2">
             <PoolStat
-              label="Ready"
-              :value="p.idle"
-              hint="idle workers"
+              label="Ready / target"
+              :value="`${p.idle} / ${p.target}`"
             />
             <PoolStat
               label="Busy"
               :value="p.busy"
-              hint="serving now"
             />
             <PoolStat
               label="Calls / sec"
               :value="formatRate(p.rate_ewma)"
-              hint="recent rate"
             />
           </div>
 
-          <!-- Sparkline of incoming rate -->
           <div>
             <Sparkline :points="poolHistoryFor(p.function_id)" />
-            <div class="text-[10px] text-foreground-muted mt-1">
-              Recent calls per second (last 5 min)
+            <div class="text-xs text-foreground-muted mt-1">
+              Traffic, last 5 minutes
             </div>
           </div>
 
-          <!-- Lifetime + resource averages -->
-          <div class="border-t border-border pt-3 grid grid-cols-2 gap-3 text-[11px]">
-            <div>
-              <div class="text-foreground-muted">
-                Spawned · killed
-              </div>
-              <div class="font-mono text-white">
-                {{ p.spawned }} · {{ p.killed }}
-              </div>
-            </div>
+          <div class="grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs">
             <div>
               <div class="text-foreground-muted">
                 Avg latency
               </div>
-              <div class="font-mono text-white">
+              <div class="mt-0.5 font-mono text-white">
                 {{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms
               </div>
             </div>
             <div>
               <div class="text-foreground-muted">
-                Avg memory
+                Avg memory / limit
               </div>
-              <div
-                class="font-mono text-white"
-                title="Average memory used per invocation vs allocated limit"
-              >
+              <div class="mt-0.5 font-mono text-white">
                 {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : EMPTY }}
                 <span class="text-foreground-muted">/ {{ p.mem_limit_mb }} MB</span>
-              </div>
-            </div>
-            <div>
-              <div class="text-foreground-muted">
-                Avg CPU
-              </div>
-              <div
-                class="font-mono text-white"
-                title="Average CPU cores consumed per invocation vs allocated"
-              >
-                {{ p.cpu_frac_avg > 0 && p.cpu_limit > 0 ? (p.cpu_frac_avg * p.cpu_limit).toFixed(2) : EMPTY }}
-                <span
-                  v-if="p.cpu_limit > 0"
-                  class="text-foreground-muted"
-                >/ {{ p.cpu_limit }} CPU</span>
               </div>
             </div>
           </div>
@@ -319,8 +280,7 @@
           No warm pools yet
         </div>
         <div class="text-xs text-foreground-muted mt-1 max-w-prose mx-auto leading-body">
-          Deploy your first function to see live worker pools, latency,
-          and cold-start rate land in the tiles above.
+          Deploy a function to start collecting runtime metrics.
         </div>
       </div>
       <div>
@@ -378,16 +338,13 @@ const memAvailable = computed(() => m.value.host?.mem_available_mb ?? 0)
 const memUsed      = computed(() => Math.max(0, memTotal.value - memAvailable.value))
 const memFree      = computed(() => Math.max(0, memTotal.value - memUsed.value))
 const memUsedPct   = computed(() => (memTotal.value > 0 ? (memUsed.value / memTotal.value) * 100 : 0))
-const memReservedPct = computed(() => (memTotal.value > 0 ? (memReserved.value / memTotal.value) * 100 : 0))
 
 onMounted(() => system.connect())
 onUnmounted(() => system.disconnect())
 
-// ── Tile: top-line metric card with icon + label + big number + hint ──
-// `h-full` so siblings in a grid row stretch to the tallest. The number
-// owns the visual weight; the hint underneath says what the number means.
+// ── Tile: top-line metric card with icon, label, and value ──
 const Tile = {
-  props: { label: String, value: [String, Number], icon: Object, hint: String },
+  props: { label: String, value: [String, Number], icon: Object },
   setup(p) {
     return () =>
       h('div', {
@@ -398,7 +355,6 @@ const Tile = {
           p.icon ? h(p.icon, { class: 'w-4 h-4 text-foreground-muted group-hover:text-primary' }) : null,
         ]),
         h('div', { class: 'text-2xl font-mono text-foreground leading-none' }, String(p.value)),
-        p.hint ? h('div', { class: 'text-[11px] text-foreground-muted mt-auto pt-3 leading-snug' }, p.hint) : null,
       ])
   },
 }
@@ -430,7 +386,7 @@ const LatencyBars = {
         rows.map((r) => {
           const pct = r.ms == null ? 0 : (r.ms / max) * 100
           return h('div', { class: 'space-y-1' }, [
-            h('div', { class: 'flex items-baseline justify-between text-[11px]' }, [
+            h('div', { class: 'flex items-baseline justify-between text-xs' }, [
               h('span', { class: 'font-mono uppercase text-foreground-muted tracking-wider' }, r.label),
               h('span', { class: 'font-mono text-white' }, r.ms == null ? EMPTY : `${r.ms}ms`),
             ]),
@@ -447,32 +403,26 @@ const LatencyBars = {
   },
 }
 
-// Stat: bigger label, value, and a one-line hint. Used in the Builds and
-// Sandbox cards where each metric deserves a sentence of context. Same
-// height across siblings so the row reads as a unit.
+// Stat: compact label and value used in Builds and Sandbox cards.
 const Stat = {
-  props: { label: String, value: [String, Number], hint: String },
+  props: { label: String, value: [String, Number] },
   setup(p) {
     return () =>
       h('div', { class: 'bg-surface border border-border rounded p-3 flex flex-col h-full' }, [
-        h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted' }, p.label),
+        h('div', { class: 'text-xs uppercase tracking-wider text-foreground-muted' }, p.label),
         h('div', { class: 'text-lg font-mono text-white mt-0.5' }, String(p.value ?? 0)),
-        p.hint ? h('div', { class: 'text-[10px] text-foreground-muted mt-auto pt-1.5 leading-snug' }, p.hint) : null,
       ])
   },
 }
 
-// PoolStat: compact version for the per-function cards. Slightly smaller
-// number, hint underneath, fixed-height so the three columns in a pool
-// card always line up vertically.
+// PoolStat: compact version for per-function cards.
 const PoolStat = {
-  props: { label: String, value: [String, Number], hint: String },
+  props: { label: String, value: [String, Number] },
   setup(p) {
     return () =>
       h('div', { class: 'bg-surface border border-border rounded p-2.5 flex flex-col h-full' }, [
-        h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted' }, p.label),
+        h('div', { class: 'text-xs uppercase tracking-wider text-foreground-muted' }, p.label),
         h('div', { class: 'text-base font-mono text-white mt-0.5 leading-none' }, String(p.value ?? 0)),
-        p.hint ? h('div', { class: 'text-[10px] text-foreground-muted mt-auto pt-1.5' }, p.hint) : null,
       ])
   },
 }
@@ -511,7 +461,7 @@ const Sparkline = {
     return () => {
       const pts = p.points || []
       if (pts.length < 2) {
-        return h('div', { class: 'h-8 flex items-center text-[10px] text-foreground-muted' }, '(collecting samples…)')
+        return h('div', { class: 'h-8 flex items-center text-xs text-foreground-muted' }, 'Collecting samples…')
       }
       const max = Math.max(...pts, 1)
       const w = 100
@@ -526,7 +476,7 @@ const Sparkline = {
         .join(' ')
       return h(
         'svg',
-        { viewBox: `0 0 ${w} ${hh}`, class: 'w-full h-8 text-blue-400', preserveAspectRatio: 'none' },
+        { viewBox: `0 0 ${w} ${hh}`, class: 'w-full h-8 text-primary', preserveAspectRatio: 'none' },
         [h('path', { d: path, fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5' })]
       )
     }

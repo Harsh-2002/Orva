@@ -19,7 +19,7 @@
       v-if="title || $slots.title || $slots.actions"
       class="flex items-center justify-between"
     >
-      <div class="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-white tracking-tight">
         <component
           :is="icon"
           v-if="icon"
@@ -28,7 +28,7 @@
         <slot name="title">
           {{ title }}
         </slot>
-      </div>
+      </h2>
       <div
         v-if="$slots.actions"
         class="flex items-center gap-2"

@@ -7,25 +7,22 @@
     chat shows a fresh, rotating set.
   -->
   <div class="text-center">
-    <div class="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/15 text-primary">
-      <MessagesSquare class="h-5 w-5" />
-    </div>
     <h2 class="text-lg font-semibold tracking-tight text-white">
       What would you like to do?
     </h2>
     <p class="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-foreground-muted">
-      Ask about your functions, logs, deployments, and operations. Or have me create, deploy, and invoke functions for you.
+      Ask about this instance or operate it with natural language.
     </p>
 
     <!-- Equal-height cards: a fixed min-height floor plus line-clamp-2 keeps every
          card the same size whether its prompt is one line or two, so a longer
          prompt never breaks the grid rhythm. No icons, just the prompt. -->
-    <div class="mx-auto mt-6 grid max-w-xl gap-2 sm:grid-cols-2">
+    <div class="mx-auto mt-5 flex max-w-xl flex-wrap justify-center gap-2">
       <button
         v-for="(p, i) in suggestions"
         :key="i"
         type="button"
-        class="flex min-h-[4.25rem] items-center rounded-lg border border-border bg-surface/50 px-3.5 py-3 text-left text-[13px] leading-snug text-foreground-muted transition-colors hover:border-foreground-muted/40 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        class="rounded-md px-3 py-2 text-left text-xs leading-snug text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         @click="$emit('pick', p)"
       >
         <span class="line-clamp-2">{{ p }}</span>
@@ -36,7 +33,6 @@
 
 <script setup>
 import { ref } from 'vue'
-import { MessagesSquare } from '@lucide/vue'
 
 defineEmits(['pick'])
 
@@ -76,5 +72,5 @@ function sample(arr, n) {
   return copy.slice(0, n)
 }
 
-const suggestions = ref(sample(POOL, 4))
+const suggestions = ref(sample(POOL, 3))
 </script>

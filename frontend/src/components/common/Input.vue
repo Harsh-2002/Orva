@@ -2,6 +2,7 @@
   <div class="flex flex-col gap-1.5 w-full">
     <label
       v-if="label"
+      :for="inputId"
       class="text-xs font-medium text-foreground-muted uppercase tracking-wide"
     >
       {{ label }} <span
@@ -17,12 +18,16 @@
         the operator on a stable viewport when they tap any field.
       -->
       <input
+        :id="inputId"
         :type="type"
         :value="modelValue"
         class="w-full bg-background border border-border rounded-md px-3 py-2 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors duration-200"
         :class="{'pl-9': icon}"
         :placeholder="placeholder"
         :disabled="disabled"
+        :required="required"
+        :aria-invalid="error ? 'true' : undefined"
+        :aria-describedby="describedBy"
         @input="$emit('update:modelValue', $event.target.value)"
       >
       <div
@@ -37,17 +42,22 @@
     </div>
     <span
       v-if="error"
-      class="text-xs text-red-500"
+      :id="errorId"
+      class="text-xs text-danger-fg"
+      role="alert"
     >{{ error }}</span>
     <span
       v-if="hint && !error"
+      :id="hintId"
       class="text-xs text-foreground-muted"
     >{{ hint }}</span>
   </div>
 </template>
 
 <script setup>
-defineProps({
+import { computed, useId } from 'vue'
+
+const props = defineProps({
   modelValue: {
     type: [String, Number],
     default: ''
@@ -61,6 +71,10 @@ defineProps({
     default: 'text'
   },
   placeholder: {
+    type: String,
+    default: ''
+  },
+  id: {
     type: String,
     default: ''
   },
@@ -78,6 +92,16 @@ defineProps({
   },
   required: Boolean,
   disabled: Boolean
+})
+
+const generatedId = useId()
+const inputId = computed(() => props.id || `field-${generatedId}`)
+const errorId = computed(() => `${inputId.value}-error`)
+const hintId = computed(() => `${inputId.value}-hint`)
+const describedBy = computed(() => {
+  if (props.error) return errorId.value
+  if (props.hint) return hintId.value
+  return undefined
 })
 
 defineEmits(['update:modelValue'])
