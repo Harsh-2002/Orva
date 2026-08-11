@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZQZWKTP3EJ3X3D8E20FK88J",
+  "strategy": "manual-commit",
+  "branch": "feat/ui-declutter",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "backend/internal/ai/manager.go",
+    "backend/internal/ai/manager_test.go",
+    "backend/internal/database/ai_chat.go",
+    "backend/internal/database/ai_chat_test.go",
+    "backend/internal/server/ai_handler.go",
+    "backend/internal/server/router.go",
+    "docs/API.md",
+    "frontend/src/components/ai/ConversationRail.vue",
+    "frontend/src/stores/ai.js",
+    "frontend/test/clearChats.test.js"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 196376,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 10163712,
+    "output_tokens": 22979,
+    "api_call_count": 67
+  }
+}

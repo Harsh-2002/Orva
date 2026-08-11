@@ -1,0 +1,9 @@
+In the AI assistant sections are the settings that AI sect it is completely broken and unaligned, like active provider on the side on the side of active model it's it it it's it is it looks very bad you have to make it consistent and analyze it first. do the layout review of the settings and then work on it everything seems to looks good to me
+
+---
+
+I think there should be some kind of option you should add in the chart like if I want to clear all the charts all in one shot can you add that option like it should it should be in the settings instead of the chart or you can add in the chart instead not in settings
+
+---
+
+https://dev.ctl.qzz.io/fn/019fec2f-e762-7a21-8b3f-58fe001a2e0f - I want to ask you one thing right we had a I have a network rule basically which will allow basically what it will it will it will block the traffic on my internal LAN if you you can see the firewall policy I have a 10.00 slash 8 range which is the blocked right but I have this serverless function what this serverless function can do it can call any URL and it can check whether that URL is live or not so it should be blocked by default right like egress is blocked for this IP so how this function is running and can check this URL is lie like the f suppose this is the URL which results to my private IP right so tell tell me like i how should be is this working as expected or it should not work at all is this a bug  you can test url like home.ctl.qzz.io which reslove to 10.1.1.10 and i have blocked in egrs 10.0.0.0/8
