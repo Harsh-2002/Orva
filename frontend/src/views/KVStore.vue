@@ -7,14 +7,14 @@
           KV Store
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Per-function key/value state for
+          JSON state for
           <router-link
             :to="`/functions/${fnName}`"
             class="text-white underline"
           >
             {{ fnName }}
           </router-link>
-          Values are JSON, optional TTL.
+          with optional TTL.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -121,8 +121,7 @@
             <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">{{ prefix }}</code>.
           </template>
           <template v-else>
-            No keys yet. Your function will write here when it calls
-            <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">orva.kv.put(...)</code>.
+            No keys yet. Values written with <code class="font-mono text-xs">orva.kv.put()</code> appear here.
           </template>
         </li>
       </ul>
@@ -202,8 +201,7 @@
                 <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">{{ prefix }}</code>.
               </template>
               <template v-else>
-                No keys yet. Your function will write here when it calls
-                <code class="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">orva.kv.put(...)</code>.
+                No keys yet. Values written with <code class="font-mono text-xs">orva.kv.put()</code> appear here.
               </template>
             </td>
           </tr>

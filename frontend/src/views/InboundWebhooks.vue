@@ -7,14 +7,14 @@
           Inbound webhooks
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          External services POST to a signed URL to fire
+          Signed URLs that invoke
           <router-link
             :to="`/functions/${fnName}`"
             class="text-white underline"
           >
             {{ fnName }}
           </router-link>
-          Set the secret here, configure it on the upstream service.
+          from external services.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -134,7 +134,7 @@
           v-if="!loading && !rows.length"
           class="px-6 py-12 text-center text-sm text-foreground-muted"
         >
-          No inbound triggers yet. Tap <strong>+ New trigger</strong> to mint one.
+          No inbound triggers yet.
         </li>
       </ul>
 
@@ -173,7 +173,7 @@
             <td class="px-4 py-3 font-medium text-white">
               <div class="flex flex-col">
                 <span>{{ row.name }}</span>
-                <span class="text-[10px] text-foreground-muted font-mono">{{ row.id }}</span>
+                <span class="text-xs text-foreground-muted font-mono">{{ row.id }}</span>
               </div>
             </td>
             <td class="px-4 py-3 font-mono text-xs text-foreground-muted hidden md:table-cell">
@@ -181,7 +181,7 @@
             </td>
             <td class="px-4 py-3 hidden sm:table-cell">
               <span
-                class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border bg-surface text-foreground-muted border-border font-mono"
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-surface text-foreground-muted border-border font-mono"
               >
                 {{ row.signature_format }}
               </span>
@@ -191,7 +191,7 @@
             </td>
             <td class="px-4 py-3 hidden md:table-cell">
               <span
-                class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border"
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs border"
                 :class="row.active
                   ? 'bg-success/10 text-success border-success/30'
                   : 'bg-surface text-foreground-muted border-border'"
@@ -224,7 +224,7 @@
               colspan="7"
               class="px-4 py-12 text-center text-foreground-muted text-sm"
             >
-              No inbound triggers yet. Click <strong>+ New trigger</strong> to mint one.
+              No inbound triggers yet.
             </td>
           </tr>
         </tbody>
@@ -234,7 +234,7 @@
     <!-- Create drawer -->
     <Drawer
       v-model="create.open"
-      title="New inbound webhook trigger"
+      title="New inbound trigger"
       width="560px"
     >
       <div class="p-5 space-y-5 text-sm">

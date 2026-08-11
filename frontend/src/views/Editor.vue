@@ -297,6 +297,7 @@
           <button
             class="p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors"
             :title="terminalOpen ? 'Collapse' : 'Expand'"
+            :aria-label="terminalOpen ? 'Collapse terminal' : 'Expand terminal'"
             @click="terminalOpen = !terminalOpen"
           >
             <ChevronDown
@@ -482,6 +483,7 @@
                     type="button"
                     class="text-foreground-muted hover:text-red-400 p-0.5 transition-colors"
                     title="Remove header"
+                    aria-label="Remove header"
                     @click="removeHeaderRow(idx)"
                   >
                     <X class="w-3 h-3" />
@@ -818,6 +820,7 @@
               <button
                 class="shrink-0 w-6 h-6 flex items-center justify-center rounded text-foreground-muted hover:text-red-400 hover:bg-surface transition-colors"
                 title="Remove route"
+                :aria-label="`Remove route ${r.path}`"
                 @click="removeRoute(r.path)"
               >
                 <X class="w-3 h-3" />
@@ -907,6 +910,7 @@
           <button
             class="shrink-0 w-7 h-7 flex items-center justify-center rounded text-foreground-muted hover:text-red-400 hover:bg-surface transition-colors"
             title="Remove"
+            :aria-label="`Remove environment variable ${pair.key || idx + 1}`"
             @click="removeEnvVar(idx)"
           >
             <X class="w-3.5 h-3.5" />
@@ -981,6 +985,7 @@
           <span class="text-foreground-muted font-mono">{{ sec.name }}</span>
           <button
             class="text-foreground-muted hover:text-red-400 transition-colors"
+            :aria-label="`Delete secret ${sec.name}`"
             @click="removeSecret(sec.id)"
           >
             <Trash2 class="w-3.5 h-3.5" />
@@ -1000,6 +1005,7 @@
           </div>
           <button
             class="text-foreground-muted hover:text-red-400 transition-colors"
+            :aria-label="`Remove pending secret ${sec.name}`"
             @click="removePendingSecret(idx)"
           >
             <Trash2 class="w-3.5 h-3.5" />
@@ -1155,6 +1161,7 @@
               type="button"
               class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors"
               title="Re-roll a fresh name"
+              aria-label="Generate another function name"
               @click="rerollName"
             >
               <Shuffle class="w-3.5 h-3.5" />

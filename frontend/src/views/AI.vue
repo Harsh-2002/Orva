@@ -38,7 +38,7 @@
         v-if="store.providersLoaded && !store.providers.length"
         class="flex shrink-0 items-center justify-between gap-3 border-b border-warning-ring bg-warning-tint px-4 py-2.5 text-xs text-warning-fg"
       >
-        <span>No AI provider configured. Add a provider API key to start chatting.</span>
+        <span>Add an AI provider to start chatting.</span>
         <Button
           size="xs"
           variant="secondary"

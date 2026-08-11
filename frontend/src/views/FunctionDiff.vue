@@ -8,7 +8,7 @@
           Compare versions
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Source diff between two past deployments of
+          Compare source and configuration for
           <router-link
             :to="`/functions/${fnName}`"
             class="text-white underline"
@@ -45,11 +45,15 @@
     <div class="pb-5 border-b border-border">
       <div class="grid gap-3 sm:gap-4 sm:grid-cols-[1fr_auto_1fr] items-end">
         <div class="space-y-1.5">
-          <label class="block text-[10px] font-bold uppercase tracking-label text-foreground-muted">
+          <label
+            for="diff-from"
+            class="block text-xs font-medium uppercase tracking-label text-foreground-muted"
+          >
             From
             <span class="ml-1 text-foreground-muted/60 normal-case font-medium tracking-normal">(older)</span>
           </label>
           <select
+            id="diff-from"
             :value="fromId"
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
             @change="updateRange({ from: $event.target.value })"
@@ -80,11 +84,15 @@
           <ArrowLeftRight class="w-4 h-4 rotate-90 sm:rotate-0 motion-reduce:transition-none transition-transform" />
         </button>
         <div class="space-y-1.5">
-          <label class="block text-[10px] font-bold uppercase tracking-label text-foreground-muted">
+          <label
+            for="diff-to"
+            class="block text-xs font-medium uppercase tracking-label text-foreground-muted"
+          >
             To
             <span class="ml-1 text-foreground-muted/60 normal-case font-medium tracking-normal">(newer)</span>
           </label>
           <select
+            id="diff-to"
             :value="toId"
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
             @change="updateRange({ to: $event.target.value })"

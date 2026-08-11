@@ -141,7 +141,7 @@ What this system rejects: the SaaS-marketing dashboard family (gradient hero pan
 - Deep violet-tinted dark surfaces; one muted purple accent carries identity.
 - Inter for prose, JetBrains Mono for any data the operator might compare digit-to-digit.
 - Standardised page heads: `text-xl semibold tracking-tight` over a one-line subhead in muted text, max-w-prose.
-- Hidden scrollbars by intent: nested overflow areas (modals, drawers, code blocks) feel calmer without 6px tracks in every region.
+- Thin, low-contrast scrollbars keep nested overflow discoverable without dominating the surface.
 - Status colour is semantic, never decorative. A pill that's amber means in-flight; an amber accent that means nothing is forbidden.
 - No copy uses em dashes. Periods, commas, colons, semicolons, parentheses. The voice is operator-spoken.
 
@@ -249,7 +249,7 @@ Filter pills on `Jobs.vue`, `Webhooks.vue`, `CronJobs.vue` status strips. Same c
 
 Two parallel conventions exist in the codebase; document both honestly.
 
-- **Page-Level Card** (used in `Dashboard.vue` for tiles, `Activity.vue` for stat strips, etc.): `bg-background border border-border rounded-lg p-5`. The page itself is `bg-surface`-shaped (via the layout shell), so cards are a step *down* into the deep background. Headline group uses `text-xs font-bold uppercase tracking-wider` followed by `text-[11px] text-foreground-muted` hint copy.
+- **Page-Level Card** (used in `Dashboard.vue` for tiles, `Activity.vue` for stat strips, etc.): `bg-background border border-border rounded-lg p-5`. The page itself is `bg-surface`-shaped (via the layout shell), so cards are a step *down* into the deep background. Use a semantic `h2` or `h3` at `text-sm font-semibold`; add hint copy only when the metric cannot explain itself.
 - **Component Card** (`components/common/Card.vue`): `bg-surface border border-border rounded-lg`, optional header/footer slots with `border-b/t border-border` dividers and a `bg-surface/50` footer tint. Hoverable variant adds `hover:border-foreground-muted`.
 
 **Padding scale:** `none / sm: p-4 / normal: px-6 py-4 / lg: p-8`. Dashboard tiles use `p-5` (20px) inline, which is the rhythm step between sm and normal — keep.
@@ -258,6 +258,7 @@ Two parallel conventions exist in the codebase; document both honestly.
 
 - **Style:** `bg-background border border-border rounded-md px-3 py-2 text-sm`. Sits one step deeper than the surface, so the eye reads "this is where you type".
 - **Label:** `text-xs font-medium text-foreground-muted uppercase tracking-wide` above the field. Required indicator is a single `*` in danger color.
+- **Association:** every label uses `for` with a stable input `id`; hint and error text are connected with `aria-describedby`, and errors set `aria-invalid`.
 - **Focus:** `focus:ring-1 focus:ring-white focus:border-white`. The ring is white, not primary — it's a "cursor's-here" marker, not an accent.
 - **Optional leading icon** (Lucide): `pl-9`, icon at `absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted`.
 - **Error:** error string in `text-xs text-danger` directly below the field.
@@ -277,7 +278,7 @@ The codebase has two: `Badge.vue` (semantic-token-driven, canonical) and `Status
 - **Width:** `w-64` mobile drawer, `lg:w-52` (208px) desktop inline.
 - **Background:** `bg-background border-r border-border`. Same as page; only the right border separates it.
 - **Brand block:** `h-16` with the Orva mark + wordmark in `font-mono` (yes, mono — the brand wears its operator's clothes).
-- **Items:** `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium`. Single-word labels, distinct icons by silhouette (Gauge, Boxes, CalendarClock, ListChecks, Activity, ListTree, Network, Fingerprint, Plug, Webhook, ShieldHalf, Settings, LibraryBig).
+- **Items:** Overview, Chat, and Functions stay visible. Lower-frequency routes are grouped under collapsible Automation, Observe, and Connect disclosures; Settings and Docs remain direct links. Rows use `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium` with distinct icons by silhouette.
 - **Active:** `bg-primary text-white shadow-lg shadow-purple-900/20`. Hover: `text-white bg-surface-hover`.
 - **Mobile:** the desktop sidebar transforms into an off-canvas drawer toggled from a `lg:hidden` top bar with a hamburger icon.
 
@@ -304,6 +305,7 @@ A side panel for inspector-style content (invocation request panel, activity row
 - **Do** reach for `bg-background border border-border` for cards-on-page and `bg-surface border border-border` for cards-on-deeper-surface. The system reads depth through borders + step shifts, not shadow.
 - **Do** add `aria-label` to every icon-only button (delete, refresh, close, filter chips). Lucide icons announce nothing on their own.
 - **Do** keep CTAs on roughly 5 to 10 percent of any screen. Most surfaces have one primary action; some have none.
+- **Do** keep the decision-ready state visible and place setup forms, implementation metadata, and advanced detail behind native disclosure controls.
 
 ### Don't
 
@@ -311,7 +313,7 @@ PRODUCT.md names five anti-references. Each is below as a Don't.
 
 - **Don't look like AWS Console.** No region selectors, no every-feature-on-screen surface, no low-density noise. Orva sits on one host; the UI should feel like one host. If a page wants a settings panel that lists ten unrelated knobs, push back: split it, or fold it into context where each knob lives.
 - **Don't fall into the generic SaaS dashboard template.** No big-number-small-label-with-gradient-accent hero metrics. The shared design law spells this out as the "hero-metric template" ban; PRODUCT.md repeats the rule. Surface metrics on bars, sparklines, and stacked-bar viz, not on template-shaped tiles.
-- **Don't lift Vercel / Railway / landing-page onboarding panels.** Diagonal gradient backgrounds, decorative blurred circles, three identical glassmorphic feature chips with icon + heading + short description. The `Onboarding.vue:4` panel is exactly this template today; replace it with a register native to Orva (live terminal output, real curl→response trace, an editor preview of a deployed function).
+- **Don't turn onboarding into a product demo.** No gradients, feature panels, terminal theatre, or secondary education beside the account-creation task.
 - **Don't apply cloud-vendor branding.** No clouds, no sky gradients, no "scale instantly" copy, no planet-scale rhetoric. Orva runs on one box you can touch.
 - **Don't read as an AI-generated control plane.** The codebase already uses violet on near-black, so the discipline that keeps it from reading like that template comes from the rest of these rules. Specifically: no glowing borders, no gradient text, no animated mesh backgrounds, no decorative blurs.
 

@@ -12,10 +12,7 @@
     </div>
 
     <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-      System events fan out to operator-configured URLs. Subscriptions are
-      global. Payloads are HMAC-SHA256 signed (header
-      <code class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface border border-border text-white">X-Orva-Signature</code>);
-      the receiver verifies with the secret you copy at create time.
+      Send signed system events to external URLs.
     </p>
 
     <!-- Subscriptions table -->
@@ -53,7 +50,7 @@
             <td class="px-4 py-3 font-medium text-white">
               <div class="flex flex-col">
                 <span>{{ sub.name }}</span>
-                <span class="text-[10px] text-foreground-muted font-mono">{{ sub.id }}</span>
+                <span class="text-xs text-foreground-muted font-mono">{{ sub.id }}</span>
               </div>
             </td>
             <td class="px-4 py-3 text-xs text-foreground-muted truncate max-w-xs hidden md:table-cell">
@@ -64,13 +61,13 @@
                 <span
                   v-for="ev in eventsBadgeList(sub)"
                   :key="ev"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-surface border border-border text-foreground font-mono"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-surface border border-border text-foreground font-mono"
                 >{{ ev }}</span>
               </div>
             </td>
             <td class="px-4 py-3">
               <span
-                class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium border"
+                class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border"
                 :class="statusPill(sub)"
               >
                 <span
@@ -112,12 +109,11 @@
               colspan="6"
               class="px-4 py-12 text-center"
             >
-              <Webhook class="w-10 h-10 text-foreground-muted mx-auto mb-3 opacity-30" />
               <p class="text-foreground-muted text-sm">
                 No webhooks yet.
               </p>
               <p class="text-foreground-muted text-xs mt-1">
-                Wire ops integrations: Slack on deploy failures, PagerDuty on cron failures, etc.
+                Add an endpoint to receive signed system events.
               </p>
             </td>
           </tr>
@@ -151,7 +147,7 @@
             placeholder="https://hooks.slack.com/services/..."
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
-          <p class="text-[11px] text-foreground-muted mt-1.5">
+          <p class="text-xs text-foreground-muted mt-1.5">
             The receiver must respond 2xx within 15s. Failed deliveries retry up to 5× with exponential backoff.
           </p>
         </div>
@@ -170,7 +166,7 @@
               {{ ev.value }}
             </Button>
           </div>
-          <p class="text-[11px] text-foreground-muted mt-1.5">
+          <p class="text-xs text-foreground-muted mt-1.5">
             Pick <code class="font-mono">*</code> to receive every event. Each badge above is one of the 8 system events that can fire today.
           </p>
         </div>
@@ -198,7 +194,7 @@
           <span class="text-sm font-medium">Webhook created</span>
         </div>
         <p class="text-xs text-foreground-muted">
-          Copy this secret <span class="text-foreground font-medium">now</span> — it won't be shown again. The receiver uses it to verify HMAC signatures.
+          Copy this secret <span class="text-foreground font-medium">now</span>. It won't be shown again.
         </p>
         <div class="bg-background border border-border rounded p-3 font-mono text-xs break-all flex items-center gap-2">
           <code class="flex-1 text-foreground">{{ mintedSecret }}</code>
@@ -246,7 +242,7 @@
             <h2 class="text-base font-semibold text-foreground truncate">
               Deliveries · {{ drawerSub.name }}
             </h2>
-            <p class="text-[11px] text-foreground-muted font-mono truncate">
+            <p class="text-xs text-foreground-muted font-mono truncate">
               {{ drawerSub.id }}
             </p>
           </div>
@@ -273,23 +269,23 @@
             <div class="flex items-center justify-between gap-2 flex-wrap">
               <code class="text-xs font-mono text-foreground">{{ d.event_name }}</code>
               <span
-                class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border"
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border"
                 :class="deliveryPill(d.status)"
               >
                 {{ d.status }}
               </span>
             </div>
-            <div class="flex items-center justify-between text-[11px] text-foreground-muted gap-2 flex-wrap">
+            <div class="flex items-center justify-between text-xs text-foreground-muted gap-2 flex-wrap">
               <span class="font-mono">{{ d.id }}</span>
               <span>{{ formatDate(d.created_at) }}</span>
             </div>
-            <div class="flex items-center justify-between text-[11px] text-foreground-muted gap-2 flex-wrap">
+            <div class="flex items-center justify-between text-xs text-foreground-muted gap-2 flex-wrap">
               <span>attempts {{ d.attempts }} / {{ d.max_attempts }}</span>
               <span v-if="d.response_status">HTTP {{ d.response_status }}</span>
             </div>
             <p
               v-if="d.last_error"
-              class="text-[11px] text-danger-fg truncate"
+              class="text-xs text-danger-fg truncate"
               :title="d.last_error"
             >
               {{ d.last_error }}
@@ -316,7 +312,7 @@ defineOptions({ name: 'WebhooksView' })
 import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import {
-  Plus, Edit, Trash2, X, Webhook, CheckCircle, Copy, Check, Zap, RotateCcw,
+  Plus, Edit, Trash2, X, CheckCircle, Copy, Check, Zap, RotateCcw,
 } from '@lucide/vue'
 import {
   listWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook,

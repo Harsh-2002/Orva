@@ -5,8 +5,7 @@
         Activity
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-        Live feed of every API call hitting Orva: UI clicks, REST/SDK,
-        MCP tools, webhook deliveries.
+        Every API and MCP request.
       </p>
     </div>
 
@@ -115,8 +114,7 @@
           v-if="!rows.length"
           class="px-6 py-12 text-center text-sm text-foreground-muted"
         >
-          No activity yet. Drive any action (open the dashboard,
-          call a function, fire an MCP tool) and rows will land here.
+          Requests and tool calls appear here.
         </li>
       </ul>
 
@@ -201,8 +199,7 @@
               colspan="8"
               class="px-4 py-12 text-center text-foreground-muted text-sm"
             >
-              No activity yet. Drive any action (open the dashboard,
-              call a function, fire an MCP tool) and rows will land here.
+              Requests and tool calls appear here.
             </td>
           </tr>
         </tbody>

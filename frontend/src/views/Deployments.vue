@@ -21,7 +21,7 @@
           @click="$router.push(`/functions/${fnName}`)"
         >
           <UploadCloud class="w-4 h-4 mr-2" />
-          Deploy New Version
+          New version
         </Button>
         <Button
           variant="secondary"
@@ -39,11 +39,9 @@
     <!-- Active version banner -->
     <div
       v-if="activeFn"
-      class="bg-background border border-border rounded-lg p-4 flex items-center gap-4"
+      class="border-y border-border py-3 flex items-center gap-3"
     >
-      <div class="w-10 h-10 rounded-md bg-success/15 border border-success/30 flex items-center justify-center shrink-0">
-        <CheckCircle2 class="w-5 h-5 text-success" />
-      </div>
+      <CheckCircle2 class="w-4 h-4 text-success-fg shrink-0" />
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-sm text-white font-medium">Currently serving</span>
@@ -52,7 +50,7 @@
           </span>
           <span
             v-if="activeFn.status !== 'active'"
-            class="text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30"
+            class="text-xs px-2 py-0.5 rounded bg-warning-tint text-warning-fg border border-warning-ring"
           >
             status: {{ activeFn.status }}
           </span>
@@ -65,7 +63,8 @@
 
     <div
       v-if="error"
-      class="bg-red-950/30 border border-red-900/40 rounded p-3 text-xs text-red-300"
+      class="bg-danger-tint border border-danger-ring rounded p-3 text-xs text-danger-fg"
+      role="alert"
     >
       {{ error }}
     </div>
@@ -90,10 +89,10 @@
                 <StatusBadge :status="d.status" />
                 <span
                   v-if="isActive(d)"
-                  class="px-1.5 py-0.5 rounded text-[10px] bg-success/15 text-success border border-success/30"
+                  class="px-1.5 py-0.5 rounded text-xs bg-success-tint text-success-fg border border-success-ring"
                 >Active</span>
               </div>
-              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-foreground-muted">
                 <span>{{ formatTime(d.submitted_at) }}</span>
                 <span
                   v-if="d.duration_ms != null"
@@ -130,7 +129,7 @@
           v-if="!loading && deployments.length === 0"
           class="px-6 py-8 text-center text-sm text-foreground-muted"
         >
-          No deployments yet for this function.
+          No deployments yet.
         </li>
       </ul>
 
@@ -176,7 +175,7 @@
                 >v{{ d.version }}</span>
                 <span
                   v-if="isActive(d)"
-                  class="px-1.5 py-0.5 rounded text-[10px] bg-success/15 text-success border border-success/30 normal-case"
+                  class="px-1.5 py-0.5 rounded text-xs bg-success-tint text-success-fg border border-success-ring normal-case"
                 >Active</span>
               </div>
             </td>
@@ -233,7 +232,7 @@
               colspan="7"
               class="px-6 py-8 text-center text-foreground-muted"
             >
-              No deployments yet for this function.
+              No deployments yet.
             </td>
           </tr>
         </tbody>
@@ -289,7 +288,7 @@
           <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
             Error
           </h3>
-          <pre class="bg-red-950/30 border border-red-900/40 rounded p-3 text-xs text-red-300 font-mono whitespace-pre-wrap break-words">{{ selected.error_message }}</pre>
+          <pre class="bg-danger-tint border border-danger-ring rounded p-3 text-xs text-danger-fg font-mono whitespace-pre-wrap break-words">{{ selected.error_message }}</pre>
         </div>
 
         <div>
@@ -299,7 +298,7 @@
             </h3>
             <span
               v-if="streamConnected"
-              class="text-[10px] text-green-400"
+              class="text-xs text-success-fg"
             >live</span>
           </div>
           <pre
@@ -381,7 +380,7 @@ const rollbackTo = async (d) => {
     if (snap && activeFn.value) {
       const lines = describeSnapshotDiff(activeFn.value, snap)
       if (lines.length) {
-        diffMessage = `Rolling back to v${d.version} (code ${shortHash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values — they aren't part of the rollback.`
+        diffMessage = `Rolling back to v${d.version} (code ${shortHash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
       } else {
         diffMessage = `Rolling back to v${d.version} (code ${shortHash}). Settings and env are already identical, so only the code changes.`
       }
@@ -447,7 +446,7 @@ const Stat = {
   setup(p) {
     return () =>
       h('div', { class: 'bg-surface border border-border rounded p-3' }, [
-        h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted mb-1' }, p.label),
+        h('div', { class: 'text-xs uppercase tracking-wider text-foreground-muted mb-1' }, p.label),
         h('div', { class: ['text-sm text-white', p.mono && 'font-mono text-xs'].filter(Boolean) }, String(p.value)),
       ])
   },

@@ -11,19 +11,19 @@
     <!-- Providers -->
     <section class="space-y-3">
       <div>
-        <h3 class="text-xs font-bold uppercase tracking-label text-foreground-muted">
+        <h3 class="text-sm font-semibold text-foreground">
           Providers
         </h3>
         <p class="text-xs text-foreground-muted mt-1.5 max-w-prose leading-snug">
-          Bring your own keys. Keys are encrypted at rest; models are listed live from each provider. Pick the provider + model inside the chat composer.
+          Keys are encrypted at rest. Choose the active model in Chat.
         </p>
       </div>
 
-      <div class="space-y-2">
+      <div class="divide-y divide-border border-y border-border">
         <div
           v-for="p in store.providers"
           :key="p.id"
-          class="rounded-md bg-surface border border-border"
+          class="py-1"
         >
           <div class="flex items-center gap-2 px-3 py-2">
             <span class="font-mono text-sm text-foreground">{{ p.provider }}</span>
@@ -32,7 +32,7 @@
               class="text-xs text-foreground-muted"
             >{{ p.label }}</span>
             <span
-              class="text-[10px] uppercase tracking-label rounded px-1.5 py-0.5"
+              class="text-xs uppercase tracking-label rounded px-1.5 py-0.5"
               :class="p.has_key ? 'bg-success-tint text-success-fg' : 'bg-surface-hover text-foreground-muted'"
             >{{ p.has_key ? 'key set' : 'no key' }}</span>
             <span class="flex-1" />
@@ -76,7 +76,7 @@
               <span
                 v-for="m in modelState(p.id).models"
                 :key="m.id"
-                class="text-[11px] font-mono text-foreground-muted bg-surface-hover rounded px-1.5 py-0.5"
+                class="text-xs font-mono text-foreground-muted bg-surface-hover rounded px-1.5 py-0.5"
               >{{ m.id }}</span>
             </div>
           </div>
@@ -91,64 +91,74 @@
     </section>
 
     <!-- Add / update provider -->
-    <section class="space-y-3 border-t border-border pt-5">
-      <h3 class="text-xs font-bold uppercase tracking-label text-foreground-muted">
+    <details class="group border-t border-border pt-4">
+      <summary class="flex cursor-pointer list-none items-center justify-between rounded-sm text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         Add provider
-      </h3>
-      <p class="text-xs text-foreground-muted -mt-0.5 max-w-prose leading-snug">
-        For any OpenAI-compatible endpoint (self-hosted, vLLM, Together, …) choose <span class="font-mono">openai</span> and set the Base URL.
-      </p>
-      <div>
-        <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide">Provider</label>
-        <select
-          v-model="form.provider"
-          class="mt-1.5 w-full bg-background border border-border rounded-md text-sm px-3 py-2 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
-        >
-          <option
-            v-for="opt in PROVIDERS"
-            :key="opt"
-            :value="opt"
+        <span
+          class="text-foreground-muted transition-transform group-open:rotate-45"
+          aria-hidden="true"
+        >+</span>
+      </summary>
+      <div class="mt-4 space-y-3">
+        <p class="text-xs text-foreground-muted max-w-prose leading-snug">
+          For compatible endpoints, choose <span class="font-mono">openai</span> and add the Base URL.
+        </p>
+        <div>
+          <label
+            for="ai-provider"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide"
+          >Provider</label>
+          <select
+            id="ai-provider"
+            v-model="form.provider"
+            class="mt-1.5 w-full bg-background border border-border rounded-md text-sm px-3 py-2 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
-            {{ opt }}
-          </option>
-        </select>
+            <option
+              v-for="opt in PROVIDERS"
+              :key="opt"
+              :value="opt"
+            >
+              {{ opt }}
+            </option>
+          </select>
+        </div>
+        <Input
+          v-model="form.label"
+          label="Label"
+          placeholder="e.g. personal, work (optional)"
+        />
+        <Input
+          v-model="form.base_url"
+          :label="baseURLRequired ? 'Base URL (required)' : 'Base URL (optional)'"
+          :placeholder="baseURLPlaceholder"
+          :hint="baseURLHint"
+          :error="baseURLError"
+          :required="baseURLRequired"
+        />
+        <Input
+          v-model="form.api_key"
+          label="API key"
+          type="password"
+          placeholder="sk-…"
+          hint="Stored encrypted; never shown again. Leave blank when updating to keep the current key."
+        />
+        <Button
+          variant="primary"
+          :loading="savingProvider"
+          :disabled="!providerFormValid"
+          @click="onSaveProvider"
+        >
+          Save provider
+        </Button>
       </div>
-      <Input
-        v-model="form.label"
-        label="Label"
-        placeholder="e.g. personal, work (optional)"
-      />
-      <Input
-        v-model="form.base_url"
-        :label="baseURLRequired ? 'Base URL (required)' : 'Base URL (optional)'"
-        :placeholder="baseURLPlaceholder"
-        :hint="baseURLHint"
-        :error="baseURLError"
-        :required="baseURLRequired"
-      />
-      <Input
-        v-model="form.api_key"
-        label="API key"
-        type="password"
-        placeholder="sk-…"
-        hint="Stored encrypted; never shown again. Leave blank when updating to keep the current key."
-      />
-      <Button
-        variant="primary"
-        :loading="savingProvider"
-        :disabled="!providerFormValid"
-        @click="onSaveProvider"
-      >
-        Save provider
-      </Button>
-    </section>
+    </details>
 
     <!-- Defaults -->
     <section
       v-if="store.settings"
       class="space-y-3 border-t border-border pt-5"
     >
-      <h3 class="text-xs font-bold uppercase tracking-label text-foreground-muted">
+      <h3 class="text-sm font-semibold text-foreground">
         Defaults
       </h3>
       <fieldset class="space-y-2">
@@ -156,15 +166,12 @@
           Approval policy
         </legend>
         <p class="text-xs text-foreground-muted leading-snug">
-          Reads always run on their own. This controls when the assistant pauses for your OK before it changes anything.
+          Choose when changes require confirmation.
         </p>
         <label
           v-for="opt in APPROVAL_OPTIONS"
           :key="opt.value"
-          class="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary"
-          :class="store.settings.approval_policy === opt.value
-            ? 'border-primary/50 bg-primary/10'
-            : 'border-border bg-background hover:bg-surface-hover'"
+          class="flex cursor-pointer items-start gap-3 px-1 py-2 transition-colors hover:bg-surface-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary"
         >
           <input
             v-model="store.settings.approval_policy"
@@ -192,7 +199,7 @@
         v-model="store.settings.max_tool_iterations"
         type="number"
         label="Tool steps per reply"
-        hint="The most tool calls the assistant may chain while answering one message before it stops and responds. Higher allows more complex multi-step tasks; 25 is a sensible default."
+        hint="Maximum tool calls in one reply."
       />
       <Button
         variant="primary"
@@ -235,17 +242,17 @@ const APPROVAL_OPTIONS = [
   {
     value: 'all_writes',
     label: 'Ask before changes (recommended)',
-    hint: 'The assistant asks first before it creates, updates, or deletes anything.',
+    hint: 'Confirm creates, updates, and deletes.',
   },
   {
     value: 'destructive_only',
     label: 'Ask before deletes only',
-    hint: 'Routine changes run on their own. Only destructive actions, like deleting, ask first.',
+    hint: 'Confirm deletes; run other changes automatically.',
   },
   {
     value: 'auto',
     label: 'Bypass: allow everything',
-    hint: 'Every action runs automatically with no prompts. Fastest, least safe.',
+    hint: 'Run every action without confirmation.',
   },
 ]
 

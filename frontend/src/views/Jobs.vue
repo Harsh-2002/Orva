@@ -7,7 +7,7 @@
           Jobs
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Background work queued via <code class="font-mono text-[11px]">jobs.enqueue()</code> from the SDK or the <code class="font-mono text-[11px]">enqueue_job</code> MCP tool. Workers pick them up at the configured concurrency, retry on failure with exponential backoff, and surface here with their full lifecycle.
+          Queued background work with automatic retries.
         </p>
       </div>
       <div class="flex items-center gap-2 text-xs text-foreground-muted">
@@ -221,13 +221,11 @@
           v-if="filteredJobs.length === 0"
           class="px-4 py-12 text-center"
         >
-          <Inbox class="w-10 h-10 text-foreground-muted mx-auto mb-3 opacity-60" />
           <p class="text-foreground-muted text-sm">
             {{ statusFilter === 'all' ? 'No jobs yet.' : `No ${statusFilter} jobs.` }}
           </p>
           <p class="text-foreground-muted text-xs mt-1">
-            Enqueue from inside a function with
-            <code class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface border border-border">orva.jobs.enqueue(name, payload)</code>.
+            Enqueue jobs from a function with <code class="font-mono text-xs">orva.jobs.enqueue()</code>.
           </p>
         </li>
       </ul>
@@ -319,13 +317,11 @@
               colspan="6"
               class="px-4 py-12 text-center"
             >
-              <Inbox class="w-10 h-10 text-foreground-muted mx-auto mb-3 opacity-60" />
               <p class="text-foreground-muted text-sm">
                 {{ statusFilter === 'all' ? 'No jobs yet.' : `No ${statusFilter} jobs.` }}
               </p>
               <p class="text-foreground-muted text-xs mt-1">
-                Enqueue from inside a function with
-                <code class="font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface border border-border">orva.jobs.enqueue(name, payload)</code>.
+                Enqueue jobs from a function with <code class="font-mono text-xs">orva.jobs.enqueue()</code>.
               </p>
             </td>
           </tr>
@@ -340,7 +336,7 @@ defineOptions({ name: 'JobsView' })
 
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { Trash2, RotateCcw, RefreshCcw, Inbox, Plus, CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
+import { Trash2, RotateCcw, RefreshCcw, Plus, CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
 import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import Button from '@/components/common/Button.vue'

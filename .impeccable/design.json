@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-05-04T00:00:00Z",
+  "generatedAt": "2026-08-11T07:32:00Z",
   "title": "Design System: Orva",
   "extensions": {
     "colorMeta": {
@@ -190,9 +190,9 @@
       "name": "Page Card",
       "kind": "card",
       "refersTo": "card",
-      "description": "Dashboard tile / panel. Sits one step deeper than the page surface to read as a content well.",
-      "html": "<section class=\"ds-card\"><div class=\"ds-card-caption\">Response time</div><div class=\"ds-card-hint\">How long calls take to come back. p99 is the worst-case 1-in-100.</div><div class=\"ds-card-value\">42 <span class=\"ds-card-unit\">ms</span></div></section>",
-      "css": ".ds-card { background: var(--color-background, #12111C); border: 1px solid var(--color-border, #2D2B42); border-radius: 8px; padding: 20px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; } .ds-card-caption { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #FFFFFF; } .ds-card-hint { margin-top: 4px; font-size: 0.6875rem; color: var(--color-foreground-muted, #A3A3B3); line-height: 1.55; } .ds-card-value { margin-top: 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.5rem; font-weight: 500; color: #FFFFFF; } .ds-card-unit { font-size: 0.875rem; color: var(--color-foreground-muted, #A3A3B3); margin-left: 4px; }"
+      "description": "Dashboard tile or panel. Shows decision-ready content first; optional context appears only when the metric is unfamiliar.",
+      "html": "<section class=\"ds-card\"><h2 class=\"ds-card-title\">Response time</h2><div class=\"ds-card-value\">42 <span class=\"ds-card-unit\">ms</span></div></section>",
+      "css": ".ds-card { background: var(--color-background, #12111C); border: 1px solid var(--color-border, #2D2B42); border-radius: 8px; padding: 20px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; } .ds-card-title { margin: 0; font-size: 0.875rem; font-weight: 600; color: #FFFFFF; } .ds-card-value { margin-top: 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.5rem; font-weight: 500; color: #FFFFFF; } .ds-card-unit { font-size: 0.875rem; color: var(--color-foreground-muted, #A3A3B3); margin-left: 4px; }"
     },
     {
       "name": "Text Input",
@@ -203,11 +203,11 @@
       "css": ".ds-input-wrap { display: flex; flex-direction: column; gap: 6px; } .ds-input-label { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-foreground-muted, #A3A3B3); } .ds-input { height: 36px; padding: 0 12px; background: var(--color-background, #12111C); color: #FFFFFF; border: 1px solid var(--color-border, #2D2B42); border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; outline: none; } .ds-input::placeholder { color: rgba(163,163,179,0.5); } .ds-input:focus { border-color: #FFFFFF; box-shadow: inset 0 0 0 1px #FFFFFF; }"
     },
     {
-      "name": "Sidebar Item (active)",
+      "name": "Sidebar Group and Active Item",
       "kind": "nav",
       "refersTo": "sidebar-item",
-      "description": "Currently-routed nav item in the dashboard sidebar. Anchors 'you are here' with hue-matched soft shadow.",
-      "html": "<a href=\"#\" class=\"ds-nav-item ds-nav-active\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"ds-nav-icon\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/><polyline points=\"3.27 6.96 12 12.01 20.73 6.96\"/><line x1=\"12\" y1=\"22.08\" x2=\"12\" y2=\"12\"/></svg><span>Functions</span></a>",
+      "description": "Primary routes stay visible; lower-frequency routes sit in collapsible groups. The current route remains visually anchored.",
+      "html": "<details class=\"ds-nav-group\" open><summary>Observe</summary><a href=\"#\" class=\"ds-nav-item ds-nav-active\">Activity</a><a href=\"#\" class=\"ds-nav-item\">Invocations</a></details>",
       "css": ".ds-nav-item { display: inline-flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: var(--color-foreground-muted, #A3A3B3); text-decoration: none; transition: color 150ms ease-out, background-color 150ms ease-out; } .ds-nav-item:hover { color: #FFFFFF; background: var(--color-surface-hover, #252438); } .ds-nav-icon { width: 16px; height: 16px; } .ds-nav-active { color: #FFFFFF; background: var(--color-primary, #553F83); box-shadow: 0 10px 15px -3px rgba(38,18,87,0.20); } .ds-nav-active:hover { color: #FFFFFF; background: var(--color-primary, #553F83); }"
     }
   ],
@@ -218,7 +218,7 @@
       "Deep violet-tinted dark surfaces; one muted purple accent carries identity.",
       "Inter for prose, JetBrains Mono for any data the operator might compare digit-to-digit.",
       "Standardised page heads: text-xl semibold tracking-tight over a one-line subhead in muted text, max-w-prose.",
-      "Hidden scrollbars by intent: nested overflow areas (modals, drawers, code blocks) feel calmer without 6px tracks in every region.",
+      "Thin, low-contrast scrollbars keep nested overflow discoverable without dominating the surface.",
       "Status colour is semantic, never decorative.",
       "No copy uses em dashes."
     ],
@@ -230,7 +230,8 @@
       { "name": "The No-Em-Dash Rule",         "section": "typography", "body": "Em dashes are forbidden in any user-facing string. Use periods, commas, colons, semicolons, or parentheses." },
       { "name": "The Heading Hierarchy Rule",  "section": "typography", "body": "Every page has exactly one H1 (the standardised page header). Section captions inside the page must be real H2 / H3 in markup, even when styled as small uppercase tracked labels." },
       { "name": "The Flat-By-Default Rule",    "section": "elevation",  "body": "Cards, list items, drawers, and inline panels carry no shadow at rest. Depth is read from borders and the background -> surface -> surface-hover ladder." },
-      { "name": "The Earned Blur Rule",        "section": "elevation",  "body": "backdrop-blur exists only on the dimmed background that sits behind a modal or drawer. It is not decoration." }
+      { "name": "The Earned Blur Rule",        "section": "elevation",  "body": "backdrop-blur exists only on the dimmed background that sits behind a modal or drawer. It is not decoration." },
+      { "name": "The Progressive Disclosure Rule", "section": "components", "body": "Keep decision-ready state visible. Place setup forms, implementation metadata, and advanced detail behind native disclosure controls." }
     ],
     "dos": [
       "Do keep page heads to one line above one body subhead, both standardised: text-xl font-semibold text-white tracking-tight over text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed.",
@@ -239,7 +240,8 @@
       "Do promote section captions inside cards to real h2 / h3 while keeping the text-xs font-bold uppercase tracking-wider styling.",
       "Do reach for bg-background border border-border for cards-on-page and bg-surface border border-border for cards-on-deeper-surface.",
       "Do add aria-label to every icon-only button.",
-      "Do keep CTAs on roughly 5 to 10 percent of any screen."
+      "Do keep CTAs on roughly 5 to 10 percent of any screen.",
+      "Do keep the decision-ready state visible and disclose setup forms, implementation metadata, and advanced detail on demand."
     ],
     "donts": [
       "Don't use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses.",
@@ -253,6 +255,7 @@
       "Don't style section captions as divs and skip the heading.",
       "Don't introduce border-left-N or border-right-N colored stripes on cards, list items, or alerts.",
       "Don't animate layout properties. Transforms and opacity only.",
+      "Don't turn onboarding into a product demo or place decorative terminal output beside account creation.",
       "Don't ease with bounce or elastic. Exponential ease-out only."
     ]
   }
