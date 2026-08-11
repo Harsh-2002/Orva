@@ -1,0 +1,21 @@
+also you need to rework on warp pool cards - the better UX is smart and saves you multiple clicks to see infrkmaton and remove unwanted infromation right ? human are not dumbs so understand psychology of UX.
+
+---
+
+run the latest build from compleing on thsi node ?
+
+---
+
+Need to understand one philosophy, right? A better UX is smart and it saves you multiple clicks, right? If you if you're showing a user to see information, it has to do multiple clicks. That is a frustrating thing, right? Especially for the developers.
+
+---
+
+the UI is consinstent and UX acrss all sections
+
+---
+
+the UI is consinstent and UX acrss all sections an yiu aduit in once final time ?
+
+---
+
+one more thign in seeting whn i set provider i can also choose model in setting as well also funnzy search of model inshdie hcat does not work so you need to work on that as well modell funnzy search on the list.
