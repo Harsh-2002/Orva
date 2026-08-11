@@ -1,5 +1,5 @@
 <template>
-  <div class="mx-auto max-w-5xl space-y-8">
+  <div class="space-y-8">
     <div>
       <h1 class="text-xl font-semibold text-white tracking-tight">
         Settings
