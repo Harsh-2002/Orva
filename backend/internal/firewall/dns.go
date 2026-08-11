@@ -55,7 +55,12 @@ func LoadDNSConfig(db dbReader) DNSConfig {
 	if raw != "" {
 		for _, s := range strings.Split(raw, ",") {
 			s = strings.TrimSpace(s)
-			if s != "" && net.ParseIP(s) != nil {
+			// Older versions accepted unspecified and v4-mapped resolver
+			// addresses. Do not render those into a sandbox's resolv.conf: an
+			// unspecified resolver is unusable, and the policy compiler refuses
+			// to create the corresponding allow rule. Filtering here lets a
+			// legacy bad value safely fall back to the defaults below.
+			if s != "" && net.ParseIP(s) != nil && ValidateTarget(s) == nil {
 				servers = append(servers, s)
 			}
 		}

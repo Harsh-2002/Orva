@@ -511,6 +511,16 @@ def main():
                       {"rule_type": "wildcard", "value": "not-a-wildcard.com"},
                       expect=range(200, 599))
         check("malformed wildcard rejected (4xx)", 400 <= bc < 500, f"status {bc}")
+        for label, rule_type, value in (
+                ("unspecified IPv4 CIDR", "cidr", "0.0.0.0/0"),
+                ("unspecified IPv6 CIDR", "cidr", "::/0"),
+                ("over-wide IPv4 CIDR", "cidr", "10.0.0.0/64"),
+                ("literal IP typed as hostname", "hostname", "0.0.0.0"),
+        ):
+            invalid = c.status("POST", "/api/v1/firewall/rules",
+                               {"rule_type": rule_type, "value": value})
+            check(f"{label} rejected (4xx)", 400 <= invalid < 500,
+                  f"status {invalid}")
         dup, _ = c.req("POST", "/api/v1/firewall/rules",
                        {"rule_type": "hostname", "value": HOST_VALUE}, expect=range(200, 599))
         check("duplicate value rejected (409)", dup == 409, f"status {dup}")
@@ -570,6 +580,11 @@ def main():
         section("DNS put validation")
         ivc = c.status("PUT", "/api/v1/firewall/dns", {"servers": ["not-an-ip"], "search": ""})
         check("non-IP resolver rejected (4xx)", 400 <= ivc < 500, f"status {ivc}")
+        for resolver in ("0.0.0.0", "::", "::ffff:192.0.2.1"):
+            urc = c.status("PUT", "/api/v1/firewall/dns",
+                           {"servers": [resolver], "search": ""})
+            check(f"unusable resolver {resolver} rejected (4xx)", 400 <= urc < 500,
+                  f"status {urc}")
         irc = c.status("PUT", "/api/v1/firewall/dns",
                        {"servers": [], "search": "", "records": [{"host": "db", "ip": "bogus"}]})
         check("bad record IP rejected (4xx)", 400 <= irc < 500, f"status {irc}")
