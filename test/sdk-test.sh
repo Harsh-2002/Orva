@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sdk-test.sh — end-to-end verification of the v0.6 runtime SDK surface.
+# sdk-test.sh — end-to-end verification of the v0.7 runtime SDK surface.
 #
 # Deploys one Python and one Node function whose handlers exercise the
 # new primitives (kv.incr, kv.cas, kv.list cursor, jobs idempotency,
@@ -26,7 +26,30 @@ CURL=(curl -sf -H "X-Orva-API-Key: $KEY")
 
 PASS=0
 FAIL=0
-trap 'echo; echo "sdk-test: PASS=$PASS FAIL=$FAIL"; [ "$FAIL" -eq 0 ]' EXIT
+noop_id=""
+py_id=""
+node_id=""
+
+finish() {
+    local status=$?
+    trap - EXIT
+    if [ "${SDK_TEST_KEEP_RESOURCES:-0}" = "1" ]; then
+        echo "sdk-test: keeping resources py=$py_id node=$node_id noop=$noop_id"
+    else
+        for id in "$py_id" "$node_id" "$noop_id"; do
+            if [ -n "$id" ]; then
+                "${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$id" > /dev/null 2>&1 || true
+            fi
+        done
+    fi
+    echo
+    echo "sdk-test: PASS=$PASS FAIL=$FAIL"
+    if [ "$FAIL" -ne 0 ]; then
+        exit 1
+    fi
+    exit "$status"
+}
+trap finish EXIT
 
 assert_eq() {
     local label="$1" want="$2" got="$3"
@@ -93,7 +116,7 @@ fi
 PY_FN="sdk-test-py-$$"
 PY_SRC=$(cat <<'EOF'
 import json
-from orva import kv, log, trace
+from orva import kv, log, trace, jobs, crons, invoke, invoke_stream, OrvaError
 
 def handler(event):
     log.info("py handler start", fields={"path": event.get("path","/")})
@@ -110,8 +133,36 @@ def handler(event):
     with trace.span("cas"):
         ok = kv.cas("sdk:cas-value", "v0", "v1")
 
+    kv.put("sdk:ttl", {"step": 1}, ttl_seconds=3600)
+    ttl_before = kv.list(prefix="sdk:ttl")["keys"][0]["expires_at"]
+    kv.put("sdk:ttl", {"step": 2})
+    ttl_preserved = kv.list(prefix="sdk:ttl")["keys"][0]["expires_at"] == ttl_before
+    kv.put("sdk:ttl", {"step": 3}, ttl_seconds=0)
+    ttl_cleared = "expires_at" not in kv.list(prefix="sdk:ttl")["keys"][0]
+
+    try:
+        kv.put_many([
+            {"key": "sdk:batch-should-rollback", "value": 1},
+            {"key": "x" * 257, "value": 2},
+        ])
+        batch_failed = False
+    except OrvaError:
+        batch_failed = True
+    batch_atomic = kv.get("sdk:batch-should-rollback") is None
+
+    invoked = invoke("sdk-test-noop", {})["body"] == "ok"
+    streamed = b"".join(invoke_stream("sdk-test-noop", {})).decode("utf-8") == "ok"
+    job = jobs.enqueue("sdk-test-noop", {}, idempotency_key="py-sdk-auth", idempotency_window_seconds=60)
+    cron = crons.upsert("sdk-auth-test", "0 3 * * *", enabled=False)
+
     log.info("py handler done", fields={"final": b})
-    return {"statusCode": 200, "body": {"a": a, "b": b, "cas": ok}}
+    return {"statusCode": 200, "body": {
+        "a": a, "b": b, "cas": ok,
+        "ttlPreserved": ttl_preserved, "ttlCleared": ttl_cleared,
+        "batchFailed": batch_failed, "batchAtomic": batch_atomic,
+        "invoked": invoked, "streamed": streamed,
+        "job": bool(job["id"]), "cronScoped": cron["function_id"] == __import__("orva").context.function_id,
+    }}
 EOF
 )
 
@@ -126,26 +177,56 @@ py_deploy=$(jq -nc --arg src "$PY_SRC" '{code:$src,filename:"handler.py"}')
     -H "Content-Type: application/json" -d "$py_deploy" > /dev/null
 wait_active "$py_id"
 
-py_resp=$("${CURL[@]}" -X POST "$BASE/fn/$py_id" -H "Content-Type: application/json" -d '{}')
+py_resp=$(curl -sS -H "X-Orva-API-Key: $KEY" -X POST "$BASE/fn/$py_id" \
+    -H "Content-Type: application/json" -d '{}')
 py_body=$(echo "$py_resp" | head -c 4096)
 
 a=$(echo "$py_body" | jq -r '.a // empty')
 b=$(echo "$py_body" | jq -r '.b // empty')
 cas_ok=$(echo "$py_body" | jq -r '.cas // empty')
+py_ttl_preserved=$(echo "$py_body" | jq -r '.ttlPreserved // empty')
+py_ttl_cleared=$(echo "$py_body" | jq -r '.ttlCleared // empty')
+py_batch_failed=$(echo "$py_body" | jq -r '.batchFailed // empty')
+py_batch_atomic=$(echo "$py_body" | jq -r '.batchAtomic // empty')
+py_invoked=$(echo "$py_body" | jq -r '.invoked // empty')
+py_streamed=$(echo "$py_body" | jq -r '.streamed // empty')
+py_job=$(echo "$py_body" | jq -r '.job // empty')
+py_cron_scoped=$(echo "$py_body" | jq -r '.cronScoped // empty')
+
+if [ -z "$a" ]; then
+    echo "diag python response: $py_body"
+fi
 
 assert_eq "python kv.incr first call returns 7"  "7" "$a"
 assert_eq "python kv.incr second call returns 5" "5" "$b"
 assert_eq "python kv.cas succeeds on match"      "true" "$cas_ok"
+assert_eq "python omitted TTL preserves expiry"  "true" "$py_ttl_preserved"
+assert_eq "python explicit zero clears expiry"   "true" "$py_ttl_cleared"
+assert_eq "python invalid batch throws"           "true" "$py_batch_failed"
+assert_eq "python failed batch writes nothing"    "true" "$py_batch_atomic"
+assert_eq "python scoped invoke succeeds"          "true" "$py_invoked"
+assert_eq "python scoped stream invoke succeeds"   "true" "$py_streamed"
+assert_eq "python scoped job enqueue succeeds"     "true" "$py_job"
+assert_eq "python cron stays in caller scope"      "true" "$py_cron_scoped"
 
-# Fetch the most recent execution for this function to peek at trace/logs.
-py_exec=$("${CURL[@]}" "$BASE/api/v1/executions?function_id=$py_id&limit=1" | jq -r '.executions[0]')
-py_trace_id=$(echo "$py_exec" | jq -r '.trace_id // empty')
+# Execution finalization uses the bounded critical writer. Poll briefly for the
+# row instead of racing its next 50 ms flush on fast CI hosts.
+py_trace_id=""
+for _ in $(seq 1 30); do
+    py_trace_id=$("${CURL[@]}" "$BASE/api/v1/executions?function_id=$py_id&limit=1" \
+        | jq -r '.executions[0].trace_id // empty')
+    [ -n "$py_trace_id" ] && break
+    sleep 0.1
+done
 assert_nonempty "python execution trace_id propagated" "$py_trace_id"
 
 sleep 1.5  # async writer
-py_trace=$("${CURL[@]}" "$BASE/api/v1/traces/$py_trace_id")
-py_user_spans=$(echo "$py_trace" | jq -r '.user_spans | length')
-py_log_entries=$(echo "$py_trace" | jq -r '.log_entries | length')
+py_trace='{}'
+if [ -n "$py_trace_id" ]; then
+    py_trace=$("${CURL[@]}" "$BASE/api/v1/traces/$py_trace_id")
+fi
+py_user_spans=$(echo "$py_trace" | jq -r '(.user_spans // []) | length')
+py_log_entries=$(echo "$py_trace" | jq -r '(.log_entries // []) | length')
 
 # 3 user spans: setup, incr, cas
 [ "$py_user_spans" -ge 3 ] && {
@@ -169,7 +250,7 @@ py_log_entries=$(echo "$py_trace" | jq -r '.log_entries | length')
 
 NODE_FN="sdk-test-node-$$"
 NODE_SRC=$(cat <<'EOF'
-const { kv, jobs, log } = require('orva')
+const { kv, jobs, crons, invoke, invokeStream, context, log, OrvaError } = require('orva')
 
 exports.handler = async (event) => {
   log.info('node handler start')
@@ -191,6 +272,30 @@ exports.handler = async (event) => {
 
   const many = await kv.getMany(['b:1', 'b:3', 'b:9999'])
 
+  await kv.put('b:ttl', { step: 1 }, { ttlSeconds: 3600 })
+  const ttlBefore = (await kv.list({ prefix: 'b:ttl' })).keys[0].expires_at
+  await kv.put('b:ttl', { step: 2 })
+  const ttlPreserved = (await kv.list({ prefix: 'b:ttl' })).keys[0].expires_at === ttlBefore
+  await kv.put('b:ttl', { step: 3 }, { ttlSeconds: 0 })
+  const ttlCleared = !('expires_at' in (await kv.list({ prefix: 'b:ttl' })).keys[0])
+
+  let batchFailed = false
+  try {
+    await kv.putMany([
+      { key: 'b:batch-should-rollback', value: 1 },
+      { key: 'x'.repeat(257), value: 2 },
+    ])
+  } catch (error) {
+    if (!(error instanceof OrvaError)) throw error
+    batchFailed = true
+  }
+  const batchAtomic = (await kv.get('b:batch-should-rollback', null)) === null
+  const invoked = (await invoke('sdk-test-noop', {})).body === 'ok'
+  const streamChunks = []
+  for await (const chunk of invokeStream('sdk-test-noop', {})) streamChunks.push(chunk)
+  const streamed = Buffer.concat(streamChunks).toString('utf8') === 'ok'
+  const cron = await crons.upsert('sdk-auth-test', '0 3 * * *', { enabled: false })
+
   // Idempotent enqueue — same key twice should return the same job id.
   // Target the noop helper function the test script pre-deploys.
   const j1 = await jobs.enqueue('sdk-test-noop', {}, {
@@ -206,6 +311,8 @@ exports.handler = async (event) => {
   return { statusCode: 200, body: JSON.stringify({
     walked, many,
     sameJob: j1.id === j2.id, j2Replayed: j2.replayed,
+    ttlPreserved, ttlCleared, batchFailed, batchAtomic,
+    invoked, streamed, cronScoped: cron.function_id === context.functionId,
   }) }
 }
 EOF
@@ -229,7 +336,8 @@ wait_active "$node_id"
     "${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$node_id/kv/$k" > /dev/null
 done
 
-node_resp=$("${CURL[@]}" -X POST "$BASE/fn/$node_id" -H "Content-Type: application/json" -d '{}')
+node_resp=$(curl -sS -H "X-Orva-API-Key: $KEY" -X POST "$BASE/fn/$node_id" \
+    -H "Content-Type: application/json" -d '{}')
 node_body=$(echo "$node_resp" | head -c 4096)
 
 walked=$(echo "$node_body" | jq -r '.walked | length')
@@ -237,13 +345,29 @@ many_one=$(echo "$node_body" | jq -r '.many["b:1"]')
 many_missing=$(echo "$node_body" | jq -r '.many["b:9999"]')
 same=$(echo "$node_body" | jq -r '.sameJob')
 replayed=$(echo "$node_body" | jq -r '.j2Replayed')
+node_ttl_preserved=$(echo "$node_body" | jq -r '.ttlPreserved')
+node_ttl_cleared=$(echo "$node_body" | jq -r '.ttlCleared')
+node_batch_failed=$(echo "$node_body" | jq -r '.batchFailed')
+node_batch_atomic=$(echo "$node_body" | jq -r '.batchAtomic')
+node_invoked=$(echo "$node_body" | jq -r '.invoked')
+node_streamed=$(echo "$node_body" | jq -r '.streamed')
+node_cron_scoped=$(echo "$node_body" | jq -r '.cronScoped')
+
+if [ "$walked" = "null" ]; then
+    echo "diag node response: $node_body"
+fi
 
 assert_eq "node kv.list cursor walks all 6 keys"          "6"    "$walked"
 assert_eq "node kv.getMany returns value for present key" "1"    "$many_one"
 assert_eq "node kv.getMany returns null for missing key"  "null" "$many_missing"
 assert_eq "node jobs.enqueue idempotency returns same id" "true" "$same"
 assert_eq "node jobs.enqueue second call has replayed=t"  "true" "$replayed"
+assert_eq "node omitted TTL preserves expiry"              "true" "$node_ttl_preserved"
+assert_eq "node explicit zero clears expiry"               "true" "$node_ttl_cleared"
+assert_eq "node invalid batch throws"                       "true" "$node_batch_failed"
+assert_eq "node failed batch writes nothing"                "true" "$node_batch_atomic"
+assert_eq "node scoped invoke succeeds"                      "true" "$node_invoked"
+assert_eq "node scoped stream invoke succeeds"               "true" "$node_streamed"
+assert_eq "node cron stays in caller scope"                  "true" "$node_cron_scoped"
 
-# ── Cleanup ──
-"${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$py_id" > /dev/null
-"${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$node_id" > /dev/null
+exit 0

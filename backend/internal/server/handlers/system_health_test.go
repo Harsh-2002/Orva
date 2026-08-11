@@ -59,6 +59,10 @@ func TestHealthNsjailAbsentStays200(t *testing.T) {
 	if sb["runtime"] != "unavailable" {
 		t.Errorf("sandbox.runtime = %v, want unavailable", sb["runtime"])
 	}
+	writer, ok := body["writer"].(map[string]any)
+	if !ok || writer["status"] != "ok" {
+		t.Errorf("writer health missing or unhealthy: %v", body["writer"])
+	}
 }
 
 // TestHealthDBDownReturns503 confirms the hard gate at the handler level.

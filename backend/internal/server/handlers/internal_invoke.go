@@ -2,10 +2,8 @@ package handlers
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,6 +12,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
 	"github.com/Harsh-2002/Orva/internal/ids"
@@ -22,14 +21,14 @@ import (
 // InternalInvokeHandler is the F2F (function-to-function) entrypoint.
 // User code inside a sandbox calls orva.invoke("other-fn", payload); the
 // adapter POSTs here. We bypass the public auth layer (worker holds the
-// internal token) and the per-function rate limiter (loops are bounded
+// scoped SDK credential) and the per-function rate limiter (loops are bounded
 // by call depth, not request rate).
 type InternalInvokeHandler struct {
-	DB            *database.Database
-	Registry      *registry.Registry
-	Pool          *pool.Manager
-	Metrics       *metrics.Metrics
-	InternalToken string
+	DB       *database.Database
+	Registry *registry.Registry
+	Pool     *pool.Manager
+	Metrics  *metrics.Metrics
+	SDKAuth  *sdkauth.Authenticator
 
 	// MaxCallDepth caps how many invoke()s can be nested before the call
 	// chain is rejected. Without this, a function recursively invoking
@@ -45,12 +44,19 @@ const defaultMaxCallDepth = 8
 func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 
-	// Per-process internal token. Constant-time compare so timing leaks
-	// don't help an external attacker who somehow reached this endpoint.
-	got := r.Header.Get("X-Orva-Internal-Token")
-	if h.InternalToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) != 1 {
+	// The verified function claim supplies immutable caller attribution.
+	callerFnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+	if authErr != nil {
 		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid internal token", reqID)
+			"missing or invalid SDK credential", reqID)
+		return
+	}
+	callerTraceID, callerSpanID, _, callerActive := h.SDKAuth.TraceContext(
+		r.Header.Get("X-Orva-Execution-Id"), callerFnID,
+	)
+	if !callerActive {
+		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+			"SDK request is not associated with an active caller execution", reqID)
 		return
 	}
 
@@ -88,7 +94,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r.Body, 1<<20)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
@@ -106,13 +112,9 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	// caller was started). traceID may be empty for legacy calls; we
 	// generate a fresh root in that case so this F2F still produces a
 	// usable single-span trace. parentSpanID = caller's span = our parent.
-	traceID := r.Header.Get("X-Orva-Trace-Id")
-	parentSpanID := r.Header.Get("X-Orva-Span-Id")
-	if traceID == "" {
-		traceID = trace.NewTraceID()
-	}
+	traceID := callerTraceID
+	parentSpanID := callerSpanID
 	spanID := trace.NewSpanID()
-	callerFnID := r.Header.Get("X-Orva-Caller-Function")
 
 	acq, err := h.Pool.Acquire(ctx, fn.ID)
 	if err != nil {
@@ -127,6 +129,9 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	// log AND in the trace tree as a distinct span. Without this, F2F
 	// children would be invisible to ops tooling.
 	execID := ids.New()
+	start := time.Now()
+	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start)
+	defer releaseExecution()
 
 	// Synthesize the event in the same shape the public /fn/ handler
 	// builds so user code can't tell the difference (which is the point).
@@ -148,7 +153,6 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	start := time.Now()
 	respJSON, _, err := acq.Worker.Dispatch(ctx, eventJSON)
 	durationMS := time.Since(start).Milliseconds()
 	if err != nil {
@@ -228,10 +232,18 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 
-	got := r.Header.Get("X-Orva-Internal-Token")
-	if h.InternalToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) != 1 {
+	callerFnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+	if authErr != nil {
 		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid internal token", reqID)
+			"missing or invalid SDK credential", reqID)
+		return
+	}
+	callerTraceID, callerSpanID, _, callerActive := h.SDKAuth.TraceContext(
+		r.Header.Get("X-Orva-Execution-Id"), callerFnID,
+	)
+	if !callerActive {
+		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+			"SDK request is not associated with an active caller execution", reqID)
 		return
 	}
 
@@ -264,7 +276,7 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := readBoundedBody(r.Body, 1<<20)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
@@ -277,13 +289,9 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	traceID := r.Header.Get("X-Orva-Trace-Id")
-	parentSpanID := r.Header.Get("X-Orva-Span-Id")
-	if traceID == "" {
-		traceID = trace.NewTraceID()
-	}
+	traceID := callerTraceID
+	parentSpanID := callerSpanID
 	spanID := trace.NewSpanID()
-	callerFnID := r.Header.Get("X-Orva-Caller-Function")
 
 	acq, err := h.Pool.Acquire(ctx, fn.ID)
 	if err != nil {
@@ -295,6 +303,9 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	defer func() { h.Pool.Release(acq, reqErr) }()
 
 	execID := ids.New()
+	start := time.Now()
+	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start)
+	defer releaseExecution()
 	event := map[string]any{
 		"method": "POST",
 		"path":   "/",
@@ -312,7 +323,6 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	start := time.Now()
 	dres, err := acq.Worker.DispatchEx(ctx, eventJSON)
 	if err != nil {
 		reqErr = err

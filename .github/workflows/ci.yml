@@ -465,6 +465,8 @@ jobs:
           : > test/e2e/CHECKLIST.md
           ADMIN_KEY="$(cat "$RUNNER_TEMP/orva-data/.admin-key")"
           python3 test/e2e/run.py --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
+          ORVA_ENDPOINT=http://127.0.0.1:8443 ORVA_API_KEY="$ADMIN_KEY" \
+            bash test/sdk-test.sh
 
       - name: Stop Orva
         if: always()

@@ -82,7 +82,7 @@ Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.g
 
 `CORS → BodySizeLimit → Auth → RequestID → Logger → Handler`
 
-Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/`, `/metrics`, `/webhook/`, `/mcp`, custom routes) bypasses the API-key check entirely — per-function auth for invocations is enforced inside `InvokeHandler`. Internal SDK paths (`/api/v1/_kv/`, `/api/v1/_internal/`) use the per-process internal token instead of API keys.
+Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/`, `/metrics`, `/webhook/`, `/mcp`, custom routes) bypasses the API-key check entirely — per-function auth for invocations is enforced inside `InvokeHandler`. Internal SDK paths (`/api/v1/_kv/`, `/api/v1/_internal/`) use process-signed, function-scoped credentials instead of API keys.
 
 ## Database
 

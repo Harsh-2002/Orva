@@ -14,6 +14,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
 	"github.com/Harsh-2002/Orva/internal/ids"
@@ -30,6 +31,7 @@ type ReplayHandler struct {
 	Registry *registry.Registry
 	Pool     *pool.Manager
 	Metrics  *metrics.Metrics
+	SDKAuth  *sdkauth.Authenticator
 
 	// PublishEvent fans the new execution out to the SSE hub so the
 	// dashboard's InvocationsLog prepends the replay row without polling.
@@ -179,6 +181,8 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	}
 	eventJSON, _ := json.Marshal(event)
 
+	releaseExecution := h.SDKAuth.BindExecution(newExecID, fn.ID, traceID, spanID, start)
+	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	duration := time.Since(start)
 	if h.Metrics != nil {

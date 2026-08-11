@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/scheduler"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
@@ -19,9 +19,9 @@ import (
 // handler doesn't need a back-channel to notify it because the goroutine
 // re-queries every tick.
 type CronHandler struct {
-	DB            *database.Database
-	Registry      *registry.Registry
-	InternalToken string // accepted by UpsertInternal for SDK-driven crons.upsert
+	DB       *database.Database
+	Registry *registry.Registry
+	SDKAuth  *sdkauth.Authenticator
 }
 
 // cronRequest is the shape of POST/PUT bodies. Payload is optional and
@@ -233,8 +233,8 @@ func (h *CronHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 }
 
 // upsertInternalRequest carries the body for the SDK's crons.upsert call.
-// The function ID is derived from the caller's X-Orva-Function-Id header
-// (set by the proxy when the function was spawned) rather than the URL.
+// The function ID is derived from the verified scoped SDK credential rather
+// than a caller-controlled body or header.
 type upsertInternalRequest struct {
 	Name     string `json:"name"`
 	Schedule string `json:"schedule"`
@@ -245,25 +245,23 @@ type upsertInternalRequest struct {
 
 // UpsertInternal handles POST /api/v1/_internal/crons. SDK-only path
 // guarded by X-Orva-Internal-Token; the function being scheduled is the
-// caller's own function (read from X-Orva-Function-Id) so the SDK doesn't
-// need to know its own UUID.
+// signed caller's own function, so the SDK doesn't need to send its UUID.
 func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	got := r.Header.Get("X-Orva-Internal-Token")
-	if h.InternalToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) != 1 {
+	fnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+	if authErr != nil {
 		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid internal token", reqID)
-		return
-	}
-	fnID := r.Header.Get("X-Orva-Function-Id")
-	if fnID == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION",
-			"missing X-Orva-Function-Id header", reqID)
+			"missing or invalid SDK credential", reqID)
 		return
 	}
 
+	body, err := readBoundedBody(r.Body, 1<<20)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)
+		return
+	}
 	var req upsertInternalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}

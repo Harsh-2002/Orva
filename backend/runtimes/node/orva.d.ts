@@ -33,6 +33,7 @@ export interface KVPutEntry<T = unknown> {
 }
 
 export interface KVOptions {
+  /** Omit to preserve expiry, use 0 to clear it, or a positive value to set it. */
   ttlSeconds?: number
 }
 

@@ -21,8 +21,8 @@ type LogEntry struct {
 }
 
 // AsyncInsertLogEntry queues an insert into execution_log_entries. The
-// async writer batches these alongside execution finalization, keeping
-// log writes off the hot proxy path.
+// telemetry writer batches these on its own bounded, droppable queue, keeping
+// log writes off the hot proxy path without delaying critical execution rows.
 func (db *Database) AsyncInsertLogEntry(e *LogEntry) {
 	if e.TS.IsZero() {
 		e.TS = time.Now().UTC()
@@ -30,7 +30,7 @@ func (db *Database) AsyncInsertLogEntry(e *LogEntry) {
 	if e.Level == "" {
 		e.Level = "info"
 	}
-	db.AsyncExec(`
+	db.AsyncExecTelemetry(`
 		INSERT INTO execution_log_entries (execution_id, trace_id, span_id, ts,
 		                                   level, message, fields)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,

@@ -28,6 +28,22 @@ Orva is **not** designed to defend against:
 - Side-channel attacks (Spectre / Rowhammer / cache timing) — these are
   out of scope for any container-grade isolation
 
+## Sandbox SDK identity
+
+Each worker receives a process-signed SDK credential containing a token
+version and its immutable function ID. Orvad verifies the signature on KV,
+function invoke/streaming, job enqueue, cron upsert, and user-span requests;
+it never trusts `X-Orva-Caller-Function` for authorization or attribution.
+The signing key is random per process, so credentials copied from an old worker
+become invalid after restart.
+
+KV access is limited to the credential's function namespace, cron upsert can
+only change that function's schedules, and user spans can only attach to an
+active execution owned by that function. Functions may intentionally invoke or
+enqueue work for another function, but the caller recorded in traces and jobs
+always comes from the signed claim. The SDK credential cannot authenticate to
+operator APIs.
+
 ## What's between user code and the host
 
 ```

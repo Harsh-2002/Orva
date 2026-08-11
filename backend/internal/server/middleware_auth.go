@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 )
 
 // sessionCacheEntry is a short-TTL memo of a successful session lookup so
@@ -28,7 +28,7 @@ const sessionCacheTTL = 30 * time.Second
 // owned by the Router and shared so the keys handler can evict an entry the
 // instant a key is deleted — otherwise a revoked key would keep authenticating
 // until process restart (it is only otherwise dropped on expiry).
-func authMiddleware(db *database.Database, keyCache *sync.Map, internalToken string, next http.Handler) http.Handler {
+func authMiddleware(db *database.Database, keyCache *sync.Map, sdkAuth *sdkauth.Authenticator, next http.Handler) http.Handler {
 	var sessionCache sync.Map // token -> sessionCacheEntry
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,37 +50,39 @@ func authMiddleware(db *database.Database, keyCache *sync.Map, internalToken str
 			next.ServeHTTP(w, r)
 			return
 		}
-		// Internal SDK endpoints (KV / F2F invoke) authenticate via the
-		// per-process internal token, NOT API keys. Skip the API-key
-		// middleware here; the handlers themselves enforce the token. We
-		// still tag the actor as sdk so the activity log identifies the
-		// calling function (X-Orva-Caller-Function header is set by the
-		// SDK adapter for both KV and invoke paths).
+		// Internal SDK endpoints authenticate with a process-signed,
+		// function-scoped credential rather than an API key. The handlers
+		// enforce route-specific scope. Strip the legacy caller header: the
+		// verified claim is carried only in the request actor context, while
+		// each handler verifies the signed credential independently.
 		if strings.HasPrefix(r.URL.Path, "/api/v1/_kv/") ||
 			strings.HasPrefix(r.URL.Path, "/api/v1/_internal/") {
-			caller := r.Header.Get("X-Orva-Caller-Function")
-			actor := &Actor{Source: "sdk", Type: "internal_token", ID: caller, Label: caller}
+			caller, _ := sdkAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+			r.Header.Del("X-Orva-Caller-Function")
+			actor := &Actor{Source: "sdk", Type: "scoped_token", ID: caller, Label: caller}
 			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
 			return
 		}
-		// Worker SDK requests bearing the CORRECT internal token bypass the
+		// Worker SDK requests bearing a valid scoped credential bypass the
 		// public auth gate; this lets jobs.enqueue() from inside a sandbox
 		// share the /api/v1/jobs route with the dashboard. The token MUST
-		// match the per-process secret — a merely-present header is not
+		// verify against the process signing key — a merely-present header is not
 		// enough (a non-empty check would let any value skip authentication
 		// entirely, and the downstream handler trusts this middleware to
 		// have authenticated). On mismatch we do NOT short-circuit: fall
 		// through to normal session/API-key auth, so a stray header on a
 		// real request still authenticates and a bogus-token-only request
 		// gets a 401 like any other unauthenticated caller.
-		if got := r.Header.Get("X-Orva-Internal-Token"); got != "" &&
-			internalToken != "" &&
-			subtle.ConstantTimeCompare([]byte(got), []byte(internalToken)) == 1 {
-			caller := r.Header.Get("X-Orva-Caller-Function")
-			actor := &Actor{Source: "sdk", Type: "internal_token", ID: caller, Label: caller}
-			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
-			return
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/jobs" {
+			r.Header.Del("X-Orva-Caller-Function")
+			caller, err := sdkAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+			if err == nil {
+				actor := &Actor{Source: "sdk", Type: "scoped_token", ID: caller, Label: caller}
+				next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
+				return
+			}
 		}
+		r.Header.Del("X-Orva-Caller-Function")
 
 		// Try session cookie first (browser UI).
 		if cookie, err := r.Cookie("session_token"); err == nil {

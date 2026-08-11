@@ -4,6 +4,7 @@
 DB directly. Lifecycle: create fn -> put key -> get -> list -> validation ->
 delete -> confirm gone -> cleanup fn."""
 import sys
+import urllib.parse
 
 from harness import OrvaClient, section, check, summary
 
@@ -72,6 +73,36 @@ def main():
         # Each entry carries a computed size_bytes — domain-specific assertion.
         e1 = next((e for e in (entries or []) if e.get("key") == KEY), None)
         check("entry has size_bytes > 0", bool(e1) and isinstance(e1.get("size_bytes"), int) and e1["size_bytes"] > 0)
+
+        section("ttl semantics")
+        ttl_key = "e2e-ttl"
+        tc, _ = c.req("PUT", f"{base}/{ttl_key}", {"value": 1, "ttl_seconds": 3600}, expect=range(200, 599))
+        check("positive ttl accepted", tc == 200, f"status {tc}")
+        _, ttl_first = c.req("GET", f"{base}/{ttl_key}", expect=range(200, 599))
+        first_expiry = (ttl_first or {}).get("expires_at")
+        oc, _ = c.req("PUT", f"{base}/{ttl_key}", {"value": 2}, expect=range(200, 599))
+        _, ttl_preserved = c.req("GET", f"{base}/{ttl_key}", expect=range(200, 599))
+        check("omitted ttl preserves expiry", oc == 200 and first_expiry and
+              ttl_preserved.get("expires_at") == first_expiry, str(ttl_preserved)[:160])
+        zc, _ = c.req("PUT", f"{base}/{ttl_key}", {"value": 3, "ttl_seconds": 0}, expect=range(200, 599))
+        _, ttl_cleared = c.req("GET", f"{base}/{ttl_key}", expect=range(200, 599))
+        check("explicit zero clears expiry", zc == 200 and ttl_cleared.get("expires_at") is None,
+              str(ttl_cleared)[:160])
+        negc, _ = c.req("PUT", f"{base}/{ttl_key}", {"value": 4, "ttl_seconds": -1}, expect=range(200, 599))
+        check("negative ttl rejected", negc == 400, f"status {negc}")
+
+        section("documented boundaries")
+        key_256 = "k" * 256
+        key_257 = "k" * 257
+        kc, _ = c.req("PUT", f"{base}/{urllib.parse.quote(key_256)}", {"value": None}, expect=range(200, 599))
+        check("256-character key accepted", kc == 200, f"status {kc}")
+        koc, _ = c.req("PUT", f"{base}/{urllib.parse.quote(key_257)}", {"value": None}, expect=range(200, 599))
+        check("257-character key rejected", koc == 400, f"status {koc}")
+        exact_value = "v" * (64 * 1024 - 2)
+        ec, _ = c.req("PUT", f"{base}/exact-64k", {"value": exact_value}, expect=range(200, 599))
+        check("64 KiB JSON value accepted", ec == 200, f"status {ec}")
+        oc, _ = c.req("PUT", f"{base}/over-64k", {"value": exact_value + "x"}, expect=range(200, 599))
+        check("value over 64 KiB rejected", oc == 413, f"status {oc}")
 
         section("validation")
         # Missing required `value` field -> 400 VALIDATION.

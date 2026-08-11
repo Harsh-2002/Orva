@@ -5,7 +5,8 @@ deploy body-size-cap exemption (M4).
 H1: authMiddleware used to skip the API-key gate for ANY non-empty
 X-Orva-Internal-Token header, so a request with a garbage value reached the
 handlers with full operator power. It must now be rejected (401) — only the
-correct per-process token, which a test can't know, is accepted.
+correct function-scoped, process-signed credential, which a test can't know,
+is accepted.
 
 Mostly read-only; the M4 section creates one function and cleans it up."""
 import sys

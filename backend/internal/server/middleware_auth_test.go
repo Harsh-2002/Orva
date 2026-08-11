@@ -7,19 +7,17 @@ import (
 )
 
 // TestInternalTokenBypassClosed is the regression guard for the auth bypass:
-// authMiddleware must only skip the API-key gate for the CORRECT per-process
-// internal token. A merely-present (bogus) X-Orva-Internal-Token must NOT
+// authMiddleware must only skip the job enqueue gate for a verified scoped
+// SDK credential. A merely-present (bogus) X-Orva-Internal-Token must NOT
 // grant access — it has to fall through to normal session/API-key auth and
 // get a 401, exactly like an unauthenticated caller.
 //
-// Before the fix, `if r.Header.Get("X-Orva-Internal-Token") != ""` let any
-// non-empty value skip authentication entirely, so a request with a garbage
-// header reached the handlers with full operator power.
-func TestInternalTokenBypassClosed(t *testing.T) {
+// SDK credentials must never grant access to the broader operator API.
+func TestScopedSDKCredentialCannotBypassOperatorAuth(t *testing.T) {
 	tc := newTestServer(t)
-	real := tc.srv.router.internalToken
+	real := tc.srv.router.sdkAuth.Mint("function-a")
 	if real == "" {
-		t.Fatal("router.internalToken is empty; the middleware can never authenticate the SDK path")
+		t.Fatal("scoped SDK credential is empty")
 	}
 
 	// A protected admin-surface endpoint that the live exploit hit.
@@ -50,11 +48,11 @@ func TestInternalTokenBypassClosed(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "correct internal token is accepted (SDK path still works)",
+			name: "valid SDK credential cannot access operator APIs",
 			setup: func(r *http.Request) {
 				r.Header.Set("X-Orva-Internal-Token", real)
 			},
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name: "valid API key is accepted (normal path unaffected)",

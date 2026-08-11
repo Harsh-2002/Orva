@@ -62,12 +62,9 @@ type SandboxTemplate struct {
 	// RefreshForDeploy so the next spawn picks up the new values.
 	SecretsLookup func(fnID string) map[string]string
 
-	// InternalToken is a process-lifetime token injected into every worker
-	// as ORVA_INTERNAL_TOKEN. The adapter sends it as the auth header when
-	// calling the KV / F2F / jobs endpoints (Phases 3, 4, 5). Validated by
-	// the corresponding handlers; not exposed to user code that doesn't
-	// already have access to env vars.
-	InternalToken string
+	// SDKToken mints a process-scoped credential bound to the worker's
+	// function ID. User code can read it, but cannot alter the signed caller.
+	SDKToken func(functionID string) string
 
 	// APIBaseURL is the base URL the adapter uses when making outbound
 	// calls to Orva's own internal endpoints (KV / F2F / jobs).
@@ -730,8 +727,8 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			// KV / F2F / jobs endpoints. Empty when running outside the
 			// server (tests) so user code can probe presence to decide
 			// whether to fall back.
-			if m.tmpl.InternalToken != "" {
-				env["ORVA_INTERNAL_TOKEN"] = m.tmpl.InternalToken
+			if m.tmpl.SDKToken != nil {
+				env["ORVA_INTERNAL_TOKEN"] = m.tmpl.SDKToken(fn.ID)
 				env["ORVA_API_BASE"] = m.tmpl.APIBaseURL
 			}
 			// Resolve the egress policy for this spawn. Read off m (not the
@@ -761,14 +758,14 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				// Without this the warm-pool spawn passed MaxPids=0 →
 				// `--cgroup_pids_max 0` (fork-bomb cap disabled). Fall back to
 				// 32 (the historical sandbox.Execute default) if unset.
-				MaxPids:       maxPidsOr(tmpl.DefaultMaxPids, 32),
-				Env:           env,
+				MaxPids: maxPidsOr(tmpl.DefaultMaxPids, 32),
+				Env:     env,
 				SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp,
 					// Outbound network access needs the socket syscalls the base
 					// policies withhold; what it may reach is decided by the
 					// compiled egress policy, not by seccomp.
 					sandbox.SeccompAllowForNetworkMode(fn.NetworkMode), nil),
-				NetworkMode:   fn.NetworkMode,
+				NetworkMode: fn.NetworkMode,
 				// Operator-managed DNS for egress sandboxes; written by
 				// internal/firewall on every refresh tick. Bound at
 				// /etc/resolv.conf and /etc/hosts when present.

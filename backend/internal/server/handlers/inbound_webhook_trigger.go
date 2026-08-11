@@ -29,6 +29,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
 	"github.com/Harsh-2002/Orva/internal/ids"
@@ -47,6 +48,7 @@ type InboundTriggerHandler struct {
 	Registry *registry.Registry
 	Pool     *pool.Manager
 	Metrics  *metrics.Metrics
+	SDKAuth  *sdkauth.Authenticator
 
 	// PublishEvent fires an `event: execution` so the live UI sees
 	// inbound-triggered runs in the same feed as HTTP invokes. Wired in
@@ -183,6 +185,8 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	eventJSON, _ := json.Marshal(event)
 
+	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
+	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	durationMS := time.Since(startedAt).Milliseconds()
 	if err != nil {

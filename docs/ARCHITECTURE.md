@@ -301,7 +301,11 @@ SQLite access. No ORM — explicit queries, prepared statements where
 hot.
 
 - `migrations.go` — schema + idempotent ALTER loop
-- `async.go` — batched-flush writer for executions (50-job batches or 50ms tick)
+- `async.go` — bounded priority writer: critical execution writes apply
+  deadline-aware backpressure; droppable logs/spans/activity use a separate
+  telemetry queue with saturation counters. Both queues batch commits.
+- `kv.go` — validated, context-aware per-function JSON KV operations and
+  all-or-nothing batches; `kv_metrics.go` records operation latency/errors.
 - One file per resource: `functions.go`, `deployments.go`, `secrets.go`, etc.
 
 ### `backend/internal/proxy/`

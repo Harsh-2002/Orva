@@ -30,8 +30,8 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 # Umbrella suite — requires API_KEY set; writes run-all-results.tsv. Runs 11:
 # secrets, routes, heavy-deploy, onboarding, errors, rollback, egress, auth,
 # tracing, build-cache, atscale. (api-smoke / loadtest / ceiling / sdk-test are
-# run individually.) NOT a CI gate — ci.yml only shellchecks test/*.sh, it never
-# executes them. Several mutate the instance they run against (atscale.sh issues
+# run individually.) NOT a CI gate — ci.yml shellchecks test/*.sh and runs only
+# sdk-test.sh against its provisioned sandbox instance. Several mutate the instance they run against (atscale.sh issues
 # no DELETEs at all), so point BASE_URL at a scratch instance, not one you care
 # about. See docs/TESTING.md.
 ./test/run-all.sh

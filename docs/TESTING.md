@@ -778,9 +778,9 @@ Two things to know when wiring it up:
 ### 3.4 The shell suites
 
 Sixteen scripts under `test/`, all of which run against an **already-running**
-instance (only `loadtest.sh` starts its own, destructively). **None of them are
-executed by CI** — CI only `shellcheck`s them (`ci.yml:197-205`). A
-syntax/quoting regression *will* redden CI; a behavioral one will not.
+instance (only `loadtest.sh` starts its own, destructively). CI runs
+`sdk-test.sh` against the provisioned Node/Python sandbox in both source-E2E
+architecture legs; the remaining scripts are only `shellcheck`ed.
 
 Default `BASE_URL` is **18443**, so on any other port you must export it.
 
@@ -795,8 +795,7 @@ export API_KEY=$(cat /tmp/orva-scratch/.admin-key)
 > nothing. Three of them are not read-only. `atscale.sh` contains **zero
 > `DELETE` calls** and leaves 20 functions behind permanently — verify it
 > yourself in one second, `grep -c DELETE test/atscale.sh` → `0` — and it is a
-> **member of `run-all.sh`**, so the umbrella inherits that litter. `sdk-test.sh`
-> leaves `sdk-test-noop` by design. `egress-test.sh` mutates the **global**
+> **member of `run-all.sh`**, so the umbrella inherits that litter. `egress-test.sh` mutates the **global**
 > `egress_blocklist` mid-run and retires every warm egress pool on the instance.
 > If you only have a live instance, read the `run-all.sh` detail below before
 > running the umbrella at all.
@@ -815,7 +814,7 @@ All rows below were measured against a live instance:
 | `build-cache-test.sh` | per-function dep-cache lifecycle: cold build, warm rebuild, purge → 200, idempotent purge, purge refused for non-functions, deploy-after-purge | **6.5 s** (warm npm) | `build-cache: 10 passed, 0 failed` | yes |
 | `heavy-deploy-test.sh` | async build queue: POST returns <500 ms with a `deployment_id`, real pip build, SSE stream emits, garbage requirements → `failed` while the function stays `active` | **14.3 s** (warm pip) | `heavy-deploy-test  pass=12  fail=0` | yes, but writes a log file (§9) |
 | `tracing-test.sh` | http root span + `X-Trace-Id`, F2F parent linkage, W3C `traceparent` honored, replay = fresh trace, outlier + `baseline_p95_ms` | **10.2 s** | ANSI `✓`/`✗` then `PASS: 10` / `FAIL: 0` | yes — trap + pre-run sweep |
-| `sdk-test.sh` | Python `kv.incr`/`kv.cas`/`trace.span`/`log.info`; Node `kv.putMany`/cursor `kv.list`/`kv.getMany`/`jobs.enqueue` idempotency | **3.2 s** | `sdk-test: PASS=13 FAIL=0` | **no** — leaves `sdk-test-noop` by design |
+| `sdk-test.sh` | Scoped SDK auth plus Python/Node KV TTL and atomic batches, invoke/stream, jobs, cron, spans, and logs | CI-gated | `sdk-test: PASS=n FAIL=0` | yes |
 | `onboarding-flow.sh` | on a **virgin DB only**: onboard → session cookie → `/auth/me` → session auth → 409 re-onboard → refresh rotates → old token revoked → logout invalidates | **0.03 s** (skip path) · **0.28 s** for all 13 checks on a virgin DB | `skip  (users already exist…)` · on a virgin DB `onboarding-flow  pass=13  fail=0` | leaves its user |
 | `run-all.sh` | umbrella over 11 suites | **49.9 s** | `test/run-all-results.tsv`; exit 1 if any row is `fail` | inherits — **including `atscale.sh`'s 20 permanent functions** |
 | `atscale.sh` | **nothing is asserted** — deploys 20 fns and dumps metrics TSV | exit 2 without `hey` | none | **no — leaves 20 functions forever** |
@@ -833,12 +832,8 @@ never confirmed by execution.
 `onboarding-flow.sh` use `exit $FAIL` — **the exit code is the failure count.**
 Never compare to 1; compare to 0.
 
-**`sdk-test.sh`'s exit code is meaningless.** Its verdict lives in
-`trap 'echo …; [ "$FAIL" -eq 0 ]' EXIT`, and bash does not propagate an EXIT
-trap's last-command status to the script's exit code. Reproduced in isolation
-(`FAIL=1` in the trap → script exits 0) and in situ (`PASS=0 FAIL=15` exited
-**7**, the status of the last cleanup `curl`). Parse the
-`sdk-test: PASS=n FAIL=m` line instead.
+`sdk-test.sh` exits non-zero when any assertion fails and cleans up all three
+functions it creates, including its no-op invocation target.
 
 #### `run-all.sh` in detail
 
@@ -856,8 +851,8 @@ Runs, in order: `secrets`, `routes`, `heavy-deploy`, **`build-cache`**,
 `onboarding-flow`, `errors`, `rollback`, `egress`, `auth`, `tracing`,
 `atscale` — 11 suites. (`test/CLAUDE.md` and `docs/CONTRIBUTING.md` both omit
 `build-cache-test.sh` from that list.) Deliberately excluded: `api-smoke.sh`
-(pure overlap), `sdk-test.sh` (different env contract and an unreliable exit
-code), `loadtest.sh` (structurally incompatible — it kills whatever holds 8443
+(pure overlap), `sdk-test.sh` (different env contract and separately CI-gated),
+`loadtest.sh` (structurally incompatible — it kills whatever holds 8443
 and deletes `~/.orva/orva.db*`), `ceiling.sh` (needs two positional args the
 umbrella cannot supply).
 
@@ -937,7 +932,7 @@ functions on `localhost:3000`):
 
 ```bash
 ORVA_ENDPOINT=$BASE_URL ORVA_API_KEY=$API_KEY bash test/tracing-test.sh  # PASS: 10 / FAIL: 0
-ORVA_ENDPOINT=$BASE_URL ORVA_API_KEY=$API_KEY bash test/sdk-test.sh      # then delete sdk-test-noop
+ORVA_ENDPOINT=$BASE_URL ORVA_API_KEY=$API_KEY bash test/sdk-test.sh
 ```
 
 **`run-all.sh` cannot go green on a host without `hey`** — `atscale.sh` exits 2
@@ -957,7 +952,7 @@ Several suites use **fixed, non-unique resource names**, so concurrent runs on
 one instance collide and an interrupted run leaves squatters:
 `routes-test.sh` (`/webhooks/stripe`, `/customer/*`, `/restricted/post-only`),
 `errors-test.sh` (`/errs/method-only`), `tracing-test.sh`
-(`trace_chain_a/b/c`, `trace_outlier`), `sdk-test.sh` (`sdk-test-noop`),
+(`trace_chain_a/b/c`, `trace_outlier`),
 `atscale.sh` (`ascale-*`), and `egress-test.sh`'s firewall rule (`example.com`).
 Everything else uses `$$`.
 
@@ -1366,7 +1361,7 @@ exports.handler = async () => {
 };
 ```
 
-→ `{"ok":true,"counter":3,"roundtrip":{"n":3},"keys":["qa-counter","qa-last"],"sdk":"0.6.0"}`
+→ `{"ok":true,"counter":3,"roundtrip":{"n":3},"keys":["qa-counter","qa-last"],"sdk":"0.7.0"}`
 
 Operator view: `orva … kv list <fn>`, `orva … kv get <fn> qa-counter` (the `…`
 is the `--endpoint`/`--api-key` pair, as everywhere in this section), and
@@ -2111,6 +2106,7 @@ The only job that builds this branch and runs it against a real nsjail with
    unprivileged user namespaces)
 7. `: > test/e2e/CHECKLIST.md` — so a committed checklist can never impersonate
    diagnostics — then `run.py --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"`
+8. `sdk-test.sh` against that same instance, covering scoped Node/Python SDK calls
 
 The arch matrix exists because this is the only place the build jail's seccomp
 profile is compiled by **Kafel**, and aarch64's syscall table omits several
@@ -2137,7 +2133,7 @@ A regression in `env.py` is invisible to CI.
 | `go` vuln | `go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...` | a new advisory reddens CI with zero code change |
 | `ui` | `cd frontend && npm audit --audit-level=moderate && npm run lint && npm run build` | CI uses **`npm ci`** (lockfile-strict); `make ui` uses `npm install` and may rewrite the lockfile. `npm audit` is the classic green-locally-red-in-CI leg |
 | `docker` | `docker build -t orva:ci . && docker run -d -p 127.0.0.1:18443:8443 …` then poll health | CI uses `no-cache: true, pull: true`. Neither passes `--build-arg VERSION`, so both report `dev`/`unknown` — only `release.yml` stamps identity. The first 2–3 health curls fail with `Empty reply`; the 30× loop is required |
-| `e2e` | §1.2 | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` embeds the **committed** `ui_dist`, so the E2E job serves the committed UI snapshot |
+| `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` embeds the **committed** `ui_dist`, so the E2E job serves the committed UI snapshot |
 | `cli-unit` | `go vet ./cli/... ./internal/...` && `go test ./cli/commands/ -count=1` | CI adds `-v` |
 | `cli-cross-build` | `bash test/cli/build-matrix.sh && bash test/cli/command-tree.sh` | the qemu-aarch64 `--version` leg is a `warn`, never a failure, and is skipped without qemu |
 | `install-matrix` | `ORVA_BROWSER_LEG=0 bash test/install/run-distro.sh ubuntu24` | verified: exit 0, ~4 min, host port **19449** |
@@ -2146,7 +2142,7 @@ A regression in `env.py` is invisible to CI.
 
 ### 8.5 What CI never runs
 
-**Zero `test/*.sh` suites execute in CI.** They are `shellcheck`ed only. The
+**Only `test/sdk-test.sh` executes in CI.** The other shell suites are `shellcheck`ed only. The
 `docker image smoke` job does two inline `curl` calls — it does not call
 `api-smoke.sh`. Also never executed anywhere in CI:
 `test/install/matrix.sh`, `test/install/failure-modes.sh`,
@@ -2171,7 +2167,6 @@ it; fix rather than route around where you can.
 |---|---|
 | `test/loadtest.sh` | Broken **and** destructive. `fuser -k 8443/tcp` kills whatever holds 8443; `rm -f ~/.orva/orva.db*` destroys the default-datadir DB; `HEY=~/go/bin/hey` with no guard; `orva=./orva` points at a gitignored repo-root binary; and `grep -q "deployed"` can never match because the CLI prints `Deploy submitted (deployment …)`, so all 6 deploys report `✗ FAILED` even when they succeed. It reads no env vars, so it cannot be retargeted. **`[UNVERIFIED]` — deliberately never executed.** |
 | `test/atscale.sh` | Its header claims it asserts budget, isolation, and no-503; the file contains **no check or assert of any kind** and no verdict. It has **zero `DELETE` calls** and permanently leaves 20 functions (`ascale-node-1..10`, `ascale-py-1..10`) — and it is a member of `run-all.sh`, so the umbrella litters any instance it is pointed at. |
-| `test/sdk-test.sh` | Exit code is meaningless (§3.4). Also `[ "$x" -ge 2 ]` on a possibly-empty value emits a raw bash error instead of a clean fail. |
 | `test/tracing-test.sh` | Ignores `BASE_URL`/`API_KEY`, so `run-all.sh` cannot drive it (§3.4). Its header documents `T3: Job propagation` and `T4: Cron is a root trace`; **neither exists in the file** — it runs T1, T2, T5, T6, T7. Two docs repeat the fiction. |
 | `test/onboarding-flow.sh` | Reports `pass` while asserting nothing on any non-virgin instance — i.e. inside `run-all.sh`, always. Its 13 checks are real and all pass on a virgin DB (verified, §3.4), but it never deletes the user it creates, so it is single-shot even there. |
 | `test/install/failure-modes.sh` | Cannot pass. It does `jq -r '.[].name'` on `/api/v1/functions`, which returns an **object** `{"functions":[…],"total":N}` — jq errors, the marker check always fails, and it reports "marker function did not survive reinstall". Its sibling `uninstall-flow.sh` uses the correct `jq -r '.functions[]? .name'`. Its onboard call also posts `{"email":…}` where the API requires `username`. Nobody noticed because CI lints it and never runs it. |
@@ -2263,7 +2258,7 @@ carries both flags for that reason.
 | `bash test/build-cache-test.sh` | 6.5 s | `build-cache: 10 passed, 0 failed` |
 | `bash test/heavy-deploy-test.sh` | 14.3 s | `heavy-deploy-test  pass=12  fail=0` |
 | `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/tracing-test.sh` | 10.2 s | `PASS: 10` / `FAIL: 0` |
-| `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | 3.2 s | `sdk-test: PASS=13 FAIL=0` — **ignore the exit code**; delete `sdk-test-noop` after |
+| `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI-gated | `sdk-test: PASS=n FAIL=0`; non-zero on failure; self-cleaning |
 | `bash test/run-all.sh` | 49.9 s | `run-all-results.tsv`, no `fail` in column 2 — **scratch instance only**: its `atscale.sh` member leaves 20 functions behind wherever `BASE_URL` points (§3.4) |
 | `cd test/e2e && PYTHONPATH=. ORVA_URL=$B ORVA_API_KEY=$K python3 tests/test_system.py` | ~1 s | `RESULT pass=7 fail=0` |
 | `cd test/e2e && … ORVA_REQUIRE_SANDBOX=1 python3 tests/test_deploy_invoke.py` | ~30 s | `ALL PASSED — 31 checks` |
@@ -2288,7 +2283,6 @@ carries both flags for that reason.
 | `make clean` without `make embed` | deletes tracked `ui_dist/` and breaks the build |
 | trust `sandbox.runtime == "ok"` | it is a bare `os.Stat` |
 | trust a green `run.py` in isolated mode without `--rebuild` | the image may be months old |
-| trust `$?` from `sdk-test.sh` | it is the last cleanup curl's status |
 | compare `$?` to 1 for the `exit $FAIL` suites | the code is the failure *count* |
 | run any `orva` command without `--endpoint`/`--api-key` | it silently targets `~/.orva/config.yaml` — your real instance (§4) |
 | run `run-all.sh` (or `atscale.sh`) against an instance you care about | zero `DELETE` calls; 20 functions stay forever |

@@ -293,7 +293,7 @@ func installAdapter(rootfs, runtime string) error {
 	}
 	fmt.Printf("[ok] installed %s adapter at %s\n", runtime, dst)
 
-	// v0.6: the runtime SDK ships alongside the adapter. Without these
+	// The runtime SDK ships alongside the adapter. Without these
 	// files, `require('orva')` / `from orva import …` raise inside a
 	// sandbox. Python places orva.py + py.typed directly under
 	// /opt/orva/; Node places orva.js + orva.d.ts + package.json under

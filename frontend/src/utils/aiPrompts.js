@@ -64,17 +64,17 @@ Secrets are stored encrypted at rest, decrypted only into the worker environment
 </env_and_secrets>
 
 <orva_sdk>
-Every function has the \`orva\` module pre-imported — zero install, zero config. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with \`network_mode: "egress"\` (or updated to it later). With the default \`network_mode: "none"\`, every SDK call fails at runtime with \`ENETUNREACH\` / \`OrvaUnavailableError\` / \`TypeError: fetch failed\`. THREE primitives:
+Every function has the \`orva\` module pre-imported — zero install, zero config. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with \`network_mode: "egress"\` (or updated to it later). With the default \`network_mode: "none"\`, every SDK call fails at runtime with \`ENETUNREACH\` / \`OrvaUnavailableError\` / \`TypeError: fetch failed\`. Core primitives:
 
 ## orva.kv — per-function key/value store on SQLite
-Per-function namespace; keys never collide across functions. Optional TTL in seconds (sweep every 5 min AND filtered at read time, so stale reads are impossible). Values JSON-serialised; cap 64 KB per value. Keys cap 256 chars. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
+Per-function namespace enforced by a process-signed, function-scoped SDK credential; caller identity never comes from a request header. Keys never collide across functions. TTL is optional: omit it to preserve an existing expiry (new keys are persistent), pass 0 to clear expiry, or pass a positive value to set/refresh it; negative values are rejected. Expiry is filtered at read time and swept every 5 minutes. Values must be valid JSON and are capped at 64 KiB; keys must be non-empty UTF-8 and are capped at 256 characters. Batches are all-or-nothing and capped at 100 operations. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
 
   Python:
     from orva import kv
 
     kv.put("user:42", {"name": "Ada", "tier": "pro"}, ttl_seconds=3600)
     user  = kv.get("user:42", default=None)         # → dict, or None
-    pages = kv.list(prefix="page:", limit=50)       # → [keys]; pass cursor= for pagination
+    pages = kv.list(prefix="page:", limit=50)       # → {keys, next_cursor}; pass next_cursor back as cursor
     kv.delete("user:42")                            # idempotent; no error if missing
 
   Node:
@@ -105,8 +105,8 @@ Tell the user about this when their function uses kv state and they
 might want to inspect it.
   kv.put(f"req:{idempotency_key}", "1", ttl_seconds=86400)
 
-## orva.invoke — function-to-function calls (no HTTP, no auth)
-Bypasses the proxy stack and dispatches via the warm pool. Faster than internal HTTP, no signing required. Recursion guard: max call depth 8. The callee's full {statusCode, headers, body} is returned; body is JSON-decoded when possible.
+## orva.invoke — function-to-function calls
+Uses the scoped internal SDK endpoint and dispatches through the warm pool; the signed credential supplies immutable caller attribution while the named target may be another function. Recursion guard: max call depth 8. The callee's full {statusCode, headers, body} is returned; body is JSON-decoded when possible.
 
   Python:
     from orva import invoke, OrvaError
@@ -345,7 +345,7 @@ Every night at 3 AM UTC, delete all KV keys that start with "session:" and are o
 </user_request>
 
 <your_response>
-**Plan.** Python 3.14 handler triggered by a cron schedule \`0 3 * * *\` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. No egress. Recommended auth: leave public; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
+**Plan.** Python 3.14 handler triggered by a cron schedule \`0 3 * * *\` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. Requires egress because the bundled KV SDK calls Orva's control plane. Recommended auth: leave public; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
 
 \`\`\`python
 import json
@@ -358,10 +358,10 @@ def handler(event):
 
     while True:
         page = kv.list(prefix="session:", limit=200, cursor=cursor)
-        for key in page.get("keys", []):
-            kv.delete(key)
+        for entry in page.get("keys", []):
+            kv.delete(entry["key"])
             deleted += 1
-        cursor = page.get("cursor")
+        cursor = page.get("next_cursor")
         if not cursor:
             break
 
@@ -378,7 +378,7 @@ def handler(event):
             "body": {"deleted": deleted}}
 \`\`\`
 
-Wire it up: open Schedules → New Schedule → expression \`0 3 * * *\`, timezone UTC, function this one. Set auth_mode to platform_key on the function so the URL can't be triggered manually by random callers.
+Wire it up: enable outbound network, then open Schedules → New Schedule → expression \`0 3 * * *\`, timezone UTC, function this one. Set auth_mode to platform_key on the function so the URL can't be triggered manually by random callers.
 </your_response>
 </example_2_cron_cleanup>
 

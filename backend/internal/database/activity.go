@@ -38,7 +38,7 @@ func (db *Database) InsertActivity(row ActivityRow) {
 	if row.TS == 0 {
 		row.TS = time.Now().UnixMilli()
 	}
-	db.AsyncExec(`
+	db.AsyncExecTelemetry(`
 		INSERT INTO activity_log (
 			ts, source, actor_type, actor_id, actor_label,
 			method, path, status, duration_ms, summary, request_id, metadata, trace_id

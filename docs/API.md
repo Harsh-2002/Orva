@@ -254,9 +254,20 @@ Operator-facing function resources use the normal API-key/session auth:
 - `PUT|DELETE /api/v1/functions/{id}/cron/{schedule_id}`
 - `GET /api/v1/cron` — list schedules across all functions.
 
+KV keys must be non-empty UTF-8 up to 256 characters and values must be valid
+JSON up to 64 KiB. Internal SDK batches accept at most 100 operations and are
+atomic. For put/increment/CAS, omitted `ttl_seconds` preserves an existing
+expiry (new keys remain persistent), zero clears expiry, a positive value sets
+or refreshes it, and a negative value returns `400 VALIDATION`.
+
 The `/_kv` and `/_internal` route families are sandbox-SDK transport
-endpoints authenticated with invocation-scoped credentials. They are not an
-operator API and should not be called with long-lived API keys.
+endpoints authenticated with a process-signed, function-scoped credential.
+The verified claim supplies caller identity; caller headers are ignored. A
+credential expires when orvad restarts, KV access is restricted to its own
+namespace, cron upsert is restricted to its own schedules, and user spans must
+name an active execution owned by the credential's function. Invokes and job
+enqueue may target another function while retaining signed caller attribution.
+These routes are not an operator API and do not accept long-lived API keys.
 
 ## Jobs
 

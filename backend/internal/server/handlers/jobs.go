@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
@@ -17,32 +17,16 @@ import (
 // AND from inside worker sandboxes (X-Orva-Internal-Token). The internal
 // path is what powers orva.jobs.enqueue() in the SDK.
 type JobsHandler struct {
-	DB            *database.Database
-	Registry      *registry.Registry
-	InternalToken string
+	DB       *database.Database
+	Registry *registry.Registry
+	SDKAuth  *sdkauth.Authenticator
 }
 
-// authorize accepts either a worker's internal token OR the standard
-// middleware-stamped session/API-key auth. Returns true when permitted.
-//
-// This handler independently constant-time-compares the internal token as
-// its own defense-in-depth check — it does NOT rely on the middleware for
-// the SDK path. For the public (session/API-key) path it does rely on
-// authMiddleware, which only forwards /api/v1/* requests to handlers after
-// a valid session cookie or API key. Note that authMiddleware requires the
-// internal-token header to MATCH the per-process secret before it will skip
-// the API-key gate (a merely-present header falls through to normal auth),
-// so an unauthenticated caller can never reach this point — the `return
-// true` below is the genuinely-authenticated public path, not a bypass.
-func (h *JobsHandler) authorize(r *http.Request) bool {
-	// Internal token path — workers calling the SDK.
-	got := r.Header.Get("X-Orva-Internal-Token")
-	if h.InternalToken != "" && subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) == 1 {
-		return true
-	}
-	// Public path — authMiddleware already enforced session/API-key auth
-	// before forwarding this request.
-	return true
+// sdkCaller returns immutable caller attribution from a verified scoped SDK
+// credential. Public session/API-key requests have no SDK caller.
+func (h *JobsHandler) sdkCaller(r *http.Request) string {
+	caller, _ := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+	return caller
 }
 
 type enqueueRequest struct {
@@ -57,14 +41,29 @@ type enqueueRequest struct {
 
 // Enqueue handles POST /api/v1/jobs.
 func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(r) {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authorized", r.Header.Get("X-Request-ID"))
+	reqID := r.Header.Get("X-Request-ID")
+	callerFnID := h.sdkCaller(r)
+	callerTraceID := ""
+	callerSpanID := ""
+	if callerFnID != "" {
+		var active bool
+		callerTraceID, callerSpanID, _, active = h.SDKAuth.TraceContext(
+			r.Header.Get("X-Orva-Execution-Id"), callerFnID,
+		)
+		if !active {
+			respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+				"SDK request is not associated with an active caller execution", reqID)
+			return
+		}
+	}
+
+	body, err := readBoundedBody(r.Body, 1<<20)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)
 		return
 	}
-	reqID := r.Header.Get("X-Request-ID")
-
 	var req enqueueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}
@@ -108,9 +107,9 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 	// the job row so the eventual execution lands in the same trace as
 	// whatever enqueued it. Empty headers (dashboard or external API
 	// caller) leave these blank → the picked-up job becomes a new root.
-	job.TraceID = r.Header.Get("X-Orva-Trace-Id")
-	job.ParentSpanID = r.Header.Get("X-Orva-Span-Id")
-	job.EnqueuedByFunctionID = r.Header.Get("X-Orva-Caller-Function")
+	job.TraceID = callerTraceID
+	job.ParentSpanID = callerSpanID
+	job.EnqueuedByFunctionID = callerFnID
 	if err := h.DB.EnqueueJob(job); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "enqueue failed: "+err.Error(), reqID)
 		return
@@ -123,10 +122,6 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 
 // List handles GET /api/v1/jobs?status=...&function_id=...&limit=...
 func (h *JobsHandler) List(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(r) {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authorized", r.Header.Get("X-Request-ID"))
-		return
-	}
 	reqID := r.Header.Get("X-Request-ID")
 	status := r.URL.Query().Get("status")
 	fnID := r.URL.Query().Get("function_id")
@@ -149,10 +144,6 @@ func (h *JobsHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /api/v1/jobs/{id}.
 func (h *JobsHandler) Get(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(r) {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authorized", r.Header.Get("X-Request-ID"))
-		return
-	}
 	reqID := r.Header.Get("X-Request-ID")
 	id := r.PathValue("id")
 	job, err := h.DB.GetJob(id)
@@ -166,10 +157,6 @@ func (h *JobsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Retry handles POST /api/v1/jobs/{id}/retry. Resets a terminal job back
 // to pending so the next scheduler tick picks it up.
 func (h *JobsHandler) Retry(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(r) {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authorized", r.Header.Get("X-Request-ID"))
-		return
-	}
 	reqID := r.Header.Get("X-Request-ID")
 	id := r.PathValue("id")
 	if _, err := h.DB.GetJob(id); err != nil {
@@ -185,10 +172,6 @@ func (h *JobsHandler) Retry(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/jobs/{id}.
 func (h *JobsHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(r) {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authorized", r.Header.Get("X-Request-ID"))
-		return
-	}
 	reqID := r.Header.Get("X-Request-ID")
 	id := r.PathValue("id")
 	if err := h.DB.DeleteJob(id); err != nil {

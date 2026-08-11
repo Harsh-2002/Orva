@@ -28,8 +28,9 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 |---|---|---|---|
 | `INVALID_JSON` | 400 | malformed request body | no — fix the payload |
 | `VALIDATION` | 400 | required field missing or invalid value | no — fix the request |
-| `UNAUTHORIZED` | 401 | missing or invalid API key / session | no — re-auth |
+| `UNAUTHORIZED` | 401 | missing or invalid API key/session, or invalid/stale SDK credential | no — re-auth or let the worker restart |
 | `FORBIDDEN` | 403 | authenticated but lacks the required permission | no |
+| `SDK_SCOPE_VIOLATION` | 403 | a signed worker credential attempted another KV/cron namespace or an execution/trace it does not own | no — fix the SDK request; caller scope cannot be elevated |
 | `NOT_FOUND` | 404 | function or route doesn't exist | no |
 | `FUNCTION_NOT_FOUND` | 404 | function lookup miss on a name-or-ID path (diff endpoint) | no |
 | `VERSION_NOT_FOUND` | 404 | deployment row not in DB (e.g. `orva diff` with a bad `--from`/`--to`) | no |
@@ -53,6 +54,7 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 | `POOL_AT_CAPACITY` | 503 | function pool at `dynamicMax` and ctx fired waiting | yes — `Retry-After: 5` |
 | `MEMORY_EXHAUSTED` | 503 | host memory budget at 80% reservation | yes — `Retry-After: 30` |
 | `EGRESS_POLICY_UNAVAILABLE` | 503 | a `network_mode=egress` function was invoked while no sandbox egress policy had compiled; the spawn is refused rather than run unfiltered | yes — `Retry-After: 10` (the manager recompiles every 10s), but a bad rule must be fixed first |
+| `KV_UNAVAILABLE` | 503 | an atomic KV batch could not commit; no batch writes were retained | yes — retry the complete batch |
 | `INSUFFICIENT_DISK` | 503 | not enough free disk on the data volume to start the build | no — free space or lower `system_config.min_free_disk_mb` |
 | `SHUTTING_DOWN` | 503 | server is closing down | no, on this host — redirect |
 | `SANDBOX_ERROR` | 503 | unmapped sandbox / dispatch failure | no — investigate |

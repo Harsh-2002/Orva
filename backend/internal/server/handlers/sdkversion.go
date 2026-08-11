@@ -18,7 +18,7 @@ var (
 	sdkVersionSeen   = map[string]struct{}{}
 )
 
-// observeSDKVersion peeks at X-Orva-SDK-Version on internal-token
+// observeSDKVersion peeks at X-Orva-SDK-Version on scoped-credential
 // requests. First sighting of a (function_id, sdk_version) tuple logs an
 // INFO; a version that differs from the SDK this server bundles
 // (version.SDKVersion) logs a WARN so operators see genuine drift. Always
@@ -29,12 +29,12 @@ var (
 // NOT version.Version (the vYYYY.MM.DD release tag). Comparing against the
 // release tag was a bug: the two value-spaces can never be equal, so it
 // logged a false WARN for every function on its first internal call.
-func observeSDKVersion(r *http.Request) {
+func observeSDKVersion(r *http.Request, functionID string) {
 	got := r.Header.Get("X-Orva-SDK-Version")
 	if got == "" {
 		return
 	}
-	fnID := r.Header.Get("X-Orva-Function-Id")
+	fnID := functionID
 	if fnID == "" {
 		// internal_invoke uses URL path; KV puts fn_id in the path too. We
 		// only need a stable dedup key for the log line, so the empty
