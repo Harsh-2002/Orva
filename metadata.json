@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZQWX6EZA1F6YN1NWDWQDS5V",
+  "strategy": "manual-commit",
+  "branch": "feat/ui-declutter",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "frontend/src/views/Dashboard.vue"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 16812,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1545728,
+    "output_tokens": 3140,
+    "api_call_count": 7
+  }
+}
