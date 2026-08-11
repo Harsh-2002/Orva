@@ -1,19 +1,19 @@
 <template>
   <!--
-    ModelMenu — the model selector in the composer toolbar. The trigger shows
-    the active model name (compact, truncated); the popover lists every
+    ModelMenu — the shared model selector used by Settings and the chat
+    composer. The trigger shows the active model name; the popover lists every
     configured provider (when more than one) and the models the active provider
     reports live from its /v1/models endpoint. Selecting a model closes the menu.
-    Replaces the old header ModelPicker's two native <select>s.
   -->
   <Popover title="Model">
-    <template #trigger="{ toggle }">
+    <template #trigger="{ open, toggle }">
       <button
         type="button"
-        class="touch-expand-sm inline-flex items-center gap-1.5 h-8 max-w-[180px] px-2.5 rounded-lg text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        class="touch-expand-sm inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        :class="wide ? 'w-full justify-between border border-border bg-background' : 'max-w-[180px]'"
         :title="store.selectedModel || 'Select model'"
         aria-label="Select model"
-        @click="toggle"
+        @click="onToggle(open, toggle)"
       >
         <Cpu class="w-3.5 h-3.5 shrink-0" />
         <span class="truncate font-mono">{{ store.selectedModel || 'No model' }}</span>
@@ -25,7 +25,7 @@
       <div class="max-h-[60dvh] overflow-y-auto scrollable py-1">
         <!-- Provider switch (only when there's more than one configured). -->
         <template v-if="store.providers.length > 1">
-          <p class="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-label text-foreground-muted">
+          <p class="px-3 pt-1.5 pb-1 text-xs uppercase tracking-label text-foreground-muted">
             Provider
           </p>
           <button
@@ -45,7 +45,7 @@
           <div class="my-1 border-t border-border" />
         </template>
 
-        <p class="px-3 pt-1 pb-1 text-[10px] uppercase tracking-label text-foreground-muted">
+        <p class="px-3 pt-1 pb-1 text-xs uppercase tracking-label text-foreground-muted">
           Model
         </p>
         <!-- Fuzzy filter — only shown once a provider reports enough models to be
@@ -63,6 +63,7 @@
             <input
               v-model="query"
               type="text"
+              aria-label="Search models"
               placeholder="Search models…"
               class="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-2.5 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:border-white focus:outline-none focus:ring-1 focus:ring-white"
             >
@@ -111,6 +112,11 @@ import { ref, computed, watch } from 'vue'
 import { Cpu, ChevronDown, Check, Search } from '@lucide/vue'
 import Popover from '@/components/common/Popover.vue'
 import { useAIStore } from '@/stores/ai'
+import { filterModels } from '@/utils/modelSearch'
+
+defineProps({
+  wide: { type: Boolean, default: false },
+})
 
 const store = useAIStore()
 
@@ -119,35 +125,15 @@ const query = ref('')
 // Only surface the search box for genuinely long lists; short lists scan fine.
 const showSearch = computed(() => store.models.length > 6)
 
-// Subsequence fuzzy match: every query char must appear in order. Score rewards
-// contiguous runs and earlier matches so the closest model id floats to the top.
-function fuzzyScore(text, q) {
-  let score = 0
-  let ti = 0
-  let prev = -1
-  for (const ch of q) {
-    const at = text.indexOf(ch, ti)
-    if (at === -1) return -1
-    score += at === prev + 1 ? 3 : 1 // contiguous run bonus
-    score -= at - ti // penalise gaps from the last match
-    prev = at
-    ti = at + 1
-  }
-  return score
-}
-
-const filteredModels = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  if (!q) return store.models
-  return store.models
-    .map((m) => ({ m, s: fuzzyScore(m.id.toLowerCase(), q) }))
-    .filter((x) => x.s >= 0)
-    .sort((a, b) => b.s - a.s)
-    .map((x) => x.m)
-})
+const filteredModels = computed(() => filterModels(store.models, query.value))
 
 // Reset the filter when the provider changes (its model list is replaced).
 watch(() => store.selectedProviderId, () => { query.value = '' })
+
+function onToggle(open, toggle) {
+  if (!open) query.value = ''
+  toggle()
+}
 
 function pick(id, close) {
   store.selectModel(id)

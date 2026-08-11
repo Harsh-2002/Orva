@@ -65,8 +65,8 @@
 
     <!-- AI assistant card. Centralized configuration for the in-product AI
          chat: BYO providers + encrypted keys + base URL, and the assistant's
-         defaults (approval policy, tool steps). The active provider/model/
-         reasoning pickers stay in the chat composer (per-conversation controls).
+         defaults (approval policy, tool steps). Provider/model selection is
+         shared with Chat; reasoning remains a conversation-time control.
          The id anchors the chat's "configure" deep-link (#ai). -->
     <section
       id="ai"

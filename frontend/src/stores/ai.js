@@ -29,9 +29,9 @@ export const useAIStore = defineStore('ai', () => {
   // from flashing for a frame on every page load. See loadProviders().
   const providersLoaded = ref(false)
 
-  // Active provider/model/thinking selection lives in the CHAT (not settings):
-  // the user switches provider + model + thinking inline. Models are fetched
-  // dynamically per provider from its /v1/models endpoint (never hardcoded).
+  // The active provider/model selection is shared by Settings and Chat; the
+  // reasoning control stays in the composer. Models are fetched dynamically
+  // per provider from its /v1/models endpoint (never hardcoded).
   const selectedProviderId = ref(null) // ai_provider_configs.id
   const selectedProvider = ref('')     // provider TYPE (openai/anthropic/…)
   const selectedModel = ref('')

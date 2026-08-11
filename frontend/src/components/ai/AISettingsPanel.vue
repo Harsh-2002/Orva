@@ -3,9 +3,9 @@
     AISettingsPanel — the AI assistant's operator configuration, embedded as a
     card body in the centralized Settings page (migrated out of the old in-chat
     modal). Covers everything that is *configuration*: providers + encrypted API
-    keys + base URL, and the assistant's defaults (approval policy, tool steps).
-    The *active* provider/model/reasoning selection is NOT here — that's a
-    per-conversation control and lives in the chat composer.
+    keys + base URL, the active provider/model, and the assistant's defaults
+    (approval policy, tool steps). The same active selection also remains
+    available in the chat composer for quick switching while working.
   -->
   <div class="space-y-6">
     <!-- Providers -->
@@ -15,7 +15,47 @@
           Providers
         </h3>
         <p class="text-xs text-foreground-muted mt-1.5 max-w-prose leading-snug">
-          Keys are encrypted at rest. Choose the active model in Chat.
+          Keys are encrypted at rest. Choose which provider and model Chat uses.
+        </p>
+      </div>
+
+      <div
+        v-if="store.providers.length"
+        class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+      >
+        <div>
+          <label
+            for="ai-active-provider"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide"
+          >Active provider</label>
+          <select
+            id="ai-active-provider"
+            :value="store.selectedProviderId || ''"
+            class="mt-1.5 w-full bg-background border border-border rounded-md text-sm px-3 py-2 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            @change="onSelectProvider"
+          >
+            <option
+              v-for="p in store.providers"
+              :key="p.id"
+              :value="p.id"
+            >
+              {{ p.label ? `${p.provider} (${p.label})` : p.provider }}
+            </option>
+          </select>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide">
+            Active model
+          </div>
+          <div class="mt-1.5">
+            <ModelMenu wide />
+          </div>
+        </div>
+        <p
+          v-if="store.modelsError"
+          class="text-xs text-danger-fg sm:col-span-2"
+        >
+          Models could not be loaded. Check the provider endpoint and credentials.
         </p>
       </div>
 
@@ -32,18 +72,14 @@
               class="text-xs text-foreground-muted"
             >{{ p.label }}</span>
             <span
+              v-if="store.selectedProviderId === p.id"
+              class="text-xs uppercase tracking-label rounded px-1.5 py-0.5 bg-primary/15 text-primary-hover"
+            >active</span>
+            <span
               class="text-xs uppercase tracking-label rounded px-1.5 py-0.5"
               :class="p.has_key ? 'bg-success-tint text-success-fg' : 'bg-surface-hover text-foreground-muted'"
             >{{ p.has_key ? 'key set' : 'no key' }}</span>
             <span class="flex-1" />
-            <Button
-              size="xs"
-              variant="secondary"
-              :loading="modelState(p.id).loading"
-              @click="loadModels(p.id)"
-            >
-              Models
-            </Button>
             <Button
               size="xs"
               variant="ghost"
@@ -51,34 +87,6 @@
             >
               Remove
             </Button>
-          </div>
-          <!-- live model preview -->
-          <div
-            v-if="modelState(p.id).loaded"
-            class="px-3 pb-2.5 -mt-0.5"
-          >
-            <p
-              v-if="modelState(p.id).error"
-              class="text-xs text-danger-fg"
-            >
-              {{ modelState(p.id).error }}
-            </p>
-            <p
-              v-else-if="!modelState(p.id).models.length"
-              class="text-xs text-foreground-muted"
-            >
-              No models reported by this endpoint.
-            </p>
-            <div
-              v-else
-              class="flex flex-wrap gap-1"
-            >
-              <span
-                v-for="m in modelState(p.id).models"
-                :key="m.id"
-                class="text-xs font-mono text-foreground-muted bg-surface-hover rounded px-1.5 py-0.5"
-              >{{ m.id }}</span>
-            </div>
           </div>
         </div>
         <p
@@ -216,7 +224,7 @@
 import { ref, computed, onMounted } from 'vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
-import apiClient from '@/api/client'
+import ModelMenu from '@/components/ai/ModelMenu.vue'
 import { useAIStore } from '@/stores/ai'
 import { useConfirmStore } from '@/stores/confirm'
 
@@ -283,25 +291,13 @@ const baseURLHint = computed(() =>
 const savingProvider = ref(false)
 const savingSettings = ref(false)
 
-// Per-provider live model preview (separate from the chat's selected models).
-const modelsState = ref({})
-function modelState(id) {
-  return modelsState.value[id] || { loading: false, loaded: false, models: [], error: '' }
-}
-
-onMounted(() => {
-  store.loadProviders()
-  store.loadSettings()
+onMounted(async () => {
+  await store.loadSettings()
+  await store.loadProviders()
 })
 
-async function loadModels(id) {
-  modelsState.value = { ...modelsState.value, [id]: { loading: true, loaded: false, models: [], error: '' } }
-  try {
-    const { data } = await apiClient.get(`/ai/providers/${id}/models`)
-    modelsState.value = { ...modelsState.value, [id]: { loading: false, loaded: true, models: data.models || [], error: data.error || '' } }
-  } catch (e) {
-    modelsState.value = { ...modelsState.value, [id]: { loading: false, loaded: true, models: [], error: e.message } }
-  }
+async function onSelectProvider(event) {
+  await store.selectProvider(event.target.value)
 }
 
 async function onSaveProvider() {
