@@ -176,7 +176,7 @@
       </div>
     </div>
 
-    <!-- Per-function pool cards — each card explains what it is. -->
+    <!-- Per-function pools: live capacity and the two useful resource signals. -->
     <div v-if="(m.pools || []).length">
       <div class="flex items-baseline justify-between mb-3">
         <div>
@@ -194,31 +194,36 @@
           :key="p.function_id"
           class="bg-background border border-border rounded-lg p-4 space-y-3"
         >
-          <!-- Header -->
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
-              <div class="text-sm font-medium text-white truncate">
-                {{ p.function_name || p.function_id }}
-              </div>
-              <div class="text-xs text-foreground-muted font-mono truncate">
+              <router-link
+                v-if="p.function_name"
+                :to="{ name: 'function-detail', params: { name: p.function_name } }"
+                class="block truncate text-sm font-medium text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {{ p.function_name }}
+              </router-link>
+              <div
+                v-else
+                class="truncate font-mono text-sm font-medium text-white"
+              >
                 {{ p.function_id }}
               </div>
             </div>
             <div class="text-right shrink-0">
               <div class="text-xs text-foreground-muted">
-                Target / cap
+                Capacity
               </div>
               <div class="text-xs font-mono text-white">
-                {{ p.target }} <span class="text-foreground-muted">/</span> {{ p.dynamic_max }}
+                {{ p.dynamic_max }} max
               </div>
             </div>
           </div>
 
-          <!-- Right-now snapshot -->
           <div class="grid grid-cols-3 gap-2">
             <PoolStat
-              label="Ready"
-              :value="p.idle"
+              label="Ready / target"
+              :value="`${p.idle} / ${p.target}`"
             />
             <PoolStat
               label="Busy"
@@ -230,65 +235,32 @@
             />
           </div>
 
-          <!-- Sparkline of incoming rate -->
           <div>
             <Sparkline :points="poolHistoryFor(p.function_id)" />
             <div class="text-xs text-foreground-muted mt-1">
-              Recent calls per second (last 5 min)
+              Traffic, last 5 minutes
             </div>
           </div>
 
-          <!-- Lifetime + resource averages -->
-          <details class="border-t border-border pt-3 text-xs">
-            <summary class="cursor-pointer text-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              Runtime details
-            </summary>
-            <div class="mt-3 grid grid-cols-2 gap-3">
-              <div>
-                <div class="text-foreground-muted">
-                  Spawned · killed
-                </div>
-                <div class="font-mono text-white">
-                  {{ p.spawned }} · {{ p.killed }}
-                </div>
+          <div class="grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs">
+            <div>
+              <div class="text-foreground-muted">
+                Avg latency
               </div>
-              <div>
-                <div class="text-foreground-muted">
-                  Avg latency
-                </div>
-                <div class="font-mono text-white">
-                  {{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms
-                </div>
-              </div>
-              <div>
-                <div class="text-foreground-muted">
-                  Avg memory
-                </div>
-                <div
-                  class="font-mono text-white"
-                  title="Average memory used per invocation vs allocated limit"
-                >
-                  {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : EMPTY }}
-                  <span class="text-foreground-muted">/ {{ p.mem_limit_mb }} MB</span>
-                </div>
-              </div>
-              <div>
-                <div class="text-foreground-muted">
-                  Avg CPU
-                </div>
-                <div
-                  class="font-mono text-white"
-                  title="Average CPU cores consumed per invocation vs allocated"
-                >
-                  {{ p.cpu_frac_avg > 0 && p.cpu_limit > 0 ? (p.cpu_frac_avg * p.cpu_limit).toFixed(2) : EMPTY }}
-                  <span
-                    v-if="p.cpu_limit > 0"
-                    class="text-foreground-muted"
-                  >/ {{ p.cpu_limit }} CPU</span>
-                </div>
+              <div class="mt-0.5 font-mono text-white">
+                {{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms
               </div>
             </div>
-          </details>
+            <div>
+              <div class="text-foreground-muted">
+                Avg memory / limit
+              </div>
+              <div class="mt-0.5 font-mono text-white">
+                {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : EMPTY }}
+                <span class="text-foreground-muted">/ {{ p.mem_limit_mb }} MB</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
