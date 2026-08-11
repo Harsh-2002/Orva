@@ -5,12 +5,18 @@
     configured provider (when more than one) and the models the active provider
     reports live from its /v1/models endpoint. Selecting a model closes the menu.
   -->
-  <Popover title="Model">
+  <Popover
+    title="Model"
+    :wide="wide"
+  >
     <template #trigger="{ open, toggle }">
       <button
+        :id="triggerId || undefined"
         type="button"
-        class="touch-expand-sm inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
-        :class="wide ? 'w-full justify-between border border-border bg-background' : 'max-w-[180px]'"
+        class="inline-flex items-center gap-1.5 transition-colors focus-visible:outline-none"
+        :class="wide
+          ? 'h-10 w-full justify-between rounded-md border border-border bg-background px-3 text-sm text-foreground hover:bg-surface-hover focus-visible:border-white focus-visible:ring-1 focus-visible:ring-white'
+          : 'touch-expand-sm h-8 max-w-[180px] rounded-lg px-2.5 text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface'"
         :title="store.selectedModel || 'Select model'"
         aria-label="Select model"
         @click="onToggle(open, toggle)"
@@ -116,6 +122,7 @@ import { filterModels } from '@/utils/modelSearch'
 
 defineProps({
   wide: { type: Boolean, default: false },
+  triggerId: { type: String, default: '' },
 })
 
 const store = useAIStore()

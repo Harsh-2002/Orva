@@ -21,7 +21,7 @@
 
       <div
         v-if="store.providers.length"
-        class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+        class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start"
       >
         <div>
           <label
@@ -31,7 +31,7 @@
           <select
             id="ai-active-provider"
             :value="store.selectedProviderId || ''"
-            class="mt-1.5 w-full bg-background border border-border rounded-md text-sm px-3 py-2 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="mt-1.5 h-10 w-full bg-background border border-border rounded-md text-sm px-3 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
             @change="onSelectProvider"
           >
             <option
@@ -44,11 +44,17 @@
           </select>
         </div>
         <div>
-          <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide">
+          <label
+            for="ai-active-model"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide"
+          >
             Active model
-          </div>
+          </label>
           <div class="mt-1.5">
-            <ModelMenu wide />
+            <ModelMenu
+              wide
+              trigger-id="ai-active-model"
+            />
           </div>
         </div>
         <p
