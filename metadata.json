@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZRGJ3E1SZJ0HNFEQWZ40RZ8",
+  "strategy": "manual-commit",
+  "branch": "codex/trace-diagnostics",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "backend/internal/database/executions.go",
+    "backend/internal/database/migrations.go",
+    "backend/internal/database/trace_summaries_test.go",
+    "backend/internal/mcp/tools_traces.go",
+    "backend/internal/server/handlers/traces.go",
+    "backend/internal/server/handlers/traces_v2_test.go",
+    "cli/commands/traces.go",
+    "docs/API.md",
+    "docs/CLI.md",
+    "docs/TRACING.md",
+    "docs/reference.md",
+    "frontend/package.json",
+    "frontend/src/api/endpoints.js",
+    "frontend/src/components/traces/TraceWaterfall.vue",
+    "frontend/src/utils/traceLayout.js",
+    "frontend/src/views/Docs.vue",
+    "frontend/src/views/TraceDetail.vue",
+    "frontend/src/views/Traces.vue",
+    "frontend/test/components/TraceWaterfall.test.js",
+    "frontend/test/components/traceLayout.test.js",
+    "frontend/vite.config.js",
+    "test/e2e/tests/test_traces.py",
+    "test/tracing-test.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2589165,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 143744512,
+    "output_tokens": 334086,
+    "api_call_count": 1800
+  }
+}
