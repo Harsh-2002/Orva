@@ -23,3 +23,7 @@ test('desktop popovers choose a direction from available viewport space', () => 
   assert.match(popover, /const opensDown =/)
   assert.match(popover, /top: `\$\{top\}px`/)
 })
+
+test('the agent loop budget stays an internal guardrail', () => {
+  assert.doesNotMatch(settings, /Tool steps per reply|max_tool_iterations/)
+})

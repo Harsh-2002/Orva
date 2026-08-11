@@ -68,6 +68,11 @@ type Manager struct {
 // delete path maps it to 409 Conflict.
 var ErrConversationBusy = errors.New("a turn is already in progress for this conversation")
 
+// maxToolIterationsPerTurn is an internal runaway-work guard, not an operator
+// preference. Twenty-five model iterations leaves ample room for multi-step
+// instance work while bounding provider cost and automatically invoked tools.
+const maxToolIterationsPerTurn = 25
+
 // tryLockConv marks a conversation busy, returning false if it already is.
 func (m *Manager) tryLockConv(id string) bool {
 	m.convMu.Lock()
@@ -689,9 +694,9 @@ func (m *Manager) resolvedSettings() database.AISettings {
 	if s.ApprovalPolicy == "" {
 		s.ApprovalPolicy = "all_writes"
 	}
-	if s.MaxToolIterations <= 0 {
-		s.MaxToolIterations = 25
-	}
+	// This is deliberately fixed rather than user-configurable. Normalize old
+	// rows written when Settings exposed the implementation guardrail.
+	s.MaxToolIterations = maxToolIterationsPerTurn
 	if strings.TrimSpace(s.SystemPrompt) == "" {
 		s.SystemPrompt = defaultSystemPrompt
 	}
@@ -727,6 +732,7 @@ func (m *Manager) SaveSettings(in database.AISettings) (database.AISettings, err
 	if !validApproval(in.ApprovalPolicy) {
 		return database.AISettings{}, fmt.Errorf("invalid approval_policy %q", in.ApprovalPolicy)
 	}
+	in.MaxToolIterations = maxToolIterationsPerTurn
 	// Preserve the operator's provider/model selection (managed separately via
 	// SaveSelection) so a general-settings save from the settings form — which
 	// doesn't carry these fields — never wipes the cross-device choice.

@@ -2,8 +2,11 @@ package ai
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 // TestTryLockConv covers the per-conversation turn guard: one turn per
@@ -54,5 +57,38 @@ func TestSaveProviderRequiresOllamaBaseURL(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "base_url is required for ollama") {
 			t.Errorf("SaveProvider(ollama, %q) error = %v, want required-base-url error", baseURL, err)
 		}
+	}
+}
+
+func TestToolIterationBudgetIsFixedInternally(t *testing.T) {
+	db, err := database.New(filepath.Join(t.TempDir(), "orva.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	m := &Manager{db: db}
+	in := database.AISettings{
+		ThinkingLevel:     "standard",
+		ApprovalPolicy:    "all_writes",
+		MaxToolIterations: 999,
+	}
+	got, err := m.SaveSettings(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxToolIterations != maxToolIterationsPerTurn {
+		t.Fatalf("MaxToolIterations = %d, want fixed internal budget %d", got.MaxToolIterations, maxToolIterationsPerTurn)
+	}
+
+	stored, _, err := db.GetSettings("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MaxToolIterations != maxToolIterationsPerTurn {
+		t.Fatalf("stored MaxToolIterations = %d, want %d", stored.MaxToolIterations, maxToolIterationsPerTurn)
 	}
 }

@@ -4,7 +4,7 @@
     card body in the centralized Settings page (migrated out of the old in-chat
     modal). Covers everything that is *configuration*: providers + encrypted API
     keys + base URL, the active provider/model, and the assistant's defaults
-    (approval policy, tool steps). The same active selection also remains
+    (approval policy). The same active selection also remains
     available in the chat composer for quick switching while working.
   -->
   <div class="space-y-6">
@@ -209,12 +209,6 @@
           </span>
         </label>
       </fieldset>
-      <Input
-        v-model="store.settings.max_tool_iterations"
-        type="number"
-        label="Tool steps per reply"
-        hint="Maximum tool calls in one reply."
-      />
       <Button
         variant="primary"
         :loading="savingSettings"
@@ -326,7 +320,6 @@ async function onSaveProvider() {
 async function onSaveSettings() {
   savingSettings.value = true
   try {
-    store.settings.max_tool_iterations = Number(store.settings.max_tool_iterations) || 25
     await store.saveSettings(store.settings)
   } finally {
     savingSettings.value = false
