@@ -1,0 +1,138 @@
+We don't need to give this option to a user at all
+
+---
+
+i really like the currnt gloabl backgroudn colpur what otehr colour option we have that can match teh bakcgrounf with our Orva theme gloablly ? only asking about backgrounf fyi.
+
+---
+
+ok good the currnt one is good right - From the code base everything is up to date, post, verified, all done right. We are ready to merge on the main ?
+
+---
+
+Are the UI change that you did? Everything is it everything is responsive for all screens respovei or not.
+
+---
+
+All docs and everything is up to date, right? Everything
+
+---
+
+So the documentations we have in the UI they are also up to date right
+
+---
+
+the docs in mcp as well
+
+---
+
+merge it deleteted the branch and switch to main
+
+---
+
+One thing that we need to work on because I can see we have some restriction about the number of pools we can have per function warm pools, right? And the calculation: we need to work on the algorithm or the logic to reserve the pool more maturely, right? Based on the real world, right? So, I cut the current. I don't think that is enough. So, that is the one thing. So, we you need to work on recalculating the pool and workers kind of allocation, right? Things like that for better efficiency and performance. And one more thing: the currently traces that which you have is not enough whenever, like, I write a function, I go to traces, I don't understand like I don't delegate it like what I'm seeing at currently, so it looks confusing sometimes, and what again I'm thinking is in the KV cache, sorry, in the KV or a KV there is some bug. Suppose I have application which will use this KV, and after some time, that application does not work with KV at all. So, something like that. So, you need to work on this scope and analyze the gap and things we can work on it here. So, you need to do independent audit on this point that I just suggested you.
+
+---
+
+plan to work on it all the tinsh with vlaidation propekry
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Orva Pool, KV, and Tracing Hardening Plan
+
+## Summary
+
+Deliver the work as three sequential PRs:
+
+1. `codex/kv-sdk-reliability`
+2. `codex/pool-controller-v2`
+3. `codex/trace-diagnostics`
+
+Each PR branches from the latest `main`, includes its own documentation and regression tests, and merges only after the consolidated CI and CodeQL are green. Rebase the next PR onto the newly merged `main`; delete merged branches afterward. Do not create a release tag or deploy production as part of this work.
+
+## PR 1 — KV Reliability and Scoped SDK Identity
+
+- Replace the process-wide bearer credential with a process-signed, function-scoped SDK token containing the immutable caller function ID and token version. Handlers derive caller identity from the verified claim and never trust `X-Orva-Caller-Function`.
+- Apply scoped authentication consistently to KV, function invocation/streaming, jobs, cron upsert, and user-span endpoints.
+  - KV requests may access only the credential’s function namespace.
+  - Cron upsert may modify only the caller’s schedules.
+  - Invokes and jobs may target other functions, but caller/trace attribution always comes from the credential.
+  - User spans must reference an execution owned by the credential’s function.
+  - Invalid, tampered, stale, or cross-function credentials return a standard 401/403 error.
+- Enforce the documented KV contract on operator and SDK paths: non-empty UTF-8 key up to 256 characters, valid JSON value up to 64 KiB, at most 100 batch operations, and bounded request bodies.
+- Make batches atomic. Validate every operation before opening the transaction; any validation or database failure rolls back every write. SDK `putMany`, `deleteMany`, and `getMany` throw when the batch fails instead of reporting partial success.
+- Change TTL inputs to optional values:
+  - omitted TTL preserves an existing expiry;
+  - explicit `0` removes expiry;
+  - positive TTL sets or refreshes expiry;
+  - negative TTL is rejected.
+  New keys with omitted TTL are persistent.
+- Add context-aware KV database methods and cancel database waits when the function/request deadline expires.
+- Replace async-writer overflow goroutines with bounded critical and telemetry queues. Critical writes return/backpressure on deadline; droppable telemetry records a metric when discarded. No unbounded goroutine fallback remains.
+- Add KV operation, latency, timeout, batch rollback, writer queue-depth, and dropped-telemetry metrics. Health output reports writer saturation separately from read-database health.
+- Update Node/Python SDK types, errors, TTL documentation, MCP reference, examples, and embedded adapter copies. Correct the cron/KV example’s egress requirement, entry iteration, and `next_cursor` usage.
+
+## PR 2 — Pool Controller v2
+
+- Remove `target_concurrency` immediately from the REST/MCP types, database model, metrics, documentation, and UI. Requests containing it return `400 VALIDATION` with a migration message.
+- Rebuild `pool_config` idempotently without the removed column while preserving all other values and foreign keys.
+- Normalize scale configuration:
+  - `scale_to_zero=true` requires and migrates `min_warm=0`;
+  - `scale_to_zero=false` requires `min_warm>=1`;
+  - defaults remain min 1, max 50, idle TTL 600 seconds, scale-to-zero off.
+- Record demand before any host or function concurrency wait. Track arrivals, busy, idle, queued, spawning, queue-wait duration, service duration, cold-start duration, rejections, and capacity timeouts per function.
+- Use a single-flight worker capacity model with an internal 70% utilization target:
+  - stable capacity derives from 60-second arrival rate × service P95;
+  - burst capacity derives from 6-second arrival rate × `(service P95 + spawn P95)`;
+  - immediate pressure includes busy plus queued work;
+  - desired workers are the maximum of those signals, clamped by configured minimum and effective host maximum.
+- Introduce one coordinator per pool. It may start up to four workers concurrently, but increments `spawning` before launch so repeated ticks cannot duplicate work.
+- Scale down only idle workers after 30 seconds continuously below target, at no more than 20% per evaluation. Scale-to-zero occurs only after no arrivals, queued work, or busy workers for the configured idle TTL.
+- Calculate effective capacity using cgroup v2 `memory.max`, `memory.current`, and CPU availability, falling back to `/proc/meminfo` only outside a constrained cgroup. Use observed worker memory P95 with the declared cgroup limit as the hard bound.
+- Add a global round-robin spawn scheduler so active functions receive alternating admission opportunities. Under memory pressure, reclaim borrowed idle capacity from the largest pool before rejecting a queued function; never kill busy workers or violate configured active minimums.
+- Keep operator `max_warm` as a hard per-function ceiling, but allocate internal worker storage from effective host capacity rather than directly from an untrusted maximum value.
+- Replace obsolete metrics with queued, spawning, queue-wait, desired workers, limiting reason, cold-start P95, service P95, and effective memory/CPU capacity.
+- Rewrite capacity documentation from measured validation results and remove stale statements about lazy spawns and memory reservation.
+
+## PR 3 — Trace Correctness and Developer UX
+
+- Define a local trace root as the earliest span whose parent is absent from the same trace. This keeps externally parented W3C traces visible while preserving the external parent ID.
+- Aggregate trace-list status, duration, outlier state, span count, error count, and cold-start count across all spans:
+  - any failed span makes the trace status `error`;
+  - duration is earliest start through latest finish;
+  - function filtering matches any span and accepts exact function ID or name.
+- Add composite trace indexes and use a stable `(started_at, trace_id)` cursor. Emit an opaque cursor while temporarily accepting legacy timestamp cursors.
+- Preserve existing summary field names but change their documented semantics to trace-wide values. Add `span_count`, `error_count`, `cold_start_count`, and `external_parent_span_id`.
+- Replace the duplicate waterfall/table layout with one causal, expandable waterfall:
+  - indent spans from `parent_span_id`;
+  - label invoke, job, cron, replay, and external-parent relationships;
+  - show status code, cold/warm state, error summary, duration versus baseline, and linked logs in the expanded row;
+  - select a span without leaving the trace page, with an explicit secondary action to open its invocation;
+  - provide all-log/selected-span views and expandable structured fields.
+- Add useful time presets and retain function/status/outlier filters. Keep information density compact and avoid introducing additional cards.
+- Make rows real buttons or keyboard-operable controls with visible focus, Enter/Space activation, semantic section headings, accessible status text, and at least 44×44 px touch actions.
+- At narrow widths, switch the waterfall to stacked span metadata above a full-width timing bar instead of retaining the fixed 12-column layout.
+- Add focused Vue component testing with Vue Test Utils/jsdom and make `npm test` a required CI step.
+- Re-run Impeccable detection and audit after implementation; target at least 17/20 with no P1 accessibility or responsive findings.
+
+## Validation and Merge Gates
+
+- **KV:** token tampering, stale token, caller spoofing, cross-namespace denial, all SDK endpoints, 64 KiB/256-character boundaries, malformed JSON, atomic rollback, TTL omit/zero/positive behavior, 1,000 concurrent increments, cancellation, queue saturation, restart persistence, and Node/Python sandbox SDK parity.
+- **Pools:** deterministic formula tests, scale-to-zero timing, no overlapping over-spawn, burst/sustained/streaming workloads, scale-down hysteresis, deployment retirement, cgroup-limited memory, two-function fairness, host exhaustion, and configuration migration/rejection tests.
+- **Traces:** external W3C parent listing, nested invoke/job chains, child-error aggregation, child outliers, function-name filtering, tied timestamps, cursor continuity, critical-path layout, keyboard interaction, mobile layout, and log/span association.
+- Run for every PR: `make test`, `make lint`, `cd frontend && npm test && npm run lint && npm run build`, `make build-all`, relevant E2E suites, and sandbox-required tests on provisioned Linux with `ORVA_REQUIRE_SANDBOX=1`.
+- Run `make docs-embed` and verify canonical `docs/reference.md`, MCP, frontend, and CLI copies are byte-identical.
+- Record before/after pool throughput, queue-wait P95, cold-start rate, worker churn, KV latency/error rate, and memory use. Throughput must not regress by more than 10%; no worker may exceed configured or effective capacity.
+- Merge only when all required CI and CodeQL checks are green. After the third merge, run the complete main-branch CI again and perform a clean `make build-all` smoke test.
+
+## Locked Decisions and Assumptions
+
+- Three independent PRs, merged in the order above.
+- `target_concurrency` is removed as an intentional breaking change; stale clients receive a clear error.
+- KV batches are all-or-nothing.
+- Omitted TTL preserves, explicit zero clears, and positive TTL refreshes.
+- Function-scoped identity protects every internal SDK endpoint.
+- SQLite remains the persistence engine.
+- Trace UX is refined within the existing Orva visual system; this is not a redesign.
+- Existing KV entries, executions, traces, and valid pool configuration survive migration.
