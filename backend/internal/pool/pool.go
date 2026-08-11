@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"runtime"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -102,6 +102,17 @@ func maxPidsOr(v, fallback int) int {
 	return fallback
 }
 
+func workerCPUUnits(cpus float64) int64 {
+	if cpus <= 0 {
+		return 1000
+	}
+	units := int64(math.Ceil(cpus * 1000))
+	if units < 1 {
+		return 1
+	}
+	return units
+}
+
 // Manager owns all function-scoped pools.
 type Manager struct {
 	cfg      ManagerConfig
@@ -121,8 +132,7 @@ type Manager struct {
 	// same function (which would race the symlink retarget).
 	fnLocks sync.Map // fnID -> *sync.Mutex
 
-	// Autoscaler — Knative-KPA-inspired per-function scaler. Drives
-	// spawn/kill based on EWMA request rate + concurrency window.
+	// Pool Controller v2 — demand formulas plus global round-robin admission.
 	scaler  *scaler
 	hostMem *hostMemTracker
 }
@@ -157,19 +167,24 @@ type AcquireResult struct {
 
 // PoolStats is a point-in-time snapshot for metrics.
 type PoolStats struct {
-	FunctionID      string
-	Idle            int
-	Busy            int64
-	Spawned         int64
-	Killed          int64
-	ScaleUps        int64
-	ScaleDowns      int64
-	RateEWMA        float64 // req/s
-	LatencyEWMAms   float64 // dispatch p-avg in ms
-	DynamicMax      int64   // current memory+cpu-derived cap
-	Target          int
-	MemUsedAvgBytes int64   // EWMA of memory.current at release; 0 if cgroups disabled
-	CPUFracAvg      float64 // EWMA of CPU fraction per invocation (0–1); 0 if cgroups disabled
+	FunctionID       string
+	Idle             int
+	Busy             int64
+	Queued           int64
+	Spawning         int64
+	Arrivals         int64
+	Spawned          int64
+	Killed           int64
+	Desired          int64
+	EffectiveMax     int64
+	StableRate       float64
+	BurstRate        float64
+	QueueWaitP95MS   float64
+	ServiceP95MS     float64
+	ColdStartP95MS   float64
+	LimitingReason   string
+	Rejections       int64
+	CapacityTimeouts int64
 }
 
 // SetSecretsLookup wires the secrets fetcher into the pool template after
@@ -225,6 +240,22 @@ func (m *Manager) HostMemStats() (total, avail, reserved int64) {
 	return m.hostMem.stats()
 }
 
+func (m *Manager) EffectiveCPUCapacity() int {
+	if m.hostMem == nil {
+		return 1
+	}
+	return m.hostMem.effectiveCPUWorkers()
+}
+
+// EffectiveMemoryCapacity returns the bytes still available for worker
+// admission after cgroup headroom and all in-flight/live reservations.
+func (m *Manager) EffectiveMemoryCapacity() int64 {
+	if m.hostMem == nil {
+		return 0
+	}
+	return m.hostMem.availableForWorkers()
+}
+
 var (
 	// ErrManagerClosed is returned from Acquire after Shutdown.
 	ErrManagerClosed = errors.New("pool manager closed")
@@ -258,17 +289,12 @@ func NewManager(cfg ManagerConfig, tmpl SandboxTemplate, db *database.Database, 
 		cfg.DefaultMin = 1
 	}
 	if cfg.DefaultMax <= 0 {
-		cfg.DefaultMax = 5
+		cfg.DefaultMax = 50
 	}
 	if cfg.DefaultIdleTTL <= 0 {
-		// 2 min — long enough that a function with steady traffic always
-		// keeps its warm pool alive, short enough that workers from a
-		// one-off burst don't loiter for ten minutes. The release-path
-		// prune above handles the burst case directly; this catches
-		// trickier scenarios like "warm pool grew, then traffic dropped
-		// to a slow trickle that keeps the pool from being idle but
-		// doesn't justify the scaled-up size."
-		cfg.DefaultIdleTTL = 2 * time.Minute
+		// Public/default contract: ten minutes before an opted-in
+		// scale-to-zero pool may discard its final warm worker.
+		cfg.DefaultIdleTTL = 10 * time.Minute
 	}
 	if cfg.ReapInterval <= 0 {
 		cfg.ReapInterval = 30 * time.Second
@@ -301,27 +327,37 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		return nil, ErrManagerClosed
 	}
 
-	// Respect the host-wide concurrency ceiling first. This prevents the
+	p, err := m.getOrCreatePool(fnID)
+	if err != nil {
+		return nil, err
+	}
+	arrivedAt := time.Now()
+	p.recordArrival(arrivedAt)
+	p.queued.Add(1)
+	finishQueue := func(pool *functionPool, rejected bool) {
+		pool.queued.Add(-1)
+		pool.recordQueueWait(time.Since(arrivedAt))
+		if rejected {
+			pool.rejections.Add(1)
+		}
+	}
+
+	// Respect the host-wide concurrency ceiling after recording demand.
 	// sum of every pool's max_warm from overwhelming the box even if each
 	// pool is within its own limit. TryAcquire returns ErrTooManyRequests
 	// after a 250ms grace — long enough to ride out micro-spikes, short
 	// enough to fail fast under sustained saturation.
 	if m.limiter != nil {
 		if err := m.limiter.TryAcquire(ctx, 250*time.Millisecond); err != nil {
+			p.capacityTimeouts.Add(1)
+			finishQueue(p, true)
 			return nil, err
 		}
 	}
 
 	for {
 		if err := ctx.Err(); err != nil {
-			if m.limiter != nil {
-				m.limiter.Release()
-			}
-			return nil, err
-		}
-
-		p, err := m.getOrCreatePool(fnID)
-		if err != nil {
+			finishQueue(p, true)
 			if m.limiter != nil {
 				m.limiter.Release()
 			}
@@ -333,8 +369,21 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		// out. A generation retired while waiting is retried transparently.
 		if err := p.acquireSlot(ctx); err != nil {
 			if errors.Is(err, errPoolRetired) {
+				p.queued.Add(-1)
+				p, err = m.getOrCreatePool(fnID)
+				if err != nil {
+					if m.limiter != nil {
+						m.limiter.Release()
+					}
+					return nil, err
+				}
+				p.queued.Add(1)
 				continue
 			}
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				p.capacityTimeouts.Add(1)
+			}
+			finishQueue(p, true)
 			if m.limiter != nil {
 				m.limiter.Release()
 			}
@@ -345,33 +394,32 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		if err != nil {
 			p.releaseSlot()
 			if errors.Is(err, errPoolRetired) {
+				p.queued.Add(-1)
+				p, err = m.getOrCreatePool(fnID)
+				if err != nil {
+					if m.limiter != nil {
+						m.limiter.Release()
+					}
+					return nil, err
+				}
+				p.queued.Add(1)
 				continue
 			}
+			finishQueue(p, true)
 			if m.limiter != nil {
 				m.limiter.Release()
 			}
 			return nil, err
 		}
 		res.pool = p
-		// Bump autoscaler signal so rate EWMA reflects real traffic.
-		//
-		// v0.4 C1 caveat (streaming): every Acquire bumps the rate counter
-		// once, but a streaming request holds the worker for the full
-		// response duration (potentially up to stream_max_seconds = 300s).
-		// The autoscaler will see "1 req/burst" and a long latency EWMA, so
-		// Little's-Law floor inflates apparent target concurrency. For
-		// mixed streaming + non-streaming workloads this can over-provision.
-		// We accept the tradeoff for v1; if it becomes a real problem we
-		// could weight streaming acquires differently or sample inflight
-		// concurrency separately. — TODO(autoscaler-streaming-weight)
-		p.recordAcquire()
+		finishQueue(p, false)
 		return res, nil
 	}
 }
 
-// RecordLatency feeds a per-request dispatch latency sample into the
-// function's EWMA. Called by the proxy after Dispatch returns (success or
-// error). Non-blocking, safe from any goroutine.
+// RecordLatency feeds a per-request service-time sample into the
+// function's rolling p95. Every dispatch path calls it after user code returns
+// or fails. Non-blocking and safe from any goroutine.
 func (m *Manager) RecordLatency(acq *AcquireResult, d time.Duration) {
 	if acq != nil && acq.pool != nil {
 		acq.pool.recordLatency(d)
@@ -520,30 +568,38 @@ func (m *Manager) Stats() []PoolStats {
 	out := make([]PoolStats, 0)
 	m.pools.Range(func(k, v any) bool {
 		p := v.(*functionPool)
-		rate, lat := p.snapshotSignals()
-		memUsed, cpuFrac := p.snapshotResourceUsage()
+		demand := p.snapshotDemand(time.Now())
+		p.sigMu.Lock()
+		reason := p.limitingReason
+		p.sigMu.Unlock()
 		out = append(out, PoolStats{
-			FunctionID:      k.(string),
-			Idle:            len(p.idle),
-			Busy:            p.busy.Load(),
-			Spawned:         p.spawned.Load(),
-			Killed:          p.killed.Load(),
-			ScaleUps:        p.scaleUps.Load(),
-			ScaleDowns:      p.scaleDowns.Load(),
-			RateEWMA:        rate,
-			LatencyEWMAms:   lat,
-			DynamicMax:      p.dynamicMax.Load(),
-			Target:          p.target,
-			MemUsedAvgBytes: memUsed,
-			CPUFracAvg:      cpuFrac,
+			FunctionID:       k.(string),
+			Idle:             len(p.idle),
+			Busy:             p.busy.Load(),
+			Queued:           p.queued.Load(),
+			Spawning:         p.spawning.Load(),
+			Arrivals:         p.arrivalsTotal.Load(),
+			Spawned:          p.spawned.Load(),
+			Killed:           p.killed.Load(),
+			Desired:          p.desired.Load(),
+			EffectiveMax:     p.dynamicMax.Load(),
+			StableRate:       demand.StableRate,
+			BurstRate:        demand.BurstRate,
+			QueueWaitP95MS:   float64(demand.QueueWaitP95.Microseconds()) / 1000,
+			ServiceP95MS:     float64(demand.ServiceP95.Microseconds()) / 1000,
+			ColdStartP95MS:   float64(demand.SpawnP95.Microseconds()) / 1000,
+			LimitingReason:   reason,
+			Rejections:       p.rejections.Load(),
+			CapacityTimeouts: p.capacityTimeouts.Load(),
 		})
 		return true
 	})
 	return out
 }
 
-// PrewarmAll spawns min_warm workers for every active function. Runs with
-// bounded parallelism (NumCPU*2) so startup doesn't monopolize the box.
+// PrewarmAll registers every active pool, then lets the global coordinator
+// fill configured minimums in round-robin order. It returns when each pool is
+// warm or its effective host cap proves the minimum cannot currently fit.
 func (m *Manager) PrewarmAll(ctx context.Context) {
 	if !m.cfg.EagerWarmup || m.reg == nil {
 		return
@@ -554,57 +610,47 @@ func (m *Manager) PrewarmAll(ctx context.Context) {
 	}
 	slog.Info("pool prewarm starting", "functions", len(fns))
 
-	sem := make(chan struct{}, runtime.NumCPU()*2)
-	var wg sync.WaitGroup
+	pools := make([]*functionPool, 0, len(fns))
 	for _, fn := range fns {
-		wg.Add(1)
-		go func(fnID string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			p, err := m.getOrCreatePool(fnID)
-			if err != nil {
-				slog.Warn("prewarm: get pool failed", "fn", fnID, "err", err)
-				return
-			}
-			p.mu.Lock()
-			min := p.min
-			p.mu.Unlock()
-			for i := 0; i < min; i++ {
-				if p.memoryBytes > 0 && p.hostMem != nil {
-					if !p.hostMem.reserve(p.memoryBytes) {
-						return
-					}
-				}
-				w, err := p.spawnFn(ctx)
-				if err != nil {
-					if p.memoryBytes > 0 && p.hostMem != nil {
-						p.hostMem.release(p.memoryBytes)
-					}
-					slog.Warn("prewarm spawn failed", "fn", fnID, "err", err)
-					return
-				}
-				p.spawned.Add(1)
-				p.mu.Lock()
-				parked := false
-				if !p.closing.Load() {
-					select {
-					case p.idle <- w:
-						parked = true
-					default:
-					}
-				}
-				p.mu.Unlock()
-				if parked {
-					continue
-				}
-				p.killWorker(w)
-				return
-			}
-		}(fn.ID)
+		p, err := m.getOrCreatePool(fn.ID)
+		if err != nil {
+			slog.Warn("prewarm: get pool failed", "fn", fn.ID, "err", err)
+			continue
+		}
+		pools = append(pools, p)
 	}
-	wg.Wait()
+	if m.scaler == nil {
+		slog.Warn("pool prewarm skipped: host capacity coordinator unavailable")
+		return
+	}
+	m.scaler.nudge()
+	waitLimit := time.NewTimer(30 * time.Second)
+	defer waitLimit.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		settled := true
+		for _, p := range pools {
+			current := int(p.busy.Load()+p.spawning.Load()) + len(p.idle)
+			effective := int(p.dynamicMax.Load())
+			if current < p.min && (effective >= p.min || p.spawning.Load() > 0) {
+				settled = false
+				break
+			}
+		}
+		if settled {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			slog.Warn("pool prewarm stopped", "err", ctx.Err())
+			return
+		case <-waitLimit.C:
+			slog.Warn("pool prewarm timed out; coordinator will continue in background")
+			return
+		case <-ticker.C:
+		}
+	}
 	slog.Info("pool prewarm complete")
 }
 
@@ -643,21 +689,13 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	minWarm := m.cfg.DefaultMin
 	maxWarm := m.cfg.DefaultMax
 	idleTTL := m.cfg.DefaultIdleTTL
-	targetConc := 10 // pool_config default; Knative-style target concurrency per worker
 	scaleToZero := false
 	if cfg, err := m.db.GetPoolConfig(fnID); err == nil && cfg != nil {
-		if cfg.MinWarm > 0 {
-			minWarm = cfg.MinWarm
-		}
+		minWarm = cfg.MinWarm
 		if cfg.MaxWarm > 0 {
 			maxWarm = cfg.MaxWarm
 		}
-		if cfg.IdleTTLS > 0 {
-			idleTTL = time.Duration(cfg.IdleTTLS) * time.Second
-		}
-		if cfg.TargetConcurrency > 0 {
-			targetConc = cfg.TargetConcurrency
-		}
+		idleTTL = time.Duration(cfg.IdleTTLS) * time.Second
 		scaleToZero = cfg.ScaleToZero
 	}
 
@@ -677,13 +715,24 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	if memoryBytes < 16*1024*1024 {
 		memoryBytes = 16 * 1024 * 1024 // 16MB floor so the budget math doesn't go wild on tiny fns
 	}
+	cpuUnits := workerCPUUnits(fn.CPUs)
 
-	// Dynamic channel size: let the scaler grow up to a safe ceiling far
-	// beyond the operator's cap. If the operator's max_warm is raised at
-	// runtime (future feature), we won't need to rebuild the channel.
+	// Allocate idle-worker storage from effective host capacity. max_warm is
+	// still a hard operator ceiling, but never directly controls allocation.
 	channelCap := maxWarm
-	if channelCap < 64 {
-		channelCap = 64
+	if m.hostMem != nil {
+		if cpuCap := int(int64(m.hostMem.effectiveCPUWorkers()) * 1000 / cpuUnits); cpuCap < channelCap {
+			channelCap = cpuCap
+		}
+		if memoryBytes > 0 {
+			total, _, _ := m.hostMem.stats()
+			if memCap := int(float64(total)*0.8) / int(memoryBytes); memCap < channelCap {
+				channelCap = memCap
+			}
+		}
+	}
+	if channelCap < 1 {
+		channelCap = 1
 	}
 
 	// Per-function concurrency cap: if set, gate every Acquire on a
@@ -703,11 +752,12 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 		max:         maxWarm,
 		idleTTL:     idleTTL,
 		maxUses:     m.cfg.DefaultMaxUses,
-		target:      targetConc,
 		memoryBytes: memoryBytes,
+		cpuUnits:    cpuUnits,
 		scaleToZero: scaleToZero,
 		hostMem:     m.hostMem,
 		idle:        make(chan *sandbox.Worker, channelCap),
+		spawnSlots:  make(chan struct{}, maxConcurrentSpawnsPerPool),
 		retired:     make(chan struct{}),
 		concSem:     concSem,
 		concPolicy:  concPolicy,
@@ -784,16 +834,16 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			return w, err
 		},
 	}
+	p.dynamicMax.Store(int64(channelCap))
+	if m.scaler != nil {
+		p.reclaimFn = func() bool { return m.scaler.reclaimBorrowedIdle(p) }
+		p.requestSpawn = m.scaler.nudge
+	}
 
 	// Store — but if another goroutine raced us, discard our pool.
 	actual, loaded := m.pools.LoadOrStore(fnID, p)
 	if loaded {
 		return actual.(*functionPool), nil
-	}
-
-	// Initialise the autoscaler signal ring for this pool.
-	if m.scaler != nil {
-		m.scaler.ensureSignals(p)
 	}
 
 	// Start the background reaper for this pool.

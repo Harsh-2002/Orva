@@ -66,10 +66,10 @@
         <div class="grid grid-cols-2 gap-4 text-sm">
           <div>
             <div class="text-xs uppercase tracking-wider text-foreground-muted">
-              CPU cores
+              CPU / worker slots
             </div>
             <div class="text-lg font-mono text-white mt-0.5">
-              {{ m.host?.num_cpu ?? '?' }}
+              {{ m.host?.num_cpu ?? '?' }} / {{ m.host?.effective_cpu_workers ?? '?' }}
             </div>
           </div>
           <div>
@@ -80,7 +80,7 @@
               {{ formatMB(memUsed) }} <span class="text-foreground-muted text-sm">/ {{ formatMB(memTotal) }}</span>
             </div>
             <div class="text-xs text-foreground-muted mt-0.5">
-              {{ memUsedPct.toFixed(1) }}% used · {{ formatMB(memReserved) }} reserved by warm pools
+              {{ memUsedPct.toFixed(1) }}% used · {{ formatMB(memEffective) }} allocatable
             </div>
           </div>
         </div>
@@ -215,23 +215,26 @@
                 Capacity
               </div>
               <div class="text-xs font-mono text-white">
-                {{ p.dynamic_max }} max
+                {{ p.effective_max }} max
+              </div>
+              <div class="text-[11px] text-foreground-muted">
+                {{ formatLimit(p.limiting_reason) }}
               </div>
             </div>
           </div>
 
           <div class="grid grid-cols-3 gap-2">
             <PoolStat
-              label="Ready / target"
-              :value="`${p.idle} / ${p.target}`"
+              label="Ready / desired"
+              :value="`${p.idle} / ${p.desired_workers}`"
             />
             <PoolStat
-              label="Busy"
-              :value="p.busy"
+              label="Busy / queued"
+              :value="`${p.busy} / ${p.queued}`"
             />
             <PoolStat
               label="Calls / sec"
-              :value="formatRate(p.rate_ewma)"
+              :value="formatRate(p.stable_rate)"
             />
           </div>
 
@@ -245,19 +248,19 @@
           <div class="grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs">
             <div>
               <div class="text-foreground-muted">
-                Avg latency
+                Service p95
               </div>
               <div class="mt-0.5 font-mono text-white">
-                {{ p.latency_ewma_ms?.toFixed?.(1) ?? 0 }} ms
+                {{ p.service_p95_ms?.toFixed?.(1) ?? 0 }} ms
               </div>
             </div>
             <div>
               <div class="text-foreground-muted">
-                Avg memory / limit
+                Queue / cold p95
               </div>
               <div class="mt-0.5 font-mono text-white">
-                {{ p.mem_used_avg_mb > 0 ? '~' + Math.round(p.mem_used_avg_mb) : EMPTY }}
-                <span class="text-foreground-muted">/ {{ p.mem_limit_mb }} MB</span>
+                {{ p.queue_wait_p95_ms?.toFixed?.(1) ?? 0 }}
+                <span class="text-foreground-muted">/ {{ p.cold_start_p95_ms?.toFixed?.(1) ?? 0 }} ms</span>
               </div>
             </div>
           </div>
@@ -308,6 +311,7 @@ const poolHistoryFor = (fnId) => system.poolHistory[fnId] || []
 
 const formatPct = (v) => (v == null ? EMPTY : `${v.toFixed(1)}%`)
 const formatRate = (v) => (v == null ? '0' : v.toFixed(1))
+const formatLimit = (v) => (v ? v.replaceAll('_', ' ') : 'calculating')
 
 // Compact human-readable byte sizes. Server reports memory in MB; we show
 // GB once we cross 1 GB so the host card doesn't overflow with five-digit
@@ -335,6 +339,7 @@ const memReserved  = computed(() => m.value.host?.mem_reserved_mb ?? 0)
 // `docker stats`/`free` show. Idle warm sandboxes use a fraction of their
 // reservation, so memUsed is typically far below memReserved.
 const memAvailable = computed(() => m.value.host?.mem_available_mb ?? 0)
+const memEffective = computed(() => m.value.host?.effective_memory_capacity_mb ?? 0)
 const memUsed      = computed(() => Math.max(0, memTotal.value - memAvailable.value))
 const memFree      = computed(() => Math.max(0, memTotal.value - memUsed.value))
 const memUsedPct   = computed(() => (memTotal.value > 0 ? (memUsed.value / memTotal.value) * 100 : 0))

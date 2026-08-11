@@ -187,7 +187,9 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
 	defer releaseExecution()
+	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
+	h.Pool.RecordLatency(acq, time.Since(dispatchStarted))
 	durationMS := time.Since(startedAt).Milliseconds()
 	if err != nil {
 		reqErr = err

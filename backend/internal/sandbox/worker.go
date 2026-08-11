@@ -36,12 +36,8 @@ type Worker struct {
 
 	// CgroupPath is resolved asynchronously after Spawn (nsjail names the
 	// cgroup after its jailed child's PID, which isn't known until after fork).
-	// AcquireUsec and AcquireAt are stamped by the pool before handing the
-	// worker to a caller and read at release for per-function EWMA metrics.
 	cgroupPathMu sync.Mutex
 	CgroupPath   string
-	AcquireUsec  int64
-	AcquireAt    time.Time
 
 	// mu serializes Dispatch calls defensively. The pool contract is that
 	// only one goroutine holds a Worker at a time, so the lock is just a

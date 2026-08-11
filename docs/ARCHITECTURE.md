@@ -204,7 +204,7 @@ One SQLite file, grouped by subsystem. Core tables:
 | `build_logs`         | stdout/stderr from `npm install` / `pip install` |
 | `function_secrets`   | per-function encrypted env vars (AES-256-GCM) |
 | `routes`             | custom URL → function-id mappings (`/webhooks/stripe`) |
-| `pool_config`        | per-fn autoscaler tuning (min_warm, max_warm, target_concurrency) |
+| `pool_config`        | per-fn pool policy (min_warm, max_warm, idle TTL, scale-to-zero) |
 | `system_config`      | global tuning knobs (versions_to_keep, gc_interval_seconds, etc.) |
 
 Feature tables added since v0.2:

@@ -578,7 +578,7 @@ specify change; the rest keep their current values.
 ```bash
 orva pool get --fn greeter
 orva pool set --fn greeter --min-warm 2 --max-warm 20 --scale-to-zero
-orva pool set --fn greeter --idle-ttl 300 --target-concurrency 4
+orva pool set --fn greeter --idle-ttl 300
 ```
 
 ### Background jobs + webhook deliveries

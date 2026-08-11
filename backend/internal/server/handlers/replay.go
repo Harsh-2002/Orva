@@ -183,7 +183,9 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 
 	releaseExecution := h.SDKAuth.BindExecution(newExecID, fn.ID, traceID, spanID, start)
 	defer releaseExecution()
+	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
+	h.Pool.RecordLatency(acq, time.Since(dispatchStarted))
 	duration := time.Since(start)
 	if h.Metrics != nil {
 		h.Metrics.RecordDuration(duration)

@@ -169,6 +169,7 @@ func testPool(fnID string, hm *hostMemTracker, memoryBytes int64) *functionPool 
 		memoryBytes: memoryBytes,
 		hostMem:     hm,
 		idle:        make(chan *sandbox.Worker, 4),
+		spawnSlots:  make(chan struct{}, 4),
 		retired:     make(chan struct{}),
 		concSem:     make(chan struct{}, 1),
 	}

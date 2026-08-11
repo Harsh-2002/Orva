@@ -47,12 +47,12 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 			}
 		}
 		return http.StatusTooManyRequests, respond.ErrorOpts{
-			Code: "FUNCTION_BUSY",
-			Message: fmt.Sprintf("function %s is at its concurrency cap", funcLabel(fn)),
-			RequestID: requestID,
-			Hint: "raise functions.max_concurrency or switch the policy to 'queue' to wait for a slot",
+			Code:        "FUNCTION_BUSY",
+			Message:     fmt.Sprintf("function %s is at its concurrency cap", funcLabel(fn)),
+			RequestID:   requestID,
+			Hint:        "raise functions.max_concurrency or switch the policy to 'queue' to wait for a slot",
 			RetryAfterS: 1,
-			Details: details,
+			Details:     details,
 		}
 
 	case errors.Is(err, pool.ErrPoolAtCapacity):
@@ -62,27 +62,27 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 			details["function_name"] = fn.Name
 		}
 		return http.StatusServiceUnavailable, respond.ErrorOpts{
-			Code: "POOL_AT_CAPACITY",
-			Message: fmt.Sprintf("function pool at capacity for %s", funcLabel(fn)),
-			RequestID: requestID,
-			Hint: "raise pool_config.max_warm via PUT /api/v1/pool/config or reduce client concurrency",
+			Code:        "POOL_AT_CAPACITY",
+			Message:     fmt.Sprintf("function pool at capacity for %s", funcLabel(fn)),
+			RequestID:   requestID,
+			Hint:        "inspect pool limiting_reason; raise max_warm only for operator_max, otherwise add host capacity or reduce worker limits",
 			RetryAfterS: 5,
-			Details: details,
+			Details:     details,
 		}
 
 	case errors.Is(err, pool.ErrMemoryExhausted):
 		return http.StatusServiceUnavailable, respond.ErrorOpts{
 			Code: "MEMORY_EXHAUSTED", Message: "host memory budget exhausted",
-			RequestID: requestID,
-			Hint:      "deploy fewer concurrent functions or increase host RAM; see /api/v1/system/metrics.json host.mem_*",
+			RequestID:   requestID,
+			Hint:        "deploy fewer concurrent functions or increase host RAM; see /api/v1/system/metrics.json host.mem_*",
 			RetryAfterS: 30,
 		}
 
 	case errors.Is(err, sandbox.ErrTooManyRequests):
 		return http.StatusTooManyRequests, respond.ErrorOpts{
 			Code: "TOO_MANY_REQUESTS", Message: "host concurrency cap reached",
-			RequestID: requestID,
-			Hint:      "back off briefly and retry; raise cfg.Sandbox.MaxConcurrent if persistent",
+			RequestID:   requestID,
+			Hint:        "back off briefly and retry; raise cfg.Sandbox.MaxConcurrent if persistent",
 			RetryAfterS: 1,
 		}
 
@@ -94,10 +94,10 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 	// Retry-After tracks the manager's 10s recompile tick.
 	case errors.Is(err, firewall.ErrPolicyUnavailable), errors.Is(err, sandbox.ErrEgressPolicyMissing):
 		return http.StatusServiceUnavailable, respond.ErrorOpts{
-			Code: "EGRESS_POLICY_UNAVAILABLE",
-			Message: "no sandbox egress policy is in force; refusing to start an unfiltered egress worker",
-			RequestID: requestID,
-			Hint:      "see GET /api/v1/firewall/status (last_compile_error) — fix the offending rule, then POST /api/v1/firewall/resolve",
+			Code:        "EGRESS_POLICY_UNAVAILABLE",
+			Message:     "no sandbox egress policy is in force; refusing to start an unfiltered egress worker",
+			RequestID:   requestID,
+			Hint:        "see GET /api/v1/firewall/status (last_compile_error) — fix the offending rule, then POST /api/v1/firewall/resolve",
 			RetryAfterS: 10,
 		}
 
@@ -162,8 +162,8 @@ func deployError(err error, requestID string, queueDepth int) (status int, opts 
 			retry = 300
 		}
 		return http.StatusServiceUnavailable, respond.ErrorOpts{
-			Code: "BUILD_QUEUE_FULL",
-			Message: fmt.Sprintf("build queue full (%d pending)", queueDepth),
+			Code:        "BUILD_QUEUE_FULL",
+			Message:     fmt.Sprintf("build queue full (%d pending)", queueDepth),
 			RequestID:   requestID,
 			Hint:        "wait for current builds to drain; consider raising NumCPU or staggering deploys",
 			RetryAfterS: retry,
@@ -176,8 +176,8 @@ func deployError(err error, requestID string, queueDepth int) (status int, opts 
 		}
 	case errors.Is(err, builder.ErrInsufficientDisk):
 		return http.StatusServiceUnavailable, respond.ErrorOpts{
-			Code: "INSUFFICIENT_DISK",
-			Message: "insufficient free disk space to start the build",
+			Code:      "INSUFFICIENT_DISK",
+			Message:   "insufficient free disk space to start the build",
 			RequestID: requestID,
 			Hint:      "free space on the data volume or lower system_config.min_free_disk_mb; see docs/CAPACITY.md",
 		}

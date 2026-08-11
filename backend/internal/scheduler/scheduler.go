@@ -390,7 +390,9 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 
 	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, ranAt)
 	defer releaseExecution()
+	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
+	s.pool.RecordLatency(acq, time.Since(dispatchStarted))
 	if err != nil {
 		reqErr = err
 		errMsg := err.Error()
@@ -697,7 +699,9 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 
 	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
 	defer releaseExecution()
+	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
+	s.pool.RecordLatency(acq, time.Since(dispatchStarted))
 	if err != nil {
 		reqErr = err
 		s.recordExecution(execID, fn.ID, "error", 0, startedAt, stderr, err.Error(),

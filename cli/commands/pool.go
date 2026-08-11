@@ -12,16 +12,16 @@ import (
 // poolCmd exposes the per-function warm-pool autoscaler config to the
 // terminal. It hits the same /api/v1/pool/config endpoints the dashboard's
 // function settings use. The pool keeps min_warm sandboxes hot, scales up
-// toward max_warm under load (one new worker per target_concurrency
-// in-flight requests), and recycles workers idle longer than idle_ttl.
+// toward max_warm from measured demand, and recycles workers idle longer
+// than idle_ttl.
 var poolCmd = &cobra.Command{
 	Use:   "pool",
 	Short: "View or tune warm-pool autoscaler config",
 	Long: `View or tune the warm-sandbox autoscaler for a function.
 
 The autoscaler keeps min_warm sandboxes hot at all times, scales up toward
-max_warm under load (adding a worker per target_concurrency in-flight
-requests), recycles workers idle longer than idle_ttl seconds, and — when
+max_warm from measured arrival, queue, service, and cold-start signals,
+recycles workers idle longer than idle_ttl seconds, and — when
 scale_to_zero is on — drops to zero warm workers when fully idle (trading a
 cold start on the next request for zero idle cost).
 
@@ -40,7 +40,7 @@ var poolGetCmd = &cobra.Command{
 	Use:   "get",
 	Short: "Show a function's warm-pool config",
 	Long: `Show the autoscaler config for a function: min_warm, max_warm, idle_ttl,
-target_concurrency, and scale_to_zero.
+and scale_to_zero.
 
 If the function has no explicit override, the server reports it as
 unconfigured (running on built-in defaults).`,
@@ -59,7 +59,6 @@ Only the flags you actually pass are sent; every omitted field keeps its
 current value (the server treats this as a partial update). Changes apply to
 new sandbox spawns; existing warm workers keep their behavior until recycled.`,
 	Example: `  orva pool set --fn greeter --min-warm 1 --max-warm 10
-  orva pool set --fn greeter --target-concurrency 5
   orva pool set --fn greeter --scale-to-zero
   orva pool set --fn greeter --scale-to-zero=false`,
 	Args: cobra.NoArgs,
@@ -74,7 +73,6 @@ func init() {
 	poolSetCmd.Flags().Int("min-warm", 0, "minimum warm sandboxes kept hot")
 	poolSetCmd.Flags().Int("max-warm", 0, "maximum warm sandboxes under load")
 	poolSetCmd.Flags().Int("idle-ttl", 0, "seconds a worker may sit idle before recycling")
-	poolSetCmd.Flags().Int("target-concurrency", 0, "in-flight requests per worker before scaling up")
 	poolSetCmd.Flags().Bool("scale-to-zero", false, "drop to zero warm workers when fully idle")
 	_ = poolSetCmd.MarkFlagRequired("fn")
 
@@ -149,16 +147,12 @@ func runPoolSet(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetInt("idle-ttl")
 		body["idle_ttl_seconds"] = v
 	}
-	if cmd.Flags().Changed("target-concurrency") {
-		v, _ := cmd.Flags().GetInt("target-concurrency")
-		body["target_concurrency"] = v
-	}
 	if cmd.Flags().Changed("scale-to-zero") {
 		v, _ := cmd.Flags().GetBool("scale-to-zero")
 		body["scale_to_zero"] = v
 	}
 	if len(body) == 1 {
-		return fmt.Errorf("nothing to set — pass at least one of --min-warm, --max-warm, --idle-ttl, --target-concurrency, --scale-to-zero")
+		return fmt.Errorf("nothing to set — pass at least one of --min-warm, --max-warm, --idle-ttl, --scale-to-zero")
 	}
 
 	resp, err := client.Put("/api/v1/pool/config", body)
@@ -185,12 +179,11 @@ func runPoolSet(cmd *cobra.Command, _ []string) error {
 
 // poolConfigView mirrors database.PoolConfig's JSON shape.
 type poolConfigView struct {
-	FunctionID        string `json:"function_id"`
-	MinWarm           int    `json:"min_warm"`
-	MaxWarm           int    `json:"max_warm"`
-	IdleTTLSeconds    int    `json:"idle_ttl_seconds"`
-	TargetConcurrency int    `json:"target_concurrency"`
-	ScaleToZero       bool   `json:"scale_to_zero"`
+	FunctionID     string `json:"function_id"`
+	MinWarm        int    `json:"min_warm"`
+	MaxWarm        int    `json:"max_warm"`
+	IdleTTLSeconds int    `json:"idle_ttl_seconds"`
+	ScaleToZero    bool   `json:"scale_to_zero"`
 }
 
 func printPoolConfig(cfg poolConfigView) {
@@ -198,7 +191,6 @@ func printPoolConfig(cfg poolConfigView) {
 	t.row("min_warm", cfg.MinWarm)
 	t.row("max_warm", cfg.MaxWarm)
 	t.row("idle_ttl_seconds", cfg.IdleTTLSeconds)
-	t.row("target_concurrency", cfg.TargetConcurrency)
 	t.row("scale_to_zero", cfg.ScaleToZero)
 	t.flush()
 }

@@ -134,7 +134,13 @@ type SystemMetricsOutput struct {
 	ActiveRequests int64          `json:"active_requests"`
 	SandboxActive  int64          `json:"sandbox_active"`
 	BuildQueue     MetricsBuildQ  `json:"build_queue"`
+	Host           MetricsHost    `json:"host"`
 	Pools          []MetricsPool  `json:"pools"`
+}
+
+type MetricsHost struct {
+	EffectiveCPUWorkers int   `json:"effective_cpu_workers"`
+	EffectiveMemoryMB   int64 `json:"effective_memory_capacity_mb"`
 }
 
 type MetricsTotals struct {
@@ -157,13 +163,20 @@ type MetricsBuildQ struct {
 }
 
 type MetricsPool struct {
-	FunctionID    string  `json:"function_id"`
-	Idle          int     `json:"idle"`
-	Busy          int64   `json:"busy"`
-	Spawned       int64   `json:"spawned"`
-	Killed        int64   `json:"killed"`
-	RateEWMA      float64 `json:"rate_ewma"`
-	LatencyEWMAms float64 `json:"latency_ewma_ms"`
+	FunctionID       string  `json:"function_id"`
+	Idle             int     `json:"idle"`
+	Busy             int64   `json:"busy"`
+	Queued           int64   `json:"queued"`
+	Spawning         int64   `json:"spawning"`
+	DesiredWorkers   int64   `json:"desired_workers"`
+	EffectiveMax     int64   `json:"effective_max"`
+	QueueWaitP95MS   float64 `json:"queue_wait_p95_ms"`
+	ServiceP95MS     float64 `json:"service_p95_ms"`
+	ColdStartP95MS   float64 `json:"cold_start_p95_ms"`
+	LimitingReason   string  `json:"limiting_reason"`
+	Arrivals         int64   `json:"arrivals"`
+	Rejections       int64   `json:"rejections"`
+	CapacityTimeouts int64   `json:"capacity_timeouts"`
 }
 
 func buildSystemMetrics(deps Deps) SystemMetricsOutput {
@@ -189,15 +202,18 @@ func buildSystemMetrics(deps Deps) SystemMetricsOutput {
 		out.BuildQueue = MetricsBuildQ{Pending: deps.BuildQueue.QueuedDepth(), Workers: deps.BuildQueue.Workers()}
 	}
 	if deps.PoolMgr != nil {
+		out.Host = MetricsHost{
+			EffectiveCPUWorkers: deps.PoolMgr.EffectiveCPUCapacity(),
+			EffectiveMemoryMB:   deps.PoolMgr.EffectiveMemoryCapacity() / 1024 / 1024,
+		}
 		for _, s := range deps.PoolMgr.Stats() {
 			out.Pools = append(out.Pools, MetricsPool{
-				FunctionID:    s.FunctionID,
-				Idle:          s.Idle,
-				Busy:          s.Busy,
-				Spawned:       s.Spawned,
-				Killed:        s.Killed,
-				RateEWMA:      s.RateEWMA,
-				LatencyEWMAms: s.LatencyEWMAms,
+				FunctionID: s.FunctionID, Idle: s.Idle, Busy: s.Busy,
+				Queued: s.Queued, Spawning: s.Spawning,
+				DesiredWorkers: s.Desired, EffectiveMax: s.EffectiveMax,
+				QueueWaitP95MS: s.QueueWaitP95MS, ServiceP95MS: s.ServiceP95MS,
+				ColdStartP95MS: s.ColdStartP95MS, LimitingReason: s.LimitingReason,
+				Arrivals: s.Arrivals, Rejections: s.Rejections, CapacityTimeouts: s.CapacityTimeouts,
 			})
 		}
 	}
