@@ -45,7 +45,7 @@
         </button>
         <button
           type="button"
-          class="touch-expand-xs shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
+          class="touch-expand-iconbtn shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
           title="Rename conversation"
           aria-label="Rename conversation"
           @click.stop="onRename(c)"
@@ -54,7 +54,7 @@
         </button>
         <button
           type="button"
-          class="touch-expand-xs shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-danger-fg focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
+          class="touch-expand-iconbtn shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-danger-fg focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
           title="Delete conversation"
           aria-label="Delete conversation"
           @click.stop="onDelete(c.id)"

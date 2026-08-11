@@ -4,22 +4,16 @@
   --font-sans: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
-  /* Custom Palette - Deep Purple/Space Theme */
-  --color-background: #12111C;
-  --color-surface: #1A1929; /* Slightly lighter than bg */
-  --color-surface-hover: #252438;
-  --color-border: #2D2B42;
+  /* Neutral graphite canvas. Violet is reserved for action and selection. */
+  --color-background: #0B0D10;
+  --color-surface: #15181D;
+  --color-surface-hover: #23272E;
+  --color-border: #343A44;
 
-  --color-foreground: #FFFFFF;
-  /* foreground-strong: pure white reserved for text on saturated brand
-     surfaces (primary CTA labels, on-violet badges, etc.). This is
-     scaffolding for a deferred palette pass: when --color-foreground
-     shifts to a tinted off-white (target #F4F2FA, oklch(96% 0.01 290))
-     to satisfy DESIGN.md's "tint every neutral toward the brand hue"
-     rule, the high-contrast sites that genuinely need pure white on
-     coloured backgrounds keep working without per-site rewrites. */
+  --color-foreground: #F4F6F8;
+  /* Pure white is reserved for text on saturated brand surfaces. */
   --color-foreground-strong: #FFFFFF;
-  --color-foreground-muted: #A3A3B3; /* Cool gray/purple tint */
+  --color-foreground-muted: #ADB4BE;
 
   --color-primary: #553F83;
   --color-primary-foreground: #FFFFFF;
@@ -28,9 +22,9 @@
      contrast on the near-black background. Used for markdown links in chat. */
   --color-link: #8b7bd8;
 
-  --color-secondary: #2D2B42;
-  --color-secondary-foreground: #FFFFFF;
-  --color-secondary-hover: #3E3B5A;
+  --color-secondary: #282E36;
+  --color-secondary-foreground: #F4F6F8;
+  --color-secondary-hover: #353D47;
 
   --color-danger: #ef4444;
   --color-success: #22c55e;
@@ -99,7 +93,7 @@
      project's recently-standardised page subhead uses leading-relaxed
      (1.625) which reads loose at the operator-grade density. 1.55 is
      DESIGN.md's prescription for body and is the right setting for
-     reading flow at 14 px on a violet-tinted dark surface. Surfaces
+     reading flow at 14 px on a graphite dark surface. Surfaces
      as Tailwind utility leading-body. */
   --leading-body: 1.55;
 }
@@ -196,6 +190,9 @@ select::-ms-expand {
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 120ms ease-out;
+  /* A leaving backdrop remains in the DOM until its fade finishes. Stop it
+     from swallowing the first click on the newly revealed surface. */
+  pointer-events: none;
 }
 .fade-enter-from,
 .fade-leave-to {
@@ -259,51 +256,28 @@ select::-ms-expand {
 /* ============================================================
    Touch-target hit-area expansion for sub-44px controls
    ------------------------------------------------------------
-   Visible button heights of 28 px (xs) and 32 px (sm) preserve
-   the dashboard's chip / drawer-icon density that operators
-   asked for, but WCAG 2.5.5 (and Apple HIG / Material) want a
-   44 px hit area. We expand the click region with a transparent
-   ::before that sits behind the button content and extends
-   vertically beyond the host's bounding box. Click events on
-   the ::before bubble to the host because a ::before pseudo
-   IS the host for hit-testing.
-
-   Horizontal expansion is intentionally OFF: chip rows place
-   chips with gap-2 (8 px) between them, and overlapping click
-   regions would create ambiguous hit zones at the gap centre.
-   Vertical-only expansion keeps siblings unambiguous.
-
-   Apply .touch-expand-xs to xs Buttons (28 -> 44 = +8 each side).
-   Apply .touch-expand-sm to sm Buttons (32 -> 44 = +6 each side).
-   Apply .touch-expand-iconbtn to IconButton (28 square -> 44 square,
-   horizontal expansion is fine here because icon buttons rarely
-   sit in tight rows; verify per-call site if they do).
+   Compact controls stay visually dense for mouse/trackpad users. On coarse
+   pointers they grow to a real 44 px box. The previous implementation used
+   invisible ::before elements outside each control; those hit regions
+   overlapped adjacent rows and made the later row capture clicks intended for
+   the visible control above it.
    ============================================================ */
-.touch-expand-xs {
-  position: relative;
-}
-.touch-expand-xs::before {
-  content: '';
-  position: absolute;
-  inset-inline: 0;
-  inset-block: -8px;
-}
-.touch-expand-sm {
-  position: relative;
-}
-.touch-expand-sm::before {
-  content: '';
-  position: absolute;
-  inset-inline: 0;
-  inset-block: -6px;
-}
+.touch-expand-xs,
+.touch-expand-sm,
 .touch-expand-iconbtn {
   position: relative;
 }
-.touch-expand-iconbtn::before {
-  content: '';
-  position: absolute;
-  inset: -8px;
+
+@media (pointer: coarse) {
+  .touch-expand-xs,
+  .touch-expand-sm,
+  .touch-expand-iconbtn {
+    min-height: 44px;
+  }
+
+  .touch-expand-iconbtn {
+    min-width: 44px;
+  }
 }
 
 /* ============================================================
@@ -328,7 +302,7 @@ select::-ms-expand {
    set — `=>`, `->`, `!=`, `>=`, `<=` render as their proper
    ligature glyphs which the operator's eye reads as a single
    unit. ss20 turns on the curved-bracket variant which scans
-   better against Orva's violet-tinted backgrounds.
+   better against Orva's graphite backgrounds.
 
    Inter-rendered numbers in tables / counters / KPI tiles
    still need an explicit `tabular-nums` Tailwind class on the

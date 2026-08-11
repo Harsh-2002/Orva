@@ -2,17 +2,17 @@
 name: Orva
 description: Self-hosted Function-as-a-Service for homelab operators and on-prem teams.
 colors:
-  background: "#12111C"
-  surface: "#1A1929"
-  surface-hover: "#252438"
-  border: "#2D2B42"
-  foreground: "#FFFFFF"
-  foreground-muted: "#A3A3B3"
+  background: "#0B0D10"
+  surface: "#15181D"
+  surface-hover: "#23272E"
+  border: "#343A44"
+  foreground: "#F4F6F8"
+  foreground-muted: "#ADB4BE"
   primary: "#553F83"
   primary-hover: "#684D9E"
   primary-foreground: "#FFFFFF"
-  secondary: "#2D2B42"
-  secondary-hover: "#3E3B5A"
+  secondary: "#282E36"
+  secondary-hover: "#353D47"
   danger: "#EF4444"
   warning: "#EAB308"
   success: "#22C55E"
@@ -133,12 +133,12 @@ components:
 
 Orva is the control plane for someone running a function platform on their own machine. Probably in a dim home office, often after-hours, more curious than time-pressured. The interface earns trust by behaving like a serious infrastructure tool: dense, unfussy, comfortable with code, willing to show numbers without dressing them up. It doesn't perform competence; it embodies it. Every page subhead reads as a one-line operator's note from a colleague who already knows the system: short, factual, no marketing flair.
 
-The palette is the deep purple-tinted near-black of an editor at midnight, paired with a single muted violet accent that carries every CTA. JetBrains Mono runs alongside Inter so paths, IDs, byte counts, and CPU readings sit in their natural register without arguing for attention. Rhythm is built from quiet density: small type, generous gaps where ideas separate, tight gaps within a single thought, no empty-space-as-decoration. Surfaces are flat. Shadows whisper, never advertise.
+The palette is the neutral graphite-black of an editor at midnight, paired with a single muted violet accent that carries every CTA. JetBrains Mono runs alongside Inter so paths, IDs, byte counts, and CPU readings sit in their natural register without arguing for attention. Rhythm is built from quiet density: small type, generous gaps where ideas separate, tight gaps within a single thought, no empty-space-as-decoration. Surfaces are flat. Shadows whisper, never advertise.
 
 What this system rejects: the SaaS-marketing dashboard family (gradient hero panels, three-up icon-feature cards, glassy decorative blurs), category clichés (cloud-vendor purple gradients, "modern" minimal-cream-with-emerald, observability navy), and copy that sounds written rather than spoken. Orva is operator software for people who chose to self-host, not a sales pitch for becoming a self-hoster.
 
 **Key Characteristics:**
-- Deep violet-tinted dark surfaces; one muted purple accent carries identity.
+- Neutral graphite-black surfaces; one muted violet accent carries identity.
 - Inter for prose, JetBrains Mono for any data the operator might compare digit-to-digit.
 - Standardised page heads: `text-xl semibold tracking-tight` over a one-line subhead in muted text, max-w-prose.
 - Thin, low-contrast scrollbars keep nested overflow discoverable without dominating the surface.
@@ -147,19 +147,19 @@ What this system rejects: the SaaS-marketing dashboard family (gradient hero pan
 
 ## 2. Colors
 
-A single muted violet accent on a deep violet-tinted near-black, with cool gray-violet text and three semantic status colours. The neutrals all carry a faint hue tilt toward the brand violet so nothing in the UI looks plastic-gray.
+A single muted violet accent sits on neutral graphite-black surfaces with cool light-gray text and three semantic status colours. Neutral surfaces maximize reading contrast; brand color is reserved for actions and selection.
 
 ### Primary
 - **Muted Violet** (`#553F83`, ≈`oklch(40% 0.10 295)`): the only identity colour. Carries primary CTAs (Deploy, Save, Confirm), the active sidebar item, status-running indicators, and selected chip filters. Reserved enough that when it appears, the eye knows where to land.
 - **Muted Violet Hover** (`#684D9E`, ≈`oklch(48% 0.12 295)`): hover state for primary surfaces. Lightness step only; same hue and chroma family.
 
 ### Neutral
-- **Background** (`#12111C`, ≈`oklch(13% 0.029 277)`): page surface and the body of cards. Almost black, faintly violet so it never reads as a flat #0d0d0d void.
-- **Surface** (`#1A1929`, ≈`oklch(18% 0.035 277)`): one elevation step up. Used for headers/footers inside cards, modal backdrops behind content rows, and inline code blocks.
-- **Surface Hover** (`#252438`, ≈`oklch(24% 0.042 277)`): hover state for rows, list items, and ghost buttons. The first frame of "I noticed you".
-- **Border** (`#2D2B42`, ≈`oklch(28% 0.045 277)`): every divider, every card outline, every input stroke. The system reads layers through borders, not shadows.
-- **Foreground** (`#FFFFFF`): currently pure white. **Tint to `#F4F2FA` (≈`oklch(96% 0.01 290)`)** to match the rest of the palette's hue discipline; the eye reads pure white as harsh against a violet-tinted dark. The `--color-foreground-strong: #FFFFFF` token is reserved for text on saturated brand-colour surfaces (primary CTA labels, on-violet badges); the default `--color-foreground` may shift to a tinted off-white in a future palette pass without breaking those high-contrast sites.
-- **Foreground Muted** (`#A3A3B3`, ≈`oklch(70% 0.018 280)`): all secondary text, icon defaults, table cell content one rank below primary. The cool gray-violet is intentional.
+- **Background** (`#0B0D10`): the near-black application canvas and card body. It is neutral graphite, not violet.
+- **Surface** (`#15181D`): one graphite elevation step up. Used for headers, footers, modal layers, and inline code blocks.
+- **Surface Hover** (`#23272E`): hover state for rows, list items, and ghost buttons. It stays neutral so interaction does not compete with semantic color.
+- **Border** (`#343A44`): dividers, card outlines, and input strokes. Slightly cool gray keeps dense structure visible without drawing a grid over the page.
+- **Foreground** (`#F4F6F8`): soft light gray for primary reading text. `--color-foreground-strong: #FFFFFF` remains reserved for saturated brand surfaces.
+- **Foreground Muted** (`#ADB4BE`): secondary text, icon defaults, and lower-ranked table content. It maintains at least 8.6:1 contrast against both primary surfaces.
 - **Link** (`--color-link: #8b7bd8`): hyperlinks inside rendered prose (the AI chat markdown, Docs). A lighter, less-saturated lift of the violet accent so links read as interactive without competing with primary CTAs. Inline code in the same prose uses `--color-surface-hover` as its chip background.
 
 ### Status (semantic, used at low chroma)
@@ -171,7 +171,7 @@ A single muted violet accent on a deep violet-tinted near-black, with cool gray-
 
 **The One Accent Rule.** Muted violet appears on roughly 5 to 10 percent of any given screen. Primary CTAs, the active sidebar item, the selected filter chip. Anywhere else, ask whether the page actually needs an accent or whether a border + foreground-muted will read more confidently. Restraint is the point.
 
-**The Tinted Neutral Rule.** Pure `#000` and `#fff` are forbidden. Every neutral carries the violet hue with chroma in the 0.005 to 0.045 band. The background is not "dark gray", it is dark violet at low chroma; the muted text is not "neutral gray", it is cool gray-violet. The forensic eye sees this; the casual eye feels it.
+**The Graphite Neutral Rule.** Canvas and elevated surfaces stay neutral graphite. Violet communicates action, selection, and focus only. Primary text is soft gray; pure white is reserved for saturated action surfaces.
 
 **The Semantic Status Rule.** Status colour is reserved for status. Use the semantic tokens (`success`, `warning`, `danger`) and their `/15` tint backgrounds and `/30` borders. Reaching for `bg-emerald-500/40` or `text-sky-300` is forbidden, even when it looks "right" in isolation: that path forks the palette across views and a future theme change becomes a 125-site rewrite.
 
@@ -235,7 +235,7 @@ The dashboard's interactive primitive. Five variants, four sizes.
 - **Chip:** unfilled border at rest; flips to primary fill when active. Filter pill toggles on Jobs/Webhooks/CronJobs status strips.
 - **States:** `:hover` lightens fill by one step; `:focus-visible` shows a 2px primary ring offset by `--color-background`; `:disabled` 50% opacity + not-allowed cursor.
 
-**Sizes:** xs `h-7 px-2.5` (28px), sm `h-8 px-3` (32px), md `h-10 px-4` (40px, default), lg `h-12 px-6` (48px). The 28px / 32px sizes need their *hit area* (not visible height) extended to 44px for mobile touch — see the Touch-Target Rule below.
+**Sizes:** xs `h-7 px-2.5` (28px), sm `h-8 px-3` (32px), md `h-10 px-4` (40px, default), lg `h-12 px-6` (48px). On coarse pointers, compact controls grow to a real, non-overlapping 44px minimum target.
 
 ### Filter Chips
 
@@ -315,17 +315,17 @@ PRODUCT.md names five anti-references. Each is below as a Don't.
 - **Don't fall into the generic SaaS dashboard template.** No big-number-small-label-with-gradient-accent hero metrics. The shared design law spells this out as the "hero-metric template" ban; PRODUCT.md repeats the rule. Surface metrics on bars, sparklines, and stacked-bar viz, not on template-shaped tiles.
 - **Don't turn onboarding into a product demo.** No gradients, feature panels, terminal theatre, or secondary education beside the account-creation task.
 - **Don't apply cloud-vendor branding.** No clouds, no sky gradients, no "scale instantly" copy, no planet-scale rhetoric. Orva runs on one box you can touch.
-- **Don't read as an AI-generated control plane.** The codebase already uses violet on near-black, so the discipline that keeps it from reading like that template comes from the rest of these rules. Specifically: no glowing borders, no gradient text, no animated mesh backgrounds, no decorative blurs.
+- **Don't read as an AI-generated control plane.** Violet is an accent on graphite, not the atmosphere of every surface. No glowing borders, gradient text, animated mesh backgrounds, or decorative blurs.
 
 The rest of the Don'ts apply across every register:
 
 - **Don't** use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses. Also no `--`. The recent header standardisation pass left ≈16 in template bodies and more in JS-built strings; sweep them.
 - **Don't** reach for raw Tailwind palette colours (`bg-blue-500/70`, `text-emerald-300`, `bg-amber-500/15`, `text-sky-300`) as a substitute for status meaning. The codebase has 125 of these and every one is a pending palette migration.
 - **Don't** hex-code colours inside a Vue component's scoped CSS. `Docs.vue` still carries hex literals (its Python/Node brand-logo SVG stops, which are a legitimate exemption); map any non-brand hex to `var(--color-…)` so a future theme change works. `Firewall.vue` has already been migrated to the semantic status tokens — use it as the reference.
-- **Don't** use `#000` or `#fff`. Foreground should tint toward the brand violet (target `#F4F2FA`); background and surfaces are already correctly tinted.
+- **Don't** use pure `#000` for surfaces or pure `#fff` for routine text. Use the graphite surface ladder and soft-gray foreground tokens; pure white is reserved for saturated action surfaces.
 - **Don't** use `backdrop-blur` decoratively. The three glassmorphic icon chips on Onboarding are the exact pattern PRODUCT.md's Vercel/Railway anti-reference rejects. Blur is reserved for "the page underneath is no longer interactive".
 - **Don't** lay out three or four identical icon-+-heading-+-paragraph cards in a feature grid. That template is the absolute ban "identical card grids" by name; PRODUCT.md flags the same shape under "Vercel / Railway / landing-page onboarding panels".
-- **Don't** size `<button>` hit areas under 44×44 on mobile. The `xs` (h-7 = 28px) and `sm` (h-8 = 32px) Button sizes carry meaningful hit-area gaps; extend the click target with padding or a `::before` overlay if the visual height matters.
+- **Don't** size `<button>` targets under 44×44 on coarse pointers. Grow the real box with `min-height` and `min-width`; invisible pseudo-element hit areas can overlap neighboring controls and steal clicks.
 - **Don't** style section captions as `<div>`s and skip the heading. Screen readers cannot navigate to text-styled divs.
 - **Don't** introduce `border-left-N` or `border-right-N` colored stripes on cards, list items, or alerts. The shared design law explicitly bans side-stripe borders.
 - **Don't** animate layout properties (`width`, `height`, `top`, `padding`). Transforms and opacity only. Use `transition-colors`, `transition-transform`, `transition-opacity`. The codebase has zero `transition-all` today; keep it that way.

@@ -1,53 +1,53 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-11T07:32:00Z",
+  "generatedAt": "2026-08-11T08:18:00Z",
   "title": "Design System: Orva",
   "extensions": {
     "colorMeta": {
       "background": {
         "role": "neutral",
-        "displayName": "Inkwell Violet",
-        "canonical": "oklch(13% 0.029 277)",
+        "displayName": "Graphite Canvas",
+        "canonical": "#0B0D10",
         "tonalRamp": [
-          "oklch(8% 0.020 277)",
-          "oklch(13% 0.029 277)",
-          "oklch(18% 0.035 277)",
-          "oklch(24% 0.042 277)",
-          "oklch(34% 0.040 277)",
-          "oklch(48% 0.035 277)",
-          "oklch(64% 0.025 277)",
-          "oklch(82% 0.012 277)"
+          "#07090B",
+          "#0B0D10",
+          "#15181D",
+          "#23272E",
+          "#343A44",
+          "#59616D",
+          "#89919C",
+          "#C5CAD1"
         ]
       },
       "surface": {
         "role": "neutral",
-        "displayName": "Surface Violet",
-        "canonical": "oklch(18% 0.035 277)",
+        "displayName": "Graphite Surface",
+        "canonical": "#15181D",
         "tonalRamp": [
-          "oklch(10% 0.025 277)",
-          "oklch(18% 0.035 277)",
-          "oklch(24% 0.042 277)",
-          "oklch(32% 0.045 277)",
-          "oklch(42% 0.045 277)",
-          "oklch(56% 0.040 277)",
-          "oklch(72% 0.025 277)",
-          "oklch(88% 0.010 277)"
+          "#0B0D10",
+          "#15181D",
+          "#23272E",
+          "#343A44",
+          "#4A515C",
+          "#6C7480",
+          "#9DA4AE",
+          "#D9DCE1"
         ]
       },
       "surface-hover": {
         "role": "neutral",
-        "displayName": "Active Violet",
-        "canonical": "oklch(24% 0.042 277)"
+        "displayName": "Graphite Hover",
+        "canonical": "#23272E"
       },
       "border": {
         "role": "neutral",
-        "displayName": "Border Violet",
-        "canonical": "oklch(28% 0.045 277)"
+        "displayName": "Graphite Border",
+        "canonical": "#343A44"
       },
       "foreground": {
         "role": "neutral",
         "displayName": "Page Foreground",
-        "canonical": "oklch(96% 0.010 290)",
+        "canonical": "#F4F6F8",
         "tonalRamp": [
           "oklch(20% 0.005 290)",
           "oklch(34% 0.008 290)",
@@ -61,8 +61,8 @@
       },
       "foreground-muted": {
         "role": "neutral",
-        "displayName": "Cool Gray-Violet",
-        "canonical": "oklch(70% 0.018 280)"
+        "displayName": "Cool Light Gray",
+        "canonical": "#ADB4BE"
       },
       "primary": {
         "role": "primary",
@@ -87,7 +87,7 @@
       "secondary": {
         "role": "neutral",
         "displayName": "Secondary Surface",
-        "canonical": "oklch(28% 0.045 277)"
+        "canonical": "#282E36"
       },
       "danger": {
         "role": "danger",
@@ -176,7 +176,7 @@
       "refersTo": "chip-active",
       "description": "Currently-selected filter pill on Jobs / Webhooks / CronJobs status strips.",
       "html": "<button class=\"ds-chip ds-chip-active\">Running</button>",
-      "css": ".ds-chip { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; line-height: 1; background: var(--color-surface, #1A1929); color: var(--color-foreground-muted, #A3A3B3); border: 1px solid var(--color-border, #2D2B42); transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out; cursor: pointer; } .ds-chip:hover { color: #FFFFFF; border-color: var(--color-foreground-muted, #A3A3B3); } .ds-chip-active { background: var(--color-primary, #553F83); color: var(--color-primary-foreground, #FFFFFF); border-color: var(--color-primary, #553F83); }"
+      "css": ".ds-chip { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; line-height: 1; background: var(--color-surface, #15181D); color: var(--color-foreground-muted, #ADB4BE); border: 1px solid var(--color-border, #343A44); transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out; cursor: pointer; } .ds-chip:hover { color: #F4F6F8; border-color: var(--color-foreground-muted, #ADB4BE); } .ds-chip-active { background: var(--color-primary, #553F83); color: var(--color-primary-foreground, #FFFFFF); border-color: var(--color-primary, #553F83); }"
     },
     {
       "name": "Status Pill (success)",
@@ -192,7 +192,7 @@
       "refersTo": "card",
       "description": "Dashboard tile or panel. Shows decision-ready content first; optional context appears only when the metric is unfamiliar.",
       "html": "<section class=\"ds-card\"><h2 class=\"ds-card-title\">Response time</h2><div class=\"ds-card-value\">42 <span class=\"ds-card-unit\">ms</span></div></section>",
-      "css": ".ds-card { background: var(--color-background, #12111C); border: 1px solid var(--color-border, #2D2B42); border-radius: 8px; padding: 20px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; } .ds-card-title { margin: 0; font-size: 0.875rem; font-weight: 600; color: #FFFFFF; } .ds-card-value { margin-top: 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.5rem; font-weight: 500; color: #FFFFFF; } .ds-card-unit { font-size: 0.875rem; color: var(--color-foreground-muted, #A3A3B3); margin-left: 4px; }"
+      "css": ".ds-card { background: var(--color-background, #0B0D10); border: 1px solid var(--color-border, #343A44); border-radius: 8px; padding: 20px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; } .ds-card-title { margin: 0; font-size: 0.875rem; font-weight: 600; color: #F4F6F8; } .ds-card-value { margin-top: 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.5rem; font-weight: 500; color: #F4F6F8; } .ds-card-unit { font-size: 0.875rem; color: var(--color-foreground-muted, #ADB4BE); margin-left: 4px; }"
     },
     {
       "name": "Text Input",
@@ -200,7 +200,7 @@
       "refersTo": "input",
       "description": "Default form field. Sits a step deeper than the surrounding card so the eye reads 'this is where you type'.",
       "html": "<label class=\"ds-input-wrap\"><span class=\"ds-input-label\">Function name</span><input type=\"text\" class=\"ds-input\" placeholder=\"image-resizer\" /></label>",
-      "css": ".ds-input-wrap { display: flex; flex-direction: column; gap: 6px; } .ds-input-label { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-foreground-muted, #A3A3B3); } .ds-input { height: 36px; padding: 0 12px; background: var(--color-background, #12111C); color: #FFFFFF; border: 1px solid var(--color-border, #2D2B42); border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; outline: none; } .ds-input::placeholder { color: rgba(163,163,179,0.5); } .ds-input:focus { border-color: #FFFFFF; box-shadow: inset 0 0 0 1px #FFFFFF; }"
+      "css": ".ds-input-wrap { display: flex; flex-direction: column; gap: 6px; } .ds-input-label { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-foreground-muted, #ADB4BE); } .ds-input { height: 36px; padding: 0 12px; background: var(--color-background, #0B0D10); color: #F4F6F8; border: 1px solid var(--color-border, #343A44); border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; outline: none; } .ds-input::placeholder { color: rgba(173,180,190,0.5); } .ds-input:focus { border-color: #FFFFFF; box-shadow: inset 0 0 0 1px #FFFFFF; }"
     },
     {
       "name": "Sidebar Group and Active Item",
@@ -208,14 +208,14 @@
       "refersTo": "sidebar-item",
       "description": "Primary routes stay visible; lower-frequency routes sit in collapsible groups. The current route remains visually anchored.",
       "html": "<details class=\"ds-nav-group\" open><summary>Observe</summary><a href=\"#\" class=\"ds-nav-item ds-nav-active\">Activity</a><a href=\"#\" class=\"ds-nav-item\">Invocations</a></details>",
-      "css": ".ds-nav-item { display: inline-flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: var(--color-foreground-muted, #A3A3B3); text-decoration: none; transition: color 150ms ease-out, background-color 150ms ease-out; } .ds-nav-item:hover { color: #FFFFFF; background: var(--color-surface-hover, #252438); } .ds-nav-icon { width: 16px; height: 16px; } .ds-nav-active { color: #FFFFFF; background: var(--color-primary, #553F83); box-shadow: 0 10px 15px -3px rgba(38,18,87,0.20); } .ds-nav-active:hover { color: #FFFFFF; background: var(--color-primary, #553F83); }"
+      "css": ".ds-nav-item { display: inline-flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: var(--color-foreground-muted, #ADB4BE); text-decoration: none; transition: color 150ms ease-out, background-color 150ms ease-out; } .ds-nav-item:hover { color: #F4F6F8; background: var(--color-surface-hover, #23272E); } .ds-nav-icon { width: 16px; height: 16px; } .ds-nav-active { color: #FFFFFF; background: var(--color-primary, #553F83); box-shadow: 0 10px 15px -3px rgba(38,18,87,0.20); } .ds-nav-active:hover { color: #FFFFFF; background: var(--color-primary, #553F83); }"
     }
   ],
   "narrative": {
     "northStar": "The Late-Night Lab Notebook",
-    "overview": "Orva is the control plane for someone running a function platform on their own machine. Probably in a dim home office, often after-hours, more curious than time-pressured. The interface earns trust by behaving like a serious infrastructure tool: dense, unfussy, comfortable with code, willing to show numbers without dressing them up. The palette is the deep purple-tinted near-black of an editor at midnight, paired with a single muted violet accent that carries every CTA. JetBrains Mono runs alongside Inter so paths, IDs, byte counts, and CPU readings sit in their natural register without arguing for attention.",
+    "overview": "Orva is the control plane for someone running a function platform on their own machine. Probably in a dim home office, often after-hours, more curious than time-pressured. The interface earns trust by behaving like a serious infrastructure tool: dense, unfussy, comfortable with code, willing to show numbers without dressing them up. The palette is neutral graphite-black with soft light-gray text, paired with a single muted violet accent for action and selection. JetBrains Mono runs alongside Inter so paths, IDs, byte counts, and CPU readings sit in their natural register without arguing for attention.",
     "keyCharacteristics": [
-      "Deep violet-tinted dark surfaces; one muted purple accent carries identity.",
+      "Neutral graphite-black surfaces; one muted violet accent carries identity.",
       "Inter for prose, JetBrains Mono for any data the operator might compare digit-to-digit.",
       "Standardised page heads: text-xl semibold tracking-tight over a one-line subhead in muted text, max-w-prose.",
       "Thin, low-contrast scrollbars keep nested overflow discoverable without dominating the surface.",
@@ -224,7 +224,7 @@
     ],
     "rules": [
       { "name": "The One Accent Rule",         "section": "colors",     "body": "Muted violet appears on roughly 5 to 10 percent of any given screen. Primary CTAs, the active sidebar item, the selected filter chip. Anywhere else, ask whether the page actually needs an accent or whether a border + foreground-muted will read more confidently." },
-      { "name": "The Tinted Neutral Rule",     "section": "colors",     "body": "Pure #000 and #FFF are forbidden. Every neutral carries the violet hue with chroma in the 0.005 to 0.045 band." },
+      { "name": "The Graphite Neutral Rule",   "section": "colors",     "body": "Canvas and elevated surfaces stay neutral graphite. Violet communicates action, selection, and focus; routine text uses soft light gray." },
       { "name": "The Semantic Status Rule",    "section": "colors",     "body": "Status colour is reserved for status. Use the semantic tokens (success, warning, danger) and their /15 tint backgrounds and /30 borders. Reaching for raw Tailwind palette colours is forbidden." },
       { "name": "The Operator's Mono Rule",    "section": "typography", "body": "If two characters at the same column should be visually compared (a UUID against another UUID, a memory reading against the limit), they are mono." },
       { "name": "The No-Em-Dash Rule",         "section": "typography", "body": "Em dashes are forbidden in any user-facing string. Use periods, commas, colons, semicolons, or parentheses." },
@@ -247,7 +247,7 @@
       "Don't use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses.",
       "Don't reach for raw Tailwind palette colours (bg-blue-500/70, text-emerald-300, bg-amber-500/15, text-sky-300) as a substitute for status meaning.",
       "Don't hex-code colours inside a Vue component's scoped CSS.",
-      "Don't use #000 or #FFF. Foreground should tint toward the brand violet.",
+      "Don't use pure #000 for surfaces or pure #FFF for routine text. Use the graphite ladder and soft-gray foreground tokens.",
       "Don't apply gradient backgrounds to surface-level chrome.",
       "Don't use backdrop-blur decoratively. Blur is reserved for 'the page underneath is no longer interactive'.",
       "Don't lay out three or four identical icon-+-heading-+-paragraph cards in a feature grid.",
