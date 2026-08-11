@@ -91,14 +91,26 @@ Edited via `PUT /api/v1/pool/config` — no restart needed.
 |-------|---------|------|
 | `min_warm` | 1 | Idle workers floor — pool never shrinks below this |
 | `max_warm` | 50 | Hard ceiling on warm pool size |
-| `idle_ttl_seconds` | 120 | Worker idle this long gets reaped |
-| `target_concurrency` | 10 | Requests per worker before scale-up triggers |
+| `idle_ttl_seconds` | 600 | No-demand interval before an opted-in pool scales to zero |
 | `scale_to_zero` | `false` | `true` = pool can drain to 0 (cold-start on next request) |
+
+Pool Controller v2 chooses capacity automatically from 60-second arrival
+rate × service p95, 6-second arrival rate × (service p95 + spawn p95), and
+immediate busy + queued pressure, with a 70% internal utilization target.
+`target_concurrency` was removed; stale requests receive `400 VALIDATION`
+with migration guidance.
+
+Admission is global across functions: the host CPU quota supplies eight
+I/O-overlap worker slots per CPU, weighted by each function's declared `cpus`,
+and memory uses cgroup v2 headroom plus per-worker reservations.
+
+`scale_to_zero=true` owns `min_warm=0`. Turning it off restores a minimum of
+at least one. Sending both fields with an incompatible pair is rejected.
 
 ```bash
 curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \
   http://localhost:8443/api/v1/pool/config \
-  -d '{"function_id":"019df200-7b00-7e00-9c00-aab1cd2e3f40","min_warm":2,"max_warm":32,"idle_ttl_seconds":60}'
+  -d '{"function_id":"019df200-7b00-7e00-9c00-aab1cd2e3f40","min_warm":2,"max_warm":32,"idle_ttl_seconds":600}'
 ```
 
 ---

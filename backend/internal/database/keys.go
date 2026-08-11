@@ -147,29 +147,32 @@ func (db *Database) CountAPIKeys() (int, error) {
 // reads this at pool creation time; runtime changes require pool recreation
 // (restart Orva, or wait for the pool to be torn down).
 type PoolConfig struct {
-	FunctionID        string `json:"function_id"`
-	MinWarm           int    `json:"min_warm"`
-	MaxWarm           int    `json:"max_warm"`
-	IdleTTLS          int    `json:"idle_ttl_seconds"`
-	TargetConcurrency int    `json:"target_concurrency"` // req/worker before scale-up considered (Knative-style)
-	ScaleToZero       bool   `json:"scale_to_zero"`      // if true, scale down to 0 when idle (cold-start on next req)
+	FunctionID  string `json:"function_id"`
+	MinWarm     int    `json:"min_warm"`
+	MaxWarm     int    `json:"max_warm"`
+	IdleTTLS    int    `json:"idle_ttl_seconds"`
+	ScaleToZero bool   `json:"scale_to_zero"`
 }
 
 func (db *Database) UpsertPoolConfig(cfg *PoolConfig) error {
+	if cfg.ScaleToZero {
+		cfg.MinWarm = 0
+	} else if cfg.MinWarm < 1 {
+		cfg.MinWarm = 1
+	}
 	sc := 0
 	if cfg.ScaleToZero {
 		sc = 1
 	}
 	_, err := db.write.Exec(`
-		INSERT INTO pool_config (function_id, min_warm, max_warm, idle_ttl_s, target_concurrency, scale_to_zero)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO pool_config (function_id, min_warm, max_warm, idle_ttl_s, scale_to_zero)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(function_id) DO UPDATE SET
 			min_warm = excluded.min_warm,
 			max_warm = excluded.max_warm,
 			idle_ttl_s = excluded.idle_ttl_s,
-			target_concurrency = excluded.target_concurrency,
 			scale_to_zero = excluded.scale_to_zero`,
-		cfg.FunctionID, cfg.MinWarm, cfg.MaxWarm, cfg.IdleTTLS, cfg.TargetConcurrency, sc,
+		cfg.FunctionID, cfg.MinWarm, cfg.MaxWarm, cfg.IdleTTLS, sc,
 	)
 	return err
 }
@@ -179,9 +182,9 @@ func (db *Database) GetPoolConfig(functionID string) (*PoolConfig, error) {
 	var sc int
 	err := db.read.QueryRow(`
 		SELECT function_id, min_warm, max_warm, idle_ttl_s,
-		       COALESCE(target_concurrency, 10), COALESCE(scale_to_zero, 0)
+		       COALESCE(scale_to_zero, 0)
 		FROM pool_config WHERE function_id = ?`, functionID,
-	).Scan(&cfg.FunctionID, &cfg.MinWarm, &cfg.MaxWarm, &cfg.IdleTTLS, &cfg.TargetConcurrency, &sc)
+	).Scan(&cfg.FunctionID, &cfg.MinWarm, &cfg.MaxWarm, &cfg.IdleTTLS, &sc)
 	if err != nil {
 		return nil, err
 	}

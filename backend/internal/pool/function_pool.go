@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,37 +20,42 @@ type functionPool struct {
 	maxUses int64
 
 	// Autoscaler inputs — set at creation time, read by scaler evaluate().
-	target      int   // target_concurrency per worker (pool_config, default 10)
 	memoryBytes int64 // per-worker memory.max budget for admission accounting
+	cpuUnits    int64 // thousandths of a declared CPU per worker
 	scaleToZero bool  // pool_config.scale_to_zero
 
 	// hostMem is the global tracker for admission control. We need a
-	// back-reference here (not just on the autoscaler) so the request-path
-	// lazy spawn in acquire() can reserve memory at the same time it
-	// promotes the worker. Without this, mem_reserved underreports for the
-	// first ~2s of a hot pool until the autoscaler's tick catches up.
+	// back-reference here (not just on the controller) so every coordinator
+	// spawn reserves memory before launch and releases the exact admitted
+	// amount when that worker exits.
 	hostMem *hostMemTracker
 
-	idle chan *sandbox.Worker
-	busy atomic.Int64 // workers currently handling a request
+	idle               chan *sandbox.Worker
+	busy               atomic.Int64 // workers currently handling a request
+	queued             atomic.Int64
+	spawning           atomic.Int64
+	spawnSlots         chan struct{} // at most four concurrent starts for this pool
+	workerReservations sync.Map      // *sandbox.Worker -> workerReservation
 
 	// Autoscaler signal state — guarded by sigMu.
 	sigMu            sync.Mutex
-	rateEWMA         float64 // req/s, α=0.2 on tick-sec buckets
-	latencyEWMAms    float64 // dispatch duration, α=0.2
-	memUsedEWMA      float64 // memory.current at release (bytes), α=0.2
-	cpuFracEWMA      float64 // CPU fraction per invocation (0–1), α=0.2
-	inflightSamples  []int64 // ring of recent busy counts (len = stableWindow/tick)
-	inflightHead     int
-	bucketCount      int64
-	belowTargetTicks int // # of consecutive ticks below target (for scale-down gating)
+	arrivals         []time.Time
+	serviceSamples   []time.Duration
+	spawnSamples     []time.Duration
+	queueWaitSamples []time.Duration
+	lastArrival      time.Time
+	belowTargetSince time.Time
+	limitingReason   string
+	memSamples       []int64
 
 	// Lifetime counters for metrics.
-	spawned    atomic.Int64
-	killed     atomic.Int64
-	scaleUps   atomic.Int64
-	scaleDowns atomic.Int64
-	dynamicMax atomic.Int64 // last computed memory/cpu/operator cap (published for metrics)
+	spawned          atomic.Int64
+	killed           atomic.Int64
+	dynamicMax       atomic.Int64 // last computed memory/cpu/operator cap (published for metrics)
+	desired          atomic.Int64
+	rejections       atomic.Int64
+	capacityTimeouts atomic.Int64
+	arrivalsTotal    atomic.Int64
 
 	// mu guards the slow paths (spawn decision, drain). The fast path is
 	// channel-only and lock-free.
@@ -67,7 +73,9 @@ type functionPool struct {
 	concSem    chan struct{}
 	concPolicy string
 
-	spawnFn func(ctx context.Context) (*sandbox.Worker, error)
+	spawnFn      func(ctx context.Context) (*sandbox.Worker, error)
+	reclaimFn    func() bool
+	requestSpawn func()
 }
 
 // acquireSlot tries to occupy a concurrency slot. Returns nil on success
@@ -120,97 +128,124 @@ func (p *functionPool) releaseSlot() {
 	}
 }
 
-// recordAcquire bumps the rate EWMA. Called from Manager.Acquire on every
-// successful worker handout. Cheap atomic-ish bookkeeping — the heavy
-// EWMA decay happens in tick() under sigMu.
-func (p *functionPool) recordAcquire() {
+func (p *functionPool) recordArrival(now time.Time) {
+	p.arrivalsTotal.Add(1)
 	p.sigMu.Lock()
-	p.bucketCount++
+	p.arrivals = append(p.arrivals, now)
+	p.lastArrival = now
+	p.pruneArrivalsLocked(now)
 	p.sigMu.Unlock()
 }
 
-// recordLatency feeds a dispatch duration into the latency EWMA.
 func (p *functionPool) recordLatency(d time.Duration) {
-	ms := float64(d.Milliseconds())
 	p.sigMu.Lock()
-	if p.latencyEWMAms == 0 {
-		p.latencyEWMAms = ms
-	} else {
-		p.latencyEWMAms = 0.2*ms + 0.8*p.latencyEWMAms
-	}
+	p.serviceSamples = appendDurationSample(p.serviceSamples, d, 512)
 	p.sigMu.Unlock()
 }
 
-// tick rolls the 1-second bucket: folds this second's count into the EWMA
-// and snapshots current inflight into the sliding window. Called by the
-// autoscaler on its scaler tick (2s). First-call safe.
-func (p *functionPool) tick(bucketSec float64) {
+func (p *functionPool) recordQueueWait(d time.Duration) {
 	p.sigMu.Lock()
-	defer p.sigMu.Unlock()
-
-	// Rate EWMA: α = 0.2 over bucketSec-sec observations.
-	rate := float64(p.bucketCount) / bucketSec
-	if p.rateEWMA == 0 {
-		p.rateEWMA = rate
-	} else {
-		p.rateEWMA = 0.2*rate + 0.8*p.rateEWMA
-	}
-	p.bucketCount = 0
-
-	// Ring buffer of inflight samples.
-	if len(p.inflightSamples) == 0 {
-		return // not initialised yet
-	}
-	p.inflightSamples[p.inflightHead] = p.busy.Load()
-	p.inflightHead = (p.inflightHead + 1) % len(p.inflightSamples)
+	p.queueWaitSamples = appendDurationSample(p.queueWaitSamples, d, 512)
+	p.sigMu.Unlock()
 }
 
-// windowMean returns the mean of the last `n` samples in the ring; used for
-// the stable and panic windows. n is clamped to the ring size.
-func (p *functionPool) windowMean(n int) float64 {
+func (p *functionPool) recordSpawn(d time.Duration) {
 	p.sigMu.Lock()
-	defer p.sigMu.Unlock()
-	if len(p.inflightSamples) == 0 {
+	p.spawnSamples = appendDurationSample(p.spawnSamples, d, 256)
+	p.sigMu.Unlock()
+}
+
+func appendDurationSample(samples []time.Duration, d time.Duration, limit int) []time.Duration {
+	if d < 0 {
+		d = 0
+	}
+	samples = append(samples, d)
+	if len(samples) > limit {
+		samples = append([]time.Duration(nil), samples[len(samples)-limit:]...)
+	}
+	return samples
+}
+
+func durationP95(samples []time.Duration) time.Duration {
+	if len(samples) == 0 {
 		return 0
 	}
-	if n > len(p.inflightSamples) {
-		n = len(p.inflightSamples)
+	copyOf := append([]time.Duration(nil), samples...)
+	sort.Slice(copyOf, func(i, j int) bool { return copyOf[i] < copyOf[j] })
+	idx := (95*len(copyOf)+99)/100 - 1
+	if idx < 0 {
+		idx = 0
 	}
-	var sum int64
-	// Walk backward from the current head — most recent n samples.
-	for i := 0; i < n; i++ {
-		idx := (p.inflightHead - 1 - i + len(p.inflightSamples)) % len(p.inflightSamples)
-		sum += p.inflightSamples[idx]
-	}
-	return float64(sum) / float64(n)
+	return copyOf[idx]
 }
 
-// snapshotSignals returns a point-in-time view for logging/metrics.
-func (p *functionPool) snapshotSignals() (rate, latMs float64) {
+func (p *functionPool) pruneArrivalsLocked(now time.Time) {
+	cutoff := now.Add(-stableWindow)
+	i := 0
+	for i < len(p.arrivals) && p.arrivals[i].Before(cutoff) {
+		i++
+	}
+	if i > 0 {
+		p.arrivals = append([]time.Time(nil), p.arrivals[i:]...)
+	}
+}
+
+type demandSnapshot struct {
+	StableRate                         float64
+	BurstRate                          float64
+	ServiceP95, SpawnP95, QueueWaitP95 time.Duration
+	LastArrival                        time.Time
+	MemoryP95                          int64
+}
+
+type workerReservation struct {
+	memoryBytes int64
+	cpuUnits    int64
+}
+
+func (p *functionPool) snapshotDemand(now time.Time) demandSnapshot {
 	p.sigMu.Lock()
 	defer p.sigMu.Unlock()
-	return p.rateEWMA, p.latencyEWMAms
+	p.pruneArrivalsLocked(now)
+	burstCutoff := now.Add(-panicWindow)
+	burst := 0
+	for _, at := range p.arrivals {
+		if !at.Before(burstCutoff) {
+			burst++
+		}
+	}
+	mem := append([]int64(nil), p.memSamples...)
+	sort.Slice(mem, func(i, j int) bool { return mem[i] < mem[j] })
+	var memP95 int64
+	if len(mem) > 0 {
+		memP95 = mem[(95*len(mem)+99)/100-1]
+	}
+	return demandSnapshot{
+		StableRate: float64(len(p.arrivals)) / stableWindow.Seconds(),
+		BurstRate:  float64(burst) / panicWindow.Seconds(),
+		ServiceP95: durationP95(p.serviceSamples), SpawnP95: durationP95(p.spawnSamples),
+		QueueWaitP95: durationP95(p.queueWaitSamples), LastArrival: p.lastArrival,
+		MemoryP95: memP95,
+	}
 }
 
-// snapshotResourceUsage returns the per-invocation resource EWMA values.
-// memBytes is 0 and cpuFrac is 0 until at least one invocation completes
-// with cgroup v2 delegation enabled.
-func (p *functionPool) snapshotResourceUsage() (memBytes int64, cpuFrac float64) {
-	p.sigMu.Lock()
-	defer p.sigMu.Unlock()
-	return int64(p.memUsedEWMA), p.cpuFracEWMA
+func (p *functionPool) admissionBytes() int64 {
+	d := p.snapshotDemand(time.Now())
+	if d.MemoryP95 <= 0 {
+		return p.memoryBytes
+	}
+	bytes := d.MemoryP95
+	if bytes < 16<<20 {
+		bytes = 16 << 20
+	}
+	if bytes > p.memoryBytes {
+		bytes = p.memoryBytes
+	}
+	return bytes
 }
 
-// stampAcquire records the wall time and cumulative CPU usage on the worker
-// just before it is handed to a caller. The pool reads these back at release
-// to compute per-invocation resource EWMA metrics.
-func stampAcquire(w *sandbox.Worker) {
-	w.AcquireAt = time.Now()
-	w.AcquireUsec = sandbox.ReadCgroupCPUUsec(w.GetCgroupPath())
-}
-
-// acquire returns an idle worker or spawns a new one up to max. If at max
-// it blocks on the idle channel or ctx cancellation.
+// acquire returns an idle worker or asks the global coordinator to admit one.
+// If the effective cap is reached it waits for an idle worker or cancellation.
 func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 	if p.closing.Load() {
 		return nil, errPoolRetired
@@ -221,58 +256,91 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 		if p.closing.Load() {
 			p.killWorker(w)
 			return nil, errPoolRetired
+		}
+		if p.isUnusable(w) {
+			p.killWorker(w)
+			return p.acquire(ctx)
+		}
+		p.busy.Add(1)
+		return &AcquireResult{Worker: w, ColdStart: false}, nil
+	default:
+	}
+	// Production pools route every new worker through the manager's global
+	// round-robin scheduler. Hand-built unit-test pools retain direct spawn.
+	if p.requestSpawn != nil {
+		p.requestSpawn()
+		return p.waitForIdle(ctx)
+	}
+	return p.acquireDirect(ctx)
+}
+
+func (p *functionPool) acquireDirect(ctx context.Context) (*AcquireResult, error) {
+	select {
+	case w := <-p.idle:
+		if p.closing.Load() {
+			p.killWorker(w)
+			return nil, errPoolRetired
 		} else if p.isUnusable(w) {
 			p.killWorker(w)
 			// Fall through to spawn below.
 		} else {
 			p.busy.Add(1)
-			stampAcquire(w)
 			return &AcquireResult{Worker: w, ColdStart: false}, nil
 		}
 	default:
 	}
 
-	// Decide whether to spawn. Cap by the autoscaler's dynamic_max (CPU /
+	// Decide whether to spawn. Cap by the controller's effective maximum (CPU /
 	// memory / operator-cap min), not just the operator hard cap. Without
-	// this, a burst can blow past what the host can comfortably hold —
-	// e.g. on a 2-CPU box the autoscaler picks dynamic_max=16 but lazy
-	// spawn would happily grow to operator p.max (default 50), leaving
-	// dozens of idle workers that take 60-70 s for the scale-down loop
-	// to clean up. Capping here turns excess load into fast 503s
-	// (POOL_AT_CAPACITY) which is the correct backpressure signal.
+	// this, a hand-built test pool could grow past the capacity calculated by
+	// the controller. Production pools never use this direct path.
 	dyn := int(p.dynamicMax.Load())
 	cap := p.max
 	if dyn > 0 && dyn < cap {
 		cap = dyn
 	}
 	p.mu.Lock()
-	total := int(p.busy.Load()) + len(p.idle)
+	total := int(p.busy.Load()+p.spawning.Load()) + len(p.idle)
 	canSpawn := total < cap && !p.closing.Load()
 	if canSpawn {
-		p.busy.Add(1)
+		select {
+		case p.spawnSlots <- struct{}{}:
+			p.spawning.Add(1)
+		default:
+			canSpawn = false
+		}
 	}
 	p.mu.Unlock()
 
 	if canSpawn {
+		started := time.Now()
+		defer func() { <-p.spawnSlots }()
 		// Reserve the worker's memory budget *before* the spawn so the host
 		// memory accounting reflects the new worker immediately. The
-		// autoscaler does the same in scaleUp(); without it here, lazy
-		// growth from cold traffic showed mem_reserved=0 for ~2s.
-		if p.memoryBytes > 0 && p.hostMem != nil {
-			if !p.hostMem.reserve(p.memoryBytes) {
-				p.busy.Add(-1)
-				return nil, ErrMemoryExhausted
+		// autoscaler does the same in scaleUp().
+		reservation := workerReservation{memoryBytes: p.admissionBytes(), cpuUnits: p.cpuUnits}
+		if p.hostMem != nil {
+			if !p.hostMem.reserve(reservation.memoryBytes, reservation.cpuUnits) {
+				reclaimed := p.reclaimFn != nil && p.reclaimFn()
+				if !reclaimed || !p.hostMem.reserve(reservation.memoryBytes, reservation.cpuUnits) {
+					p.spawning.Add(-1)
+					return nil, ErrMemoryExhausted
+				}
 			}
 		}
 		w, err := p.spawnFn(ctx)
 		if err != nil {
-			p.busy.Add(-1)
-			if p.memoryBytes > 0 && p.hostMem != nil {
-				p.hostMem.release(p.memoryBytes)
+			p.spawning.Add(-1)
+			if p.hostMem != nil {
+				p.hostMem.release(reservation.memoryBytes, reservation.cpuUnits)
 			}
 			return nil, err
 		}
+		p.spawning.Add(-1)
+		p.busy.Add(1)
+		p.recordSpawn(time.Since(started))
 		p.spawned.Add(1)
+		p.workerReservations.Store(w, reservation)
 		// Retirement may have happened while spawnFn was starting the
 		// process. Never hand that stale worker to the caller; release its
 		// accounting and let Manager.Acquire retry on the new generation.
@@ -284,19 +352,13 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 			p.killWorker(w)
 			return nil, errPoolRetired
 		}
-		// Count lazy growth as a scale-up event too. Operators watching the
-		// autoscaler metric want "how often did this pool grow" — which
-		// includes both the predictive scaler and request-path expansion.
-		p.scaleUps.Add(1)
-		stampAcquire(w)
 		return &AcquireResult{Worker: w, ColdStart: true}, nil
 	}
 
-	// At max — block until someone releases or ctx fires. ctx-fire here
-	// specifically means "the pool didn't free up in time" — surface as
-	// ErrPoolAtCapacity rather than the generic ctx err so the proxy can
-	// distinguish it from per-fn TimeoutMS expiry (which fires on a
-	// derived ctx and surfaces as ErrTimeout from Worker.Dispatch).
+	return p.waitForIdle(ctx)
+}
+
+func (p *functionPool) waitForIdle(ctx context.Context) (*AcquireResult, error) {
 	select {
 	case w := <-p.idle:
 		if p.closing.Load() {
@@ -309,11 +371,11 @@ func (p *functionPool) acquire(ctx context.Context) (*AcquireResult, error) {
 			return p.acquire(ctx)
 		}
 		p.busy.Add(1)
-		stampAcquire(w)
-		return &AcquireResult{Worker: w, ColdStart: false}, nil
+		return &AcquireResult{Worker: w, ColdStart: w.Served.Load() == 0}, nil
 	case <-p.retired:
 		return nil, errPoolRetired
 	case <-ctx.Done():
+		p.capacityTimeouts.Add(1)
 		return nil, ErrPoolAtCapacity
 	}
 }
@@ -327,35 +389,21 @@ func (p *functionPool) markRetired() {
 }
 
 // release returns the worker to the pool unless it errored or is unusable.
-// Also kills the worker when the idle channel already holds at least
-// `dynamicMax` workers — this prunes excess capacity from a prior burst as
-// soon as their busy work finishes, instead of waiting 60-70 s for the
-// autoscaler's scale-down loop to converge. Without this, a 30 s c=200
-// burst left 60+ idle workers parked on a 2-CPU host and made the UI
-// feel sluggish for over a minute afterward.
+// Also kills the worker when the idle channel already holds at least the
+// effective host/operator cap, preventing a completed burst from parking
+// workers that the controller can no longer admit.
 func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	p.busy.Add(-1)
 
-	// Sample cgroup v2 resource usage for per-function EWMA metrics.
+	// Sample cgroup v2 memory for observed worker-memory p95 admission.
 	cgPath := w.GetCgroupPath()
-	if cgPath != "" && !w.AcquireAt.IsZero() {
+	if cgPath != "" {
 		memCur := sandbox.ReadCgroupMemCurrent(cgPath)
-		cpuNow := sandbox.ReadCgroupCPUUsec(cgPath)
-		elapsedUsec := time.Since(w.AcquireAt).Microseconds()
 		p.sigMu.Lock()
 		if memCur > 0 {
-			if p.memUsedEWMA == 0 {
-				p.memUsedEWMA = float64(memCur)
-			} else {
-				p.memUsedEWMA = 0.2*float64(memCur) + 0.8*p.memUsedEWMA
-			}
-		}
-		if cpuNow > w.AcquireUsec && elapsedUsec > 0 {
-			frac := float64(cpuNow-w.AcquireUsec) / float64(elapsedUsec)
-			if p.cpuFracEWMA == 0 {
-				p.cpuFracEWMA = frac
-			} else {
-				p.cpuFracEWMA = 0.2*frac + 0.8*p.cpuFracEWMA
+			p.memSamples = append(p.memSamples, memCur)
+			if len(p.memSamples) > 256 {
+				p.memSamples = append([]int64(nil), p.memSamples[len(p.memSamples)-256:]...)
 			}
 		}
 		p.sigMu.Unlock()
@@ -398,7 +446,9 @@ func (p *functionPool) isUnusable(w *sandbox.Worker) bool {
 	if w == nil || w.IsDead() {
 		return true
 	}
-	if w.IsExpired(p.idleTTL, p.maxUses) {
+	// idleTTL is a pool-level no-demand signal owned by the controller. A
+	// worker's age is not idle time and must not silently violate min_warm.
+	if w.IsExpired(0, p.maxUses) {
 		return true
 	}
 	return false
@@ -413,13 +463,17 @@ func (p *functionPool) killWorker(w *sandbox.Worker) {
 	}
 	_ = w.Kill()
 	p.killed.Add(1)
-	if p.memoryBytes > 0 && p.hostMem != nil {
-		p.hostMem.release(p.memoryBytes)
+	reservation := workerReservation{memoryBytes: p.memoryBytes, cpuUnits: p.cpuUnits}
+	if value, ok := p.workerReservations.LoadAndDelete(w); ok {
+		reservation = value.(workerReservation)
+	}
+	if p.hostMem != nil {
+		p.hostMem.release(reservation.memoryBytes, reservation.cpuUnits)
 	}
 }
 
-// sweep walks the idle channel, killing expired workers and putting live
-// ones back. Called periodically by the manager's reaper.
+// sweep walks the idle channel, killing dead/max-use workers and putting live
+// ones back. Pool idle expiry and scale-down are controller decisions.
 func (p *functionPool) sweep(defaultMaxUses int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

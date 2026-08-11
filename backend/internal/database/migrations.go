@@ -61,10 +61,9 @@ CREATE TABLE IF NOT EXISTS execution_logs (
 CREATE TABLE IF NOT EXISTS pool_config (
     function_id        TEXT PRIMARY KEY,
     min_warm           INTEGER NOT NULL DEFAULT 1,
-    max_warm           INTEGER NOT NULL DEFAULT 50,       -- Knative-style soft cap; autoscaler respects mem/cpu budget
+    max_warm           INTEGER NOT NULL DEFAULT 50,
     idle_ttl_s         INTEGER NOT NULL DEFAULT 600,
     max_use_count      INTEGER NOT NULL DEFAULT 1000,
-    target_concurrency INTEGER NOT NULL DEFAULT 10,       -- Knative target concurrency per worker
     scale_to_zero      INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
 );
@@ -536,7 +535,6 @@ PRAGMA foreign_keys = ON;
 	// Additive columns for the smart autoscaler. Idempotent — SQLite errors
 	// if the column already exists, which we ignore.
 	for _, stmt := range []string{
-		"ALTER TABLE pool_config ADD COLUMN target_concurrency INTEGER NOT NULL DEFAULT 10",
 		"ALTER TABLE pool_config ADD COLUMN scale_to_zero INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE api_keys ADD COLUMN key_prefix TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE deployments ADD COLUMN code_hash TEXT NOT NULL DEFAULT ''",
@@ -785,6 +783,14 @@ PRAGMA foreign_keys = ON;
 		}
 	}
 
+	// Pool controller v2 removes the public target_concurrency knob. Rebuild
+	// the table because SQLite cannot DROP COLUMN safely across all supported
+	// versions. The copy normalizes the scale contract at the same time:
+	// scale-to-zero rows own min_warm=0; active-minimum rows own min_warm>=1.
+	if err := migratePoolConfigV2(db); err != nil {
+		return fmt.Errorf("pool config v2 migration: %w", err)
+	}
+
 	// v0.4 A3 fix: drop the legacy FK on execution_requests.execution_id
 	// for databases that were created before the FK-removal change. SQLite
 	// has no ALTER TABLE DROP CONSTRAINT, so the only way to remove an FK
@@ -863,6 +869,69 @@ PRAGMA foreign_keys = ON;
 		db.writer.start()
 	}
 	return nil
+}
+
+func migratePoolConfigV2(db *Database) error {
+	rows, err := db.read.Query(`PRAGMA table_info(pool_config)`)
+	if err != nil {
+		return err
+	}
+	hasTarget := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if name == "target_concurrency" {
+			hasTarget = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !hasTarget {
+		// Keep legacy-but-valid rows aligned even after a prior successful
+		// rebuild; this also makes the migration idempotent after interruption.
+		_, err := db.write.Exec(`UPDATE pool_config SET min_warm = CASE
+			WHEN scale_to_zero = 1 THEN 0
+			WHEN min_warm < 1 THEN 1
+			ELSE min_warm END`)
+		return err
+	}
+
+	tx, err := db.write.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS pool_config_v2`,
+		`CREATE TABLE pool_config_v2 (
+			function_id   TEXT PRIMARY KEY,
+			min_warm      INTEGER NOT NULL DEFAULT 1,
+			max_warm      INTEGER NOT NULL DEFAULT 50,
+			idle_ttl_s    INTEGER NOT NULL DEFAULT 600,
+			max_use_count INTEGER NOT NULL DEFAULT 1000,
+			scale_to_zero INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY (function_id) REFERENCES functions(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO pool_config_v2
+			(function_id, min_warm, max_warm, idle_ttl_s, max_use_count, scale_to_zero)
+		 SELECT function_id,
+			CASE WHEN scale_to_zero = 1 THEN 0 WHEN min_warm < 1 THEN 1 ELSE min_warm END,
+			max_warm, idle_ttl_s, max_use_count, scale_to_zero
+		 FROM pool_config`,
+		`DROP TABLE pool_config`,
+		`ALTER TABLE pool_config_v2 RENAME TO pool_config`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // dropExecutionRequestsFK rebuilds the execution_requests table without

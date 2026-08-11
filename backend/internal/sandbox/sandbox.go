@@ -571,22 +571,3 @@ func ReadCgroupMemCurrent(cgPath string) int64 {
 	v, _ := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 	return v
 }
-
-// ReadCgroupCPUUsec reads the cumulative usage_usec from cpu.stat in a
-// cgroup v2 directory. Returns 0 on any error.
-func ReadCgroupCPUUsec(cgPath string) int64 {
-	if cgPath == "" {
-		return 0
-	}
-	data, err := os.ReadFile(filepath.Join(cgPath, "cpu.stat"))
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "usage_usec ") {
-			v, _ := strconv.ParseInt(strings.TrimPrefix(line, "usage_usec "), 10, 64)
-			return v
-		}
-	}
-	return 0
-}

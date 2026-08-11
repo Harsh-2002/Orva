@@ -1,149 +1,114 @@
-# Capacity — honest numbers
+# Pool Controller v2 capacity validation
 
-This doc reports what was measured, not what was hoped for.
+This document records reproducible measurements, not estimated capacity.
+Numbers are a comparison aid for this host; they are not a universal sizing
+promise.
 
 ## Test rig
-- Host: 2 CPU / 12 GB RAM (`mem_total_mb=11961` reported by `/proc/meminfo`)
-- Image: `orva:ui-mature` (built from this tree, nsjail compiled from source, two rootfs trees: node + python)
-- Container flags: `--pid host --cgroupns host --cap-add SYS_ADMIN --security-opt seccomp=unconfined,apparmor=unconfined,systempaths=unconfined --device /dev/net/tun`
-- Test: `bash test/atscale.sh` against a clean container (volume `orva-test-data`)
 
-## What was deployed
+- Date: 2026-08-11
+- Host: 4 logical CPUs, 15,999 MiB RAM
+- Baseline: `a1c7ac7d` (the KV reliability merge, before Pool Controller v2)
+- Candidate: `codex/pool-controller-v2`
+- Runtime: native Orva, nsjail, production Node rootfs, isolated ports and
+  temporary databases
+- Logging: `ORVA_LOG_LEVEL=error` for both measured runs
+- Handler: 10 ms async Node response, 128 MiB declared memory, 1 CPU
+- Load: 15 seconds, concurrency 32, persistent HTTP connections
 
-20 functions, mixed runtime:
+The host did not delegate writable cgroup controllers to this development
+process, so per-worker `memory.current` sampling was unavailable. Admission
+therefore correctly stayed on the declared cgroup hard bound. Cgroup parsing
+and constrained-capacity arithmetic are covered by deterministic tests and
+the required provisioned-Linux CI lane.
 
-| runtime  | count | shape                        |
-|----------|-------|------------------------------|
-| node     | 10    | trivial echo handler         |
-| python   | 10    | trivial dict-return handler  |
+## Before and after
 
-All 20 inline-deployed (no requirements.txt / package.json — those exercise the longer build path; covered separately in plan §B).
+| Metric | Baseline | Controller v2 | Change |
+|---|---:|---:|---:|
+| Successful requests | 17,183 | 15,978 | — |
+| Failed requests | 0 | 0 | — |
+| Throughput | 1,144.24 req/s | 1,063.80 req/s | **-7.03%** |
+| Client latency p95 | 49.77 ms | 52.23 ms | +2.46 ms |
+| Server service p95 | 37 ms | 39 ms | +2 ms |
+| Queue-wait p95 | not exposed | **0.006 ms** | new signal |
+| Cold-start rate | 0.402% | **0.200%** | -50.2% |
+| Workers spawned | 69 | **32** | -53.6% |
+| Workers killed during measured load | 37 | **0** | eliminated |
+| Effective ceiling | 32 | 32 | unchanged |
+| Capacity timeouts | not exposed | **0** | new signal |
 
-**Build pipeline result:** all 20 deployments transitioned `queued → building → succeeded` in **2 seconds wall-clock** with `runtime.NumCPU()=2` build workers. No errors.
+The throughput gate allows at most a 10% regression; the measured 7.03%
+decrease passes. The controller trades that bounded difference for half the
+cold-start rate and removes the baseline's spawn/kill churn under the same
+load. No worker exceeded the 32-worker effective CPU ceiling.
 
-## Idle capacity
+After correcting the unobserved-memory fallback, a separate 5-second
+concurrency-32 check produced 1,205.28 req/s with zero failures. It reserved
+6,144 MiB for 32 workers (32 × the 192 MiB declared cgroup hard bound), with
+`queued=0`, `spawning=0`, and zero capacity timeouts after the run. Once
+`memory.current` samples exist, admission uses observed worker memory p95,
+clamped to the declared bound.
 
-Right after deploy, before any traffic:
+## KV control measurement
 
-| metric                  | value                     |
-|-------------------------|---------------------------|
-| pools created           | **0**                     |
-| host RSS (orva alloc)   | 12 MB                     |
-| memory reserved by pools | 0 MB                     |
-| memory available        | 9285 MB                   |
+The same isolated candidate instance processed 1,000 concurrent atomic KV
+increments:
 
-Pools are created **lazily on first invoke**. With `EagerWarmup=true`, prewarm fires on startup for each function in the registry — but the autoscaler hasn't seen traffic, so it doesn't aggressively spawn before signals say it should. This is correct behavior and what the user asked for: *"you can't keep the pool always active when there are no requests."*
+| Metric | Result |
+|---|---:|
+| Final value | 1,000 |
+| KV errors | 0 |
+| KV timeouts | 0 |
+| Cumulative increment latency | 2,338.098 ms |
+| Mean database increment latency | 2.338 ms |
 
-**Idle capacity claim:** 20 functions deployed, sub-13 MB Orva heap, ~9.2 GB RAM still available. The platform itself takes negligible memory; real cost arrives only when traffic does.
+This confirms the pool changes did not disturb the KV reliability contract or
+SQLite atomic-increment path.
 
-## Concurrent active capacity
+## Controller invariants validated
 
-5 functions hammered concurrently (3 Node, 2 Python) at `c=25` each for 30 s:
+Automated tests cover:
 
-| metric                          | value                     |
-|---------------------------------|---------------------------|
-| total invocations               | **13,476**                |
-| cold starts                     | 205 (1.5%)                |
-| warm hits                       | 13,271 (98.5%)            |
-| build errors                    | 0                         |
-| memory reserved (peak)          | 5376 MB / 11961 MB (44.9%) |
-| memory available (after)        | 7871 MB                   |
-| sandbox concurrent (peak)       | 125                       |
-| sandbox total                   | 13,476                    |
+- exact stable, burst, and immediate-pressure formulas at 70% utilization;
+- scale-to-zero only after the configured no-demand TTL;
+- `spawning` publication before launch and at most four concurrent starts per
+  function, including repeated evaluations;
+- 30 seconds continuously below desired capacity before scale-down;
+- no more than 20% shrink per evaluation and idle workers only;
+- cgroup memory headroom and pending-reservation admission;
+- declared memory as the safe fallback before an observed p95 exists;
+- migration of legacy pool rows, removal of `target_concurrency`, preservation
+  of values and foreign-key cascade behavior;
+- rejection of stale configuration with `400 VALIDATION` migration guidance;
+- scale-to-zero configuration normalization in the database and REST surface;
+- deployment/policy generation retirement without crossing workers between
+  generations.
 
-Roughly **450 req/s aggregate** across 5 fns × 2 CPUs = ~90 req/s/fn — consistent with our single-fn ceiling (962 req/s on one fn) once divided five ways and accounting for the autoscaler tick latency.
+The global scheduler rotates its starting function each evaluation. When
+memory or CPU admission fails, it first reclaims an idle worker above the
+configured minimum from the largest borrowing pool. Busy workers and active
+configured minimums are never reclamation candidates. CPU admission is global
+across pools, weighted by each function's declared CPU limit, and bounded to
+eight I/O-overlap worker slots per effective cgroup CPU.
 
-## Cross-function isolation — confirmed
+## Operational interpretation
 
-Per-pool snapshot at end of run:
+Use these Pool Controller v2 signals together:
 
-| function          | idle | busy | scale_ups | scale_downs |
-|-------------------|-----:|-----:|----------:|------------:|
-| ascale-node-1   |   25 |    0 |         0 |          10 |
-| ascale-node-3   |   25 |    0 |         0 |          11 |
-| ascale-node-5   |   25 |    0 |         0 |           9 |
-| ascale-py-1       |   14 |    0 |        14 |           0 |
-| ascale-py-2       |   14 |    0 |        14 |           0 |
-| (15 idle fns)     |    – |    – |         – |           – |
+- `queued` and `queue_wait_p95_ms` show user-visible pressure.
+- `spawning` distinguishes cold-start work from a stuck queue.
+- `desired_workers` is the demand result; `effective_max` is the actual
+  host/operator ceiling.
+- `host.effective_memory_capacity_mb` is the live admission budget after
+  cgroup headroom and worker reservations; `host.effective_cpu_workers` is
+  the ceiling derived from the active CPU quota.
+- `limiting_reason` says whether the active bound is stable demand, burst
+  demand, immediate pressure, configured minimum, idle TTL, operator maximum,
+  function concurrency, CPU capacity, or memory capacity.
+- `cold_start_p95_ms` and `service_p95_ms` explain why two functions with the
+  same request rate can require different worker counts.
 
-**Only 5 pools exist.** The 15 untouched functions never spawned a worker — confirming pool isolation under the per-function `functionPool` design. A function under heavy load cannot starve another function's resources.
-
-(Note: the `scale_ups=0` for the Node pools reflects that the autoscaler grew them via the request-path lazy spawn rather than the autoscaler's predictive `scaleUp`. Both code paths increment `spawned` but only the autoscaler increments `scale_ups`. This is a metrics-attribution nuance, not a behavior issue.)
-
-## Process leaks
-
-```
-nsjail processes: 104
-expected (Σ idle + Σ busy) = 25+25+25+14+14 + 0 = 103
-```
-
-Off-by-one is the sampling race between `metrics.json` snapshot and the `ps`-equivalent walk. **No process leaks.**
-
-## Honest answers to the user's questions
-
-> *How many functions can we run smoothly?*
-
-- **Idle:** essentially unlimited up to disk space. Each function at `min_warm=1` reserves one ~50 MB worker only when it actually receives traffic. 20 idle functions cost `12 MB` of Orva-heap + zero pool memory.
-- **Concurrent active:** 5 functions all hot, sharing 2 CPUs, sustains ~450 req/s aggregate before CPU is the wall. More functions can be active simultaneously, just at lower per-fn req/s.
-- **Memory wall:** ~80 functions could each hold one 128 MB worker (`memory.max = 192 MB` × 1.5 factor) before hitting the 80% RAM-reservation gate. In practice the autoscaler shrinks idle pools, so this is the worst case.
-
-> *Did everything work end-to-end?*
-
-| component                              | tested | result                         |
-|----------------------------------------|--------|--------------------------------|
-| 20 deploys via async build pipeline    | ✓      | 0 failures, 2s aggregate       |
-| Per-fn pool isolation                  | ✓      | 15 idle fns untouched          |
-| Autoscaler scale-up                    | ✓      | 5 hot pools spawned to ~25     |
-| Autoscaler scale-down                  | ✓      | scale_downs counter increments |
-| Memory accounting                      | ✓      | mem_reserved tracks workers    |
-| Process leak                           | ✓      | nsjail count matches pool size |
-| Bootstrap admin key persistence        | ✓      | survives `docker rm` + `run`   |
-| `/api/v1/auth/status` route guard correctness | ✓      | doesn't bounce to onboarding   |
-| Latency unit (ns→ms fix)               | ✓      | `latency_ms` is now ms in JSON |
-| New `/system/metrics.json` endpoint    | ✓      | UI reads this directly         |
-
-## Known soft issues (not blockers)
-
-1. The autoscaler's lazy spawn-on-Acquire bumps `spawned` but not `scale_ups` — fix is to attribute spawns by source.
-2. `mem_reserved` momentarily reads 0 during the very first tick of a hot pool because Acquire-path spawns bypass `hostMem.reserve()`. Reserved memory is correctly tracked once the autoscaler ticks (within 2 s). Acceptable for now.
-3. Bash test's phase 5 awk parser failed on empty `hey` percentile fields — the data we needed (cross-fn isolation, process leak check, total invocations) was already captured.
-
----
-
-## Round E retrospective (2026-04-25)
-
-All three soft issues above are **resolved**:
-- **E.1.1** — `internal/pool/function_pool.go` lazy spawn now bumps `scaleUps` alongside `spawned`; verified live, hot pools reported 8/13/13/15/18 scale events vs the prior 0.
-- **E.1.2** — `functionPool.hostMem` back-reference added; `acquire()` reserves memory before spawn and `killWorker` releases on every termination path. `mem_reserved_mb` now reflects accurate occupancy from sample 1 (was 0 for 4 ticks).
-- **E.1.3** — `test/atscale.sh` phase 5 uses `awk -v` defaults; no more SIGPIPE on empty hey fields.
-
-Plus one **architectural fix** uncovered while writing E.4 tests:
-- **Secrets injection.** Pre-round-E, secrets were built into a per-request env map by `proxy.Forward` but never plumbed to `pool.Acquire`. Warm workers kept their original env and never saw new secrets. Fix: `pool.SandboxTemplate.SecretsLookup` is consulted at every spawn, and secret upsert/delete triggers `Manager.RefreshForDeploy` so the next worker picks up the change. Verified by `test/secrets-test.sh` (8/8 pass).
-
-## Verified flows (`bash test/run-all.sh`, 2026-04-25)
-
-| flow | tests | result | artifact |
-|---|---|---|---|
-| Multi-fn deploy + isolation | atscale.sh | ✓ 20 fns deployed in 4s; 5-fn concurrent load; cross-fn isolation; ~705 req/s aggregate | `test/atscale-results.tsv` |
-| Secrets injection | secrets-test.sh | ✓ 8/8: STRIPE_* env injected, delete propagates via pool refresh, value_encrypted opaque, c=20 invokes consistent | `test/run-all-results.tsv` |
-| Custom routes | routes-test.sh | ✓ 7/7: exact + prefix matching, reserved-prefix rejected (400), method restriction (405/200), direct invoke coexists, c=25 load | `test/run-all-results.tsv` |
-| Heavy-dep async deploy | heavy-deploy-test.sh | ✓ 12/12: POST 202 in <500 ms, terminal status, requests==2.31.0 imported in sandbox, failure path keeps prior version active | `test/heavy-deploy-stream.log` |
-| Onboarding curl-sim | onboarding-flow.sh | ✓ 13/13: status flips, cookie 7d, /api/v1/auth/me returns expires_at, /api/v1/auth/refresh rotates token, logout invalidates | `test/run-all-results.tsv` |
-| Error code coverage | errors-test.sh (Round F) | ✓ 5/5: PAYLOAD_TOO_LARGE 413, WORKER_CRASHED 502, TIMEOUT 504, NOT_FOUND 404, METHOD_NOT_ALLOWED 405 (POOL_AT_CAPACITY needs sqlite3 in image — skipped gracefully) | `docs/ERRORS.md` |
-| Onboarding (browser) | manual checklist | pending — operator runs through Onboarding → Login → Dashboard → Editor flow once after deploying a release | append a dated checklist below |
-
-### Browser pass checklist (manual, run once per release)
-
-```
-[ ] Visit http://localhost:18443 → routes to /onboarding
-[ ] Submit onboarding form → routes to /
-[ ] Dashboard renders with all sections (host card, latency cards, build pipeline, sandbox, pool grid)
-[ ] /api/v1/system/metrics.json values match Dashboard cards (no client-side recompute drift)
-[ ] Click an invocation row in /invocations → drawer opens with stderr, status, duration
-[ ] Deploy a fn with deps → Editor shows live SSE log drawer, Test button gated until succeeded
-[ ] Click "Deploy history →" link in Editor → /functions/<name>/deployments table
-[ ] Click a deployment row → drawer opens with build log
-[ ] Wait for session to enter the last 12h (or set cookie expiry via devtools) → toast appears
-[ ] Click "Stay signed in" → toast clears, navigate, no re-prompt
-[ ] /api/v1/auth/logout → bounces to /login
-```
+Raise `max_warm` only when `limiting_reason=operator_max`. CPU or memory
+limits require host capacity or smaller function limits; increasing the
+operator ceiling cannot override the effective host maximum.

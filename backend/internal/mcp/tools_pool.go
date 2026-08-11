@@ -2,18 +2,18 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type PoolConfigView struct {
-	FunctionID        string `json:"function_id"`
-	MinWarm           int    `json:"min_warm"`
-	MaxWarm           int    `json:"max_warm"`
-	IdleTTLSeconds    int    `json:"idle_ttl_seconds"`
-	TargetConcurrency int    `json:"target_concurrency"`
-	ScaleToZero       bool   `json:"scale_to_zero"`
+	FunctionID     string `json:"function_id"`
+	MinWarm        int    `json:"min_warm"`
+	MaxWarm        int    `json:"max_warm"`
+	IdleTTLSeconds int    `json:"idle_ttl_seconds"`
+	ScaleToZero    bool   `json:"scale_to_zero"`
 }
 
 type GetPoolConfigInput struct {
@@ -21,19 +21,18 @@ type GetPoolConfigInput struct {
 }
 
 type SetPoolConfigInput struct {
-	FunctionID        string `json:"function_id"`
-	MinWarm           *int   `json:"min_warm,omitempty"`
-	MaxWarm           *int   `json:"max_warm,omitempty"`
-	IdleTTLSeconds    *int   `json:"idle_ttl_seconds,omitempty"`
-	TargetConcurrency *int   `json:"target_concurrency,omitempty" jsonschema:"req per worker before scale-up considered"`
-	ScaleToZero       *bool  `json:"scale_to_zero,omitempty"`
+	FunctionID     string `json:"function_id"`
+	MinWarm        *int   `json:"min_warm,omitempty"`
+	MaxWarm        *int   `json:"max_warm,omitempty"`
+	IdleTTLSeconds *int   `json:"idle_ttl_seconds,omitempty"`
+	ScaleToZero    *bool  `json:"scale_to_zero,omitempty"`
 }
 
 func toPoolConfigView(c *database.PoolConfig) PoolConfigView {
 	return PoolConfigView{
 		FunctionID: c.FunctionID, MinWarm: c.MinWarm, MaxWarm: c.MaxWarm,
-		IdleTTLSeconds: c.IdleTTLS, TargetConcurrency: c.TargetConcurrency,
-		ScaleToZero: c.ScaleToZero,
+		IdleTTLSeconds: c.IdleTTLS,
+		ScaleToZero:    c.ScaleToZero,
 	}
 }
 
@@ -44,7 +43,7 @@ func registerPoolTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "get_pool_config",
 			Title:       "Get Pool Config",
-			Description: "Get the autoscaler pool config for a function (min_warm, max_warm, idle_ttl, target_concurrency, scale_to_zero). Returns nulls/defaults if no override is configured.",
+			Description: "Get the Pool Controller v2 config for a function (min_warm, max_warm, idle_ttl, scale_to_zero). Returns defaults if no override is configured.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetPoolConfigInput) (*mcpsdk.CallToolResult, PoolConfigView, error) {
@@ -57,7 +56,7 @@ func registerPoolTools(rc *regCtx) {
 				// no row = use defaults
 				return nil, PoolConfigView{
 					FunctionID: fn.ID, MinWarm: 1, MaxWarm: 50,
-					IdleTTLSeconds: 600, TargetConcurrency: 10,
+					IdleTTLSeconds: 600,
 				}, nil
 			}
 			return nil, toPoolConfigView(cfg), nil
@@ -80,7 +79,7 @@ func registerPoolTools(rc *regCtx) {
 			if err != nil {
 				cfg = &database.PoolConfig{
 					FunctionID: fn.ID, MinWarm: 1, MaxWarm: 50,
-					IdleTTLS: 600, TargetConcurrency: 10,
+					IdleTTLS: 600,
 				}
 			}
 			if in.MinWarm != nil {
@@ -92,11 +91,26 @@ func registerPoolTools(rc *regCtx) {
 			if in.IdleTTLSeconds != nil {
 				cfg.IdleTTLS = *in.IdleTTLSeconds
 			}
-			if in.TargetConcurrency != nil {
-				cfg.TargetConcurrency = *in.TargetConcurrency
-			}
 			if in.ScaleToZero != nil {
 				cfg.ScaleToZero = *in.ScaleToZero
+			}
+			if in.MinWarm != nil {
+				if cfg.ScaleToZero && cfg.MinWarm != 0 {
+					return nil, PoolConfigView{}, fmt.Errorf("scale_to_zero=true requires min_warm=0")
+				}
+				if !cfg.ScaleToZero && cfg.MinWarm < 1 {
+					return nil, PoolConfigView{}, fmt.Errorf("scale_to_zero=false requires min_warm>=1")
+				}
+			}
+			if in.ScaleToZero != nil && in.MinWarm == nil {
+				if cfg.ScaleToZero {
+					cfg.MinWarm = 0
+				} else if cfg.MinWarm < 1 {
+					cfg.MinWarm = 1
+				}
+			}
+			if cfg.MaxWarm < 1 || cfg.MinWarm > cfg.MaxWarm || cfg.IdleTTLS < 0 {
+				return nil, PoolConfigView{}, fmt.Errorf("require min_warm <= max_warm, max_warm >= 1, and idle_ttl_seconds >= 0")
 			}
 			if err := deps.DB.UpsertPoolConfig(cfg); err != nil {
 				return nil, PoolConfigView{}, err

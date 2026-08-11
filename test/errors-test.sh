@@ -25,7 +25,7 @@ http_status() { printf '%s' "$1" | head -n1 | awk '{print $2}' | tr -d '\r'; }
 # Extract a header value (case-insensitive) from a curl -i response.
 http_header() {
     local name="$1" resp="$2"
-    printf '%s' "$resp" | awk -v n="$(echo "$name" | tr 'A-Z' 'a-z')" '
+    printf '%s' "$resp" | awk -v n="$(echo "$name" | tr '[:upper:]' '[:lower:]')" '
         BEGIN{IGNORECASE=1}
         /^\r?$/ {exit}
         {
@@ -158,9 +158,19 @@ done
 
 # Pin pool max_warm=1 via the public API. PoolRefresh tears down the running
 # pool so the next acquire picks up the new bounds without a server restart.
+legacy_pool_body="/tmp/orva-legacy-pool-$$.json"
+legacy_pool_status=$(curl -s -o "$legacy_pool_body" -w '%{http_code}' \
+    -X PUT "$BASE/api/v1/pool/config" -H "X-Orva-API-Key: $KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"function_id\":\"$fid\",\"target_concurrency\":1}")
+legacy_pool_code=$(jq -r '.error.code // empty' "$legacy_pool_body")
+rm -f "$legacy_pool_body"
+legacy_pool_ok=$([ "$legacy_pool_status" = 400 ] && [ "$legacy_pool_code" = VALIDATION ] && echo ok || echo fail)
+check "removed target_concurrency returns 400 VALIDATION" "$legacy_pool_ok" \
+    "status=$legacy_pool_status code=$legacy_pool_code"
 pool_resp=$("${CURL[@]}" -X PUT "$BASE/api/v1/pool/config" \
     -H "Content-Type: application/json" \
-    -d "{\"function_id\":\"$fid\",\"min_warm\":1,\"max_warm\":1,\"idle_ttl_seconds\":600,\"target_concurrency\":1}")
+    -d "{\"function_id\":\"$fid\",\"min_warm\":1,\"max_warm\":1,\"idle_ttl_seconds\":600}")
 if echo "$pool_resp" | jq -e '.max_warm == 1' >/dev/null 2>&1; then
     sleep 1  # let the pool refresh settle
 

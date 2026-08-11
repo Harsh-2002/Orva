@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { listFunctions, listInvocations, getMetricsJSON, getHealth } from '@/api/endpoints'
 import { useEventsStore } from '@/stores/events'
 
-// poolHistorySize is how many ticks of per-pool rate_ewma we retain for
+// poolHistorySize is how many ticks of per-pool stable_rate we retain for
 // the dashboard sparkline. 60 ticks × 5s/tick = 5 min of context.
 const poolHistorySize = 60
 
@@ -19,7 +19,7 @@ export const useSystemStore = defineStore('system', () => {
   const functionsCount = ref(0)
   const recentInvocations = ref([])
 
-  // poolHistory[fn_id] = ring of recent rate_ewma values for sparkline.
+  // poolHistory[fn_id] = ring of recent stable-rate values for sparkline.
   const poolHistory = ref({})
 
   // buildInfo: one-shot snapshot of /api/v1/system/health's build identity
@@ -41,7 +41,7 @@ export const useSystemStore = defineStore('system', () => {
     for (const p of snap.pools || []) {
       seen.add(p.function_id)
       const ring = poolHistory.value[p.function_id] || []
-      ring.push(p.rate_ewma)
+      ring.push(p.stable_rate)
       if (ring.length > poolHistorySize) ring.splice(0, ring.length - poolHistorySize)
       poolHistory.value[p.function_id] = ring
     }

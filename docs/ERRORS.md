@@ -8,7 +8,7 @@ Every API error returns the same envelope:
     "code": "POOL_AT_CAPACITY",
     "message": "function pool at capacity for 019df200-7b00-7e00-9c00-aab1cd2e3f40",
     "request_id": "req_abc...",
-    "hint": "raise pool_config.max_warm via PUT /api/v1/pool/config",
+    "hint": "inspect pool limiting_reason; raise max_warm only for operator_max",
     "retry_after_s": 5,
     "details": {
       "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
@@ -65,7 +65,7 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 
 Every transient error includes a `hint` field telling the operator what to change. Examples:
 
-- `POOL_AT_CAPACITY`: "raise pool_config.max_warm via PUT /api/v1/pool/config or reduce client concurrency"
+- `POOL_AT_CAPACITY`: "inspect pool limiting_reason; raise max_warm only for operator_max, otherwise add host capacity or reduce worker limits"
 - `MEMORY_EXHAUSTED`: "deploy fewer concurrent functions or increase host RAM; see /api/v1/system/metrics.json host.mem_*"
 - `BUILD_QUEUE_FULL`: "wait for current builds to drain; consider raising NumCPU or staggering deploys"
 - `WORKER_CRASHED`: "check stderr in the latest execution log; common causes: process.exit, OOM, syntax error in handler"

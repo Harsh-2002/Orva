@@ -21,9 +21,11 @@ Five fields to look at first:
 |---|---|
 | `host.num_goroutines` | 50–500 idle, scales with active invokes |
 | `host.mem_reserved_mb` / `host.mem_total_mb` | should stay under 80% |
+| `host.effective_memory_capacity_mb` | current memory available for one or more additional worker admissions |
+| `host.effective_cpu_workers` | worker ceiling derived from the active cgroup CPU quota |
 | `sandbox.active` | <= `cfg.Sandbox.MaxConcurrent` (derived: `NumCPU × 64`, floor 200) |
 | `latency_ms.p99` | <= 5 × `latency_ms.p50`. If p99 is 10× p50 the pool is saturated |
-| `pools[].idle` for each pool | <= `pools[].dynamic_max`. If exceeded, the pool stability fix didn't deploy |
+| `pools[].idle + busy + spawning` | <= `pools[].effective_max`; queued should drain after a burst |
 
 ## Common errors and what they mean
 
@@ -32,7 +34,7 @@ Full catalog in [ERRORS.md](ERRORS.md). The ones operators see most:
 | code | what's happening | what to do |
 |---|---|---|
 | `429 TOO_MANY_REQUESTS` | host-wide concurrency cap hit | client should back off + retry. The ceiling is derived from CPU count (`NumCPU × 64`, floor 200) and is not operator-tunable today — add CPUs to raise it |
-| `503 POOL_AT_CAPACITY` | this function's pool at `dynamic_max` and ctx fired waiting | raise `pool_config.max_warm` for that fn, or accept the backpressure |
+| `503 POOL_AT_CAPACITY` | this function reached its effective host/operator ceiling and the queue deadline expired | inspect `limiting_reason`; raise `max_warm` only when it says `operator_max`, otherwise add host capacity or reduce worker limits |
 | `503 MEMORY_EXHAUSTED` | host RAM at 80% reservation | scale-down idle pools, increase host RAM, or reduce per-fn `memory_mb` |
 | `502 WORKER_CRASHED` | function process exited mid-request (panic, OOM kill, syntax error) | check the execution's stderr in the dashboard or `execution_logs` table |
 | `504 TIMEOUT` | exceeded fn `timeout_ms` | raise it (`PUT /api/v1/functions/{id}` with `{"timeout_ms": 60000}`) or optimize the handler |
@@ -50,12 +52,13 @@ docker stats orva --no-stream
 docker exec orva ps -ef | wc -l   # nsjail process count
 ```
 
-If PIDs are >300 and idle is >dynamic_max, the pool over-spawned past
-its cap. This was a real bug fixed in early Round-G builds — if you're
-on `v2026.04.28` or later it shouldn't recur.
+If total workers (`idle + busy + spawning`) exceeds `effective_max`, capture
+the metrics snapshot and logs: Pool Controller v2 publishes spawning before
+launch specifically to prevent overlapping evaluations from over-spawning.
 
-**Recovery.** The autoscaler will catch up within ~30 s of load
-ending. If it doesn't:
+**Recovery.** The controller waits 30 seconds below desired capacity, then removes no
+more than 20% of workers per evaluation. It should converge without dropping
+busy work. If it doesn't:
 
 ```bash
 docker restart orva

@@ -53,12 +53,14 @@ type MetricsJSONShape struct {
 }
 
 type hostBlock struct {
-	NumCPU         int   `json:"num_cpu"`
-	NumGoroutines  int   `json:"num_goroutines"`
-	OrvaAllocMB    int64 `json:"orva_alloc_mb"`
-	MemTotalMB     int64 `json:"mem_total_mb"`
-	MemAvailableMB int64 `json:"mem_available_mb"`
-	MemReservedMB  int64 `json:"mem_reserved_mb"`
+	NumCPU              int   `json:"num_cpu"`
+	EffectiveCPUWorkers int   `json:"effective_cpu_workers"`
+	NumGoroutines       int   `json:"num_goroutines"`
+	OrvaAllocMB         int64 `json:"orva_alloc_mb"`
+	MemTotalMB          int64 `json:"mem_total_mb"`
+	MemAvailableMB      int64 `json:"mem_available_mb"`
+	MemReservedMB       int64 `json:"mem_reserved_mb"`
+	EffectiveMemoryMB   int64 `json:"effective_memory_capacity_mb"`
 }
 
 type totalsBlock struct {
@@ -90,22 +92,27 @@ type buildQueueBlock struct {
 }
 
 type poolBlock struct {
-	FunctionID    string  `json:"function_id"`
-	FunctionName  string  `json:"function_name"`
-	Idle          int     `json:"idle"`
-	Busy          int64   `json:"busy"`
-	Spawned       int64   `json:"spawned"`
-	Killed        int64   `json:"killed"`
-	ScaleUps      int64   `json:"scale_ups"`
-	ScaleDowns    int64   `json:"scale_downs"`
-	RateEWMA      float64 `json:"rate_ewma"`
-	LatencyEWMAms float64 `json:"latency_ewma_ms"`
-	DynamicMax    int64   `json:"dynamic_max"`
-	Target        int     `json:"target"`
-	MemUsedAvgMB  float64 `json:"mem_used_avg_mb"` // EWMA of memory.current at release; 0 if cgroups disabled
-	CPUFracAvg    float64 `json:"cpu_frac_avg"`    // EWMA of CPU fraction per invocation (0–1)
-	MemLimitMB    int64   `json:"mem_limit_mb"`    // configured memory_mb for this function
-	CPULimit      float64 `json:"cpu_limit"`       // configured cpus for this function (0 = uncapped)
+	FunctionID       string  `json:"function_id"`
+	FunctionName     string  `json:"function_name"`
+	Idle             int     `json:"idle"`
+	Busy             int64   `json:"busy"`
+	Queued           int64   `json:"queued"`
+	Spawning         int64   `json:"spawning"`
+	Arrivals         int64   `json:"arrivals"`
+	Spawned          int64   `json:"spawned"`
+	Killed           int64   `json:"killed"`
+	DesiredWorkers   int64   `json:"desired_workers"`
+	EffectiveMax     int64   `json:"effective_max"`
+	StableRate       float64 `json:"stable_rate"`
+	BurstRate        float64 `json:"burst_rate"`
+	QueueWaitP95MS   float64 `json:"queue_wait_p95_ms"`
+	ServiceP95MS     float64 `json:"service_p95_ms"`
+	ColdStartP95MS   float64 `json:"cold_start_p95_ms"`
+	LimitingReason   string  `json:"limiting_reason"`
+	Rejections       int64   `json:"rejections"`
+	CapacityTimeouts int64   `json:"capacity_timeouts"`
+	MemLimitMB       int64   `json:"mem_limit_mb"`
+	CPULimit         float64 `json:"cpu_limit"`
 }
 
 // Health handles GET /api/v1/system/health.
@@ -299,32 +306,35 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	if h.PoolMgr != nil {
 		promHeader(w, "orva_pool_idle", "gauge", "Idle warm workers per function.")
 		promHeader(w, "orva_pool_busy", "gauge", "Busy workers per function.")
+		promHeader(w, "orva_pool_queued", "gauge", "Invocations waiting for capacity per function.")
+		promHeader(w, "orva_pool_spawning", "gauge", "Workers currently starting per function.")
+		promHeader(w, "orva_pool_arrivals_total", "counter", "Invocation arrivals observed before capacity waits.")
 		promHeader(w, "orva_pool_spawned_total", "counter", "Workers spawned per function.")
 		promHeader(w, "orva_pool_killed_total", "counter", "Workers killed per function.")
-		promHeader(w, "orva_pool_scale_events_total", "counter", "Autoscaler scale events per function and direction.")
-		promHeader(w, "orva_pool_rate_ewma", "gauge", "EWMA of request rate per function.")
-		promHeader(w, "orva_pool_latency_ewma_ms", "gauge", "EWMA of invocation latency per function (ms).")
-		promHeader(w, "orva_pool_max_dynamic", "gauge", "Dynamic max pool size per function.")
-		promHeader(w, "orva_pool_target_concurrency", "gauge", "Target concurrency per function.")
-		promHeader(w, "orva_pool_mem_used_avg_bytes", "gauge", "EWMA of memory used per invocation (bytes).")
-		promHeader(w, "orva_pool_cpu_frac_avg", "gauge", "EWMA of CPU fraction per invocation.")
+		promHeader(w, "orva_pool_desired_workers", "gauge", "Controller desired workers per function.")
+		promHeader(w, "orva_pool_effective_max", "gauge", "Effective host and operator capacity per function.")
+		promHeader(w, "orva_pool_queue_wait_p95_ms", "gauge", "Observed queue-wait p95 per function.")
+		promHeader(w, "orva_pool_service_p95_ms", "gauge", "Observed service-time p95 per function.")
+		promHeader(w, "orva_pool_cold_start_p95_ms", "gauge", "Observed worker start p95 per function.")
+		promHeader(w, "orva_pool_rejections_total", "counter", "Pool admission rejections per function.")
+		promHeader(w, "orva_pool_capacity_timeouts_total", "counter", "Capacity waits that reached their deadline.")
+		promHeader(w, "orva_pool_limiting_reason", "gauge", "Current limiting reason as a labeled one-hot gauge.")
 		for _, s := range h.PoolMgr.Stats() {
 			fmt.Fprintf(w, "orva_pool_idle{function_id=%q} %d\n", s.FunctionID, s.Idle)
 			fmt.Fprintf(w, "orva_pool_busy{function_id=%q} %d\n", s.FunctionID, s.Busy)
+			fmt.Fprintf(w, "orva_pool_queued{function_id=%q} %d\n", s.FunctionID, s.Queued)
+			fmt.Fprintf(w, "orva_pool_spawning{function_id=%q} %d\n", s.FunctionID, s.Spawning)
+			fmt.Fprintf(w, "orva_pool_arrivals_total{function_id=%q} %d\n", s.FunctionID, s.Arrivals)
 			fmt.Fprintf(w, "orva_pool_spawned_total{function_id=%q} %d\n", s.FunctionID, s.Spawned)
 			fmt.Fprintf(w, "orva_pool_killed_total{function_id=%q} %d\n", s.FunctionID, s.Killed)
-			fmt.Fprintf(w, "orva_pool_scale_events_total{function_id=%q,direction=\"up\"} %d\n", s.FunctionID, s.ScaleUps)
-			fmt.Fprintf(w, "orva_pool_scale_events_total{function_id=%q,direction=\"down\"} %d\n", s.FunctionID, s.ScaleDowns)
-			fmt.Fprintf(w, "orva_pool_rate_ewma{function_id=%q} %.2f\n", s.FunctionID, s.RateEWMA)
-			fmt.Fprintf(w, "orva_pool_latency_ewma_ms{function_id=%q} %.2f\n", s.FunctionID, s.LatencyEWMAms)
-			fmt.Fprintf(w, "orva_pool_max_dynamic{function_id=%q} %d\n", s.FunctionID, s.DynamicMax)
-			fmt.Fprintf(w, "orva_pool_target_concurrency{function_id=%q} %d\n", s.FunctionID, s.Target)
-			if s.MemUsedAvgBytes > 0 {
-				fmt.Fprintf(w, "orva_pool_mem_used_avg_bytes{function_id=%q} %d\n", s.FunctionID, s.MemUsedAvgBytes)
-			}
-			if s.CPUFracAvg > 0 {
-				fmt.Fprintf(w, "orva_pool_cpu_frac_avg{function_id=%q} %.4f\n", s.FunctionID, s.CPUFracAvg)
-			}
+			fmt.Fprintf(w, "orva_pool_desired_workers{function_id=%q} %d\n", s.FunctionID, s.Desired)
+			fmt.Fprintf(w, "orva_pool_effective_max{function_id=%q} %d\n", s.FunctionID, s.EffectiveMax)
+			fmt.Fprintf(w, "orva_pool_queue_wait_p95_ms{function_id=%q} %.3f\n", s.FunctionID, s.QueueWaitP95MS)
+			fmt.Fprintf(w, "orva_pool_service_p95_ms{function_id=%q} %.3f\n", s.FunctionID, s.ServiceP95MS)
+			fmt.Fprintf(w, "orva_pool_cold_start_p95_ms{function_id=%q} %.3f\n", s.FunctionID, s.ColdStartP95MS)
+			fmt.Fprintf(w, "orva_pool_rejections_total{function_id=%q} %d\n", s.FunctionID, s.Rejections)
+			fmt.Fprintf(w, "orva_pool_capacity_timeouts_total{function_id=%q} %d\n", s.FunctionID, s.CapacityTimeouts)
+			fmt.Fprintf(w, "orva_pool_limiting_reason{function_id=%q,reason=%q} 1\n", s.FunctionID, s.LimitingReason)
 		}
 		tot, avail, res := h.PoolMgr.HostMemStats()
 		promHeader(w, "orva_host_mem_total_bytes", "gauge", "Total host memory (bytes).")
@@ -333,6 +343,10 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "orva_host_mem_available_bytes %d\n", avail)
 		promHeader(w, "orva_host_mem_reserved_bytes", "gauge", "Host memory reserved by warm pools (bytes).")
 		fmt.Fprintf(w, "orva_host_mem_reserved_bytes %d\n", res)
+		promHeader(w, "orva_host_effective_cpu_workers", "gauge", "Effective worker capacity derived from cgroup v2 CPU quota.")
+		fmt.Fprintf(w, "orva_host_effective_cpu_workers %d\n", h.PoolMgr.EffectiveCPUCapacity())
+		promHeader(w, "orva_host_effective_memory_capacity_bytes", "gauge", "Memory currently available for additional worker admission.")
+		fmt.Fprintf(w, "orva_host_effective_memory_capacity_bytes %d\n", h.PoolMgr.EffectiveMemoryCapacity())
 	}
 }
 
@@ -392,6 +406,8 @@ func (h *SystemHandler) BuildMetricsSnapshot() MetricsJSONShape {
 
 	if h.PoolMgr != nil {
 		tot, avail, res := h.PoolMgr.HostMemStats()
+		out.Host.EffectiveCPUWorkers = h.PoolMgr.EffectiveCPUCapacity()
+		out.Host.EffectiveMemoryMB = h.PoolMgr.EffectiveMemoryCapacity() / 1024 / 1024
 		out.Host.MemTotalMB = tot / 1024 / 1024
 		out.Host.MemAvailableMB = avail / 1024 / 1024
 		out.Host.MemReservedMB = res / 1024 / 1024
@@ -412,22 +428,15 @@ func (h *SystemHandler) BuildMetricsSnapshot() MetricsJSONShape {
 				}
 			}
 			out.Pools = append(out.Pools, poolBlock{
-				FunctionID:    s.FunctionID,
-				FunctionName:  name,
-				Idle:          s.Idle,
-				Busy:          s.Busy,
-				Spawned:       s.Spawned,
-				Killed:        s.Killed,
-				ScaleUps:      s.ScaleUps,
-				ScaleDowns:    s.ScaleDowns,
-				RateEWMA:      s.RateEWMA,
-				LatencyEWMAms: s.LatencyEWMAms,
-				DynamicMax:    s.DynamicMax,
-				Target:        s.Target,
-				MemUsedAvgMB:  float64(s.MemUsedAvgBytes) / 1024 / 1024,
-				CPUFracAvg:    s.CPUFracAvg,
-				MemLimitMB:    memLimitMB,
-				CPULimit:      cpuLimit,
+				FunctionID: s.FunctionID, FunctionName: name,
+				Idle: s.Idle, Busy: s.Busy, Queued: s.Queued, Spawning: s.Spawning,
+				Arrivals: s.Arrivals, Spawned: s.Spawned, Killed: s.Killed,
+				DesiredWorkers: s.Desired, EffectiveMax: s.EffectiveMax,
+				StableRate: s.StableRate, BurstRate: s.BurstRate,
+				QueueWaitP95MS: s.QueueWaitP95MS, ServiceP95MS: s.ServiceP95MS,
+				ColdStartP95MS: s.ColdStartP95MS, LimitingReason: s.LimitingReason,
+				Rejections: s.Rejections, CapacityTimeouts: s.CapacityTimeouts,
+				MemLimitMB: memLimitMB, CPULimit: cpuLimit,
 			})
 		}
 	}

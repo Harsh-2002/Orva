@@ -51,7 +51,11 @@ func egressTestManager(t *testing.T) (*Manager, *registry.Registry) {
 	// Stops the reapers getOrCreatePool starts, before the DB cleanup below it
 	// tears the connections down.
 	t.Cleanup(func() {
-		close(m.shutdown)
+		select {
+		case <-m.shutdown:
+		default:
+			close(m.shutdown)
+		}
 		m.wg.Wait()
 	})
 	return m, m.reg

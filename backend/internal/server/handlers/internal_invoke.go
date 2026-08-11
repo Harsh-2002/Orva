@@ -153,7 +153,9 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	}
 	eventJSON, _ := json.Marshal(event)
 
+	dispatchStarted := time.Now()
 	respJSON, _, err := acq.Worker.Dispatch(ctx, eventJSON)
+	h.Pool.RecordLatency(acq, time.Since(dispatchStarted))
 	durationMS := time.Since(start).Milliseconds()
 	if err != nil {
 		reqErr = err
@@ -323,7 +325,9 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	}
 	eventJSON, _ := json.Marshal(event)
 
+	dispatchStarted := time.Now()
 	dres, err := acq.Worker.DispatchEx(ctx, eventJSON)
+	h.Pool.RecordLatency(acq, time.Since(dispatchStarted))
 	if err != nil {
 		reqErr = err
 		errMsg := err.Error()

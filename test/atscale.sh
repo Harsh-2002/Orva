@@ -8,7 +8,8 @@
 #      idle-capacity baseline.
 #   3. Hammer 5 fns concurrently with hey; assert cross-fn isolation
 #      (untouched fns stay at min_warm) and no 503 BUILDING.
-#   4. Capture autoscaler-driven scale-up/scale-down counts per fn.
+#   4. Capture Controller v2 demand/capacity signals and assert no pool
+#      exceeds its effective host/operator ceiling.
 #
 # Output: tab-separated rows on stdout. Save to test/atscale-results.tsv.
 #
@@ -174,8 +175,12 @@ wait "${PIDS[@]}" || true
 # ── Phase 4: Per-fn pool snapshot after load ────────────────────────────
 echo "# phase 4: post-load per-pool snapshot" >&2
 metrics=$("${CURL[@]}" "$BASE/api/v1/system/metrics.json")
-echo "# function_id	function_name	idle	busy	dynamic_max	scale_ups	scale_downs	rate_ewma"
-echo "$metrics" | jq -r '.pools[] | [.function_id, .function_name, .idle, .busy, .dynamic_max, .scale_ups, .scale_downs, .rate_ewma] | @tsv'
+echo "# function_id	function_name	idle	busy	queued	spawning	desired	effective_max	queue_p95_ms	service_p95_ms	cold_p95_ms	limiting_reason"
+echo "$metrics" | jq -r '.pools[] | [.function_id, .function_name, .idle, .busy, .queued, .spawning, .desired_workers, .effective_max, .queue_wait_p95_ms, .service_p95_ms, .cold_start_p95_ms, .limiting_reason] | @tsv'
+if echo "$metrics" | jq -e 'any(.pools[]; (.idle + .busy + .spawning) > .effective_max)' >/dev/null; then
+    echo "pool exceeded effective capacity" >&2
+    exit 1
+fi
 
 # ── Phase 5: Throughput per hammered fn ─────────────────────────────────
 echo "# phase 5: hammered-fn throughput" >&2
@@ -195,11 +200,11 @@ for name in "${LOAD_FNS[@]}"; do
 done
 
 # ── Phase 6: Process leak check ─────────────────────────────────────────
-echo "# phase 6: nsjail process count (should match sum(idle+busy)) " >&2
+echo "# phase 6: nsjail process count (should match sum(idle+busy+spawning)) " >&2
 container=$(docker ps --filter "publish=${BASE##*:}" --format '{{.Names}}' | head -1)
 if [ -n "$container" ]; then
     nsjail_count=$(docker exec "$container" sh -c 'ls /proc/[0-9]*/cmdline 2>/dev/null | xargs -I{} sh -c "tr \"\\000\" \" \" < {}; echo" 2>/dev/null | grep -c nsjail || true')
-    expected=$(echo "$metrics" | jq -r '[.pools[] | .idle + .busy] | add // 0')
+    expected=$(echo "$metrics" | jq -r '[.pools[] | .idle + .busy + .spawning] | add // 0')
     echo "process_check	nsjail_running=$nsjail_count	expected=$expected"
 fi
 

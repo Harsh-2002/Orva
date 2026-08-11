@@ -168,8 +168,9 @@ The first invocation after deploy or after a long idle period
 spawns a fresh worker (~50–500 ms depending on runtime size and deps).
 Subsequent invocations land on idle workers from the pool (~2–15 ms).
 
-Per-function pool sizing is autoscaled based on EWMA request rate +
-in-flight concurrency. You can tune the floor/ceiling via
+Per-function pool sizing uses 60-second stable demand, 6-second burst demand,
+queue pressure, service p95, and cold-start p95. You tune only the policy
+floor/ceiling via
 `PUT /api/v1/pool/config`:
 
 ```json
@@ -177,8 +178,8 @@ in-flight concurrency. You can tune the floor/ceiling via
   "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
   "min_warm": 2,
   "max_warm": 32,
-  "idle_ttl_seconds": 120,
-  "target_concurrency": 10
+  "idle_ttl_seconds": 600,
+  "scale_to_zero": false
 }
 ```
 
