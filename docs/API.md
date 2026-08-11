@@ -516,6 +516,12 @@ List conversations (most-recently-updated first).
 ### `POST /api/v1/ai/conversations`
 Create an empty conversation.
 
+### `DELETE /api/v1/ai/conversations`
+Delete every conversation and cascade-delete their messages and tool calls in
+one operation. Returns `{"deleted": N}`. Responds with `409
+CONVERSATION_BUSY` without deleting anything when any conversation has a turn
+in progress.
+
 ### `GET /api/v1/ai/conversations/{id}`
 Fetch one conversation with its full message + tool-call timeline.
 

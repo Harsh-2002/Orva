@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,18 @@ func TestTryLockConv(t *testing.T) {
 	m.unlockConv("c2")
 	if !m.tryLockConv("c2") {
 		t.Fatal("c2 should be lockable again after unlock")
+	}
+}
+
+func TestDeleteAllConversationsRejectsActiveTurn(t *testing.T) {
+	m := &Manager{}
+	if !m.tryLockConv("c1") {
+		t.Fatal("lock c1")
+	}
+	defer m.unlockConv("c1")
+
+	if _, err := m.DeleteAllConversations(); !errors.Is(err, ErrConversationBusy) {
+		t.Fatalf("DeleteAllConversations error = %v, want ErrConversationBusy", err)
 	}
 }
 

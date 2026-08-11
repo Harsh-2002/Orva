@@ -261,6 +261,19 @@ func (h *AIHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *AIHandler) DeleteAllConversations(w http.ResponseWriter, r *http.Request) {
+	deleted, err := h.Manager.DeleteAllConversations()
+	if errors.Is(err, ai.ErrConversationBusy) {
+		respond.Error(w, http.StatusConflict, "CONVERSATION_BUSY", err.Error(), RequestID(r.Context()))
+		return
+	}
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), RequestID(r.Context()))
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
 func (h *AIHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.Atoi(r.URL.Query().Get("since_seq"))
 	msgs, err := h.Manager.ListMessages(r.PathValue("id"), since)

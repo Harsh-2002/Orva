@@ -212,6 +212,16 @@ func (db *Database) DeleteConversation(id string) error {
 	return err
 }
 
+// DeleteAllConversations clears chat history in one statement. Foreign-key
+// cascades remove every message and tool call with the parent conversations.
+func (db *Database) DeleteAllConversations() (int64, error) {
+	res, err := db.write.Exec(`DELETE FROM ai_conversations`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func scanConversation(scan func(...any) error) (*AIConversation, error) {
 	var (
 		c        AIConversation

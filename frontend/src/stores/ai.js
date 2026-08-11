@@ -458,6 +458,16 @@ export const useAIStore = defineStore('ai', () => {
     if (activeId.value === id) newConversation()
   }
 
+  async function clearConversations() {
+    // Stop local streaming before asking the server to clear history. The
+    // server still rejects the delete if another tab has a turn in flight.
+    stop()
+    const { data } = await apiClient.delete('/ai/conversations')
+    conversations.value = []
+    newConversation()
+    return data.deleted || 0
+  }
+
   // exportActive downloads the active conversation as a Markdown transcript.
   function exportActive() {
     const items = timeline.value
@@ -615,7 +625,7 @@ export const useAIStore = defineStore('ai', () => {
     selectedProviderId, selectedProvider, selectedModel, thinking, models, modelsError, modelsLoading,
     sendMessage, approveTool, rejectTool, stop,
     regenerate, editAndResend, deleteMessageFrom, retry, dismissError,
-    loadConversations, openConversation, newConversation, deleteConversation, renameConversation, exportActive,
+    loadConversations, openConversation, newConversation, deleteConversation, clearConversations, renameConversation, exportActive,
     loadSettings, saveSettings, loadProviders, saveProvider, deleteProvider,
     selectProvider, selectModel, setThinking, loadProviderModels,
   }

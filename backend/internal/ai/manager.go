@@ -1013,6 +1013,18 @@ func (m *Manager) UpdateConversation(id string, title *string, archived *bool) (
 
 func (m *Manager) DeleteConversation(id string) error { return m.db.DeleteConversation(id) }
 
+// DeleteAllConversations atomically clears chat history when no conversation
+// is mid-turn. Holding convMu across the delete closes the gap where a new turn
+// could start after the busy check but before the database statement.
+func (m *Manager) DeleteAllConversations() (int64, error) {
+	m.convMu.Lock()
+	defer m.convMu.Unlock()
+	if len(m.convBusy) > 0 {
+		return 0, ErrConversationBusy
+	}
+	return m.db.DeleteAllConversations()
+}
+
 func (m *Manager) ListMessages(convID string, sinceSeq int) ([]*database.AIMessage, error) {
 	return m.db.ListMessages(convID, sinceSeq)
 }
