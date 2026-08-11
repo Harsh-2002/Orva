@@ -1,0 +1,5 @@
+So one major change that I want currently our background is like some kind of light purple, right? It has really one of the worst contrast, right? It is not readable at all. So what I'm thinking, can you use gray like light grey kind of thumb something I mean sets in black which does matches perfectly like we have to just update the background right so according to the text and whatever we have it should have a better background that can give gives a better contrast and also feel very much good and modern right so this is what you need to figure out and do it as well and it should be consistent across all the pages everything globally right this is global change
+
+---
+
+In the AI assistant sections are the settings that AI sect it is completely broken and unaligned, like active provider on the side on the side of active model it's it it it's it is it looks very bad you have to make it consistent and analyze it first. do the layout review of the settings and then work on it everything seems to looks good to me
