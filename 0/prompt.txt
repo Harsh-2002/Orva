@@ -1,0 +1,25 @@
+We don't need to give this option to a user at all
+
+---
+
+i really like the currnt gloabl backgroudn colpur what otehr colour option we have that can match teh bakcgrounf with our Orva theme gloablly ? only asking about backgrounf fyi.
+
+---
+
+ok good the currnt one is good right - From the code base everything is up to date, post, verified, all done right. We are ready to merge on the main ?
+
+---
+
+Are the UI change that you did? Everything is it everything is responsive for all screens respovei or not.
+
+---
+
+All docs and everything is up to date, right? Everything
+
+---
+
+So the documentations we have in the UI they are also up to date right
+
+---
+
+the docs in mcp as well
