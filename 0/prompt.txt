@@ -1,0 +1,11 @@
+also nsjail can have it own indepdent dns rule right and netwok egress rule correct ?
+
+---
+
+i dont think we need this Tool steps per reply
+25
+Maximum tool calls in one reply. - This does not make sense at all, so choose what is the best for the most use cases, right? Send set the best value properly
+
+---
+
+We don't need to give this option to a user at all
