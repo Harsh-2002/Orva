@@ -1510,6 +1510,10 @@ point at their parent via `parent_span_id`. You don't instantiate
 spans, you don't import a tracer — you just write your handler and
 the platform plumbs IDs through every internal hop.
 
+The local root is the earliest execution whose parent is absent from the same
+trace. Externally parented W3C traces therefore remain visible and preserve the
+upstream ID as `external_parent_span_id`.
+
 ### What user code sees
 
 Two env vars are stamped per invocation. Read them only if you want to
@@ -1594,10 +1598,16 @@ flag icon next to the span.
 
 ### Where to look
 
-- `/traces` — list of recent traces, filterable by function / status / outlier-only.
-- `/traces/:id` — waterfall + per-span detail. Click a span to jump to its execution in the Invocations log.
+- `/traces` — trace-wide summaries, filterable by exact function ID/name (matching any span), status, outlier, and time preset. Status, duration, and counts aggregate the complete trace.
+- `/traces/:id` — one expandable causal waterfall. Select a span in place for status code, cold/warm state, error, baseline comparison, and linked logs; use the separate **Open invocation** action to navigate.
 - `GET /api/v1/traces/{id}` — full span tree as JSON. Pair with `list_traces` / `get_trace` MCP tools for AI agents.
 - `GET /api/v1/functions/{id}/baseline` — current P95/P99/mean for a function.
+
+Trace-list pagination uses an opaque `next_cursor` over the stable
+`(started_at, trace_id)` order. Pass it back as `before`; timestamp-only legacy
+cursors are temporarily accepted. Summaries include `span_count`,
+`error_count`, `cold_start_count`, and (for W3C roots)
+`external_parent_span_id`.
 
 ---
 

@@ -589,6 +589,13 @@ PRAGMA foreign_keys = ON;
 		"ALTER TABLE executions ADD COLUMN baseline_p95_ms INTEGER",
 		"CREATE INDEX IF NOT EXISTS idx_executions_trace_id ON executions(trace_id)",
 		"CREATE INDEX IF NOT EXISTS idx_executions_parent_span_id ON executions(parent_span_id)",
+		// Trace diagnostics v2: cover local-root discovery, stable list
+		// pagination, and the any-span function filter without scanning the
+		// complete execution history.
+		"CREATE INDEX IF NOT EXISTS idx_executions_trace_started ON executions(trace_id, started_at, id)",
+		"CREATE INDEX IF NOT EXISTS idx_executions_trace_parent ON executions(trace_id, parent_span_id)",
+		"CREATE INDEX IF NOT EXISTS idx_executions_started_trace ON executions(started_at DESC, trace_id DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_executions_function_trace ON executions(function_id, trace_id)",
 		// Jobs preserve trace context across the queue gap so the
 		// scheduled execution that runs them lands in the same trace
 		// as whatever enqueued them.

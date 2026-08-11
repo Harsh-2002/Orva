@@ -2,7 +2,10 @@ package database
 
 import (
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -324,11 +327,12 @@ func (db *Database) GetExecution(id string) (*Execution, error) {
 }
 
 // ListByTraceID returns every execution that shares a trace_id, ordered
-// by started_at ASC so the root span is first and children follow in
-// causal order. Backed by idx_executions_trace_id.
+// by (started_at, id) so tied timestamps remain deterministic. Backed by
+// idx_executions_trace_started.
 func (db *Database) ListByTraceID(traceID string) ([]*Execution, error) {
 	rows, err := db.read.Query(
-		"SELECT "+executionSelectColumns+" FROM executions WHERE trace_id = ? ORDER BY started_at ASC",
+		"SELECT "+executionSelectColumns+` FROM executions WHERE trace_id = ?
+		 ORDER BY julianday(replace(started_at, ' +0000 UTC', 'Z')) ASC, id ASC`,
 		traceID,
 	)
 	if err != nil {
@@ -347,28 +351,127 @@ func (db *Database) ListByTraceID(traceID string) ([]*Execution, error) {
 	return execs, rows.Err()
 }
 
-// ListRootSpans returns recent root spans (parent_span_id IS NULL)
-// optionally filtered by function_id, since/until window, and outlier
-// flag. Used by the Traces list view. Cursor pagination is by started_at.
-type ListRootSpansParams struct {
-	FunctionID   string
-	Since        string // ISO8601 inclusive
-	Until        string // ISO8601 exclusive
-	Status       string
-	OutlierOnly  bool
-	Limit        int
-	BeforeCursor string // started_at lower bound for "next page"
+// TraceSummary is one trace-wide row for the trace list. Root* identifies the
+// local root: the earliest execution whose parent span is absent from this
+// trace. That definition keeps an inbound W3C trace visible while retaining
+// its external parent id.
+type TraceSummary struct {
+	TraceID              string
+	RootSpanID           string
+	RootFunctionID       string
+	FunctionName         string
+	ExternalParentSpanID string
+	Trigger              string
+	StartedAt            time.Time
+	DurationMS           int64
+	Status               string
+	StatusCode           int
+	IsOutlier            bool
+	SpanCount            int
+	ErrorCount           int
+	ColdStartCount       int
 }
 
-func (db *Database) ListRootSpans(p ListRootSpansParams) ([]*Execution, error) {
+type ListTraceSummariesParams struct {
+	Function        string
+	Since           string // ISO8601 inclusive, applied to trace start
+	Until           string // ISO8601 exclusive, applied to trace start
+	Status          string
+	OutlierOnly     bool
+	Limit           int
+	BeforeStartedAt string
+	BeforeTraceID   string
+	LegacyBefore    bool
+}
+
+// ListTraceSummaries aggregates status, timing, outliers, and counts across
+// every execution and user span in each trace. The stable sort/cursor is
+// (started_at DESC, trace_id DESC). Function filtering matches any execution
+// in the trace by exact immutable id or exact current function name.
+func (db *Database) ListTraceSummaries(p ListTraceSummariesParams) ([]TraceSummary, error) {
 	if p.Limit <= 0 || p.Limit > 200 {
 		p.Limit = 50
 	}
-	q := "SELECT " + executionSelectColumns + " FROM executions WHERE trace_id IS NOT NULL AND parent_span_id IS NULL"
+	q := `
+		WITH execution_rollup AS (
+			SELECT trace_id,
+				MIN(julianday(replace(started_at, ' +0000 UTC', 'Z'))) AS start_jd,
+				MAX(julianday(replace(started_at, ' +0000 UTC', 'Z')) + COALESCE(duration_ms, 0) / 86400000.0) AS end_jd,
+				COUNT(*) AS execution_count,
+				SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
+				SUM(CASE WHEN cold_start = 1 THEN 1 ELSE 0 END) AS cold_start_count,
+				MAX(is_outlier) AS has_outlier
+			FROM executions
+			WHERE trace_id IS NOT NULL
+			GROUP BY trace_id
+		),
+		user_rollup AS (
+			SELECT trace_id,
+				MIN(julianday(replace(started_at, ' +0000 UTC', 'Z'))) AS start_jd,
+				MAX(julianday(replace(started_at, ' +0000 UTC', 'Z')) + duration_ms / 86400000.0) AS end_jd,
+				COUNT(*) AS span_count,
+				SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count
+			FROM user_spans
+			GROUP BY trace_id
+		),
+		local_roots AS (
+			SELECT e.*,
+				ROW_NUMBER() OVER (
+					PARTITION BY e.trace_id
+					ORDER BY julianday(replace(e.started_at, ' +0000 UTC', 'Z')) ASC, e.id ASC
+				) AS root_rank
+			FROM executions e
+			WHERE e.trace_id IS NOT NULL
+			  AND NOT EXISTS (
+				SELECT 1 FROM executions parent
+				WHERE parent.trace_id = e.trace_id
+				  AND parent.span_id = e.parent_span_id
+			  )
+		),
+		summaries AS (
+			SELECT r.trace_id,
+				r.span_id AS root_span_id,
+				r.function_id AS root_function_id,
+				COALESCE(f.name, '') AS function_name,
+				CASE WHEN r.parent_span_id IS NOT NULL THEN r.parent_span_id ELSE '' END AS external_parent_span_id,
+				COALESCE(r.trigger, '') AS trigger,
+				r.started_at,
+				er.start_jd AS started_jd,
+				CAST(ROUND((
+					MAX(er.end_jd, COALESCE(ur.end_jd, er.end_jd)) -
+					MIN(er.start_jd, COALESCE(ur.start_jd, er.start_jd))
+				) * 86400000.0) AS INTEGER) AS duration_ms,
+				CASE WHEN er.error_count + COALESCE(ur.error_count, 0) > 0 THEN 'error' ELSE 'success' END AS status,
+				COALESCE((
+					SELECT e2.status_code FROM executions e2
+					WHERE e2.trace_id = r.trace_id AND e2.status = 'error' AND e2.status_code IS NOT NULL
+					ORDER BY e2.started_at ASC, e2.id ASC LIMIT 1
+				), r.status_code, 0) AS status_code,
+				er.has_outlier AS is_outlier,
+				er.execution_count + COALESCE(ur.span_count, 0) AS span_count,
+				er.error_count + COALESCE(ur.error_count, 0) AS error_count,
+				er.cold_start_count
+			FROM local_roots r
+			JOIN execution_rollup er ON er.trace_id = r.trace_id
+			LEFT JOIN user_rollup ur ON ur.trace_id = r.trace_id
+			LEFT JOIN functions f ON f.id = r.function_id
+			WHERE r.root_rank = 1
+		)
+		SELECT trace_id, root_span_id, root_function_id, function_name,
+			external_parent_span_id, trigger, started_at, duration_ms,
+			status, status_code, is_outlier, span_count, error_count,
+			cold_start_count
+		FROM summaries
+		WHERE 1=1`
 	args := []any{}
-	if p.FunctionID != "" {
-		q += " AND function_id = ?"
-		args = append(args, p.FunctionID)
+	if p.Function != "" {
+		q += ` AND EXISTS (
+			SELECT 1 FROM executions match_exec
+			LEFT JOIN functions match_fn ON match_fn.id = match_exec.function_id
+			WHERE match_exec.trace_id = summaries.trace_id
+			  AND (match_exec.function_id = ? OR match_fn.name = ?)
+		)`
+		args = append(args, p.Function, p.Function)
 	}
 	if p.Status != "" {
 		q += " AND status = ?"
@@ -378,18 +481,26 @@ func (db *Database) ListRootSpans(p ListRootSpansParams) ([]*Execution, error) {
 		q += " AND is_outlier = 1"
 	}
 	if p.Since != "" {
-		q += " AND started_at >= ?"
+		q += " AND started_jd >= julianday(?)"
 		args = append(args, p.Since)
 	}
 	if p.Until != "" {
-		q += " AND started_at < ?"
+		q += " AND started_jd < julianday(?)"
 		args = append(args, p.Until)
 	}
-	if p.BeforeCursor != "" {
-		q += " AND started_at < ?"
-		args = append(args, p.BeforeCursor)
+	if p.BeforeStartedAt != "" {
+		if p.LegacyBefore || p.BeforeTraceID == "" {
+			q += " AND started_jd < julianday(?)"
+			args = append(args, p.BeforeStartedAt)
+		} else {
+			q += ` AND (
+				started_jd < julianday(?) OR
+				(started_jd = julianday(?) AND trace_id < ?)
+			)`
+			args = append(args, p.BeforeStartedAt, p.BeforeStartedAt, p.BeforeTraceID)
+		}
 	}
-	q += " ORDER BY started_at DESC LIMIT ?"
+	q += " ORDER BY started_jd DESC, trace_id DESC LIMIT ?"
 	args = append(args, p.Limit)
 
 	rows, err := db.read.Query(q, args...)
@@ -398,15 +509,60 @@ func (db *Database) ListRootSpans(p ListRootSpansParams) ([]*Execution, error) {
 	}
 	defer rows.Close()
 
-	var execs []*Execution
+	var summaries []TraceSummary
 	for rows.Next() {
-		exec, err := scanExecutionRows(rows)
-		if err != nil {
+		var s TraceSummary
+		var outlier int
+		if err := rows.Scan(
+			&s.TraceID, &s.RootSpanID, &s.RootFunctionID, &s.FunctionName,
+			&s.ExternalParentSpanID, &s.Trigger, &s.StartedAt, &s.DurationMS,
+			&s.Status, &s.StatusCode, &outlier, &s.SpanCount, &s.ErrorCount,
+			&s.ColdStartCount,
+		); err != nil {
 			return nil, err
 		}
-		execs = append(execs, exec)
+		s.IsOutlier = outlier == 1
+		summaries = append(summaries, s)
 	}
-	return execs, rows.Err()
+	return summaries, rows.Err()
+}
+
+type traceCursor struct {
+	Version   int    `json:"v"`
+	StartedAt string `json:"started_at"`
+	TraceID   string `json:"trace_id"`
+}
+
+// EncodeTraceCursor returns an opaque, URL-safe cursor for the stable trace
+// ordering tuple. It deliberately omits padding so it stays query-string safe.
+func EncodeTraceCursor(startedAt time.Time, traceID string) string {
+	payload, _ := json.Marshal(traceCursor{
+		Version: 1, StartedAt: startedAt.Format(time.RFC3339Nano), TraceID: traceID,
+	})
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+// DecodeTraceCursor accepts v1 opaque cursors and, during the migration
+// window, legacy RFC3339 timestamp cursors.
+func DecodeTraceCursor(value string) (startedAt, traceID string, legacy bool, err error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", "", false, nil
+	}
+	if raw, decodeErr := base64.RawURLEncoding.DecodeString(value); decodeErr == nil {
+		var cursor traceCursor
+		if jsonErr := json.Unmarshal(raw, &cursor); jsonErr == nil &&
+			cursor.Version == 1 && cursor.StartedAt != "" && cursor.TraceID != "" {
+			if _, parseErr := time.Parse(time.RFC3339Nano, cursor.StartedAt); parseErr != nil {
+				return "", "", false, fmt.Errorf("invalid trace cursor timestamp: %w", parseErr)
+			}
+			return cursor.StartedAt, cursor.TraceID, false, nil
+		}
+	}
+	if _, parseErr := time.Parse(time.RFC3339Nano, value); parseErr == nil {
+		return value, "", true, nil
+	}
+	return "", "", false, fmt.Errorf("invalid trace cursor")
 }
 
 type ListExecutionsParams struct {

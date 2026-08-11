@@ -223,7 +223,7 @@ The function's stderr from this invocation.
 - `DELETE /api/v1/executions/{id}` — delete one execution record.
 - `POST /api/v1/executions/bulk-delete` — delete matching execution records.
 - `POST /api/v1/executions/{id}/replay` — replay a captured request.
-- `GET /api/v1/traces` and `GET /api/v1/traces/{id}` — list and inspect traces.
+- `GET /api/v1/traces` and `GET /api/v1/traces/{id}` — list trace-wide summaries with opaque stable cursors and inspect the complete causal waterfall.
 - `GET /api/v1/functions/{id}/baseline` — return the function's trace baseline.
 - `GET /api/v1/activity` — list the operator activity feed.
 

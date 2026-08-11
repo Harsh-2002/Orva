@@ -65,45 +65,54 @@ type LogEntryRow struct {
 }
 
 type GetTraceOutput struct {
-	TraceID         string        `json:"trace_id"`
-	RootSpanID      string        `json:"root_span_id,omitempty"`
-	RootFunctionID  string        `json:"root_function_id,omitempty"`
-	Trigger         string        `json:"trigger,omitempty"`
-	StartedAt       string        `json:"started_at"`
-	TotalDurationMS int64         `json:"total_duration_ms"`
-	Status          string        `json:"status"`
-	HasOutlier      bool          `json:"has_outlier"`
-	SpanCount       int           `json:"span_count"`
-	Spans           []SpanRow     `json:"spans"`
-	UserSpans       []UserSpanRow `json:"user_spans"`
-	LogEntries      []LogEntryRow `json:"log_entries"`
+	TraceID              string        `json:"trace_id"`
+	RootSpanID           string        `json:"root_span_id,omitempty"`
+	RootFunctionID       string        `json:"root_function_id,omitempty"`
+	ExternalParentSpanID string        `json:"external_parent_span_id,omitempty"`
+	Trigger              string        `json:"trigger,omitempty"`
+	StartedAt            string        `json:"started_at"`
+	TotalDurationMS      int64         `json:"total_duration_ms"`
+	Status               string        `json:"status"`
+	HasOutlier           bool          `json:"has_outlier"`
+	SpanCount            int           `json:"span_count"`
+	ErrorCount           int           `json:"error_count"`
+	ColdStartCount       int           `json:"cold_start_count"`
+	Spans                []SpanRow     `json:"spans"`
+	UserSpans            []UserSpanRow `json:"user_spans"`
+	LogEntries           []LogEntryRow `json:"log_entries"`
 }
 
 type ListTracesInput struct {
-	FunctionID  string `json:"function_id,omitempty" jsonschema:"filter to traces whose root span is this function"`
+	FunctionID  string `json:"function_id,omitempty" jsonschema:"filter to traces containing this exact function id or name"`
 	Status      string `json:"status,omitempty"     jsonschema:"success or error"`
 	OutlierOnly bool   `json:"outlier_only,omitempty" jsonschema:"only return traces flagged as outliers"`
 	Since       string `json:"since,omitempty"      jsonschema:"ISO8601 lower bound on root.started_at"`
 	Until       string `json:"until,omitempty"      jsonschema:"ISO8601 upper bound on root.started_at"`
 	Limit       int    `json:"limit,omitempty"      jsonschema:"default 50, max 200"`
+	Before      string `json:"before,omitempty"     jsonschema:"opaque next_cursor from a previous list_traces response"`
 }
 
 type RootSpanRow struct {
-	TraceID        string `json:"trace_id"`
-	RootSpanID     string `json:"root_span_id"`
-	RootFunctionID string `json:"root_function_id"`
-	FunctionName   string `json:"function_name,omitempty"`
-	Trigger        string `json:"trigger,omitempty"`
-	StartedAt      string `json:"started_at"`
-	DurationMS     int64  `json:"duration_ms,omitempty"`
-	Status         string `json:"status"`
-	StatusCode     int    `json:"status_code,omitempty"`
-	IsOutlier      bool   `json:"is_outlier"`
+	TraceID              string `json:"trace_id"`
+	RootSpanID           string `json:"root_span_id"`
+	RootFunctionID       string `json:"root_function_id"`
+	FunctionName         string `json:"function_name,omitempty"`
+	ExternalParentSpanID string `json:"external_parent_span_id,omitempty"`
+	Trigger              string `json:"trigger,omitempty"`
+	StartedAt            string `json:"started_at"`
+	DurationMS           int64  `json:"duration_ms"`
+	Status               string `json:"status"`
+	StatusCode           int    `json:"status_code,omitempty"`
+	IsOutlier            bool   `json:"is_outlier"`
+	SpanCount            int    `json:"span_count"`
+	ErrorCount           int    `json:"error_count"`
+	ColdStartCount       int    `json:"cold_start_count"`
 }
 
 type ListTracesOutput struct {
-	Traces []RootSpanRow `json:"traces"`
-	Count  int           `json:"count"`
+	Traces     []RootSpanRow `json:"traces"`
+	Count      int           `json:"count"`
+	NextCursor string        `json:"next_cursor,omitempty"`
 }
 
 type GetFunctionBaselineInput struct {
@@ -132,18 +141,23 @@ func registerTraceTools(rc *regCtx) {
 			if len(execs) == 0 {
 				return nil, GetTraceOutput{}, fmt.Errorf("no spans found for trace %s", in.TraceID)
 			}
-			view := handlers.BuildTraceViewForMCP(in.TraceID, execs, deps.Registry)
+			userSpans, _ := deps.DB.ListUserSpansByTrace(in.TraceID)
+			entries, _ := deps.DB.ListLogEntriesByTrace(in.TraceID)
+			view := handlers.BuildTraceViewForMCP(in.TraceID, execs, userSpans, entries, deps.Registry)
 			out := GetTraceOutput{
-				TraceID:         view.TraceID,
-				RootSpanID:      view.RootSpanID,
-				RootFunctionID:  view.RootFunctionID,
-				Trigger:         view.Trigger,
-				StartedAt:       view.StartedAt,
-				TotalDurationMS: view.TotalDurationMS,
-				Status:          view.Status,
-				HasOutlier:      view.HasOutlier,
-				SpanCount:       view.SpanCount,
-				Spans:           make([]SpanRow, len(view.Spans)),
+				TraceID:              view.TraceID,
+				RootSpanID:           view.RootSpanID,
+				RootFunctionID:       view.RootFunctionID,
+				ExternalParentSpanID: view.ExternalParentSpanID,
+				Trigger:              view.Trigger,
+				StartedAt:            view.StartedAt,
+				TotalDurationMS:      view.TotalDurationMS,
+				Status:               view.Status,
+				HasOutlier:           view.HasOutlier,
+				SpanCount:            view.SpanCount,
+				ErrorCount:           view.ErrorCount,
+				ColdStartCount:       view.ColdStartCount,
+				Spans:                make([]SpanRow, len(view.Spans)),
 			}
 			for i, sp := range view.Spans {
 				out.Spans[i] = SpanRow{
@@ -169,35 +183,31 @@ func registerTraceTools(rc *regCtx) {
 			// log entries so MCP clients see the full picture, not
 			// just the system spans.
 			out.UserSpans = []UserSpanRow{}
-			if userSpans, err := deps.DB.ListUserSpansByTrace(in.TraceID); err == nil {
-				for _, us := range userSpans {
-					out.UserSpans = append(out.UserSpans, UserSpanRow{
-						ID:           us.ID,
-						ExecutionID:  us.ExecutionID,
-						ParentSpanID: us.ParentSpanID,
-						Name:         us.Name,
-						StartedAt:    us.StartedAt.Format("2006-01-02T15:04:05.999999999Z"),
-						DurationMS:   us.DurationMS,
-						OffsetMS:     us.OffsetMS,
-						Status:       us.Status,
-						ErrorMessage: us.ErrorMessage,
-						Attributes:   us.Attributes,
-					})
-				}
+			for _, us := range userSpans {
+				out.UserSpans = append(out.UserSpans, UserSpanRow{
+					ID:           us.ID,
+					ExecutionID:  us.ExecutionID,
+					ParentSpanID: us.ParentSpanID,
+					Name:         us.Name,
+					StartedAt:    us.StartedAt.Format("2006-01-02T15:04:05.999999999Z"),
+					DurationMS:   us.DurationMS,
+					OffsetMS:     us.OffsetMS,
+					Status:       us.Status,
+					ErrorMessage: us.ErrorMessage,
+					Attributes:   us.Attributes,
+				})
 			}
 			out.LogEntries = []LogEntryRow{}
-			if entries, err := deps.DB.ListLogEntriesByTrace(in.TraceID); err == nil {
-				for _, le := range entries {
-					out.LogEntries = append(out.LogEntries, LogEntryRow{
-						ID:          le.ID,
-						ExecutionID: le.ExecutionID,
-						SpanID:      le.SpanID,
-						TS:          le.TS.Format("2006-01-02T15:04:05.999999999Z"),
-						Level:       le.Level,
-						Message:     le.Message,
-						Fields:      le.Fields,
-					})
-				}
+			for _, le := range entries {
+				out.LogEntries = append(out.LogEntries, LogEntryRow{
+					ID:          le.ID,
+					ExecutionID: le.ExecutionID,
+					SpanID:      le.SpanID,
+					TS:          le.TS.Format("2006-01-02T15:04:05.999999999Z"),
+					Level:       le.Level,
+					Message:     le.Message,
+					Fields:      le.Fields,
+				})
 			}
 			return nil, out, nil
 		},
@@ -207,55 +217,50 @@ func registerTraceTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "list_traces",
 			Title:       "List Traces",
-			Description: "List recent root spans (one entry per trace). Filter by function, status, time range, or outlier flag. Pair with get_trace to drill into a specific causal chain.",
+			Description: "List recent trace-wide summaries. Function filters match any span by exact id or name; status, duration, outlier, and counts cover the complete trace. Pair with get_trace to inspect the causal chain.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListTracesInput) (*mcpsdk.CallToolResult, ListTracesOutput, error) {
-			params := database.ListRootSpansParams{
-				FunctionID:  resolveFnIDForBaseline(deps, in.FunctionID),
-				Status:      in.Status,
-				OutlierOnly: in.OutlierOnly,
-				Since:       in.Since,
-				Until:       in.Until,
-				Limit:       in.Limit,
+			beforeStartedAt, beforeTraceID, legacyBefore, err := database.DecodeTraceCursor(in.Before)
+			if err != nil {
+				return nil, ListTracesOutput{}, err
+			}
+			params := database.ListTraceSummariesParams{
+				Function:        in.FunctionID,
+				Status:          in.Status,
+				OutlierOnly:     in.OutlierOnly,
+				Since:           in.Since,
+				Until:           in.Until,
+				Limit:           in.Limit,
+				BeforeStartedAt: beforeStartedAt,
+				BeforeTraceID:   beforeTraceID,
+				LegacyBefore:    legacyBefore,
 			}
 			if params.Limit <= 0 || params.Limit > 200 {
 				params.Limit = 50
 			}
-			roots, err := deps.DB.ListRootSpans(params)
+			summaries, err := deps.DB.ListTraceSummaries(params)
 			if err != nil {
 				return nil, ListTracesOutput{}, fmt.Errorf("list traces: %w", err)
 			}
-			rows := make([]RootSpanRow, 0, len(roots))
-			for _, e := range roots {
-				var name string
-				if deps.Registry != nil {
-					if fn, err := deps.Registry.Get(e.FunctionID); err == nil {
-						name = fn.Name
-					}
-				}
-				var dur int64
-				if e.DurationMS != nil {
-					dur = *e.DurationMS
-				}
-				var sc int
-				if e.StatusCode != nil {
-					sc = *e.StatusCode
-				}
+			rows := make([]RootSpanRow, 0, len(summaries))
+			for _, s := range summaries {
 				rows = append(rows, RootSpanRow{
-					TraceID:        e.TraceID,
-					RootSpanID:     e.SpanID,
-					RootFunctionID: e.FunctionID,
-					FunctionName:   name,
-					Trigger:        e.Trigger,
-					StartedAt:      e.StartedAt.Format("2006-01-02T15:04:05.000Z07:00"),
-					DurationMS:     dur,
-					Status:         e.Status,
-					StatusCode:     sc,
-					IsOutlier:      e.IsOutlier,
+					TraceID: s.TraceID, RootSpanID: s.RootSpanID,
+					RootFunctionID: s.RootFunctionID, FunctionName: s.FunctionName,
+					ExternalParentSpanID: s.ExternalParentSpanID, Trigger: s.Trigger,
+					StartedAt:  s.StartedAt.Format("2006-01-02T15:04:05.000Z07:00"),
+					DurationMS: s.DurationMS, Status: s.Status, StatusCode: s.StatusCode,
+					IsOutlier: s.IsOutlier, SpanCount: s.SpanCount,
+					ErrorCount: s.ErrorCount, ColdStartCount: s.ColdStartCount,
 				})
 			}
-			return nil, ListTracesOutput{Traces: rows, Count: len(rows)}, nil
+			var nextCursor string
+			if len(summaries) == params.Limit && len(summaries) > 0 {
+				last := summaries[len(summaries)-1]
+				nextCursor = database.EncodeTraceCursor(last.StartedAt, last.TraceID)
+			}
+			return nil, ListTracesOutput{Traces: rows, Count: len(rows), NextCursor: nextCursor}, nil
 		},
 	)
 

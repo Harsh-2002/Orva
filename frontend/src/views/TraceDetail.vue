@@ -1,300 +1,132 @@
 <template>
   <div class="space-y-6">
-    <!-- Page header — title + breadcrumb back-link, matches the rest of
-         the dashboard. The right slot is empty here because the trace
-         id IS the page identity (rendered in the summary card below). -->
-    <div class="flex items-start justify-between gap-4">
-      <div>
-        <button
-          class="inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-white mb-1 transition-colors"
-          @click="router.push('/traces')"
-        >
-          <ArrowLeft class="w-3.5 h-3.5" />
-          All traces
-        </button>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
-          Trace
-        </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Spans in this invocation chain.
-        </p>
-      </div>
-    </div>
+    <header>
+      <button
+        type="button"
+        class="min-h-11 inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-white rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        @click="router.push('/traces')"
+      >
+        <ArrowLeft
+          class="w-3.5 h-3.5"
+          aria-hidden="true"
+        /> All traces
+      </button>
+      <h1 class="text-xl font-semibold text-white tracking-headline">
+        Trace diagnostics
+      </h1>
+      <p class="text-sm text-foreground-muted mt-1.5 leading-body">
+        Follow work across functions without leaving the trace.
+      </p>
+    </header>
 
     <div
       v-if="error"
       class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
+      role="alert"
     >
       {{ error }}
     </div>
-
     <div
       v-else-if="loading && !trace"
       class="text-xs text-foreground-muted italic"
+      aria-live="polite"
     >
       Loading trace…
     </div>
 
     <template v-else-if="trace">
-      <!-- Summary card — same shell as Settings cards: bg-background +
-           border + rounded-lg + p-5 + space-y. Stats are dt/dd-style
-           label-on-top so the eye scans top-to-bottom. -->
-      <div class="bg-background border border-border rounded-lg p-5 space-y-4">
-        <div class="flex items-center gap-3 flex-wrap text-xs">
-          <span class="text-foreground-muted uppercase tracking-wide">
-            trace id
-          </span>
-          <code class="bg-surface text-white px-2 py-0.5 rounded font-mono">
-            {{ trace.trace_id }}
-          </code>
+      <section aria-labelledby="trace-summary-heading">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2
+            id="trace-summary-heading"
+            class="sr-only"
+          >
+            Trace summary
+          </h2>
+          <code class="bg-surface text-white px-2 py-1 rounded font-mono text-xs break-all">{{ trace.trace_id }}</code>
           <button
-            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors"
-            title="Copy trace id"
+            type="button"
+            class="min-h-11 min-w-11 inline-flex items-center justify-center rounded text-foreground-muted hover:text-white hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label="Copy trace ID"
             @click="copyID"
           >
-            <Copy class="w-3.5 h-3.5" />
+            <Copy
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
           </button>
+          <span
+            v-if="trace.external_parent_span_id"
+            class="text-xs text-foreground-muted"
+          >External parent <code>{{ shortID(trace.external_parent_span_id) }}</code></span>
         </div>
-
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-3 border-t border-border text-xs">
+        <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
           <div>
-            <div class="text-foreground-muted uppercase tracking-wide mb-1">
-              Trigger
-            </div>
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-foreground-muted border-border lowercase">
-              {{ trace.trigger || EMPTY }}
-            </span>
-          </div>
-          <div>
-            <div class="text-foreground-muted uppercase tracking-wide mb-1">
-              Total duration
-            </div>
-            <div class="text-white font-mono">
-              {{ trace.total_duration_ms }}ms
-            </div>
-          </div>
-          <div>
-            <div class="text-foreground-muted uppercase tracking-wide mb-1">
-              Spans
-            </div>
-            <div class="text-white">
-              {{ trace.span_count }}
-            </div>
-          </div>
-          <div>
-            <div class="text-foreground-muted uppercase tracking-wide mb-1">
+            <dt class="inline text-foreground-muted">
               Status
-            </div>
-            <div class="flex items-center gap-2">
+            </dt><dd class="inline">
               <StatusBadge :status="trace.status" />
-              <span
-                v-if="trace.has_outlier"
-                class="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-warning-fg"
-              >
-                <Flag class="w-3 h-3" /> Outlier
-              </span>
-            </div>
+            </dd>
           </div>
-        </div>
-      </div>
-
-      <!-- Waterfall card. Each span is a row with offset bar; bar
-           position/width is computed in JS from offset_ms/duration_ms.
-           Bar colors align with the broader dashboard palette: primary
-           for warm successes, amber for outliers, red for errors.
-           User-defined spans (orva.trace.span) interleave under their
-           parent system span and render with --accent-muted so the
-           operator can distinguish "Orva ran X" from "your code did Y". -->
-      <div class="bg-background border border-border rounded-lg p-5">
-        <div class="text-xs text-foreground-muted uppercase tracking-wide mb-4">
-          Waterfall
-        </div>
-        <div class="space-y-1.5">
-          <template
-            v-for="(s, i) in trace.spans"
-            :key="s.span_id || `s${i}`"
-          >
-            <div
-              class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1.5 rounded cursor-pointer transition-colors"
-              @click="onSpanClick(s)"
-            >
-              <div class="col-span-3 truncate flex items-center gap-1.5">
-                <span class="text-white">{{ s.function_name || s.function_id }}</span>
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-foreground-muted border-border lowercase">
-                  {{ s.trigger || EMPTY }}
-                </span>
-                <AlertCircle
-                  v-if="s.status === 'error'"
-                  class="w-3 h-3 shrink-0 text-danger-fg"
-                  aria-label="error"
-                />
-                <Flag
-                  v-if="s.is_outlier"
-                  class="w-3 h-3 shrink-0 text-warning-fg"
-                  aria-label="outlier"
-                />
-              </div>
-
-              <div class="col-span-7 relative h-4">
-                <div
-                  class="absolute h-2 top-1 rounded-sm"
-                  :class="barClass(s)"
-                  :style="barStyle(s)"
-                  :title="`+${s.offset_ms}ms · ${s.duration_ms}ms`"
-                />
-              </div>
-
-              <div class="col-span-2 text-right font-mono">
-                <span class="text-white">{{ s.duration_ms }}ms</span>
-                <span
-                  v-if="s.baseline_p95_ms"
-                  class="block text-[10px] text-foreground-muted"
-                >
-                  p95 {{ s.baseline_p95_ms }}ms
-                </span>
-              </div>
-            </div>
-
-            <!-- User-defined sub-spans nested beneath their parent. -->
-            <div
-              v-for="us in userSpansFor(s)"
-              :key="`us-${us.id}`"
-              class="grid grid-cols-12 gap-2 items-center text-xs hover:bg-surface/40 px-2 py-1 rounded transition-colors"
-            >
-              <div class="col-span-3 truncate flex items-center gap-1.5 pl-5">
-                <span class="text-foreground-muted text-[10px]">└</span>
-                <span class="text-foreground-muted">{{ us.name }}</span>
-                <span
-                  v-if="us.status === 'error'"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-danger-tint text-danger-fg border border-danger-ring"
-                >
-                  error
-                </span>
-              </div>
-              <div class="col-span-7 relative h-3">
-                <div
-                  class="absolute h-1.5 top-1 rounded-sm bg-accent-muted/70"
-                  :style="userSpanBarStyle(us)"
-                  :title="`+${us.offset_ms}ms · ${us.duration_ms}ms`"
-                />
-              </div>
-              <div class="col-span-2 text-right font-mono text-foreground-muted">
-                {{ us.duration_ms }}ms
-              </div>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Log lane. Structured entries from orva.log.* across every
-           span in the trace, sorted by ts. Empty when the user didn't
-           emit any structured logs (so old traces stay clean). -->
-      <div
-        v-if="trace.log_entries && trace.log_entries.length"
-        class="bg-background border border-border rounded-lg p-5"
-      >
-        <div class="text-xs text-foreground-muted uppercase tracking-wide mb-3">
-          Logs ({{ trace.log_entries.length }})
-        </div>
-        <div class="space-y-1 font-mono text-xs">
+          <div>
+            <dt class="inline text-foreground-muted">
+              Duration
+            </dt><dd class="inline text-white font-mono">
+              {{ trace.total_duration_ms }}ms
+            </dd>
+          </div>
+          <div>
+            <dt class="inline text-foreground-muted">
+              Spans
+            </dt><dd class="inline text-white">
+              {{ trace.span_count }}
+            </dd>
+          </div>
+          <div v-if="trace.error_count">
+            <dt class="inline text-foreground-muted">
+              Errors
+            </dt><dd class="inline text-danger-fg">
+              {{ trace.error_count }}
+            </dd>
+          </div>
+          <div>
+            <dt class="inline text-foreground-muted">
+              Cold starts
+            </dt><dd class="inline text-white">
+              {{ trace.cold_start_count || 0 }}
+            </dd>
+          </div>
           <div
-            v-for="entry in trace.log_entries"
-            :key="`log-${entry.id}`"
-            class="flex items-baseline gap-2 px-2 py-1 rounded hover:bg-surface/40 transition-colors"
-            :class="logRowClass(entry)"
+            v-if="trace.has_outlier"
+            class="inline-flex items-center gap-1 text-warning-fg"
           >
-            <span class="text-foreground-muted text-[10px] tabular-nums">
-              {{ formatLogTime(entry.ts) }}
-            </span>
-            <span
-              class="text-[10px] uppercase tracking-wide"
-              :class="logLevelClass(entry.level)"
-            >
-              {{ entry.level }}
-            </span>
-            <span class="text-white truncate">{{ entry.message }}</span>
-            <code
-              v-if="entry.fields"
-              class="text-[10px] text-foreground-muted truncate"
-            >
-              {{ entry.fields }}
-            </code>
+            <Flag
+              class="w-3 h-3"
+              aria-hidden="true"
+            /> Outlier
           </div>
-        </div>
-      </div>
+        </dl>
+      </section>
 
-      <!-- Span list — same table shell as Activity / Invocations / Traces. -->
-      <div class="bg-background border border-border rounded-lg overflow-x-auto">
-        <table class="w-full text-sm text-left">
-          <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
-            <tr>
-              <th class="px-4 py-3 w-32">
-                Span
-              </th>
-              <th class="px-4 py-3">
-                Function
-              </th>
-              <th class="px-4 py-3 w-28 hidden md:table-cell">
-                Trigger
-              </th>
-              <th class="px-4 py-3 w-24 text-right">
-                Offset
-              </th>
-              <th class="px-4 py-3 w-24 text-right">
-                Duration
-              </th>
-              <th class="px-4 py-3 w-24">
-                Status
-              </th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border">
-            <tr
-              v-for="s in trace.spans"
-              :key="`tbl-${s.span_id}`"
-              class="hover:bg-surface/40 cursor-pointer transition-colors"
-              @click="onSpanClick(s)"
-            >
-              <td class="px-4 py-2.5 font-mono text-xs text-foreground-muted">
-                {{ s.span_id?.slice(0, 11) || EMPTY }}
-              </td>
-              <td class="px-4 py-2.5 text-white">
-                {{ s.function_name || s.function_id }}
-              </td>
-              <td class="px-4 py-2.5 hidden md:table-cell">
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-foreground-muted border-border lowercase">
-                  {{ s.trigger || EMPTY }}
-                </span>
-              </td>
-              <td class="px-4 py-2.5 text-right font-mono text-xs text-foreground-muted">
-                +{{ s.offset_ms }}ms
-              </td>
-              <td class="px-4 py-2.5 text-right font-mono text-xs text-white">
-                {{ s.duration_ms }}ms
-              </td>
-              <td class="px-4 py-2.5">
-                <StatusBadge :status="s.status" />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <TraceWaterfall
+        :trace="trace"
+        @open-invocation="openInvocation"
+      />
     </template>
   </div>
 </template>
 
 <script setup>
-import { EMPTY } from '@/utils/format'
-import { ref, onMounted, computed } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Copy, Flag, AlertCircle } from '@lucide/vue'
+import { ArrowLeft, Copy, Flag } from '@lucide/vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
+import TraceWaterfall from '@/components/traces/TraceWaterfall.vue'
 import { getTrace } from '@/api/endpoints'
+import { shortID } from '@/utils/traceLayout'
 
 const route = useRoute()
 const router = useRouter()
-
 const trace = ref(null)
 const loading = ref(false)
 const error = ref('')
@@ -303,83 +135,19 @@ const fetchTrace = async () => {
   loading.value = true
   error.value = ''
   try {
-    const res = await getTrace(route.params.id)
-    trace.value = res.data
+    trace.value = (await getTrace(route.params.id)).data
   } catch (err) {
-    if (err?.response?.status === 404) {
-      error.value = 'No spans found for that trace.'
-    } else {
-      error.value = err?.response?.data?.error?.message || err?.message || 'failed to load trace'
-    }
+    error.value = err?.response?.status === 404
+      ? 'No spans found for that trace.'
+      : err?.response?.data?.error?.message || err?.message || 'Failed to load trace.'
   } finally {
     loading.value = false
   }
 }
-
-const total = computed(() => Math.max(1, trace.value?.total_duration_ms || 1))
-
-const barStyle = (s) => {
-  const left = (s.offset_ms / total.value) * 100
-  // Clamp width so a 0ms span still shows a thin marker.
-  const width = Math.max(0.5, (s.duration_ms / total.value) * 100)
-  return { left: `${left}%`, width: `${width}%` }
-}
-
-const barClass = (s) => {
-  if (s.status === 'error') return 'bg-danger/70'
-  if (s.is_outlier) return 'bg-warning/80'
-  return 'bg-primary/80'
-}
-
-// User-defined spans are scoped to a parent system span via parent_span_id
-// (which matches one of trace.spans[i].span_id). We compute the children
-// on demand so the template stays declarative.
-const userSpansFor = (parent) => {
-  if (!trace.value?.user_spans || !parent?.span_id) return []
-  return trace.value.user_spans
-    .filter((u) => u.parent_span_id === parent.span_id)
-    .sort((a, b) => (a.offset_ms || 0) - (b.offset_ms || 0))
-}
-
-const userSpanBarStyle = (us) => {
-  const left = ((us.offset_ms || 0) / total.value) * 100
-  const width = Math.max(0.5, ((us.duration_ms || 0) / total.value) * 100)
-  return { left: `${left}%`, width: `${width}%` }
-}
-
-const logLevelClass = (level) => {
-  switch (level) {
-    case 'error': return 'text-danger-fg'
-    case 'warn':  return 'text-warning-fg'
-    case 'debug': return 'text-foreground-muted'
-    default:      return 'text-primary-light'
-  }
-}
-const logRowClass = (entry) => entry.level === 'error' ? 'bg-danger-tint' : ''
-
-const formatLogTime = (ts) => {
-  if (!ts) return ''
-  try {
-    const d = new Date(ts)
-    return d.toLocaleTimeString(undefined, { hour12: false }) + '.' +
-           String(d.getMilliseconds()).padStart(3, '0')
-  } catch {
-    return ts
-  }
-}
-
-const onSpanClick = (s) => {
-  if (!s.execution_id) return
-  router.push({ path: '/invocations', query: { exec: s.execution_id } })
-}
-
+const openInvocation = (executionID) => router.push({ path: '/invocations', query: { exec: executionID } })
 const copyID = async () => {
   if (!trace.value?.trace_id) return
-  try {
-    await navigator.clipboard.writeText(trace.value.trace_id)
-  } catch {
-    // ignore — clipboard may be blocked in non-https; user can select-copy.
-  }
+  try { await navigator.clipboard.writeText(trace.value.trace_id) } catch { /* selection remains available */ }
 }
 
 onMounted(fetchTrace)

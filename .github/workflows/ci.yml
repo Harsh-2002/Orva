@@ -293,6 +293,10 @@ jobs:
         working-directory: frontend
         run: npm audit --audit-level=moderate
 
+      - name: component and unit tests
+        working-directory: frontend
+        run: npm test
+
       - name: eslint
         working-directory: frontend
         run: npm run lint

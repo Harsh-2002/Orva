@@ -16,6 +16,10 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
+  test: {
+    environment: 'jsdom',
+    include: ['test/components/**/*.test.js'],
+  },
   server: {
     host: true,
     port: 3000,

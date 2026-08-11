@@ -103,7 +103,7 @@ fid_c=$(deploy trace_chain_c node 'module.exports.handler = async () => ({
 })')
 short_c=${fid_c#fn_}
 
-resp_headers=$(curl -sSI "${H_KEY[@]}" "$ENDPOINT/fn/$short_c/")
+resp_headers=$(curl -sS -D - -o /dev/null "${H_KEY[@]}" "$ENDPOINT/fn/$short_c/")
 trace_id=$(echo "$resp_headers" | grep -i '^x-trace-id:' | awk '{print $2}' | tr -d '\r\n')
 [ -n "$trace_id" ] && ok "X-Trace-Id present in HTTP response: $trace_id" || fail "X-Trace-Id missing"
 
@@ -130,8 +130,11 @@ module.exports.handler = async () => {
 }' egress)
 short_a=${fid_a#fn_}
 
-resp_headers=$(curl -sSI "${H_KEY[@]}" "$ENDPOINT/fn/$short_a/")
-chain_trace=$(echo "$resp_headers" | grep -i '^x-trace-id:' | awk '{print $2}' | tr -d '\r\n')
+chain_response=$(curl -sS -i "${H_KEY[@]}" "$ENDPOINT/fn/$short_a/")
+chain_trace=$(echo "$chain_response" | grep -i '^x-trace-id:' | awk '{print $2}' | tr -d '\r\n')
+chain_status=$(echo "$chain_response" | sed -n '1s/.* \([0-9][0-9][0-9]\).*/\1/p')
+[ "$chain_status" = "200" ] && ok "F2F parent invocation succeeds" \
+  || fail "F2F parent returned HTTP $chain_status: $(echo "$chain_response" | tail -n 1)"
 flush
 chain=$(curl -sS "${H_KEY[@]}" "$ENDPOINT/api/v1/traces/$chain_trace")
 chain_spans=$(echo "$chain" | jq '.spans | length')
@@ -149,12 +152,41 @@ section "T5: External W3C traceparent"
 
 ext_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ext_par="bbbbbbbbbbbbbbbb"
-ext_resp=$(curl -sSI "${H_KEY[@]}" -H "traceparent: 00-$ext_id-$ext_par-01" "$ENDPOINT/fn/$short_c/")
+ext_resp=$(curl -sS -D - -o /dev/null "${H_KEY[@]}" -H "traceparent: 00-$ext_id-$ext_par-01" "$ENDPOINT/fn/$short_c/")
 ext_trace=$(echo "$ext_resp" | grep -i '^x-trace-id:' | awk '{print $2}' | tr -d '\r\n')
 case "$ext_trace" in
   "tr_${ext_id}") ok "External traceparent honored: $ext_trace" ;;
   *) fail "external traceparent ignored (got $ext_trace, expected tr_$ext_id)" ;;
 esac
+
+flush
+ext_detail=$(curl -sS "${H_KEY[@]}" "$ENDPOINT/api/v1/traces/$ext_trace")
+external_parent=$(echo "$ext_detail" | jq -r '.external_parent_span_id // empty')
+[ "$external_parent" = "sp_${ext_par}" ] \
+  && ok "External parent retained on local root" \
+  || fail "external parent missing (got $external_parent)"
+
+# Externally parented traces must remain visible in the list, and the function
+# filter matches any span by exact name (not only a NULL-parent root row).
+ext_summary=$(curl -sS "${H_KEY[@]}" "$ENDPOINT/api/v1/traces?function_id=trace_chain_c&limit=50" \
+  | jq -c --arg trace "$ext_trace" '.traces[]? | select(.trace_id == $trace)')
+[ -n "$ext_summary" ] && ok "Externally parented trace appears in list" \
+  || fail "external trace missing from trace list"
+[ "$(echo "$ext_summary" | jq -r '.external_parent_span_id // empty')" = "sp_${ext_par}" ] \
+  && ok "List summary retains external parent" \
+  || fail "list summary lost external parent"
+
+chain_summary=$(curl -sS "${H_KEY[@]}" "$ENDPOINT/api/v1/traces?function_id=trace_chain_b&limit=50" \
+  | jq -c --arg trace "$chain_trace" '.traces[]? | select(.trace_id == $trace)')
+[ -n "$chain_summary" ] && ok "Child-function name filter finds full trace" \
+  || fail "child function filter missed F2F trace"
+chain_span_count=0
+if [ -n "$chain_summary" ]; then
+  chain_span_count=$(printf '%s\n' "$chain_summary" | jq -r '.span_count // 0')
+fi
+[ "$chain_span_count" -eq 2 ] \
+  && ok "Trace list reports aggregate span_count" \
+  || fail "trace list span_count was not 2"
 
 section "T6: Replay creates fresh trace"
 
@@ -180,6 +212,8 @@ import os, time
 def handler(event):
     if os.environ.get("SLOW") == "1":
         time.sleep(0.6)
+    else:
+        time.sleep(0.01)
     return {"statusCode": 200, "headers": {"content-type":"application/json"}, "body": "{}"}')
 short_o=${fid_o#fn_}
 

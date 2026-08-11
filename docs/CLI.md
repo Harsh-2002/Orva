@@ -518,7 +518,7 @@ orva fixtures delete greeter happy-path
 Every execution is a span; spans sharing a `trace_id` form a causal tree.
 
 ```bash
-orva traces list                       # recent root spans
+orva traces list                       # recent trace-wide summaries
 orva traces list --fn greeter --limit 20
 orva traces get tr_01h…                 # full span tree
 orva traces baseline greeter            # rolling p95/p99/mean latency

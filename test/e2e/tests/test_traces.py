@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Causal traces: list (read-only), get-by-id 404, function baseline snapshot.
+"""Causal traces: aggregate list contract, cursor validation, detail, baseline.
 
-Traces are a set of executions sharing a trace_id; the list contains only ROOT
-spans. On a fresh instance there is no traffic, so the list is empty — we assert
-the 200 + list shape rather than requiring rows. The baseline endpoint is always
-200 with a zero-sample snapshot for a brand-new function. Mostly read-only; the
-only resource we create is a function (no sandbox needed), which we clean up.
+Traces are a set of spans sharing a trace_id; list rows are trace-wide summaries.
+On a fresh instance there may be no traffic, so the test accepts an empty list.
+The baseline endpoint is always 200 with a zero-sample snapshot for a brand-new
+function. Mostly read-only; the only resource created is cleaned up.
 """
 import sys
 
@@ -42,6 +41,9 @@ def main():
         check("has next_cursor field", isinstance(lst, dict) and "next_cursor" in lst,
               str(lst)[:160])
 
+        bc, _ = c.req("GET", "/api/v1/traces?before=not-a-cursor", expect=range(200, 599))
+        check("malformed cursor -> 400", bc == 400, f"status {bc}")
+
         section("list traces with filters")
         # Filter params are honored (function_id / status / limit); a bogus
         # function_id simply yields an empty result, still 200.
@@ -61,6 +63,11 @@ def main():
         # If the fresh instance happens to have any trace, fetch the first and
         # validate the detailed shape; otherwise this is a no-op (still PASS).
         if traces:
+            summary_row = traces[0]
+            check("summary includes trace-wide counts",
+                  all(isinstance(summary_row.get(k), int)
+                      for k in ("span_count", "error_count", "cold_start_count")),
+                  str(summary_row)[:240])
             tid = traces[0].get("trace_id")
             if tid:
                 dc, det = c.req("GET", f"/api/v1/traces/{tid}", expect=range(200, 599))
@@ -70,6 +77,10 @@ def main():
                       str(det)[:160])
                 check("trace detail trace_id matches",
                       isinstance(det, dict) and det.get("trace_id") == tid)
+                check("trace detail includes aggregate diagnostics",
+                      isinstance(det, dict) and all(isinstance(det.get(k), int)
+                                                    for k in ("span_count", "error_count", "cold_start_count")),
+                      str(det)[:240])
         else:
             check("no traces on fresh instance (expected)", True)
 
