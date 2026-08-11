@@ -855,6 +855,12 @@
         spans, you don't import a tracer; you just write your handler and the
         platform plumbs IDs through every internal hop.
       </p>
+      <p class="doc-prose">
+        The local root is the earliest execution whose parent is absent from
+        the same trace. Externally parented W3C traces therefore remain visible
+        and preserve the upstream ID as
+        <code class="doc-chip">external_parent_span_id</code>.
+      </p>
 
       <TraceTreeDiagram />
 
@@ -952,11 +958,18 @@
         Where to look
       </h3>
       <ul class="doc-list">
-        <li><code class="doc-chip">/traces</code>: list of recent traces, filterable by function / status / outlier-only.</li>
-        <li><code class="doc-chip">/traces/:id</code>: waterfall + per-span detail. Click a span to jump to its execution in the Invocations log.</li>
+        <li><code class="doc-chip">/traces</code>: trace-wide summaries, filterable by exact function ID/name (matching any span), status, outlier, and time preset.</li>
+        <li><code class="doc-chip">/traces/:id</code>: one expandable causal waterfall. Select a span in place for status code, cold/warm state, error, baseline comparison, and linked logs; use the separate <strong>Open invocation</strong> action to navigate.</li>
         <li><code class="doc-chip">GET /api/v1/traces/{id}</code>: full span tree as JSON. Pair with <code class="doc-chip">list_traces</code> / <code class="doc-chip">get_trace</code> MCP tools for AI agents.</li>
         <li><code class="doc-chip">GET /api/v1/functions/{id}/baseline</code>: current P95/P99/mean for a function.</li>
       </ul>
+      <p class="doc-prose">
+        Trace-list status, duration, outlier state, and span/error/cold-start
+        counts cover the complete trace. Pagination uses an opaque
+        <code class="doc-chip">next_cursor</code> over the stable
+        <code class="doc-chip">(started_at, trace_id)</code> order; pass it back
+        as <code class="doc-chip">before</code>.
+      </p>
     </section>
 
     <!-- ── 10. Errors & recovery ─────────────────────────────── -->

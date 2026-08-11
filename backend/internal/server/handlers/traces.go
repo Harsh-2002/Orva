@@ -12,8 +12,8 @@ import (
 )
 
 // TracesHandler exposes the trace REST surface. A trace is a set of
-// executions sharing the same trace_id; the root span is the one with a
-// nil parent_span_id. The waterfall view in the UI is driven entirely
+// executions sharing the same trace_id; the local root is the earliest span
+// whose parent is absent from that same trace. The waterfall view in the UI is driven entirely
 // from these endpoints — there is no separate spans table.
 type TracesHandler struct {
 	DB       *database.Database
@@ -26,22 +26,22 @@ type TracesHandler struct {
 // per span); when the function has been deleted the name is empty and
 // the UI shows the function id instead.
 type SpanView struct {
-	ExecutionID      string  `json:"execution_id"`
-	SpanID           string  `json:"span_id"`
-	ParentSpanID     string  `json:"parent_span_id,omitempty"`
-	FunctionID       string  `json:"function_id"`
-	FunctionName     string  `json:"function_name,omitempty"`
-	ParentFunctionID string  `json:"parent_function_id,omitempty"`
-	Trigger          string  `json:"trigger,omitempty"`
-	Status           string  `json:"status"`
-	StatusCode       int     `json:"status_code,omitempty"`
-	ColdStart        bool    `json:"cold_start"`
-	IsOutlier        bool    `json:"is_outlier,omitempty"`
-	BaselineP95MS    int64   `json:"baseline_p95_ms,omitempty"`
-	StartedAt        string  `json:"started_at"`
-	DurationMS       int64   `json:"duration_ms,omitempty"`
-	ErrorMessage     string  `json:"error_message,omitempty"`
-	OffsetMS         int64   `json:"offset_ms"` // ms since trace.started_at
+	ExecutionID      string `json:"execution_id"`
+	SpanID           string `json:"span_id"`
+	ParentSpanID     string `json:"parent_span_id,omitempty"`
+	FunctionID       string `json:"function_id"`
+	FunctionName     string `json:"function_name,omitempty"`
+	ParentFunctionID string `json:"parent_function_id,omitempty"`
+	Trigger          string `json:"trigger,omitempty"`
+	Status           string `json:"status"`
+	StatusCode       int    `json:"status_code,omitempty"`
+	ColdStart        bool   `json:"cold_start"`
+	IsOutlier        bool   `json:"is_outlier,omitempty"`
+	BaselineP95MS    int64  `json:"baseline_p95_ms,omitempty"`
+	StartedAt        string `json:"started_at"`
+	DurationMS       int64  `json:"duration_ms,omitempty"`
+	ErrorMessage     string `json:"error_message,omitempty"`
+	OffsetMS         int64  `json:"offset_ms"` // ms since trace.started_at
 }
 
 // UserSpanView is one orva.trace.span() entry surfaced into the trace
@@ -73,18 +73,21 @@ type LogEntryView struct {
 
 // TraceView is the response for GET /api/v1/traces/{id}.
 type TraceView struct {
-	TraceID         string         `json:"trace_id"`
-	RootSpanID      string         `json:"root_span_id,omitempty"`
-	RootFunctionID  string         `json:"root_function_id,omitempty"`
-	Trigger         string         `json:"trigger,omitempty"`
-	StartedAt       string         `json:"started_at"`
-	TotalDurationMS int64          `json:"total_duration_ms"`
-	Status          string         `json:"status"`
-	HasOutlier      bool           `json:"has_outlier"`
-	SpanCount       int            `json:"span_count"`
-	Spans           []SpanView     `json:"spans"`
-	UserSpans       []UserSpanView `json:"user_spans"`
-	LogEntries      []LogEntryView `json:"log_entries"`
+	TraceID              string         `json:"trace_id"`
+	RootSpanID           string         `json:"root_span_id,omitempty"`
+	RootFunctionID       string         `json:"root_function_id,omitempty"`
+	ExternalParentSpanID string         `json:"external_parent_span_id,omitempty"`
+	Trigger              string         `json:"trigger,omitempty"`
+	StartedAt            string         `json:"started_at"`
+	TotalDurationMS      int64          `json:"total_duration_ms"`
+	Status               string         `json:"status"`
+	HasOutlier           bool           `json:"has_outlier"`
+	SpanCount            int            `json:"span_count"`
+	ErrorCount           int            `json:"error_count"`
+	ColdStartCount       int            `json:"cold_start_count"`
+	Spans                []SpanView     `json:"spans"`
+	UserSpans            []UserSpanView `json:"user_spans"`
+	LogEntries           []LogEntryView `json:"log_entries"`
 }
 
 // GetTrace handles GET /api/v1/traces/{trace_id}. Pulls every execution
@@ -110,58 +113,16 @@ func (h *TracesHandler) GetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := buildTraceView(traceID, execs, h.Registry)
-
-	// User-defined spans + structured log entries — both keyed by
-	// trace_id. Missing/empty tables (older traces predating v0.6) leave
-	// the slices empty.
-	if userSpans, err := h.DB.ListUserSpansByTrace(traceID); err == nil {
-		uvs := make([]UserSpanView, 0, len(userSpans))
-		for _, s := range userSpans {
-			uvs = append(uvs, UserSpanView{
-				ID:           s.ID,
-				ExecutionID:  s.ExecutionID,
-				ParentSpanID: s.ParentSpanID,
-				Name:         s.Name,
-				StartedAt:    s.StartedAt.Format(time.RFC3339Nano),
-				DurationMS:   s.DurationMS,
-				OffsetMS:     s.OffsetMS,
-				Status:       s.Status,
-				ErrorMessage: s.ErrorMessage,
-				Attributes:   s.Attributes,
-			})
-		}
-		out.UserSpans = uvs
-	}
-	if entries, err := h.DB.ListLogEntriesByTrace(traceID); err == nil {
-		lvs := make([]LogEntryView, 0, len(entries))
-		for _, e := range entries {
-			lvs = append(lvs, LogEntryView{
-				ID:          e.ID,
-				ExecutionID: e.ExecutionID,
-				SpanID:      e.SpanID,
-				TS:          e.TS.Format(time.RFC3339Nano),
-				Level:       e.Level,
-				Message:     e.Message,
-				Fields:      e.Fields,
-			})
-		}
-		out.LogEntries = lvs
-	}
-	if out.UserSpans == nil {
-		out.UserSpans = []UserSpanView{}
-	}
-	if out.LogEntries == nil {
-		out.LogEntries = []LogEntryView{}
-	}
+	userSpans, _ := h.DB.ListUserSpansByTrace(traceID)
+	entries, _ := h.DB.ListLogEntriesByTrace(traceID)
+	out := buildTraceView(traceID, execs, userSpans, entries, h.Registry)
 	respond.JSON(w, http.StatusOK, out)
 }
 
 // ListTraces handles GET /api/v1/traces?function_id=&since=&until=&status=&outlier_only=&limit=&before.
-// The result list contains only ROOT spans; expand any of them via
-// GET /api/v1/traces/{trace_id} for the full tree. before is an
-// ISO8601 cursor: pass the started_at of the oldest row from the
-// previous page to fetch the next.
+// Each result is aggregated across the complete trace. before is an opaque
+// stable cursor; legacy ISO8601 timestamp cursors remain accepted during the
+// migration window.
 func (h *TracesHandler) ListTraces(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	q := r.URL.Query()
@@ -171,67 +132,69 @@ func (h *TracesHandler) ListTraces(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	params := database.ListRootSpansParams{
-		FunctionID:   q.Get("function_id"),
-		Since:        q.Get("since"),
-		Until:        q.Get("until"),
-		Status:       q.Get("status"),
-		OutlierOnly:  q.Get("outlier_only") == "1" || q.Get("outlier_only") == "true",
-		Limit:        limit,
-		BeforeCursor: q.Get("before"),
+	beforeStartedAt, beforeTraceID, legacyBefore, err := database.DecodeTraceCursor(q.Get("before"))
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
 	}
-	roots, err := h.DB.ListRootSpans(params)
+	params := database.ListTraceSummariesParams{
+		Function:        q.Get("function_id"),
+		Since:           q.Get("since"),
+		Until:           q.Get("until"),
+		Status:          q.Get("status"),
+		OutlierOnly:     q.Get("outlier_only") == "1" || q.Get("outlier_only") == "true",
+		Limit:           limit,
+		BeforeStartedAt: beforeStartedAt,
+		BeforeTraceID:   beforeTraceID,
+		LegacyBefore:    legacyBefore,
+	}
+	summaries, err := h.DB.ListTraceSummaries(params)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "list traces: "+err.Error(), reqID)
 		return
 	}
 
-	type rootSummary struct {
-		TraceID        string `json:"trace_id"`
-		RootSpanID     string `json:"root_span_id"`
-		RootFunctionID string `json:"root_function_id"`
-		FunctionName   string `json:"function_name,omitempty"`
-		Trigger        string `json:"trigger,omitempty"`
-		StartedAt      string `json:"started_at"`
-		DurationMS     int64  `json:"duration_ms,omitempty"`
-		Status         string `json:"status"`
-		StatusCode     int    `json:"status_code,omitempty"`
-		IsOutlier      bool   `json:"is_outlier"`
+	type traceSummary struct {
+		TraceID              string `json:"trace_id"`
+		RootSpanID           string `json:"root_span_id"`
+		RootFunctionID       string `json:"root_function_id"`
+		FunctionName         string `json:"function_name,omitempty"`
+		ExternalParentSpanID string `json:"external_parent_span_id,omitempty"`
+		Trigger              string `json:"trigger,omitempty"`
+		StartedAt            string `json:"started_at"`
+		DurationMS           int64  `json:"duration_ms"`
+		Status               string `json:"status"`
+		StatusCode           int    `json:"status_code,omitempty"`
+		IsOutlier            bool   `json:"is_outlier"`
+		SpanCount            int    `json:"span_count"`
+		ErrorCount           int    `json:"error_count"`
+		ColdStartCount       int    `json:"cold_start_count"`
 	}
-	out := make([]rootSummary, 0, len(roots))
-	for _, e := range roots {
-		var name string
-		if h.Registry != nil {
-			if fn, err := h.Registry.Get(e.FunctionID); err == nil {
-				name = fn.Name
-			}
-		}
-		var dur int64
-		if e.DurationMS != nil {
-			dur = *e.DurationMS
-		}
-		var sc int
-		if e.StatusCode != nil {
-			sc = *e.StatusCode
-		}
-		out = append(out, rootSummary{
-			TraceID:        e.TraceID,
-			RootSpanID:     e.SpanID,
-			RootFunctionID: e.FunctionID,
-			FunctionName:   name,
-			Trigger:        e.Trigger,
-			StartedAt:      e.StartedAt.Format(time.RFC3339Nano),
-			DurationMS:     dur,
-			Status:         e.Status,
-			StatusCode:     sc,
-			IsOutlier:      e.IsOutlier,
+	out := make([]traceSummary, 0, len(summaries))
+	for _, s := range summaries {
+		out = append(out, traceSummary{
+			TraceID:              s.TraceID,
+			RootSpanID:           s.RootSpanID,
+			RootFunctionID:       s.RootFunctionID,
+			FunctionName:         s.FunctionName,
+			ExternalParentSpanID: s.ExternalParentSpanID,
+			Trigger:              s.Trigger,
+			StartedAt:            s.StartedAt.Format(time.RFC3339Nano),
+			DurationMS:           s.DurationMS,
+			Status:               s.Status,
+			StatusCode:           s.StatusCode,
+			IsOutlier:            s.IsOutlier,
+			SpanCount:            s.SpanCount,
+			ErrorCount:           s.ErrorCount,
+			ColdStartCount:       s.ColdStartCount,
 		})
 	}
 
-	// Cursor for the next page: started_at of the oldest row we returned.
+	// Cursor for the next page: both ordering keys of the oldest row.
 	var nextCursor string
-	if len(roots) == limit && len(roots) > 0 {
-		nextCursor = roots[len(roots)-1].StartedAt.Format(time.RFC3339Nano)
+	if len(summaries) == limit && len(summaries) > 0 {
+		last := summaries[len(summaries)-1]
+		nextCursor = database.EncodeTraceCursor(last.StartedAt, last.TraceID)
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{
 		"traces":      out,
@@ -268,28 +231,35 @@ func (h *TracesHandler) GetFunctionBaseline(w http.ResponseWriter, r *http.Reque
 // BuildTraceViewForMCP is the exported entry-point so the MCP layer
 // can reuse the same shaping logic without duplicating the offset/
 // outlier walk. Same return type as the REST endpoint.
-func BuildTraceViewForMCP(traceID string, execs []*database.Execution, reg *registry.Registry) TraceView {
-	return buildTraceView(traceID, execs, reg)
+func BuildTraceViewForMCP(traceID string, execs []*database.Execution, userSpans []*database.UserSpan, entries []*database.LogEntry, reg *registry.Registry) TraceView {
+	return buildTraceView(traceID, execs, userSpans, entries, reg)
 }
 
 // buildTraceView shapes the database rows into the API contract. Pure
 // (no DB hits) so it's trivially testable.
-func buildTraceView(traceID string, execs []*database.Execution, reg *registry.Registry) TraceView {
+func buildTraceView(traceID string, execs []*database.Execution, userSpans []*database.UserSpan, entries []*database.LogEntry, reg *registry.Registry) TraceView {
 	if len(execs) == 0 {
 		return TraceView{TraceID: traceID, Spans: []SpanView{}}
 	}
-	// execs is already sorted started_at ASC. The earliest is the trace's
-	// reference point for offset_ms. The root span is the one with no
-	// parent — usually the first row, but a misconfigured replay could
-	// theoretically produce a different ordering.
+	// The local root is the earliest span whose parent does not appear in this
+	// trace. This includes ordinary roots and externally-parented W3C roots.
 	root := execs[0]
+	spanIDs := make(map[string]struct{}, len(execs))
 	for _, e := range execs {
-		if e.ParentSpanID == "" {
+		spanIDs[e.SpanID] = struct{}{}
+	}
+	for _, e := range execs {
+		if _, parentIsLocal := spanIDs[e.ParentSpanID]; !parentIsLocal {
 			root = e
 			break
 		}
 	}
 	traceStart := execs[0].StartedAt
+	for _, s := range userSpans {
+		if s.StartedAt.Before(traceStart) {
+			traceStart = s.StartedAt
+		}
+	}
 
 	// One trace lookup of function names. We resolve via the registry
 	// (which caches by id); falls back to DB only on misses.
@@ -307,6 +277,7 @@ func buildTraceView(traceID string, execs []*database.Execution, reg *registry.R
 	var hasOutlier bool
 	var totalEnd time.Time
 	traceStatus := "success"
+	var errorCount, coldStartCount int
 	for _, e := range execs {
 		var dur int64
 		if e.DurationMS != nil {
@@ -334,6 +305,12 @@ func buildTraceView(traceID string, execs []*database.Execution, reg *registry.R
 		if e.Status == "error" && traceStatus == "success" {
 			traceStatus = "error"
 		}
+		if e.Status == "error" {
+			errorCount++
+		}
+		if e.ColdStart {
+			coldStartCount++
+		}
 		spans = append(spans, SpanView{
 			ExecutionID:      e.ID,
 			SpanID:           e.SpanID,
@@ -353,22 +330,53 @@ func buildTraceView(traceID string, execs []*database.Execution, reg *registry.R
 			OffsetMS:         offset,
 		})
 	}
+	uvs := make([]UserSpanView, 0, len(userSpans))
+	for _, s := range userSpans {
+		uvs = append(uvs, UserSpanView{
+			ID: s.ID, ExecutionID: s.ExecutionID, ParentSpanID: s.ParentSpanID,
+			Name: s.Name, StartedAt: s.StartedAt.Format(time.RFC3339Nano),
+			DurationMS: s.DurationMS, OffsetMS: max(0, s.StartedAt.Sub(traceStart).Milliseconds()), Status: s.Status,
+			ErrorMessage: s.ErrorMessage, Attributes: s.Attributes,
+		})
+		if end := s.StartedAt.Add(time.Duration(s.DurationMS) * time.Millisecond); end.After(totalEnd) {
+			totalEnd = end
+		}
+		if s.Status == "error" {
+			traceStatus = "error"
+			errorCount++
+		}
+	}
+	lvs := make([]LogEntryView, 0, len(entries))
+	for _, e := range entries {
+		lvs = append(lvs, LogEntryView{
+			ID: e.ID, ExecutionID: e.ExecutionID, SpanID: e.SpanID,
+			TS: e.TS.Format(time.RFC3339Nano), Level: e.Level,
+			Message: e.Message, Fields: e.Fields,
+		})
+	}
 	totalMS := totalEnd.Sub(traceStart).Milliseconds()
 	if totalMS < 0 {
 		totalMS = 0
 	}
+	externalParent := ""
+	if root.ParentSpanID != "" {
+		externalParent = root.ParentSpanID
+	}
 	return TraceView{
-		TraceID:         traceID,
-		RootSpanID:      root.SpanID,
-		RootFunctionID:  root.FunctionID,
-		Trigger:         root.Trigger,
-		StartedAt:       traceStart.Format(time.RFC3339Nano),
-		TotalDurationMS: totalMS,
-		Status:          traceStatus,
-		HasOutlier:      hasOutlier,
-		SpanCount:       len(spans),
-		Spans:           spans,
-		UserSpans:       []UserSpanView{},
-		LogEntries:      []LogEntryView{},
+		TraceID:              traceID,
+		RootSpanID:           root.SpanID,
+		RootFunctionID:       root.FunctionID,
+		ExternalParentSpanID: externalParent,
+		Trigger:              root.Trigger,
+		StartedAt:            traceStart.Format(time.RFC3339Nano),
+		TotalDurationMS:      totalMS,
+		Status:               traceStatus,
+		HasOutlier:           hasOutlier,
+		SpanCount:            len(spans) + len(uvs),
+		ErrorCount:           errorCount,
+		ColdStartCount:       coldStartCount,
+		Spans:                spans,
+		UserSpans:            uvs,
+		LogEntries:           lvs,
 	}
 }

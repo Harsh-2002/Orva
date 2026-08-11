@@ -386,9 +386,9 @@ export const uploadRestore = (file) => {
 }
 
 // ── Tracing (v0.5) ──────────────────────────────────────────────────
-// A trace is the set of executions sharing a trace_id. The list view
-// returns root spans only; getTrace expands one trace into its full
-// span tree with offsets pre-computed for the waterfall view.
+// A trace is the set of executions sharing a trace_id. The list returns
+// trace-wide summaries and an opaque stable cursor; getTrace expands one
+// trace into its complete causal tree with waterfall offsets.
 
 export const getTrace = (traceID) => apiClient.get(`/traces/${traceID}`)
 

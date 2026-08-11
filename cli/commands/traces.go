@@ -11,11 +11,11 @@ import (
 )
 
 // tracesCmd surfaces the dashboard's tracing view to the terminal. A trace
-// is a set of executions sharing one trace_id; the root span is the one
-// with no parent. These subcommands hit the same REST endpoints the
+// is a set of executions sharing one trace_id; its local root is the earliest
+// span whose parent is absent from the trace. These subcommands hit the same REST endpoints the
 // dashboard's waterfall view uses:
 //
-//	GET /api/v1/traces                       — recent root spans
+//	GET /api/v1/traces                       — recent trace summaries
 //	GET /api/v1/traces/{trace_id}            — full causal tree
 //	GET /api/v1/functions/{id}/baseline      — rolling p50/p95/p99 latency
 var tracesCmd = &cobra.Command{
@@ -36,9 +36,10 @@ rolling latency baseline.
 
 var tracesListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List recent traces (root spans)",
-	Long: `List recent traces, one row per trace (the root span). Filter to a single
-function with --fn and cap the result count with --limit.
+	Short: "List recent trace summaries",
+	Long: `List recent traces, one trace-wide summary per row. Status, duration,
+outliers, and counts include all spans. --fn matches any span by exact function
+name or id; --before accepts the opaque cursor returned by a previous page.
 
   orva traces list
   orva traces list --fn greeter --limit 20
@@ -72,9 +73,9 @@ current sample count. The baseline drives the outlier flag on each span.
 }
 
 func init() {
-	tracesListCmd.Flags().String("fn", "", "filter to traces whose root span is this function (name or id)")
+	tracesListCmd.Flags().String("fn", "", "filter to traces containing this function (exact name or id)")
 	tracesListCmd.Flags().Int("limit", 50, "max number of traces to return (1-200)")
-	tracesListCmd.Flags().String("before", "", "cursor: return traces older than this timestamp (from a prior page's next_cursor)")
+	tracesListCmd.Flags().String("before", "", "opaque cursor from a prior page's next_cursor")
 
 	tracesCmd.AddCommand(
 		tracesListCmd,
@@ -83,18 +84,22 @@ func init() {
 	)
 }
 
-// rootSpanRow mirrors the server's rootSummary (handlers/traces.go).
+// rootSpanRow mirrors the server's trace-wide list summary.
 type rootSpanRow struct {
-	TraceID        string `json:"trace_id"`
-	RootSpanID     string `json:"root_span_id"`
-	RootFunctionID string `json:"root_function_id"`
-	FunctionName   string `json:"function_name"`
-	Trigger        string `json:"trigger"`
-	StartedAt      string `json:"started_at"`
-	DurationMS     int64  `json:"duration_ms"`
-	Status         string `json:"status"`
-	StatusCode     int    `json:"status_code"`
-	IsOutlier      bool   `json:"is_outlier"`
+	TraceID              string `json:"trace_id"`
+	RootSpanID           string `json:"root_span_id"`
+	RootFunctionID       string `json:"root_function_id"`
+	FunctionName         string `json:"function_name"`
+	ExternalParentSpanID string `json:"external_parent_span_id"`
+	Trigger              string `json:"trigger"`
+	StartedAt            string `json:"started_at"`
+	DurationMS           int64  `json:"duration_ms"`
+	Status               string `json:"status"`
+	StatusCode           int    `json:"status_code"`
+	IsOutlier            bool   `json:"is_outlier"`
+	SpanCount            int    `json:"span_count"`
+	ErrorCount           int    `json:"error_count"`
+	ColdStartCount       int    `json:"cold_start_count"`
 }
 
 // spanRow mirrors the server's SpanView (handlers/traces.go).
@@ -117,16 +122,19 @@ type spanRow struct {
 
 // traceView mirrors the server's TraceView (handlers/traces.go).
 type traceView struct {
-	TraceID         string    `json:"trace_id"`
-	RootSpanID      string    `json:"root_span_id"`
-	RootFunctionID  string    `json:"root_function_id"`
-	Trigger         string    `json:"trigger"`
-	StartedAt       string    `json:"started_at"`
-	TotalDurationMS int64     `json:"total_duration_ms"`
-	Status          string    `json:"status"`
-	HasOutlier      bool      `json:"has_outlier"`
-	SpanCount       int       `json:"span_count"`
-	Spans           []spanRow `json:"spans"`
+	TraceID              string    `json:"trace_id"`
+	RootSpanID           string    `json:"root_span_id"`
+	RootFunctionID       string    `json:"root_function_id"`
+	ExternalParentSpanID string    `json:"external_parent_span_id"`
+	Trigger              string    `json:"trigger"`
+	StartedAt            string    `json:"started_at"`
+	TotalDurationMS      int64     `json:"total_duration_ms"`
+	Status               string    `json:"status"`
+	HasOutlier           bool      `json:"has_outlier"`
+	SpanCount            int       `json:"span_count"`
+	ErrorCount           int       `json:"error_count"`
+	ColdStartCount       int       `json:"cold_start_count"`
+	Spans                []spanRow `json:"spans"`
 }
 
 // baselineSummary mirrors metrics.BaselineSummary.
@@ -192,13 +200,14 @@ func runTracesList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	t := newTable("TRACE_ID", "ROOT", "STATUS", "DURATION", "STARTED")
+	t := newTable("TRACE_ID", "ENTRY", "STATUS", "DURATION", "SPANS", "ERRORS", "STARTED")
 	for _, tr := range result.Traces {
 		root := tr.FunctionName
 		if root == "" {
 			root = tr.RootFunctionID
 		}
-		t.row(tr.TraceID, dash(root), dash(tr.Status), formatDuration(tr.DurationMS), dash(tr.StartedAt))
+		t.row(tr.TraceID, dash(root), dash(tr.Status), formatDuration(tr.DurationMS),
+			fmt.Sprintf("%d", tr.SpanCount), fmt.Sprintf("%d", tr.ErrorCount), dash(tr.StartedAt))
 	}
 	t.flush()
 
