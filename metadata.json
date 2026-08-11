@@ -1,0 +1,60 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZQWAC2WE6W36TGP6FPWREM4",
+  "strategy": "manual-commit",
+  "branch": "feat/ui-declutter",
+  "checkpoints_count": 6,
+  "files_touched": [
+    ".impeccable/design.json",
+    "DESIGN.md",
+    "PRODUCT.md",
+    "frontend/src/components/ai/AISettingsPanel.vue",
+    "frontend/src/components/ai/EmptyState.vue",
+    "frontend/src/components/channels/FunctionPickerModal.vue",
+    "frontend/src/components/common/Button.vue",
+    "frontend/src/components/common/EditorCard.vue",
+    "frontend/src/components/common/IconButton.vue",
+    "frontend/src/components/common/Input.vue",
+    "frontend/src/components/layout/Sidebar.vue",
+    "frontend/src/style.css",
+    "frontend/src/views/AI.vue",
+    "frontend/src/views/Activity.vue",
+    "frontend/src/views/ApiKeys.vue",
+    "frontend/src/views/Channels.vue",
+    "frontend/src/views/CronJobs.vue",
+    "frontend/src/views/Dashboard.vue",
+    "frontend/src/views/Deployments.vue",
+    "frontend/src/views/Docs.vue",
+    "frontend/src/views/Editor.vue",
+    "frontend/src/views/Firewall.vue",
+    "frontend/src/views/FunctionDiff.vue",
+    "frontend/src/views/FunctionsList.vue",
+    "frontend/src/views/InboundWebhooks.vue",
+    "frontend/src/views/InvocationsLog.vue",
+    "frontend/src/views/Jobs.vue",
+    "frontend/src/views/KVStore.vue",
+    "frontend/src/views/Login.vue",
+    "frontend/src/views/NotFound.vue",
+    "frontend/src/views/Onboarding.vue",
+    "frontend/src/views/Settings.vue",
+    "frontend/src/views/TraceDetail.vue",
+    "frontend/src/views/Traces.vue",
+    "frontend/src/views/Webhooks.vue"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1579043,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 54883712,
+    "output_tokens": 159382,
+    "api_call_count": 440
+  }
+}

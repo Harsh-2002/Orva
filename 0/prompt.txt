@@ -1,0 +1,33 @@
+HANDOFF.md read this and anazlye this codebase read docs and review and vlaidte all the PR and le me know if they are ready to merge it yet or not.
+
+---
+
+Recommended order: fix and revalidate #39 → merge #39 → retarget #40 to main → fix #40 findings → wait for CI and CodeQL → merge #40. - plan it.
+
+---
+
+also delete HANDOFF.md as well after this planned fix once done
+
+---
+
+Implement the plan.
+
+---
+
+Okay, then delete PR branches once every all the CI is green and switch to main branch
+
+---
+
+$impeccable we need to simply the UX in UI in all section currnetly to mmanu compoenst text messages nadb ox on each section its really hard to focus consedring this is small project so we need to refine UX. we dont have to redesign the UI. we need to declutter it so feels more breatble and acceprted to user not overwhelming. current it is overhwling so you need to audit all teh section in web app every section and how we cam make the UI with ebtter breatble UX. liek shorter text and things liek minor which makes impact. so use the impacaable skill for that and audit it.
+
+---
+
+go ahead plan all everything and start implemantion and then create a PR for it.
+
+---
+
+Impeccable also reports that PRODUCT.md is legacy and .impeccable/design.json is stale; I left both untouched because drift should not be repaired during an audit. - update it then
+
+---
+
+contiue
