@@ -17,6 +17,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -26,9 +27,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -56,27 +61,39 @@ const (
 func newStatelessHandler(t *testing.T) (http.Handler, string) {
 	t.Helper()
 
-	db, err := database.New(filepath.Join(t.TempDir(), "mcp-stateless.db"))
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	if err := db.Migrate(); err != nil {
-		t.Fatalf("migrate test db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := newStatelessDatabase(t)
 
 	const key = "orva_stateless_test_key_0123456789abcdef"
-	sum := sha256.Sum256([]byte(key))
-	if err := db.InsertAPIKey(&database.APIKey{
-		ID:          "key_statelesstest",
-		KeyHash:     hex.EncodeToString(sum[:]),
-		Name:        "stateless-test",
-		Permissions: `["invoke","read","write","admin"]`,
-	}); err != nil {
-		t.Fatalf("seed api key: %v", err)
-	}
+	seedStatelessAPIKey(t, db, key, "key_statelesstest", "stateless-test",
+		`["invoke","read","write","admin"]`)
 
 	return NewHandler(Deps{DB: db, Version: "test"}), key
+}
+
+func newStatelessDatabase(tb testing.TB) *database.Database {
+	tb.Helper()
+	db, err := database.New(filepath.Join(tb.TempDir(), "mcp-stateless.db"))
+	if err != nil {
+		tb.Fatalf("open test db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		tb.Fatalf("migrate test db: %v", err)
+	}
+	tb.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func seedStatelessAPIKey(tb testing.TB, db *database.Database, plaintext, id, name, permissions string) {
+	tb.Helper()
+	sum := sha256.Sum256([]byte(plaintext))
+	if err := db.InsertAPIKey(&database.APIKey{
+		ID:          id,
+		KeyHash:     hex.EncodeToString(sum[:]),
+		Name:        name,
+		Permissions: permissions,
+	}); err != nil {
+		tb.Fatalf("seed api key: %v", err)
+	}
 }
 
 // rpcResponse is the JSON-RPC envelope, decoded far enough to branch on
@@ -153,7 +170,7 @@ func newProtocolMeta(includeCapabilities bool) map[string]any {
 }
 
 // rpcBody marshals a JSON-RPC request with the given params.
-func rpcBody(t *testing.T, id int, method string, params map[string]any) string {
+func rpcBody(t testing.TB, id int, method string, params map[string]any) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
@@ -633,5 +650,278 @@ func TestChannelPathIsAlsoCacheScopedPrivate(t *testing.T) {
 			"dropped from that branch. A channel catalog is the most tightly scoped "+
 			"surface Orva has, so a shareable cache entry here leaks one tenant's "+
 			"function names to another.", out.CacheScope, cacheScopePrivate)
+	}
+}
+
+func serveModernRPC(t testing.TB, handler http.Handler, apiKey, host, method string, params map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/mcp",
+		strings.NewReader(rpcBody(t, 1, method, params)))
+	if host == "" {
+		host = "orva.test"
+	}
+	req.Host = host
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set(hdrProtocolVersion, protocolVersion20260728)
+	req.Header.Set(hdrMethod, method)
+	if method == "tools/call" {
+		if name, _ := params["name"].(string); name != "" {
+			req.Header.Set("Mcp-Name", name)
+		}
+	}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	return w
+}
+
+func listedToolNames(t *testing.T, w *httptest.ResponseRecorder) map[string]bool {
+	t.Helper()
+	if w.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, want 200; body=%s", w.Code, truncBody(w.Body.String()))
+	}
+	out := decodeResult[mcpsdk.ListToolsResult](t, decodeRPC(t, w))
+	names := make(map[string]bool, len(out.Tools))
+	for _, tool := range out.Tools {
+		names[tool.Name] = true
+	}
+	return names
+}
+
+func decodeStructuredToolResult[T any](t *testing.T, w *httptest.ResponseRecorder) T {
+	t.Helper()
+	if w.Code != http.StatusOK {
+		t.Fatalf("tools/call status = %d, want 200; body=%s", w.Code, truncBody(w.Body.String()))
+	}
+	out := decodeResult[mcpsdk.CallToolResult](t, decodeRPC(t, w))
+	raw, err := json.Marshal(out.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structuredContent: %v", err)
+	}
+	var result T
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("decode structuredContent into %T: %v; raw=%s", result, err, truncBody(string(raw)))
+	}
+	return result
+}
+
+func TestOperatorServerCacheReusesPermissionVariants(t *testing.T) {
+	var cache operatorServerCache
+	var builds atomic.Int32
+	build := func() *mcpsdk.Server {
+		builds.Add(1)
+		return mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cache-test", Version: "1"}, nil)
+	}
+
+	readA := cache.get(permSet{permRead: true}, build)
+	readB := cache.get(permSet{permRead: true}, build)
+	admin := cache.get(permSet{permRead: true, permAdmin: true}, build)
+	if readA != readB {
+		t.Fatal("identical permission sets returned different cached servers")
+	}
+	if readA == admin {
+		t.Fatal("different permission surfaces shared one cached server")
+	}
+	if got := builds.Load(); got != 2 {
+		t.Fatalf("server builds = %d, want one per permission variant (2)", got)
+	}
+
+	var concurrent operatorServerCache
+	builds.Store(0)
+	const callers = 64
+	servers := make(chan *mcpsdk.Server, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			servers <- concurrent.get(permSet{permInvoke: true, permRead: true}, build)
+		}()
+	}
+	wg.Wait()
+	close(servers)
+	var first *mcpsdk.Server
+	for server := range servers {
+		if first == nil {
+			first = server
+		} else if server != first {
+			t.Fatal("concurrent cache lookup returned more than one server")
+		}
+	}
+	if got := builds.Load(); got != 1 {
+		t.Fatalf("concurrent server builds = %d, want 1", got)
+	}
+}
+
+func TestPermissionDowngradeSelectsCachedRestrictedServerImmediately(t *testing.T) {
+	db := newStatelessDatabase(t)
+	const key = "orva_permission_downgrade_0123456789abcdef"
+	seedStatelessAPIKey(t, db, key, "key_downgrade", "downgrade",
+		`["invoke","read","write","admin"]`)
+	handler := NewHandler(Deps{DB: db, Version: "test"})
+	params := map[string]any{"_meta": newProtocolMeta(true)}
+
+	before := listedToolNames(t, serveModernRPC(t, handler, key, "orva.test", "tools/list", params))
+	if !before["create_function"] || !before["list_functions"] {
+		t.Fatalf("admin catalog missing expected tools: create=%v list=%v", before["create_function"], before["list_functions"])
+	}
+
+	if err := db.DeleteAPIKey("key_downgrade"); err != nil {
+		t.Fatalf("delete key before permission downgrade: %v", err)
+	}
+	seedStatelessAPIKey(t, db, key, "key_downgrade", "downgrade", `["read"]`)
+
+	after := listedToolNames(t, serveModernRPC(t, handler, key, "orva.test", "tools/list", params))
+	if !after["list_functions"] {
+		t.Fatal("read-only catalog lost list_functions after downgrade")
+	}
+	if after["create_function"] {
+		t.Fatal("create_function remained visible after immediate write-permission downgrade")
+	}
+	if len(after) >= len(before) {
+		t.Fatalf("downgrade did not reduce catalog: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestCachedServerUsesRequestOriginForFunctionAndDocs(t *testing.T) {
+	db := newStatelessDatabase(t)
+	const key = "orva_origin_context_0123456789abcdef"
+	seedStatelessAPIKey(t, db, key, "key_origin", "origin", `["read"]`)
+	reg := registry.New(db)
+	fn := &database.Function{
+		ID: "018f0000-0000-7000-8000-000000000001", Name: "origin-context",
+		Runtime: "node", Entrypoint: "handler.js", TimeoutMS: 5000,
+		MemoryMB: 64, CPUs: 0.25, NetworkMode: database.NetworkModeNone,
+		ConcurrencyPolicy: database.ConcurrencyPolicyQueue, AuthMode: database.AuthModeNone,
+		Version: 1, Status: "active",
+	}
+	if err := reg.Set(fn); err != nil {
+		t.Fatalf("seed function: %v", err)
+	}
+	handler := NewHandler(Deps{DB: db, Registry: reg, Version: "test"})
+
+	call := func(host, name string, args map[string]any) *httptest.ResponseRecorder {
+		return serveModernRPC(t, handler, key, host, "tools/call", map[string]any{
+			"_meta": newProtocolMeta(true), "name": name, "arguments": args,
+		})
+	}
+	for _, host := range []string{"alpha.example", "beta.example"} {
+		function := decodeStructuredToolResult[FunctionView](t,
+			call(host, "get_function", map[string]any{"function_id": fn.ID}))
+		wantInvoke := "https://" + host + "/fn/" + fn.ID
+		if function.InvokeURL != wantInvoke {
+			t.Errorf("get_function on %s returned invoke_url %q, want %q", host, function.InvokeURL, wantInvoke)
+		}
+
+		docs := decodeStructuredToolResult[GetOrvaDocsOutput](t,
+			call(host, "get_orva_docs", map[string]any{}))
+		wantOrigin := "https://" + host
+		if docs.Origin != wantOrigin {
+			t.Errorf("get_orva_docs on %s returned origin %q, want %q", host, docs.Origin, wantOrigin)
+		}
+		if !strings.Contains(docs.Markdown, wantOrigin) {
+			t.Errorf("get_orva_docs markdown on %s did not substitute request origin", host)
+		}
+	}
+}
+
+func TestCachedServerAttributesActivityToEachRequestPrincipal(t *testing.T) {
+	db := newStatelessDatabase(t)
+	const keyA = "orva_activity_actor_a_0123456789abcdef"
+	const keyB = "orva_activity_actor_b_0123456789abcdef"
+	seedStatelessAPIKey(t, db, keyA, "key_actor_a", "actor-a", `["read"]`)
+	seedStatelessAPIKey(t, db, keyB, "key_actor_b", "actor-b", `["read"]`)
+	handler := NewHandler(Deps{DB: db, Version: "test"})
+	params := map[string]any{
+		"_meta": newProtocolMeta(true), "name": "get_orva_docs", "arguments": map[string]any{},
+	}
+	for _, key := range []string{keyA, keyB} {
+		w := serveModernRPC(t, handler, key, "orva.test", "tools/call", params)
+		if w.Code != http.StatusOK {
+			t.Fatalf("tools/call status = %d; body=%s", w.Code, truncBody(w.Body.String()))
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	seen := map[string]string{}
+	for time.Now().Before(deadline) {
+		rows, _, err := db.ListActivity(database.ActivityFilter{Source: "mcp", Limit: 20})
+		if err != nil {
+			t.Fatalf("list activity: %v", err)
+		}
+		for _, row := range rows {
+			if row.ActorID == "key_actor_a" || row.ActorID == "key_actor_b" {
+				seen[row.ActorID] = row.ActorLabel
+			}
+		}
+		if len(seen) == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if seen["key_actor_a"] != "actor-a" || seen["key_actor_b"] != "actor-b" {
+		t.Fatalf("cached server activity attribution = %v, want both request principals", seen)
+	}
+}
+
+func TestCachedOperatorServerHandlesConcurrentRequests(t *testing.T) {
+	handler, key := newStatelessHandler(t)
+	body := rpcBody(t, 1, "tools/list", map[string]any{"_meta": newProtocolMeta(true)})
+	const requests = 64
+	errCh := make(chan error, requests)
+	var wg sync.WaitGroup
+	for range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			req.Header.Set(hdrProtocolVersion, protocolVersion20260728)
+			req.Header.Set(hdrMethod, "tools/list")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				errCh <- fmt.Errorf("status %d: %s", w.Code, truncBody(w.Body.String()))
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Error(err)
+	}
+}
+
+func BenchmarkStatelessToolsListWarm(b *testing.B) {
+	db := newStatelessDatabase(b)
+	const key = "orva_benchmark_key_0123456789abcdef"
+	seedStatelessAPIKey(b, db, key, "key_benchmark", "benchmark",
+		`["invoke","read","write","admin"]`)
+	handler := NewHandler(Deps{DB: db, Version: "bench"})
+	body := rpcBody(b, 1, "tools/list", map[string]any{"_meta": newProtocolMeta(true)})
+	run := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set(hdrProtocolVersion, protocolVersion20260728)
+		req.Header.Set(hdrMethod, "tools/list")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	if code := run(); code != http.StatusOK {
+		b.Fatalf("warmup status = %d, want 200", code)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if code := run(); code != http.StatusOK {
+			b.Fatalf("status = %d, want 200", code)
+		}
 	}
 }

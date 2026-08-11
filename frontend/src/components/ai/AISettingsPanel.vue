@@ -123,6 +123,8 @@
         :label="baseURLRequired ? 'Base URL (required)' : 'Base URL (optional)'"
         :placeholder="baseURLPlaceholder"
         :hint="baseURLHint"
+        :error="baseURLError"
+        :required="baseURLRequired"
       />
       <Input
         v-model="form.api_key"
@@ -134,7 +136,7 @@
       <Button
         variant="primary"
         :loading="savingProvider"
-        :disabled="!form.provider"
+        :disabled="!providerFormValid"
         @click="onSaveProvider"
       >
         Save provider
@@ -256,6 +258,11 @@ const form = ref({ provider: 'openai', label: '', api_key: '', base_url: '' })
 // produced a provider that could not answer a single turn.
 const BASE_URL_REQUIRED = ['ollama']
 const baseURLRequired = computed(() => BASE_URL_REQUIRED.includes(form.value.provider))
+const baseURLError = computed(() =>
+  baseURLRequired.value && !form.value.base_url.trim()
+    ? 'Base URL is required for Ollama.'
+    : '')
+const providerFormValid = computed(() => Boolean(form.value.provider) && !baseURLError.value)
 
 const baseURLPlaceholder = computed(() =>
   baseURLRequired.value
@@ -291,7 +298,7 @@ async function loadModels(id) {
 }
 
 async function onSaveProvider() {
-  if (!form.value.provider) return
+  if (!providerFormValid.value) return
   savingProvider.value = true
   try {
     await store.saveProvider({

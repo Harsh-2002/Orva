@@ -19,6 +19,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	authpkg "github.com/Harsh-2002/Orva/backend/internal/auth"
@@ -52,34 +53,114 @@ type Deps struct {
 	DataDir    string
 	Version    string // Orva version string, surfaced via initialize
 
-	// BaseURL is the canonical scheme://host the inbound MCP request
-	// arrived on (e.g. "https://orva.example.com"). Set per-request in
-	// NewHandler from urlhint.BaseURL(r); used by tool handlers to
-	// build fully-qualified `invoke_url` fields so agents never
-	// concatenate /fn/ + id manually. Empty when constructed outside
-	// the HTTP path (tests).
+	// BaseURL is the fallback canonical scheme://host used by callers outside
+	// the HTTP path (notably the in-process AI agent). HTTP requests carry their
+	// own base URL in context so cached MCP servers never capture one tenant's
+	// host and reuse it for another.
 	BaseURL string
+}
+
+// operatorServerCache holds one immutable server per permission surface. Orva
+// has four permissions, so the cache is bounded at 16 entries. The MCP SDK
+// Server is concurrency-safe; request-varying identity and origin live in the
+// method context rather than in these cached registrations.
+type operatorServerCache struct {
+	mu      sync.Mutex
+	servers map[uint8]*mcpsdk.Server
+}
+
+func (c *operatorServerCache) get(perms permSet, build func() *mcpsdk.Server) *mcpsdk.Server {
+	key := permissionCacheKey(perms)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.servers == nil {
+		c.servers = make(map[uint8]*mcpsdk.Server, 16)
+	}
+	if s := c.servers[key]; s != nil {
+		return s
+	}
+	s := build()
+	c.servers[key] = s
+	return s
+}
+
+func permissionCacheKey(perms permSet) uint8 {
+	var key uint8
+	if perms.Has(permRead) {
+		key |= 1 << 0
+	}
+	if perms.Has(permInvoke) {
+		key |= 1 << 1
+	}
+	if perms.Has(permWrite) {
+		key |= 1 << 2
+	}
+	if perms.Has(permAdmin) {
+		key |= 1 << 3
+	}
+	return key
+}
+
+func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
+	s := mcpsdk.NewServer(
+		&mcpsdk.Implementation{
+			Name:    "orva",
+			Version: deps.Version,
+			Title:   "Orva — serverless platform",
+		},
+		&mcpsdk.ServerOptions{
+			Instructions: serverInstructions,
+			SchemaCache:  schemaCache,
+		},
+	)
+
+	// Activity attribution comes from the request context, so sharing this
+	// server between API keys with the same permissions cannot cross-label rows.
+	s.AddReceivingMiddleware(activityMiddleware(deps), catalogEncodingMiddleware(), cacheScopeMiddleware())
+
+	// Every operator-tool family is registered through a regCtx so the exact
+	// same definitions feed the external MCP server and in-process AI registry.
+	rc := serverRegCtx(s, deps, perms)
+	registerSystemTools(rc)
+	registerFunctionTools(rc)
+	registerDeployTools(rc)
+	registerInvokeTools(rc)
+	registerSecretTools(rc)
+	registerRouteTools(rc)
+	registerKeyTools(rc)
+	registerFirewallTools(rc)
+	registerPoolTools(rc)
+	registerCronTools(rc)
+	registerKVTools(rc)
+	registerJobTools(rc)
+	registerWebhookTools(rc)
+	registerInboundWebhookTools(rc)
+	registerFixtureTools(rc)
+	registerTraceTools(rc)
+	registerDocsTools(rc)
+	registerResources(s, deps, perms)
+	return s
 }
 
 // NewHandler returns an http.Handler that speaks MCP Streamable HTTP
 // at the path it's mounted under. The handler:
 //   - extracts the bearer token / X-Orva-API-Key on every request
 //   - resolves it against the same API-key store the REST API uses
-//   - builds a per-request *Server registering only the tools the
-//     key's permissions allow
+//   - reuses one operator *Server per permission set while keeping channel
+//     servers request-scoped
 //   - rejects unauthenticated calls with 401 before any MCP work
 //
 // The result is that an agent's tool catalog is always scoped to
 // what its key can actually do, which keeps planning context lean
 // and removes "tool exists but errors" surprises.
 func NewHandler(deps Deps) http.Handler {
+	var operatorServers operatorServerCache
+
 	getServer := func(r *http.Request) *mcpsdk.Server {
-		// Per-request copy of Deps with the inbound base URL
-		// stamped in. Tool handlers use this to build canonical
-		// `invoke_url` fields that match the audience the OAuth
-		// token (if any) is bound to.
+		// Channel servers remain request-scoped because their tool set and
+		// instructions contain channel-specific function metadata.
 		reqDeps := deps
-		reqDeps.BaseURL = urlhint.BaseURL(r)
+		reqDeps.BaseURL = baseURLForContext(r.Context(), deps.BaseURL)
 
 		// Reuse the principal the auth gate already resolved for this
 		// request rather than resolving a second time. Resolving is not
@@ -87,7 +168,7 @@ func NewHandler(deps Deps) http.Handler {
 		// DB, and queues an api_keys.last_used_at write. Under the old
 		// stateful transport getServer ran once per SESSION, so the
 		// duplicate cost was amortised; stateless mode runs it on every
-		// single request, which would have doubled the DB work and the
+		// single request, which would otherwise double the DB work and the
 		// last-used writes on the MCP hot path.
 		//
 		// The fallback still resolves, so this stays correct if the SDK
@@ -113,7 +194,7 @@ func NewHandler(deps Deps) http.Handler {
 				},
 				&mcpsdk.ServerOptions{Instructions: instr, SchemaCache: schemaCache},
 			)
-			s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal), cacheScopeMiddleware())
+			s.AddReceivingMiddleware(activityMiddleware(reqDeps), cacheScopeMiddleware())
 			registerChannelTools(s, reqDeps, principal.Channel)
 			return s
 		}
@@ -128,63 +209,9 @@ func NewHandler(deps Deps) http.Handler {
 			perms = permSet{}
 		}
 
-		s := mcpsdk.NewServer(
-			&mcpsdk.Implementation{
-				Name:    "orva",
-				Version: deps.Version,
-				Title:   "Orva — serverless platform",
-			},
-			&mcpsdk.ServerOptions{
-				Instructions: serverInstructions,
-				// Statelessness means a Server -- and therefore all ~73 tool
-				// registrations -- is built per request instead of per session.
-				// Each AddTool reflects over its input type to derive a JSON
-				// schema; without a shared cache that reflection would run on
-				// every single MCP request. The cache is safe for concurrent
-				// use and is the SDK's documented answer for exactly this.
-				SchemaCache: schemaCache,
-			},
-		)
-
-		// Activity middleware: each tools/call goes through here, so we
-		// see every MCP tool invocation as a distinct row in the live
-		// feed even though the underlying transport is one streaming
-		// POST to /mcp. The HTTP-level loggerMiddleware would otherwise
-		// only show the streaming request itself.
-		s.AddReceivingMiddleware(activityMiddleware(reqDeps, principal), cacheScopeMiddleware())
-
-		// Every operator-tool family is registered through a regCtx so the
-		// exact same tool definitions feed both the external MCP server (here)
-		// and the in-process AI agent registry (BuildAgentRegistry).
-		rc := serverRegCtx(s, reqDeps, perms)
-		registerSystemTools(rc)
-		registerFunctionTools(rc)
-		registerDeployTools(rc)
-		registerInvokeTools(rc)
-		registerSecretTools(rc)
-		registerRouteTools(rc)
-		registerKeyTools(rc)
-		registerFirewallTools(rc)
-		registerPoolTools(rc)
-		// v0.2 + v0.3: cron schedules, KV store, background jobs, and
-		// system-event webhooks. Each respects the same permission gates.
-		registerCronTools(rc)
-		registerKVTools(rc)
-		registerJobTools(rc)
-		registerWebhookTools(rc)
-		// v0.4 C2a: inbound webhook triggers (signed external POSTs).
-		registerInboundWebhookTools(rc)
-		// v0.4 B3 + B5: saved request fixtures (Postman-style presets) +
-		// test_function_with_fixture invoke variant.
-		registerFixtureTools(rc)
-		// v0.5: causal tracing — get_trace / list_traces / get_function_baseline.
-		registerTraceTools(rc)
-		// v0.5: get_orva_docs — return the canonical Orva reference markdown.
-		registerDocsTools(rc)
-
-		registerResources(s, reqDeps, perms)
-
-		return s
+		return operatorServers.get(perms, func() *mcpsdk.Server {
+			return buildOperatorServer(deps, perms)
+		})
 	}
 
 	mcpHandler := mcpsdk.NewStreamableHTTPHandler(getServer, &mcpsdk.StreamableHTTPOptions{
@@ -196,16 +223,15 @@ func NewHandler(deps Deps) http.Handler {
 		// new protocol reachable at all.
 		//
 		// Orva keeps no session state of its own to give up: there is no
-		// session map here, Deps is rebuilt per request (BaseURL comes from
-		// urlhint.BaseURL(r)), and the bearer token is re-resolved to a
-		// Principal on every request by the auth gate below. The only session
-		// state was the SDK's own.
+		// session map here, and the bearer token is re-resolved to a Principal
+		// on every request by the auth gate below. Cached servers contain only
+		// static registrations; origin and actor identity are request context.
 		//
 		// It also closes a real gap. In stateful mode getServer ran once per
 		// session, so the registered tool set froze at the permissions the key
 		// held when the session opened; a permission downgrade mid-session was
-		// not re-gated. Rebuilding per request means the catalog always matches
-		// the caller's current perms.
+		// not re-gated. Selecting the cache entry from freshly-resolved
+		// permissions means the catalog always matches the caller's current perms.
 		//
 		// Legacy clients are unaffected: a stateless server still accepts the
 		// old initialize handshake and negotiates the older version, it simply
@@ -233,10 +259,11 @@ func NewHandler(deps Deps) http.Handler {
 			return
 		}
 
-		// Hand the resolved principal to getServer instead of making it
-		// repeat the lookup. See principalForRequest.
-		mcpHandler.ServeHTTP(w, r.WithContext(
-			context.WithValue(r.Context(), principalCtxKey{}, principal)))
+		// Hand request-varying identity and origin to the cached server through
+		// context. Neither value may be captured by a shared registration.
+		ctx := context.WithValue(r.Context(), principalCtxKey{}, principal)
+		ctx = context.WithValue(ctx, baseURLCtxKey{}, urlhint.BaseURL(r))
+		mcpHandler.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -376,10 +403,9 @@ func originAllowed(_ string) bool { return true }
 // so the live Activity feed sees per-tool granularity even though the
 // outer HTTP transport is one streaming POST to /mcp.
 //
-// principal may be nil if auth couldn't resolve the bearer (the outer
-// http.Handler would already have returned 401 in that case, but we
-// defend by still emitting an anonymous activity row). Otherwise its
-// Kind / ID / Label flow straight into ActorType / ActorID / ActorLabel
+// The principal comes from request context and may be nil if auth could not
+// resolve the bearer (the outer handler already returns 401 in that case).
+// Otherwise its Kind / ID / Label flow into ActorType / ActorID / ActorLabel
 // — which is how channel calls show up as `actor_type=channel`
 // instead of being misattributed to api_key like the older synth-
 // APIKey hack used to do.
@@ -387,6 +413,7 @@ func originAllowed(_ string) bool { return true }
 // auth gate to getServer. Unexported empty-struct key so nothing outside this
 // package can set or spoof it.
 type principalCtxKey struct{}
+type baseURLCtxKey struct{}
 
 // principalForRequest returns the principal the auth gate resolved for this
 // request, falling back to a fresh resolution if it is absent.
@@ -397,24 +424,34 @@ func principalForRequest(db *database.Database, r *http.Request) (*authpkg.Princ
 	return authenticateRequest(db, r)
 }
 
+// baseURLForContext returns the inbound origin carried by NewHandler, falling
+// back to Deps.BaseURL for non-HTTP callers such as the in-process AI registry.
+func baseURLForContext(ctx context.Context, fallback string) string {
+	if baseURL, ok := ctx.Value(baseURLCtxKey{}).(string); ok {
+		if baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/"); baseURL != "" {
+			return baseURL
+		}
+	}
+	return strings.TrimRight(strings.TrimSpace(fallback), "/")
+}
+
 // schemaCache is process-wide on purpose.
 //
 // It memoises the JSON schema derived by reflection from each tool's input
 // type, keyed by reflect.Type. Those types are compile-time constants, so the
 // derived schema is identical for every request, every principal and every
 // channel -- there is nothing per-caller in it to leak. Sharing it is what
-// keeps per-request server construction (see Stateless in NewHandler) from
-// re-reflecting ~73 tool signatures on every MCP call.
+// keeps the bounded permission variants (and request-scoped channel servers)
+// from re-reflecting tool signatures during their first construction.
 var schemaCache = mcpsdk.NewSchemaCache()
 
-func activityMiddleware(deps Deps, principal *authpkg.Principal) mcpsdk.Middleware {
+func activityMiddleware(deps Deps) mcpsdk.Middleware {
 	return func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
 			// We only attribute the protocol calls that an operator
-			// would consider "actions" — tools/call, tools/list (since
-			// agents probe the surface), and resources/read. Skip the
-			// chatty pings and capability negotiation — they'd flood
-			// the feed without telling the operator anything new.
+			// would consider "actions" — tools/call and resources/read.
+			// Skip catalog probes, pings, and capability negotiation: they
+			// would flood the feed without telling the operator anything new.
 			if !shouldRecordMCPMethod(method) {
 				return next(ctx, method, req)
 			}
@@ -424,6 +461,7 @@ func activityMiddleware(deps Deps, principal *authpkg.Principal) mcpsdk.Middlewa
 			elapsed := time.Since(started).Milliseconds()
 
 			actorType, actorID, actorLabel := "", "", ""
+			principal, _ := ctx.Value(principalCtxKey{}).(*authpkg.Principal)
 			if principal != nil {
 				actorType = principal.Kind
 				actorID = principal.ID

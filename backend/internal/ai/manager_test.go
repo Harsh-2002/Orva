@@ -1,6 +1,9 @@
 package ai
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestTryLockConv covers the per-conversation turn guard: one turn per
 // conversation, independent across conversations, re-lockable after release.
@@ -28,5 +31,15 @@ func TestTryLockConv(t *testing.T) {
 	m.unlockConv("c2")
 	if !m.tryLockConv("c2") {
 		t.Fatal("c2 should be lockable again after unlock")
+	}
+}
+
+func TestSaveProviderRequiresOllamaBaseURL(t *testing.T) {
+	m := &Manager{}
+	for _, baseURL := range []string{"", "   ", "\t\n"} {
+		_, err := m.SaveProvider(ProviderInput{Provider: " OLLAMA ", BaseURL: baseURL})
+		if err == nil || !strings.Contains(err.Error(), "base_url is required for ollama") {
+			t.Errorf("SaveProvider(ollama, %q) error = %v, want required-base-url error", baseURL, err)
+		}
 	}
 }

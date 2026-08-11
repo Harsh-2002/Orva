@@ -15,6 +15,7 @@ from harness import OrvaClient, section, check, summary
 PROVIDER = "openai"
 LABEL = "e2e-prov"
 SECRET = "sk-secret-123"
+OLLAMA_LABEL = "e2e-ollama"
 
 
 def find_entry(c, label=LABEL, provider=PROVIDER):
@@ -31,7 +32,10 @@ def cleanup(c):
     try:
         lst = c.get("/api/v1/ai/providers") or {}
         for p in lst.get("providers", []):
-            if p.get("provider") == PROVIDER and p.get("label") == LABEL:
+            owned = ((p.get("provider"), p.get("label")) in {
+                (PROVIDER, LABEL), ("ollama", OLLAMA_LABEL),
+            })
+            if owned:
                 c.req("DELETE", f"/api/v1/ai/providers/{p['id']}", expect=(200, 204, 404))
     except Exception:
         pass
@@ -44,7 +48,31 @@ def main():
         return 2
     cleanup(c)
     try:
-        # ── 1. create a provider with a plaintext key ─────────────────────
+        # ── 1. Ollama requires a reachable endpoint ──────────────────────
+        section("ollama base URL validation")
+        for raw in ("", "   "):
+            code, _ = c.req("POST", "/api/v1/ai/providers", {
+                "provider": "ollama", "label": OLLAMA_LABEL,
+                "api_key": "", "base_url": raw, "enabled": True,
+            }, expect=(400,))
+            check(f"ollama base_url {raw!r} -> 400", code == 400, f"status {code}")
+        entries = [p for p in (c.get("/api/v1/ai/providers") or {}).get("providers", [])
+                   if p.get("provider") == "ollama" and p.get("label") == OLLAMA_LABEL]
+        check("invalid ollama requests persist no row", not entries, str(entries))
+
+        code, resp = c.req("POST", "/api/v1/ai/providers", {
+            "provider": "ollama", "label": OLLAMA_LABEL,
+            "api_key": "", "base_url": "http://192.168.1.50:11434/v1/",
+            "enabled": True,
+        }, expect=(200, 201))
+        ollama = (resp or {}).get("provider") or {}
+        check("ollama with LAN base URL is accepted", code == 200 and bool(ollama.get("id")), str(resp)[:200])
+        check("ollama base URL is normalized",
+              ollama.get("base_url") == "http://192.168.1.50:11434", str(ollama))
+        if ollama.get("id"):
+            c.req("DELETE", f"/api/v1/ai/providers/{ollama['id']}", expect=(200, 204))
+
+        # ── 2. create a provider with a plaintext key ─────────────────────
         section("create provider (has_key True)")
         code, resp = c.req("POST", "/api/v1/ai/providers", {
             "provider": PROVIDER, "label": LABEL, "api_key": SECRET,
@@ -62,7 +90,7 @@ def main():
               SECRET not in json.dumps(resp), "plaintext key leaked in create response")
         pid = prov.get("id")
 
-        # ── 2. list providers + at-rest secrecy ───────────────────────────
+        # ── 3. list providers + at-rest secrecy ───────────────────────────
         section("list providers — key never leaves the server")
         code, lst = c.req("GET", "/api/v1/ai/providers", expect=(200,))
         check("list -> 200", code == 200, f"status {code}")
@@ -76,7 +104,7 @@ def main():
         check("list response does NOT contain plaintext key anywhere",
               SECRET not in json.dumps(lst), "plaintext key leaked in providers list")
 
-        # ── 3. rotate the key (upsert keeps has_key True) ─────────────────
+        # ── 4. rotate the key (upsert keeps has_key True) ─────────────────
         section("rotate key (upsert by provider+label)")
         code, resp = c.req("POST", "/api/v1/ai/providers", {
             "provider": PROVIDER, "label": LABEL, "api_key": "sk-rotated-456",
@@ -94,7 +122,7 @@ def main():
                    if p.get("provider") == PROVIDER and p.get("label") == LABEL]
         check("upsert did not create a duplicate row", len(entries) == 1, f"{len(entries)} entries")
 
-        # ── 4. update without key preserves stored key, flips enabled ─────
+        # ── 5. update without key preserves stored key, flips enabled ─────
         section("update with empty api_key preserves stored key")
         code, resp = c.req("POST", "/api/v1/ai/providers", {
             "provider": PROVIDER, "label": LABEL, "api_key": "",
@@ -108,7 +136,7 @@ def main():
         check("update still the same row (same id)", uprov.get("id") == pid,
               f"{uprov.get('id')} != {pid}")
 
-        # ── 5. delete -> 204, entry gone ──────────────────────────────────
+        # ── 6. delete -> 204, entry gone ──────────────────────────────────
         section("delete provider")
         code = c.delete(f"/api/v1/ai/providers/{pid}")
         check("delete -> 204", code == 204, f"status {code}")

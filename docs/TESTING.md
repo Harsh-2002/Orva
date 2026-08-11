@@ -155,9 +155,8 @@ For `network_mode: egress` the argv is prefixed with
 **The path is hardcoded, not resolved from `$PATH`.**
 `backend/internal/config/defaults.go:42` sets
 `NsjailBin: "/usr/local/bin/nsjail"` and there is no environment override.
-CONTRACT §1's "nsjail on `PATH`" is imprecise — a host with nsjail at
-`/usr/bin/nsjail` satisfies the documented requirement and still fails every
-invocation.
+CONTRACT §1 records that exact requirement; installing nsjail only at
+`/usr/bin/nsjail` still fails every invocation.
 
 **Do not trust the health field.**
 
@@ -444,7 +443,8 @@ export KEY=$(grep -o 'orva_[A-Za-z0-9_]*' ~/.orva/config.yaml | head -1)
 
 ### 2.7 Port map
 
-CONTRACT §5's table is incomplete for testing. The full picture:
+CONTRACT §5 records the application and isolated-E2E ports. The fuller testing
+picture is:
 
 | Context | Port | Source |
 |---|---|---|
@@ -453,7 +453,7 @@ CONTRACT §5's table is incomplete for testing. The full picture:
 | Frontend dev server | 5173 | `make dev` |
 | Shell suites' default `BASE_URL` | **18443** | `test/*.sh` |
 | `harness.ORVA_URL` default | 8443 | `test/e2e/harness.py:33` |
-| **Isolated E2E container, host side** | **8455** | `test/e2e/env.py` (`ORVA_E2E_PORT`) — absent from CONTRACT §5 |
+| **Isolated E2E container, host side** | **8455** | `test/e2e/env.py` (`ORVA_E2E_PORT`) |
 | Mock LLM | 11434 | `run.py` / `harness.py` (`MOCK_PORT`) — **collides with Ollama's default** |
 | `install-matrix` distro containers | **19449–19454** | `run-distro.sh`, `19443 + NR-1` over a file with 6 comment lines; the script's own usage text says 19443+index and is wrong |
 | `failure-modes.sh` / `kata-flow.sh` / kata-bench | 19999 / 28443 / 38443 / 18443 | — |
@@ -2187,9 +2187,6 @@ it; fix rather than route around where you can.
 | Doc | Claim | Reality |
 |---|---|---|
 | `docs/RUNTIMES.md` | dependency installs run "on the host (not in the sandbox)" | exactly backwards — every install runs inside nsjail via `sandbox.RunBuild`; the server log proves it (§4.2) |
-| CONTRACT §1 | nsjail "on `PATH`" | the path is hardcoded to `/usr/local/bin/nsjail` with no override |
-| CONTRACT §4, CLAUDE.md | `frontend/public/docs.md` is "served at `/docs.md`" | `GET /docs.md` is 404; it is `/web/docs.md` |
-| CONTRACT §5 | port table | omits the E2E container's host port 8455 |
 | CONTRACT §6, `docs/CONTRIBUTING.md` | `test/run-all.sh` is part of the gate | no CI job runs it or any of its members |
 | CLAUDE.md | the installer/CLI E2E suites "all run on PRs" | on PRs they are path-filtered and normally skip; `cli-upgrade` and `released-container` never run on push or PR at all |
 | `test/CLAUDE.md`, `docs/CONTRIBUTING.md` | the `run-all.sh` member list | both omit `build-cache-test.sh`, which the umbrella does run |
