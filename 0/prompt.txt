@@ -1,0 +1,13 @@
+contiue
+
+---
+
+dont merge it yet let it pass the CI and complie the update teh currnt orva deployment on this node. can you do it ?
+
+---
+
+no need to wait for CI this is dev node - complie and repalce binary
+
+---
+
+all good in UI/UX but in settings section why you made it narrow laout instaed of propeyr wide liek otehr pages we have it should follow the standard right ? can you do that make it side but also standard
