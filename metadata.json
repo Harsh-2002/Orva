@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZQYNE1PY127PY52FGKSAJYR",
+  "strategy": "manual-commit",
+  "branch": "feat/ui-declutter",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".impeccable/design.json",
+    "DESIGN.md",
+    "backend/internal/oauth/consent.tmpl",
+    "backend/internal/server/oauth_e2e_test.go",
+    "frontend/src/components/ai/ConversationRail.vue",
+    "frontend/src/style.css",
+    "frontend/test/themeContrast.test.js",
+    "frontend/test/touchTargets.test.js"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 113243,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 5362688,
+    "output_tokens": 19074,
+    "api_call_count": 37
+  }
+}

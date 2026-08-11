@@ -1,0 +1,5 @@
+Also, there is some bugs as well. So sometimes in the UI on the side left or section, sometimes I click it does not clickable. So this is the bug I also notice. Like I click on it multiple times, it doesn't, it does not click at all. So this is a bug that I found. So you need to find the root cause for it and fix it
+
+---
+
+So one major change that I want currently our background is like some kind of light purple, right? It has really one of the worst contrast, right? It is not readable at all. So what I'm thinking, can you use gray like light grey kind of thumb something I mean sets in black which does matches perfectly like we have to just update the background right so according to the text and whatever we have it should have a better background that can give gives a better contrast and also feel very much good and modern right so this is what you need to figure out and do it as well and it should be consistent across all the pages everything globally right this is global change
