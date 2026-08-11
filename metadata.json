@@ -1,0 +1,62 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZRD0B5347GGSYG1V60P1EZZ",
+  "strategy": "manual-commit",
+  "branch": "codex/pool-controller-v2",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "backend/internal/database/keys.go",
+    "backend/internal/database/migrations.go",
+    "backend/internal/database/pool_config_v2_test.go",
+    "backend/internal/mcp/tools_pool.go",
+    "backend/internal/mcp/tools_system.go",
+    "backend/internal/pool/autoscaler.go",
+    "backend/internal/pool/autoscaler_v2_test.go",
+    "backend/internal/pool/egress_retire_test.go",
+    "backend/internal/pool/function_pool.go",
+    "backend/internal/pool/hostmem.go",
+    "backend/internal/pool/hostmem_v2_test.go",
+    "backend/internal/pool/pool.go",
+    "backend/internal/pool/pool_generation_test.go",
+    "backend/internal/sandbox/sandbox.go",
+    "backend/internal/sandbox/worker.go",
+    "backend/internal/scheduler/scheduler.go",
+    "backend/internal/server/handlers/errmap.go",
+    "backend/internal/server/handlers/inbound_webhook_trigger.go",
+    "backend/internal/server/handlers/internal_invoke.go",
+    "backend/internal/server/handlers/pool.go",
+    "backend/internal/server/handlers/pool_v2_test.go",
+    "backend/internal/server/handlers/replay.go",
+    "backend/internal/server/handlers/system.go",
+    "cli/commands/pool.go",
+    "docs/API.md",
+    "docs/ARCHITECTURE.md",
+    "docs/CAPACITY.md",
+    "docs/CLI.md",
+    "docs/CONFIG.md",
+    "docs/ERRORS.md",
+    "docs/OPERATIONS.md",
+    "docs/RUNTIMES.md",
+    "docs/reference.md",
+    "frontend/src/stores/system.js",
+    "frontend/src/views/Dashboard.vue",
+    "test/atscale.sh",
+    "test/errors-test.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2006999,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 116050432,
+    "output_tokens": 262841,
+    "api_call_count": 1593
+  }
+}
