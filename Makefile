@@ -47,7 +47,7 @@ docs-embed:
 # Copy adapter sources + bundled SDK into backend/cmd/orva/adapters/ so
 # //go:embed has them at build time. Keeps backend/runtimes/ as the
 # source-of-truth directory (shared with Dockerfile COPY paths).
-# Also copies the v0.2 orva SDK module (kv / invoke / jobs).
+# Also copies the bundled Orva SDK module (kv / invoke / jobs / tracing).
 adapters-embed:
 	@rm -rf backend/cmd/orva/adapters
 	@mkdir -p backend/cmd/orva/adapters/node backend/cmd/orva/adapters/python
@@ -55,7 +55,7 @@ adapters-embed:
 	@cp backend/runtimes/python/adapter.py   backend/cmd/orva/adapters/python/adapter.py
 	@cp backend/runtimes/node/orva.js        backend/cmd/orva/adapters/node/orva.js
 	@cp backend/runtimes/python/orva.py      backend/cmd/orva/adapters/python/orva.py
-	@# v0.6 SDK: ship .d.ts + package.json so TS handlers get types;
+	@# Ship .d.ts + package.json so TS handlers get types;
 	@# py.typed marks the Python module as fully typed for static checkers.
 	@cp backend/runtimes/node/orva.d.ts      backend/cmd/orva/adapters/node/orva.d.ts
 	@cp backend/runtimes/node/package.json   backend/cmd/orva/adapters/node/package.json

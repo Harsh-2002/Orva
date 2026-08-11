@@ -1,34 +1,33 @@
 package handlers
 
 import (
-	"crypto/subtle"
 	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
 // SpansHandler accepts user-defined spans emitted from orva.trace.span()
-// inside a sandbox. Authentication is the per-process internal token
+// inside a sandbox. Authentication is the function-scoped SDK credential
 // (same as KV and F2F). Insertion is fire-and-forget — the handler
 // returns 202 Accepted immediately and the async writer commits the row
 // alongside any other batched writes.
 type SpansHandler struct {
-	DB            *database.Database
-	InternalToken string
+	DB      *database.Database
+	SDKAuth *sdkauth.Authenticator
 }
 
-func (h *SpansHandler) authorize(w http.ResponseWriter, r *http.Request) bool {
-	got := r.Header.Get("X-Orva-Internal-Token")
-	if h.InternalToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(h.InternalToken)) != 1 {
+func (h *SpansHandler) authorize(w http.ResponseWriter, r *http.Request) (string, bool) {
+	caller, err := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+	if err != nil {
 		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid internal token", r.Header.Get("X-Request-ID"))
-		return false
+			"missing or invalid SDK credential", r.Header.Get("X-Request-ID"))
+		return "", false
 	}
-	return true
+	return caller, true
 }
 
 // userSpanRequest is the wire shape the runtime SDK sends. The trace ID,
@@ -47,20 +46,25 @@ type userSpanRequest struct {
 // Create handles POST /api/v1/_internal/spans. Returns 202 with the
 // generated span ID — the actual DB write is batched async.
 func (h *SpansHandler) Create(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(w, r) {
+	callerFnID, ok := h.authorize(w, r)
+	if !ok {
 		return
 	}
 	reqID := r.Header.Get("X-Request-ID")
-	traceID := r.Header.Get("X-Orva-Trace-Id")
-	parentSpanID := r.Header.Get("X-Orva-Span-Id")
 	execID := r.Header.Get("X-Orva-Execution-Id")
-	if traceID == "" || parentSpanID == "" || execID == "" {
+	if execID == "" {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION",
-			"missing trace/span/execution context headers", reqID)
+			"missing execution context header", reqID)
+		return
+	}
+	traceID, parentSpanID, executionStart, owned := h.SDKAuth.TraceContext(execID, callerFnID)
+	if !owned {
+		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+			"span execution is not active for the calling function", reqID)
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	body, err := readBoundedBody(r.Body, 1<<16)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
@@ -83,11 +87,9 @@ func (h *SpansHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// row's final insert), we fall back to "now since some reasonable
 	// origin" — the dashboard renders these defensively.
 	offset := int64(0)
-	if exec, err := h.DB.GetExecution(execID); err == nil && !exec.StartedAt.IsZero() {
-		d := req.StartedAt.Sub(exec.StartedAt)
-		if d > 0 {
-			offset = d.Milliseconds()
-		}
+	offset = req.StartedAt.Sub(executionStart).Milliseconds()
+	if offset < 0 {
+		offset = 0
 	}
 
 	span := &database.UserSpan{

@@ -59,14 +59,14 @@
       </div>
       <button
         v-if="prefix"
-        class="text-[11px] text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
+        class="text-xs text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
         @click="prefix = ''; refresh()"
       >
         Clear
       </button>
       <span
         v-if="truncated"
-        class="text-[11px] text-amber-400/80"
+        class="text-xs text-amber-400/80"
       >
         Showing first {{ rows.length }}. Narrow the prefix to see more.
       </span>
@@ -87,10 +87,10 @@
               <div class="font-mono text-xs text-white break-all">
                 {{ row.key }}
               </div>
-              <div class="mt-1 font-mono text-[11px] text-foreground-muted break-all">
+              <div class="mt-1 font-mono text-xs text-foreground-muted break-all">
                 {{ valuePreview(row.value) }}
               </div>
-              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-foreground-muted">
                 <span
                   v-if="row.expires_at"
                   :class="ttlClass(row.expires_at)"
@@ -226,7 +226,7 @@
         <!-- Stat strip -->
         <div class="grid grid-cols-2 gap-3">
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+            <div class="text-xs uppercase tracking-wider text-foreground-muted mb-1">
               Key
             </div>
             <div class="text-xs text-white font-mono break-all">
@@ -234,7 +234,7 @@
             </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+            <div class="text-xs uppercase tracking-wider text-foreground-muted mb-1">
               TTL
             </div>
             <div
@@ -245,7 +245,7 @@
             </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+            <div class="text-xs uppercase tracking-wider text-foreground-muted mb-1">
               Updated
             </div>
             <div class="text-xs text-white font-mono truncate">
@@ -253,7 +253,7 @@
             </div>
           </div>
           <div class="bg-surface border border-border rounded p-3 min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
+            <div class="text-xs uppercase tracking-wider text-foreground-muted mb-1">
               Size
             </div>
             <div class="text-xs text-white font-mono">
@@ -274,9 +274,10 @@
             min="0"
             max="31536000"
             class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            @input="inspect.ttlTouched = true"
           >
           <p
-            class="text-[11px] mt-1.5"
+            class="text-xs mt-1.5"
             :class="ttlInvalid(inspect.ttlSeconds) ? 'text-danger-fg' : 'text-foreground-muted'"
           >
             Must be between 0 and 31536000 (1 year).
@@ -359,9 +360,10 @@
             min="0"
             max="31536000"
             class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            @input="setKey.ttlTouched = true"
           >
           <p
-            class="text-[11px] mt-1.5"
+            class="text-xs mt-1.5"
             :class="ttlInvalid(setKey.ttlSeconds) ? 'text-danger-fg' : 'text-foreground-muted'"
           >
             Must be between 0 and 31536000 (1 year).
@@ -432,12 +434,13 @@ const saving = ref(false)
 const prefix = ref('')
 
 // Inspect drawer state. row holds the wire entry; text is the editable
-// JSON; ttlSeconds is what we send back on Save (0 = never).
+// JSON; untouched TTL inputs are omitted so updates preserve expiry.
 const inspect = reactive({
   open: false,
   row: null,
   text: '',
   ttlSeconds: 0,
+  ttlTouched: false,
   error: '',
 })
 
@@ -446,6 +449,7 @@ const setKey = reactive({
   key: '',
   text: '',
   ttlSeconds: 0,
+  ttlTouched: false,
   error: '',
 })
 
@@ -502,6 +506,7 @@ const openInspect = (row) => {
   // escape-laden one-line string.
   inspect.text = prettyJSON(row.value)
   inspect.ttlSeconds = row.expires_at ? Math.max(0, Math.floor((new Date(row.expires_at) - Date.now()) / 1000)) : 0
+  inspect.ttlTouched = false
   inspect.error = ''
   inspect.open = true
 }
@@ -521,10 +526,9 @@ const saveInspect = async () => {
   inspect.error = ''
   saving.value = true
   try {
-    await kvPut(fnName.value, inspect.row.key, {
-      value: parsed,
-      ttl_seconds: inspect.ttlSeconds || 0,
-    })
+    const payload = { value: parsed }
+    if (inspect.ttlTouched) payload.ttl_seconds = inspect.ttlSeconds
+    await kvPut(fnName.value, inspect.row.key, payload)
     inspect.open = false
     await refresh()
   } catch (e) {
@@ -552,6 +556,7 @@ const openSet = () => {
   setKey.key = ''
   setKey.text = ''
   setKey.ttlSeconds = 0
+  setKey.ttlTouched = false
   setKey.error = ''
   setKey.open = true
 }
@@ -580,10 +585,9 @@ const saveSetKey = async () => {
   setKey.error = ''
   saving.value = true
   try {
-    await kvPut(fnName.value, key, {
-      value: parsed,
-      ttl_seconds: setKey.ttlSeconds || 0,
-    })
+    const payload = { value: parsed }
+    if (setKey.ttlTouched) payload.ttl_seconds = setKey.ttlSeconds
+    await kvPut(fnName.value, key, payload)
     setKey.open = false
     await refresh()
   } catch (e) {

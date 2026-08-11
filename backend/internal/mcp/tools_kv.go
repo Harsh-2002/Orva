@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -123,11 +122,11 @@ type KVPutInput struct {
 	FunctionID string  `json:"function_id" jsonschema:"function id (UUID) or name owning this key"`
 	Key        string  `json:"key"`
 	Value      KVValue `json:"value" jsonschema:"the value to store; populate one typed field matching the type field"`
-	TTLSeconds int     `json:"ttl_seconds,omitempty" jsonschema:"0 (default) = no expiry; positive = expire after that many seconds"`
+	TTLSeconds *int    `json:"ttl_seconds,omitempty" jsonschema:"omit to preserve an existing expiry; 0 removes expiry; positive expires after that many seconds"`
 }
 type KVPutOutput struct {
 	Key        string `json:"key"`
-	TTLSeconds int    `json:"ttl_seconds"`
+	TTLSeconds *int   `json:"ttl_seconds,omitempty"`
 }
 
 type KVDeleteInput struct {
@@ -155,7 +154,7 @@ type KVIncrInput struct {
 	FunctionID string `json:"function_id" jsonschema:"function id (UUID) or name owning this key"`
 	Key        string `json:"key"`
 	Delta      int64  `json:"delta,omitempty" jsonschema:"increment amount; default 1; negative decrements"`
-	TTLSeconds int    `json:"ttl_seconds,omitempty" jsonschema:"0 = preserve existing TTL; positive = refresh expiry"`
+	TTLSeconds *int   `json:"ttl_seconds,omitempty" jsonschema:"omit to preserve an existing expiry; 0 removes expiry; positive refreshes expiry"`
 }
 type KVIncrOutput struct {
 	Value int64 `json:"value"`
@@ -168,7 +167,7 @@ type KVCASInput struct {
 	Key        string  `json:"key"`
 	Expected   KVValue `json:"expected" jsonschema:"current value to match before swapping; populate exactly one typed field"`
 	New        KVValue `json:"new" jsonschema:"value to install when Expected matches"`
-	TTLSeconds int     `json:"ttl_seconds,omitempty"`
+	TTLSeconds *int    `json:"ttl_seconds,omitempty" jsonschema:"omit to preserve an existing expiry; 0 removes expiry; positive refreshes expiry"`
 }
 type KVCASOutput struct {
 	OK      bool     `json:"ok"`
@@ -186,16 +185,16 @@ func registerKVTools(rc *regCtx) {
 			Description: "Read a value from a function's per-namespace KV store. Returns found=false if the key is missing or has expired (TTL elapsed).",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVGetInput) (*mcpsdk.CallToolResult, KVGetOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in KVGetInput) (*mcpsdk.CallToolResult, KVGetOutput, error) {
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {
 				return nil, KVGetOutput{}, err
 			}
-			key := strings.TrimSpace(in.Key)
-			if key == "" {
-				return nil, KVGetOutput{}, errors.New("key is required")
+			key := in.Key
+			if err := database.ValidateKVKey(key); err != nil {
+				return nil, KVGetOutput{}, err
 			}
-			entry, err := deps.DB.KVGet(fn.ID, key)
+			entry, err := deps.DB.KVGetContext(ctx, fn.ID, key)
 			if errors.Is(err, database.ErrKVNotFound) {
 				return nil, KVGetOutput{Found: false}, nil
 			}
@@ -214,20 +213,20 @@ func registerKVTools(rc *regCtx) {
 			Description: "Write a value to a function's KV store. value can be any JSON-serializable type; it's stored as JSON and returned by kv_get with the same shape. Optional ttl_seconds expires the key automatically.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVPutInput) (*mcpsdk.CallToolResult, KVPutOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in KVPutInput) (*mcpsdk.CallToolResult, KVPutOutput, error) {
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {
 				return nil, KVPutOutput{}, err
 			}
-			key := strings.TrimSpace(in.Key)
-			if key == "" {
-				return nil, KVPutOutput{}, errors.New("key is required")
+			key := in.Key
+			if err := database.ValidateKVKey(key); err != nil {
+				return nil, KVPutOutput{}, err
 			}
 			body, err := encodeKVValue(in.Value)
 			if err != nil {
 				return nil, KVPutOutput{}, err
 			}
-			if err := deps.DB.KVPut(fn.ID, key, body, in.TTLSeconds); err != nil {
+			if err := deps.DB.KVPutContext(ctx, fn.ID, key, body, in.TTLSeconds); err != nil {
 				return nil, KVPutOutput{}, err
 			}
 			return nil, KVPutOutput{Key: key, TTLSeconds: in.TTLSeconds}, nil
@@ -241,12 +240,12 @@ func registerKVTools(rc *regCtx) {
 			Description: "Remove a single key from a function's KV store. Idempotent — returns ok even if the key never existed.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVDeleteInput) (*mcpsdk.CallToolResult, KVDeleteOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in KVDeleteInput) (*mcpsdk.CallToolResult, KVDeleteOutput, error) {
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {
 				return nil, KVDeleteOutput{}, err
 			}
-			if err := deps.DB.KVDelete(fn.ID, in.Key); err != nil {
+			if err := deps.DB.KVDeleteContext(ctx, fn.ID, in.Key); err != nil {
 				return nil, KVDeleteOutput{}, err
 			}
 			return nil, KVDeleteOutput{Status: "deleted", Key: in.Key}, nil
@@ -260,12 +259,12 @@ func registerKVTools(rc *regCtx) {
 			Description: "List a function's KV keys, optionally filtered by prefix. Useful for inspecting what state a function has accumulated. Expired keys are excluded.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVListInput) (*mcpsdk.CallToolResult, KVListOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in KVListInput) (*mcpsdk.CallToolResult, KVListOutput, error) {
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {
 				return nil, KVListOutput{}, err
 			}
-			page, err := deps.DB.KVListWithCursor(fn.ID, in.Prefix, in.Cursor, in.Limit)
+			page, err := deps.DB.KVListWithCursorContext(ctx, fn.ID, in.Prefix, in.Cursor, in.Limit)
 			if err != nil {
 				return nil, KVListOutput{}, err
 			}
@@ -287,20 +286,20 @@ func registerKVTools(rc *regCtx) {
 			Description: "Atomically increment an integer counter. Missing keys are treated as 0; pass a negative delta to decrement. Use this instead of read+put when multiple writers can update the same counter concurrently.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVIncrInput) (*mcpsdk.CallToolResult, KVIncrOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in KVIncrInput) (*mcpsdk.CallToolResult, KVIncrOutput, error) {
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {
 				return nil, KVIncrOutput{}, err
 			}
-			key := strings.TrimSpace(in.Key)
-			if key == "" {
-				return nil, KVIncrOutput{}, errors.New("key is required")
+			key := in.Key
+			if err := database.ValidateKVKey(key); err != nil {
+				return nil, KVIncrOutput{}, err
 			}
 			delta := in.Delta
 			if delta == 0 {
 				delta = 1
 			}
-			next, err := deps.DB.KVIncr(fn.ID, key, delta, in.TTLSeconds)
+			next, err := deps.DB.KVIncrContext(ctx, fn.ID, key, delta, in.TTLSeconds)
 			if err != nil {
 				return nil, KVIncrOutput{}, err
 			}
@@ -315,14 +314,14 @@ func registerKVTools(rc *regCtx) {
 			Description: "Atomically swap a key's value only if the current value matches Expected. Useful for safe read-modify-write loops where multiple writers could otherwise overwrite each other. Returns ok=false plus the current value when the precondition fails.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: false, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in KVCASInput) (*mcpsdk.CallToolResult, KVCASOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in KVCASInput) (*mcpsdk.CallToolResult, KVCASOutput, error) {
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {
 				return nil, KVCASOutput{}, err
 			}
-			key := strings.TrimSpace(in.Key)
-			if key == "" {
-				return nil, KVCASOutput{}, errors.New("key is required")
+			key := in.Key
+			if err := database.ValidateKVKey(key); err != nil {
+				return nil, KVCASOutput{}, err
 			}
 			expected, err := encodeKVValue(in.Expected)
 			if err != nil {
@@ -332,7 +331,7 @@ func registerKVTools(rc *regCtx) {
 			if err != nil {
 				return nil, KVCASOutput{}, err
 			}
-			ok, current, err := deps.DB.KVCAS(fn.ID, key, expected, next, in.TTLSeconds)
+			ok, current, err := deps.DB.KVCASContext(ctx, fn.ID, key, expected, next, in.TTLSeconds)
 			if err != nil {
 				return nil, KVCASOutput{}, err
 			}

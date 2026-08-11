@@ -124,15 +124,15 @@ func init() {
 	kvListCmd.Flags().Int("limit", 200, "maximum number of entries to return (max 1000)")
 
 	kvPutCmd.Flags().String("value", "", "JSON value to store: inline, @file, or @- for stdin (required)")
-	kvPutCmd.Flags().Int("ttl", 0, "TTL in seconds (0 = no expiry)")
+	kvPutCmd.Flags().Int("ttl", 0, "TTL seconds (omit=preserve, 0=clear, positive=set)")
 	kvPutCmd.MarkFlagRequired("value")
 
 	kvIncrCmd.Flags().Int64("by", 1, "amount to add (may be negative)")
-	kvIncrCmd.Flags().Int("ttl", 0, "TTL in seconds to (re)set on the key (0 = preserve existing)")
+	kvIncrCmd.Flags().Int("ttl", 0, "TTL seconds (omit=preserve, 0=clear, positive=set)")
 
 	kvCASCmd.Flags().String("expected", "", "expected current JSON value; 'null' means the key must not exist (required)")
 	kvCASCmd.Flags().String("new", "", "new JSON value to store if the precondition holds (required)")
-	kvCASCmd.Flags().Int("ttl", 0, "TTL in seconds to set on the new value (0 = no expiry)")
+	kvCASCmd.Flags().Int("ttl", 0, "TTL seconds (omit=preserve, 0=clear, positive=set)")
 	kvCASCmd.MarkFlagRequired("expected")
 	kvCASCmd.MarkFlagRequired("new")
 
@@ -270,6 +270,9 @@ func runKVPut(cmd *cobra.Command, args []string) error {
 
 	valueArg, _ := cmd.Flags().GetString("value")
 	ttl, _ := cmd.Flags().GetInt("ttl")
+	if ttl < 0 {
+		return fmt.Errorf("put: --ttl must be >= 0")
+	}
 
 	data, err := readBodyArg(valueArg)
 	if err != nil {
@@ -283,7 +286,7 @@ func runKVPut(cmd *cobra.Command, args []string) error {
 	body := map[string]any{
 		"value": value,
 	}
-	if ttl > 0 {
+	if cmd.Flags().Changed("ttl") {
 		body["ttl_seconds"] = ttl
 	}
 
@@ -300,7 +303,7 @@ func runKVPut(cmd *cobra.Command, args []string) error {
 	if outputJSON(cmd) {
 		return emitRaw(respBody)
 	}
-	if ttl > 0 {
+	if cmd.Flags().Changed("ttl") {
 		okf(cmd, "KV entry %q saved (ttl %ds)", key, ttl)
 	} else {
 		okf(cmd, "KV entry %q saved", key)
@@ -354,9 +357,12 @@ func runKVIncr(cmd *cobra.Command, args []string) error {
 	key := args[1]
 	by, _ := cmd.Flags().GetInt64("by")
 	ttl, _ := cmd.Flags().GetInt("ttl")
+	if ttl < 0 {
+		return fmt.Errorf("incr: --ttl must be >= 0")
+	}
 
 	body := map[string]any{"delta": by}
-	if ttl > 0 {
+	if cmd.Flags().Changed("ttl") {
 		body["ttl_seconds"] = ttl
 	}
 
@@ -398,6 +404,9 @@ func runKVCAS(cmd *cobra.Command, args []string) error {
 	expectedArg, _ := cmd.Flags().GetString("expected")
 	newArg, _ := cmd.Flags().GetString("new")
 	ttl, _ := cmd.Flags().GetInt("ttl")
+	if ttl < 0 {
+		return fmt.Errorf("cas: --ttl must be >= 0")
+	}
 
 	var expected json.RawMessage
 	if err := json.Unmarshal([]byte(expectedArg), &expected); err != nil {
@@ -409,7 +418,7 @@ func runKVCAS(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"expected": expected, "new": newVal}
-	if ttl > 0 {
+	if cmd.Flags().Changed("ttl") {
 		body["ttl_seconds"] = ttl
 	}
 

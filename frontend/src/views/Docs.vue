@@ -321,7 +321,7 @@
             module exposes three primitives every function can use without
             extra dependencies: a per-function key/value store, in-process
             calls to other Orva functions, and a fire-and-forget background
-            job queue. Routes through the per-process internal token
+            job queue. Routes through a process-signed, function-scoped credential
             injected at worker spawn time.
           </p>
         </div>

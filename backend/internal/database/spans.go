@@ -12,17 +12,17 @@ import (
 // `executions` still carries the canonical "this execution ran" span;
 // user_spans rows describe substages inside that execution.
 type UserSpan struct {
-	ID            string     `json:"id"`
-	TraceID       string     `json:"trace_id"`
-	ParentSpanID  string     `json:"parent_span_id"`
-	ExecutionID   string     `json:"execution_id"`
-	Name          string     `json:"name"`
-	StartedAt     time.Time  `json:"started_at"`
-	DurationMS    int64      `json:"duration_ms"`
-	Attributes    string     `json:"attributes,omitempty"`
-	Status        string     `json:"status"`
-	ErrorMessage  string     `json:"error_message,omitempty"`
-	OffsetMS      int64      `json:"offset_ms"`
+	ID           string    `json:"id"`
+	TraceID      string    `json:"trace_id"`
+	ParentSpanID string    `json:"parent_span_id"`
+	ExecutionID  string    `json:"execution_id"`
+	Name         string    `json:"name"`
+	StartedAt    time.Time `json:"started_at"`
+	DurationMS   int64     `json:"duration_ms"`
+	Attributes   string    `json:"attributes,omitempty"`
+	Status       string    `json:"status"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+	OffsetMS     int64     `json:"offset_ms"`
 }
 
 // AsyncInsertUserSpan queues an insert of a user-defined span. The
@@ -36,7 +36,7 @@ func (db *Database) AsyncInsertUserSpan(s *UserSpan) {
 	if s.Status == "" {
 		s.Status = "ok"
 	}
-	db.AsyncExec(`
+	db.AsyncExecTelemetry(`
 		INSERT INTO user_spans (id, trace_id, parent_span_id, execution_id,
 		                       name, started_at, duration_ms, attributes,
 		                       status, error_message, offset_ms)

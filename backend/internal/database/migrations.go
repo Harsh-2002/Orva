@@ -856,8 +856,8 @@ PRAGMA foreign_keys = ON;
 
 	// Kick off the batched async writer now that the schema exists. Safe
 	// to call multiple times — Migrate is idempotent and we only start the
-	// writer if it's nil. Tests that don't call Migrate continue to use
-	// the goroutine-per-call fallback in Async().
+	// writer if it's nil. Tests that don't call Migrate use direct bounded
+	// writes without spawning overflow goroutines.
 	if db.writer == nil {
 		db.writer = newAsyncWriter(db)
 		db.writer.start()

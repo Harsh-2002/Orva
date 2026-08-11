@@ -26,6 +26,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/scheduler"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
@@ -109,12 +110,11 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// After first run the UI authenticates via session cookies from /auth/login.
 	bootstrapAdminKey(db, cfg.Data.Dir)
 
-	// Internal token — process-lifetime random secret injected into every
-	// sandboxed worker as ORVA_INTERNAL_TOKEN. The adapter uses it to
-	// authenticate against /api/v1/_kv/, /api/v1/_internal/invoke/, and
-	// /api/v1/_jobs/. Regenerated on each restart so a leaked token from
-	// stderr can't be replayed past the next deploy.
-	internalToken := generateInternalToken()
+	// Process-lifetime signing key for function-scoped SDK credentials.
+	// Workers receive a token containing their immutable function ID; the
+	// server derives caller identity from the verified claim.
+	internalToken := generateSDKSigningKey()
+	sdkAuth := sdkauth.New([]byte(internalToken))
 	// API base for the worker SDK. From inside a sandbox with
 	// network_mode=egress, 127.0.0.1 is the sandbox's own loopback —
 	// useless for reaching orvad. The right destination is whatever IP
@@ -147,7 +147,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			DataDir:        cfg.Data.Dir,
 			DefaultSeccomp: cfg.Sandbox.SeccompPolicy,
 			DefaultMaxPids: cfg.Functions.DefaultMaxPids,
-			InternalToken:  internalToken,
+			SDKToken:       sdkAuth.Mint,
 			APIBaseURL:     apiBase,
 			Metrics:        met,
 		},
@@ -159,6 +159,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		Sandbox: limiter,
 		Pool:    poolMgr,
 		DB:      db,
+		SDKAuth: sdkAuth,
 		Config: proxy.ProxyConfig{
 			NsjailBin: cfg.Sandbox.NsjailBin,
 			RootfsDir: cfg.Sandbox.RootfsDir,
@@ -273,17 +274,17 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	fw.Start(context.Background())
 
 	deps := RouterDeps{
-		Registry:      reg,
-		Proxy:         px,
-		Builder:       bld,
-		Metrics:       met,
-		Secrets:       sm,
-		BuildQueue:    buildQueue,
-		PoolMgr:       poolMgr,
-		EventHub:      hub,
-		Firewall:      fw,
-		InternalToken: internalToken,
-		StartTime:     startTime,
+		Registry:   reg,
+		Proxy:      px,
+		Builder:    bld,
+		Metrics:    met,
+		Secrets:    sm,
+		BuildQueue: buildQueue,
+		PoolMgr:    poolMgr,
+		EventHub:   hub,
+		Firewall:   fw,
+		SDKAuth:    sdkAuth,
+		StartTime:  startTime,
 	}
 
 	router := NewRouter(cfg, db, deps)
@@ -302,6 +303,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// pass first.
 	sched := scheduler.New(db, poolMgr, cfg.Data.Dir, hub)
 	sched.SetMetrics(met)
+	sched.SetSDKAuth(sdkAuth)
 	sched.SetEgressGuard(fw)
 
 	// WebhookFanout subscribes to the Hub and writes webhook_deliveries
@@ -564,15 +566,12 @@ func defaultRouteGatewayIPv4() string {
 	return ""
 }
 
-// generateInternalToken returns a fresh 32-byte random hex string used as
-// the per-process token injected into every worker as ORVA_INTERNAL_TOKEN.
-// Regenerated on each server start so a leaked token from a single boot
-// can't be replayed forever.
-func generateInternalToken() string {
+// generateSDKSigningKey returns a fresh 32-byte signing key. It is regenerated
+// on every start, which makes credentials from a previous process stale.
+func generateSDKSigningKey() string {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// Fall back to a time-based string. Should never happen on Linux.
-		return fmt.Sprintf("orva-internal-%d", time.Now().UnixNano())
+		panic("generate SDK signing key: " + err.Error())
 	}
 	return hex.EncodeToString(b[:])
 }

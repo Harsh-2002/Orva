@@ -314,7 +314,10 @@ orva kv delete greeter visits
 ```
 
 `kv put --value` accepts an inline string, `@file`, or `@-` (stdin).
-Values are JSON, capped at 64 KB.
+Keys must be non-empty UTF-8 and are capped at 256 characters. Values must be
+valid JSON and are capped at 64 KiB. Omitting `--ttl` preserves an existing
+expiry (and creates persistent new keys); `--ttl 0` removes expiry; a positive
+TTL sets or refreshes it. Negative TTLs are rejected.
 
 Atomic counters and compare-and-swap are available too:
 

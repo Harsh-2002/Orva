@@ -21,6 +21,7 @@ type Database struct {
 	// pressure under sustained 500+ req/s. nil until Migrate() is called
 	// (so tests that create a Database without migrating still work).
 	writer *asyncWriter
+	kv     kvMetrics
 
 	// asyncWG tracks fire-and-forget goroutines (log inserts, last-used
 	// updates) so Close() can wait for them to finish before tearing the

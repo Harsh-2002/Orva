@@ -41,24 +41,24 @@ type SystemHandler struct {
 // /metrics endpoint stays for Prometheus scrapers; this is the cheaper
 // path for the dashboard so it doesn't have to parse Prom text.
 type MetricsJSONShape struct {
-	UptimeSeconds  int64                `json:"uptime_seconds"`
-	Host           hostBlock            `json:"host"`
-	Totals         totalsBlock          `json:"totals"`
-	Rates          ratesBlock           `json:"rates"`
-	ActiveRequests int64                `json:"active_requests"`
-	LatencyMS      latencyBlock         `json:"latency_ms"`
-	Sandbox        sandboxBlock         `json:"sandbox"`
-	BuildQueue     buildQueueBlock      `json:"build_queue"`
-	Pools          []poolBlock          `json:"pools"`
+	UptimeSeconds  int64           `json:"uptime_seconds"`
+	Host           hostBlock       `json:"host"`
+	Totals         totalsBlock     `json:"totals"`
+	Rates          ratesBlock      `json:"rates"`
+	ActiveRequests int64           `json:"active_requests"`
+	LatencyMS      latencyBlock    `json:"latency_ms"`
+	Sandbox        sandboxBlock    `json:"sandbox"`
+	BuildQueue     buildQueueBlock `json:"build_queue"`
+	Pools          []poolBlock     `json:"pools"`
 }
 
 type hostBlock struct {
-	NumCPU         int    `json:"num_cpu"`
-	NumGoroutines  int    `json:"num_goroutines"`
-	OrvaAllocMB    int64  `json:"orva_alloc_mb"`
-	MemTotalMB     int64  `json:"mem_total_mb"`
-	MemAvailableMB int64  `json:"mem_available_mb"`
-	MemReservedMB  int64  `json:"mem_reserved_mb"`
+	NumCPU         int   `json:"num_cpu"`
+	NumGoroutines  int   `json:"num_goroutines"`
+	OrvaAllocMB    int64 `json:"orva_alloc_mb"`
+	MemTotalMB     int64 `json:"mem_total_mb"`
+	MemAvailableMB int64 `json:"mem_available_mb"`
+	MemReservedMB  int64 `json:"mem_reserved_mb"`
 }
 
 type totalsBlock struct {
@@ -102,10 +102,10 @@ type poolBlock struct {
 	LatencyEWMAms float64 `json:"latency_ewma_ms"`
 	DynamicMax    int64   `json:"dynamic_max"`
 	Target        int     `json:"target"`
-	MemUsedAvgMB  float64 `json:"mem_used_avg_mb"`  // EWMA of memory.current at release; 0 if cgroups disabled
-	CPUFracAvg    float64 `json:"cpu_frac_avg"`     // EWMA of CPU fraction per invocation (0–1)
-	MemLimitMB    int64   `json:"mem_limit_mb"`     // configured memory_mb for this function
-	CPULimit      float64 `json:"cpu_limit"`        // configured cpus for this function (0 = uncapped)
+	MemUsedAvgMB  float64 `json:"mem_used_avg_mb"` // EWMA of memory.current at release; 0 if cgroups disabled
+	CPUFracAvg    float64 `json:"cpu_frac_avg"`    // EWMA of CPU fraction per invocation (0–1)
+	MemLimitMB    int64   `json:"mem_limit_mb"`    // configured memory_mb for this function
+	CPULimit      float64 `json:"cpu_limit"`       // configured cpus for this function (0 = uncapped)
 }
 
 // Health handles GET /api/v1/system/health.
@@ -172,10 +172,25 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 			"runtime":             sandboxRuntime,
 		},
 		"host": map[string]any{
-			"num_cpu":     runtime.NumCPU(),
+			"num_cpu":       runtime.NumCPU(),
 			"num_goroutine": runtime.NumGoroutine(),
-			"alloc_mb":    int(memStats.Alloc / 1024 / 1024),
+			"alloc_mb":      int(memStats.Alloc / 1024 / 1024),
 		},
+	}
+	if h.DB != nil {
+		writer := h.DB.WriterStats()
+		writerStatus := "ok"
+		if (writer.CriticalCap > 0 && writer.CriticalDepth*100/writer.CriticalCap >= 80) ||
+			(writer.TelemetryCap > 0 && writer.TelemetryDepth*100/writer.TelemetryCap >= 80) {
+			writerStatus = "saturated"
+		}
+		resp["writer"] = map[string]any{
+			"status": writerStatus, "critical_queue_depth": writer.CriticalDepth,
+			"telemetry_queue_depth": writer.TelemetryDepth,
+			"critical_timeouts":     writer.CriticalTimeouts,
+			"critical_failures":     writer.CriticalFailures,
+			"dropped_telemetry":     writer.DroppedTelemetry,
+		}
 	}
 
 	respond.JSON(w, httpStatus, resp)
@@ -246,6 +261,29 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	// path. Returns 0 cleanly when there are no pending jobs (or when
 	// the DB handle is missing in tests).
 	if h.DB != nil {
+		writer := h.DB.WriterStats()
+		promHeader(w, "orva_writer_queue_depth", "gauge", "Pending asynchronous database writes by priority.")
+		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"critical\"} %d\n", writer.CriticalDepth)
+		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"telemetry\"} %d\n", writer.TelemetryDepth)
+		promHeader(w, "orva_writer_critical_timeouts_total", "counter", "Critical database writes that exceeded their enqueue deadline.")
+		fmt.Fprintf(w, "orva_writer_critical_timeouts_total %d\n", writer.CriticalTimeouts)
+		promHeader(w, "orva_writer_critical_failures_total", "counter", "Critical database writes lost to transaction failures after enqueue.")
+		fmt.Fprintf(w, "orva_writer_critical_failures_total %d\n", writer.CriticalFailures)
+		promHeader(w, "orva_writer_dropped_telemetry_total", "counter", "Telemetry writes dropped because the bounded queue was full.")
+		fmt.Fprintf(w, "orva_writer_dropped_telemetry_total %d\n", writer.DroppedTelemetry)
+		kv := h.DB.KVMetrics()
+		promHeader(w, "orva_kv_operations_total", "counter", "KV operations by type.")
+		promHeader(w, "orva_kv_errors_total", "counter", "KV operation failures by type.")
+		promHeader(w, "orva_kv_timeouts_total", "counter", "KV operations canceled by request or function deadlines.")
+		promHeader(w, "orva_kv_latency_ms_total", "counter", "Cumulative KV operation latency in milliseconds.")
+		for _, operation := range kv.Operations {
+			fmt.Fprintf(w, "orva_kv_operations_total{operation=%q} %d\n", operation.Operation, operation.Count)
+			fmt.Fprintf(w, "orva_kv_errors_total{operation=%q} %d\n", operation.Operation, operation.Errors)
+			fmt.Fprintf(w, "orva_kv_timeouts_total{operation=%q} %d\n", operation.Operation, operation.Timeouts)
+			fmt.Fprintf(w, "orva_kv_latency_ms_total{operation=%q} %.3f\n", operation.Operation, float64(operation.LatencyTotalNS)/float64(time.Millisecond))
+		}
+		promHeader(w, "orva_kv_batch_rollbacks_total", "counter", "Atomic KV batches rolled back after database or deadline failure.")
+		fmt.Fprintf(w, "orva_kv_batch_rollbacks_total %d\n", kv.Rollbacks)
 		var depth int64
 		if rdb := h.DB.ReadDB(); rdb != nil {
 			_ = rdb.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status='pending'`).Scan(&depth)
@@ -423,13 +461,13 @@ type SystemStorageHandler struct {
 
 // StorageInfo is the response shape for GET /api/v1/system/storage.
 type StorageInfo struct {
-	DBBytes        int64 `json:"db_bytes"`         // size of orva.db on disk
-	DBPages        int64 `json:"db_pages"`         // PRAGMA page_count
-	DBPageSize     int64 `json:"db_page_size"`     // PRAGMA page_size
-	DBFreePages    int64 `json:"db_free_pages"`    // PRAGMA freelist_count — reclaimable on next VACUUM
-	WALBytes       int64 `json:"wal_bytes"`        // size of orva.db-wal sidecar
-	FunctionsBytes int64 `json:"functions_bytes"`  // recursive size of <data_dir>/functions
-	TotalBytes     int64 `json:"total_bytes"`      // db + wal + functions
+	DBBytes        int64 `json:"db_bytes"`        // size of orva.db on disk
+	DBPages        int64 `json:"db_pages"`        // PRAGMA page_count
+	DBPageSize     int64 `json:"db_page_size"`    // PRAGMA page_size
+	DBFreePages    int64 `json:"db_free_pages"`   // PRAGMA freelist_count — reclaimable on next VACUUM
+	WALBytes       int64 `json:"wal_bytes"`       // size of orva.db-wal sidecar
+	FunctionsBytes int64 `json:"functions_bytes"` // recursive size of <data_dir>/functions
+	TotalBytes     int64 `json:"total_bytes"`     // db + wal + functions
 }
 
 // VacuumResult is the response shape for POST /api/v1/system/vacuum.

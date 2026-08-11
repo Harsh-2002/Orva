@@ -24,6 +24,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
 	"github.com/Harsh-2002/Orva/internal/ids"
@@ -106,12 +107,17 @@ type Scheduler struct {
 	// baselines. Optional — may be nil in tests; recordExecution
 	// short-circuits the outlier hook when it's missing.
 	metrics *metrics.Metrics
+	sdkAuth *sdkauth.Authenticator
 }
 
 // SetMetrics wires the metrics container so cron/job-recorded executions
 // feed per-function baselines and get an outlier flag back-written.
 // Optional — leave unset in tests where metrics aren't relevant.
 func (s *Scheduler) SetMetrics(m *metrics.Metrics) { s.metrics = m }
+
+// SetSDKAuth registers cron and job executions while their worker is active,
+// allowing every runtime SDK endpoint to verify execution ownership.
+func (s *Scheduler) SetSDKAuth(a *sdkauth.Authenticator) { s.sdkAuth = a }
 
 // SetEgressGuard puts webhook delivery behind the operator's egress policy.
 // Call before Start — the delivery loop reads httpClient from its own
@@ -382,6 +388,8 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	}
 	eventJSON, _ := json.Marshal(event)
 
+	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, ranAt)
+	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {
 		reqErr = err
@@ -687,6 +695,8 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	}
 	eventJSON, _ := json.Marshal(event)
 
+	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
+	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {
 		reqErr = err

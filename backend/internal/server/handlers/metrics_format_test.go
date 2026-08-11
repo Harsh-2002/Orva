@@ -42,3 +42,24 @@ func TestMetricsExpositionFormat(t *testing.T) {
 		t.Errorf("duration histogram buckets missing\n---\n%s", body)
 	}
 }
+
+func TestKVMetricsAndWriterSaturationAreExposed(t *testing.T) {
+	db := newTestDB(t)
+	h := &SystemHandler{Metrics: metrics.New(), DB: db}
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	h.GetMetrics(w, req)
+	body := w.Body.String()
+	for _, want := range []string{
+		"# TYPE orva_kv_operations_total counter",
+		"orva_kv_operations_total{operation=\"put\"}",
+		"# TYPE orva_kv_batch_rollbacks_total counter",
+		"# TYPE orva_writer_queue_depth gauge",
+		"# TYPE orva_writer_critical_failures_total counter",
+		"# TYPE orva_writer_dropped_telemetry_total counter",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics output missing %q", want)
+		}
+	}
+}

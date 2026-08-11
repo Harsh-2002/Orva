@@ -1,6 +1,6 @@
 {
   "name": "orva",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "main": "./orva.js",
   "types": "./orva.d.ts",
   "private": true,

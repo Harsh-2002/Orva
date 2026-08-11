@@ -14,6 +14,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
 )
 
@@ -24,7 +25,7 @@ import (
 //
 // Anything that smells like an authentication credential lives here:
 // platform-issued bearer tokens, browser cookies, the operator-issued
-// Orva API key, the per-process internal token used by the SDK, and
+// Orva API key, the function-scoped credential used by the SDK, and
 // HTTP/1.1's proxy auth. If a future header carries credentials, add
 // it to this map — there is no allow-list fallback.
 var redactHeaders = map[string]bool{
@@ -112,7 +113,8 @@ type Proxy struct {
 	// DB is used to persist the captured request envelope for replay
 	// (v0.4 A3). Optional: when nil, capture is skipped silently. Tests
 	// without a DB wired up keep working unchanged.
-	DB *database.Database
+	DB      *database.Database
+	SDKAuth *sdkauth.Authenticator
 
 	Config ProxyConfig
 }
@@ -192,6 +194,10 @@ func (p *Proxy) Forward(
 	_ = cpus
 	_ = seccompPolicy
 	_ = coldStart
+	releaseExecution := p.SDKAuth.BindExecution(
+		execID, fnID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), startTime,
+	)
+	defer releaseExecution()
 
 	// Serialize the HTTP request into JSON for the adapter.
 	body, _ := io.ReadAll(r.Body)

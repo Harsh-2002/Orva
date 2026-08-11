@@ -106,7 +106,8 @@ func (db *Database) InsertExecutionFinal(exec *Execution, durationMS int64, stat
 }
 
 // AsyncInsertExecutionFinal queues the final-write of a completed execution
-// for the batched writer. Non-blocking on the hot path. Trace fields are
+// for the bounded critical writer. Enqueue applies deadline-aware backpressure
+// only when saturated; commit remains off the hot request path. Trace fields are
 // taken from exec.TraceID/SpanID/ParentSpanID/Trigger/ParentFunctionID;
 // callers populate them before calling. IsOutlier + BaselineP95MS are NOT
 // written here — the baseline package back-writes them via UpdateOutlier
@@ -231,10 +232,8 @@ func (db *Database) AsyncInsertExecutionLog(log *ExecutionLog) {
 }
 
 // AsyncInsertExecutionRequest queues a captured-request row for the
-// batched writer (v0.4 A3). Mirrors the pattern of AsyncInsertExecutionFinal:
-// the proxy hot path never blocks on the SQLite writer. Foreign-key
-// satisfaction relies on the executions row landing first via the same
-// queue — under the batched-tx model both rows commit together.
+// bounded critical writer (v0.4 A3). execution_requests intentionally has no
+// foreign key because capture happens before the final execution row exists.
 func (db *Database) AsyncInsertExecutionRequest(req *ExecutionRequest) {
 	truncated := 0
 	if req.Truncated {

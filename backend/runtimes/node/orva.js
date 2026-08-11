@@ -1,7 +1,7 @@
 // Orva Node.js SDK — kv, invoke, jobs, crons, trace, log, context.
 //
-// Routes through ORVA_API_BASE (loopback) using ORVA_INTERNAL_TOKEN that
-// was injected at worker spawn. Both env vars must be present in
+// Routes through ORVA_API_BASE using the function-scoped ORVA_INTERNAL_TOKEN
+// injected at worker spawn. Both env vars must be present in
 // production; absent in tests where the SDK throws OrvaUnavailableError
 // (unless __test_mode__ has supplied an override implementation).
 //
@@ -14,7 +14,7 @@
 // SDK version baked at adapter-embed time. Bumped in lockstep with the
 // server. The string is sent on every internal-token call so operators
 // can see drift in deployment logs.
-const SDK_VERSION = '0.6.0'
+const SDK_VERSION = '0.7.0'
 
 const COMMON_HEADERS = { 'Content-Type': 'application/json' }
 
@@ -73,8 +73,6 @@ function _traceHeaders() {
   const exec = _execID()
   if (trace) h['X-Orva-Trace-Id'] = trace
   if (span) h['X-Orva-Span-Id'] = span
-  if (fn) h['X-Orva-Caller-Function'] = fn
-  if (fn) h['X-Orva-Function-Id'] = fn
   if (exec) h['X-Orva-Execution-Id'] = exec
   h['X-Orva-SDK-Version'] = SDK_VERSION
   return h
@@ -146,13 +144,17 @@ const kv = {
     return data.value != null ? data.value : defaultValue
   },
 
-  /** Upsert a value. ttlSeconds=0 disables expiry. */
-  async put(key, value, { ttlSeconds = 0 } = {}) {
+  /** Upsert a value. Omit ttlSeconds to preserve expiry; 0 clears it. */
+  async put(key, value, options = {}) {
     const fn = _fnID()
+    const requestBody = { value }
+    if (Object.hasOwn(options, 'ttlSeconds')) {
+      requestBody.ttl_seconds = Number(options.ttlSeconds)
+    }
     const { status, body } = await _request(
       'PUT',
       `/api/v1/_kv/${fn}/${encodeURIComponent(key)}`,
-      { body: { value, ttl_seconds: ttlSeconds | 0 } }
+      { body: requestBody }
     )
     if (status >= 400) throw new OrvaError(`kv.put(${key}) failed: ${body}`, status)
   },
@@ -198,6 +200,7 @@ const kv = {
     })
     if (status >= 400) throw new OrvaError(`kv.getMany failed: ${body}`, status)
     const data = JSON.parse(body)
+    _assertAtomicBatch(data, 'kv.getMany')
     const out = {}
     for (const r of data.results || []) {
       out[r.key] = r.found ? r.value : null
@@ -209,16 +212,16 @@ const kv = {
   async putMany(entries) {
     if (!entries || entries.length === 0) return
     const fn = _fnID()
-    const ops = entries.map((e) => ({
-      op: 'put',
-      key: e.key,
-      value: e.value,
-      ttl_seconds: (e.ttlSeconds | 0) || 0,
-    }))
+    const ops = entries.map((e) => {
+      const op = { op: 'put', key: e.key, value: e.value }
+      if (Object.hasOwn(e, 'ttlSeconds')) op.ttl_seconds = Number(e.ttlSeconds)
+      return op
+    })
     const { status, body } = await _request('POST', `/api/v1/_kv/${fn}/batch`, {
       body: { ops },
     })
     if (status >= 400) throw new OrvaError(`kv.putMany failed: ${body}`, status)
+    _assertAtomicBatch(JSON.parse(body), 'kv.putMany')
   },
 
   /** Delete N keys in one transaction. Returns the number removed. */
@@ -231,16 +234,21 @@ const kv = {
     })
     if (status >= 400) throw new OrvaError(`kv.deleteMany failed: ${body}`, status)
     const data = JSON.parse(body)
+    _assertAtomicBatch(data, 'kv.deleteMany')
     return (data.results || []).filter((r) => r.found).length
   },
 
   /** Atomic increment. Missing keys are treated as 0. Returns new value. */
-  async incr(key, delta = 1, { ttlSeconds = 0 } = {}) {
+  async incr(key, delta = 1, options = {}) {
     const fn = _fnID()
+    const requestBody = { delta }
+    if (Object.hasOwn(options, 'ttlSeconds')) {
+      requestBody.ttl_seconds = Number(options.ttlSeconds)
+    }
     const { status, body } = await _request(
       'POST',
       `/api/v1/_kv/${fn}/${encodeURIComponent(key)}/incr`,
-      { body: { delta, ttl_seconds: ttlSeconds | 0 } }
+      { body: requestBody }
     )
     if (status >= 400) throw new OrvaError(`kv.incr(${key}) failed: ${body}`, status)
     return JSON.parse(body).value
@@ -251,17 +259,20 @@ const kv = {
    * Returns true on success; on mismatch, throws OrvaCASMismatch carrying
    * the current value so callers can retry.
    */
-  async cas(key, expected, newValue, { ttlSeconds = 0 } = {}) {
+  async cas(key, expected, newValue, options = {}) {
     const fn = _fnID()
+    const requestBody = {
+      expected: expected === null ? null : expected,
+      new: newValue,
+    }
+    if (Object.hasOwn(options, 'ttlSeconds')) {
+      requestBody.ttl_seconds = Number(options.ttlSeconds)
+    }
     const { status, body } = await _request(
       'POST',
       `/api/v1/_kv/${fn}/${encodeURIComponent(key)}/cas`,
       {
-        body: {
-          expected: expected === null ? null : expected,
-          new: newValue,
-          ttl_seconds: ttlSeconds | 0,
-        },
+        body: requestBody,
       }
     )
     if (status >= 400) throw new OrvaError(`kv.cas(${key}) failed: ${body}`, status)
@@ -269,6 +280,13 @@ const kv = {
     if (!data.ok) throw new OrvaCASMismatch(data.current ?? null)
     return true
   },
+}
+
+function _assertAtomicBatch(data, operation) {
+  const failed = (data.results || []).find((result) => result.error)
+  if (failed) {
+    throw new OrvaError(`${operation} failed: ${failed.error}`, 500)
+  }
 }
 
 // ── Function-to-function invoke ─────────────────────────────────────

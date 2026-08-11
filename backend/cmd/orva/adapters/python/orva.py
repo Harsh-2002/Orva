@@ -1,8 +1,8 @@
 """Orva Python SDK — kv, invoke, jobs, crons, trace, log, context.
 
 Available inside any function running on Orva. Routes through the
-ORVA_API_BASE loopback URL using the per-process ORVA_INTERNAL_TOKEN
-that the worker received at spawn time. Both env vars are present in
+ORVA_API_BASE URL using the function-scoped ORVA_INTERNAL_TOKEN that the
+worker received at spawn time. Both env vars are present in
 production and absent in tests; helpers raise OrvaUnavailableError when
 the SDK can't reach the host unless __test_mode__ has installed an
 override.
@@ -27,7 +27,7 @@ from urllib.parse import quote
 
 
 # SDK version baked at adapter-embed time. Sent on every internal call.
-SDK_VERSION = "0.6.0"
+SDK_VERSION = "0.7.0"
 
 T = TypeVar("T")
 
@@ -129,9 +129,6 @@ def _trace_headers() -> Dict[str, str]:
         h["X-Orva-Trace-Id"] = v
     if v := _span_id():
         h["X-Orva-Span-Id"] = v
-    if v := _function_id():
-        h["X-Orva-Caller-Function"] = v
-        h["X-Orva-Function-Id"] = v
     if v := _execution_id():
         h["X-Orva-Execution-Id"] = v
     return h
@@ -211,9 +208,12 @@ class _KV:
         return data["value"] if data.get("value") is not None else default
 
     @staticmethod
-    def put(key: str, value: Any, *, ttl_seconds: int = 0) -> None:
+    def put(key: str, value: Any, *, ttl_seconds: Optional[int] = None) -> None:
         fn = _function_id()
-        payload = json.dumps({"value": value, "ttl_seconds": int(ttl_seconds)}).encode("utf-8")
+        request_body: Dict[str, Any] = {"value": value}
+        if ttl_seconds is not None:
+            request_body["ttl_seconds"] = int(ttl_seconds)
+        payload = json.dumps(request_body).encode("utf-8")
         status, body, _ = _request(
             "PUT", f"/api/v1/_kv/{fn}/{quote(key, safe='')}", body=payload
         )
@@ -241,6 +241,7 @@ class _KV:
         if status >= 400:
             raise OrvaError(f"kv.list failed: {body!r}", status=status)
         data = json.loads(body)
+        _assert_atomic_batch(data, "kv.get_many")
         return {"keys": list(data.get("keys") or []), "next_cursor": data.get("next_cursor", "")}
 
     @staticmethod
@@ -263,19 +264,17 @@ class _KV:
         if not entries:
             return
         fn = _function_id()
-        ops = [
-            {
-                "op": "put",
-                "key": e["key"],
-                "value": e["value"],
-                "ttl_seconds": int(e.get("ttl_seconds", 0)),
-            }
-            for e in entries
-        ]
+        ops = []
+        for entry in entries:
+            op = {"op": "put", "key": entry["key"], "value": entry["value"]}
+            if "ttl_seconds" in entry:
+                op["ttl_seconds"] = int(entry["ttl_seconds"])
+            ops.append(op)
         payload = json.dumps({"ops": ops}).encode("utf-8")
         status, body, _ = _request("POST", f"/api/v1/_kv/{fn}/batch", body=payload)
         if status >= 400:
             raise OrvaError(f"kv.put_many failed: {body!r}", status=status)
+        _assert_atomic_batch(json.loads(body), "kv.put_many")
 
     @staticmethod
     def delete_many(keys: List[str]) -> int:
@@ -287,12 +286,16 @@ class _KV:
         if status >= 400:
             raise OrvaError(f"kv.delete_many failed: {body!r}", status=status)
         data = json.loads(body)
+        _assert_atomic_batch(data, "kv.delete_many")
         return sum(1 for r in data.get("results") or [] if r.get("found"))
 
     @staticmethod
-    def incr(key: str, delta: int = 1, *, ttl_seconds: int = 0) -> int:
+    def incr(key: str, delta: int = 1, *, ttl_seconds: Optional[int] = None) -> int:
         fn = _function_id()
-        payload = json.dumps({"delta": int(delta), "ttl_seconds": int(ttl_seconds)}).encode("utf-8")
+        request_body: Dict[str, Any] = {"delta": int(delta)}
+        if ttl_seconds is not None:
+            request_body["ttl_seconds"] = int(ttl_seconds)
+        payload = json.dumps(request_body).encode("utf-8")
         status, body, _ = _request(
             "POST", f"/api/v1/_kv/{fn}/{quote(key, safe='')}/incr", body=payload
         )
@@ -301,11 +304,12 @@ class _KV:
         return int(json.loads(body)["value"])
 
     @staticmethod
-    def cas(key: str, expected: Any, new: Any, *, ttl_seconds: int = 0) -> bool:
+    def cas(key: str, expected: Any, new: Any, *, ttl_seconds: Optional[int] = None) -> bool:
         fn = _function_id()
-        payload = json.dumps(
-            {"expected": expected, "new": new, "ttl_seconds": int(ttl_seconds)}
-        ).encode("utf-8")
+        request_body: Dict[str, Any] = {"expected": expected, "new": new}
+        if ttl_seconds is not None:
+            request_body["ttl_seconds"] = int(ttl_seconds)
+        payload = json.dumps(request_body).encode("utf-8")
         status, body, _ = _request(
             "POST", f"/api/v1/_kv/{fn}/{quote(key, safe='')}/cas", body=payload
         )
@@ -318,6 +322,12 @@ class _KV:
 
 
 kv = _KV()
+
+
+def _assert_atomic_batch(data: Dict[str, Any], operation: str) -> None:
+    failed = next((item for item in data.get("results") or [] if item.get("error")), None)
+    if failed:
+        raise OrvaError(f"{operation} failed: {failed['error']}", status=500)
 
 
 # ── Function-to-function invoke ─────────────────────────────────────

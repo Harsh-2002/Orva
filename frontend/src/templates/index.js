@@ -1293,10 +1293,10 @@ const ts_hello_tsconfig = `{
 //  above. The Editor reads this list directly.
 // ─────────────────────────────────────────────────────────────────────
 
-// v0.6 SDK showcase: structured logs, user-defined spans, atomic counters,
+// v0.7 SDK showcase: structured logs, user-defined spans, atomic counters,
 // idempotent jobs — every new primitive in one inline handler so users
 // can see the dashboard waterfall + logs lane after one click.
-const py_traced_pipeline = `"""v0.6 SDK showcase: trace.span + log.* + kv.incr + jobs.enqueue.
+const py_traced_pipeline = `"""v0.7 SDK showcase: trace.span + log.* + kv.incr + jobs.enqueue.
 Open this trace in the dashboard after invoking — you'll see system
 spans, your two child spans ('parse' / 'transform'), and the
 level-tagged log lines all interleaved by timestamp."""
@@ -1375,15 +1375,15 @@ const pythonTemplates = [
     description: 'Generator that yields one word every 100ms. Demonstrates v0.4 chunked streaming end-to-end.',
     code: py_stream_llm, deps: '' },
 
-  { id: 'py-traced-pipeline', category: 'Showcase',  label: 'v0.6 SDK pipeline',
+  { id: 'py-traced-pipeline', category: 'Showcase',  label: 'v0.7 SDK pipeline',
     description: 'trace.span + log.info + kv.incr + idempotent jobs.enqueue. After invoking, open the new trace — child spans and structured logs render inline in the waterfall.',
     code: py_traced_pipeline, deps: '' },
 ]
 
-// v0.6 SDK showcase (Node): atomic incr, compare-and-swap loop,
+// v0.7 SDK showcase (Node): atomic incr, compare-and-swap loop,
 // structured logging. The dashboard's Logs lane on the resulting
 // invocation will show every log.* call interleaved with the spans.
-const node_counter_cas = `// v0.6 SDK showcase: kv.incr + kv.cas + log.info.
+const node_counter_cas = `// v0.7 SDK showcase: kv.incr + kv.cas + log.info.
 // Demonstrates the recommended pattern for race-safe state mutation
 // from inside an Orva function.
 
@@ -1454,8 +1454,8 @@ const nodeTemplates = [
     description: 'POST creates a slug, GET redirects. Uses Orva KV.',
     code: node_url_shortener, deps: '' },
 
-  { id: 'node-counter-cas',     category: 'Showcase',  label: 'v0.6 SDK counter (kv.incr + kv.cas)',
-    description: 'Atomic counter and a CAS-retry loop for richer state. Demonstrates v0.6 race-safe primitives and structured logging end-to-end.',
+  { id: 'node-counter-cas',     category: 'Showcase',  label: 'v0.7 SDK counter (kv.incr + kv.cas)',
+    description: 'Atomic counter and a CAS-retry loop for richer state. Demonstrates v0.7 race-safe primitives and structured logging end-to-end.',
     code: node_counter_cas, deps: '' },
 
   // TypeScript starter — the builder's tsc step picks this up via the

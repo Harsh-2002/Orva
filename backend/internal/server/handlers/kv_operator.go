@@ -12,23 +12,22 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // Per-value cap for KV writes from the dashboard. Mirrors the cap the
 // SDK adapter enforces from inside sandboxes — keeps the operator path
 // honest. The SDK side checks this in a different spot, so we duplicate
 // the constant rather than couple the two packages.
-const kvOperatorMaxValueBytes = 64 * 1024
+const kvOperatorMaxValueBytes = database.KVMaxValueBytes
 
 // kvOperatorBodyCap is the request-body read limit. Slightly larger
 // than the value cap so the {"value": ..., "ttl_seconds": ...} envelope
@@ -113,12 +112,12 @@ func (h *KVOperatorHandler) List(w http.ResponseWriter, r *http.Request) {
 		limit = 1000
 	}
 
-	entries, err := h.DB.KVList(fnID, prefix, limit)
+	entries, err := h.DB.KVListContext(r.Context(), fnID, prefix, limit)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv list failed: "+err.Error(), reqID)
 		return
 	}
-	total, err := h.DB.KVCount(fnID)
+	total, err := h.DB.KVCountContext(r.Context(), fnID)
 	if err != nil {
 		// Soft-fail on the count — the list itself succeeded, surface 0
 		// rather than 500ing the whole response.
@@ -145,12 +144,12 @@ func (h *KVOperatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.PathValue("key")
-	if key == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "key is required", reqID)
+	if err := database.ValidateKVKey(key); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
 	}
 
-	entry, err := h.DB.KVGet(fnID, key)
+	entry, err := h.DB.KVGetContext(r.Context(), fnID, key)
 	if errors.Is(err, database.ErrKVNotFound) {
 		respond.JSON(w, http.StatusNotFound, map[string]any{"found": false, "key": key})
 		return
@@ -174,7 +173,7 @@ func (h *KVOperatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 // (any JSON), ttl_seconds is optional (0 = no expiry).
 type kvOperatorPutRequest struct {
 	Value      json.RawMessage `json:"value"`
-	TTLSeconds int             `json:"ttl_seconds,omitempty"`
+	TTLSeconds *int            `json:"ttl_seconds,omitempty"`
 }
 
 // Put handles PUT /api/v1/functions/{fn_id}/kv/{key}. Upserts.
@@ -186,12 +185,12 @@ func (h *KVOperatorHandler) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.PathValue("key")
-	if key == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "key is required", reqID)
+	if err := database.ValidateKVKey(key); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, kvOperatorBodyCap))
+	body, err := readBoundedBody(r.Body, kvOperatorBodyCap)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
@@ -219,11 +218,12 @@ func (h *KVOperatorHandler) Put(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "value must be valid JSON", reqID)
 		return
 	}
-	if req.TTLSeconds < 0 {
-		req.TTLSeconds = 0
+	if err := database.ValidateKVTTL(req.TTLSeconds); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
 	}
 
-	if err := h.DB.KVPut(fnID, key, req.Value, req.TTLSeconds); err != nil {
+	if err := h.DB.KVPutContext(r.Context(), fnID, key, req.Value, req.TTLSeconds); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv put failed: "+err.Error(), reqID)
 		return
 	}
@@ -244,11 +244,11 @@ func (h *KVOperatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.PathValue("key")
-	if key == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "key is required", reqID)
+	if err := database.ValidateKVKey(key); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
 	}
-	if err := h.DB.KVDelete(fnID, key); err != nil {
+	if err := h.DB.KVDeleteContext(r.Context(), fnID, key); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv delete failed: "+err.Error(), reqID)
 		return
 	}
@@ -259,7 +259,7 @@ func (h *KVOperatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // the internal kvIncrRequest (kv.go) — same shape, operator auth.
 type kvOperatorIncrRequest struct {
 	Delta      int64 `json:"delta"`
-	TTLSeconds int   `json:"ttl_seconds,omitempty"`
+	TTLSeconds *int  `json:"ttl_seconds,omitempty"`
 }
 
 // Incr handles POST /api/v1/functions/{fn_id}/kv/{key}/incr. Atomically adds
@@ -273,11 +273,11 @@ func (h *KVOperatorHandler) Incr(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.PathValue("key")
-	if key == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "key is required", reqID)
+	if err := database.ValidateKVKey(key); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	body, err := readBoundedBody(r.Body, 1<<16)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
@@ -289,7 +289,11 @@ func (h *KVOperatorHandler) Incr(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	next, err := h.DB.KVIncr(fnID, key, req.Delta, req.TTLSeconds)
+	if err := database.ValidateKVTTL(req.TTLSeconds); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
+	}
+	next, err := h.DB.KVIncrContext(r.Context(), fnID, key, req.Delta, req.TTLSeconds)
 	if err != nil {
 		respond.Error(w, http.StatusConflict, "KV_INCR_FAILED", err.Error(), reqID)
 		return
@@ -303,7 +307,7 @@ func (h *KVOperatorHandler) Incr(w http.ResponseWriter, r *http.Request) {
 type kvOperatorCASRequest struct {
 	Expected   *json.RawMessage `json:"expected"`
 	New        json.RawMessage  `json:"new"`
-	TTLSeconds int              `json:"ttl_seconds,omitempty"`
+	TTLSeconds *int             `json:"ttl_seconds,omitempty"`
 }
 
 // CAS handles POST /api/v1/functions/{fn_id}/kv/{key}/cas. A failed precondition
@@ -317,11 +321,11 @@ func (h *KVOperatorHandler) CAS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := r.PathValue("key")
-	if key == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "key is required", reqID)
+	if err := database.ValidateKVKey(key); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, kvOperatorBodyCap))
+	body, err := readBoundedBody(r.Body, kvOperatorBodyCap)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
@@ -338,8 +342,20 @@ func (h *KVOperatorHandler) CAS(w http.ResponseWriter, r *http.Request) {
 	var expectedBytes []byte
 	if req.Expected != nil {
 		expectedBytes = []byte(*req.Expected)
+		if err := database.ValidateKVValue(expectedBytes); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION", "expected value: "+err.Error(), reqID)
+			return
+		}
 	}
-	swapped, current, err := h.DB.KVCAS(fnID, key, expectedBytes, []byte(req.New), req.TTLSeconds)
+	if err := database.ValidateKVValue(req.New); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
+	}
+	if err := database.ValidateKVTTL(req.TTLSeconds); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
+	}
+	swapped, current, err := h.DB.KVCASContext(r.Context(), fnID, key, expectedBytes, []byte(req.New), req.TTLSeconds)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv cas failed: "+err.Error(), reqID)
 		return

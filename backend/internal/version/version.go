@@ -35,4 +35,4 @@ var BuildTime = "unknown"
 // MUST stay in lock-step with the adapters that stamp the header:
 //   backend/runtimes/node/orva.js   → const SDK_VERSION
 //   backend/runtimes/python/orva.py → SDK_VERSION
-const SDKVersion = "0.6.0"
+const SDKVersion = "0.7.0"

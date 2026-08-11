@@ -17,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/proxy"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
@@ -29,16 +30,16 @@ type Router struct {
 	cfg     *config.Config
 	db      *database.Database
 
-	registry      *registry.Registry
-	proxy         *proxy.Proxy
-	builder       *builder.Builder
-	metrics       *metrics.Metrics
-	secrets       *secrets.Manager
-	buildQueue    *builder.Queue
-	poolMgr       *pool.Manager
-	eventHub      *events.Hub
-	firewall      *firewall.Manager
-	internalToken string
+	registry   *registry.Registry
+	proxy      *proxy.Proxy
+	builder    *builder.Builder
+	metrics    *metrics.Metrics
+	secrets    *secrets.Manager
+	buildQueue *builder.Queue
+	poolMgr    *pool.Manager
+	eventHub   *events.Hub
+	firewall   *firewall.Manager
+	sdkAuth    *sdkauth.Authenticator
 
 	ai *aipkg.Manager // in-product AI chat assistant (lazily-built LLM gateway)
 
@@ -49,17 +50,17 @@ type Router struct {
 
 // RouterDeps holds the dependencies for creating a Router.
 type RouterDeps struct {
-	Registry      *registry.Registry
-	Proxy         *proxy.Proxy
-	Builder       *builder.Builder
-	Metrics       *metrics.Metrics
-	Secrets       *secrets.Manager
-	BuildQueue    *builder.Queue
-	PoolMgr       *pool.Manager
-	EventHub      *events.Hub
-	Firewall      *firewall.Manager
-	InternalToken string    // Per-process token for kv/jobs/F2F SDK auth (Phase 3+).
-	StartTime     time.Time // Shared process start time (health/uptime). Zero → time.Now().
+	Registry   *registry.Registry
+	Proxy      *proxy.Proxy
+	Builder    *builder.Builder
+	Metrics    *metrics.Metrics
+	Secrets    *secrets.Manager
+	BuildQueue *builder.Queue
+	PoolMgr    *pool.Manager
+	EventHub   *events.Hub
+	Firewall   *firewall.Manager
+	SDKAuth    *sdkauth.Authenticator // Function-scoped worker credential verifier.
+	StartTime  time.Time              // Shared process start time (health/uptime). Zero → time.Now().
 }
 
 func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Router {
@@ -72,12 +73,12 @@ func NewRouter(cfg *config.Config, db *database.Database, deps RouterDeps) *Rout
 		builder:    deps.Builder,
 		metrics:    deps.Metrics,
 		secrets:    deps.Secrets,
-		buildQueue:    deps.BuildQueue,
-		poolMgr:       deps.PoolMgr,
-		eventHub:      deps.EventHub,
-		firewall:      deps.Firewall,
-		internalToken: deps.InternalToken,
-		startTime:     deps.StartTime,
+		buildQueue: deps.BuildQueue,
+		poolMgr:    deps.PoolMgr,
+		eventHub:   deps.EventHub,
+		firewall:   deps.Firewall,
+		sdkAuth:    deps.SDKAuth,
+		startTime:  deps.StartTime,
 	}
 	if r.startTime.IsZero() {
 		r.startTime = time.Now()
@@ -181,6 +182,7 @@ func (r *Router) setupRoutes() {
 		Registry: r.registry,
 		Pool:     r.poolMgr,
 		Metrics:  r.metrics,
+		SDKAuth:  r.sdkAuth,
 	}
 	if r.eventHub != nil {
 		replayHandler.PublishEvent = r.eventHub.Publish
@@ -241,66 +243,64 @@ func (r *Router) setupRoutes() {
 	// Per-(function, name) UNIQUE; PUT acts as an upsert on the {name}
 	// path segment so callers don't need a separate insert/update split.
 	fixtureHandler := &handlers.FixtureHandler{DB: r.db, Registry: r.registry}
-	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/fixtures",        fixtureHandler.List)
-	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/fixtures",        fixtureHandler.Create)
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/fixtures", fixtureHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/fixtures", fixtureHandler.Create)
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Get)
 	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Upsert)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Delete)
 
 	// Cron schedules (per-function, fired by internal/scheduler).
-	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry, InternalToken: r.internalToken}
-	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/cron",         cronHandler.List)
-	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/cron",         cronHandler.Create)
-	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/cron/{id}",    cronHandler.Update)
-	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}",    cronHandler.Delete)
+	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry, SDKAuth: r.sdkAuth}
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/cron", cronHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/cron", cronHandler.Create)
+	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/cron/{id}", cronHandler.Update)
+	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}", cronHandler.Delete)
 	// Dashboard "Schedules" page lists schedules across all functions.
 	r.mux.HandleFunc("GET /api/v1/cron", cronHandler.ListAll)
 
 	// Internal token used by the worker SDK (kv, jobs, F2F invoke).
-	internalToken := r.internalToken
-
 	// Per-function key/value store (Phase 3). Internal-only — auth is the
-	// per-process internal token, not API keys.
-	kvHandler := &handlers.KVHandler{DB: r.db, InternalToken: internalToken}
+	// function-scoped SDK credential, not API keys.
+	kvHandler := &handlers.KVHandler{DB: r.db, SDKAuth: r.sdkAuth}
 	r.mux.HandleFunc("PUT    /api/v1/_kv/{fn_id}/{key}", kvHandler.Put)
 	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}/{key}", kvHandler.Get)
 	r.mux.HandleFunc("DELETE /api/v1/_kv/{fn_id}/{key}", kvHandler.Delete)
-	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}",       kvHandler.List)
+	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}", kvHandler.List)
 	// v0.6 SDK upgrade: batch / atomic increment / compare-and-swap.
-	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/batch",         kvHandler.Batch)
-	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/incr",    kvHandler.Incr)
-	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/cas",     kvHandler.CAS)
+	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/batch", kvHandler.Batch)
+	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/incr", kvHandler.Incr)
+	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/cas", kvHandler.CAS)
 
 	// Function-to-function calls (Phase 4). Path uses the friendly name.
 	f2fHandler := &handlers.InternalInvokeHandler{
-		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics, InternalToken: internalToken,
+		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics, SDKAuth: r.sdkAuth,
 	}
-	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}",        f2fHandler.Invoke)
+	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}", f2fHandler.Invoke)
 	// v0.6 SDK upgrade: chunked-transfer streaming variant for invokeStream.
 	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}/stream", f2fHandler.InvokeStream)
 
 	// v0.6 SDK upgrade: user-defined spans + SDK-driven cron upsert.
-	spansHandler := &handlers.SpansHandler{DB: r.db, InternalToken: internalToken}
+	spansHandler := &handlers.SpansHandler{DB: r.db, SDKAuth: r.sdkAuth}
 	r.mux.HandleFunc("POST /api/v1/_internal/spans", spansHandler.Create)
 	r.mux.HandleFunc("POST /api/v1/_internal/crons", cronHandler.UpsertInternal)
 
-	// Background job queue (Phase 5). Public + internal token both work.
+	// Background job queue (Phase 5). Public + scoped SDK credentials both work.
 	jobsHandler := &handlers.JobsHandler{
-		DB: r.db, Registry: r.registry, InternalToken: internalToken,
+		DB: r.db, Registry: r.registry, SDKAuth: r.sdkAuth,
 	}
-	r.mux.HandleFunc("POST   /api/v1/jobs",            jobsHandler.Enqueue)
-	r.mux.HandleFunc("GET    /api/v1/jobs",            jobsHandler.List)
-	r.mux.HandleFunc("GET    /api/v1/jobs/{id}",       jobsHandler.Get)
+	r.mux.HandleFunc("POST   /api/v1/jobs", jobsHandler.Enqueue)
+	r.mux.HandleFunc("GET    /api/v1/jobs", jobsHandler.List)
+	r.mux.HandleFunc("GET    /api/v1/jobs/{id}", jobsHandler.Get)
 	r.mux.HandleFunc("POST   /api/v1/jobs/{id}/retry", jobsHandler.Retry)
-	r.mux.HandleFunc("DELETE /api/v1/jobs/{id}",       jobsHandler.Delete)
+	r.mux.HandleFunc("DELETE /api/v1/jobs/{id}", jobsHandler.Delete)
 
 	// Inbound webhook triggers (v0.4 C2a). CRUD lives under the
 	// authenticated /api/v1/functions/{fn_id}/inbound-webhooks tree;
 	// the public POST /webhook/{id} that external services hit is
 	// registered separately below so the auth middleware skips it.
 	inboundHandler := &handlers.InboundWebhookHandler{DB: r.db, Registry: r.registry}
-	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/inbound-webhooks",      inboundHandler.List)
-	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/inbound-webhooks",      inboundHandler.Create)
+	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/inbound-webhooks", inboundHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/inbound-webhooks", inboundHandler.Create)
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Get)
 	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Update)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Delete)
@@ -310,7 +310,7 @@ func (r *Router) setupRoutes() {
 	// don't need an API key. Authentication is the HMAC signature on
 	// the request body itself.
 	inboundTrigger := &handlers.InboundTriggerHandler{
-		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics,
+		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics, SDKAuth: r.sdkAuth,
 	}
 	if r.eventHub != nil {
 		inboundTrigger.PublishEvent = r.eventHub.Publish
@@ -321,13 +321,13 @@ func (r *Router) setupRoutes() {
 	// events fan out to subscribers via internal/scheduler's webhook
 	// delivery loop.
 	webhooksHandler := &handlers.WebhooksHandler{DB: r.db}
-	r.mux.HandleFunc("GET    /api/v1/webhooks",                       webhooksHandler.List)
-	r.mux.HandleFunc("POST   /api/v1/webhooks",                       webhooksHandler.Create)
-	r.mux.HandleFunc("GET    /api/v1/webhooks/{id}",                  webhooksHandler.Get)
-	r.mux.HandleFunc("PUT    /api/v1/webhooks/{id}",                  webhooksHandler.Update)
-	r.mux.HandleFunc("DELETE /api/v1/webhooks/{id}",                  webhooksHandler.Delete)
-	r.mux.HandleFunc("POST   /api/v1/webhooks/{id}/test",             webhooksHandler.Test)
-	r.mux.HandleFunc("GET    /api/v1/webhooks/{id}/deliveries",       webhooksHandler.ListDeliveries)
+	r.mux.HandleFunc("GET    /api/v1/webhooks", webhooksHandler.List)
+	r.mux.HandleFunc("POST   /api/v1/webhooks", webhooksHandler.Create)
+	r.mux.HandleFunc("GET    /api/v1/webhooks/{id}", webhooksHandler.Get)
+	r.mux.HandleFunc("PUT    /api/v1/webhooks/{id}", webhooksHandler.Update)
+	r.mux.HandleFunc("DELETE /api/v1/webhooks/{id}", webhooksHandler.Delete)
+	r.mux.HandleFunc("POST   /api/v1/webhooks/{id}/test", webhooksHandler.Test)
+	r.mux.HandleFunc("GET    /api/v1/webhooks/{id}/deliveries", webhooksHandler.ListDeliveries)
 	r.mux.HandleFunc("POST   /api/v1/webhooks/deliveries/{id}/retry", webhooksHandler.RetryDelivery)
 
 	// Custom routes: user-defined URL → function mappings.
@@ -552,7 +552,7 @@ func (r *Router) buildMiddlewareChain() {
 	// Build chain from inside out: Handler -> Logger -> RequestID -> Auth -> BodySize -> CORS
 	chain := loggerMiddleware(r.db, r.eventHub, r.mux)
 	chain = requestIDMiddleware(chain)
-	chain = authMiddleware(r.db, &r.keyCache, r.internalToken, chain)
+	chain = authMiddleware(r.db, &r.keyCache, r.sdkAuth, chain)
 	chain = bodySizeMiddleware(maxBody, chain)
 	chain = corsMiddleware(origins, chain)
 
