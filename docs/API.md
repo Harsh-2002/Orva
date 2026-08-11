@@ -565,8 +565,10 @@ List the models the configured provider/endpoint reports.
 ### `GET /api/v1/ai/settings`
 ### `PUT /api/v1/ai/settings`
 Read/update assistant settings: default provider/model, thinking level,
-approval policy (`all_writes` / `destructive_only` / `auto`), and the
-per-reply tool-step cap.
+and approval policy (`all_writes` / `destructive_only` / `auto`). The
+`max_tool_iterations` response field is retained for API compatibility but is
+an internal runaway-work guard fixed at `25`; values supplied by `PUT` are
+ignored and normalized to `25`.
 
 ### `PUT /api/v1/ai/selection`
 Persist the dashboard's active provider/model/thinking selection.

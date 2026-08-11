@@ -307,7 +307,7 @@ def configure_mock_provider(client, port=MOCK_PORT, model="gpt-4o", approval="al
     })
     client.put("/api/v1/ai/settings", {
         "provider": "openai", "model": model, "thinking_level": thinking,
-        "approval_policy": approval, "max_tool_iterations": 10,
+        "approval_policy": approval,
     })
 
 
