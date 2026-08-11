@@ -209,15 +209,24 @@ assert_eq "python scoped stream invoke succeeds"   "true" "$py_streamed"
 assert_eq "python scoped job enqueue succeeds"     "true" "$py_job"
 assert_eq "python cron stays in caller scope"      "true" "$py_cron_scoped"
 
-# Fetch the most recent execution for this function to peek at trace/logs.
-py_exec=$("${CURL[@]}" "$BASE/api/v1/executions?function_id=$py_id&limit=1" | jq -r '.executions[0]')
-py_trace_id=$(echo "$py_exec" | jq -r '.trace_id // empty')
+# Execution finalization uses the bounded critical writer. Poll briefly for the
+# row instead of racing its next 50 ms flush on fast CI hosts.
+py_trace_id=""
+for _ in $(seq 1 30); do
+    py_trace_id=$("${CURL[@]}" "$BASE/api/v1/executions?function_id=$py_id&limit=1" \
+        | jq -r '.executions[0].trace_id // empty')
+    [ -n "$py_trace_id" ] && break
+    sleep 0.1
+done
 assert_nonempty "python execution trace_id propagated" "$py_trace_id"
 
 sleep 1.5  # async writer
-py_trace=$("${CURL[@]}" "$BASE/api/v1/traces/$py_trace_id")
-py_user_spans=$(echo "$py_trace" | jq -r '.user_spans | length')
-py_log_entries=$(echo "$py_trace" | jq -r '.log_entries | length')
+py_trace='{}'
+if [ -n "$py_trace_id" ]; then
+    py_trace=$("${CURL[@]}" "$BASE/api/v1/traces/$py_trace_id")
+fi
+py_user_spans=$(echo "$py_trace" | jq -r '(.user_spans // []) | length')
+py_log_entries=$(echo "$py_trace" | jq -r '(.log_entries // []) | length')
 
 # 3 user spans: setup, incr, cas
 [ "$py_user_spans" -ge 3 ] && {
