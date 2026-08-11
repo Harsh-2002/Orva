@@ -349,16 +349,31 @@ jobs:
   #   cli     — cross-build and validate released CLI installers/upgrades
   #   install — validate released server installers plus native sandboxes
   e2e:
-    name: source API + sandbox E2E
+    name: source API + sandbox E2E (${{ matrix.arch }})
     if: >-
       github.event_name == 'push' ||
       github.event_name == 'pull_request' ||
       (github.event_name == 'workflow_dispatch' &&
         (inputs.suite == 'source' || inputs.suite == 'all'))
-    runs-on: ubuntu-24.04
+    # This is the only job that builds THIS branch and runs it against a real
+    # nsjail with ORVA_REQUIRE_SANDBOX=1, so it is the only place the build
+    # jail's seccomp profile is ever compiled by Kafel. That matters per-arch:
+    # aarch64's syscall table omits several legacy non-*at calls, and Kafel
+    # treats an unknown name as a COMPILE error — so a wrong entry takes every
+    # dependency build on arm64 down rather than degrading it. The two legs run
+    # in parallel, so this costs runner time but almost no wall clock.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     concurrency:
-      group: e2e-source-${{ github.ref }}
+      group: e2e-source-${{ matrix.arch }}-${{ github.ref }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
@@ -403,6 +418,16 @@ jobs:
           getcap /usr/local/bin/nsjail || true
           sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
           sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
+          # network_mode "egress" sandboxes get a TAP device from /dev/net/tun
+          # via nsjail's NSTUN backend. The runner does not always have the
+          # module loaded, and a missing device only shows up as an opaque
+          # "Couldn't initialize net namespace" much later in the suite.
+          [ -c /dev/net/tun ] || sudo modprobe tun || true
+          if [ ! -c /dev/net/tun ]; then
+            echo "::error title=/dev/net/tun missing::egress sandboxes cannot spawn without the tun device"
+            exit 1
+          fi
+          ls -l /dev/net/tun
           # Ubuntu 24.04 hosted runners restrict unprivileged user namespaces.
           # Exercise Orva's setcap fallback while keeping every other nsjail
           # namespace and the mandatory real invocation gate enabled.
@@ -862,7 +887,14 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
           echo "ORVA_INSTALLER_PATH=$installer" >> "$GITHUB_ENV"
       - name: install and invoke both runtimes
-        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH bash test/install/native-engine.sh
+        env:
+          # The dependency-install canary exercises the build jail, which only
+          # exists in a PUBLISHED artifact from the release that introduced it.
+          # Enable it once the thing under test can actually contain the fix;
+          # on a PR this script installs the current release, where npm runs on
+          # the host as the orva user and fails EACCES on /home/orva/.npm.
+          ORVA_DEPS_CANARY: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH,ORVA_DEPS_CANARY bash test/install/native-engine.sh
 
   released-container:
     name: released container (${{ matrix.arch }})

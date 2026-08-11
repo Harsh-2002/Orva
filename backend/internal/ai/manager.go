@@ -21,6 +21,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/ai/llm"
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/mcp"
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 )
@@ -45,6 +46,14 @@ type Manager struct {
 	mu     sync.Mutex
 	client *llm.Client
 	dirty  bool // rebuild the gateway on next use (provider configs changed)
+
+	// egress is the operator's sandbox egress policy, applied to the daemon's
+	// own provider traffic. nil = unfiltered (tests, and any build that never
+	// wires it). Both fields are set once at boot; see SetEgressGuard.
+	egress firewall.Guard
+	// providerHTTP is the guarded client for the model-catalog probe. Held so
+	// its connection pool is reused across probes rather than rebuilt per call.
+	providerHTTP *http.Client
 
 	// convMu guards convBusy, the set of conversations with a turn in flight.
 	// One turn per conversation: overlapping turns (double-send, or chat while
@@ -110,7 +119,28 @@ func baseURLFromContext(ctx context.Context) string {
 // (and rebuilt when provider configs change), so startup never depends on a
 // provider being configured.
 func New(db *database.Database, sec *secrets.Manager, deps mcp.Deps) *Manager {
-	return &Manager{db: db, secrets: sec, deps: deps, dirty: true}
+	return &Manager{
+		db: db, secrets: sec, deps: deps, dirty: true,
+		// A nil guard filters nothing, so the probe works the same before
+		// SetEgressGuard runs (and in tests, which never call it).
+		providerHTTP: firewall.NewHTTPClient(nil, firewall.SubsystemAIProviders, 15*time.Second),
+	}
+}
+
+// SetEgressGuard subjects provider traffic to the operator's egress policy.
+// Call before serving; it is the only writer of either field.
+//
+// Two different strengths of control, because the two paths differ:
+//
+//   - the model-catalog probe uses our own http.Client, so it is filtered at
+//     connect time by the dialer's Control hook (rebinding-proof).
+//   - chat turns go through the embedded Bifrost gateway, which builds its own
+//     fasthttp clients and exposes no dial hook. Those get a pre-flight check on
+//     the provider endpoint in buildRunner instead — a weaker gate, and marked
+//     as such at firewall.CheckEndpoint.
+func (m *Manager) SetEgressGuard(g firewall.Guard) {
+	m.egress = g
+	m.providerHTTP = firewall.NewHTTPClient(g, firewall.SubsystemAIProviders, 15*time.Second)
 }
 
 // Close releases the LLM gateway pools.
@@ -383,6 +413,12 @@ func (m *Manager) DeleteMessageFrom(convID, messageID string) error {
 // copy of Deps so tools render real invoke URLs, and is appended to the system
 // prompt so the agent can answer "how do I call this" with the live origin.
 func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent.Config, firstTurn bool) (*agent.Runner, error) {
+	// Checked here rather than at connect time: every entry point (chat,
+	// resume, regenerate, edit) funnels through buildRunner, and the provider
+	// endpoint cannot change mid-turn.
+	if err := m.checkProviderEgress(ctx, cfg.Provider); err != nil {
+		return nil, err
+	}
 	client, err := m.getClient()
 	if err != nil {
 		return nil, fmt.Errorf("ai gateway unavailable: %w", err)
@@ -423,6 +459,33 @@ func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent
 		return b, nil
 	}
 	return agent.New(client, tools, dispatch, m.db, cfg), nil
+}
+
+// checkProviderEgress refuses a turn whose provider endpoint the operator has
+// blocked. Best-effort by construction: Bifrost owns the connection, so this
+// resolves and checks the endpoint up front instead of filtering the dial (see
+// firewall.CheckEndpoint). An unknown endpoint is allowed rather than guessed —
+// inventing a destination would block turns the operator never blocked.
+func (m *Manager) checkProviderEgress(ctx context.Context, provider string) error {
+	if m.egress == nil || provider == "" {
+		return nil
+	}
+	root := ""
+	if cfg, err := m.db.GetEnabledProviderConfig(strings.ToLower(provider)); err == nil {
+		root = normalizeBaseURL(cfg.BaseURL)
+	}
+	if root == "" {
+		root = defaultPreflightRoot(provider)
+	}
+	if root == "" {
+		return nil
+	}
+	if err := firewall.CheckEndpoint(ctx, m.egress, firewall.SubsystemAIGateway, root); err != nil {
+		// The wrapped error already names the subsystem and the address; adding
+		// the provider tells the operator which configured key is affected.
+		return fmt.Errorf("provider %q: %w", provider, err)
+	}
+	return nil
 }
 
 // ─── settings ────────────────────────────────────────────────────────────────
@@ -823,7 +886,7 @@ func (m *Manager) ProviderModels(id string) ([]ModelInfo, error) {
 	} else if key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := m.providerHTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("reach %s: %w", root, err)
 	}
@@ -858,6 +921,26 @@ func normalizeBaseURL(u string) string {
 	u = strings.TrimRight(u, "/")
 	u = strings.TrimSuffix(u, "/v1")
 	return strings.TrimRight(u, "/")
+}
+
+// defaultPreflightRoot is the URL the egress preflight resolves when the
+// operator has set no custom base URL.
+//
+// Deliberately separate from defaultRoot: that one builds API request URLs by
+// appending "/v1/models", so a provider whose OpenAI-compatible path does not
+// fit that shape cannot be added there just to obtain a preflight. The check
+// only needs a host it can resolve. gemini is selectable in the dashboard's
+// provider list but has no defaultRoot, so with a default base URL it was
+// getting no endpoint check at all.
+func defaultPreflightRoot(provider string) string {
+	if r := defaultRoot(provider); r != "" {
+		return r
+	}
+	switch strings.ToLower(provider) {
+	case "gemini":
+		return "https://generativelanguage.googleapis.com"
+	}
+	return ""
 }
 
 // defaultRoot is the provider ROOT (no /v1) used when no custom base URL is set.

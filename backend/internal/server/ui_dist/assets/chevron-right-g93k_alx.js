@@ -1,0 +1,1 @@
+import{At as e}from"./index-tLK25Srp.js";var t=e(`chevron-right`,[[`path`,{d:`m9 18 6-6-6-6`,key:`mthhwq`}]]);export{t};

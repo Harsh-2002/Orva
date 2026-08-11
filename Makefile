@@ -22,6 +22,12 @@ LDFLAGS = -s -w \
   -X github.com/Harsh-2002/Orva/backend/internal/version.Commit=$(COMMIT) \
   -X github.com/Harsh-2002/Orva/backend/internal/version.BuildTime=$(BUILD_TIME)
 
+# The slim CLI does NOT import backend/internal/version (CONTRACT.md forbids it
+# importing backend/internal at all), so the server's -X targets above are
+# silently ignored there and a locally built CLI reports "dev". It carries its
+# own `main.Version` instead — the same variable release.yml stamps.
+CLI_LDFLAGS = -s -w -X main.Version=$(VERSION)
+
 .PHONY: build test lint clean ui embed build-all dev adapters-embed docs-embed cli cli-all
 
 # Sync the canonical docs reference markdown into both consumers:
@@ -87,7 +93,7 @@ cli:
 	@mkdir -p $(BUILD)
 	CGO_ENABLED=0 go build \
 	  -trimpath \
-	  -ldflags="$(LDFLAGS)" \
+	  -ldflags="$(CLI_LDFLAGS)" \
 	  -o $(BUILD)/orva ./cli/cmd/orva
 
 # Cross-compile the slim CLI for every release-asset target.
@@ -102,7 +108,7 @@ cli-all:
 	  echo ">> building orva-cli-$$os-$$arch$$ext"; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build \
 	    -trimpath \
-	    -ldflags="$(LDFLAGS)" \
+	    -ldflags="$(CLI_LDFLAGS)" \
 	    -o $(BUILD)/orva-cli-$$os-$$arch$$ext ./cli/cmd/orva || exit 1; \
 	done
 

@@ -89,6 +89,22 @@ change behavior). --env replaces the entire env-var map.
 	RunE: runFunctionsUpdate,
 }
 
+var functionsPurgeCacheCmd = &cobra.Command{
+	Use:   "purge-cache <name-or-id>",
+	Short: "Delete a function's cached npm/pip downloads",
+	Long: `Delete the function's build cache — the npm and pip downloads Orva keeps so a
+redeploy does not refetch every dependency. The cache is per-function and is
+rebuilt by the next deploy, which will be slower once.
+
+Use this to recover from a build that pulled a bad or malicious package: the
+cache is the only place such bytes persist between deploys.
+
+  orva functions purge-cache greeter
+  orva functions purge-cache greeter --yes`,
+	Args: cobra.ExactArgs(1),
+	RunE: runFunctionsPurgeCache,
+}
+
 func init() {
 	functionsListCmd.Flags().Int("limit", 100, "maximum number of functions to return")
 	functionsListCmd.Flags().Int("offset", 0, "number of functions to skip (pagination)")
@@ -120,6 +136,7 @@ func init() {
 	functionsCmd.AddCommand(functionsGetCmd)
 	functionsCmd.AddCommand(functionsDeleteCmd)
 	functionsCmd.AddCommand(functionsUpdateCmd)
+	functionsCmd.AddCommand(functionsPurgeCacheCmd)
 }
 
 func runFunctionsList(cmd *cobra.Command, args []string) error {
@@ -304,6 +321,41 @@ func runFunctionsDelete(cmd *cobra.Command, args []string) error {
 		return emitRaw(raw)
 	}
 	okf(cmd, "Deleted function %s", fnID)
+	return nil
+}
+
+func runFunctionsPurgeCache(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	fnID, err := resolveFnID(client, args[0])
+	if err != nil {
+		return err
+	}
+
+	if err := confirm(cmd, fmt.Sprintf("Purge the build cache for %q? The next deploy refetches its dependencies.", args[0])); err != nil {
+		return err
+	}
+
+	resp, err := client.Delete("/api/v1/functions/" + fnID + "/build-cache")
+	if err != nil {
+		return err
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+
+	if outputJSON(cmd) && len(raw) > 0 {
+		return emitRaw(raw)
+	}
+	okf(cmd, "Purged build cache for %s", args[0])
 	return nil
 }
 

@@ -103,4 +103,77 @@ if ! jq -e '. == {runtime:"python", ok:true}' <<<"$python_body" >/dev/null; then
     exit 1
 fi
 
-echo "native installed service: Node and Python invocations passed"
+# Dependency installs — the post-release canary for the build jail.
+#
+# Gated OFF by default because this script installs the PUBLISHED binary. Until
+# a release ships the build jail, dependency installs here run npm on the host
+# as the orva service user against /home/orva/.npm — which is not writable by
+# it, so npm fails EACCES. That is a real defect in the current release (the
+# build jail fixes it by giving npm a writable HOME inside the sandbox), but it
+# is not something a PR can fix, so gating on it would redden every PR for a
+# bug already shipped. ci.yml sets ORVA_DEPS_CANARY=1 only for release /
+# schedule / workflow_dispatch runs, i.e. once the artifact under test can
+# actually contain the fix.
+if [ "${ORVA_DEPS_CANARY:-0}" != "1" ]; then
+    echo "native installed service: Node and Python invocations passed" \
+         "(dependency canary skipped — set ORVA_DEPS_CANARY=1 to run it)"
+    exit 0
+fi
+
+#
+# This script installs the PUBLISHED binary, so it cannot gate a merge; the
+# e2e job's arch matrix does that against the branch. What this adds is
+# coverage of the shipped artifact on real amd64 AND arm64 hardware, which is
+# where a seccomp profile that Kafel cannot compile would surface as every
+# dependency build failing on one architecture. --follow exits non-zero on a
+# failed build, so a broken build jail fails this script rather than warning.
+mkdir -p "$workdir/node-deps" "$workdir/python-deps"
+cat > "$workdir/node-deps/package.json" <<'EOF'
+{ "name": "ci-native-node-deps", "version": "1.0.0", "dependencies": { "semver": "7.6.3" } }
+EOF
+cat > "$workdir/node-deps/handler.js" <<'EOF'
+const semver = require("semver");
+exports.handler = async () => ({
+  statusCode: 200,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ runtime: "node", valid: semver.valid("1.2.3") }),
+});
+EOF
+# urllib3 is py3-none-any, so this asserts the build jail rather than
+# manylinux wheel-platform resolution.
+printf 'urllib3==2.2.3\n' > "$workdir/python-deps/requirements.txt"
+cat > "$workdir/python-deps/handler.py" <<'EOF'
+import json
+import urllib3
+
+def handler(event):
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"runtime": "python", "v": urllib3.__version__}),
+    }
+EOF
+
+"${orva[@]}" deploy "$workdir/node-deps" --name ci-native-node-deps --runtime node --follow
+if ! deps_body=$("${orva[@]}" invoke ci-native-node-deps --body '{}' 2>"$workdir/node-deps.stderr"); then
+    printf 'Node dependency invocation failed:\n' >&2
+    cat "$workdir/node-deps.stderr" >&2
+    exit 1
+fi
+if ! jq -e '. == {runtime:"node", valid:"1.2.3"}' <<<"$deps_body" >/dev/null; then
+    printf 'unexpected Node dependency response:\n%s\n' "$deps_body" >&2
+    exit 1
+fi
+
+"${orva[@]}" deploy "$workdir/python-deps" --name ci-native-python-deps --runtime python --follow
+if ! pydeps_body=$("${orva[@]}" invoke ci-native-python-deps --body '{}' 2>"$workdir/python-deps.stderr"); then
+    printf 'Python dependency invocation failed:\n' >&2
+    cat "$workdir/python-deps.stderr" >&2
+    exit 1
+fi
+if ! jq -e '. == {runtime:"python", v:"2.2.3"}' <<<"$pydeps_body" >/dev/null; then
+    printf 'unexpected Python dependency response:\n%s\n' "$pydeps_body" >&2
+    exit 1
+fi
+
+echo "native installed service: Node and Python invocations passed (incl. jailed dependency installs)"

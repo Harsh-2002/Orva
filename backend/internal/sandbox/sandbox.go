@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -54,8 +55,9 @@ type ExecConfig struct {
 	// NetworkMode controls the sandbox's network access. "" or "none"
 	// keeps the function in an isolated net namespace with only loopback
 	// (the safe default — blocks egress and exfil). "egress" adds nsjail's
-	// --use_pasta flag, which gives the sandbox a userspace TCP/UDP stack
-	// that NATs out via the host without exposing host interfaces.
+	// --user_net flag, which gives the sandbox a userspace TCP/UDP stack
+	// (the bundled "nstun" backend) that NATs out via the host without
+	// exposing host interfaces, filtered by the compiled egress policy.
 	NetworkMode string
 
 	// ResolvConfPath, when non-empty AND NetworkMode=="egress", is the
@@ -71,10 +73,29 @@ type ExecConfig struct {
 	// system_config.dns_records.
 	HostsPath string
 
+	// EgressPolicyPath is the nsjail --config file holding the compiled NSTUN
+	// user_net rules. REQUIRED when NetworkMode=="egress": an empty path is a
+	// spawn error, never a silent fall-through.
+	//
+	// This deliberately does NOT follow the skip-if-missing posture used for
+	// ResolvConfPath/HostsPath above. Missing DNS config degrades a sandbox;
+	// missing egress policy would run it completely unfiltered, because NSTUN
+	// allows anything no rule matches.
+	EgressPolicyPath string
+
+	// EgressPolicyGen identifies the policy generation, for logs and metrics.
+	EgressPolicyGen string
+
 	// Paths (populated from config at startup).
 	NsjailBin string
 	RootfsDir string // e.g. ~/.orva/rootfs
 }
+
+// ErrEgressPolicyMissing means an egress sandbox was asked to start without a
+// compiled policy. This is fail-closed by design: NSTUN allows any destination
+// no rule matches, so spawning without a policy would run the function with no
+// filtering at all — strictly worse than not running it.
+var ErrEgressPolicyMissing = errors.New("egress policy config missing: refusing to start an unfiltered sandbox")
 
 // ExecResult holds the outcome of a sandboxed execution.
 type ExecResult struct {
@@ -97,7 +118,10 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 		return &ExecResult{Error: err, Duration: time.Since(start)}
 	}
 
-	args := buildArgs(cfg, rootfs, entrypoint)
+	args, err := buildArgs(cfg, rootfs, entrypoint)
+	if err != nil {
+		return &ExecResult{Error: err, Duration: time.Since(start)}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout+5*time.Second)
 	defer cancel()
@@ -187,7 +211,7 @@ func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
 	return rootfs, entrypoint, nil
 }
 
-func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
+func buildArgs(cfg ExecConfig, rootfs, entrypoint string) ([]string, error) {
 	// Prefer user namespaces for nsjail's mount/chroot setup. On hosts that
 	// restrict unprivileged user namespaces, the bare-metal installer grants
 	// the nsjail executable the narrow capability set it needs and exports
@@ -196,48 +220,37 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
 	// NOTE: --time_limit intentionally dropped; Go-side context.WithTimeout
 	// + Worker.Kill() handles timeouts with millisecond resolution and
 	// avoids the skew from nsjail's whole-second limit.
-	args := []string{
+	var args []string
+
+	// The compiled egress policy is loaded via --config, which MUST be the very
+	// first argument — see egressConfigArgs for why, and for the fail-closed
+	// contract when no policy is available.
+	prefix, err := egressConfigArgs(cfg.NetworkMode, cfg.EgressPolicyPath)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, prefix...)
+
+	args = append(args,
 		"-Mo",
 		"--chroot", rootfs,
-		"-R", cfg.CodeDir + ":/code",
+		"-R", cfg.CodeDir+":/code",
 		"-T", "/tmp",
 		"--rlimit_as", "max",
-		"-Q",
-	}
+		// -q (WARNING), not -Q (FATAL): nsjail gates rule-compilation errors
+		// behind ERROR, so -Q made every malformed-policy diagnostic invisible.
+		// NSTUN is default-allow, so a silently dropped rule is a security
+		// failure we must be able to see.
+		"-q",
+	)
 	if os.Getenv("ORVA_DISABLE_USERNS") == "1" {
 		args = append(args, "--disable_clone_newuser")
 	}
 
-	// Per-function egress. nsjail's default already creates a fresh net
-	// namespace with only loopback; --user_net layers a userspace TCP/UDP
-	// stack (nsjail's bundled "nstun" backend) on top so the function can
-	// reach external APIs without ever touching a host interface.
-	// Functions that don't need network access stay loopback-only —
-	// that's the safe default and blocks data exfiltration from
-	// compromised handlers. Requires /dev/net/tun in the container; the
-	// entrypoint mknods it on startup.
-	if cfg.NetworkMode == "egress" {
-		args = append(args, "--user_net")
-		// Bind-mount the firewall-managed resolv.conf so the function's
-		// DNS resolver matches what the operator configured. nsjail's
-		// -R takes <src>:<dst>; we mount over /etc/resolv.conf inside
-		// the chroot. Skip silently if the file isn't on disk yet — the
-		// firewall manager writes it on its first refresh tick, so a
-		// fresh boot may briefly fall back to the rootfs's default.
-		if cfg.ResolvConfPath != "" {
-			if _, err := os.Stat(cfg.ResolvConfPath); err == nil {
-				args = append(args, "-R", cfg.ResolvConfPath+":/etc/resolv.conf")
-			}
-		}
-		// /etc/hosts overrides — the resolver consults files before DNS by
-		// default, so any host→IP record in this file beats whatever the
-		// upstream resolver returns. Same skip-if-missing posture as resolv.
-		if cfg.HostsPath != "" {
-			if _, err := os.Stat(cfg.HostsPath); err == nil {
-				args = append(args, "-R", cfg.HostsPath+":/etc/hosts")
-			}
-		}
-	}
+	// Per-function egress. Functions that don't need network access stay
+	// loopback-only — that's the safe default and blocks data exfiltration
+	// from compromised handlers.
+	args = append(args, egressNetArgs(cfg.NetworkMode, cfg.ResolvConfPath, cfg.HostsPath)...)
 
 	// Cgroup v2 resource limits — only enabled if we have a writable cgroup
 	// delegate (systemd user slice on most modern hosts; bind-mounted in the
@@ -299,6 +312,72 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) []string {
 		args = append(args, "/opt/orva/adapter.js")
 	}
 
+	return args, nil
+}
+
+// egressConfigArgs returns the `--config <policy>` prefix an egress jail must
+// carry, or an error when no usable policy exists. Shared by the worker jail
+// (buildArgs) and the build jail (buildJailArgs) so there is exactly one
+// fail-closed implementation: NSTUN allows every destination no rule matches,
+// so starting either one without a policy would run it entirely unfiltered.
+//
+// The caller must place the returned args FIRST. nsjail's config loader does a
+// CopyFrom onto the config message, and CopyFrom CLEARS the destination first —
+// so every njc-backed flag parsed before it is silently destroyed, including
+// --env (i.e. every secret and ORVA_API_BASE), --seccomp_string, --cwd, the
+// --cgroup_* and --rlimit_* flags, and all bind mounts. Flags parsed AFTER it
+// survive and take precedence, which is what we want. Verified empirically: an
+// --env before --config arrives empty in the jail, and a --cwd before it is
+// silently reset to "/".
+//
+// There is no CLI flag for NSTUN rules, so a config file is the only way to
+// express policy at all.
+func egressConfigArgs(mode, policyPath string) ([]string, error) {
+	if mode != "egress" {
+		return nil, nil
+	}
+	if policyPath == "" {
+		return nil, ErrEgressPolicyMissing
+	}
+	// Confirm the generation file is still on disk. Without this the failure
+	// still fails closed — nsjail exits 255 on an unreadable --config — but it
+	// surfaces as a generic crash with an operator hint pointing at the wrong
+	// thing. Catching it here maps both variants (no policy compiled, and a
+	// compiled policy whose file has gone missing) onto one actionable error.
+	if _, err := os.Stat(policyPath); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrEgressPolicyMissing, policyPath)
+	}
+	return []string{"--config", policyPath}, nil
+}
+
+// egressNetArgs returns the network flags for an egress jail: nsjail's default
+// already creates a fresh net namespace with only loopback; --user_net layers a
+// userspace TCP/UDP stack (nsjail's bundled "nstun" backend) on top so the jail
+// can reach external hosts without ever touching a host interface. Requires
+// /dev/net/tun in the container; the entrypoint mknods it on startup.
+//
+// The DNS files are bind-mounted read-only over the chroot's own so name
+// resolution matches what the operator configured. Both are skipped silently
+// when absent — the firewall manager writes them on its first refresh tick, so
+// a fresh boot may briefly fall back to whatever the rootfs ships. /etc/hosts
+// beats upstream DNS because the resolver consults files first.
+func egressNetArgs(mode, resolvConfPath, hostsPath string) []string {
+	if mode != "egress" {
+		return nil
+	}
+	args := []string{"--user_net"}
+	for _, m := range []struct{ src, dst string }{
+		{resolvConfPath, "/etc/resolv.conf"},
+		{hostsPath, "/etc/hosts"},
+	} {
+		if m.src == "" {
+			continue
+		}
+		if _, err := os.Stat(m.src); err != nil {
+			continue
+		}
+		args = append(args, "-R", m.src+":"+m.dst)
+	}
 	return args
 }
 

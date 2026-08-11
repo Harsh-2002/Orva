@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -32,11 +33,16 @@ type ListFirewallRulesOutput struct {
 }
 
 type AddFirewallRuleInput struct {
-	Value    string `json:"value" jsonschema:"CIDR (10.0.0.0/8), hostname (example.com), or wildcard (*.example.com)"`
-	RuleType string `json:"rule_type,omitempty" jsonschema:"cidr, hostname, or wildcard — auto-detected from value if omitted"`
+	Value    string `json:"value" jsonschema:"CIDR (10.0.0.0/8) or hostname (example.com). A wildcard (*.example.com) is rejected — see rule_type"`
+	RuleType string `json:"rule_type,omitempty" jsonschema:"cidr or hostname — auto-detected from value if omitted. wildcard is refused: the policy matches packet addresses, not DNS names"`
 	Label    string `json:"label,omitempty"`
 	Enabled  *bool  `json:"enabled,omitempty" jsonschema:"defaults to true"`
 }
+
+// wildcardUnenforceable matches the REST handler's refusal text and the
+// compiler's own `unenforced_rules` reason, so an agent that tries a wildcard
+// is told the same thing an operator reading the dashboard is.
+const wildcardUnenforceable = "wildcard hostnames cannot be enforced: the egress policy matches IP/CIDR, not DNS names. Use a CIDR or an exact hostname."
 
 type DeleteFirewallRuleInput struct {
 	RuleID  int64 `json:"rule_id"`
@@ -68,7 +74,7 @@ func registerFirewallTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "list_firewall_rules",
 			Title:       "List Firewall Rules",
-			Description: "List all egress firewall rules — both built-in defaults and operator-added customs. Each rule is a CIDR, hostname, or wildcard pattern; enabled rules block matching outbound traffic from sandboxes with network_mode=egress.",
+			Description: "List the stored sandbox egress rules — built-in defaults and operator-added customs. Each rule is a CIDR or hostname; enabled rules are compiled into a per-sandbox nsjail NSTUN policy that rejects matching outbound traffic from every function with network_mode=egress. This returns what is STORED, not what is in force: use get_egress_policy_status to see the compiled generation and any rule the compiler could not enforce.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, ListFirewallRulesOutput, error) {
@@ -86,9 +92,30 @@ func registerFirewallTools(rc *regCtx) {
 
 	regAddTool(rc, permAdmin,
 		&mcpsdk.Tool{
+			Name:  "get_egress_policy_status",
+			Title: "Get Egress Policy Status",
+			Description: "Report what the sandbox egress policy is actually enforcing right now, as opposed to what list_firewall_rules says is stored. " +
+				"`enforced` is false when no policy has compiled — every network_mode=egress invocation then fails closed with EGRESS_POLICY_UNAVAILABLE rather than running unfiltered. " +
+				"`policy_stale` means a recompile failed and the last known-good generation is still in force; read `last_compile_error` for why. " +
+				"`unenforced_rules` lists stored rules the compiler deliberately dropped (a wildcard, or a malformed value) — check it before telling anyone a destination is blocked. " +
+				"`control_plane_allow` is the carve-out that keeps orvad's internal SDK reachable from inside the jail.",
+			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
+		},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, firewall.Snapshot, error) {
+			if deps.Firewall == nil {
+				// Not "nothing is blocked" — enforcement state is unknowable
+				// without the manager, and saying otherwise would be a lie.
+				return nil, firewall.Snapshot{}, errors.New("egress policy manager is not initialized on this instance")
+			}
+			return nil, deps.Firewall.Snapshot(), nil
+		},
+	)
+
+	regAddTool(rc, permAdmin,
+		&mcpsdk.Tool{
 			Name:        "add_firewall_rule",
 			Title:       "Add Firewall Rule",
-			Description: "Add a custom egress firewall rule. Value can be a CIDR (10.0.0.0/8), hostname (example.com), or wildcard (*.example.com) — type is auto-detected. Takes effect immediately for new sandbox spawns.",
+			Description: "Add a custom sandbox egress rule. Value is a CIDR (10.0.0.0/8) or a hostname (example.com); the type is auto-detected. A wildcard (*.example.com) is refused — the policy filters packets by address, so a name pattern can never be enforced; block the CIDR or the exact hostname instead. The rule is compiled into a new policy generation immediately, which recycles the warm egress workers so running functions pick it up.",
 			Annotations: &mcpsdk.ToolAnnotations{OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in AddFirewallRuleInput) (*mcpsdk.CallToolResult, FirewallRuleView, error) {
@@ -108,7 +135,12 @@ func registerFirewallTools(rc *regCtx) {
 				}
 			}
 			if !database.ValidBlocklistRuleType(ruleType) {
-				return nil, FirewallRuleView{}, errors.New("invalid rule_type (allowed: cidr, hostname, wildcard)")
+				return nil, FirewallRuleView{}, errors.New("invalid rule_type (allowed: cidr, hostname)")
+			}
+			// Same refusal as POST /api/v1/firewall/rules: a stored wildcard
+			// would show up as a rule and block nothing.
+			if ruleType == database.BlocklistTypeWildcard {
+				return nil, FirewallRuleView{}, errors.New(wildcardUnenforceable)
 			}
 			enabled := true
 			if in.Enabled != nil {
@@ -119,7 +151,7 @@ func registerFirewallTools(rc *regCtx) {
 				return nil, FirewallRuleView{}, err
 			}
 			if deps.Firewall != nil {
-				_ = deps.Firewall.ForceRefresh()
+				refreshEgressPolicy(deps)
 			}
 			return nil, toFirewallRuleView(rule), nil
 		},
@@ -129,7 +161,7 @@ func registerFirewallTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "delete_firewall_rule",
 			Title:       "Delete Firewall Rule",
-			Description: "Delete a custom firewall rule by id. Built-in (default/suggested) rules can't be deleted — disable them via add_firewall_rule's enabled flag instead. Pass confirm=true.",
+			Description: "Delete a custom sandbox egress rule by id. Built-in (default/suggested) rules can't be deleted — disable them from the dashboard or REST instead. Deleting recompiles the policy and recycles the warm egress workers, so traffic the rule was blocking is reachable again within seconds. Pass confirm=true.",
 			Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteFirewallRuleInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
@@ -140,7 +172,7 @@ func registerFirewallTools(rc *regCtx) {
 				return nil, DeletedOutput{}, err
 			}
 			if deps.Firewall != nil {
-				_ = deps.Firewall.ForceRefresh()
+				refreshEgressPolicy(deps)
 			}
 			return nil, DeletedOutput{DeletedID: ""}, nil
 		},
@@ -150,7 +182,7 @@ func registerFirewallTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "get_dns_config",
 			Title:       "Get DNS Config",
-			Description: "Get the operator-managed DNS configuration: upstream resolver IPs, optional search domain, and host→IP overrides. Sandboxes with network_mode=egress see this as their /etc/resolv.conf and /etc/hosts.",
+			Description: "Get the operator-managed DNS configuration: upstream resolver IPs, optional search domain, and host→IP overrides. Sandboxes with network_mode=egress see this as their /etc/resolv.conf and /etc/hosts, mounted per worker at spawn. The configured resolvers are also carved out of the egress policy, so a rule that would otherwise cover them does not break name resolution.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, GetDNSConfigOutput, error) {
@@ -170,7 +202,7 @@ func registerFirewallTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "set_dns_config",
 			Title:       "Set DNS Config",
-			Description: "Update DNS settings. Servers must be literal IPs (not hostnames). Records (max 64) override DNS for specific hostnames. Idempotent — pass the desired full state.",
+			Description: "Update DNS settings. Servers must be literal IPs (not hostnames). Records (max 64) override DNS for specific hostnames. Idempotent — pass the desired full state. Changing the resolvers also moves the egress policy (resolvers get an explicit allow rule), which recycles the warm egress workers; a search-domain or records-only edit reaches new spawns and lets existing warm workers age out.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in SetDNSConfigInput) (*mcpsdk.CallToolResult, GetDNSConfigOutput, error) {
@@ -209,7 +241,7 @@ func registerFirewallTools(rc *regCtx) {
 				return nil, GetDNSConfigOutput{}, err
 			}
 			if deps.Firewall != nil {
-				_ = deps.Firewall.ForceRefresh()
+				refreshEgressPolicy(deps)
 			}
 			cfg := firewall.LoadDNSConfig(deps.DB)
 			out := GetDNSConfigOutput{
@@ -222,4 +254,23 @@ func registerFirewallTools(rc *regCtx) {
 			return nil, out, nil
 		},
 	)
+}
+
+// refreshEgressPolicy recompiles the egress policy after an MCP-driven change.
+//
+// The DB write has already committed, so the tool result is not wrong about
+// the mutation — but a failure here means the change is NOT in force, and
+// these tools' own descriptions state the opposite as fact ("recycles the warm
+// egress workers, so traffic the rule was blocking is reachable again within
+// seconds"). Discarding the error silently let the in-product AI assistant
+// report a security change as applied when the previous policy was still
+// running. The detail lands on GET /api/v1/firewall/status.
+func refreshEgressPolicy(deps Deps) {
+	if deps.Firewall == nil {
+		return
+	}
+	if err := deps.Firewall.ForceRefresh(); err != nil {
+		slog.Warn("egress policy not refreshed after an MCP change; the change is saved but NOT in force",
+			"err", err, "hint", "see GET /api/v1/firewall/status (last_compile_error)")
+	}
 }

@@ -37,8 +37,8 @@ an issue.
 
 ## Kernel feature requirements
 
-The install script warns (but does not block) when these are missing.
-Without them, nsjail's isolation degrades:
+None of these block installation — the installer warns where it can probe,
+and otherwise the feature simply stops working at invocation time:
 
 - `kernel.unprivileged_userns_clone = 1` — preferred for nsjail's
   per-function user namespaces. On bare-metal hosts that disable or restrict
@@ -46,8 +46,15 @@ Without them, nsjail's isolation degrades:
   capability set to nsjail and configures `ORVA_DISABLE_USERNS=1`; the runtime
   still uses mount, PID, network, IPC, UTS, chroot, and seccomp isolation.
 - cgroup v2 — required for per-function memory / CPU limits.
-- `nf_tables` kernel module — required for the egress firewall feature.
-  Without it, the daemon runs fine; the firewall UI shows "degraded".
+- `/dev/net/tun` (the `tun` kernel module) — required by nsjail's
+  `--user_net`, i.e. by every function with `network_mode: egress`, and
+  therefore by the egress policy that filters those functions. Without the
+  device they fail to spawn; `network_mode: none` functions are unaffected.
+  Load it with `modprobe tun`; in Docker pass `--device /dev/net/tun` (the
+  shipped compose file and `install.sh`'s compose output already do).
+  **No `nftables` / `nf_tables` is needed.** The egress policy is compiled
+  into each sandbox's own network namespace by nsjail and never touches host
+  firewall state — see [`SECURITY.md`](SECURITY.md#sandbox-egress-policy).
 
 ## gVisor (runsc) compatibility
 
@@ -143,6 +150,11 @@ End-to-end passes on Ubuntu 24 and ARM64 bare metal surfaced several bugs in
    `CAP_NET_ADMIN`, and `CAP_NET_BIND_SERVICE`. Linux therefore rejected the
    nsjail `execve` with `EPERM`, producing an immediate `SANDBOX_ERROR` with
    no child stderr. The shipped unit now retains all nsjail file capabilities
-   and gives orvad only ambient `CAP_NET_ADMIN` for nftables. On hosts where
-   AppArmor or container policy blocks unprivileged user namespaces, the
-   installer also selects nsjail's setcap fallback automatically.
+   in its bounding set. `CAP_NET_ADMIN` is part of that set because **nsjail**
+   needs it to create and configure the TUN interface for `--user_net`
+   (`network_mode: egress`) — not because orvad programs a host firewall. It
+   no longer does: the egress policy is compiled per sandbox and loaded by
+   nsjail itself, so orvad requires no network-administration capability of
+   its own. On hosts where AppArmor or container policy blocks unprivileged
+   user namespaces, the installer also selects nsjail's setcap fallback
+   automatically.

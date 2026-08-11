@@ -100,9 +100,13 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := buildArgs(cfg, rootfs, entrypoint)
+	args, err := buildArgs(cfg, rootfs, entrypoint)
+	if err != nil {
+		return nil, err
+	}
 
-	slog.Debug("nsjail spawn", "bin", cfg.NsjailBin, "args", args)
+	slog.Debug("nsjail spawn", "bin", cfg.NsjailBin, "args", args,
+		"egress_policy_gen", cfg.EgressPolicyGen)
 
 	cmd := exec.Command(cfg.NsjailBin, args...)
 

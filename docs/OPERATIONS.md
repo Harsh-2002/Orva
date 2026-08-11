@@ -103,11 +103,19 @@ service environment. Check these known causes:
   crashing. Older builds crashed every worker here — upgrade to fix.
 - **nsjail capabilities excluded by systemd.** If the API returns
   `SANDBOX_ERROR` immediately and nsjail produces no stderr, inspect
-  `systemctl cat orva`. The bounding set must retain `CAP_SYS_ADMIN`,
-  `CAP_NET_ADMIN`, `CAP_SETUID`, `CAP_SETGID`, and
-  `CAP_NET_BIND_SERVICE`; otherwise Linux rejects the setcap nsjail binary at
-  `execve` before it can log. Re-running the current bare-metal installer
-  refreshes the unit safely on upgrades.
+  `systemctl cat orva`. The bounding set must retain every capability the
+  installed nsjail binary carries as a file capability — `CAP_SYS_ADMIN`,
+  `CAP_NET_ADMIN`, `CAP_SETUID`, `CAP_SETGID`, `CAP_NET_BIND_SERVICE` —
+  otherwise Linux rejects the setcap nsjail binary at `execve` before it can
+  log. These are **nsjail's** requirements, not orvad's: `CAP_NET_ADMIN` is
+  what lets nsjail configure the TUN interface for `--user_net`
+  (`network_mode: egress`). orvad itself administers no host networking, so
+  dropping the capability from the bounding set does not "turn off the
+  firewall" — it breaks sandbox spawn outright. Re-running the current
+  bare-metal installer refreshes the unit safely on upgrades.
+- **`/dev/net/tun` missing.** If only `network_mode: egress` functions fail
+  (and `none` functions run fine), nsjail cannot open the TUN device.
+  `modprobe tun` on bare metal; pass `--device /dev/net/tun` in Docker.
 
 Quick confirmation that nsjail itself works on the host:
 `sudo -u orva nsjail -Mo --chroot /var/lib/orva/rootfs/node -T /tmp -- /usr/local/bin/node --version`
@@ -230,6 +238,28 @@ docker exec orva sqlite3 /var/lib/orva/orva.db "SELECT id, username FROM users"
 docker exec orva sqlite3 /var/lib/orva/orva.db "DELETE FROM users; DELETE FROM sessions"
 # refresh dashboard → routes to /onboarding
 ```
+
+## Upgrading from an nftables-based build
+
+Nothing to clean up. Egress filtering is now compiled per sandbox and loaded
+by nsjail, so no build creates a host firewall table any more — there is no
+migration step, no service reconfiguration, and no leftover state on a normal
+upgrade.
+
+The one exception applies to the **currently published release**, not to some
+older pre-release: `v2026.08.05` is the last nftables-based build, and on
+bare-metal systemd it created `table inet orva_firewall` while running. A clean
+`systemctl stop` (which the installer performs on upgrade) removes it. If that
+daemon was instead SIGKILLed, OOM-killed, or lost to a hard reboot, the table
+survives — the new build no longer manages nftables, so nothing will clear it
+for you. Check and delete it by hand once:
+
+```bash
+sudo nft delete table inet orva_firewall
+```
+
+Orva never creates that table again, so a "table not found" error here just
+means there was nothing to remove.
 
 ## Logs
 

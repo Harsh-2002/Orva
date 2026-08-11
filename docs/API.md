@@ -94,7 +94,9 @@ Create a function record.
 - `none` (default) — isolated net namespace, loopback only. DNS / TCP /
   UDP all blocked. Best for pure-compute handlers.
 - `egress` — userspace TCP/UDP stack via nsjail `--user_net`. Function
-  can call external HTTPS APIs. Host interfaces stay isolated.
+  can call external HTTPS APIs. Host interfaces stay isolated. The
+  instance-wide egress policy is compiled into every such sandbox; a
+  blocked destination gives the handler `ECONNREFUSED`.
 
 Toggling on an existing function via `PUT /api/v1/functions/{id}`
 drains the warm pool so the next invocation picks up the new mode.
@@ -424,6 +426,55 @@ Prometheus also scrapes the unauthenticated `GET /metrics` path.
 - `PUT|DELETE /api/v1/firewall/rules/{rule_id}`
 - `POST /api/v1/firewall/resolve`
 - `GET|PUT /api/v1/firewall/dns`
+
+### Firewall status
+
+`GET /api/v1/firewall/rules` returns `{"rules": [...], "status": {...}}`, and
+`POST /api/v1/firewall/resolve` returns the same `status` object. It describes
+the compiled sandbox egress policy (see
+[`SECURITY.md`](SECURITY.md#sandbox-egress-policy)):
+
+```json
+{
+  "ipv4": ["169.254.0.0/16", "93.184.216.34/32"],
+  "ipv6": ["fd00:ec2::254/128"],
+  "hostname_map": {"example.com": ["93.184.216.34"]},
+  "backend": "nstun",
+  "enforced": true,
+  "policy_generation": "3f9a1c0d4b7e2851",
+  "policy_rule_counts": {"v4": 8, "v6": 2, "allow": 7, "reject": 3},
+  "policy_stale": false,
+  "last_success_at": "2026-08-09T11:02:14Z",
+  "control_plane_allow": {"addrs": ["172.17.0.1"], "port": 8443},
+  "unenforced_rules": [
+    {"id": 12, "value": "*.corp.com",
+     "reason": "wildcard hostnames are not enforceable: egress policy matches IP/CIDR, not DNS names. Use a CIDR or an exact hostname."}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `ipv4` / `ipv6` | The REJECT prefixes actually present in the compiled policy — derived from what is enforced, not from the raw table |
+| `hostname_map` | `hostname` rule → the addresses currently resolved for it |
+| `backend` | Always `"nstun"`. Enforcement is nsjail NSTUN rules loaded per sandbox |
+| `enforced` | A policy has compiled and is in use. **`false` means egress functions refuse to spawn**, since NSTUN's no-match default is ALLOW |
+| `policy_generation` | 16 hex chars — a hash of the exact bytes handed to nsjail. Changes only when enforcement changes |
+| `policy_rule_counts` | Compiled rule counts: `v4`, `v6`, `allow` (carve-outs), `reject` (blocklist) |
+| `policy_stale` | A recompile failed and the last known-good generation is still in force. Read with `last_compile_error` |
+| `last_compile_error` | Present only on failure |
+| `last_success_at` | RFC 3339 timestamp of the last successful compile |
+| `control_plane_allow` | The narrow ALLOW that keeps orvad's internal SDK (`orva.kv` / `orva.jobs` / `orva.invoke`) reachable: exact addresses, exact port, TCP only |
+| `unenforced_rules` | Stored rules deliberately **not** compiled, each with a `reason`. Wildcard rules land here. Surfaced so the UI never implies a rule is in force when it isn't |
+
+`nftables_available` was **removed, with no compatibility alias.** The field
+described a host-firewall mechanism that no longer exists, and reporting it as
+permanently `true` would be a lie in the API. Clients that read it should read
+`enforced` (is a policy in force) and `backend` instead.
+
+Creating or enabling a `wildcard` rule now fails with `400 VALIDATION`;
+wildcards cannot be expressed as packet rules. Existing wildcard rows are left
+untouched and reported in `unenforced_rules`.
 
 ### `GET /api/v1/events`
 Server-sent events stream of:

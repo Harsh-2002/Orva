@@ -1,17 +1,27 @@
 #!/usr/bin/env bash
-# egress-test.sh — verify per-function network_mode toggle.
+# egress-test.sh — verify per-function network_mode toggle + egress policy
+# enforcement.
 #
 # Asserts:
 #  - Default function (network_mode=none) cannot resolve / connect outbound.
 #  - PUT network_mode=egress unlocks outbound; warm pool drains and respawns.
 #  - PUT back to none re-isolates.
 #  - Invalid network_mode is rejected with 400 VALIDATION.
-#  - Toggle latency overhead is bounded (sanity check on pasta startup).
+#  - Toggle latency overhead is bounded (sanity check on NSTUN startup).
+#  - The compiled NSTUN policy is published (backend=nstun + a generation).
+#  - A blocklist rule for the destination actually REFUSES the connection,
+#    and deleting the rule restores reachability.
+#  - Fail-closed: with the compiled policy off disk, an egress worker refuses
+#    to start while network_mode=none keeps serving (needs ORVA_CONTAINER).
 
 set -euo pipefail
 
 BASE="${BASE_URL:-http://localhost:18443}"
 KEY="${API_KEY:?set API_KEY}"
+# Optional: the docker container serving $BASE. Only the fail-closed step needs
+# it — that check has to take a file off the daemon's data dir, which the HTTP
+# API deliberately never exposes. Same convention as secrets-test.sh.
+CONTAINER="${ORVA_CONTAINER:-}"
 
 CURL=(curl -sf -H "X-Orva-API-Key: $KEY")
 
@@ -20,6 +30,50 @@ check() {
     local label="$1" cond="$2"
     if [ "$cond" = "ok" ]; then echo "ok	$label"; PASS=$((PASS+1))
     else echo "fail	$label	${3-}"; FAIL=$((FAIL+1)); fi
+}
+
+# Everything this script creates is torn down on any exit path. A leaked
+# blocklist rule would keep blocking example.com for every later run, so it
+# must not survive a mid-script failure.
+fid=""; rule_id=""; hidden_pol=""
+cleanup() {
+    # First: put back a policy generation the fail-closed step took off disk.
+    # Leaving it hidden would break egress for every function on this instance,
+    # not just the one this script created.
+    if [ -n "$hidden_pol" ] && [ -n "$CONTAINER" ]; then
+        docker exec "$CONTAINER" mv "$hidden_pol" "${hidden_pol%.egress-test-hidden}" \
+            >/dev/null 2>&1 || true
+        curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" -H "Content-Type: application/json" \
+            -X POST "$BASE/api/v1/firewall/resolve" -d '{}' || true
+    fi
+    if [ -n "$rule_id" ]; then
+        curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+            -X DELETE "$BASE/api/v1/firewall/rules/$rule_id" || true
+    fi
+    if [ -n "$fid" ]; then
+        curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+            -X DELETE "$BASE/api/v1/functions/$fid" || true
+    fi
+}
+trap cleanup EXIT
+
+# Retire the warm pool so the next invoke spawns under the current policy
+# generation. nsjail loads NSTUN rules once per worker, and the policy-driven
+# recycle is rate-limited to one per 60s — a PUT that touches the spawn config
+# drains the pool now instead.
+cold_start() {
+    "${CURL[@]}" -X PUT "$BASE/api/v1/functions/$1" \
+        -H "Content-Type: application/json" -d '{"memory_mb":128}' > /dev/null
+    sleep 1
+}
+
+# The `.ok` field of the handler's own response: true = the outbound HTTPS GET
+# completed, false = it was refused.
+probe_ok() {
+    "${CURL[@]}" -X POST "$BASE/fn/${1#fn_}/" -d '{}' | jq -r '.ok'
+}
+probe_err() {
+    "${CURL[@]}" -X POST "$BASE/fn/${1#fn_}/" -d '{}' | jq -r '.err'
 }
 
 # 1. Create + deploy fn that does an outbound HTTPS GET and reports the
@@ -121,12 +175,121 @@ t0=$(date +%s%N)
 t1=$(date +%s%N)
 warm_ms=$(( (t1 - t0) / 1000000 ))
 # Generous bound — example.com round-trip dominates. We're checking
-# pasta isn't catastrophically broken (>5s would indicate a hang).
+# the NSTUN stack isn't catastrophically broken (>5s would indicate a hang).
 check "warm-pool egress latency < 5000 ms" \
     "$([ "$warm_ms" -lt 5000 ] && echo ok || echo fail)" "warm_ms=$warm_ms"
 
-# Cleanup.
-"${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$fid" > /dev/null
+# 7. Egress policy enforcement. The function stays in egress mode from step 6,
+#    so a blocklist rule covering its destination is the only variable: if the
+#    invoke still succeeds, the compiled NSTUN policy is a no-op.
+status=$("${CURL[@]}" "$BASE/api/v1/firewall/status")
+backend=$(echo "$status" | jq -r '.backend')
+gen_before=$(echo "$status" | jq -r '.policy_generation')
+check "egress policy backend == nstun" \
+    "$([ "$backend" = nstun ] && echo ok || echo fail)" "got=$backend"
+check "a policy generation is published" \
+    "$([ -n "$gen_before" ] && [ "$gen_before" != null ] && echo ok || echo fail)" \
+    "gen=$gen_before"
+
+# Idempotency: a leftover rule from an interrupted run would 409 the create.
+stale_id=$("${CURL[@]}" "$BASE/api/v1/firewall/rules" \
+    | jq -r '[.rules[]? | select(.kind=="custom" and .value=="example.com") | .id][0] // empty')
+if [ -n "$stale_id" ]; then
+    curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+        -X DELETE "$BASE/api/v1/firewall/rules/$stale_id"
+fi
+
+# A hostname rule is resolved by the daemon and compiled into REJECT rules for
+# every address it answers with — which is exactly what this function fetches.
+rule=$("${CURL[@]}" -X POST "$BASE/api/v1/firewall/rules" \
+    -H "Content-Type: application/json" \
+    -d '{"rule_type":"hostname","value":"example.com","label":"egress-test"}')
+rule_id=$(echo "$rule" | jq -r '.id')
+check "blocklist rule created" \
+    "$([ -n "$rule_id" ] && [ "$rule_id" != null ] && echo ok || echo fail)" \
+    "resp=$(echo "$rule" | head -c 160)"
+
+gen_after=$("${CURL[@]}" "$BASE/api/v1/firewall/status" | jq -r '.policy_generation')
+check "new rule publishes a new policy generation" \
+    "$([ -n "$gen_after" ] && [ "$gen_after" != "$gen_before" ] && echo ok || echo fail)" \
+    "before=$gen_before after=$gen_after"
+
+cold_start "$fid"
+ok_blocked=$(probe_ok "$fid")
+check "blocklist rule refuses the outbound connection" \
+    "$([ "$ok_blocked" = false ] && echo ok || echo fail)" "ok=$ok_blocked"
+err_blocked=$(probe_err "$fid")
+# NSTUN REJECT synthesizes a refusal rather than blackholing the packet, so a
+# blocked function fails immediately instead of hanging until its timeout.
+check "refusal surfaces as ECONNREFUSED" \
+    "$([ "$err_blocked" = ECONNREFUSED ] && echo ok || echo fail)" "err=$err_blocked"
+
+# 8. Deleting the rule restores reachability — proves the block came from the
+#    policy and not from a broken sandbox.
+curl -s -o /dev/null -H "X-Orva-API-Key: $KEY" \
+    -X DELETE "$BASE/api/v1/firewall/rules/$rule_id"
+rule_id=""
+cold_start "$fid"
+ok_restored=$(probe_ok "$fid")
+check "deleting the rule restores reachability" \
+    "$([ "$ok_restored" = true ] && echo ok || echo fail)" "ok=$ok_restored"
+
+# 9. Fail-closed. NSTUN is default-ALLOW, so a worker that starts without the
+#    policy it was supposed to load runs completely unfiltered — the one
+#    outcome the design exists to prevent. Take the published generation off
+#    disk and the egress worker must refuse to start, while a network_mode=none
+#    worker (which loads no policy) keeps serving.
+#
+#    Gated on ORVA_CONTAINER because it needs the daemon's data dir, and it
+#    only proceeds once the container's first-boot admin key matches $API_KEY —
+#    sabotaging some *other* Orva would be far worse than skipping. Everything
+#    is restored below and again in the EXIT trap.
+if [ -z "$CONTAINER" ] || ! command -v docker >/dev/null 2>&1; then
+    echo "skip	fail-closed check (set ORVA_CONTAINER to the container serving $BASE)"
+elif [ "$(docker exec "$CONTAINER" cat /var/lib/orva/.admin-key 2>/dev/null || true)" != "$KEY" ]; then
+    echo "skip	fail-closed check (ORVA_CONTAINER=$CONTAINER is not the instance at $BASE)"
+else
+    gen_now=$("${CURL[@]}" "$BASE/api/v1/firewall/status" | jq -r '.policy_generation')
+    pol="/var/lib/orva/firewall/policy/egress-$gen_now.cfg"
+    if ! docker exec "$CONTAINER" test -e "$pol"; then
+        check "compiled policy generation is on disk" fail "missing $pol in $CONTAINER"
+    else
+        check "compiled policy generation is on disk" ok
+        docker exec "$CONTAINER" mv "$pol" "$pol.egress-test-hidden"
+        hidden_pol="$pol.egress-test-hidden"
+
+        # The function is still in egress mode from step 6/8.
+        cold_start "$fid"
+        code_closed=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Orva-API-Key: $KEY" \
+            -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
+        check "egress worker refuses to start without its policy" \
+            "$([ "${code_closed:0:1}" = 5 ] && echo ok || echo fail)" \
+            "http=$code_closed (200 means it ran UNFILTERED)"
+
+        # The discriminating half: no policy is only supposed to stop egress.
+        "${CURL[@]}" -X PUT "$BASE/api/v1/functions/$fid" \
+            -H "Content-Type: application/json" -d '{"network_mode":"none"}' > /dev/null
+        sleep 3
+        code_none=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Orva-API-Key: $KEY" \
+            -X POST "$BASE/fn/${fid#fn_}/" -d '{}')
+        check "network_mode=none keeps serving through the outage" \
+            "$([ "$code_none" = 200 ] && echo ok || echo fail)" "http=$code_none"
+
+        # Restore + prove recovery, so the block above is attributable to the
+        # missing policy and this script leaves nothing broken behind.
+        docker exec "$CONTAINER" mv "$hidden_pol" "$pol"
+        hidden_pol=""
+        "${CURL[@]}" -X POST "$BASE/api/v1/firewall/resolve" \
+            -H "Content-Type: application/json" -d '{}' > /dev/null
+        "${CURL[@]}" -X PUT "$BASE/api/v1/functions/$fid" \
+            -H "Content-Type: application/json" -d '{"network_mode":"egress"}' > /dev/null
+        sleep 3
+        cold_start "$fid"
+        ok_recovered=$(probe_ok "$fid" || true)
+        check "egress recovers once the policy is back" \
+            "$([ "$ok_recovered" = true ] && echo ok || echo fail)" "ok=$ok_recovered"
+    fi
+fi
 
 echo
 echo "=== egress-test: $PASS passed, $FAIL failed ==="

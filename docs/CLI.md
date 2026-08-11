@@ -521,23 +521,39 @@ orva traces get tr_01h…                 # full span tree
 orva traces baseline greeter            # rolling p95/p99/mean latency
 ```
 
-### Egress firewall
+### Egress policy (`orva firewall`)
 
-The allow/block list applied to sandboxes running with
-`network_mode=egress`. Rules are a CIDR, a hostname, or a `*.wildcard`.
-Built-in rules can be toggled but not deleted; custom rules are fully
-editable. Mutations take effect on the next sandbox spawn.
+The blocklist applied to every sandbox running with `network_mode=egress`.
+A rule is a **CIDR** (or bare IP) or an **exact hostname**; hostnames are
+resolved to addresses on a timer. Built-in rules can be toggled but not
+deleted; custom rules are fully editable.
+
+Mutations take effect on the **next** spawn: the policy is loaded by nsjail
+once at worker start, so saving a rule publishes a new policy generation and
+retires the warm egress workers (rate-limited to one recycle per 60 s). Expect
+a few seconds and a cold start.
 
 ```bash
 orva firewall list
-orva firewall add 10.0.0.0/8 --label "internal net"
-orva firewall add '*.metadata.google.internal'        # type auto-detected
+orva firewall add 10.42.0.0/16 --label "internal net"
 orva firewall add example.com --type hostname --disabled
 orva firewall enable 7
 orva firewall disable 7
 orva firewall delete 7                                 # prompts; --yes to skip
 orva firewall resolve example.com                      # re-resolve hostnames now
 ```
+
+**Wildcard patterns are not supported.** `orva firewall add '*.corp.com'`
+fails with `400 VALIDATION`, as does enabling an existing wildcard row: packet
+rules match addresses, not DNS names. Any wildcard row already in the table is
+left as-is, excluded from the compiled policy, and reported under
+`unenforced_rules` in the status output. Use a CIDR or an exact hostname.
+
+**`orva firewall add 10.0.0.0/8` also blocks orvad itself.** The daemon's own
+outbound calls are filtered by the same rules, so a broad RFC1918 block cuts
+off internal package mirrors, LAN-hosted AI providers, and internal webhook
+targets. There is no allow-exception to add on top — block a narrower CIDR
+instead. See [`SECURITY.md`](SECURITY.md#sandbox-egress-policy).
 
 ### Sandbox DNS
 
@@ -635,7 +651,7 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | `orva webhooks create / list / test / delete / deliveries / retry` | Outbound system-event subscriptions |
 | `orva webhooks inbound …` | Inbound signed-POST triggers (GitHub, Stripe, etc.) |
 | `orva traces list / get / baseline` | Distributed traces + latency baselines |
-| `orva firewall list / add / enable / disable / delete / resolve` | Egress firewall rules |
+| `orva firewall list / add / enable / disable / delete / resolve` | Sandbox egress policy rules (CIDR or exact hostname) |
 | `orva dns get / set` | Sandbox DNS config |
 | `orva pool get / set` | Per-function warm-pool autoscaler config |
 | `orva backup download / restore` | Point-in-time snapshot + restore |

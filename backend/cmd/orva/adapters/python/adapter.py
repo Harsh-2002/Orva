@@ -622,8 +622,11 @@ def _dispatch_and_emit(event, streaming_enabled, keepalive_s):
 
 # ── Main loop ──────────────────────────────────────────────────────────
 
-max_reqs = int(os.environ.get("ORVA_MAX_REQUESTS", "0") or 0)
-served = 0
+# Worker recycling is owned by the pool (SandboxTemplate DefaultMaxUses →
+# functionPool.maxUses), which retires a worker after N dispatches. This adapter
+# deliberately has no second, self-managed recycle counter: the pool is the
+# single lifecycle authority, and a worker that exits on its own schedule races
+# the pool's accounting.
 
 try:
     while True:
@@ -694,10 +697,6 @@ try:
                 except Exception:
                     pass
 
-        served += 1
-        if max_reqs > 0 and served >= max_reqs:
-            _write_frame({"type": "bye"})
-            sys.exit(0)
 except SystemExit:
     raise
 except Exception as exc:

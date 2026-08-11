@@ -2,7 +2,6 @@ package builder
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
@@ -14,13 +13,15 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
 // BuildResult holds the output of a successful build.
@@ -48,6 +49,10 @@ var ErrInsufficientDisk = errors.New("insufficient free disk space for deploy")
 
 // Builder handles building function code for nsjail execution.
 type Builder struct {
+	// FnLock is the per-function build mutex, shared with the build queue and
+	// the GC. Optional: nil means no concurrent build can exist (unit tests).
+	FnLock func(fnID string) *sync.Mutex
+
 	// BuildFunc can be injected to override behavior. For nsjail this is
 	// typically a no-op since code just needs to be extracted, not built.
 	BuildFunc func(ctx context.Context, dockerfilePath, contextDir, imageTag string) (int64, error)
@@ -66,11 +71,34 @@ type Builder struct {
 	Logger interface {
 		Append(stream, line string)
 	}
+
+	// NsjailBin / RootfsDir locate the sandbox every dependency install runs
+	// in. Same values the pool uses for workers, so a function is built with
+	// the very toolchain it will later run under.
+	NsjailBin string
+	RootfsDir string
+
+	// EgressPolicy resolves the compiled NSTUN policy a dependency install
+	// runs under, exactly as pool.Manager does for workers. Late-bound from
+	// the firewall manager in server.New (see SetEgressPolicy).
+	//
+	// Unlike the pool's, a nil accessor here is NOT "no policy layer wired,
+	// carry on": an install reaches a package registry, so running it without
+	// a policy is precisely the unfiltered egress this exists to prevent.
+	// Builds that install nothing never consult it.
+	EgressPolicy func() (path, gen string, err error)
 }
 
 // New creates a new Builder.
 func New() *Builder {
 	return &Builder{}
+}
+
+// SetEgressPolicy wires the compiled-policy accessor in after construction,
+// mirroring pool.Manager.SetEgressPolicy: the firewall manager is built later
+// than the builder in server.New.
+func (b *Builder) SetEgressPolicy(fn func() (string, string, error)) {
+	b.EgressPolicy = fn
 }
 
 // Build extracts the code archive into a content-addressed version directory,
@@ -139,7 +167,7 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	if err := ValidateArchive(scratchDir, fn.Runtime, fn.Entrypoint); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
 	}
-	resolvedEntrypoint, err := b.installDependencies(ctx, scratchDir, fn.Runtime, fn.Entrypoint)
+	resolvedEntrypoint, err := b.installDependencies(ctx, fn.ID, scratchDir, fn.Runtime, fn.Entrypoint)
 	if err != nil {
 		return nil, fmt.Errorf("install dependencies: %w", err)
 	}
@@ -233,6 +261,22 @@ func (b *Builder) checkFreeDisk() error {
 		return nil
 	}
 	freeMB := int64(st.Bavail) * int64(st.Bsize) / (1024 * 1024)
+	if freeMB >= int64(floorMB) {
+		return nil
+	}
+
+	// Below the floor. Before refusing the deploy, reclaim the build caches:
+	// they are a pure optimisation, so a rebuildable cache must never be the
+	// reason a deploy fails for want of space. Caches a build may still be
+	// using are left alone (EvictIdleBuildCaches).
+	cacheMB := BuildCacheUsageBytes(b.DataDir) / (1024 * 1024)
+	slog.Warn("free disk below floor for deploy; reclaiming build caches",
+		"free_mb", freeMB, "floor_mb", floorMB, "build_cache_mb", cacheMB, "dir", b.DataDir)
+	if freed := EvictIdleBuildCaches(b.DataDir, b.tryFnLock); freed > 0 {
+		if err := syscall.Statfs(b.DataDir, &st); err == nil {
+			freeMB = int64(st.Bavail) * int64(st.Bsize) / (1024 * 1024)
+		}
+	}
 	if freeMB < int64(floorMB) {
 		slog.Warn("insufficient free disk for deploy", "free_mb", freeMB, "floor_mb", floorMB, "dir", b.DataDir)
 		return ErrInsufficientDisk
@@ -392,8 +436,19 @@ func extractTarGz(archivePath, destDir string) error {
 //   - python: if requirements.txt is present, runs `pip install -t <codeDir>`.
 //     Packages land at /code/<pkg> and the Python adapter adds /code to sys.path.
 //
-// Both commands run on the host (not inside nsjail) during the build phase.
-func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, entrypoint string) (string, error) {
+// Every one of those commands runs inside nsjail, under the same compiled NSTUN
+// egress policy a function worker gets (see sandbox.RunBuild). This is not
+// decoration: `npm install` executes whatever postinstall script a package
+// ships, and both installers fetch from a registry, so a host-side build was
+// the one path out of the box the operator's blocklist could not touch. The
+// installs therefore fail closed — no compiled policy, no install — while a
+// function with no dependencies never invokes an installer at all and deploys
+// exactly as before.
+//
+// The toolchain comes from the runtime's own rootfs, not the host, which also
+// closes a latent skew: Orva used to build with the host's npm/pip and run the
+// result under the rootfs's node/python.
+func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtime, entrypoint string) (string, error) {
 	switch {
 	case isNodeRuntime(runtime):
 		pkgJSON := filepath.Join(codeDir, "package.json")
@@ -402,18 +457,33 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 			// tsconfig.json-only directory through to the TS step so a
 			// user with a globally available tsc can be told clearly
 			// that they need to declare typescript as a dep.
-			return b.maybeCompileTypeScript(ctx, codeDir, entrypoint)
+			return b.maybeCompileTypeScript(ctx, fnID, codeDir, entrypoint)
 		}
 		slog.Info("installing node dependencies", "dir", codeDir)
-		cmd := exec.CommandContext(ctx, "npm", "install", "--prefix", codeDir, "--no-audit", "--no-fund")
-		cmd.Dir = codeDir
-		out, err := cmd.CombinedOutput()
-		logLines(b, "npm", out)
+		out, err := b.runBuildStep(ctx, buildStep{
+			language: sandbox.Node,
+			fnID:     fnID,
+			codeDir:  codeDir,
+			stream:   "npm",
+			// --prefix is redundant now that the jail's cwd is the code dir,
+			// but it keeps the resolved install root explicit and matches
+			// what operators see in the build log.
+			argv: []string{nodeNpmBin, "install", "--prefix", sandbox.BuildCodeDir, "--no-audit", "--no-fund"},
+			env: map[string]string{
+				// The "New major version of npm available" banner is pure
+				// noise in a deploy log the user is watching. It only showed
+				// up once builds moved into the jail, because npm's notifier
+				// state lives in HOME and HOME is now thrown away each time.
+				"NO_UPDATE_NOTIFIER":         "1",
+				"npm_config_update_notifier": "false",
+			},
+			network: buildNetworkEgress,
+		})
 		if err != nil {
 			return entrypoint, fmt.Errorf("npm install failed: %w\n%s", err, string(out))
 		}
 		slog.Info("npm install complete", "output", strings.TrimSpace(string(out)))
-		return b.maybeCompileTypeScript(ctx, codeDir, entrypoint)
+		return b.maybeCompileTypeScript(ctx, fnID, codeDir, entrypoint)
 
 	case isPythonRuntime(runtime):
 		reqTxt := filepath.Join(codeDir, "requirements.txt")
@@ -421,34 +491,173 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 			return entrypoint, nil
 		}
 		slog.Info("installing python dependencies", "dir", codeDir, "runtime", runtime)
-		// Cross-install wheels for the sandbox's Python version (not the
-		// host's). --only-binary=:all: forces wheels so we never execute
-		// setup.py with the wrong interpreter.
+		// Wheels are still resolved explicitly for the sandbox's Python
+		// version and platform. The build now runs on that interpreter, so
+		// this is belt-and-braces rather than a cross-install — but pinning
+		// it keeps wheel selection identical to what shipped before.
+		// --only-binary=:all: forces wheels so we never execute a setup.py.
 		pyVer := pythonVersionFor(runtime)
-		baseArgs := []string{
-			"install", "-r", reqTxt, "-t", codeDir,
-			"--python-version", pyVer,
-			"--platform", "manylinux2014_x86_64",
-			"--implementation", "cp",
-			"--only-binary=:all:",
-			"--quiet",
-			// Suppress pip's "Running pip as the 'root' user" warning.
-			// We're inside a single-tenant container — there's no
-			// alternative user to switch to and the warning was the
-			// only line showing up in the deploy progress UI.
-			"--root-user-action=ignore",
-		}
-		cmd := exec.CommandContext(ctx, "pip", baseArgs...)
-		cmd.Env = append(os.Environ(), "PIP_DISABLE_PIP_VERSION_CHECK=1")
-		cmd.Dir = codeDir
-		out, err := cmd.CombinedOutput()
-		logLines(b, "pip", out)
+		out, err := b.runBuildStep(ctx, buildStep{
+			language: sandbox.Python,
+			fnID:     fnID,
+			codeDir:  codeDir,
+			stream:   "pip",
+			argv: []string{
+				pythonPipBin,
+				"install", "-r", sandbox.BuildCodeDir + "/requirements.txt",
+				"-t", sandbox.BuildCodeDir,
+				"--python-version", pyVer,
+				"--platform", pipPlatformTag(),
+				"--implementation", "cp",
+				"--only-binary=:all:",
+				"--quiet",
+				// Suppress pip's "Running pip as the 'root' user" warning.
+				// We're inside a single-tenant container — there's no
+				// alternative user to switch to and the warning was the
+				// only line showing up in the deploy progress UI.
+				"--root-user-action=ignore",
+			},
+			env:     map[string]string{"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+			network: buildNetworkEgress,
+		})
 		if err != nil {
 			return entrypoint, fmt.Errorf("pip install failed: %w\n%s", err, string(out))
 		}
 		slog.Info("pip install complete")
 	}
 	return entrypoint, nil
+}
+
+// Toolchain paths inside the runtime rootfs images.
+const (
+	nodeNpmBin   = "/usr/local/bin/npm"
+	nodeNpxBin   = "/usr/local/bin/npx"
+	pythonPipBin = "/usr/local/bin/pip"
+)
+
+// buildNetworkEgress marks a step that must reach a package registry. Note it
+// is a property of the STEP, not of the function: a function with
+// network_mode=none still has to download its dependencies to exist at all.
+// What that download may reach is the operator's egress policy to decide.
+const buildNetworkEgress = "egress"
+
+// buildStep is one jailed command in the deploy pipeline.
+type buildStep struct {
+	language sandbox.Language
+	fnID     string // scopes the persistent installer cache; "" = no cache
+	codeDir  string
+	argv     []string
+	env      map[string]string
+	stream   string // build_logs label: "npm" / "pip" / "tsc"
+	network  string // buildNetworkEgress, or "" for no network
+	timeout  time.Duration
+}
+
+// runBuildStep resolves the egress policy (when the step needs one), runs the
+// command in nsjail, and streams its output into build_logs — preserving the
+// old behaviour of logging everything the subprocess printed on both the
+// success and failure paths.
+func (b *Builder) runBuildStep(ctx context.Context, step buildStep) ([]byte, error) {
+	cfg := b.buildConfigFor(step)
+	if step.network == buildNetworkEgress {
+		path, gen, err := b.resolveEgressPolicy()
+		if err != nil {
+			return nil, err
+		}
+		cfg.EgressPolicyPath, cfg.EgressPolicyGen = path, gen
+	}
+
+	out, err := sandbox.RunBuild(ctx, cfg)
+	logLines(b, step.stream, out)
+	return out, err
+}
+
+// buildConfigFor translates a step into the jail configuration. Split out from
+// runBuildStep so the cache-scoping invariant is testable without nsjail: the
+// cache directory handed to a step is derived from the id of the function
+// being built and from nothing else.
+func (b *Builder) buildConfigFor(step buildStep) sandbox.BuildConfig {
+	cfg := sandbox.BuildConfig{
+		Language:    step.language,
+		CodeDir:     step.codeDir,
+		Argv:        step.argv,
+		Env:         withRegistryEnv(step.env),
+		NetworkMode: step.network,
+		Timeout:     step.timeout,
+		NsjailBin:   b.NsjailBin,
+		RootfsDir:   b.RootfsDir,
+	}
+	if b.DataDir == "" {
+		return cfg
+	}
+	// The jail's HOME/TMPDIR lives beside the code it is building so the
+	// two share a filesystem (no EXDEV on rename, no tmpfs RAM cost).
+	cfg.ScratchBase = filepath.Join(b.DataDir, buildScratchDirName)
+	cfg.ResolvConfPath = filepath.Join(b.DataDir, "firewall", "resolv.conf")
+	cfg.HostsPath = filepath.Join(b.DataDir, "firewall", "hosts")
+
+	// The installer cache is private to this function — see buildcache.go for
+	// why sharing one is a code-execution channel between functions. Failure
+	// to prepare it degrades to the throwaway cache; it never fails a build.
+	cacheDir, err := PrepareBuildCache(b.DataDir, step.fnID)
+	if err != nil {
+		slog.Warn("build cache unavailable for this step", "fn", step.fnID, "err", err)
+		return cfg
+	}
+	cfg.CacheDir = cacheDir
+	return cfg
+}
+
+// resolveEgressPolicy is the fail-closed gate on every dependency install.
+func (b *Builder) resolveEgressPolicy() (path, gen string, err error) {
+	if b.EgressPolicy == nil {
+		return "", "", fmt.Errorf("%w: builder has no egress policy source", sandbox.ErrEgressPolicyMissing)
+	}
+	return b.EgressPolicy()
+}
+
+// registryEnvPrefixes are the environment variables forwarded from orvad's own
+// environment into a build jail. A jailed build gets a fresh HOME, so an
+// operator's ~/.npmrc or pip.conf no longer applies; the env-var form of the
+// same settings (the one the Docker deployment uses) still does. Proxy vars are
+// included because a private registry usually sits behind one.
+var registryEnvPrefixes = []string{"NPM_CONFIG_", "npm_config_", "PIP_"}
+
+var registryEnvNames = []string{
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+}
+
+// withRegistryEnv layers the forwarded registry/proxy configuration under the
+// step's own environment (the step wins on collision).
+func withRegistryEnv(stepEnv map[string]string) map[string]string {
+	env := make(map[string]string, len(stepEnv)+8)
+	for _, kv := range os.Environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		forward := false
+		for _, name := range registryEnvNames {
+			if k == name {
+				forward = true
+				break
+			}
+		}
+		for _, prefix := range registryEnvPrefixes {
+			if strings.HasPrefix(k, prefix) {
+				forward = true
+				break
+			}
+		}
+		if forward {
+			env[k] = v
+		}
+	}
+	for k, v := range stepEnv {
+		env[k] = v
+	}
+	return env
 }
 
 // maybeCompileTypeScript runs `tsc --project tsconfig.json` when the code
@@ -458,7 +667,7 @@ func (b *Builder) installDependencies(ctx context.Context, codeDir, runtime, ent
 // invocation time. Returns the post-compile entrypoint
 // (`<outDir>/<stem>.js`); when no tsconfig.json is present it returns the
 // original entrypoint unchanged so existing .js-only deploys are untouched.
-func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoint string) (string, error) {
+func (b *Builder) maybeCompileTypeScript(ctx context.Context, fnID, codeDir, entrypoint string) (string, error) {
 	tsConfigPath := filepath.Join(codeDir, "tsconfig.json")
 	if _, err := os.Stat(tsConfigPath); os.IsNotExist(err) {
 		return entrypoint, nil
@@ -483,29 +692,30 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, codeDir, entrypoin
 			timeoutSec = 300
 		}
 	}
-	tscCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-	defer cancel()
-
 	slog.Info("compiling typescript", "dir", codeDir, "timeout_sec", timeoutSec)
 	// `--no-install` keeps us from quietly fetching tsc when it's missing —
 	// npm install above should have placed it. If the operator has air-
 	// gapped their box this preserves the failure mode.
-	cmd := exec.CommandContext(tscCtx, "npx", "--no-install", "tsc", "--project", "tsconfig.json")
-	cmd.Dir = codeDir
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	stdoutBytes, runErr := cmd.Output()
-	logLines(b, "tsc", stdoutBytes)
-	logLines(b, "tsc", stderrBuf.Bytes())
-	if tscCtx.Err() == context.DeadlineExceeded {
+	//
+	// No network: tsc compiles what npm already put on disk, so this step gets
+	// no --user_net and needs no egress policy. It is still jailed, because
+	// tsc and everything tsconfig.json pulls in is third-party code.
+	out, runErr := b.runBuildStep(ctx, buildStep{
+		language: sandbox.Node,
+		fnID:     fnID,
+		codeDir:  codeDir,
+		stream:   "tsc",
+		argv:     []string{nodeNpxBin, "--no-install", "tsc", "--project", "tsconfig.json"},
+		timeout:  time.Duration(timeoutSec) * time.Second,
+	})
+	if errors.Is(runErr, sandbox.ErrBuildTimedOut) {
 		return entrypoint, fmt.Errorf("tsc timed out after %ds", timeoutSec)
 	}
 	if runErr != nil {
-		// tsc prints diagnostics to stdout (TS6059, TS2322, …) — surface
-		// both streams so the user sees the actual type error in the
+		// tsc prints diagnostics to stdout (TS6059, TS2322, …) — surface the
+		// captured output so the user sees the actual type error in the
 		// build log.
-		combined := strings.TrimSpace(string(stdoutBytes) + "\n" + stderrBuf.String())
-		return entrypoint, fmt.Errorf("tsc failed: %w\n%s", runErr, combined)
+		return entrypoint, fmt.Errorf("tsc failed: %w\n%s", runErr, strings.TrimSpace(string(out)))
 	}
 
 	outDir := readTSConfigOutDir(tsConfigPath)
@@ -613,4 +823,32 @@ func logLines(b *Builder, stream string, out []byte) {
 		}
 		b.Logger.Append(stream, line)
 	}
+}
+
+// tryFnLock takes the per-function build lock without blocking, mirroring the
+// GC. Returns a no-op release and true when no lock source is wired (unit
+// tests), since there is no concurrent build to protect against there.
+func (b *Builder) tryFnLock(fnID string) (func(), bool) {
+	if b.FnLock == nil {
+		return func() {}, true
+	}
+	lk := b.FnLock(fnID)
+	if lk == nil || !lk.TryLock() {
+		return nil, false
+	}
+	return lk.Unlock, true
+}
+
+// pipPlatformTag is the manylinux wheel platform pip resolves against.
+//
+// It must track the host architecture. This was hardcoded to
+// manylinux2014_x86_64, which combined with --only-binary=:all: meant an
+// arm64 host silently installed x86_64 wheels — any package with a compiled
+// extension would then fail to import at invoke time, long after the deploy
+// reported success.
+func pipPlatformTag() string {
+	if goruntime.GOARCH == "arm64" {
+		return "manylinux2014_aarch64"
+	}
+	return "manylinux2014_x86_64"
 }

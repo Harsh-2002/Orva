@@ -27,7 +27,7 @@ per-invocation billing.
 ```bash
 docker run -d --name orva -p 8443:8443 \
   --pid host --cgroupns host \
-  --cap-add SYS_ADMIN --cap-add NET_ADMIN \
+  --cap-add SYS_ADMIN \
   --security-opt seccomp=unconfined \
   --security-opt apparmor=unconfined \
   --security-opt systempaths=unconfined \
@@ -39,9 +39,11 @@ docker run -d --name orva -p 8443:8443 \
 
 > `--pid host` and `--cgroupns host` are **required** on the default runc runtime:
 > nsjail enrolls each sandbox PID in the host cgroup hierarchy, and without them
-> every invocation fails with `Launching child process failed`. `--cap-add
-> NET_ADMIN` + `--device /dev/net/tun` are needed for `network_mode: egress`
-> functions. `docker compose up -d` (see [Install](#install)) sets all of this for you.
+> every invocation fails with `Launching child process failed`. `--device
+> /dev/net/tun` is what `network_mode: egress` functions need — each sandbox gets
+> its own TAP device inside nsjail's user namespace, so the container itself needs
+> no `NET_ADMIN` (only add it back if you force `ORVA_DISABLE_USERNS=1`).
+> `docker compose up -d` (see [Install](#install)) sets all of this for you.
 
 Open **http://localhost:8443**, finish onboarding (~30s), and deploy your first
 function from the in-browser editor.
@@ -75,7 +77,7 @@ Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)
 - **Built-in primitives** — per-function KV store, background jobs (retries + backoff), cron schedules, function-to-function calls, encrypted secrets, custom routes, and signed inbound webhooks.
 - **Distributed tracing** — every HTTP → F2F → job chain shares one trace, with a waterfall view and zero code changes.
 - **Versioning** — content-hashed deploys with one-click (or one-command) rollback and side-by-side diffs.
-- **MCP + AI** — a 72-tool operator MCP server at `/mcp` and a built-in agentic AI assistant (dashboard or `orva chat`) that operate your instance with your own provider key. → [AI & MCP](#ai--mcp)
+- **MCP + AI** — a 73-tool operator MCP server at `/mcp` and a built-in agentic AI assistant (dashboard or `orva chat`) that operate your instance with your own provider key. → [AI & MCP](#ai--mcp)
 - **Templates** — 21 starters (Stripe/GitHub webhooks, JWT/OAuth, CSV→JSON, URL shortener, …) in the editor.
 
 ---

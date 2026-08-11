@@ -153,6 +153,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/functions/{fn_id}/rollback", fnHandler.Rollback)
 	r.mux.HandleFunc("GET /api/v1/functions/{fn_id}/source", fnHandler.GetSource)
 	r.mux.HandleFunc("GET /api/v1/functions/{fn_id}/diff", fnHandler.Diff)
+	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/build-cache", fnHandler.PurgeBuildCache)
 
 	// Deployments — async build state + log streaming.
 	depHandler := &handlers.DeploymentHandler{DB: r.db}
@@ -416,13 +417,17 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/v1/pool/config", poolCfgHandler.Upsert)
 	r.mux.HandleFunc("POST /api/v1/pool/config", poolCfgHandler.Upsert)
 
-	// Egress firewall — UI-driven blocklist. Every mutation calls
-	// Manager.ForceRefresh so the operator sees changes apply live.
+	// Sandbox egress policy — UI-driven rule table compiled into a per-sandbox
+	// nsjail NSTUN policy. Every mutation calls Manager.ForceRefresh so the
+	// operator sees the recompile (and the warm-pool recycle) live. /status is
+	// the read-only view errmap.go points EGRESS_POLICY_UNAVAILABLE at, so the
+	// route must exist.
 	fwHandler := &handlers.FirewallHandler{DB: r.db, Manager: r.firewall}
 	r.mux.HandleFunc("GET /api/v1/firewall/rules", fwHandler.List)
 	r.mux.HandleFunc("POST /api/v1/firewall/rules", fwHandler.Create)
 	r.mux.HandleFunc("PUT /api/v1/firewall/rules/{rule_id}", fwHandler.Update)
 	r.mux.HandleFunc("DELETE /api/v1/firewall/rules/{rule_id}", fwHandler.Delete)
+	r.mux.HandleFunc("GET /api/v1/firewall/status", fwHandler.Status)
 	r.mux.HandleFunc("POST /api/v1/firewall/resolve", fwHandler.Resolve)
 	r.mux.HandleFunc("GET /api/v1/firewall/dns", fwHandler.GetDNS)
 	r.mux.HandleFunc("PUT /api/v1/firewall/dns", fwHandler.PutDNS)

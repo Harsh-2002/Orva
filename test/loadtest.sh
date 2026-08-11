@@ -67,9 +67,16 @@ MEM_BASELINE=$(free -m | awk '/Mem:/{print $3}')
 echo "Memory baseline: ${MEM_BASELINE}MB"
 echo ""
 
-# Start server
-echo "Starting server (max_concurrent=500)..."
-ORVA_MAX_CONCURRENT=500 $orva serve > /tmp/orva-loadtest.log 2>&1 &
+# Start server.
+#
+# The sandbox concurrency ceiling is NOT configurable by environment: it is
+# sized automatically as NumCPU x 64 (config/defaults.go maxConcurrentDefault).
+# This script used to export ORVA_MAX_CONCURRENT=500 and print that number,
+# but nothing has ever read that variable — so every run to date was actually
+# measured at the auto-sized default, not at 500. Report the real ceiling.
+conc=$(( $(nproc) * 64 ))
+echo "Starting server (sandbox max_concurrent=${conc}, auto-sized NumCPU x 64)..."
+$orva serve > /tmp/orva-loadtest.log 2>&1 &
 SERVER_PID=$!
 sleep 3
 

@@ -177,8 +177,11 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Determine language.
 	lang := sandbox.Language(fn.Runtime)
 
-	// Build seccomp policy for this function.
-	seccompPolicy := sandbox.BuildSeccompPolicy(h.DefaultSeccomp, nil, nil)
+	// Build seccomp policy for this function. An egress function additionally
+	// needs the outbound socket syscalls the base policies withhold — without
+	// them seccomp kills the connect() before the egress policy is consulted.
+	seccompPolicy := sandbox.BuildSeccompPolicy(h.DefaultSeccomp,
+		sandbox.SeccompAllowForNetworkMode(fn.NetworkMode), nil)
 
 	// Build env: function's env_vars plus decrypted secrets. Secrets win on
 	// key collision (so an operator can override a public env var).

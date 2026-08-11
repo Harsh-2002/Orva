@@ -32,24 +32,21 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestSupportedEnvVars(t *testing.T) {
-	const expected = 13
+	const expected = 10
 	if len(SupportedEnvVars) != expected {
 		t.Errorf("SupportedEnvVars: want %d entries, got %d (%v)", expected, len(SupportedEnvVars), SupportedEnvVars)
 	}
 	want := map[string]bool{
-		"ORVA_CORS_ORIGINS":       true,
-		"ORVA_DATA_DIR":           true,
-		"ORVA_DEFAULT_MEMORY_MB":  true,
-		"ORVA_DEFAULT_TIMEOUT_MS": true,
-		"ORVA_HOST":               true,
-		"ORVA_LOG_LEVEL":          true,
-		"ORVA_LOG_RETENTION_DAYS": true,
-		"ORVA_MAX_BODY_BYTES":     true,
-		"ORVA_PORT":               true,
-		"ORVA_SECCOMP_POLICY":     true,
-		"ORVA_SECURE_COOKIES":     true,
-		"ORVA_SESSION_DAYS":       true,
-		"ORVA_WRITE_TIMEOUT_SEC":  true,
+		"ORVA_CORS_ORIGINS":      true,
+		"ORVA_DATA_DIR":          true,
+		"ORVA_HOST":              true,
+		"ORVA_LOG_LEVEL":         true,
+		"ORVA_MAX_BODY_BYTES":    true,
+		"ORVA_PORT":              true,
+		"ORVA_SECCOMP_POLICY":    true,
+		"ORVA_SECURE_COOKIES":    true,
+		"ORVA_SESSION_DAYS":      true,
+		"ORVA_WRITE_TIMEOUT_SEC": true,
 	}
 	for _, v := range SupportedEnvVars {
 		if !want[v] {
@@ -59,6 +56,63 @@ func TestSupportedEnvVars(t *testing.T) {
 	}
 	for v := range want {
 		t.Errorf("missing env var from SupportedEnvVars: %s", v)
+	}
+}
+
+// validSample is one legal value per supported env var. Kept beside
+// SupportedEnvVars so adding a knob without a loader block fails the build's
+// tests rather than shipping a name operators can set to no effect.
+var validSample = map[string]string{
+	"ORVA_CORS_ORIGINS":      "https://a.example",
+	"ORVA_DATA_DIR":          "/custom/data",
+	"ORVA_HOST":              "127.0.0.1",
+	"ORVA_LOG_LEVEL":         "debug",
+	"ORVA_MAX_BODY_BYTES":    "1048576",
+	"ORVA_PORT":              "7070",
+	"ORVA_SECCOMP_POLICY":    "strict",
+	"ORVA_SECURE_COOKIES":    "true",
+	"ORVA_SESSION_DAYS":      "30",
+	"ORVA_WRITE_TIMEOUT_SEC": "120",
+}
+
+// TestEverySupportedEnvVarIsRead guards the phantom-knob regression: a name
+// advertised in SupportedEnvVars (and therefore in docs/CONFIG.md) that
+// applyEnvOverrides never reads is a knob an operator can set with no effect.
+// TestEverySupportedEnvVarIsAppliedByTheLoader checks that every advertised
+// variable is actually consumed by applyEnvOverrides — i.e. that a supported
+// name is not simply ignored.
+//
+// It does NOT prove the variable has a runtime effect, and it would NOT have
+// caught the three phantom knobs this package just deleted
+// (ORVA_DEFAULT_MEMORY_MB, ORVA_DEFAULT_TIMEOUT_MS, ORVA_LOG_RETENTION_DAYS).
+// Those were read by the loader and recorded in ActiveEnvVars exactly like a
+// working knob; what made them phantoms is that nothing OUTSIDE this package
+// ever read the struct field they set. That is a property of the whole
+// codebase, not of the loader, so no unit test here can assert it — the guard
+// is the rule stated at the top of docs/CONFIG.md ("every variable below has
+// an observable runtime effect") plus review of the consuming call site.
+//
+// Do not describe this test as a phantom-knob guard. It is not one.
+func TestEverySupportedEnvVarIsAppliedByTheLoader(t *testing.T) {
+	for _, name := range SupportedEnvVars {
+		t.Run(name, func(t *testing.T) {
+			sample, ok := validSample[name]
+			if !ok {
+				t.Fatalf("%s has no entry in validSample — add one alongside the loader block", name)
+			}
+			clearOrvaEnv(t)
+			t.Setenv(name, sample)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, active := range cfg.ActiveEnvVars {
+				if active == name {
+					return
+				}
+			}
+			t.Errorf("%s=%q is declared supported but applyEnvOverrides never read it (this checks parsing only, not runtime effect)", name, sample)
+		})
 	}
 }
 
@@ -90,9 +144,6 @@ func TestLoadEnvOverrides(t *testing.T) {
 	clearOrvaEnv(t)
 	t.Setenv("ORVA_PORT", "7070")
 	t.Setenv("ORVA_LOG_LEVEL", "debug")
-	t.Setenv("ORVA_DEFAULT_MEMORY_MB", "128")
-	t.Setenv("ORVA_DEFAULT_TIMEOUT_MS", "45000")
-	t.Setenv("ORVA_LOG_RETENTION_DAYS", "30")
 	t.Setenv("ORVA_WRITE_TIMEOUT_SEC", "120")
 	t.Setenv("ORVA_SECURE_COOKIES", "true")
 	t.Setenv("ORVA_SESSION_DAYS", "30")
@@ -111,23 +162,14 @@ func TestLoadEnvOverrides(t *testing.T) {
 	if cfg.Logging.Level != "debug" {
 		t.Errorf("log level: want debug, got %s", cfg.Logging.Level)
 	}
-	if cfg.Logging.RetentionDays != 30 {
-		t.Errorf("log retention: want 30, got %d", cfg.Logging.RetentionDays)
-	}
-	if cfg.Functions.DefaultMemoryMB != 128 {
-		t.Errorf("memory: want 128, got %d", cfg.Functions.DefaultMemoryMB)
-	}
-	if cfg.Functions.DefaultTimeoutMS != 45000 {
-		t.Errorf("timeout: want 45000, got %d", cfg.Functions.DefaultTimeoutMS)
-	}
 	if !cfg.Security.SecureCookies {
 		t.Error("secure cookies: want true, got false")
 	}
 	if cfg.Security.SessionDays != 30 {
 		t.Errorf("session days: want 30, got %d", cfg.Security.SessionDays)
 	}
-	if len(cfg.ActiveEnvVars) != 8 {
-		t.Errorf("ActiveEnvVars: want 8 entries, got %d (%v)", len(cfg.ActiveEnvVars), cfg.ActiveEnvVars)
+	if len(cfg.ActiveEnvVars) != 5 {
+		t.Errorf("ActiveEnvVars: want 5 entries, got %d (%v)", len(cfg.ActiveEnvVars), cfg.ActiveEnvVars)
 	}
 }
 
@@ -194,8 +236,9 @@ func TestLoadDataDirDerivedPaths(t *testing.T) {
 func TestLoadIgnoresInvalidNumericEnv(t *testing.T) {
 	clearOrvaEnv(t)
 	t.Setenv("ORVA_PORT", "not-a-number")
-	t.Setenv("ORVA_DEFAULT_MEMORY_MB", "abc")
-	t.Setenv("ORVA_SESSION_DAYS", "0") // zero is rejected: must be >0
+	t.Setenv("ORVA_WRITE_TIMEOUT_SEC", "abc")
+	t.Setenv("ORVA_MAX_BODY_BYTES", "-1") // non-positive is rejected
+	t.Setenv("ORVA_SESSION_DAYS", "0")    // zero is rejected: must be >0
 
 	cfg, err := Load()
 	if err != nil {
@@ -205,15 +248,18 @@ func TestLoadIgnoresInvalidNumericEnv(t *testing.T) {
 	if cfg.Server.Port != 8443 {
 		t.Errorf("port: invalid value should preserve default, got %d", cfg.Server.Port)
 	}
-	if cfg.Functions.DefaultMemoryMB != 64 {
-		t.Errorf("memory: invalid value should preserve default 64, got %d", cfg.Functions.DefaultMemoryMB)
+	if cfg.Server.WriteTimeoutSec != 60 {
+		t.Errorf("write timeout: invalid value should preserve default 60, got %d", cfg.Server.WriteTimeoutSec)
+	}
+	if cfg.Server.MaxBodyBytes != 6*1024*1024 {
+		t.Errorf("max body: negative value should preserve default, got %d", cfg.Server.MaxBodyBytes)
 	}
 	if cfg.Security.SessionDays != 7 {
 		t.Errorf("session days: zero should preserve default 7, got %d", cfg.Security.SessionDays)
 	}
 	for _, v := range cfg.ActiveEnvVars {
 		switch v {
-		case "ORVA_PORT", "ORVA_DEFAULT_MEMORY_MB", "ORVA_SESSION_DAYS":
+		case "ORVA_PORT", "ORVA_WRITE_TIMEOUT_SEC", "ORVA_MAX_BODY_BYTES", "ORVA_SESSION_DAYS":
 			t.Errorf("invalid env var leaked into ActiveEnvVars: %s", v)
 		}
 	}

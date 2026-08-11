@@ -20,7 +20,6 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/proxy"
@@ -30,21 +29,22 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 type Server struct {
-	httpServer *http.Server
-	router     *Router
-	cfg        *config.Config
-	db         *database.Database
-	Pool       *sandbox.Limiter
-	PoolMgr    *pool.Manager
-	Registry   *registry.Registry
-	Metrics    *metrics.Metrics
-	BuildQueue *builder.Queue
-	EventHub   *events.Hub
-	Firewall   *firewall.Manager
-	Scheduler  *scheduler.Scheduler
+	httpServer    *http.Server
+	router        *Router
+	cfg           *config.Config
+	db            *database.Database
+	Pool          *sandbox.Limiter
+	PoolMgr       *pool.Manager
+	Registry      *registry.Registry
+	Metrics       *metrics.Metrics
+	BuildQueue    *builder.Queue
+	EventHub      *events.Hub
+	Firewall      *firewall.Manager
+	Scheduler     *scheduler.Scheduler
 	WebhookFanout *events.WebhookFanout
 }
 
@@ -59,6 +59,10 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	bld := builder.New()
 	bld.DataDir = cfg.Data.Dir
 	bld.DB = db
+	// Dependency installs run in nsjail against the runtime rootfs, so the
+	// builder needs the same sandbox paths the pool uses for workers.
+	bld.NsjailBin = cfg.Sandbox.NsjailBin
+	bld.RootfsDir = cfg.Sandbox.RootfsDir
 	met := metrics.New()
 
 	// Warm per-function baselines from recent successful warm executions
@@ -126,7 +130,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// host-wide ceiling and spawns per-function worker pools lazily.
 	poolMgr := pool.NewManager(
 		pool.ManagerConfig{
-			DefaultMin:     1,
+			DefaultMin: 1,
 			// Operator soft cap; autoscaler still clamps further by memory
 			// + CPU headroom at runtime. Was 5 (static dumb default); the
 			// autoscaler now reads load signals so this only matters as a
@@ -198,13 +202,22 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// runtime.NumCPU() workers is enough for the single-box target.
 	buildQueue := builder.NewQueue(bld, db, reg)
 	buildQueue.FnLock = poolMgr.FunctionLock
+	// The builder reclaims idle build caches when disk runs low on the deploy
+	// path; it needs the same per-function lock the GC uses so it cannot
+	// delete a cache out from under a concurrent build of another function.
+	bld.FnLock = poolMgr.FunctionLock
 	buildQueue.PublishEvent = hub.Publish
 	buildQueue.Start()
 
 	// Round-G: prune archived version dirs in the background. Always
 	// preserves the actively-served version; tunable via
-	// system_config.versions_to_keep + gc_interval_seconds.
-	go builder.NewGC(cfg.Data.Dir, db).Run(context.Background())
+	// system_config.versions_to_keep + gc_interval_seconds. The same tick
+	// bounds the per-function build caches and reclaims orphaned function
+	// dirs — both take the build queue's per-function lock (try-only) so
+	// nothing an in-flight build is writing is ever removed underneath it.
+	gc := builder.NewGC(cfg.Data.Dir, db)
+	gc.FnLock = poolMgr.FunctionLock
+	go gc.Run(context.Background())
 
 	// Background ticker: snapshot system metrics every 5 s and publish
 	// to the hub. The HTTP handler GET /api/v1/system/metrics.json still
@@ -212,11 +225,51 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// path for the dashboard.
 	go runMetricsPublisher(context.Background(), hub, db, met, limiter, poolMgr, buildQueue, reg, startTime)
 
-	// Egress firewall manager. Started immediately so the initial nft
-	// rules are in place before any function can run. If nft isn't
-	// available (no NET_ADMIN, BSD host, etc.) the manager logs a
-	// warning and the API surfaces it via /firewall/rules → status.
-	fw := firewall.NewManager(db, cfg.Data.Dir)
+	// Sandbox egress policy manager. Started before any function can run so
+	// the first egress worker already has a compiled policy.
+	//
+	// The control-plane carve-out is derived from apiBase: sandboxes reach
+	// orvad on a NON-loopback address, which is normally RFC1918, so without
+	// an explicit allow ahead of the operator's block rules the internal SDK
+	// (kv, jobs, function-to-function) would break the moment anyone enabled
+	// the shipped private-network suggestions.
+	//
+	// A failure here is not fatal: the policy simply never compiles, egress
+	// functions refuse to start (fail-closed — NSTUN defaults to allow, so
+	// running them unfiltered would be worse), and network_mode=none keeps
+	// working. The error surfaces on /firewall/status.
+	controlPlane, cpErr := firewall.ParseControlPlane(apiBase, cfg.Server.Port)
+	if cpErr != nil {
+		slog.Error("egress policy: control-plane address unresolved; egress functions will refuse to start",
+			"err", cpErr, "api_base", apiBase)
+	}
+	slog.Info("egress policy configured",
+		"control_plane", controlPlane.Addrs, "port", controlPlane.Port)
+
+	fw := firewall.NewManager(db, cfg.Data.Dir, controlPlane)
+
+	// Every egress spawn resolves the current policy generation. Wired before
+	// Start so the initial compile cannot publish into an unwired manager.
+	poolMgr.SetEgressPolicy(fw.EgressPolicy)
+	// Dependency installs are jailed the same way and answer to the same
+	// policy — that is the only thing that puts `npm install`'s postinstall
+	// scripts and both installers' registry traffic under the operator's
+	// blocklist. Fail-closed: no policy, no install (a function with no
+	// dependencies never asks).
+	bld.SetEgressPolicy(fw.EgressPolicy)
+
+	// NSTUN reads its rules once at worker start, so a policy change cannot
+	// affect an already-warm worker. Retiring the egress pools is what rolls
+	// them forward; network_mode=none pools are untouched.
+	fw.SetOnPolicyChange(func(gen string) {
+		retired := poolMgr.RetireEgressPools()
+		slog.Info("egress policy applied", "generation", gen, "retired_pools", retired)
+		hub.Publish("firewall.policy_applied", map[string]any{
+			"generation":    gen,
+			"retired_pools": retired,
+		})
+	})
+
 	fw.Start(context.Background())
 
 	deps := RouterDeps{
@@ -235,11 +288,21 @@ func New(cfg *config.Config, db *database.Database) *Server {
 
 	router := NewRouter(cfg, db, deps)
 
+	// orvad's own egress is filtered by the same policy the sandboxes get. The
+	// old nftables table hooked `output` and so covered every process in this
+	// netns, orvad included; the NSTUN policy that replaced it is per-sandbox,
+	// which would leave the daemon as the one unfiltered path out of the box.
+	// Wired before either subsystem starts serving.
+	if router.ai != nil {
+		router.ai.SetEgressGuard(fw)
+	}
+
 	// Scheduler runs cron triggers (P1) + future TTL/queue ticks. Started
 	// later in serve.go after the HTTP listener is up so health probes
 	// pass first.
 	sched := scheduler.New(db, poolMgr, cfg.Data.Dir, hub)
 	sched.SetMetrics(met)
+	sched.SetEgressGuard(fw)
 
 	// WebhookFanout subscribes to the Hub and writes webhook_deliveries
 	// rows for every event that any operator-configured subscription
@@ -292,7 +355,7 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 			keyHash := hex.EncodeToString(hash[:])
 
 			if _, err := db.GetAPIKeyByHash(keyHash); err == nil {
-				printBootstrapKey(plaintext, "(loaded from " + keyPath + ")")
+				printBootstrapKey(plaintext, "(loaded from "+keyPath+")")
 				return
 			}
 			// Keyfile present but DB row missing — re-insert.
@@ -308,7 +371,7 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 				return
 			}
 			slog.Info("restored bootstrap admin key from keyfile", "path", keyPath)
-			printBootstrapKey(plaintext, "(restored from " + keyPath + ")")
+			printBootstrapKey(plaintext, "(restored from "+keyPath+")")
 			return
 		}
 	}
@@ -360,7 +423,7 @@ func bootstrapAdminKey(db *database.Database, dataDir string) {
 		slog.Warn("failed to persist admin key file (key still in DB; copy now)", "error", err)
 	}
 
-	printBootstrapKey(plaintextKey, "(saved at " + keyPath + ")")
+	printBootstrapKey(plaintextKey, "(saved at "+keyPath+")")
 }
 
 func printBootstrapKey(key, note string) {
@@ -390,14 +453,14 @@ func printBootstrapKey(key, note string) {
 //  2. Probe a list of candidate IPs against orvad's own health
 //     endpoint at the configured port. First candidate that returns
 //     200 within a short timeout wins. Candidates, in order:
-//        - "127.0.0.1" — works on bare-metal AND
-//          `network_mode: host`. Cheapest probe.
-//        - every non-loopback non-link-local IPv4 on the host —
-//          inside Docker this enumerates bridge / user-defined
-//          network interfaces; bare-metal it's the host's NICs.
-//        - the default-route gateway from /proc/net/route — last
-//          resort for old-style `8443:8443` mappings where orvad
-//          and the host share a port.
+//     - "127.0.0.1" — works on bare-metal AND
+//     `network_mode: host`. Cheapest probe.
+//     - every non-loopback non-link-local IPv4 on the host —
+//     inside Docker this enumerates bridge / user-defined
+//     network interfaces; bare-metal it's the host's NICs.
+//     - the default-route gateway from /proc/net/route — last
+//     resort for old-style `8443:8443` mappings where orvad
+//     and the host share a port.
 //
 //  3. Fallback: if every probe fails (orvad isn't listening yet,
 //     network stack confused), default to `127.0.0.1` so the SDK

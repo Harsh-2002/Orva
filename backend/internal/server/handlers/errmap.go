@@ -8,6 +8,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
@@ -83,6 +84,21 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 			RequestID: requestID,
 			Hint:      "back off briefly and retry; raise cfg.Sandbox.MaxConcurrent if persistent",
 			RetryAfterS: 1,
+		}
+
+	// — Egress policy fail-closed —
+	// NSTUN is default-ALLOW, so a network_mode=egress worker without a
+	// compiled policy would run unfiltered. The pool refuses the spawn
+	// (firewall.ErrPolicyUnavailable) and buildArgs refuses the argv
+	// (sandbox.ErrEgressPolicyMissing); both mean the same thing to a caller.
+	// Retry-After tracks the manager's 10s recompile tick.
+	case errors.Is(err, firewall.ErrPolicyUnavailable), errors.Is(err, sandbox.ErrEgressPolicyMissing):
+		return http.StatusServiceUnavailable, respond.ErrorOpts{
+			Code: "EGRESS_POLICY_UNAVAILABLE",
+			Message: "no sandbox egress policy is in force; refusing to start an unfiltered egress worker",
+			RequestID: requestID,
+			Hint:      "see GET /api/v1/firewall/status (last_compile_error) — fix the offending rule, then POST /api/v1/firewall/resolve",
+			RetryAfterS: 10,
 		}
 
 	// — Worker process state —

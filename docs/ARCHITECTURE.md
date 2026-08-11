@@ -215,7 +215,7 @@ Feature tables added since v0.2:
 | KV & fixtures        | `kv_store`, `fixtures` |
 | Webhooks             | `event_subscriptions`, `webhook_deliveries`, `inbound_webhooks` |
 | Tracing & activity   | `user_spans`, `activity_log` |
-| Firewall             | `egress_blocklist` |
+| Egress policy + sandbox DNS | `egress_blocklist` (DNS keys live in `system_config`) |
 | Agent channels       | `channels`, `channel_functions` |
 | OAuth 2.1            | `oauth_clients`, `oauth_authorization_codes`, `oauth_access_tokens` |
 | AI assistant         | `ai_conversations`, `ai_messages`, `ai_tool_calls`, `ai_provider_configs`, `ai_settings` |
@@ -256,6 +256,33 @@ nsjail invocation, per-spawn config, host-wide concurrency limiter.
 - `worker.go` — JSON frame protocol over stdin/stdout, expiry tracking
 - `seccomp.go` — Kafel policy (`default`, `strict`, `permissive`)
 - `limiter.go` — host-wide `MaxConcurrent` semaphore with `TryAcquire`
+
+### `backend/internal/firewall/`
+
+Sandbox egress policy + sandbox DNS. Nothing here touches host network
+state; enforcement lives inside each sandbox's own network namespace.
+
+- `policy.go` — compiler: `egress_blocklist` rows → ordered nsjail NSTUN
+  `user_net { rule4 / rule6 }` rules. Carve-outs (NSTUN gateway, orvad's
+  control plane, DNS resolvers) precede the rejects because NSTUN is
+  default-ALLOW and first-match-wins. Every address is validated and
+  re-emitted canonicalised: nsjail's own rule parsing is fail-open, so a
+  malformed value there becomes a match-any wildcard, not a stricter rule.
+  `Policy.Blocks` replays the same rules for orvad's own dialer.
+- `nstun.go` — publishes each compiled policy as an immutable
+  `<dataDir>/firewall/policy/egress-<gen>.cfg` (temp+rename), retargets a
+  `current` symlink for operators, and GCs old generations.
+- `manager.go` — poll loop (10 s table poll, 5 min hostname re-resolve),
+  generation bookkeeping, `Snapshot()` for the API, and the
+  policy-change callback that retires warm egress pools.
+- `dns.go` — generates the `resolv.conf` and `hosts` handed to egress
+  sandboxes.
+
+The generation is a hash of the rendered bytes, so it changes only when
+what nsjail enforces changes. `pool` captures a concrete generation path at
+spawn; because that file is never rewritten, a running worker keeps exactly
+the policy it started with, and a policy change recycles the pool instead of
+mutating live workers.
 
 ### `backend/internal/builder/`
 

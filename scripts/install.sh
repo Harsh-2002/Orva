@@ -551,40 +551,27 @@ install_prereqs() {
         *)             ip_nsjail="" ;;
     esac
     ip_pkgs="ca-certificates curl tar zstd $ip_nsjail"
-    ip_opt="nftables"
     log "installing prerequisites: $ip_pkgs"
-    [ "$DRYRUN" = "1" ] && { log "(dryrun) would install: $ip_pkgs $ip_opt"; return; }
+    [ "$DRYRUN" = "1" ] && { log "(dryrun) would install: $ip_pkgs"; return; }
 
     case "$DISTRO_ID" in
         ubuntu|debian)
             DEBIAN_FRONTEND=noninteractive apt-get update -qq
             # shellcheck disable=SC2086
-            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $ip_pkgs
-            # shellcheck disable=SC2086
-            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $ip_opt \
-                || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $ip_pkgs ;;
         alpine)
             # shellcheck disable=SC2086
-            apk add --no-cache $ip_pkgs
-            # shellcheck disable=SC2086
-            apk add --no-cache $ip_opt || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
+            apk add --no-cache $ip_pkgs ;;
         fedora|rhel|centos|rocky|almalinux|amzn)
             ip_dnf="yum"; have dnf && ip_dnf="dnf"
             # shellcheck disable=SC2086
-            "$ip_dnf" install -y --allowerasing --setopt=install_weak_deps=False $ip_pkgs
-            # shellcheck disable=SC2086
-            "$ip_dnf" install -y --allowerasing $ip_opt \
-                || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
+            "$ip_dnf" install -y --allowerasing --setopt=install_weak_deps=False $ip_pkgs ;;
         arch|manjaro|endeavouros)
             # shellcheck disable=SC2086
-            pacman_run -Syu --noconfirm --needed $ip_pkgs
-            # shellcheck disable=SC2086
-            pacman_run -S --noconfirm --needed $ip_opt || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
+            pacman_run -Syu --noconfirm --needed $ip_pkgs ;;
         opensuse-leap|opensuse-tumbleweed|sles)
             # shellcheck disable=SC2086
-            zypper --non-interactive install $ip_pkgs
-            # shellcheck disable=SC2086
-            zypper --non-interactive install $ip_opt || warn "optional '$ip_opt' failed (egress firewall disabled)" ;;
+            zypper --non-interactive install $ip_pkgs ;;
         *)
             case "$DISTRO_LIKE" in
                 *debian*|*ubuntu*) DEBIAN_FRONTEND=noninteractive apt-get update -qq
@@ -604,22 +591,49 @@ install_prereqs() {
     esac
 }
 
-# ── Kernel / firewall preflight (bare-metal) ─────────────────────────────────
-NFTABLES_STATUS="unknown"; NFTABLES_HINT=""
-check_nftables() {
-    [ "$DRYRUN" = "1" ] && { NFTABLES_STATUS="dryrun"; return; }
-    if ! have nft; then
-        NFTABLES_STATUS="disabled"
-        NFTABLES_HINT="install the 'nftables' package to enable per-function egress filtering"
-        warn "nft not found — egress firewall disabled"; return
+# ── Kernel / sandbox-egress preflight (bare-metal) ───────────────────────────
+# The egress policy is enforced per sandbox by nsjail's NSTUN backend, which
+# needs a TAP device from /dev/net/tun. On bare metal nothing creates or relaxes
+# that node for us (the Docker entrypoint does), and the unit runs as
+# $SERVICE_USER — so existence alone does not prove the daemon can open it.
+# Warn, never block: functions with network_mode "none" are unaffected.
+TUN_STATUS="unknown"; TUN_HINT=""
+check_egress_device() {
+    [ "$DRYRUN" = "1" ] && { TUN_STATUS="dryrun"; return; }
+    [ -c /dev/net/tun ] || { have modprobe && modprobe tun 2>/dev/null; } || true
+    if [ ! -c /dev/net/tun ]; then
+        TUN_STATUS="unavailable"
+        TUN_HINT="load the module: modprobe tun (persist it in /etc/modules-load.d/tun.conf)"
+        warn "/dev/net/tun missing — functions with network_mode 'egress' cannot spawn"
+        return
     fi
-    if ! nft list tables >/dev/null 2>&1; then
-        NFTABLES_STATUS="disabled"
-        NFTABLES_HINT="nft present but kernel cannot apply rules — try 'modprobe nf_tables' as root"
-        warn "nft list tables failed — egress firewall disabled until resolved"; return
+    ced_mode=$(stat -c '%A' /dev/net/tun 2>/dev/null || true)
+    if [ -z "$ced_mode" ]; then
+        TUN_STATUS="present (permissions unverified)"
+        log "/dev/net/tun present — could not read its permission bits"
+        return
     fi
-    NFTABLES_STATUS="enabled"
-    log "nftables OK — egress firewall will be enforced"
+    ced_owner=$(stat -c '%U' /dev/net/tun 2>/dev/null || true)
+    ced_group=$(stat -c '%G' /dev/net/tun 2>/dev/null || true)
+    # Symbolic mode is 'c' + owner(2-4) + group(5-7) + other(8-10); nsjail opens
+    # the node read-write, so anything short of rw for $SERVICE_USER is a fail.
+    ced_ok=0
+    case "$ced_mode" in *rw?) ced_ok=1 ;; esac
+    if [ "$ced_ok" = "0" ] && [ "$ced_owner" = "$SERVICE_USER" ]; then
+        case "$ced_mode" in ?rw*) ced_ok=1 ;; esac
+    fi
+    if [ "$ced_ok" = "0" ] && [ -n "$ced_group" ] &&
+       id -nG "$SERVICE_USER" 2>/dev/null | grep -qw -- "$ced_group"; then
+        case "$ced_mode" in ????rw*) ced_ok=1 ;; esac
+    fi
+    if [ "$ced_ok" = "1" ]; then
+        TUN_STATUS="ready"
+        log "sandbox egress OK — $SERVICE_USER can open /dev/net/tun ($ced_mode)"
+        return
+    fi
+    TUN_STATUS="blocked ($ced_mode ${ced_owner:-?}:${ced_group:-?})"
+    TUN_HINT="grant $SERVICE_USER read-write access, e.g. a udev rule setting MODE=\"0660\" GROUP=\"$SERVICE_USER\""
+    warn "$SERVICE_USER cannot open /dev/net/tun — egress functions will fail to spawn"
 }
 
 check_kernel_features() {
@@ -762,10 +776,10 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
-# orvad needs NET_ADMIN for nftables. nsjail's file capabilities include
-# SETUID, SETGID, and NET_BIND_SERVICE; those must remain in the service's
-# bounding set or Linux rejects execve(nsjail) with EPERM before it can start.
-AmbientCapabilities=CAP_NET_ADMIN
+# The daemon itself holds no capabilities: the egress policy is enforced inside
+# each sandbox by nsjail, not by host firewall rules. The bounding set must stay
+# a superset of nsjail's file capabilities (=eip) — Linux rejects execve(nsjail)
+# with EPERM if any of them cannot be raised here, before nsjail logs a word.
 CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE
 NoNewPrivileges=false
 Delegate=yes
@@ -800,7 +814,6 @@ output_log="/var/log/orva.log"
 error_log="/var/log/orva.log"
 
 export ORVA_DATA_DIR="${DATA_DIR}"
-export ORVA_ROOTFS_DIR="${DATA_DIR}/rootfs"
 export ORVA_DISABLE_USERNS="${SERVICE_DISABLE_USERNS}"
 
 depend() {
@@ -912,10 +925,12 @@ run_bare_metal() {
     fi
     install_prereqs
     check_kernel_features
-    check_nftables
     download_and_install_binaries
     write_service_files
     create_user
+    # After create_user: the /dev/net/tun probe reports whether the *service
+    # user* can open it, which needs that user to exist.
+    check_egress_device
     download_rootfs
     install_adapters
     # Always refresh the unit file so unit changes reach existing installs.
@@ -956,10 +971,10 @@ ${wc_runtime}
     pid: host
     cgroup: host
     # SYS_ADMIN: nsjail user namespaces / mounts / cgroup delegation.
-    # NET_ADMIN: the egress firewall manager applies nftables rules via nft.
+    # No NET_ADMIN: each sandbox's TAP device is created inside nsjail's own
+    # user namespace, so the kernel checks ns_capable() there instead.
     cap_add:
       - SYS_ADMIN
-      - NET_ADMIN
     # Lifted so nsjail can apply its own per-function seccomp + namespaces.
     security_opt:
       - seccomp=unconfined
@@ -1119,7 +1134,7 @@ print_followup_bare() {
   Data:            $DATA_DIR
   Binary / CLI:    $PREFIX/bin/orva   (also on PATH: $CLI_INSTALL_PATH)
   nsjail:          $PREFIX/bin/nsjail
-  Egress firewall: $NFTABLES_STATUS${NFTABLES_HINT:+ ($NFTABLES_HINT)}
+  Sandbox egress:  $TUN_STATUS${TUN_HINT:+ ($TUN_HINT)}
 
   Start / status:
     systemctl enable --now orva            # systemd

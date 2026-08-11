@@ -381,6 +381,23 @@ INSERT OR IGNORE INTO system_config (key, value) VALUES
     ('versions_to_keep', '5'),
     ('gc_interval_seconds', '300'),
     ('min_free_disk_mb', '500'),
+    -- Per-function npm/pip caches under <dataDir>/build-cache/<fn>/. Both
+    -- bounds are enforced by the version GC's tick: drop a function's cache
+    -- once it has gone unused this many days (0 = never), and keep the total
+    -- under this many MB by evicting whole per-function caches, least
+    -- recently used first (0 = no size cap).
+    ('build_cache_max_age_days', '14'),
+    ('build_cache_max_mb', '2048'),
+    -- Execution history retention, in days. Purged at boot and every 24h.
+    -- 0 disables purging entirely (keep everything).
+    --
+    -- Seeded deliberately, unlike a phantom knob: this one IS read, and it is
+    -- the only setting here that DELETES operator-visible data by default, so
+    -- it must be visible in a plain SELECT over system_config rather than
+    -- existing only as a Go fallback constant. An operator has to be able to
+    -- find the thing deleting their history, and turn it off, without
+    -- reading the source. (No backticks here: this block is a Go raw string.)
+    ('execution_retention_days', '30'),
     -- Global DNS for sandboxed functions with network_mode=egress.
     -- Comma-separated list of resolver IPs (v4 or v6). Empty = use the
     -- host's /etc/resolv.conf. Operator-editable from the Firewall page.

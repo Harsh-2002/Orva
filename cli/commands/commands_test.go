@@ -9,7 +9,7 @@ import "testing"
 func TestCommandTree(t *testing.T) {
 	root := NewRoot()
 	paths := [][]string{
-		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"}, {"functions", "update"},
+		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"}, {"functions", "update"}, {"functions", "purge-cache"},
 		{"deploy"},
 		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
 		{"rollback"},

@@ -96,6 +96,16 @@ func runServe(cmd *cobra.Command, args []string) {
 	// versions/<hash>/ layout. Idempotent — no-op on subsequent boots.
 	builder.MigrateLegacyCodeDirs(cfg.Data.Dir, db)
 
+	// Reclaim build scratch dirs left behind by a crash. RunBuild defers its
+	// own cleanup, which only covers a live process — a kill -9 mid-install
+	// leaks the whole working set under build-tmp/ permanently.
+	builder.SweepBuildScratch(cfg.Data.Dir)
+
+	// Trim execution history so the database does not grow without bound.
+	// Runs once now and daily thereafter; the window is the system_config key
+	// database.RetentionSettingKey (0 disables it).
+	db.StartRetention(context.Background())
+
 	srv := server.New(cfg, db)
 
 	// Load the active function set into the registry cache, then kick off
