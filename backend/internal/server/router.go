@@ -432,11 +432,13 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/firewall/dns", fwHandler.GetDNS)
 	r.mux.HandleFunc("PUT /api/v1/firewall/dns", fwHandler.PutDNS)
 
-	// MCP server — Streamable HTTP transport at /mcp. Speaks the
-	// 2025-11-25 protocol; auth via Authorization: Bearer <orva_xxx>
-	// (or X-Orva-API-Key for parity with REST callers). The handler
-	// owns its own auth gate; /mcp does not start with /api/ so it
-	// naturally bypasses middleware_auth.go.
+	// MCP server — Streamable HTTP transport at /mcp, stateless: the SDK
+	// serves the 2026-07-28 protocol only in that mode and negotiates down
+	// for older clients, so there is no initialize handshake and no
+	// Mcp-Session-Id (GET/DELETE /mcp are therefore 405). Auth via
+	// Authorization: Bearer <orva_xxx> (or X-Orva-API-Key for parity with
+	// REST callers). The handler owns its own auth gate; /mcp does not
+	// start with /api/ so it naturally bypasses middleware_auth.go.
 	mcpDeps := orvampc.Deps{
 		DB:         r.db,
 		Registry:   r.registry,

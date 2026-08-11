@@ -5,6 +5,10 @@ do not start their own server. The backend must already be running. (The
 comprehensive, self-spinning suite is the Python one under `test/e2e/` — see
 below; these shell scripts are the ad-hoc checks against a running instance.)
 
+> **Verifying Orva end to end?** Read [`docs/TESTING.md`](../docs/TESTING.md) first —
+> it covers which layer to reach for, what each suite's pass/fail signal and exit-code
+> convention actually is, and which of these scripts are stale or destructive.
+
 ## Config
 
 Most scripts read `BASE_URL` + `API_KEY` from the environment (the default port
@@ -23,9 +27,13 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 ## Running
 
 ```bash
-# Umbrella suite — requires API_KEY set; writes run-all-results.tsv. Runs:
+# Umbrella suite — requires API_KEY set; writes run-all-results.tsv. Runs 11:
 # secrets, routes, heavy-deploy, onboarding, errors, rollback, egress, auth,
-# tracing, atscale. (api-smoke / loadtest / ceiling / sdk-test are run individually.)
+# tracing, build-cache, atscale. (api-smoke / loadtest / ceiling / sdk-test are
+# run individually.) NOT a CI gate — ci.yml only shellchecks test/*.sh, it never
+# executes them. Several mutate the instance they run against (atscale.sh issues
+# no DELETEs at all), so point BASE_URL at a scratch instance, not one you care
+# about. See docs/TESTING.md.
 ./test/run-all.sh
 
 # Individual suites
@@ -75,5 +83,5 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 ## Notes
 
 - Tests are additive and idempotent where possible — they create resources with unique names and clean up after themselves.
-- `egress-test.sh` asserts the per-function `network_mode` toggle; outbound isolation depends on the host firewall/pasta being configured.
+- `egress-test.sh` asserts the per-function `network_mode` toggle. Isolation is per-sandbox: nsjail's NSTUN userspace stack applies the compiled egress policy inside each worker. No host firewall is involved, and `--use_pasta` is long gone — an `egress` function needs only nsjail and `/dev/net/tun`.
 - `heavy-deploy-test.sh` logs are saved to `heavy-deploy-stream.log` for inspection after the run.

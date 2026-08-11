@@ -67,16 +67,11 @@ func ReferenceMarkdown(origin string) string {
 	return strings.ReplaceAll(orvaDocsMarkdown, "{{ORIGIN}}", resolveDocsOrigin(origin))
 }
 
-// registerDocsTools wires get_orva_docs into the per-request server.
+// registerDocsTools wires get_orva_docs into the operator server.
 // Read permission is sufficient — the docs are public reference
 // material and exposing them never grants any escalated capability.
 func registerDocsTools(rc *regCtx) {
 	rc.group = "docs"
-	// The per-request/per-turn base URL (set on Deps by the MCP server and the
-	// in-process agent alike) is the origin fallback when the caller doesn't
-	// pass one — so docs snippets reference the live host instead of a
-	// placeholder even when the model forgets the `origin` argument.
-	depBaseURL := strings.TrimRight(strings.TrimSpace(rc.deps.BaseURL), "/")
 	regAddTool(rc, permRead,
 		&mcpsdk.Tool{
 			Name:  "get_orva_docs",
@@ -88,12 +83,12 @@ func registerDocsTools(rc *regCtx) {
 				OpenWorldHint: ptrFalse(),
 			},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetOrvaDocsInput) (*mcpsdk.CallToolResult, GetOrvaDocsOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in GetOrvaDocsInput) (*mcpsdk.CallToolResult, GetOrvaDocsOutput, error) {
 			// Caller-supplied origin wins; else the per-request base URL; else the
 			// generic placeholder (applied by resolveDocsOrigin via ReferenceMarkdown).
 			origin := strings.TrimRight(strings.TrimSpace(in.Origin), "/")
 			if origin == "" {
-				origin = depBaseURL
+				origin = baseURLForContext(ctx, rc.deps.BaseURL)
 			}
 			origin = resolveDocsOrigin(origin)
 			md := ReferenceMarkdown(origin)

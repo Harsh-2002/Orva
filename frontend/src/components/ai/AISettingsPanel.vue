@@ -120,9 +120,11 @@
       />
       <Input
         v-model="form.base_url"
-        label="Base URL (optional)"
-        placeholder="https://api.openai.com/v1  or  https://your-host/v1"
-        hint="For custom / self-hosted endpoints. Either with or without /v1 works."
+        :label="baseURLRequired ? 'Base URL (required)' : 'Base URL (optional)'"
+        :placeholder="baseURLPlaceholder"
+        :hint="baseURLHint"
+        :error="baseURLError"
+        :required="baseURLRequired"
       />
       <Input
         v-model="form.api_key"
@@ -134,7 +136,7 @@
       <Button
         variant="primary"
         :loading="savingProvider"
-        :disabled="!form.provider"
+        :disabled="!providerFormValid"
         @click="onSaveProvider"
       >
         Save provider
@@ -204,7 +206,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import apiClient from '@/api/client'
@@ -248,6 +250,29 @@ const APPROVAL_OPTIONS = [
 ]
 
 const form = ref({ provider: 'openai', label: '', api_key: '', base_url: '' })
+
+// Providers the gateway cannot reach without an explicit base URL. Every other
+// provider has a known endpoint, so the field really is optional there — but
+// ollama is only ever self-hosted and has no default to fall back on, and
+// calling the field "optional" for it meant selecting ollama and saving
+// produced a provider that could not answer a single turn.
+const BASE_URL_REQUIRED = ['ollama']
+const baseURLRequired = computed(() => BASE_URL_REQUIRED.includes(form.value.provider))
+const baseURLError = computed(() =>
+  baseURLRequired.value && !form.value.base_url.trim()
+    ? 'Base URL is required for Ollama.'
+    : '')
+const providerFormValid = computed(() => Boolean(form.value.provider) && !baseURLError.value)
+
+const baseURLPlaceholder = computed(() =>
+  baseURLRequired.value
+    ? 'http://192.168.1.50:11434  or  http://ollama.lan:11434'
+    : 'https://api.openai.com/v1  or  https://your-host/v1')
+
+const baseURLHint = computed(() =>
+  baseURLRequired.value
+    ? 'Where your server is listening. A private LAN address works; Orva permits it when your egress blocklist does.'
+    : 'For custom / self-hosted endpoints. Either with or without /v1 works. A private LAN address works too.')
 const savingProvider = ref(false)
 const savingSettings = ref(false)
 
@@ -273,7 +298,7 @@ async function loadModels(id) {
 }
 
 async function onSaveProvider() {
-  if (!form.value.provider) return
+  if (!providerFormValid.value) return
   savingProvider.value = true
   try {
     await store.saveProvider({

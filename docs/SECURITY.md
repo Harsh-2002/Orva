@@ -287,12 +287,34 @@ compatibility alias — see [`API.md`](API.md#firewall-status).
   calls.
 
   The AI gateway is the exception: the embedded Bifrost gateway owns its own
-  transport, so Orva checks a provider endpoint **before** the turn rather
-  than at dial time. Bifrost's own dialer independently re-resolves and
-  refuses link-local, unspecified and RFC1918 destinations on every dial,
-  which is what closes the metadata/private-network rebinding case; a public
-  address the operator has blocklisted could still be reached by rebinding
-  within a turn. Changing that requires provider credentials, i.e. admin.
+  transport and exposes no hook to install Orva's dialer, so Orva checks a
+  provider endpoint against the same compiled rule set **before** the turn
+  rather than at dial time. A destination the operator has blocklisted is
+  refused there, naming the subsystem —
+  `ai-gateway: destination blocked by egress policy: tcp 10.1.1.20:11555`.
+
+  Bifrost's own dialer then independently re-resolves at dial time and
+  **unconditionally** refuses link-local (`169.254.0.0/16`, `fe80::`) and
+  unspecified addresses. That is not configurable and is what closes the
+  cloud-metadata rebinding case.
+
+  RFC1918 is the one part Orva decides. Bifrost refuses private destinations
+  unless `AllowPrivateNetwork` is set, and Orva sets it **only when the
+  operator's own configured base URL is itself private** — an IP literal in a
+  private range, or a hostname that resolves entirely to private addresses.
+  For a public provider (`api.openai.com`) it stays off, so a public hostname
+  can never be rebound onto a private address mid-turn. This is what makes a
+  LAN-hosted endpoint — ollama, vLLM, an internal gateway — reachable at all;
+  before it, Bifrost's blanket default silently overrode the operator's
+  explicit configuration, and the refusal surfaced as nothing more useful than
+  "failed to execute HTTP request to provider API". The operator's blocklist
+  remains the authority either way: block `10.0.0.0/8` and the preflight
+  refuses a LAN provider even though the flag would have permitted the dial.
+
+  Residual risk: a **public** address the operator has blocklisted could still
+  be reached by rebinding within a turn, because the preflight resolves earlier
+  than the dial. Changing provider configuration requires admin, and an
+  attacker holding the provider hostname's DNS already receives the API key.
 - **Blocked destinations now report `ECONNREFUSED`**, not `EHOSTUNREACH`.
   Handlers (and log-scraping alerts) that string-match the old errno need
   updating.

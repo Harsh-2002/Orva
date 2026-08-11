@@ -52,10 +52,11 @@ type FunctionView struct {
 	UpdatedAt         time.Time         `json:"updated_at"`
 }
 
-func toFunctionView(fn *database.Function, deps Deps) FunctionView {
+func toFunctionView(ctx context.Context, fn *database.Function, deps Deps) FunctionView {
 	if fn == nil {
 		return FunctionView{}
 	}
+	baseURL := baseURLForContext(ctx, deps.BaseURL)
 	v := FunctionView{
 		ID:                fn.ID,
 		Name:              fn.Name,
@@ -77,20 +78,20 @@ func toFunctionView(fn *database.Function, deps Deps) FunctionView {
 		CreatedAt:         fn.CreatedAt,
 		UpdatedAt:         fn.UpdatedAt,
 	}
-	if deps.BaseURL != "" {
-		v.InvokeURL = deps.BaseURL + "/fn/" + fn.ID
+	if baseURL != "" {
+		v.InvokeURL = baseURL + "/fn/" + fn.ID
 	}
 	// Best-effort: ListRoutes returns every route in the system; we
 	// filter to this function. A miss returns an empty slice rather
 	// than failing the whole tool call — routes are a hint, not load-
 	// bearing.
-	if deps.DB != nil && deps.BaseURL != "" {
+	if deps.DB != nil && baseURL != "" {
 		if all, err := deps.DB.ListRoutes(); err == nil {
 			for _, r := range all {
 				if r.FunctionID != fn.ID {
 					continue
 				}
-				v.Routes = append(v.Routes, deps.BaseURL+r.Path)
+				v.Routes = append(v.Routes, baseURL+r.Path)
 			}
 		}
 	}
@@ -229,7 +230,7 @@ func registerFunctionTools(rc *regCtx) {
 			Description: "List all functions on this Orva instance. Each result includes invoke_url (fully-qualified canonical URL — call this directly, do NOT build it from parts) and routes (list of custom-route URLs, if any). Use id (a UUID) to refer to a function in other MCP tools, or name for human-friendly references. Supports pagination (limit/offset) and filtering by runtime, status, or substring search.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFunctionsInput) (*mcpsdk.CallToolResult, ListFunctionsOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in ListFunctionsInput) (*mcpsdk.CallToolResult, ListFunctionsOutput, error) {
 			lim := in.Limit
 			if lim <= 0 {
 				lim = 50
@@ -251,7 +252,7 @@ func registerFunctionTools(rc *regCtx) {
 						continue
 					}
 				}
-				out.Functions = append(out.Functions, toFunctionView(fn, deps))
+				out.Functions = append(out.Functions, toFunctionView(ctx, fn, deps))
 			}
 			return nil, out, nil
 		},
@@ -264,12 +265,12 @@ func registerFunctionTools(rc *regCtx) {
 			Description: "Fetch one function by id or name. Returns the full record including invoke_url (use verbatim to call the function over HTTP — never concatenate /fn/ + id manually), any custom routes, resource limits, env_vars, network_mode, auth_mode, and rate_limit_per_min.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {
 				return nil, FunctionView{}, err
 			}
-			return nil, toFunctionView(fn, deps), nil
+			return nil, toFunctionView(ctx, fn, deps), nil
 		},
 	)
 
@@ -313,12 +314,12 @@ func registerFunctionTools(rc *regCtx) {
 				OpenWorldHint:   ptrFalse(),
 			},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in CreateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in CreateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
 			fn, err := createFunction(deps, in)
 			if err != nil {
 				return nil, FunctionView{}, err
 			}
-			return nil, toFunctionView(fn, deps), nil
+			return nil, toFunctionView(ctx, fn, deps), nil
 		},
 	)
 
@@ -333,12 +334,12 @@ func registerFunctionTools(rc *regCtx) {
 				OpenWorldHint:  ptrFalse(),
 			},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in UpdateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in UpdateFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
 			fn, err := updateFunction(deps, in)
 			if err != nil {
 				return nil, FunctionView{}, err
 			}
-			return nil, toFunctionView(fn, deps), nil
+			return nil, toFunctionView(ctx, fn, deps), nil
 		},
 	)
 

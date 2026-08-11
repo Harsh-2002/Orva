@@ -811,10 +811,14 @@ func (m *Manager) SaveProvider(in ProviderInput) (ProviderView, error) {
 	if provider == "" {
 		return ProviderView{}, fmt.Errorf("provider is required")
 	}
+	baseURL := normalizeBaseURL(in.BaseURL)
+	if provider == "ollama" && baseURL == "" {
+		return ProviderView{}, fmt.Errorf("base_url is required for ollama")
+	}
 	cfg := &database.AIProviderConfig{
 		Provider:    provider,
 		Label:       in.Label,
-		BaseURL:     normalizeBaseURL(in.BaseURL),
+		BaseURL:     baseURL,
 		ExtraConfig: in.ExtraConfig,
 		Enabled:     in.Enabled == nil || *in.Enabled,
 	}

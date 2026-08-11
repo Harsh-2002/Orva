@@ -306,3 +306,56 @@ func TestBuildRequestOmitsCacheControlWithoutSystemPrompt(t *testing.T) {
 		t.Fatal("CacheControl set without a system prompt")
 	}
 }
+
+// TestBifrostErrSurfacesTheWrappedCause is the guard on a diagnosability bug
+// that cost real debugging time.
+//
+// Bifrost's GetErrorString returns only ErrorField.Message. For every transport
+// failure that Message is the fixed string "failed to execute HTTP request to
+// provider API", and the actual reason lives in ErrorField.Error, which was
+// being discarded. An operator whose LAN provider was refused by Bifrost's
+// private-IP guard therefore saw a sentence that named neither the address nor
+// the reason, with no way to tell it apart from a TLS failure, a DNS error, or
+// a refused connection.
+func TestBifrostErrSurfacesTheWrappedCause(t *testing.T) {
+	const transportMsg = "failed to execute HTTP request to provider API"
+
+	t.Run("cause is appended", func(t *testing.T) {
+		got := bifrostErr(&schemas.BifrostError{
+			Error: &schemas.ErrorField{
+				Message: transportMsg,
+				Error:   errors.New("connection to private IP 10.1.1.20 is not allowed"),
+			},
+		})
+		if !strings.Contains(got, transportMsg) {
+			t.Errorf("dropped the summary: %q", got)
+		}
+		if !strings.Contains(got, "10.1.1.20") {
+			t.Errorf("dropped the cause, which is the only diagnosable part: %q", got)
+		}
+	})
+
+	t.Run("no cause leaves the message untouched", func(t *testing.T) {
+		got := bifrostErr(&schemas.BifrostError{
+			Error: &schemas.ErrorField{Message: "unauthorized"},
+		})
+		if got != "unauthorized" {
+			t.Errorf("want %q, got %q", "unauthorized", got)
+		}
+	})
+
+	t.Run("duplicate cause is not repeated", func(t *testing.T) {
+		got := bifrostErr(&schemas.BifrostError{
+			Error: &schemas.ErrorField{Message: "boom", Error: errors.New("boom")},
+		})
+		if got != "boom" {
+			t.Errorf("a cause identical to the message must not be appended twice: %q", got)
+		}
+	})
+
+	t.Run("nil is still handled", func(t *testing.T) {
+		if got := bifrostErr(nil); got == "" {
+			t.Error("nil must still render something")
+		}
+	})
+}

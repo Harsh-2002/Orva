@@ -653,7 +653,67 @@ call directly. API key permissions scope the available tool set.
 - **Endpoint:** `{{ORIGIN}}/mcp`
 - **Auth header:** `Authorization: Bearer <token>`
   (fallback: `X-Orva-API-Key: <token>`)
-- **Transport:** Streamable HTTP, MCP 2025-11-25.
+- **Transport:** Streamable HTTP, stateless. Orva serves MCP **2026-07-28**
+  and still accepts older clients — the SDK negotiates down, and
+  `server/discover` advertises `2026-07-28`, `2025-11-25`, `2025-06-18`,
+  `2025-03-26`, `2024-11-05`.
+
+> **No handshake, no session.** The transport is stateless: there is no
+> `initialize` step to perform first, no `Mcp-Session-Id` is ever issued, and
+> `GET /mcp` / `DELETE /mcp` — the SSE-resume and session-teardown verbs of the
+> older session transport — return `405`. Every POST carries its own bearer
+> token and is answered on its own. A legacy client that still sends
+> `initialize` gets a normal reply (with its own `protocolVersion` echoed back)
+> and simply never receives a session header. Every POST must send
+> `Accept: application/json, text/event-stream`. A **successful** reply is a
+> single SSE `message` event (`Content-Type: text/event-stream`); a request
+> rejected at the transport layer comes back as plain `application/json` with a
+> 4xx status, so a client has to handle both framings.
+
+> **2026-07-28 request shape.** A client that opts into the new protocol
+> replaces the handshake with wire headers plus two `params._meta` keys:
+> ```jsonc
+> Mcp-Protocol-Version: 2026-07-28   // required once _meta declares a protocolVersion
+> Mcp-Method: tools/list             // required — must equal the JSON-RPC method
+> Mcp-Name: <name>                   // required for tools/call, resources/read,
+>                                    // prompts/get — must equal params.name / params.uri
+>
+> "_meta": {
+>   "io.modelcontextprotocol/protocolVersion":    "2026-07-28",   // required
+>   "io.modelcontextprotocol/clientCapabilities": {},             // required
+>   "io.modelcontextprotocol/clientInfo": { "name": "curl", "version": "0" }  // optional
+> }
+> ```
+> The headers exist so a proxy or rate-limiter can route on the operation
+> without parsing the body, which is why they must agree with it: a
+> `Mcp-Method` or `Mcp-Name` that disagrees is rejected rather than ignored.
+>
+> Failure modes, all observed:
+>
+> | Mistake | Response |
+> |---|---|
+> | `clientCapabilities` omitted from `_meta` | `400` · `-32602 missing or invalid _meta field` |
+> | `Mcp-Method` omitted, or disagreeing with the body | `400` · `-32020` |
+> | `Mcp-Name` omitted on `tools/call` / `resources/read` / `prompts/get` | `400` · `-32020 missing required Mcp-Name header for method "tools/call"` |
+> | `_meta.protocolVersion` present but `Mcp-Protocol-Version` header absent | `400` · `-32020 Mcp-Protocol-Version header is required for requests carrying "io.modelcontextprotocol/protocolVersion"` |
+>
+> Note the last row: declaring **any** `protocolVersion` in `_meta` — including
+> an older one — commits the request to the header-validated path. It does not
+> fall back. The legacy path is reached by sending no `_meta.protocolVersion` at
+> all, and a bare `tools/list` with `"params":{}` and no protocol headers still
+> returns the full catalog.
+
+> **List results are private and immediately stale.** `tools/list`,
+> `resources/list`, `resources/templates/list`, `prompts/list`,
+> `resources/read` and `server/discover` results carry `ttlMs` and `cacheScope`.
+> Orva returns `cacheScope: "private"` because the catalog is permission-scoped
+> (a full-permission key lists 73 tools; a `read`-only key lists 27) and
+> channel-specific (a channel token sees only that channel's functions) — a
+> shared cache entry would hand one caller another caller's tool surface.
+> `ttlMs` is `0` because the catalog changes on any deploy, channel edit, or
+> permission change, and statelessness removed the session a
+> `tools/list_changed` notification would have travelled over. Re-list instead
+> of caching.
 
 > **Strict input contract.** The MCP tool surface is required-by-default: optional fields are exceptions
 > (pagination, list filters, true patches, opt-in TTLs). Notable required fields the agent must declare
@@ -699,21 +759,53 @@ claude mcp add --transport http --scope user orva {{ORIGIN}}/mcp --header "Autho
 
 ### MCP — curl
 
-> Talk to MCP directly. Step 1 returns a session id (Mcp-Session-Id) that Step 2 references.
+> Talk to MCP directly — no handshake, no session id. Step 1 asks the server what it supports; Step 2 lists the tools. Each reply is one SSE `message` event.
 
 ```bash
-curl -sD - -X POST {{ORIGIN}}/mcp \
+curl -sN -X POST {{ORIGIN}}/mcp \
   -H 'Authorization: Bearer <YOUR_ORVA_TOKEN>' \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 
-curl -sX POST {{ORIGIN}}/mcp \
+curl -sN -X POST {{ORIGIN}}/mcp \
   -H 'Authorization: Bearer <YOUR_ORVA_TOKEN>' \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -H 'Mcp-Session-Id: <SID>' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/list' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"}}}}'
+```
+
+`server/discover` returns `supportedVersions`, `capabilities`
+(`logging`, `resources.listChanged`, `tools.listChanged`), the server
+`instructions`, and `serverInfo` under `result._meta`'s
+`io.modelcontextprotocol/serverInfo` key — everything a client used to learn
+from the `initialize` reply. Older clients need none of it; a bare list with
+no `_meta` returns the same catalog:
+
+```bash
+curl -sN -X POST {{ORIGIN}}/mcp \
+  -H 'Authorization: Bearer <YOUR_ORVA_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+Calling a tool needs the third header. `Mcp-Name` must repeat `params.name`, or
+the request is refused with `-32020` before the tool ever runs:
+
+```bash
+curl -sN -X POST {{ORIGIN}}/mcp \
+  -H 'Authorization: Bearer <YOUR_ORVA_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'Mcp-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/call' \
+  -H 'Mcp-Name: system_health' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"system_health","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
 ### More clients (Cursor, VS Code, Codex CLI, OpenCode, Zed, Windsurf, ChatGPT)

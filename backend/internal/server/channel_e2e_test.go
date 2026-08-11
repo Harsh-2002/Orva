@@ -83,7 +83,15 @@ func TestChannelE2E_FullFlow(t *testing.T) {
 		t.Fatalf("token has wrong prefix: %q", connToken)
 	}
 
-	// Initialize MCP session with the channel token.
+	// Legacy handshake leg. A pre-2026-07-28 client still opens with
+	// initialize and must still be answered, so keep proving that — but
+	// it gets no session id anymore. /mcp runs the SDK's Streamable HTTP
+	// handler with Stateless:true (mcp.NewHandler), which is the only
+	// mode in which the SDK will serve protocol 2026-07-28 at all; a
+	// stateless server negotiates the old version fine and simply issues
+	// no Mcp-Session-Id. Asserting the header is ABSENT is the tripwire:
+	// if statefulness ever comes back, every 2026-07-28 client starts
+	// getting HTTP 400 again and this fails first.
 	mcpInit := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}`
 	req = httptest.NewRequest("POST", "/mcp", strings.NewReader(mcpInit))
 	req.Header.Set("Authorization", "Bearer "+connToken)
@@ -94,19 +102,23 @@ func TestChannelE2E_FullFlow(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("mcp initialize w/ channel token: status=%d body=%s", w.Code, w.Body.String())
 	}
-	sessionID := w.Header().Get("Mcp-Session-Id")
-	if sessionID == "" {
-		t.Fatalf("no Mcp-Session-Id in initialize")
+	if !strings.Contains(w.Body.String(), `"protocolVersion":"2025-11-25"`) {
+		t.Fatalf("legacy initialize did not negotiate 2025-11-25; body=%s",
+			truncateChannelBody(w.Body.String()))
+	}
+	if sid := w.Header().Get("Mcp-Session-Id"); sid != "" {
+		t.Fatalf("stateless /mcp issued Mcp-Session-Id %q — statefulness is back and 2026-07-28 clients will 400", sid)
 	}
 
 	// tools/list — must contain ONLY the bundled functions, NO Orva
-	// management tools.
+	// management tools. No session id to carry: the bearer alone is what
+	// scopes the catalog, because a stateless server re-resolves the
+	// token to a Principal and rebuilds the tool set on every request.
 	listReq := `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`
 	req = httptest.NewRequest("POST", "/mcp", strings.NewReader(listReq))
 	req.Header.Set("Authorization", "Bearer "+connToken)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("Mcp-Session-Id", sessionID)
 	w = httptest.NewRecorder()
 	tc.srv.router.ServeHTTP(w, req)
 	body := w.Body.String()

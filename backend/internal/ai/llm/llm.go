@@ -375,12 +375,26 @@ func isReasoningError(msg string) bool {
 }
 
 // bifrostErr renders a Bifrost error to a readable string.
+//
+// GetErrorString returns only ErrorField.Message and drops ErrorField.Error,
+// the wrapped cause. For any transport failure Message is the fixed string
+// "failed to execute HTTP request to provider API", so the operator saw that
+// and nothing else — the actual reason ("connection to private IP 10.1.1.20 is
+// not allowed", a TLS failure, a refused connection, a DNS error) was
+// discarded on the way out. Appending the cause is what makes a provider
+// misconfiguration diagnosable instead of a shrug.
 func bifrostErr(e *schemas.BifrostError) string {
 	if e == nil {
 		return "unknown bifrost error"
 	}
-	if s := e.GetErrorString(); s != "" {
-		return s
+	msg := e.GetErrorString()
+	if msg == "" {
+		msg = e.String()
 	}
-	return e.String()
+	if e.Error != nil && e.Error.Error != nil {
+		if cause := e.Error.Error.Error(); cause != "" && cause != msg {
+			return msg + ": " + cause
+		}
+	}
+	return msg
 }

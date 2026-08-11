@@ -14,8 +14,10 @@ update the test allow-list and explain why in code comments.
 
 ## Schema dialect & shape
 
-1. **Don't set `$schema`** — let the SDK pick the MCP 2025-11-25 default
-   (JSON-Schema Draft 2020-12).
+1. **Don't set `$schema`** — let the SDK pick the MCP 2026-07-28 default
+   (JSON-Schema Draft 2020-12). Older clients negotiate down to
+   2025-11-25 / 2025-06-18 / 2025-03-26 / 2024-11-05, which use the same
+   dialect, so one schema serves every version.
 2. **Object schemas have `additionalProperties: false`** — at every
    nesting level. The Go SDK's `jsonschema-go` does this automatically
    for inferred struct schemas; if you hand-roll a `*jsonschema.Schema`,
@@ -70,6 +72,13 @@ update the test allow-list and explain why in code comments.
     (e.g. `"List Functions"` for `list_functions`); channel-mode uses
     the original (un-sanitised) function name.
 
+Result-level caching is not yours to set per tool: 2026-07-28 list results
+carry `ttlMs` + `cacheScope`, and `cacheScopeMiddleware` (`cachescope.go`)
+rewrites the SDK's hardcoded `"public"` to `"private"` on every one of them.
+The catalog is permission- and channel-scoped, so a shared cache entry would
+leak one principal's tool surface to another. If a future SDK adds a new
+list-shaped result type, add it to that middleware.
+
 ---
 
 ## Channel-mode generation
@@ -101,7 +110,10 @@ When the channel auto-emits one tool per bundled function:
 
 ## Sources
 
-- MCP spec 2025-11-25 — Tools section + JSON Schema usage.
+- MCP spec 2026-07-28 — Tools section + JSON Schema usage (the transport
+  is stateless: no `initialize` handshake, no `Mcp-Session-Id`; a
+  2026-07-28 request declares `protocolVersion` + `clientCapabilities` in
+  `params._meta`). Older spec revisions back to 2024-11-05 still negotiate.
 - Anthropic — "Writing tools for agents" (engineering blog, Sept 2025).
 - Anthropic — Strict tool use (JSON Schema subset).
 - OpenAI — Structured Outputs supported subset.

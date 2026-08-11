@@ -183,6 +183,7 @@ Defaults work out of the box. Common knobs: `ORVA_PORT` (8443), `ORVA_DATA_DIR`
 | [SUPPORT](docs/SUPPORT.md) | Distro / kernel / container-runtime matrix |
 | [CAPACITY](docs/CAPACITY.md) | Throughput numbers + benchmark methodology |
 | [CONTRIBUTING](docs/CONTRIBUTING.md) | Dev setup, build from source, tests |
+| [TESTING](docs/TESTING.md) | End-to-end verification guide: bring-up, testing layers, user journeys, triage |
 
 Runtime isolation specifics (Kata, gVisor) live in [docs/KATA.md](docs/KATA.md) and [docs/GVISOR.md](docs/GVISOR.md).
 

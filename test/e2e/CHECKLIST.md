@@ -4,10 +4,10 @@
 > overwrites it. When a module FAILs, fix the code or harden the test;
 > when you add a feature, add a module here.
 
-- **Last run:** 2026-08-04 13:34:37Z
+- **Last run:** 2026-08-11 06:02:13Z
 - **Target:** external instance http://127.0.0.1:18443
-- **Modules:** 26 passed, 0 failed, 0 skipped
-- **Checks:** 537 passed, 0 failed
+- **Modules:** 28 passed, 0 failed, 0 skipped
+- **Checks:** 659 passed, 0 failed
 
 | Module | Status | Checks (pass/fail) |
 |---|---|---|
@@ -16,7 +16,7 @@
 | `test_ai_conversations.py` | ✅ PASS | 26/0 |
 | `test_ai_edit.py` | ✅ PASS | 23/0 |
 | `test_ai_perms.py` | ✅ PASS | 9/0 |
-| `test_ai_providers.py` | ✅ PASS | 22/0 |
+| `test_ai_providers.py` | ✅ PASS | 27/0 |
 | `test_ai_settings.py` | ✅ PASS | 15/0 |
 | `test_auth.py` | ✅ PASS | 15/0 |
 | `test_backup.py` | ✅ PASS | 11/0 |
@@ -24,16 +24,18 @@
 | `test_cli.py` | ✅ PASS | 41/0 |
 | `test_cli_chat.py` | ✅ PASS | 11/0 |
 | `test_cron.py` | ✅ PASS | 19/0 |
-| `test_deploy_invoke.py` | ✅ PASS | 23/0 |
-| `test_firewall.py` | ✅ PASS | 30/0 |
+| `test_deploy_invoke.py` | ✅ PASS | 31/0 |
+| `test_firewall.py` | ✅ PASS | 80/0 |
 | `test_fixtures.py` | ✅ PASS | 29/0 |
 | `test_functions.py` | ✅ PASS | 13/0 |
 | `test_inbound_webhooks.py` | ✅ PASS | 23/0 |
 | `test_jobs.py` | ✅ PASS | 21/0 |
 | `test_keys.py` | ✅ PASS | 17/0 |
 | `test_kv.py` | ✅ PASS | 23/0 |
+| `test_mcp.py` | ✅ PASS | 51/0 |
 | `test_routes.py` | ✅ PASS | 24/0 |
 | `test_secrets.py` | ✅ PASS | 18/0 |
+| `test_security.py` | ✅ PASS | 8/0 |
 | `test_system.py` | ✅ PASS | 7/0 |
 | `test_traces.py` | ✅ PASS | 21/0 |
 | `test_webhooks.py` | ✅ PASS | 25/0 |
