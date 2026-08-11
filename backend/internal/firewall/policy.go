@@ -420,6 +420,14 @@ func parseTarget(raw string) (netip.Prefix, error) {
 	return p.Masked(), nil
 }
 
+// ValidateTarget reports whether raw is an IP address or CIDR that NSTUN can
+// enforce without widening it. API handlers use this before persisting rules
+// so the write contract matches the compiler's fail-closed contract.
+func ValidateTarget(raw string) error {
+	_, err := parseTarget(raw)
+	return err
+}
+
 // canonPrefixes sorts and dedupes so rule order — and therefore the policy
 // hash — is stable regardless of DB row order or DNS answer order.
 func canonPrefixes(in []netip.Prefix) []netip.Prefix {

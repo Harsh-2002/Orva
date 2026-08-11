@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -69,6 +70,76 @@ func TestDeleteFunctionReclaimsDisk(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "functions", "other-fn", "versions", "abc", "blob")); err != nil {
 		t.Errorf("another function's code must survive: %v", err)
+	}
+}
+
+// TestDeleteFunctionWaitsForBuildLock pins the ordering that prevents an
+// in-flight build from recreating a function after DELETE returned. The build
+// queue and this handler receive the same mutex from pool.Manager.
+func TestDeleteFunctionWaitsForBuildLock(t *testing.T) {
+	const fnID = "019df200-7b00-7e00-9c00-aab1cd2e3f44"
+	h, dataDir := newFnDiskHandler(t, fnID)
+	writeTree(t, filepath.Join(dataDir, "functions", fnID, "versions", "abc"))
+	writeTree(t, filepath.Join(dataDir, "build-cache", fnID, "npm"))
+
+	var buildLock sync.Mutex
+	buildLock.Lock() // simulate Queue.runJob holding the per-function lock
+	lockRequested := make(chan struct{})
+	h.FnLock = func(got string) *sync.Mutex {
+		if got != fnID {
+			t.Errorf("FnLock(%q), want %q", got, fnID)
+		}
+		close(lockRequested)
+		return &buildLock
+	}
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/functions/"+fnID, nil)
+		req.SetPathValue("fn_id", fnID)
+		w := httptest.NewRecorder()
+		h.Delete(w, req)
+		done <- w
+	}()
+	<-lockRequested
+
+	select {
+	case <-done:
+		t.Fatal("delete completed while the function build lock was held")
+	default:
+	}
+	if _, err := h.Registry.Get(fnID); err != nil {
+		t.Fatalf("function disappeared before the build lock was released: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "functions", fnID, "versions", "abc", "blob")); err != nil {
+		t.Fatalf("function files disappeared before the build lock was released: %v", err)
+	}
+
+	// A build may persist its final state while it owns the lock. DELETE must
+	// run afterward and be the final writer.
+	fn, err := h.Registry.Get(fnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn.Status = "active"
+	if err := h.Registry.SetSilent(fn); err != nil {
+		t.Fatalf("simulated build final write: %v", err)
+	}
+	buildLock.Unlock()
+	w := <-done
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body %s", w.Code, w.Body.String())
+	}
+	if _, err := h.Registry.Get(fnID); err == nil {
+		t.Fatal("function was recreated after serialized delete")
+	}
+	for _, gone := range []string{
+		filepath.Join(dataDir, "functions", fnID),
+		filepath.Join(dataDir, "build-cache", fnID),
+	} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s must be reclaimed after delete, stat err = %v", gone, err)
+		}
 	}
 }
 

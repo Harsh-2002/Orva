@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -33,6 +34,30 @@ type FirewallHandler struct {
 // firewall.compile) so an operator reading the rejection and an operator
 // reading the status snapshot are told the same thing.
 const wildcardUnenforceable = "wildcard hostnames cannot be enforced: the egress policy matches IP/CIDR, not DNS names. Use a CIDR or an exact hostname."
+
+func validateEnforceableRule(ruleType, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("value is required")
+	}
+	switch ruleType {
+	case database.BlocklistTypeCIDR:
+		if err := firewall.ValidateTarget(value); err != nil {
+			return fmt.Errorf("value must be an enforceable IP or CIDR: %w", err)
+		}
+	case database.BlocklistTypeHostname:
+		// A literal address intentionally typed as a hostname would still be
+		// resolved as an address by net.LookupHost. Refuse the misleading type
+		// instead of storing a rule that later lands in unenforced_rules.
+		if net.ParseIP(value) != nil {
+			return errors.New("literal IP addresses must use rule_type cidr")
+		}
+		if !validHostnameRe.MatchString(value) {
+			return errors.New("value must be an exact hostname using letters, digits, dots, or hyphens")
+		}
+	}
+	return nil
+}
 
 type listFirewallResponse struct {
 	Rules  []*database.BlocklistRule `json:"rules"`
@@ -144,22 +169,9 @@ func (h *FirewallHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", wildcardUnenforceable, reqID)
 		return
 	}
-	if req.Value == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "value is required", reqID)
+	if err := validateEnforceableRule(req.RuleType, req.Value); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
-	}
-	// Type-specific validation so the operator can't enter
-	// "192.168.1.1" with rule_type=hostname and have it silently treated
-	// as a DNS name.
-	switch req.RuleType {
-	case database.BlocklistTypeCIDR:
-		if _, _, err := net.ParseCIDR(req.Value); err != nil {
-			if ip := net.ParseIP(req.Value); ip == nil {
-				respond.Error(w, http.StatusBadRequest, "VALIDATION",
-					"value must be an IP or CIDR (e.g. 192.168.1.0/24)", reqID)
-				return
-			}
-		}
 	}
 
 	enabled := true
@@ -205,34 +217,8 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Toggle enabled is allowed regardless of kind.
-	if req.Enabled != nil {
-		// Enabling a wildcard would arm a rule the compiler cannot express as a
-		// packet filter. Disabling one stays allowed — that is how an operator
-		// retires a legacy row without us ever rewriting it behind their back.
-		if *req.Enabled {
-			existing, err := h.DB.GetBlocklistRule(id)
-			if err != nil {
-				respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
-				return
-			}
-			if existing.RuleType == database.BlocklistTypeWildcard {
-				respond.Error(w, http.StatusBadRequest, "VALIDATION", wildcardUnenforceable, reqID)
-				return
-			}
-		}
-		if err := h.DB.SetBlocklistRuleEnabled(id, *req.Enabled); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
-				return
-			}
-			respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
-			return
-		}
-	}
-
-	// Edit value/type/label is custom-only (the DAO enforces this).
-	if req.Value != nil || req.RuleType != nil || req.Label != nil {
+	editing := req.Value != nil || req.RuleType != nil || req.Label != nil
+	if req.Enabled != nil || editing {
 		existing, err := h.DB.GetBlocklistRule(id)
 		if err != nil {
 			respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
@@ -242,7 +228,7 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 		value := existing.Value
 		label := existing.Label
 		if req.RuleType != nil {
-			ruleType = *req.RuleType
+			ruleType = strings.TrimSpace(*req.RuleType)
 		}
 		if req.Value != nil {
 			value = strings.TrimSpace(*req.Value)
@@ -250,7 +236,7 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if req.Label != nil {
 			label = *req.Label
 		}
-		if !database.ValidBlocklistRuleType(ruleType) {
+		if editing && !database.ValidBlocklistRuleType(ruleType) {
 			respond.Error(w, http.StatusBadRequest, "VALIDATION",
 				"rule_type must be one of: cidr, hostname", reqID)
 			return
@@ -259,13 +245,33 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// existing wildcard row" (ruleType carries over from the stored row).
 		// A legacy wildcard is therefore disable-or-delete only; there is no
 		// edit that leaves it enforceable.
-		if ruleType == database.BlocklistTypeWildcard {
+		if (editing || (req.Enabled != nil && *req.Enabled)) && ruleType == database.BlocklistTypeWildcard {
 			respond.Error(w, http.StatusBadRequest, "VALIDATION", wildcardUnenforceable, reqID)
 			return
 		}
-		if err := h.DB.UpdateBlocklistRuleValue(id, ruleType, value, label); err != nil {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
-			return
+		// Validate before either write so a combined {enabled:true,value:bad}
+		// request cannot partially arm a legacy row and then fail its edit.
+		if editing || (req.Enabled != nil && *req.Enabled) {
+			if err := validateEnforceableRule(ruleType, value); err != nil {
+				respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+				return
+			}
+		}
+		if req.Enabled != nil {
+			if err := h.DB.SetBlocklistRuleEnabled(id, *req.Enabled); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
+					return
+				}
+				respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
+				return
+			}
+		}
+		if editing {
+			if err := h.DB.UpdateBlocklistRuleValue(id, ruleType, value, label); err != nil {
+				respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+				return
+			}
 		}
 	}
 
@@ -337,9 +343,9 @@ func (h *FirewallHandler) PutDNS(w http.ResponseWriter, r *http.Request) {
 		if s == "" {
 			continue
 		}
-		if net.ParseIP(s) == nil {
+		if net.ParseIP(s) == nil || firewall.ValidateTarget(s) != nil {
 			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"invalid resolver IP: "+s+" (use a literal IPv4 or IPv6 address)", reqID)
+				"invalid resolver IP: "+s+" (use a specific IPv4 or IPv6 address)", reqID)
 			return
 		}
 		clean = append(clean, s)

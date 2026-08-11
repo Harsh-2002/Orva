@@ -118,6 +118,109 @@ func TestCreateFirewallRuleAcceptsCIDRAndHostname(t *testing.T) {
 	}
 }
 
+func TestCreateFirewallRuleRejectsUnenforceableTargets(t *testing.T) {
+	db := newTestDB(t)
+	h := &FirewallHandler{DB: db}
+
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"unspecified IPv4 CIDR", map[string]any{"rule_type": "cidr", "value": "0.0.0.0/0"}},
+		{"unspecified IPv6 CIDR", map[string]any{"rule_type": "cidr", "value": "::/0"}},
+		{"over-wide CIDR", map[string]any{"rule_type": "cidr", "value": "10.0.0.0/64"}},
+		{"v4-mapped IPv6", map[string]any{"rule_type": "cidr", "value": "::ffff:192.0.2.1"}},
+		{"literal IP as hostname", map[string]any{"rule_type": "hostname", "value": "0.0.0.0"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := postRule(t, h, tc.body)
+			if code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", code, body)
+			}
+			if got := errCode(t, body); got != "VALIDATION" {
+				t.Errorf("code = %q, want VALIDATION", got)
+			}
+		})
+	}
+
+	rules, err := db.ListBlocklistRules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range rules {
+		if rule.Kind == database.BlocklistKindCustom {
+			t.Fatalf("a refused target was still inserted: %+v", rule)
+		}
+	}
+}
+
+func TestUpdateLegacyUnenforceableRule(t *testing.T) {
+	db := newTestDB(t)
+	h := &FirewallHandler{DB: db}
+	legacy, err := db.InsertCustomBlocklistRule(
+		database.BlocklistTypeCIDR, "0.0.0.0/0", "legacy", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("enable refused without partial mutation", func(t *testing.T) {
+		code, body := putRule(t, h, legacy.ID, map[string]any{
+			"enabled": true,
+			"value":   "::/0",
+		})
+		if code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400 (body: %s)", code, body)
+		}
+		row, err := db.GetBlocklistRule(legacy.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row.Enabled || row.Value != "0.0.0.0/0" {
+			t.Fatalf("refused update partially mutated row: %+v", row)
+		}
+	})
+
+	t.Run("repair to valid target is allowed", func(t *testing.T) {
+		code, body := putRule(t, h, legacy.ID, map[string]any{
+			"enabled": true,
+			"value":   "203.0.113.0/24",
+		})
+		if code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body: %s)", code, body)
+		}
+		row, err := db.GetBlocklistRule(legacy.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !row.Enabled || row.Value != "203.0.113.0/24" {
+			t.Fatalf("valid repair did not apply: %+v", row)
+		}
+	})
+}
+
+func TestPutDNSRejectsUnspecifiedResolvers(t *testing.T) {
+	db := newTestDB(t)
+	h := &FirewallHandler{DB: db}
+	if err := db.SetSystemConfig("dns_servers", "1.1.1.1"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, resolver := range []string{"0.0.0.0", "::", "::ffff:192.0.2.1"} {
+		t.Run(resolver, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{"servers": []string{resolver}})
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/firewall/dns", bytes.NewReader(raw))
+			w := httptest.NewRecorder()
+			h.PutDNS(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", w.Code, w.Body.String())
+			}
+			if got := db.GetSystemConfigString("dns_servers", ""); got != "1.1.1.1" {
+				t.Fatalf("refused resolver overwrote stored config: %q", got)
+			}
+		})
+	}
+}
+
 // TestUpdateLegacyWildcardRule covers the deliberate asymmetry for rows that
 // predate the refusal: they are never rewritten behind the operator's back, so
 // enabling and editing are closed off while disabling stays open.

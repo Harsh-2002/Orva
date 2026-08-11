@@ -18,10 +18,10 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // errVersionGCd is returned by Rollback when the target version directory
@@ -480,6 +480,17 @@ func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
+	}
+	// Serialize the entire delete with builds and rollback for this function.
+	// A build keeps a pointer to the function row and finishes by calling
+	// Registry.SetSilent; deleting without this lock allowed that final write to
+	// INSERT the row again after a successful DELETE. The same lock also keeps
+	// PurgeFunctionFiles from removing code or cache files while a build uses
+	// them.
+	if h.FnLock != nil {
+		lk := h.FnLock(fnID)
+		lk.Lock()
+		defer lk.Unlock()
 	}
 
 	if err := h.Registry.Delete(fnID); err != nil {
@@ -1130,4 +1141,3 @@ func short(s string) string {
 	}
 	return s
 }
-
