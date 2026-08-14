@@ -38,6 +38,28 @@ var redactHeaders = map[string]bool{
 
 const redactedValue = "[REDACTED]"
 
+// sessionCookieName is Orva's dashboard session cookie (handlers/auth.go).
+const sessionCookieName = "session_token"
+
+// stripSessionCookie removes Orva's session cookie from a Cookie header value
+// while preserving every other cookie, so a function that sets its own cookies
+// still receives them.
+func stripSessionCookie(v string) string {
+	var kept []string
+	for _, p := range strings.Split(v, ";") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		name, _, _ := strings.Cut(p, "=")
+		if strings.EqualFold(strings.TrimSpace(name), sessionCookieName) {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return strings.Join(kept, "; ")
+}
+
 // captureCache holds the cached value of replay_capture_enabled +
 // replay_capture_max_bytes. The proxy reads system_config exactly once at
 // package level and refreshes it on a long timer, trading a small window
@@ -233,7 +255,21 @@ func (p *Proxy) Forward(
 
 	headers := make(map[string]string, len(r.Header))
 	for k, v := range r.Header {
-		if !strings.EqualFold(k, "X-Orva-API-Key") {
+		// Orva's own credentials must never reach user code. The API key is
+		// dropped outright. The Cookie header is kept minus session_token:
+		// that cookie is Path="/" with full control-plane authority and is
+		// accepted as invoke auth (handlers/invoke_auth.go), and the
+		// dashboard's own invoke client sends it with credentials against
+		// /fn/ — so forwarding it verbatim hands operator authority to the
+		// sandbox. Any other cookie belongs to the function.
+		switch {
+		case strings.EqualFold(k, "X-Orva-API-Key"):
+			continue
+		case strings.EqualFold(k, "Cookie"):
+			if c := stripSessionCookie(v[0]); c != "" {
+				headers["cookie"] = c
+			}
+		default:
 			headers[strings.ToLower(k)] = v[0]
 		}
 	}
@@ -290,18 +326,13 @@ func (p *Proxy) Forward(
 		timeout = 30 * time.Second
 	}
 
-	if env == nil {
-		env = map[string]string{}
-	}
-	env["ORVA_EXECUTION_ID"] = execID
-	env["ORVA_TIMEOUT_MS"] = strconv.FormatInt(timeoutMS, 10)
-	env["ORVA_MEMORY_MB"] = strconv.Itoa(memoryMB)
-	if tID := trace.TraceID(r.Context()); tID != "" {
-		env["ORVA_TRACE_ID"] = tID
-	}
-	if sID := trace.SpanID(r.Context()); sID != "" {
-		env["ORVA_SPAN_ID"] = sID
-	}
+	// Per-request values cannot travel as env vars: a warm worker's
+	// environment is fixed when it is spawned and it outlives this request.
+	// Execution id, trace id and span id ride the x-orva-* request headers
+	// above, which both adapters read; the per-function values
+	// (ORVA_TIMEOUT_MS, ORVA_MEMORY_MB) are set in pool.buildEnv at spawn.
+	_ = env
+	_ = memoryMB
 
 	if p.Pool == nil {
 		// Tests and tooling without a pool wired up: fail fast with a clear
