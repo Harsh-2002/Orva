@@ -143,7 +143,7 @@ encrypted and only decrypt into the worker environment at spawn time.
 | `env_vars` | Plain config | Plaintext config stored on the function record. Use for feature flags and non-secret settings. |
 | `/secrets` | Encrypted | AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time. |
 | `network_mode` | Egress control | none = isolated loopback. egress = outbound HTTPS allowed; firewall blocklist applies. The orva SDK (kv / invoke / jobs) reaches orvad over the bridge, so it requires `egress`. |
-| `auth_mode` | Invoke gate | none = public. platform_key = require Orva API key. signed = require HMAC. |
+| `auth_mode` | Invoke gate | none = public. platform_key = require an Orva session cookie, or an API key carrying the `invoke` permission (via `X-Orva-API-Key` or `Authorization: Bearer`). signed = require HMAC. |
 | `rate_limit_per_min` | Per-IP throttle | Optional cap for public or webhook-facing functions. Exceeding it returns 429. |
 | custom routes | Pretty URLs | Operator-defined `/path` or `/prefix/*` mappings to the function. Manage via `POST /api/v1/routes`, the `set_route` MCP tool, the `orva routes set` CLI, or the dashboard's function settings → "Custom routes" section (collision-checks against other functions). Optional. |
 
@@ -191,7 +191,7 @@ Surface, as of v0.7:
 - **`crons.upsert(name, schedule, {payload, timezone, enabled})`** — declare a cron schedule from the function body itself.
 - **`trace.span(name, fn, attrs?)`** — wrap a code block as a child span; durations land in the trace waterfall.
 - **`log.{debug,info,warn,error}(msg, fields?)`** — structured logs surfaced in the dashboard Logs lane.
-- **`context`** — frozen view of `functionId`, `executionId`, `traceId`, `spanId`, `callDepth`, `timeoutMs`, `memoryMb`, `sdkVersion`.
+- **`context`** — frozen view of `functionId`, `executionId`, `traceId`, `spanId`, `callDepth`, `timeoutMs`, `memoryMb`, `sdkVersion`. `timeoutMs` is the function's configured timeout (from `ORVA_TIMEOUT_MS`), also reachable as `getRemainingTimeInMillis()` / `get_remaining_time_in_millis()` on the handler's context argument.
 - **`secrets.get(name)`** — explicit accessor over the secret environment vars.
 - **`webhook.parse(event)`** — extract source / verified / payload from an inbound-webhook event without re-parsing headers.
 - **`__test_mode__(impl)`** — swap the transport for tests so handlers run without a live server.
@@ -676,6 +676,13 @@ call directly. API key permissions scope the available tool set.
 > single SSE `message` event (`Content-Type: text/event-stream`); a request
 > rejected at the transport layer comes back as plain `application/json` with a
 > 4xx status, so a client has to handle both framings.
+
+> **Origin.** A browser request whose `Origin` is not in an explicit
+> `ORVA_CORS_ORIGINS` list is rejected `403` *before* authentication. A request
+> with **no** `Origin` header — every non-browser MCP client, which is nearly
+> all of them — is always allowed. The default (`ORVA_CORS_ORIGINS` unset, or
+> `*`) allows any origin. If you narrow that list for the dashboard, remember it
+> also governs `/mcp`, including third-party agent-channel consumers.
 
 > **2026-07-28 request shape.** A client that opts into the new protocol
 > replaces the handshake with wire headers plus two `params._meta` keys:
@@ -1249,7 +1256,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 <auth_modes>
 Configure auth_mode on the function record (editor Settings modal or PUT /api/v1/functions/<name>):
 - "public" (default) — anyone with the URL can invoke. If the function needs user auth, verify a JWT IN the handler.
-- "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API Keys page.
+- "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. The key must carry the "invoke" permission; a key scoped to read/write only gets 403. Keys minted from the dashboard, the CLI, the bootstrap flow and OAuth all carry it. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API Keys page.
 - "signed" — caller signs the request with HMAC-SHA256 over "<unix-timestamp>.<raw_body>" using ORVA_SIGNING_SECRET (a function secret). Headers: X-Orva-Timestamp, X-Orva-Signature: sha256=<hex>. ±5 min skew window. Use for partner integrations where you've shared a secret and want pure HTTP without OAuth.
 
 For end-user apps prefer in-handler JWT verification (Auth0, Clerk, Supabase, Firebase) — the platform stays out of the way. Pattern in Python:
@@ -1263,22 +1270,22 @@ Per-function rate limiting (rpm + burst) is configurable on the function record;
 </auth_modes>
 
 <cors>
-The platform never injects CORS headers. The handler controls them.
-- Answer OPTIONS before any auth check.
-- Attach CORS headers to EVERY response, including 401 / 500.
-- Allowlist origins; do not echo "*" with credentials.
-- Set Access-Control-Allow-Headers explicitly (Content-Type, Authorization, X-Requested-With, …).
+The platform DOES inject CORS headers. Its middleware is the outermost wrapper and runs on every response, including /fn/ and custom routes.
+- OPTIONS never reaches your handler. The platform answers it 204 with a fixed Access-Control-Allow-Methods (GET, POST, PUT, DELETE, OPTIONS) and Access-Control-Allow-Headers (Content-Type, Authorization, X-Request-ID, X-Orva-API-Key). Do NOT write an "if method == OPTIONS" branch — it is dead code.
+- Access-Control-Allow-Origin is always set by the platform: "*" by default, or the caller's Origin plus Vary: Origin when ORVA_CORS_ORIGINS names an explicit allow-list. A request from an origin outside that list gets no Allow-Origin header at all.
+- On non-OPTIONS responses a header your handler returns REPLACES the platform's. That is how you narrow (or widen) Allow-Origin per function.
+- A browser that needs a custom request header beyond the four above will fail preflight, and no handler change can fix it — the preflight response is the platform's.
 Pattern:
-  CORS = {
-      "Access-Control-Allow-Origin":  "https://app.example.com",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Max-Age":       "600",
+  # No OPTIONS branch: the platform already answered it.
+  return {
+      "statusCode": 200,
+      "headers": {
+          "Content-Type": "application/json",
+          # Optional: override the platform default for this function.
+          "Access-Control-Allow-Origin": "https://app.example.com",
+      },
+      "body": data,
   }
-  if event["method"] == "OPTIONS":
-      return {"statusCode": 204, "headers": CORS, "body": ""}
-  # ... real handler ...
-  return {"statusCode": 200, "headers": {**CORS, "Content-Type": "application/json"}, "body": data}
 </cors>
 
 <custom_routes>

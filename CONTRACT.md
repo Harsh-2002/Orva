@@ -95,10 +95,14 @@ hand-maintained view — update it alongside if content changes.)
   `ORVA_REQUIRE_SANDBOX=1`** on a provisioned Linux host, where **real deploy/invoke
   is mandatory and a sandbox skip is a hard failure**. If you cannot run it locally,
   say so — do not claim a change is verified on `make test` alone.
-- **Supplementary, NOT gated**: the shell suites (`test/run-all.sh` against a live
-  instance). No CI job executes them — `ci.yml` only *shellchecks* `test/*.sh`. They
-  are useful ad-hoc checks, and several mutate or litter the instance they run
-  against, so point them at a scratch instance rather than one you care about.
+- **Supplementary, NOT gated**: `test/run-all.sh` and its members, run against a
+  live instance. No CI job executes *those* — several mutate or litter the
+  instance they run against, so point them at a scratch instance rather than one
+  you care about. Note this does **not** mean "CI only shellchecks `test/`":
+  `ci.yml` executes `test/sdk-test.sh` inside the gated E2E job
+  (`ORVA_REQUIRE_SANDBOX=1`), plus `test/cli/{build-matrix,command-tree,install-cli-test,upgrade-test}.sh`
+  and `test/install/{run-distro,native-engine}.sh`. `docs/TESTING.md` marks each
+  harness CI-gated or not; trust that table.
 - **How to actually do it:** [`docs/TESTING.md`](docs/TESTING.md) — bring-up, what each
   testing layer can and cannot prove, expected output per journey, and triage.
 

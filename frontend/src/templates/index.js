@@ -763,17 +763,8 @@ def handler(event):
     path = _strip_route_prefix(raw_path)
     parts = [p for p in path.split("/") if p]
 
-    if method == "OPTIONS":
-        return {
-            "statusCode": 204,
-            "headers": {
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                "Access-Control-Max-Age": "600",
-            },
-            "body": "",
-        }
+    # No OPTIONS branch: Orva's CORS middleware answers preflight 204 before
+    # the request ever reaches a handler, so one here would be dead code.
 
     # GET / → HTML
     if method == "GET" and not parts:

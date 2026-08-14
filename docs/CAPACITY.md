@@ -112,3 +112,8 @@ Use these Pool Controller v2 signals together:
 Raise `max_warm` only when `limiting_reason=operator_max`. CPU or memory
 limits require host capacity or smaller function limits; increasing the
 operator ceiling cannot override the effective host maximum.
+
+`max_warm` also sizes the pool's idle-worker storage, so it is capped at
+**1024** — a larger value is rejected with a 400 rather than clamped
+silently. `effective_max` remains the live host/operator ceiling, recomputed
+each tick from *observed* memory use; `max_warm` is only its upper bound.

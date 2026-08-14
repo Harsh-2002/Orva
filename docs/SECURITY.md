@@ -20,6 +20,9 @@ ordered by importance:
 5. A function cannot make **arbitrary network calls** when network mode
    is `none` (default — isolated net namespace, loopback only). Functions
    that need outbound HTTPS opt in by setting `network_mode: egress`
+6. A function cannot obtain **Orva's own operator credentials** from the
+   request that invoked it (see [What reaches user code from the
+   request](#what-reaches-user-code-from-the-request))
 
 Orva is **not** designed to defend against:
 - A malicious operator running on the same host (they own the keys)
@@ -43,6 +46,42 @@ active execution owned by that function. Functions may intentionally invoke or
 enqueue work for another function, but the caller recorded in traces and jobs
 always comes from the signed claim. The SDK credential cannot authenticate to
 operator APIs.
+
+## What reaches user code from the request
+
+Your handler receives the inbound HTTP request as `event.headers`. Orva's own
+credentials are removed first — otherwise invoking a function would hand it
+the credential that authorized the invocation. One function,
+`proxy.SanitizeForwardedHeaders`, does this for every path that reaches a
+sandbox: `/fn/{id}`, custom routes, and inbound webhooks.
+
+| header | reaches your handler? |
+|---|---|
+| `X-Orva-API-Key` | **no** — dropped |
+| `X-Orva-Internal-Token` | **no** — dropped |
+| `Proxy-Authorization` | **no** — dropped |
+| `Cookie` | yes, **minus `session_token`**; your own cookies survive |
+| `Authorization` | yes, **unless** it carries an `orva_`-prefixed credential |
+| everything else | yes, including `X-Orva-Timestamp` / `X-Orva-Signature` |
+
+`session_token` is the dashboard session: `Path=/`, full control-plane
+authority, and accepted as invoke auth. The dashboard's own Test/Invoke button
+sends it with credentials, so forwarding it would leak operator authority to
+sandboxed code on the most ordinary UI action there is.
+
+A third-party `Authorization` **is** forwarded — a function doing its own JWT
+verification needs it. Only Orva-issued credentials (every one of which is
+`orva_`-prefixed) are withheld.
+
+> This set is deliberately **not** the same as `redactHeaders` in the same
+> file. That one governs what replay capture refuses to persist — it also
+> covers `Authorization`, because a captured request is stored. This table
+> governs what enters the sandbox. A future credential header belongs in both.
+
+A handler's returned headers **replace** the platform's on non-OPTIONS
+responses, so a function can widen its own `Access-Control-Allow-Origin` past
+`ORVA_CORS_ORIGINS`. That is a boundary fact, not a convenience: the
+platform's CORS setting does not constrain what a function chooses to answer.
 
 ## What's between user code and the host
 
@@ -433,6 +472,20 @@ standard path). Tracking issue / future work — let us know if this
 matters for your deployment.
 
 ## Common questions
+
+> "Can someone with a write API key redirect another function's traffic?"
+
+No. Two independent guards. A custom route may not be created under a prefix
+Orva serves itself — `/api/`, `/auth/`, `/web/`, `/_orva/`, `/fn/`, `/mcp/`,
+`/webhook/` — and the REST endpoint and the MCP `set_route` tool validate
+against the same list. Separately, a direct `/fn/{id}` call resolves its
+function from the path and never consults the route table at all, so even a
+pre-existing catch-all `/*` route cannot shadow it.
+
+This matters because `auth_mode` and the per-function rate limit are evaluated
+against the **resolved** function. If a route could redirect `/fn/{id}`, a
+request aimed at a `platform_key`-gated function would be served by whatever
+function the route named — including one with `auth_mode: none`.
 
 > "I saw `WARNING: Running pip as the 'root' user' in the build log
 > earlier. Was my function being installed as root?"

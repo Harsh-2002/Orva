@@ -85,9 +85,19 @@ invocations skip the ~50ms spawn cost.
 ```
 POST /fn/xxx/health
      │
-     ▼ middleware: auth → rate-limit → CORS
+     ▼ middleware: CORS → body-size → auth → request-ID → logger
+     │              (auth only inspects /api/ paths; /fn/ passes straight
+     │               through — per-function auth_mode is enforced below)
+     │
+     ▼ mux: /fn/ dispatches directly to InvokeHandler. The custom-route
+     │      catch-all is a separate registration and rejects Orva's own
+     │      prefixes via isReservedPath — a deliberately different list
+     │      from database.ReservedRoutePrefixes, which guards route creation
      │
      ▼ InvokeHandler.ServeHTTP
+     │      └─ a /fn/ path resolves its id from the path and never consults
+     │         the route table; auth_mode and the per-function rate limit
+     │         are then applied to the RESOLVED function (not middleware)
      │
      ▼ Registry.Get(fnID)               ← in-memory cache, SQLite fallback
      │

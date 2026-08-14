@@ -130,8 +130,21 @@ Both arrive at your handler as `process.env` (Node) or `os.environ`
 | var | what |
 |---|---|
 | `ORVA_FUNCTION_ID`  | the function's ID (`019df200-7b00-7e00-9c00-aab1cd2e3f40`) |
+| `ORVA_FUNCTION_NAME`| the function's name |
+| `ORVA_MEMORY_MB`    | the function's declared memory limit |
+| `ORVA_TIMEOUT_MS`   | the function's configured timeout — also surfaced as `getRemainingTimeInMillis()` / `get_remaining_time_in_millis()` on the context argument, and as `ctx.timeoutMs` |
+| `ORVA_ENTRYPOINT`   | your handler file (e.g. `handler.js`) — omitted when the function has no explicit entrypoint |
 | `ORVA_EXECUTION_ID` | this invocation's ID — useful for log correlation |
-| `ORVA_ENTRYPOINT`   | your handler file (e.g. `handler.js`) |
+
+The first five are **spawn-scoped**: a warm worker's environment is fixed when
+it is created, so they cannot vary per request. `ORVA_EXECUTION_ID`,
+`ORVA_TRACE_ID` and `ORVA_SPAN_ID` are genuinely per-request and are refreshed
+by the adapter from the `x-orva-*` request headers on every invocation.
+
+Because the first five are baked in at spawn, changing `timeout_ms`,
+`memory_mb`, `cpus` or `env_vars` drains the idle workers so the next spawn
+picks up the new value. Changing `entrypoint` does **not** — redeploy to
+pick that up.
 
 ## Filesystem inside the sandbox
 
