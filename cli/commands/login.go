@@ -37,10 +37,12 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	if test {
 		infof(cmd, "Testing credentials against %s ...", endpoint)
 		probe := cli.NewClient(endpoint, apiKey)
-		// Probe an authenticated endpoint. /api/v1/system/health is exempt
-		// from the auth middleware, so it only ever proved reachability — a
-		// typo'd or revoked key sailed through and was written to disk.
-		resp, err := probe.Get("/api/v1/auth/me")
+		// Probe must sit behind authMiddleware AND be satisfiable by an API
+		// key. Two prefixes bypass the middleware entirely — /api/v1/system/health
+		// and all of /api/v1/auth/ — so neither can verify a key; /api/v1/auth/me
+		// additionally demands a session cookie the CLI never has. /api/v1/runtimes
+		// is a cheap read-gated GET behind the middleware.
+		resp, err := probe.Get("/api/v1/runtimes")
 		if err != nil {
 			return fmt.Errorf("could not reach %s: %w", endpoint, err)
 		}
@@ -52,6 +54,10 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			// Authenticated, but this key has no "read" permission. The
 			// credential itself is genuine, so saving it is correct.
 			infof(cmd, "Key accepted (limited permissions: no read access)")
+		case resp.StatusCode == http.StatusNotFound:
+			// Server predates /api/v1/runtimes. Don't refuse a good config
+			// just because the CLI is newer than the server.
+			infof(cmd, "Key saved (server too old to verify: /api/v1/runtimes not found)")
 		case resp.StatusCode >= 400:
 			return fmt.Errorf("credential check failed: %s", resp.Status)
 		}
