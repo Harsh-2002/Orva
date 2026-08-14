@@ -440,18 +440,19 @@ func (r *Router) setupRoutes() {
 	// REST callers). The handler owns its own auth gate; /mcp does not
 	// start with /api/ so it naturally bypasses middleware_auth.go.
 	mcpDeps := orvampc.Deps{
-		DB:         r.db,
-		Registry:   r.registry,
-		Builder:    r.builder,
-		BuildQueue: r.buildQueue,
-		PoolMgr:    r.poolMgr,
-		Secrets:    r.secrets,
-		Proxy:      r.proxy,
-		Firewall:   r.firewall,
-		Metrics:    r.metrics,
-		EventHub:   r.eventHub,
-		DataDir:    r.cfg.Data.Dir,
-		Version:    version.Version,
+		DB:             r.db,
+		Registry:       r.registry,
+		Builder:        r.builder,
+		BuildQueue:     r.buildQueue,
+		PoolMgr:        r.poolMgr,
+		Secrets:        r.secrets,
+		Proxy:          r.proxy,
+		Firewall:       r.firewall,
+		Metrics:        r.metrics,
+		EventHub:       r.eventHub,
+		DataDir:        r.cfg.Data.Dir,
+		Version:        version.Version,
+		AllowedOrigins: r.cfg.Security.CORSOrigins,
 	}
 	mcpHandler := orvampc.NewHandler(mcpDeps)
 	r.mux.Handle("/mcp", mcpHandler)

@@ -17,6 +17,7 @@ package mcp
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -58,6 +59,10 @@ type Deps struct {
 	// own base URL in context so cached MCP servers never capture one tenant's
 	// host and reuse it for another.
 	BaseURL string
+
+	// AllowedOrigins is ORVA_CORS_ORIGINS. Empty, or ["*"], means any origin —
+	// the default. Narrowing it also narrows /mcp.
+	AllowedOrigins []string
 }
 
 // operatorServerCache holds one immutable server per permission surface. Orva
@@ -239,12 +244,24 @@ func NewHandler(deps Deps) http.Handler {
 		Stateless: true,
 	})
 
+	// Compiled once, outside the handler. Mirrors middleware.go's corsMiddleware
+	// so /mcp and the REST API agree on what an allowed origin is;
+	// config.go already trims each element.
+	allowAnyOrigin := len(deps.AllowedOrigins) == 0 || deps.AllowedOrigins[0] == "*"
+	allowedOrigins := make(map[string]bool, len(deps.AllowedOrigins))
+	for _, o := range deps.AllowedOrigins {
+		allowedOrigins[o] = true
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Origin validation — spec mandates this for the Streamable
-		// HTTP transport. Our existing CORS middleware also adds the
-		// Access-Control-* headers; here we just refuse browsers
-		// pointing at us from the wrong origin if Origin is set.
-		if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
+		// Origin validation — the spec mandates it for the Streamable HTTP
+		// transport. A request with NO Origin is always allowed: that is every
+		// non-browser MCP client, which is nearly all of them. Deliberately not
+		// compared against r.Host — under DNS rebinding the attacker controls
+		// both. The net effect is 401 -> 403 for a hostile browser origin,
+		// since /mcp has no ambient credential to steal in the first place.
+		if origin := r.Header.Get("Origin"); origin != "" && !allowAnyOrigin && !allowedOrigins[origin] {
+			slog.Warn("mcp: origin rejected", "origin", origin, "allowed", deps.AllowedOrigins)
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
 		}
@@ -391,12 +408,6 @@ func PRMHandler(w http.ResponseWriter, r *http.Request) {
   "resource_documentation": "https://github.com/Harsh-2002/Orva"
 }`))
 }
-
-// originAllowed mirrors the simple permissive policy of our CORS
-// middleware. We let any non-browser origin through (typical for
-// agents) and any same-origin browser request. Tighten later if
-// hosted Orva needs CSRF-style protection on the MCP path.
-func originAllowed(_ string) bool { return true }
 
 // activityMiddleware emits an activity_log row for every MCP method
 // call (primarily tools/call). It runs INSIDE the JSON-RPC dispatcher,
