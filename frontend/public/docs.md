@@ -128,7 +128,7 @@ print(r.json())
 > the `set_route` MCP tool, the `orva routes set` CLI, OR the
 > dashboard's function settings → "Custom routes" section (it
 > collision-checks against other functions before saving).
-> Reserved prefixes: `/api/` `/fn/` `/mcp/` `/web/` `/_orva/`.
+> Reserved prefixes: `/api/` `/auth/` `/fn/` `/mcp/` `/web/` `/webhook/` `/_orva/`.
 
 ---
 
@@ -1284,7 +1284,7 @@ Pattern:
 <custom_routes>
 Default URL: /fn/<id> (the function id is a UUIDv7). To attach a friendly path (/api/payments, /webhooks/stripe, /v1/users/{id}), the operator configures a route via the dashboard or:
   POST /api/v1/routes   { "path": "/api/payments", "function_id": "<uuid>" }
-Path params with {name} are passed in event.path_params. Reserved prefixes (do NOT suggest these for custom routes): /api/, /fn/, /mcp/, /web/, /_orva/.
+Path params with {name} are passed in event.path_params. Reserved prefixes (do NOT suggest these for custom routes): /api/, /auth/, /fn/, /mcp/, /web/, /webhook/, /_orva/.
 </custom_routes>
 
 <production_patterns>

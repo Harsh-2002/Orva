@@ -305,7 +305,9 @@ List custom routes.
 ```
 
 `methods` accepts `*` for all methods or comma-separated (`GET,POST`).
-Reserved prefixes (`/api/`, `/auth/`, `/web/`, `/_orva/`) are rejected.
+Reserved prefixes (`/api/`, `/auth/`, `/web/`, `/_orva/`, `/fn/`, `/mcp/`,
+`/webhook/`) are rejected — Orva serves those itself, so a route under one
+could only shadow the platform or never fire.
 
 ### `DELETE /api/v1/routes?path=/webhooks/stripe`
 Remove a route.

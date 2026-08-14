@@ -1,12 +1,43 @@
 package database
 
-import "time"
+import (
+	"errors"
+	"strings"
+	"time"
+)
 
 type Route struct {
 	Path       string    `json:"path"`
 	FunctionID string    `json:"function_id"`
 	Methods    string    `json:"methods"` // "*" or comma-separated "GET,POST"
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+// ReservedRoutePrefixes are the path prefixes Orva serves itself. A custom
+// route may not live under any of them: the mux dispatches these before the
+// custom-route catch-all ever runs, so such a route could only shadow the
+// platform or sit dead in the table. Kept here so the REST handler and the
+// MCP tool validate against one list instead of two that drift.
+var ReservedRoutePrefixes = []string{
+	"/api/", "/auth/", "/web/", "/_orva/", "/fn/", "/mcp/", "/webhook/",
+}
+
+// ValidateRoutePath rejects custom-route paths that are malformed or that
+// collide with a prefix Orva serves itself.
+func ValidateRoutePath(path string) error {
+	if !strings.HasPrefix(path, "/") {
+		return errors.New("path must start with /")
+	}
+	for _, p := range ReservedRoutePrefixes {
+		if strings.HasPrefix(path, p) {
+			return errors.New("path conflicts with reserved prefix " + p)
+		}
+	}
+	// Prefix routes end in "/*" (e.g. "/shortener/*" matches any sub-path).
+	if strings.Contains(path, "*") && !strings.HasSuffix(path, "/*") {
+		return errors.New("wildcard must be the final segment ('/prefix/*')")
+	}
+	return nil
 }
 
 func (db *Database) UpsertRoute(path, functionID, methods string) error {

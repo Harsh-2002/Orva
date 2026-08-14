@@ -46,23 +46,10 @@ func (h *RouteHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	req.Path = strings.TrimSpace(req.Path)
 	req.FunctionID = strings.TrimSpace(req.FunctionID)
 
-	if !strings.HasPrefix(req.Path, "/") {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "path must start with /", reqID)
-		return
-	}
-	// Reserve internal Orva namespaces so users can't hijack the control plane.
-	for _, reserved := range []string{"/api/", "/auth/", "/web/", "/_orva/"} {
-		if strings.HasPrefix(req.Path, reserved) {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"path conflicts with reserved prefix "+reserved, reqID)
-			return
-		}
-	}
-	// Prefix routes end in "/*" (e.g. "/shortener/*" matches any sub-path).
-	// Validate that the `/*` sits at the end and nowhere else.
-	if strings.Contains(req.Path, "*") && !strings.HasSuffix(req.Path, "/*") {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION",
-			"wildcard must be the final segment ('/prefix/*')", reqID)
+	// Reserves internal Orva namespaces so users can't hijack the control
+	// plane, and validates the wildcard placement.
+	if err := database.ValidateRoutePath(req.Path); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
 	}
 	if req.FunctionID == "" {

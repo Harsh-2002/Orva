@@ -7,6 +7,8 @@ import (
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
 type RouteView struct {
@@ -35,8 +37,6 @@ type DeleteRouteInput struct {
 	Path    string `json:"path"`
 	Confirm bool   `json:"confirm"`
 }
-
-var reservedPrefixes = []string{"/api/", "/auth/", "/web/", "/_orva/"}
 
 func registerRouteTools(rc *regCtx) {
 	deps := rc.deps
@@ -68,21 +68,13 @@ func registerRouteTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "set_route",
 			Title:       "Set Route",
-			Description: "Create or update a custom route. Use exact paths (/webhooks/stripe) for fixed URLs, or prefix paths (/shortener/*) when the function should see sub-paths. Reserved prefixes (/api/, /auth/, /web/, /_orva/) are rejected.",
+			Description: "Create or update a custom route. Use exact paths (/webhooks/stripe) for fixed URLs, or prefix paths (/shortener/*) when the function should see sub-paths. Reserved prefixes (/api/, /auth/, /web/, /_orva/, /fn/, /mcp/, /webhook/) are rejected.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in SetRouteInput) (*mcpsdk.CallToolResult, RouteOpOutput, error) {
 			path := strings.TrimSpace(in.Path)
-			if !strings.HasPrefix(path, "/") {
-				return nil, RouteOpOutput{}, errors.New("path must start with /")
-			}
-			for _, p := range reservedPrefixes {
-				if strings.HasPrefix(path, p) {
-					return nil, RouteOpOutput{}, errors.New("path conflicts with reserved prefix " + p)
-				}
-			}
-			if strings.Contains(path, "*") && !strings.HasSuffix(path, "/*") {
-				return nil, RouteOpOutput{}, errors.New("wildcard must be the final segment ('/prefix/*')")
+			if err := database.ValidateRoutePath(path); err != nil {
+				return nil, RouteOpOutput{}, err
 			}
 			fn, err := resolveFunction(deps, in.FunctionID)
 			if err != nil {

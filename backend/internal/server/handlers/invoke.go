@@ -57,9 +57,14 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// whether the match was exact or a `/prefix/*` match.
 	var stripPrefix string
 
-	// Check custom routes first. MatchRoute tries exact match, then the
-	// longest `/prefix/*` match.
-	if route, matched, err := h.DB.MatchRoute(r.URL.Path); err == nil && route != nil {
+	// A direct /fn/ call never consults the custom-route table. A "/*" route
+	// prefix-matches every path, so letting routes win here would let anyone
+	// who can write a route redirect the whole instance's /fn/ traffic into a
+	// function of their choosing — including requests aimed at functions with
+	// a stricter auth_mode, since auth is checked against the resolved id.
+	if strings.HasPrefix(r.URL.Path, "/fn/") {
+		fnID = extractFnID(r.URL.Path)
+	} else if route, matched, err := h.DB.MatchRoute(r.URL.Path); err == nil && route != nil {
 		if route.Methods != "*" && route.Methods != "" {
 			allowed := false
 			for _, m := range strings.Split(route.Methods, ",") {
@@ -83,11 +88,9 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			stripPrefix = matched // full path → function sees "/"
 		}
-	} else {
-		// Fall back to /fn/{id} extraction.
-		fnID = extractFnID(r.URL.Path)
 	}
 
+	// Neither a /fn/ path nor a registered custom route.
 	if fnID == "" {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "no function for this path", reqID)
 		return
