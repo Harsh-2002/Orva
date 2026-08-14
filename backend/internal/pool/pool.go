@@ -883,6 +883,15 @@ func buildEnv(fn *database.Function) map[string]string {
 	// injected it before, so that field was permanently the empty string.
 	env["ORVA_FUNCTION_NAME"] = fn.Name
 	env["ORVA_MEMORY_MB"] = fmt.Sprintf("%d", fn.MemoryMB)
+	// Backs getRemainingTimeInMillis() / ctx.timeoutMs in both adapters.
+	// This is a per-function property, so it belongs on the worker at spawn;
+	// the proxy cannot inject it per request because warm workers outlive the
+	// request that created them. Mirrors the <=0 fallback in InvokeHandler.
+	timeoutMS := fn.TimeoutMS
+	if timeoutMS <= 0 {
+		timeoutMS = 30000
+	}
+	env["ORVA_TIMEOUT_MS"] = fmt.Sprintf("%d", timeoutMS)
 	// Tell the Node / Python adapter which file to load. The builder
 	// rewrites this during a TypeScript build to "<outDir>/<stem>.js"
 	// (e.g. "dist/handler.js") so the worker requires the compiled
