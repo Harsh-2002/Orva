@@ -343,18 +343,8 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		}
 	}
 
-	// Build env: function env_vars + decrypted secrets (secrets win).
-	env := map[string]string{}
-	for k, v := range fn.EnvVars {
-		env[k] = v
-	}
-	if deps.Secrets != nil {
-		if secretMap, err := deps.Secrets.GetForFunction(fn.ID); err == nil {
-			for k, v := range secretMap {
-				env[k] = v
-			}
-		}
-	}
+	// No env is built here: pool.buildEnv merges env_vars + decrypted secrets
+	// at spawn, which is the only point a warm worker's environment can be set.
 
 	timeoutMS := in.TimeoutMS
 	if timeoutMS <= 0 {
@@ -462,8 +452,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	result, ferr := deps.Proxy.Forward(
 		rec, reqWithCtx, codeDir, lang,
 		fn.ID, execID, timeoutMS,
-		int(fn.MemoryMB), fn.CPUs,
-		env, seccompPolicy,
+		fn.CPUs, seccompPolicy,
 		"", true, start,
 	)
 	duration := time.Since(start)

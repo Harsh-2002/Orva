@@ -28,6 +28,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/proxy"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
@@ -169,7 +170,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	// code (e.g. a GitHub handler that wants X-GitHub-Event) can branch
 	// on them, plus stamp our own x-orva-* tags so a function can tell
 	// it was triggered by an inbound webhook vs a regular HTTP call.
-	headers := flattenHeaders(r.Header)
+	headers := proxy.SanitizeForwardedHeaders(r.Header)
 	headers["x-orva-trigger"] = "inbound_webhook"
 	headers["x-orva-inbound-webhook-id"] = hook.ID
 	headers["x-orva-execution-id"] = execID
@@ -283,17 +284,6 @@ func (h *InboundTriggerHandler) publish(execID string, fn *database.Function, st
 		"finished_at":   now.Format(time.RFC3339Nano),
 		"trigger":       "inbound_webhook",
 	})
-}
-
-// flattenHeaders converts http.Header (multimap) into the simple map the
-// adapter contract expects. Multi-value headers are joined with ", " —
-// matches RFC 9110 §5.2.
-func flattenHeaders(in http.Header) map[string]string {
-	out := make(map[string]string, len(in))
-	for k, vs := range in {
-		out[strings.ToLower(k)] = strings.Join(vs, ", ")
-	}
-	return out
 }
 
 // verifyInboundSignature dispatches to the correct verifier per the

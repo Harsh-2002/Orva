@@ -186,26 +186,15 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	seccompPolicy := sandbox.BuildSeccompPolicy(h.DefaultSeccomp,
 		sandbox.SeccompAllowForNetworkMode(fn.NetworkMode), nil)
 
-	// Build env: function's env_vars plus decrypted secrets. Secrets win on
-	// key collision (so an operator can override a public env var).
-	env := map[string]string{}
-	for k, v := range fn.EnvVars {
-		env[k] = v
-	}
-	if h.Secrets != nil {
-		if secretMap, err := h.Secrets.GetForFunction(fn.ID); err == nil {
-			for k, v := range secretMap {
-				env[k] = v
-			}
-		}
-	}
+	// No env is built here: a warm worker's environment is fixed at spawn, so
+	// pool.buildEnv merges env_vars + decrypted secrets there. Decrypting them
+	// per request only to discard them was pure cost on the hot path.
 
 	// Forward request through nsjail sandbox.
 	result, err := h.Proxy.Forward(
 		w, r, codeDir, lang,
 		fnID, execID, timeoutMS,
-		int(fn.MemoryMB), fn.CPUs,
-		env,
+		fn.CPUs,
 		seccompPolicy,
 		stripPrefix,
 		true, start,

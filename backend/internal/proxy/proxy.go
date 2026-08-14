@@ -41,6 +41,72 @@ const redactedValue = "[REDACTED]"
 // sessionCookieName is Orva's dashboard session cookie (handlers/auth.go).
 const sessionCookieName = "session_token"
 
+// SanitizeForwardedHeaders flattens an inbound http.Header into the map the
+// adapter contract expects, with Orva's own credentials removed. EVERY path
+// that hands an inbound HTTP request to sandboxed code must go through this:
+// /fn/ and custom routes via Forward, inbound webhooks via the webhook
+// trigger handler. A second, hand-rolled flattener is how the webhook path
+// came to leak the operator's session cookie into user code.
+//
+// This set is deliberately NOT redactHeaders above. That one governs what
+// replay capture refuses to persist; this one governs what enters the
+// sandbox, and the two differ on purpose — a third-party Authorization
+// belongs to the function, but must never be persisted in a captured
+// request. A future credential header belongs in both.
+func SanitizeForwardedHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		switch {
+		case strings.EqualFold(k, "X-Orva-API-Key"),
+			strings.EqualFold(k, "X-Orva-Internal-Token"),
+			strings.EqualFold(k, "Proxy-Authorization"):
+			// Orva-issued credentials. Never user data, never forwarded.
+			continue
+
+		case strings.EqualFold(k, "Cookie"):
+			// Strip per value, never on a pre-joined string: stripSessionCookie
+			// splits on ";", so joining "mine=1" and "session_token=x" with
+			// ", " first yields a single crumb named "mine" and the session
+			// cookie survives the strip.
+			var kept []string
+			for _, v := range vs {
+				if c := stripSessionCookie(v); c != "" {
+					kept = append(kept, c)
+				}
+			}
+			if len(kept) > 0 {
+				out["cookie"] = strings.Join(kept, "; ")
+			}
+
+		case strings.EqualFold(k, "Authorization"):
+			// A third-party bearer belongs to the function — handlers are told
+			// to verify JWTs themselves. An Orva-issued one does not: every
+			// Orva credential is "orva_"-prefixed, and platform_key invoke
+			// accepts this header, so forwarding it would hand a management
+			// key to the sandbox it just authorized.
+			if v := strings.Join(vs, ", "); !isOrvaCredential(v) {
+				out["authorization"] = v
+			}
+
+		default:
+			// RFC 9110 §5.2: repeated field lines are equivalent to one
+			// comma-joined value.
+			out[strings.ToLower(k)] = strings.Join(vs, ", ")
+		}
+	}
+	return out
+}
+
+// isOrvaCredential reports whether an Authorization value carries an
+// Orva-issued credential, bare or as a bearer token.
+func isOrvaCredential(v string) bool {
+	v = strings.TrimSpace(v)
+	if f := strings.Fields(v); len(f) == 2 && strings.EqualFold(f[0], "Bearer") {
+		return strings.HasPrefix(f[1], "orva_")
+	}
+	return strings.HasPrefix(v, "orva_")
+}
+
 // stripSessionCookie removes Orva's session cookie from a Cookie header value
 // while preserving every other cookie, so a function that sets its own cookies
 // still receives them.
@@ -204,9 +270,7 @@ func (p *Proxy) Forward(
 	language sandbox.Language,
 	fnID, execID string,
 	timeoutMS int64,
-	memoryMB int,
 	cpus float64,
-	env map[string]string,
 	seccompPolicy string,
 	stripPrefix string, // strip this from r.URL.Path before passing to the function
 	coldStart bool, // ignored; populated from pool Acquire result
@@ -253,26 +317,7 @@ func (p *Proxy) Forward(
 		path = path + "?" + r.URL.RawQuery
 	}
 
-	headers := make(map[string]string, len(r.Header))
-	for k, v := range r.Header {
-		// Orva's own credentials must never reach user code. The API key is
-		// dropped outright. The Cookie header is kept minus session_token:
-		// that cookie is Path="/" with full control-plane authority and is
-		// accepted as invoke auth (handlers/invoke_auth.go), and the
-		// dashboard's own invoke client sends it with credentials against
-		// /fn/ — so forwarding it verbatim hands operator authority to the
-		// sandbox. Any other cookie belongs to the function.
-		switch {
-		case strings.EqualFold(k, "X-Orva-API-Key"):
-			continue
-		case strings.EqualFold(k, "Cookie"):
-			if c := stripSessionCookie(v[0]); c != "" {
-				headers["cookie"] = c
-			}
-		default:
-			headers[strings.ToLower(k)] = v[0]
-		}
-	}
+	headers := SanitizeForwardedHeaders(r.Header)
 	headers["x-orva-function-id"] = fnID
 	headers["x-orva-execution-id"] = execID
 	headers["x-orva-timeout-ms"] = strconv.FormatInt(timeoutMS, 10)
@@ -325,14 +370,6 @@ func (p *Proxy) Forward(
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-
-	// Per-request values cannot travel as env vars: a warm worker's
-	// environment is fixed when it is spawned and it outlives this request.
-	// Execution id, trace id and span id ride the x-orva-* request headers
-	// above, which both adapters read; the per-function values
-	// (ORVA_TIMEOUT_MS, ORVA_MEMORY_MB) are set in pool.buildEnv at spawn.
-	_ = env
-	_ = memoryMB
 
 	if p.Pool == nil {
 		// Tests and tooling without a pool wired up: fail fast with a clear
