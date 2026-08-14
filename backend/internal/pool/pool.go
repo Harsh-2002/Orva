@@ -717,22 +717,50 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	}
 	cpuUnits := workerCPUUnits(fn.CPUs)
 
-	// Allocate idle-worker storage from effective host capacity. max_warm is
-	// still a hard operator ceiling, but never directly controls allocation.
-	channelCap := maxWarm
+	// The idle channel is storage, not a budget. Its capacity is frozen for
+	// the life of the pool, so sizing it from DECLARED memory pinned the pool
+	// below the controller's dynamicMax — which is recomputed every tick from
+	// OBSERVED p95 and climbs back toward max_warm once real RSS proves lower.
+	// startSpawn gates on dynamicMax, so it kept admitting workers the channel
+	// could not hold and killing them on arrival, indefinitely.
+	//
+	// Invariant relied on by startSpawn and the release path:
+	//     cap(p.idle) >= p.max >= dynamicMax
+	//
+	// Memory safety never rested on this allocation and does not now:
+	// hostMem.reserve() is a fail-closed, live, global gate on every spawn
+	// path, backed by real MemAvailable rather than a boot-time estimate.
+	if maxWarm > MaxWarmLimit {
+		slog.Warn("max_warm clamped to the idle-channel ceiling",
+			"function", fn.ID, "requested", maxWarm, "clamped", MaxWarmLimit)
+		maxWarm = MaxWarmLimit
+	}
+	if maxWarm < 1 {
+		maxWarm = 1
+	}
+	if minWarm > maxWarm {
+		minWarm = maxWarm
+	}
+
+	// Seed the controller's published ceiling with the conservative
+	// host-derived estimate: PrewarmAll and effective_max in
+	// /api/v1/system/pool read dynamicMax before the scaler's first tick and
+	// must not claim capacity the host cannot back. Overwritten within one
+	// tick from observed p95.
+	initialMax := maxWarm
 	if m.hostMem != nil {
-		if cpuCap := int(int64(m.hostMem.effectiveCPUWorkers()) * 1000 / cpuUnits); cpuCap < channelCap {
-			channelCap = cpuCap
+		if cpuCap := int(int64(m.hostMem.effectiveCPUWorkers()) * 1000 / cpuUnits); cpuCap < initialMax {
+			initialMax = cpuCap
 		}
 		if memoryBytes > 0 {
 			total, _, _ := m.hostMem.stats()
-			if memCap := int(float64(total)*0.8) / int(memoryBytes); memCap < channelCap {
-				channelCap = memCap
+			if memCap := int(float64(total)*0.8) / int(memoryBytes); memCap < initialMax {
+				initialMax = memCap
 			}
 		}
 	}
-	if channelCap < 1 {
-		channelCap = 1
+	if initialMax < 1 {
+		initialMax = 1
 	}
 
 	// Per-function concurrency cap: if set, gate every Acquire on a
@@ -756,7 +784,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 		cpuUnits:    cpuUnits,
 		scaleToZero: scaleToZero,
 		hostMem:     m.hostMem,
-		idle:        make(chan *sandbox.Worker, channelCap),
+		idle:        make(chan *sandbox.Worker, maxWarm),
 		spawnSlots:  make(chan struct{}, maxConcurrentSpawnsPerPool),
 		retired:     make(chan struct{}),
 		concSem:     concSem,
@@ -834,7 +862,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			return w, err
 		},
 	}
-	p.dynamicMax.Store(int64(channelCap))
+	p.dynamicMax.Store(int64(initialMax))
 	if m.scaler != nil {
 		p.reclaimFn = func() bool { return m.scaler.reclaimBorrowedIdle(p) }
 		p.requestSpawn = m.scaler.nudge

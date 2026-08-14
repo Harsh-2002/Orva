@@ -17,6 +17,14 @@ const (
 	scaleDownStep              = 0.20
 	scaleDownGrace             = 30 * time.Second
 	maxConcurrentSpawnsPerPool = 4
+
+	// MaxWarmLimit bounds the per-pool idle-channel allocation. max_warm is
+	// operator-supplied and the channel is now sized from it directly, so an
+	// absurd value would allocate an absurd channel. It clamps p.max too, or
+	// cap(p.idle) >= p.max breaks and the spawn/kill churn returns. The REST
+	// and MCP pool-config writers reject anything above it so operators get a
+	// 400 rather than a silent clamp.
+	MaxWarmLimit = 1024
 )
 
 // scaler is the global admission scheduler. It evaluates pools in a rotating
@@ -246,15 +254,20 @@ func (s *scaler) scaleUp(p *functionPool, want int, reason string) {
 
 func (s *scaler) startSpawn(p *functionPool, reason string) bool {
 	p.mu.Lock()
-	cap := int(p.dynamicMax.Load())
-	if cap > p.max {
-		cap = p.max
+	// Named limit, not cap: the builtin is needed for cap(p.idle) below.
+	limit := int(p.dynamicMax.Load())
+	if limit > p.max {
+		limit = p.max
 	}
-	if cap < 0 {
-		cap = 0
+	if limit < 0 {
+		limit = 0
 	}
 	total := int(p.busy.Load()+p.spawning.Load()) + len(p.idle)
-	if p.closing.Load() || total >= cap {
+	// A spawned worker's only destination is p.idle (park-or-kill below), so
+	// never start one the channel cannot hold. Implied by total >= limit while
+	// cap(p.idle) >= p.max holds; kept as a structural backstop so a future
+	// drift between the two cannot silently resume spawn/kill churn.
+	if p.closing.Load() || total >= limit || len(p.idle) >= cap(p.idle) {
 		p.mu.Unlock()
 		return false
 	}

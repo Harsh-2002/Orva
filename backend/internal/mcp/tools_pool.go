@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -111,6 +112,10 @@ func registerPoolTools(rc *regCtx) {
 			}
 			if cfg.MaxWarm < 1 || cfg.MinWarm > cfg.MaxWarm || cfg.IdleTTLS < 0 {
 				return nil, PoolConfigView{}, fmt.Errorf("require min_warm <= max_warm, max_warm >= 1, and idle_ttl_seconds >= 0")
+			}
+			// max_warm sizes the pool's idle channel; reject rather than clamp.
+			if cfg.MaxWarm > pool.MaxWarmLimit {
+				return nil, PoolConfigView{}, fmt.Errorf("max_warm must be <= %d", pool.MaxWarmLimit)
 			}
 			if err := deps.DB.UpsertPoolConfig(cfg); err != nil {
 				return nil, PoolConfigView{}, err

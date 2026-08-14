@@ -423,8 +423,13 @@ func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	// Aggressive prune: don't park excess workers above the autoscaler's
 	// current cap. dynamicMax==0 only at first boot (autoscaler hasn't
 	// computed yet) — fall through to the original cap-only check there.
+	// dyn is a TOTAL-worker ceiling, so compare the same total startSpawn
+	// gates on. Comparing len(idle) alone was masked by cap(idle) being the
+	// smaller number; now that the channel holds max_warm, a shrinking
+	// dynamicMax would otherwise settle the pool above effective_max and
+	// break the idle+busy+spawning <= effective_max invariant.
 	dyn := int(p.dynamicMax.Load())
-	if dyn > 0 && len(p.idle) >= dyn {
+	if dyn > 0 && int(p.busy.Load()+p.spawning.Load())+len(p.idle) >= dyn {
 		p.mu.Unlock()
 		p.killWorker(w)
 		return
