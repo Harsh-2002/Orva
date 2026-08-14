@@ -166,6 +166,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
+          # Without this, setup-go pins to the runner image's stale cached Go.
+          check-latest: true
           cache: false
 
       - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends dash shellcheck
@@ -231,6 +233,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
+          # govulncheck scans the stdlib, so a stale toolchain fails on CVEs the code cannot fix.
+          check-latest: true
           # No build cache for the same reason.
           cache: false
 
@@ -514,6 +518,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
+          check-latest: true
           cache: false
       - name: go vet (cli + internal)
         run: go vet ./cli/... ./internal/...
@@ -532,6 +537,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
+          # CLI release binaries are built here; keep them on the same patched toolchain.
+          check-latest: true
           cache: false
       - name: build matrix
         run: bash test/cli/build-matrix.sh
