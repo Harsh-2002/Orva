@@ -6,8 +6,10 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +22,9 @@ import (
 // Modes:
 //
 //	none          — public; always allowed
-//	platform_key  — requires Orva session cookie OR X-Orva-API-Key header
+//	platform_key  — requires an Orva session cookie, OR an API key (via
+//	                X-Orva-API-Key or Authorization: Bearer) that carries the
+//	                "invoke" permission
 //	signed        — requires X-Orva-Signature: sha256=<hex(hmac(secret, ts.body))>
 //	                and X-Orva-Timestamp: <unix-seconds, ±5min skew tolerance>
 //
@@ -38,21 +42,28 @@ func (h *InvokeHandler) authorizeInvoke(w http.ResponseWriter, r *http.Request, 
 		return ""
 
 	case database.AuthModePlatformKey:
-		// Accept either path the management API accepts: session cookie OR
-		// X-Orva-API-Key header. We do a *minimal* validation here — we just
-		// need to know the credential is real and unexpired. Permissions are
-		// not enforced at this layer because the caller already chose to
-		// gate this function on platform-only access; a valid management key
-		// is, by definition, allowed to invoke.
+		// Session cookie first, and unconditionally: this is the dashboard's
+		// own path (its invoke client sends credentials), so keeping it ahead
+		// of the key checks is what keeps the UI's blast radius zero.
 		if cookie, err := r.Cookie("session_token"); err == nil {
 			if _, err := h.DB.GetSessionUser(cookie.Value); err == nil {
 				return ""
 			}
 		}
+		// X-Orva-API-Key, or the Authorization: Bearer form the management
+		// API also accepts. Bearer is only safe to accept here because
+		// proxy.SanitizeForwardedHeaders withholds orva_-prefixed
+		// Authorization values from the sandbox — otherwise authorizing a
+		// function would hand it the key that did the authorizing.
 		apiKey := r.Header.Get("X-Orva-API-Key")
 		if apiKey == "" {
+			if b := r.Header.Get("Authorization"); len(b) > 7 && strings.EqualFold(b[:7], "bearer ") {
+				apiKey = strings.TrimSpace(b[7:])
+			}
+		}
+		if apiKey == "" {
 			writeInvokeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
-				"this function requires an Orva session cookie or X-Orva-API-Key header")
+				"this function requires an Orva session cookie, X-Orva-API-Key header, or Authorization: Bearer <key>")
 			return "UNAUTHORIZED"
 		}
 		hash := sha256.Sum256([]byte(apiKey))
@@ -64,6 +75,20 @@ func (h *InvokeHandler) authorizeInvoke(w http.ResponseWriter, r *http.Request, 
 		if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
 			writeInvokeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED", "API key expired")
 			return "UNAUTHORIZED"
+		}
+		// /fn/ skips authMiddleware entirely, and requiredPermission never
+		// returns "invoke" — so this is the only place the invoke permission
+		// can be enforced for HTTP. Without it a key scoped to ["read"] can
+		// POST here and cause arbitrary side effects, while the same key is
+		// correctly denied invoke_function over MCP and OAuth. Fails closed:
+		// PermissionsList degrades to an empty slice on malformed JSON.
+		if !slices.Contains(key.PermissionsList(), "invoke") {
+			slog.Warn("invoke denied: api key lacks the invoke permission",
+				"function", fn.ID, "key_id", key.ID, "key_name", key.Name,
+				"permissions", key.PermissionsList())
+			writeInvokeAuthError(w, http.StatusForbidden, "FORBIDDEN",
+				"API key lacks the invoke permission required to call this function")
+			return "FORBIDDEN"
 		}
 		return ""
 
