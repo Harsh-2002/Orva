@@ -1027,7 +1027,10 @@ run_cli() {
     else
         rc_asset="orva-cli-linux-${ARCH}"
     fi
-    if fetch "$base/checksums.txt" "$tmp/checksums.txt"; then verify "$tmp/orva" "$rc_asset"; fi
+    # Fail closed, exactly like the bare-metal path: a missing or flaked
+    # checksums.txt must abort, never install an unverified binary.
+    fetch "$base/checksums.txt" "$tmp/checksums.txt" || die "failed to download checksums.txt"
+    verify "$tmp/orva" "$rc_asset"
     install -d -m 0755 "$(dirname "$CLI_INSTALL_PATH")"
     install -m 0755 "$tmp/orva" "$CLI_INSTALL_PATH"
     log "CLI installed: $("$CLI_INSTALL_PATH" --version 2>/dev/null || echo orva)"
