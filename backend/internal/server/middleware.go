@@ -353,14 +353,29 @@ func bodySizeMiddleware(maxBytes int64, next http.Handler) http.Handler {
 }
 
 // corsMiddleware sets CORS headers and handles preflight OPTIONS requests.
+//
+// Access-Control-Allow-Origin takes a single origin or "*" — never a list. So
+// when the operator configures an allow-list we echo back the request's own
+// Origin if it is a member, and set Vary: Origin so caches keep the responses
+// apart. Joining the list into one header (the previous behavior) produced a
+// value no browser accepts, which silently broke CORS for every configured
+// origin as soon as there was more than one.
 func corsMiddleware(origins []string, next http.Handler) http.Handler {
-	allowOrigin := "*"
-	if len(origins) > 0 && origins[0] != "*" {
-		allowOrigin = strings.Join(origins, ", ")
+	allowAny := len(origins) == 0 || origins[0] == "*"
+	allowed := make(map[string]bool, len(origins))
+	for _, o := range origins {
+		allowed[strings.TrimSpace(o)] = true
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+		if allowAny {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else {
+			w.Header().Add("Vary", "Origin")
+			if o := r.Header.Get("Origin"); o != "" && allowed[o] {
+				w.Header().Set("Access-Control-Allow-Origin", o)
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Orva-API-Key")
 		w.Header().Set("Access-Control-Max-Age", "86400")

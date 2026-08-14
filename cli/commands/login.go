@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"net/http"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
@@ -36,15 +37,24 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	if test {
 		infof(cmd, "Testing credentials against %s ...", endpoint)
 		probe := cli.NewClient(endpoint, apiKey)
-		resp, err := probe.Get("/api/v1/system/health")
+		// Probe an authenticated endpoint. /api/v1/system/health is exempt
+		// from the auth middleware, so it only ever proved reachability — a
+		// typo'd or revoked key sailed through and was written to disk.
+		resp, err := probe.Get("/api/v1/auth/me")
 		if err != nil {
 			return fmt.Errorf("could not reach %s: %w", endpoint, err)
 		}
-		if err := checkResponse(resp); err != nil {
-			resp.Body.Close()
-			return fmt.Errorf("credentials rejected by server: %w", err)
-		}
 		resp.Body.Close()
+		switch {
+		case resp.StatusCode == http.StatusUnauthorized:
+			return fmt.Errorf("credentials rejected by %s: invalid or expired API key", endpoint)
+		case resp.StatusCode == http.StatusForbidden:
+			// Authenticated, but this key has no "read" permission. The
+			// credential itself is genuine, so saving it is correct.
+			infof(cmd, "Key accepted (limited permissions: no read access)")
+		case resp.StatusCode >= 400:
+			return fmt.Errorf("credential check failed: %s", resp.Status)
+		}
 	}
 
 	cfg := &cli.CLIConfig{

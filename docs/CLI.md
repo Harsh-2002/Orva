@@ -208,9 +208,11 @@ files and point `ORVA_CONFIG` at them:
 ORVA_CONFIG=~/.orva/staging.yaml orva functions list
 ```
 
-`orva login --test` verifies the credentials against the server's
-`/system/health` before writing them to disk, so a typo fails loudly
-instead of saving a broken config:
+`orva login --test` verifies the credentials against an authenticated
+endpoint (`/api/v1/auth/me`) before writing them to disk, so a typo'd,
+revoked, or expired key fails loudly instead of saving a broken config. A
+valid key that lacks the `read` permission is still accepted — the server
+authenticated it, it just cannot read:
 
 ```bash
 orva login --endpoint https://orva.example.com --api-key orva_… --test
