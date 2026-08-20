@@ -2191,7 +2191,6 @@ it; fix rather than route around where you can.
 | `test/e2e/CLAUDE.md` | the CLI coverage confirms "slim-CLI ↔ full-server parity" | `harness.py` defaults `ORVA_BIN` to the **full server** binary; parity is actually proven by `test/cli/command-tree.sh` |
 | README, `test/e2e/CLAUDE.md` | the `sudo cat /var/lib/orva/.admin-key` key recipe | that file does not exist on a browser-onboarded instance (§2.6) |
 | `docs/CAPACITY.md` | "`secrets-test.sh` ✓ 8/8", "`routes-test.sh` ✓ 7/7", "`onboarding-flow.sh` ✓ 13/13" | today's real counts are 6 and 6 without `hey` and a `sqlite3`-equipped container. The `13/13` is the one that holds — but only on a virgin DB, a precondition CAPACITY.md does not state; on any instance with a user it is 0 (§3.4). Check counts are environment-dependent, so any absolute number in prose is a future lie |
-| `orva init` | writes `orva.yaml` and says "run: `orva serve --config orva.yaml`" | dead. `orva serve` has no `--config` flag and nothing in the repo ever reads that file |
 | the dev instance's stored AI system prompt | "Node 22/24 … Python 3.13/3.14" | two generic runtimes, latest-stable only. DB state, possibly an operator override |
 
 **One entry withdrawn from that table.** An earlier revision listed CONTRACT §7

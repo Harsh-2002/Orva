@@ -1,5 +1,5 @@
 // Orva server binary. Includes the daemon (orva serve), the host-setup
-// command (orva setup), the project init command (orva init), AND every
+// command (orva setup), AND every
 // client-side subcommand from cli/commands — so an operator on the server
 // box can `orva functions list / deploy / invoke / ...` without installing
 // the standalone CLI.
@@ -18,7 +18,11 @@ func main() {
 	// the same identity as /api/v1/system/health.
 	commands.Version = version.Version
 	root := commands.NewRoot()
-	root.AddCommand(newServeCmd(), newSetupCmd(), newInitCmd())
+	// `orva init` was removed: it wrote an orva.yaml that nothing read, then
+	// told the operator to run `orva serve --config orva.yaml`, a flag that
+	// does not exist. docs/CONFIG.md has always documented configuration as
+	// environment variables only.
+	root.AddCommand(newServeCmd(), newSetupCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

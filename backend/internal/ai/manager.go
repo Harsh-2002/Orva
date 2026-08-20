@@ -803,10 +803,16 @@ func (m *Manager) ListProviders() ([]ProviderView, error) {
 // and only used on this request; an empty APIKey on update leaves the stored
 // key untouched.
 type ProviderInput struct {
-	Provider    string `json:"provider"`
-	Label       string `json:"label"`
-	APIKey      string `json:"api_key"`
-	BaseURL     string `json:"base_url"`
+	Provider string `json:"provider"`
+	Label    string `json:"label"`
+	APIKey   string `json:"api_key"`
+	BaseURL  string `json:"base_url"`
+	// ExtraConfig is accepted, encrypted, persisted and round-tripped by the
+	// API, and is read by NOTHING -- llm/account.go builds a provider from
+	// the base URL and key alone. Setting e.g. a Bedrock region here saves
+	// successfully and changes no behaviour. Kept on the wire so existing
+	// stored values are not dropped, but a non-empty value now warns rather
+	// than silently doing nothing.
 	ExtraConfig string `json:"extra_config"`
 	Enabled     *bool  `json:"enabled"`
 }
@@ -820,6 +826,11 @@ func (m *Manager) SaveProvider(in ProviderInput) (ProviderView, error) {
 	baseURL := normalizeBaseURL(in.BaseURL)
 	if provider == "ollama" && baseURL == "" {
 		return ProviderView{}, fmt.Errorf("base_url is required for ollama")
+	}
+	if strings.TrimSpace(in.ExtraConfig) != "" {
+		slog.Warn("ai provider extra_config is stored but not applied; "+
+			"the gateway is configured from base_url and api_key only",
+			"provider", provider)
 	}
 	cfg := &database.AIProviderConfig{
 		Provider:    provider,

@@ -1683,7 +1683,6 @@ orva system health      # smoke test
 | Command | Subcommands | Purpose |
 |---|---|---|
 | `orva login` | — | Save endpoint + API key to ~/.orva/config.yaml |
-| `orva init` | — | Full server build only: write the legacy orva.yaml template (the current server is configured by environment variables) |
 | `orva deploy` | [path] | Package a directory and deploy as a function |
 | `orva invoke` | [name|id] | POST to /fn/<id>/ and print the response |
 | `orva logs` | [name|id] [--follow] | List recent executions; --follow streams live via SSE |
@@ -1743,7 +1742,7 @@ orva kv list resize-image --prefix user:
 
 # Read / write / delete
 orva kv get  resize-image cache:home
-orva kv put  resize-image cache:home '{"hits":42}' --ttl 3600
+orva kv put  resize-image cache:home --value '{"hits":42}' --ttl 3600
 orva kv delete resize-image cache:home
 ```
 
@@ -1751,7 +1750,7 @@ orva kv delete resize-image cache:home
 
 ```bash
 # Secrets — encrypted at rest, injected as env vars at spawn:
-orva secrets set    resize-image S3_BUCKET my-bucket
+orva secrets set    resize-image S3_BUCKET --value my-bucket
 orva secrets list   resize-image
 orva secrets delete resize-image S3_BUCKET
 
@@ -1768,11 +1767,11 @@ orva jobs retry  <job_id>
 orva jobs delete <job_id>
 
 # Outbound webhooks (system events):
-orva webhooks create --url https://hooks.slack.com/... --events deployment.failed,job.failed
+orva webhooks create --name slack-alerts --url https://hooks.slack.com/... --events deployment.failed,job.failed
 orva webhooks test   <webhook_id>
 
 # Inbound webhook triggers (external POST → function):
-orva webhooks inbound create --fn order-handler --signature stripe
+orva webhooks inbound create order-handler --name stripe-orders --format hmac_sha256_hex
 ```
 
 #### System health, metrics, vacuum

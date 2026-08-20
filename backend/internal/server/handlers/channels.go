@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"fmt"
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
@@ -138,6 +139,16 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve expiry: explicit ExpiresAt wins; ExpiresInDays is the UI shortcut.
+	//
+	// Cap the input. time.Duration is int64 NANOSECONDS, so it overflows at
+	// roughly 106,751 days: expires_in_days: 200000 wrapped NEGATIVE and
+	// minted a 201 Created credential whose expires_at was already in the
+	// past, handing back a one-time plaintext that never worked.
+	if req.ExpiresInDays != nil && *req.ExpiresInDays > maxExpiresInDays {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			fmt.Sprintf("expires_in_days must be <= %d", maxExpiresInDays), reqID)
+		return
+	}
 	if req.ExpiresAt == nil && req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
 		t := time.Now().UTC().Add(time.Duration(*req.ExpiresInDays) * 24 * time.Hour)
 		req.ExpiresAt = &t

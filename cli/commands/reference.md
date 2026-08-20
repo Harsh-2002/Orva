@@ -1683,7 +1683,6 @@ orva system health      # smoke test
 | Command | Subcommands | Purpose |
 |---|---|---|
 | `orva login` | — | Save endpoint + API key to ~/.orva/config.yaml |
-| `orva init` | — | Full server build only: write the legacy orva.yaml template (the current server is configured by environment variables) |
 | `orva deploy` | [path] | Package a directory and deploy as a function |
 | `orva invoke` | [name|id] | POST to /fn/<id>/ and print the response |
 | `orva logs` | [name|id] [--follow] | List recent executions; --follow streams live via SSE |

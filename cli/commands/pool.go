@@ -11,19 +11,24 @@ import (
 
 // poolCmd exposes the per-function warm-pool autoscaler config to the
 // terminal. It hits the same /api/v1/pool/config endpoints the dashboard's
-// function settings use. The pool keeps min_warm sandboxes hot, scales up
-// toward max_warm from measured demand, and recycles workers idle longer
-// than idle_ttl.
+// function settings use. The pool keeps min_warm sandboxes hot and scales up
+// toward max_warm from measured demand.
+//
+// Note idle_ttl_seconds is consulted ONLY when scale_to_zero is enabled --
+// it is the grace period before dropping the last worker, not a general
+// idle-recycle timer. The text below used to describe it as the latter,
+// which made a knob that does nothing under the default configuration look
+// like it was doing something.
 var poolCmd = &cobra.Command{
 	Use:   "pool",
 	Short: "View or tune warm-pool autoscaler config",
 	Long: `View or tune the warm-sandbox autoscaler for a function.
 
 The autoscaler keeps min_warm sandboxes hot at all times, scales up toward
-max_warm from measured arrival, queue, service, and cold-start signals,
-recycles workers idle longer than idle_ttl seconds, and — when
-scale_to_zero is on — drops to zero warm workers when fully idle (trading a
-cold start on the next request for zero idle cost).
+max_warm from measured arrival, queue, service, and cold-start signals, and
+— when scale_to_zero is on — drops to zero warm workers once fully idle for
+idle_ttl seconds (trading a cold start on the next request for zero idle
+cost). With scale_to_zero off, which is the default, idle_ttl has no effect.
 
 Pool config is always per-function: pass --fn to target one.`,
 	Example: `  # Show a function's pool config

@@ -257,6 +257,30 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// Refuse an un-editable rule BEFORE either write. The two statements
+		// disagree about what they match -- SetBlocklistRuleEnabled matches
+		// any kind, UpdateBlocklistRuleValue only kind='custom' -- and they
+		// are not in a transaction. So PUT {enabled:false, label:"..."} on a
+		// seeded rule (the 169.254.0.0/16 metadata block, say) disabled it,
+		// THEN returned 400 "not editable": the operator read a rejection
+		// while the metadata block was actually off, and the early return
+		// skipped refreshEnforcement so nothing recompiled either.
+		if editing {
+			kind, err := h.DB.GetBlocklistRuleKind(id)
+			if errors.Is(err, sql.ErrNoRows) {
+				respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
+				return
+			}
+			if err != nil {
+				respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
+				return
+			}
+			if kind != "custom" {
+				respond.Error(w, http.StatusBadRequest, "VALIDATION",
+					"seeded rules cannot be edited; they can only be enabled or disabled", reqID)
+				return
+			}
+		}
 		if req.Enabled != nil {
 			if err := h.DB.SetBlocklistRuleEnabled(id, *req.Enabled); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {

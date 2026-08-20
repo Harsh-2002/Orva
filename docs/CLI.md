@@ -858,7 +858,7 @@ a fully clean slate.
 
 The `orva` you install via `install-cli.sh` / `install-cli.ps1` is the
 **slim CLI build** — it can talk to any remote orvad, but it doesn't
-have `orva serve`, `orva setup`, or `orva init`. Those live in the
+have `orva serve` or `orva setup`. Those live in the
 server binary at `/opt/orva/bin/orva` after a `scripts/install.sh`
 deployment.
 
@@ -876,7 +876,6 @@ perspective; the slim CLI is just smaller.
 | Size | ~20 MB | ~55 MB |
 | `orva serve` | ❌ | ✅ |
 | `orva setup` | ❌ | ✅ |
-| `orva init` | ❌ | ✅ |
 | All other subcommands | ✅ | ✅ |
 
 ---

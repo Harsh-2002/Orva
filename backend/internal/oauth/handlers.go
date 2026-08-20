@@ -29,7 +29,9 @@ const (
 // the DB handle but no HTTP-routing logic — the router wires the six
 // methods (DCR / authorize GET+POST / token / revoke) into the mux.
 type Handler struct {
-	DB            *database.Database
+	DB *database.Database
+	// SecureCookies is unused: this package sets no cookies. Kept only so
+	// the router wiring does not need editing; remove both together.
 	SecureCookies bool // mirrors AuthHandler.SecureCookies; set when behind HTTPS
 }
 
