@@ -23,6 +23,13 @@ ordered by importance:
 6. A function cannot obtain **Orva's own operator credentials** from the
    request that invoked it (see [What reaches user code from the
    request](#what-reaches-user-code-from-the-request))
+7. A caller cannot **forge Orva's own signals to a function** — the
+   `x-orva-*` namespace is server-set, so `webhook.parse().verified` and
+   the function-to-function recursion cap mean what they claim to
+8. A function's **response cannot act as the dashboard** — same-origin
+   output carries a restrictive CSP so a reflected-input function is not a
+   path to the control plane (see [What reaches the browser from your
+   function](#what-reaches-the-browser-from-your-function))
 
 Orva is **not** designed to defend against:
 - A malicious operator running on the same host (they own the keys)
@@ -62,6 +69,7 @@ sandbox: `/fn/{id}`, custom routes, and inbound webhooks.
 | `Proxy-Authorization` | **no** — dropped |
 | `Cookie` | yes, **minus `session_token`**; your own cookies survive |
 | `Authorization` | yes, **unless** it carries an `orva_`-prefixed credential |
+| any `X-Orva-*` header | **no** — the whole namespace is dropped |
 | everything else | yes, including `X-Orva-Timestamp` / `X-Orva-Signature` |
 
 `session_token` is the dashboard session: `Path=/`, full control-plane
@@ -73,6 +81,26 @@ A third-party `Authorization` **is** forwarded — a function doing its own JWT
 verification needs it. Only Orva-issued credentials (every one of which is
 `orva_`-prefixed) are withheld.
 
+The `x-orva-` namespace is the server talking to its own adapter, so an
+inbound one is dropped wholesale and the server sets what it needs afterward.
+Two of those headers are load-bearing and were previously caller-writable:
+
+- **`x-orva-trigger`** is what `orva.webhook.parse(event).verified` is
+  derived from, and this document's own guidance tells handlers to gate on
+  it. A caller who could set it on a direct `/fn/` request passed that check
+  with no HMAC ever computed. It is also what the shipped cron template
+  branches on to decide whether to delete KV rows.
+- **`x-orva-call-depth`** seeds `ORVA_CALL_DEPTH`, which the SDK forwards on
+  nested invokes and the function-to-function endpoint compares against its
+  cap. A negative value made that comparison false forever, so recursion was
+  unbounded — consuming a worker and an instance-wide sandbox-limiter slot at
+  every level.
+
+The whole prefix is dropped rather than a denylist of those two, so a header
+added to the namespace later cannot inherit the problem. The call-depth
+endpoint additionally clamps a negative value, because the cap is the only
+thing bounding that recursion.
+
 > This set is deliberately **not** the same as `redactHeaders` in the same
 > file. That one governs what replay capture refuses to persist — it also
 > covers `Authorization`, because a captured request is stored. This table
@@ -82,6 +110,59 @@ A handler's returned headers **replace** the platform's on non-OPTIONS
 responses, so a function can widen its own `Access-Control-Allow-Origin` past
 `ORVA_CORS_ORIGINS`. That is a boundary fact, not a convenience: the
 platform's CORS setting does not constrain what a function chooses to answer.
+
+Two exceptions. `Content-Security-Policy` and `X-Content-Type-Options` are
+stamped **after** the handler's headers and cannot be overridden (see [What
+reaches the browser from your
+function](#what-reaches-the-browser-from-your-function)). And hop-by-hop and
+framing headers a handler returns — `Content-Length`, `Content-Encoding`,
+`Transfer-Encoding`, `Connection`, `Keep-Alive`, `TE`, `Trailer`, `Upgrade`,
+`Proxy-Authenticate`, `Proxy-Authorization` — are **dropped** rather than
+relayed, because they describe the adapter's transfer, not ours. A handler
+proxying a gzipped upstream used to return the compressed `Content-Length`
+alongside a body the adapter had already decoded, and the response was
+truncated.
+
+## What reaches the browser from your function
+
+Function output is served from the same origin as the dashboard and the API,
+and the dashboard session cookie is `Path=/` with `SameSite=Lax`. `auth_mode`
+defaults to `none`, so a public function that reflects any part of its input
+would otherwise be same-origin XSS: script in that response could drive
+`/api/v1/keys` with the operator's cookie attached.
+
+Every function response therefore carries:
+
+| header | value |
+|---|---|
+| `Content-Security-Policy` | `sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'none'; base-uri 'none'` |
+| `X-Content-Type-Options` | `nosniff` |
+
+**The control is the origin, not the content.** `sandbox` without
+`allow-same-origin` places the document in an *opaque* origin, so script in a
+function's response cannot read the dashboard's origin or issue credentialed
+same-origin requests to `/api/v1/*`. Scripts, forms, popups and downloads are
+all still allowed, because functions legitimately serve interactive pages —
+Orva's own guestbook template posts a form and runs an inline script.
+
+`allow-scripts` **without** `allow-same-origin` is the safe pairing; granting
+both together would let a document remove its own sandbox.
+
+These headers are applied **after** the handler's own, so a function cannot
+opt itself out. What this costs an HTML function is same-origin state:
+`document.cookie`, `localStorage` and `sessionStorage` are unavailable in an
+opaque origin. Keep state server-side (Orva's KV store) rather than in the
+browser.
+
+`frame-ancestors 'none'` also means function output cannot be embedded in an
+iframe elsewhere.
+
+Orva also strips hop-by-hop and framing headers (`content-length`,
+`content-encoding`, `transfer-encoding`, …) from the handler's response,
+because the adapter copies every header off its `fetch` Response. A handler
+proxying an upstream would otherwise return the compressed `content-length`
+alongside a body the adapter had already decoded, and the response would be
+truncated.
 
 ## What's between user code and the host
 

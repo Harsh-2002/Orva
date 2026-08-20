@@ -488,6 +488,14 @@ exports.handler = async (event) => {
 }
 ```
 
+> **What `verified` rests on.** It is derived from the `x-orva-trigger`
+> header, which the server sets on the webhook path after checking the HMAC.
+> Orva strips the entire inbound `x-orva-*` namespace before a request reaches
+> your handler, so a caller hitting `/fn/<id>/` directly cannot set it — the
+> only way `verified` is true is that the signature check passed. The same
+> guarantee is what makes it safe to branch on `x-orva-trigger` to tell a cron
+> or job invocation from an HTTP one.
+
 ### Testing handlers without a server
 
 ```js
@@ -1273,7 +1281,7 @@ Per-function rate limiting (rpm + burst) is configurable on the function record;
 The platform DOES inject CORS headers. Its middleware is the outermost wrapper and runs on every response, including /fn/ and custom routes.
 - OPTIONS never reaches your handler. The platform answers it 204 with a fixed Access-Control-Allow-Methods (GET, POST, PUT, DELETE, OPTIONS) and Access-Control-Allow-Headers (Content-Type, Authorization, X-Request-ID, X-Orva-API-Key). Do NOT write an "if method == OPTIONS" branch — it is dead code.
 - Access-Control-Allow-Origin is always set by the platform: "*" by default, or the caller's Origin plus Vary: Origin when ORVA_CORS_ORIGINS names an explicit allow-list. A request from an origin outside that list gets no Allow-Origin header at all.
-- On non-OPTIONS responses a header your handler returns REPLACES the platform's. That is how you narrow (or widen) Allow-Origin per function.
+- On non-OPTIONS responses a header your handler returns REPLACES the platform's, with two exceptions: Content-Security-Policy and X-Content-Type-Options are stamped afterwards and cannot be overridden (function output runs in an opaque origin so it cannot act as the dashboard), and hop-by-hop/framing headers (Content-Length, Content-Encoding, Transfer-Encoding, Connection, Keep-Alive, TE, Trailer, Upgrade, Proxy-Authenticate, Proxy-Authorization) are dropped rather than relayed. That is how you narrow (or widen) Allow-Origin per function.
 - A browser that needs a custom request header beyond the four above will fail preflight, and no handler change can fix it — the preflight response is the platform's.
 Pattern:
   # No OPTIONS branch: the platform already answered it.
@@ -1303,7 +1311,7 @@ Treat each handler as a tiny service. Apply these by default:
 4. Timeouts on outbound HTTPS. httpx default is no timeout — set timeout=10. node fetch default is also no timeout — pass an AbortSignal.timeout(10_000). 30 s sandbox cap means you get killed mid-request otherwise.
 5. Catch broad, return narrow. try/except around your business logic; map to 400 / 401 / 404 / 502 / 500 with a short message. Don't leak stack traces in production responses (log them, return a request id).
 6. Hot-path safety. Module-level work runs once per cold start and re-runs on warm timeout. Cache JWKS / config / heavy imports at module level. Don't open DB connections at import time if they can fail — lazy-init inside the handler with a simple cached singleton.
-7. JSON everywhere unless asked. Default Content-Type: application/json. Use text/html only when serving a web page.
+7. JSON everywhere unless asked. Default Content-Type: application/json. Use text/html only when serving a web page. HTML pages served from a function run in an OPAQUE origin (Orva sends a CSP sandbox so function output cannot act as the dashboard), so scripts and forms work but document.cookie, localStorage and sessionStorage do not — keep state server-side in the KV store.
 
 Anti-patterns to avoid:
 - Spawning subprocesses (blocked by the sandbox).

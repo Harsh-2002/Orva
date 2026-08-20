@@ -22,15 +22,46 @@ func TestFunctionResponseGuards(t *testing.T) {
 	if csp == "" {
 		t.Fatal("no Content-Security-Policy on function output")
 	}
-	for _, want := range []string{
-		"default-src 'none'", "frame-ancestors 'none'", "base-uri 'none'",
-	} {
+
+	// The control is the opaque origin. allow-same-origin would hand the
+	// document back the dashboard's origin and undo the whole thing --
+	// worse, combined with allow-scripts it lets a page remove its own
+	// sandbox.
+	if !strings.Contains(csp, "sandbox ") {
+		t.Errorf("CSP does not sandbox the document: %s", csp)
+	}
+	if strings.Contains(csp, "allow-same-origin") {
+		t.Errorf("CSP grants allow-same-origin, defeating the isolation: %s", csp)
+	}
+	for _, want := range []string{"frame-ancestors 'none'", "base-uri 'none'"} {
 		if !strings.Contains(csp, want) {
 			t.Errorf("CSP missing %q: %s", want, csp)
 		}
 	}
-	if strings.Contains(csp, "script-src 'unsafe-inline'") {
-		t.Error("CSP permits inline script, which is the whole attack")
+}
+
+// TestFunctionResponseGuardsDoNotBreakInteractivePages — the first version
+// of this policy used default-src 'none' with a bare `sandbox`, which made
+// every HTML function inert: no script, no form submission. Orva ships a
+// guestbook template that does both, so that policy broke a shipped
+// showcase. Isolation must come from the opaque origin, not from refusing
+// to run the page.
+func TestFunctionResponseGuardsDoNotBreakInteractivePages(t *testing.T) {
+	rec := httptest.NewRecorder()
+	applyFunctionResponseGuards(rec)
+	csp := rec.Header().Get("Content-Security-Policy")
+
+	for _, need := range []string{"allow-scripts", "allow-forms"} {
+		if !strings.Contains(csp, need) {
+			t.Errorf("CSP withholds %s, which breaks the shipped guestbook "+
+				"template (inline script + form POST): %s", need, csp)
+		}
+	}
+	if strings.Contains(csp, "default-src 'none'") {
+		t.Errorf("default-src 'none' blocks the page's own resources: %s", csp)
+	}
+	if strings.Contains(csp, "form-action 'none'") {
+		t.Errorf("form-action 'none' blocks the guestbook's form POST: %s", csp)
 	}
 }
 

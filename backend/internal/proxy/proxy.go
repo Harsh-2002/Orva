@@ -703,21 +703,29 @@ func hopByHopResponseHeader(k string) bool {
 // applyFunctionResponseGuards stops function output from acting as the
 // dashboard.
 //
-// Function responses are served from the same origin as /web and /api, and
-// the session cookie is Path=/ with SameSite=Lax. auth_mode defaults to
-// "none", so any public function that reflects part of its input is
-// same-origin XSS: script in that response can drive /api/v1/keys with the
-// operator's cookie attached. A separate host for /fn/ would be the
-// structural fix; these headers are the contained one.
+// Function responses share an origin with /web and /api, the session cookie
+// is Path=/ with SameSite=Lax, and auth_mode defaults to "none" -- so a
+// public function that reflects any part of its input is same-origin XSS:
+// script in that response could drive /api/v1/keys with the operator's
+// cookie attached.
 //
-// Set before the adapter's own headers would be, then unconditionally
-// overwritten here, so a handler cannot opt itself out.
+// The control is the ORIGIN, not the content. `sandbox` without
+// allow-same-origin puts the document in an opaque origin, so its script
+// cannot read or issue credentialed same-origin requests to the control
+// plane. Scripts and forms are explicitly allowed, because functions
+// legitimately serve interactive pages: Orva ships a guestbook template that
+// posts a form and runs an inline character counter, and the first version
+// of this policy -- default-src 'none' with a bare `sandbox` -- made every
+// such page inert.
+//
+// allow-scripts WITHOUT allow-same-origin is the safe pairing. Granting both
+// together would let the document remove its own sandbox.
+//
+// Applied after the adapter's own headers and unconditionally, so a handler
+// cannot opt itself out.
 func applyFunctionResponseGuards(w http.ResponseWriter) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	// No inline script, no script from anywhere, nothing embeddable. Function
-	// output is data and documents, not part of the dashboard application.
 	w.Header().Set("Content-Security-Policy",
-		"default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; "+
-			"font-src data:; form-action 'none'; frame-ancestors 'none'; "+
-			"base-uri 'none'; sandbox allow-downloads")
+		"sandbox allow-scripts allow-forms allow-popups allow-downloads; "+
+			"frame-ancestors 'none'; base-uri 'none'")
 }

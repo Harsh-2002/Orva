@@ -191,3 +191,29 @@ func (db *Database) GetPoolConfig(functionID string) (*PoolConfig, error) {
 	cfg.ScaleToZero = sc != 0
 	return &cfg, nil
 }
+
+// BootstrapKeyName is the name given to the admin key the server mints for
+// itself on first run. It is NOT evidence that an operator has claimed the
+// instance: server.New calls bootstrapAdminKey on every boot, so this key
+// exists from the very first start, before anyone has done anything.
+const BootstrapKeyName = "bootstrap-admin"
+
+// CountOperatorAPIKeys counts API keys EXCLUDING the auto-minted bootstrap
+// key. Use this, not CountAPIKeys, to answer "has anyone actually set this
+// instance up" -- CountAPIKeys is >= 1 from first boot and so cannot
+// distinguish a virgin instance from a claimed one.
+func (db *Database) CountOperatorAPIKeys() (int, error) {
+	var count int
+	err := db.read.QueryRow(
+		"SELECT COUNT(*) FROM api_keys WHERE name != ?", BootstrapKeyName).Scan(&count)
+	return count, err
+}
+
+// CountFunctions reports how many functions exist. Together with
+// CountOperatorAPIKeys it answers "is this instance in use", which is the
+// real question behind whether unauthenticated onboarding is still safe.
+func (db *Database) CountFunctions() (int, error) {
+	var count int
+	err := db.read.QueryRow("SELECT COUNT(*) FROM functions").Scan(&count)
+	return count, err
+}
