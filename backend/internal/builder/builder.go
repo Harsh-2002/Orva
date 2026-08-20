@@ -499,6 +499,7 @@ func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtim
 			fnID:     fnID,
 			codeDir:  codeDir,
 			stream:   "npm",
+			timeout:  b.buildStepTimeout(),
 			// --prefix is redundant now that the jail's cwd is the code dir,
 			// but it keeps the resolved install root explicit and matches
 			// what operators see in the build log.
@@ -536,6 +537,7 @@ func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtim
 			fnID:     fnID,
 			codeDir:  codeDir,
 			stream:   "pip",
+			timeout:  b.buildStepTimeout(),
 			argv: []string{
 				pythonPipBin,
 				"install", "-r", sandbox.BuildCodeDir + "/requirements.txt",
@@ -885,4 +887,21 @@ func pipPlatformTag() string {
 		return "manylinux2014_aarch64"
 	}
 	return "manylinux2014_x86_64"
+}
+
+// buildStepTimeout returns the per-step deadline from build_timeout_seconds.
+//
+// npm install and pip install had NO timeout at all -- queue.go passes
+// context.Background() and neither step set one, so only tsc was bounded. A
+// registry connection that hangs left the deployment showing "deps" forever
+// and burned a build-queue slot permanently, and nothing resets a stuck
+// deployment on boot either.
+func (b *Builder) buildStepTimeout() time.Duration {
+	secs := 300
+	if b.DB != nil {
+		if v := b.DB.GetSystemConfigInt("build_timeout_seconds", 300); v > 0 {
+			secs = v
+		}
+	}
+	return time.Duration(secs) * time.Second
 }

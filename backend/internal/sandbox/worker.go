@@ -213,6 +213,13 @@ func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte
 		// Caller used the back-compat path on a streaming handler. Drain
 		// chunks into a buffer so the existing single-write path still
 		// works; this is the path tests + non-HTTP callers take.
+		//
+		// Bounded, because "non-HTTP callers" is not a niche: cron, jobs,
+		// F2F and the inbound-webhook trigger all use Dispatch rather than
+		// DispatchEx. A handler that streams a large body works fine over
+		// /fn/ and used to OOM-kill orvad when the SAME function was fired
+		// by cron -- the buffer, the string copy and the JSON envelope are
+		// roughly four to six times the payload, all resident at once.
 		var buf []byte
 		for {
 			kind, data, err := res.NextFrame(ctx)
@@ -223,6 +230,11 @@ func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte
 				break
 			}
 			if kind == "chunk" {
+				if len(buf)+len(data) > maxBufferedStreamBytes {
+					return nil, res.Stderr(), fmt.Errorf(
+						"streamed response exceeds %d bytes on a non-streaming caller: %w",
+						maxBufferedStreamBytes, ErrStreamTooLarge)
+				}
 				buf = append(buf, data...)
 			}
 		}
@@ -582,6 +594,15 @@ func (w *Worker) Quit(grace time.Duration) error {
 // loser sees "Wait was already called" and returns without reaping).
 // Pre-fix this was the path that produced <defunct> nsjail entries after
 // streaming-client disconnects: markDead → pool kill → duplicate Wait.
+// maxBufferedStreamBytes caps what Dispatch will accumulate from a
+// streaming handler. 32 MiB is far above any sane buffered response and far
+// below what would threaten the daemon.
+const maxBufferedStreamBytes = 32 << 20
+
+// ErrStreamTooLarge is returned when a streaming handler's output exceeds
+// what a non-streaming caller can safely buffer.
+var ErrStreamTooLarge = errors.New("streamed response too large to buffer")
+
 func (w *Worker) Kill() error {
 	w.markDead()
 	if w.Cmd == nil || w.Cmd.Process == nil {

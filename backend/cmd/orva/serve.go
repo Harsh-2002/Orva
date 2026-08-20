@@ -115,6 +115,17 @@ func runServe(cmd *cobra.Command, args []string) {
 	// leaks the whole working set under build-tmp/ permanently.
 	builder.SweepBuildScratch(cfg.Data.Dir)
 
+	// Fail deployments abandoned mid-build. Only the finish paths set a
+	// terminal status and both run in-process, so a restart left the row at
+	// 'queued'/'building' forever and the dashboard span a spinner that
+	// never resolved. The tarball they would have built from is in the
+	// scratch dir the sweep above just reclaimed.
+	if n, err := db.RequeueStuckDeployments(); err != nil {
+		slog.Warn("could not reconcile stuck deployments", "error", err)
+	} else if n > 0 {
+		slog.Info("failed deployments abandoned by a previous run", "count", n)
+	}
+
 	// Reclaim NSJAIL.* cgroup directories left behind by a previous process.
 	// Workers are SIGKILLed, so nsjail never runs its own cleanup, and every
 	// spawn scans this directory to find its own cgroup -- an accumulation
