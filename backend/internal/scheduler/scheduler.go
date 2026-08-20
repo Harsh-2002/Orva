@@ -206,7 +206,16 @@ func (s *Scheduler) Start(ctx context.Context) {
 	// recomputed time.
 	s.recomputeNextRunOnBoot()
 
+	// Reclaim jobs and webhook deliveries abandoned in 'running'. Claiming
+	// flips a row out of 'pending' and only 'pending' is ever re-claimed, so
+	// anything in flight when the process died stayed stuck forever: never
+	// retried despite max_attempts, never marked failed, invisible in failed
+	// lists. Stop() logs that it gives up on in-flight work, so this is the
+	// normal shutdown path, not just crashes.
+	s.requeueStuck()
+
 	go s.cronLoop(ctx)
+	go s.stuckSweepLoop(ctx)
 	go s.kvSweepLoop(ctx)
 	go s.jobsLoop(ctx)
 	go s.webhookLoop(ctx)
@@ -903,5 +912,36 @@ func http3xxLabel(code int) string {
 		return "4xx"
 	default:
 		return "ok"
+	}
+}
+
+// requeueStuck reclaims abandoned work. Best-effort: a failure here must
+// not stop the scheduler from starting.
+func (s *Scheduler) requeueStuck() {
+	jobs, deliveries, err := s.db.RequeueStuck(time.Now())
+	if err != nil {
+		slog.Warn("requeue stuck work failed", "err", err)
+		return
+	}
+	if jobs > 0 || deliveries > 0 {
+		slog.Info("requeued abandoned work",
+			"jobs", jobs, "webhook_deliveries", deliveries)
+	}
+}
+
+// stuckSweepLoop repeats the boot reconcile periodically, so a worker lost
+// while the process stays up (a panic in a handler goroutine, a sandbox
+// killed by the OOM killer) is also recovered rather than waiting for the
+// next restart.
+func (s *Scheduler) stuckSweepLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.requeueStuck()
+		}
 	}
 }

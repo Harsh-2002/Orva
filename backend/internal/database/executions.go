@@ -603,14 +603,21 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 		countQuery += " AND status = ?"
 		args = append(args, params.Status)
 	}
+	// Compare as time, not as text. started_at is stored space-separated
+	// (Go's time layout, hence the ' +0000 UTC' fixups elsewhere in this
+	// file) while every client sends RFC3339 with a 'T'. ' ' (0x20) sorts
+	// below 'T' (0x54), so a raw string comparison puts every row from the
+	// cutoff's OWN DATE below the cutoff: "last 1 hour" returned nothing at
+	// all, and executions prune over-deleted by up to a day at the boundary.
+	// The sibling trace query already does this correctly.
 	if params.Since != "" {
-		query += " AND started_at >= ?"
-		countQuery += " AND started_at >= ?"
+		query += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) >= julianday(?)"
+		countQuery += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) >= julianday(?)"
 		args = append(args, params.Since)
 	}
 	if params.Until != "" {
-		query += " AND started_at < ?"
-		countQuery += " AND started_at < ?"
+		query += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) < julianday(?)"
+		countQuery += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) < julianday(?)"
 		args = append(args, params.Until)
 	}
 	if params.Search != "" {

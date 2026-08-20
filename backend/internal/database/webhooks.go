@@ -165,7 +165,7 @@ type WebhookDelivery struct {
 	ID             string     `json:"id"`
 	SubscriptionID string     `json:"subscription_id"`
 	EventName      string     `json:"event_name"`
-	Payload        []byte     `json:"-"` // JSON envelope; surfaced in Get only
+	Payload        []byte     `json:"-"`      // JSON envelope; surfaced in Get only
 	Status         string     `json:"status"` // pending|running|succeeded|failed
 	ScheduledAt    time.Time  `json:"scheduled_at"`
 	StartedAt      *time.Time `json:"started_at,omitempty"`
@@ -305,7 +305,15 @@ func (db *Database) MarkDeliveryFailure(id, errMsg string, attempts, maxAttempts
 			WHERE id = ?`, now, errMsg, respStatus, id)
 		return err
 	}
-	delaySec := 1 << attempts
+	// Clamp the shift before shifting. attempts is caller-controlled through
+	// max_attempts, and at 63 the shift goes negative, skips the > 3600 cap,
+	// and lands scheduled_at in the past -- so a failing job is re-claimed
+	// every scheduler tick with zero backoff, spawning a sandbox each time.
+	shift := attempts
+	if shift > 12 {
+		shift = 12
+	}
+	delaySec := 1 << shift
 	if delaySec > 3600 {
 		delaySec = 3600
 	}

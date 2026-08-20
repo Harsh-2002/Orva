@@ -6,8 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"crypto/sha256"
+	"encoding/hex"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"log/slog"
+	"slices"
+	"strings"
 )
 
 // loginAttemptsPerMin bounds POST /api/v1/auth/login per client IP. Login sits
@@ -41,11 +46,62 @@ func (h *AuthHandler) sessionTTL() time.Duration {
 	return time.Duration(h.sessionMaxAge()) * time.Second
 }
 
+// secureCookie decides the Secure flag for the session cookie.
+//
+// It used to be the ORVA_SECURE_COOKIES env var alone, defaulting to false,
+// so an operator who put Orva behind Caddy or nginx TLS and did not know to
+// set it shipped a 7-day full-admin session cookie without Secure. Any page
+// could then force it onto a cleartext http:// request and anyone on the
+// network path could read it. The request already tells us the real scheme
+// -- urlhint derives it for the OAuth issuer and MCP paths -- so use that,
+// keeping the env var as an override for setups we cannot detect.
+func (h *AuthHandler) secureCookie(r *http.Request) bool {
+	if h.SecureCookies {
+		return true
+	}
+	if r != nil && r.TLS != nil {
+		return true
+	}
+	if r != nil && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
+	return false
+}
+
+// callerHoldsAdminKey verifies an admin API key presented directly on the
+// request. Onboard lives under /api/v1/auth/, which the auth middleware
+// skips wholesale, so the check has to happen here.
+func (h *AuthHandler) callerHoldsAdminKey(r *http.Request) bool {
+	raw := r.Header.Get("X-Orva-API-Key")
+	if raw == "" {
+		if v := r.Header.Get("Authorization"); len(v) > 7 && strings.EqualFold(v[:7], "bearer ") {
+			raw = strings.TrimSpace(v[7:])
+		}
+	}
+	if raw == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(raw))
+	key, err := h.DB.GetAPIKeyByHash(hex.EncodeToString(sum[:]))
+	if err != nil || key == nil {
+		return false
+	}
+	if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
+		return false
+	}
+	return slices.Contains(key.PermissionsList(), "admin")
+}
+
 // Status handles GET /auth/status — returns whether any users exist.
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	count, err := h.DB.CountUsers()
 	if err != nil {
-		respond.JSON(w, http.StatusOK, map[string]any{"has_user": false})
+		// Fail CLOSED. Reporting has_user:false on a read error advertises an
+		// unclaimed instance, and /auth/onboard is inside the auth-middleware
+		// bypass, so this value is the only thing standing between a stranger
+		// and an admin session.
+		slog.Error("auth status: user count failed", "error", err)
+		respond.JSON(w, http.StatusOK, map[string]any{"has_user": true})
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{"has_user": count > 0})
@@ -53,9 +109,43 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 // Onboard handles POST /auth/onboard — creates the first admin user.
 func (h *AuthHandler) Onboard(w http.ResponseWriter, r *http.Request) {
-	count, _ := h.DB.CountUsers()
+	count, err := h.DB.CountUsers()
+	if err != nil {
+		// The error was discarded here, which resolved to count==0 and
+		// allowed admin creation. This check is the ONLY gate on the
+		// endpoint: /api/v1/auth/ is exempt from the auth middleware.
+		slog.Error("onboard: user count failed", "error", err)
+		respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE",
+			"cannot verify setup state; refusing to create an admin user", "")
+		return
+	}
 	if count > 0 {
 		respond.Error(w, http.StatusConflict, "ALREADY_SETUP", "admin user already exists", "")
+		return
+	}
+	// CreateUser is only ever called from here, so an operator who uses API
+	// keys exclusively -- which `orva setup` sets them up to do -- leaves
+	// has_user false permanently and this endpoint open to anyone who can
+	// reach the port. A session cookie bypasses the permission model
+	// entirely, so that is unauthenticated full admin: mint keys, read
+	// secrets, download a backup.
+	//
+	// Once the instance has any API key it is claimed, and onboarding must
+	// prove control. The bootstrap key printed by `orva setup` satisfies
+	// this, so the intended first-run flow is unchanged; what it stops is a
+	// stranger claiming a provisioned instance.
+	keyCount, err := h.DB.CountAPIKeys()
+	if err != nil {
+		slog.Error("onboard: api key count failed", "error", err)
+		respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE",
+			"cannot verify setup state; refusing to create an admin user", "")
+		return
+	}
+	if keyCount > 0 && !h.callerHoldsAdminKey(r) {
+		slog.Warn("onboard refused: instance is already provisioned and the "+
+			"caller presented no admin key", "api_keys", keyCount, "remote", r.RemoteAddr)
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
+			"this instance is already set up; present an admin API key to create a dashboard user", "")
 		return
 	}
 
@@ -94,7 +184,7 @@ func (h *AuthHandler) Onboard(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   h.SecureCookies,
+		Secure:   h.secureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   h.sessionMaxAge(),
 	})
@@ -146,7 +236,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   h.SecureCookies,
+		Secure:   h.secureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   h.sessionMaxAge(),
 	})
@@ -215,7 +305,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		Value:    newSession.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   h.SecureCookies,
+		Secure:   h.secureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   h.sessionMaxAge(),
 	})
