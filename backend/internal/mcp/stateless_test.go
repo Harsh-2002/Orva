@@ -847,7 +847,7 @@ func TestCachedServerAttributesActivityToEachRequestPrincipal(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	seen := map[string]string{}
 	for time.Now().Before(deadline) {
-		rows, _, err := db.ListActivity(database.ActivityFilter{Source: "mcp", Limit: 20})
+		rows, _, _, err := db.ListActivity(database.ActivityFilter{Source: "mcp", Limit: 20})
 		if err != nil {
 			t.Fatalf("list activity: %v", err)
 		}

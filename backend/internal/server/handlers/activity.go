@@ -29,6 +29,7 @@ type ActivityHandler struct {
 //   - q            free-text LIKE on path/summary/actor_label
 //   - limit        default 200, max 1000
 //   - cursor       ts millis from a previous response's next_cursor
+//   - cursor_id    id from a previous response's next_cursor_id (tie-break)
 func (h *ActivityHandler) List(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	q := r.URL.Query()
@@ -68,8 +69,15 @@ func (h *ActivityHandler) List(w http.ResponseWriter, r *http.Request) {
 			filter.Cursor = n
 		}
 	}
+	// Tie-break within the cursor's millisecond. Without it, every row
+	// sharing the last row's timestamp was skipped at a page boundary.
+	if v := q.Get("cursor_id"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			filter.CursorID = n
+		}
+	}
 
-	rows, next, err := h.DB.ListActivity(filter)
+	rows, next, nextID, err := h.DB.ListActivity(filter)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to list activity", reqID)
 		return
@@ -79,8 +87,9 @@ func (h *ActivityHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, http.StatusOK, map[string]any{
-		"rows":        rows,
-		"next_cursor": next,
-		"count":       len(rows),
+		"rows":           rows,
+		"next_cursor":    next,
+		"next_cursor_id": nextID,
+		"count":          len(rows),
 	})
 }

@@ -490,18 +490,30 @@ const goToPage = async (p) => {
 
   // Need to fetch page p? Always — we don't cache page rows because
   // live activity invalidates them anyway.
+  // Carry the tie-break id as well as the timestamp. The list is ordered
+  // (ts DESC, id DESC), so a ts-only cursor skipped every row sharing the
+  // last row's millisecond -- which is precisely what happens when a page
+  // boundary lands inside a burst.
   const cursorForPage = pages.value[p - 1]?.cursor
-  const res = await listActivity(buildParams(cursorForPage ? { cursor: cursorForPage } : {}))
+  const cursorIDForPage = pages.value[p - 1]?.cursorID
+  const res = await listActivity(buildParams(
+    cursorForPage
+      ? { cursor: cursorForPage, ...(cursorIDForPage ? { cursor_id: cursorIDForPage } : {}) }
+      : {},
+  ))
   historyRows.value = res.data?.rows || []
   const next = res.data?.next_cursor || 0
+  const nextID = res.data?.next_cursor_id || 0
   hasMoreBeyondKnown.value = next > 0
 
   // Record this page's bounds for back-nav and the next page's cursor.
   if (!pages.value[p - 1]) pages.value[p - 1] = {}
   pages.value[p - 1].cursor = cursorForPage
+  pages.value[p - 1].cursorID = cursorIDForPage
   if (next) {
     if (!pages.value[p]) pages.value[p] = {}
     pages.value[p].cursor = next
+    pages.value[p].cursorID = nextID
   } else {
     // No more pages — trim the recorded list.
     pages.value = pages.value.slice(0, p)
