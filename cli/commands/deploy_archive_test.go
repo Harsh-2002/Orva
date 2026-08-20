@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,10 +37,54 @@ func TestCreateArchiveHandlesSymlinks(t *testing.T) {
 	if _, ok := names["shared.js"]; !ok {
 		t.Error("regular file missing from the archive")
 	}
-	if target, ok := links["lib.js"]; !ok {
-		t.Error("symlink missing from the archive")
-	} else if target != "shared.js" {
-		t.Errorf("symlink target = %q, want shared.js", target)
+	// DEREFERENCED, not archived as a link: the builder refuses link entries,
+	// because recreating one from an untrusted archive lets an early link
+	// redirect a later write outside the extraction root, and lexical
+	// containment cannot see through that chain.
+	if len(links) != 0 {
+		t.Errorf("archive carries link entries the builder will refuse: %v", links)
+	}
+	if got := names["lib.js"]; got != "module.exports = 1;\n" {
+		t.Errorf("lib.js = %q, want the target's contents", got)
+	}
+}
+
+// TestCreateArchiveRejectsDirectorySymlinks — following one could duplicate a
+// whole tree, or loop forever on a cycle. Fail with a message that says what
+// to do rather than silently omitting the path.
+func TestCreateArchiveRejectsDirectorySymlinks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(dir, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	archive, err := createArchive(dir)
+	if archive != "" {
+		defer os.Remove(archive)
+	}
+	if err == nil {
+		t.Fatal("a symlink to a directory was packed")
+	}
+	if !strings.Contains(err.Error(), "symlink to a directory") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestCreateArchiveReportsBrokenSymlinks — a dangling link used to produce a
+// confusing tar error; it should name the file.
+func TestCreateArchiveReportsBrokenSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink("nope.js", filepath.Join(dir, "dangling.js")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	archive, err := createArchive(dir)
+	if archive != "" {
+		defer os.Remove(archive)
+	}
+	if err == nil || !strings.Contains(err.Error(), "broken") {
+		t.Errorf("broken symlink not reported clearly: %v", err)
 	}
 }
 

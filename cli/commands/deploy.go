@@ -331,19 +331,50 @@ func createArchive(srcDir string) (string, error) {
 			return err
 		}
 
-		// filepath.Walk uses Lstat, so a symlink arrives as a symlink.
-		// FileInfoHeader then emits a zero-size TypeSymlink header, and
-		// falling through to Open+Copy wrote the target's CONTENT into it:
-		// "archive/tar: write too long", aborting the whole deploy. A
-		// lib.js -> shared.js link is an ordinary thing in a JS project.
-		link := ""
+		// filepath.Walk uses Lstat, so a symlink arrives as a symlink, and
+		// FileInfoHeader emits a zero-size TypeSymlink header. The original
+		// code then fell through to Open+Copy and wrote the target's CONTENT
+		// into that zero-size entry: "archive/tar: write too long", which
+		// aborted the whole deploy. A lib.js -> shared.js link is ordinary in
+		// a JS project.
+		//
+		// DEREFERENCE rather than archiving the link, which is what `tar -h`
+		// does. Packing links would mean the server has to recreate them, and
+		// recreating a link from an untrusted archive is genuinely unsafe:
+		// lexical containment cannot see through a chain, so an early link
+		// entry can redirect a later write outside the extraction root. The
+		// builder therefore refuses link entries outright, and dereferencing
+		// here is what keeps ordinary projects deployable.
 		if info.Mode()&fs.ModeSymlink != 0 {
-			if link, err = os.Readlink(path); err != nil {
-				return fmt.Errorf("read symlink %s: %w", relPath, err)
+			resolved, err := os.Stat(path) // follows the link
+			if err != nil {
+				return fmt.Errorf("symlink %s is broken: %w", relPath, err)
 			}
+			if resolved.IsDir() {
+				// Walking through it could duplicate a whole tree, or loop
+				// forever on a cycle. Say so rather than silently omitting it.
+				return fmt.Errorf(
+					"%s is a symlink to a directory, which deploy cannot pack; "+
+						"replace it with the directory itself or exclude it", relPath)
+			}
+			hdr, err := tar.FileInfoHeader(resolved, "")
+			if err != nil {
+				return err
+			}
+			hdr.Name = relPath
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(tw, f)
+			return err
 		}
 
-		header, err := tar.FileInfoHeader(info, link)
+		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
 		}
@@ -353,8 +384,7 @@ func createArchive(srcDir string) (string, error) {
 			return err
 		}
 
-		if info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
-			// A symlink header carries its target in Linkname and has no body.
+		if info.IsDir() {
 			return nil
 		}
 		if !info.Mode().IsRegular() {

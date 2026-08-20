@@ -152,7 +152,7 @@ POST /api/v1/functions/{id}/deploy-inline   {code, dependencies}
      │      │     ├ if versions/<hash>/.orva-ready exists → cached short-circuit
      │      │     ├ scratch_dir = versions/<hash>.tmp.<rand>
      │      │     │     ├ extract tarball
-     │      │     │     ├ ValidateArchive (reject path-traversal symlinks). Extraction recreates symlinks with a containment check — target resolved relative to the link's own directory, absolute targets refused — and rejects hard links outright. Links used to be silently dropped, which also made this validator's symlink branch unreachable
+     │      │     │     ├ ValidateArchive (reject path-traversal symlinks). Extraction **refuses** symlink and hard-link entries rather than recreating them: a lexical containment check cannot see through a chain, so an early link entry can redirect a later write outside the extraction root. `orva deploy` dereferences symlinks when packing, so an ordinary project never produces one. Link entries used to be silently dropped, which also made this validator's symlink branch unreachable
      │      │     │     ├ npm install / pip install (inside nsjail via sandbox.RunBuild, under the same compiled egress policy a worker gets — not host-side), each bounded by build_timeout_seconds
      │      │     │     ├ install adapter wrapper (main.js / main.py)
      │      │     │     └ touch .orva-ready

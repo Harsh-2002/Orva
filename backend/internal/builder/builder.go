@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
@@ -415,38 +414,36 @@ func extractTarGz(archivePath, destDir string) error {
 				return err
 			}
 
-		case tar.TypeSymlink:
-			// Symlinks were silently DROPPED here -- no default case, so the
-			// archive was accepted minus its links, and the symlink-escape
-			// branch in the validator was unreachable dead code because no
-			// symlink could ever exist in the extracted tree. The CLI now
-			// archives them properly, so they have to be recreated, and the
-			// containment check has to be real.
+		case tar.TypeSymlink, tar.TypeLink:
+			// Links are REFUSED, never recreated.
 			//
-			// Resolve the target relative to the LINK's directory and refuse
-			// anything that leaves the extraction root. An absolute target is
-			// refused outright.
-			if filepath.IsAbs(hdr.Linkname) {
-				return fmt.Errorf("absolute symlink target in archive: %s -> %s",
-					hdr.Name, hdr.Linkname)
+			// An earlier version of this recreated symlinks after a lexical
+			// containment check. CodeQL flagged it (go/unsafe-unzip-symlink)
+			// and was right to: a lexical check cannot see through a chain.
+			// Extract "a -> ." and then a later entry "a/../../evil" and the
+			// second write resolves through the first link at write time, so
+			// every path this loop validated by string manipulation can still
+			// land outside the root. That containment check was also wrong in
+			// the other direction -- it anchored to the LINK's directory
+			// rather than the extraction root, rejecting an ordinary
+			// "sub/lib.js -> ../shared.js".
+			//
+			// Nothing here needs to create a link. `orva deploy` now
+			// DEREFERENCES symlinks when building the archive: a link to a
+			// regular file is packed as that file's contents under the link's
+			// name, which is what `tar -h` does and produces an equivalent
+			// tree with none of this risk. So a link entry reaching this
+			// point came from somewhere else, and refusing it is both safe
+			// and honest -- unlike the original behaviour, which dropped link
+			// entries silently and accepted the archive minus its links.
+			kind := "symlink"
+			if hdr.Typeflag == tar.TypeLink {
+				kind = "hard link"
 			}
-			if _, err := safepath.Join(filepath.Dir(target), hdr.Linkname); err != nil {
-				return fmt.Errorf("symlink escapes the code directory: %s -> %s",
-					hdr.Name, hdr.Linkname)
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return err
-			}
-			// Replace any existing entry so re-extraction is idempotent.
-			_ = os.Remove(target)
-			if err := os.Symlink(hdr.Linkname, target); err != nil {
-				return fmt.Errorf("create symlink %s: %w", hdr.Name, err)
-			}
-
-		case tar.TypeLink:
-			// Hard links can reference a file outside the archive entirely,
-			// and no deploy needs them. Refuse loudly rather than dropping.
-			return fmt.Errorf("hard links are not supported in deploy archives: %s", hdr.Name)
+			return fmt.Errorf(
+				"%s entries are not supported in deploy archives: %s -> %s "+
+					"(deploy dereferences symlinks when packing; re-run `orva deploy`)",
+				kind, hdr.Name, hdr.Linkname)
 		}
 	}
 	return nil
