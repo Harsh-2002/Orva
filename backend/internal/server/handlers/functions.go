@@ -770,6 +770,10 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 		Code         string `json:"code"`
 		Filename     string `json:"filename"`
 		Dependencies string `json:"dependencies"` // requirements.txt or package.json content
+		// Extras are additional files written alongside the handler --
+		// tsconfig.json for a TypeScript deploy, a small config file, etc.
+		// Paths are relative and contained the same way entrypoint is.
+		Extras map[string]string `json:"extras,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
@@ -780,13 +784,30 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Filename == "" {
+		// Default to the function's OWN entrypoint. Hardcoding handler.js /
+		// handler.py meant a function configured with any other entrypoint --
+		// which the MCP create_function tool requires you to set, advertising
+		// 'src/index.ts' as an example -- deployed a file the builder then
+		// refused to find: "entrypoint not found: src/index.ts".
 		switch {
+		case fn.Entrypoint != "":
+			req.Filename = fn.Entrypoint
 		case runtimeIsNode(fn.Runtime):
 			req.Filename = "handler.js"
 		case runtimeIsPython(fn.Runtime):
 			req.Filename = "handler.py"
-		default:
-			req.Filename = fn.Entrypoint
+		}
+	}
+	if err := safepath.Validate(req.Filename); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"invalid filename: "+err.Error(), reqID)
+		return
+	}
+	for name := range req.Extras {
+		if err := safepath.Validate(name); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid extra file "+strconv.Quote(name)+": "+err.Error(), reqID)
+			return
 		}
 	}
 
@@ -814,6 +835,16 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 	if depsFilename != "" {
 		tw.WriteHeader(&tar.Header{Name: depsFilename, Size: int64(len(req.Dependencies)), Mode: 0644})
 		tw.Write([]byte(req.Dependencies))
+	}
+	// Support files. The TypeScript template ships a tsconfig.json this way,
+	// and the builder gates its tsc step on that file existing -- without a
+	// channel for it the template could never actually compile.
+	for name, content := range req.Extras {
+		if name == req.Filename || name == depsFilename {
+			continue // the handler and deps files are already written
+		}
+		tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(content)), Mode: 0644})
+		tw.Write([]byte(content))
 	}
 	tw.Close()
 	gw.Close()

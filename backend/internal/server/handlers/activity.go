@@ -25,6 +25,7 @@ type ActivityHandler struct {
 //   - since        unix millis lower bound (inclusive)
 //   - until        unix millis upper bound (exclusive)
 //   - status_min   integer; rows with status >= n (use 400 for "errors")
+//   - status_max   integer; rows with status <= n (use 399 for "successes")
 //   - q            free-text LIKE on path/summary/actor_label
 //   - limit        default 200, max 1000
 //   - cursor       ts millis from a previous response's next_cursor
@@ -45,6 +46,11 @@ func (h *ActivityHandler) List(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("until"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			filter.UntilMS = n
+		}
+	}
+	if v := q.Get("status_max"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			filter.StatusMax = n
 		}
 	}
 	if v := q.Get("status_min"); v != "" {

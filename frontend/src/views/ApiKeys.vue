@@ -109,9 +109,38 @@
           </select>
         </div>
       </div>
+      <div>
+        <span
+          class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+        >Permissions</span>
+        <div class="flex flex-wrap gap-3">
+          <label
+            v-for="perm in permissionOptions"
+            :key="perm.value"
+            class="flex items-start gap-2 text-sm text-foreground cursor-pointer"
+          >
+            <input
+              v-model="newKey.permissions"
+              type="checkbox"
+              :value="perm.value"
+              class="mt-0.5 accent-primary"
+            >
+            <span>
+              <span class="font-medium">{{ perm.label }}</span>
+              <span class="block text-xs text-foreground-muted">{{ perm.hint }}</span>
+            </span>
+          </label>
+        </div>
+        <p
+          v-if="!newKey.permissions.length"
+          class="text-xs text-danger mt-1.5"
+        >
+          Select at least one permission.
+        </p>
+      </div>
       <div class="flex gap-2 pt-1">
         <Button
-          :disabled="!newKey.name.trim() || submitting"
+          :disabled="!newKey.name.trim() || !newKey.permissions.length || submitting"
           :loading="submitting"
           @click="submitCreate"
         >
@@ -297,7 +326,18 @@ const createdKey = ref('')
 const createdCopied = ref(false)
 const creating = ref(false)
 const submitting = ref(false)
-const newKey = ref({ name: '', expiresInDays: 0 })
+// The form sent only {name, expires_in_days}, so the server applied its
+// default of all four permissions and EVERY dashboard-minted key was full
+// admin -- strictly more permissive than the CLI, which defaults to invoke
+// only. Least privilege is not reachable if the UI cannot express it.
+const permissionOptions = [
+  { value: 'invoke', label: 'Invoke', hint: 'Call functions' },
+  { value: 'read', label: 'Read', hint: 'List and inspect resources' },
+  { value: 'write', label: 'Write', hint: 'Create, update and delete resources' },
+  { value: 'admin', label: 'Admin', hint: 'Keys, channels, firewall, backup and restore' },
+]
+const defaultPermissions = () => ['invoke', 'read']
+const newKey = ref({ name: '', expiresInDays: 0, permissions: defaultPermissions() })
 
 const loadKeys = async () => {
   const res = await listApiKeys()
@@ -305,13 +345,13 @@ const loadKeys = async () => {
 }
 
 const openCreate = () => {
-  newKey.value = { name: '', expiresInDays: 0 }
+  newKey.value = { name: '', expiresInDays: 0, permissions: defaultPermissions() }
   creating.value = true
 }
 
 const cancelCreate = () => {
   creating.value = false
-  newKey.value = { name: '', expiresInDays: 0 }
+  newKey.value = { name: '', expiresInDays: 0, permissions: defaultPermissions() }
 }
 
 const submitCreate = async () => {
@@ -319,6 +359,9 @@ const submitCreate = async () => {
   try {
     const body = { name: newKey.value.name.trim() }
     if (newKey.value.expiresInDays > 0) body.expires_in_days = newKey.value.expiresInDays
+    // Always send permissions explicitly. Omitting the field makes the
+    // server fall back to all four.
+    body.permissions = [...newKey.value.permissions]
     const res = await createApiKey(body)
     createdKey.value = res.data.key
     createdCopied.value = false

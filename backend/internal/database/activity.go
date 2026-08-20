@@ -56,6 +56,7 @@ type ActivityFilter struct {
 	SinceMS   int64  // ts >= since
 	UntilMS   int64  // ts < until
 	StatusMin int    // status >= n  (use 400 for "errors only")
+	StatusMax int    // status <= n  (use 399 for "successes only")
 	Search    string // LIKE on path / summary / actor_label
 	Limit     int    // default 200, max 1000
 	Cursor    int64  // ts threshold (descending paginate; ts < cursor)
@@ -88,6 +89,10 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 	if f.UntilMS > 0 {
 		conds = append(conds, "ts < ?")
 		args = append(args, f.UntilMS)
+	}
+	if f.StatusMax > 0 {
+		conds = append(conds, "status <= ?")
+		args = append(args, f.StatusMax)
 	}
 	if f.StatusMin > 0 {
 		conds = append(conds, "status >= ?")

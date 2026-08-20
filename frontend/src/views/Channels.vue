@@ -221,7 +221,7 @@
           v-if="channels.length === 0"
           class="px-6 py-8 text-center text-sm text-foreground-muted"
         >
-          No channels yet.
+          {{ loadError ? `Could not load channels: ${loadError}` : 'No channels yet.' }}
         </li>
       </ul>
 
@@ -319,7 +319,12 @@
               colspan="6"
               class="px-6 py-8 text-center text-foreground-muted"
             >
-              No channels yet. Click <span class="text-white">New channel</span> to bundle functions for an agent.
+              <template v-if="loadError">
+                Could not load channels: {{ loadError }}
+              </template>
+              <template v-else>
+                No channels yet. Click <span class="text-white">New channel</span> to bundle functions for an agent.
+              </template>
             </td>
           </tr>
         </tbody>
@@ -379,9 +384,18 @@ const canSubmit = computed(
   () => newChannel.value.name.trim() && newChannel.value.functionIds.length > 0,
 )
 
+// A failed fetch used to render "No channels yet", which reads as "you have
+// none" rather than "we could not ask".
+const loadError = ref('')
+
 const load = async () => {
-  const res = await listChannels()
-  channels.value = res.data.channels || []
+  try {
+    const res = await listChannels()
+    channels.value = res.data.channels || []
+    loadError.value = ''
+  } catch (e) {
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  }
 }
 
 const openCreate = () => {

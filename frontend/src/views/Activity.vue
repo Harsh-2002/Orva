@@ -470,6 +470,10 @@ const buildParams = (extra = {}) => {
   const p = { limit: PAGE_SIZE }
   if (filters.value.source) p.source = filters.value.source
   if (filters.value.statusBucket === 'err') p.status_min = 400
+  // The Success chip existed in statusOptions but nothing ever read it, so
+  // clicking it highlighted the chip and re-fetched an identical list. The
+  // backend had no upper bound at all; status_max was added alongside this.
+  if (filters.value.statusBucket === 'ok') p.status_max = 399
   if (filters.value.q) p.q = filters.value.q
   const since = rangeMS(filters.value.range)
   if (since) p.since = Date.now() - since
@@ -526,6 +530,7 @@ let unsub = null
 const matchesFilters = (row) => {
   if (filters.value.source && row.source !== filters.value.source) return false
   if (filters.value.statusBucket === 'err' && (row.status || 0) < 400) return false
+  if (filters.value.statusBucket === 'ok' && (row.status || 0) >= 400) return false
   if (filters.value.q) {
     const q = filters.value.q.toLowerCase()
     const hay = (row.path + ' ' + row.summary + ' ' + row.actor_label).toLowerCase()

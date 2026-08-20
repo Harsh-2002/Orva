@@ -464,6 +464,13 @@ const emptyStatus = () => ({
   unenforced_rules: [],
 })
 const status = ref(emptyStatus())
+
+// loadError distinguishes "we could not read the policy" from "there is no
+// policy". Without it a failed fetch left enforced:false and painted the red
+// "No egress policy is compiled" banner - a false security alarm
+// indistinguishable from the real thing, on any transient network blip or
+// expired session.
+const loadError = ref('')
 const busyId = ref(null)
 const showCreate = ref(false)
 const creating = ref(false)
@@ -749,6 +756,7 @@ const wildcardAttempt = computed(() => newRule.value.value.includes('*'))
 // Order matters: stale means a good policy IS still loaded, so it must be
 // tested before the generic error case.
 const policyState = computed(() => {
+  if (loadError.value) return 'unknown'
   if (status.value.enforced && status.value.policy_stale) return 'stale'
   if (!status.value.enforced) return 'unenforced'
   if (status.value.last_error) return 'degraded'
@@ -757,6 +765,7 @@ const policyState = computed(() => {
 
 const statusBannerClass = computed(() => {
   switch (policyState.value) {
+    case 'unknown': return 'border-border bg-surface-hover text-foreground-muted'
     case 'unenforced': return 'border-danger-ring bg-danger-tint text-danger-fg'
     case 'stale':
     case 'degraded':   return 'border-warning-ring bg-warning-tint text-warning-fg'
@@ -766,6 +775,8 @@ const statusBannerClass = computed(() => {
 const statusIcon = computed(() => (policyState.value === 'ok' ? ShieldCheck : AlertTriangle))
 const statusBannerText = computed(() => {
   switch (policyState.value) {
+    case 'unknown':
+      return `Could not load the egress policy status, so the state below is unknown. This is NOT a report that enforcement is off. ${loadError.value}`
     case 'unenforced':
       return 'No egress policy is compiled, so nothing below is in force. Orva fails closed: functions with outbound network enabled cannot start until a policy compiles.'
     case 'stale':
@@ -811,9 +822,14 @@ const appliedAt = computed(() => {
 })
 
 const load = async () => {
-  const res = await apiClient.get('/firewall/rules')
-  rules.value = res.data.rules || []
-  status.value = { ...emptyStatus(), ...(res.data.status || {}) }
+  try {
+    const res = await apiClient.get('/firewall/rules')
+    rules.value = res.data.rules || []
+    status.value = { ...emptyStatus(), ...(res.data.status || {}) }
+    loadError.value = ''
+  } catch (e) {
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  }
 }
 
 const toggle = async (rule) => {
