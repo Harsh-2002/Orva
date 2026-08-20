@@ -14,6 +14,8 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
 	"github.com/Harsh-2002/Orva/internal/ids"
+
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 )
 
 type contextKey string
@@ -43,7 +45,18 @@ type Actor struct {
 
 // WithActor returns a new context carrying the actor for downstream
 // readers (notably loggerMiddleware → activity log).
+// WithActor stores the actor for logging AND mirrors its id into the shared
+// auth package's context, which the handlers package can read without an
+// import cycle. That cycle is why audit fields like
+// channel_functions.added_by_actor_id were hardcoded to "".
 func WithActor(ctx context.Context, a *Actor) context.Context {
+	if a != nil {
+		ctx = auth.WithActorID(ctx, a.ID)
+	}
+	return withActorOnly(ctx, a)
+}
+
+func withActorOnly(ctx context.Context, a *Actor) context.Context {
 	if a == nil {
 		return ctx
 	}

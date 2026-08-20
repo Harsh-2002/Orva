@@ -169,7 +169,12 @@ func registerWebhookTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	// Webhook subscriptions are ordinary write-scoped resources over REST
+	// (requiredPermission has no /api/v1/webhooks branch, so POST/PUT/DELETE
+	// are "write"). These were gated at admin, so a read+write+invoke key got
+	// no webhook tools at all over MCP while doing all of it over REST --
+	// contradicting permissions.go's claim to mirror the REST mapping.
+	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "create_webhook",
 			Title:       "Create Webhook",
@@ -208,7 +213,7 @@ func registerWebhookTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "update_webhook",
 			Title:       "Update Webhook",
@@ -246,7 +251,7 @@ func registerWebhookTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "delete_webhook",
 			Title:       "Delete Webhook",
@@ -267,7 +272,7 @@ func registerWebhookTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "test_webhook",
 			Title:       "Test Webhook",
@@ -324,7 +329,7 @@ func registerWebhookTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "retry_webhook_delivery",
 			Title:       "Retry Webhook Delivery",

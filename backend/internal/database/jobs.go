@@ -197,8 +197,13 @@ func (db *Database) GetJob(id string) (*Job, error) {
 // ListJobs returns recent jobs joined with function_name. Optional
 // status / function filters; default limit 50.
 func (db *Database) ListJobs(status, functionID string, limit int) ([]*Job, error) {
-	if limit <= 0 || limit > 500 {
+	// Clamp, do not reset: an over-cap request returning the DEFAULT gives
+	// the caller fewer rows than asking for nothing would have.
+	if limit <= 0 {
 		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
 	}
 	q := `
 		SELECT j.id, j.function_id, j.payload, j.status, j.scheduled_at,

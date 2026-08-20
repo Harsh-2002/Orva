@@ -40,7 +40,11 @@ func toPoolConfigView(c *database.PoolConfig) PoolConfigView {
 func registerPoolTools(rc *regCtx) {
 	deps := rc.deps
 	rc.group = "pool"
-	regAddTool(rc, permAdmin,
+	// REST gates GET /api/v1/pool/config at "read" -- only PUT/POST is
+	// admin. permissions.go claims to mirror requiredPermission, and a
+	// read-scoped key could inspect pool config over REST while the MCP
+	// tool was invisible to it.
+	regAddTool(rc, permRead,
 		&mcpsdk.Tool{
 			Name:        "get_pool_config",
 			Title:       "Get Pool Config",

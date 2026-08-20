@@ -256,8 +256,18 @@ func mutateChannelFunctions(cmd *cobra.Command, args []string, add bool) error {
 	if err := checkResponse(resp); err != nil {
 		return err
 	}
+	// Carry the per-function tool descriptions through. Decoding only
+	// function_ids and PUTting without descriptions wiped every custom MCP
+	// tool description an operator had written in the dashboard, the moment
+	// anyone ran `orva channels add-functions`. SetChannelFunctions
+	// preserves a prior value only when the incoming description is blank
+	// AND the row survives, which a full replace does not guarantee.
 	var current struct {
 		FunctionIDs []string `json:"function_ids"`
+		Functions   []struct {
+			ID          string `json:"id"`
+			Description string `json:"description"`
+		} `json:"functions"`
 	}
 	if err := decodeJSON(resp, &current); err != nil {
 		return fmt.Errorf("decode response: %w", err)
@@ -281,7 +291,16 @@ func mutateChannelFunctions(cmd *cobra.Command, args []string, add bool) error {
 	for fnID := range have {
 		newIDs = append(newIDs, fnID)
 	}
+	descriptions := make(map[string]string, len(current.Functions))
+	for _, f := range current.Functions {
+		if f.Description != "" && have[f.ID] {
+			descriptions[f.ID] = f.Description
+		}
+	}
 	body := map[string]any{"function_ids": newIDs}
+	if len(descriptions) > 0 {
+		body["descriptions"] = descriptions
+	}
 	resp, err = client.Put("/api/v1/channels/"+id+"/functions", body)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)

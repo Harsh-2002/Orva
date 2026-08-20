@@ -54,6 +54,10 @@ type Deps struct {
 	DataDir    string
 	Version    string // Orva version string, surfaced via initialize
 
+	// NsjailBin is the sandbox binary path, so system_health can report
+	// whether this host can actually run functions rather than assuming it.
+	NsjailBin string
+
 	// BaseURL is the fallback canonical scheme://host used by callers outside
 	// the HTTP path (notably the in-process AI agent). HTTP requests carry their
 	// own base URL in context so cached MCP servers never capture one tenant's

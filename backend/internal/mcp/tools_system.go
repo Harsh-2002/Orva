@@ -24,6 +24,8 @@ var mcpVacuumMu sync.Mutex
 
 type SystemHealthOutput struct {
 	Status            string `json:"status"`
+	Database          string `json:"database"`
+	SandboxRuntime    string `json:"sandbox_runtime"`
 	Version           string `json:"version"`
 	UptimeSeconds     int64  `json:"uptime_seconds"`
 	SandboxActive     int64  `json:"sandbox_active"`
@@ -47,13 +49,40 @@ func registerSystemTools(rc *regCtx) {
 			Description: "Health check for the Orva instance. Returns version, uptime, sandbox counters, and host resources. Use this to confirm an Orva instance is reachable before doing anything else.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemHealthOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemHealthOutput, error) {
 			var active, total int64
 			if deps.Proxy != nil && deps.Proxy.Sandbox != nil {
 				active, total = deps.Proxy.Sandbox.Stats()
 			}
+
+			// Actually probe. This returned a hardcoded "healthy" and looked
+			// at nothing, so the tool whose description says "use this to
+			// confirm an Orva instance is reachable before doing anything
+			// else" reported healthy on a wedged database and on a host with
+			// no nsjail -- where every single invocation fails. The REST
+			// health endpoint has always done both checks.
+			status := "healthy"
+			dbStatus := "ok"
+			if deps.DB != nil {
+				pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				defer cancel()
+				if err := deps.DB.Ping(pingCtx); err != nil {
+					dbStatus, status = "error", "degraded"
+				}
+			}
+			// Informational, like the REST handler: an instance with no
+			// nsjail is still reachable, it just cannot run anything.
+			sandboxRuntime := "ok"
+			if deps.NsjailBin != "" {
+				if _, err := os.Stat(deps.NsjailBin); err != nil {
+					sandboxRuntime = "unavailable"
+				}
+			}
+
 			return nil, SystemHealthOutput{
-				Status:            "healthy",
+				Status:            status,
+				Database:          dbStatus,
+				SandboxRuntime:    sandboxRuntime,
 				Version:           orDefault(deps.Version, "0.1.0"),
 				UptimeSeconds:     int64(time.Since(startTime).Seconds()),
 				SandboxActive:     active,

@@ -452,6 +452,7 @@ func (r *Router) setupRoutes() {
 		EventHub:       r.eventHub,
 		DataDir:        r.cfg.Data.Dir,
 		Version:        version.Version,
+		NsjailBin:      r.cfg.Sandbox.NsjailBin,
 		AllowedOrigins: r.cfg.Security.CORSOrigins,
 	}
 	mcpHandler := orvampc.NewHandler(mcpDeps)

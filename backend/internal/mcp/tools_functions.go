@@ -239,20 +239,50 @@ func registerFunctionTools(rc *regCtx) {
 			if lim > 200 {
 				lim = 200
 			}
-			res, err := deps.DB.ListFunctions(database.ListFunctionsParams{
+			// The search filter runs in Go, so it has to see every candidate
+			// row -- not just the current page. Filtering AFTER pagination
+			// searched only the rows that happened to be on the page while
+			// reporting the unfiltered count, so on 200 functions
+			// search:"payments" scanned the newest 50 and returned
+			// "total: 200" beside one result.
+			q := strings.ToLower(strings.TrimSpace(in.Search))
+			params := database.ListFunctionsParams{
 				Status: in.Status, Runtime: in.Runtime, Limit: lim, Offset: in.Offset,
-			})
+			}
+			if q != "" {
+				// Fetch wide, filter, then page by hand.
+				params.Limit = 1000
+				params.Offset = 0
+			}
+			res, err := deps.DB.ListFunctions(params)
 			if err != nil {
 				return nil, ListFunctionsOutput{}, err
 			}
 			out := ListFunctionsOutput{Total: res.Total, Limit: lim, Offset: in.Offset}
-			q := strings.ToLower(strings.TrimSpace(in.Search))
+			matched := make([]*database.Function, 0, len(res.Functions))
 			for _, fn := range res.Functions {
 				if q != "" {
 					if !strings.Contains(strings.ToLower(fn.Name), q) && !strings.Contains(strings.ToLower(fn.ID), q) {
 						continue
 					}
 				}
+				matched = append(matched, fn)
+			}
+			if q != "" {
+				// Total must describe the filtered set, then apply the
+				// caller's window to it.
+				out.Total = len(matched)
+				start := in.Offset
+				if start > len(matched) {
+					start = len(matched)
+				}
+				end := start + lim
+				if end > len(matched) {
+					end = len(matched)
+				}
+				matched = matched[start:end]
+			}
+			for _, fn := range matched {
 				out.Functions = append(out.Functions, toFunctionView(ctx, fn, deps))
 			}
 			return nil, out, nil
