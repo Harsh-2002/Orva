@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"errors"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
@@ -53,6 +54,11 @@ const sessionCookieName = "session_token"
 // sandbox, and the two differ on purpose — a third-party Authorization
 // belongs to the function, but must never be persisted in a captured
 // request. A future credential header belongs in both.
+// ErrBodyTooLarge is returned when the inbound request body exceeds the
+// configured cap. Callers map it to 413; the invoke error mapper keys on it
+// via errors.Is.
+var ErrBodyTooLarge = errors.New("request body too large")
+
 func SanitizeForwardedHeaders(h http.Header) map[string]string {
 	out := make(map[string]string, len(h))
 	for k, vs := range h {
@@ -307,7 +313,22 @@ func (p *Proxy) Forward(
 	defer releaseExecution()
 
 	// Serialize the HTTP request into JSON for the adapter.
-	body, _ := io.ReadAll(r.Body)
+	//
+	// Check the read error. MaxBytesReader is installed by the body-size
+	// middleware, but that middleware's cheap up-front rejection only fires
+	// when Content-Length is PRESENT -- a chunked upload has none, so an
+	// over-limit chunked POST reached here, was truncated at the cap, and
+	// was handed to the function as a short body with a 200. Silent
+	// truncation of a request body is worse than a 413.
+	body, bodyErr := io.ReadAll(r.Body)
+	if bodyErr != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(bodyErr, &mbe) {
+			return nil, fmt.Errorf("request body exceeds the configured cap of %d bytes: %w",
+				mbe.Limit, ErrBodyTooLarge)
+		}
+		return nil, fmt.Errorf("read request body: %w", bodyErr)
+	}
 
 	// Compute the path the function sees.
 	path := r.URL.Path
@@ -463,10 +484,16 @@ func (p *Proxy) Forward(
 		// which on a buffered handler equals total response time.
 		w.Header().Set("X-Orva-Duration-MS", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
 		w.WriteHeader(sc)
-		n, _ := w.Write([]byte(dres.Body))
+		// Check the write error. Discarding it recorded the execution as a
+		// success when the client got nothing -- a broken pipe mid-body is
+		// exactly the case where the executions row should not say 200.
+		n, werr := w.Write([]byte(dres.Body))
 		result.StatusCode = sc
 		result.ResponseSize = n
 		result.Wrote = true
+		if werr != nil {
+			return result, fmt.Errorf("write response: %w", werr)
+		}
 		return result, nil
 	}
 
@@ -515,6 +542,15 @@ func (p *Proxy) Forward(
 	w.Header().Set("X-Orva-Ttfb-Ms", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
 
 	flusher, _ := w.(http.Flusher)
+
+	// Clear the server's write deadline for the streaming path, as the SSE
+	// handler, the AI chat handler and the build-log handler all already do.
+	// Without it a stream is severed at the default 60s WriteTimeout and the
+	// worker is killed as a "client disconnect" -- while stream_max_seconds
+	// defaults to 300 and is the cap the operator is told governs this. A
+	// two-minute stream died at sixty seconds regardless of configuration.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
 	w.WriteHeader(sc)
 	if flusher != nil {
 		flusher.Flush() // push headers immediately so TTFB is measurable

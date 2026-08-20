@@ -92,11 +92,18 @@ func (s *sseSink) Ping() {
 	}
 }
 
-// heartbeat pings the sink every 15s until the returned stop() is called. Safe
-// to run concurrently with Send (both take the sink mutex).
+// heartbeat pings the sink every 15s until the returned stop() is called.
+// Safe to run concurrently with Send (both take the sink mutex).
+//
+// stop() WAITS for the goroutine to exit. It used to only close(done) and
+// return, so a ping already blocked on the sink mutex would win the race,
+// wake up after the handler had returned, and write to a ResponseWriter the
+// server had recycled for another request.
 func heartbeat(sink *sseSink) (stop func()) {
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()
 		for {
@@ -108,7 +115,10 @@ func heartbeat(sink *sseSink) (stop func()) {
 			}
 		}
 	}()
-	return func() { close(done) }
+	return func() {
+		close(done)
+		<-exited
+	}
 }
 
 func startSSE(w http.ResponseWriter) (*sseSink, bool) {
