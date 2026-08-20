@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
@@ -413,6 +414,39 @@ func extractTarGz(archivePath, destDir string) error {
 			if err := os.Chmod(target, os.FileMode(hdr.Mode)); err != nil {
 				return err
 			}
+
+		case tar.TypeSymlink:
+			// Symlinks were silently DROPPED here -- no default case, so the
+			// archive was accepted minus its links, and the symlink-escape
+			// branch in the validator was unreachable dead code because no
+			// symlink could ever exist in the extracted tree. The CLI now
+			// archives them properly, so they have to be recreated, and the
+			// containment check has to be real.
+			//
+			// Resolve the target relative to the LINK's directory and refuse
+			// anything that leaves the extraction root. An absolute target is
+			// refused outright.
+			if filepath.IsAbs(hdr.Linkname) {
+				return fmt.Errorf("absolute symlink target in archive: %s -> %s",
+					hdr.Name, hdr.Linkname)
+			}
+			if _, err := safepath.Join(filepath.Dir(target), hdr.Linkname); err != nil {
+				return fmt.Errorf("symlink escapes the code directory: %s -> %s",
+					hdr.Name, hdr.Linkname)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			// Replace any existing entry so re-extraction is idempotent.
+			_ = os.Remove(target)
+			if err := os.Symlink(hdr.Linkname, target); err != nil {
+				return fmt.Errorf("create symlink %s: %w", hdr.Name, err)
+			}
+
+		case tar.TypeLink:
+			// Hard links can reference a file outside the archive entirely,
+			// and no deploy needs them. Refuse loudly rather than dropping.
+			return fmt.Errorf("hard links are not supported in deploy archives: %s", hdr.Name)
 		}
 	}
 	return nil

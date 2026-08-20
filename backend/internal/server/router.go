@@ -503,6 +503,10 @@ func (r *Router) setupRoutes() {
 	// token (authorization_code + refresh_token grants), revoke (RFC 7009).
 	// Lets claude.ai / ChatGPT add /mcp as a custom channel via OAuth
 	// without the operator pasting a bearer token.
+	// Process-wide: whether X-Forwarded-For may be trusted for the DCR rate
+	// limiter's client identity.
+	oauth.TrustForwardedFor = r.cfg.Security.TrustedProxy
+
 	oauthHandler := &oauth.Handler{
 		DB:            r.db,
 		SecureCookies: r.cfg.Security.SecureCookies,

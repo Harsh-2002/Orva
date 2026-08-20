@@ -28,9 +28,9 @@ type dcrBucket struct {
 }
 
 const (
-	dcrCap          = 10.0
-	dcrRefillPerHr  = 10.0
-	dcrIdleTimeout  = 2 * time.Hour
+	dcrCap         = 10.0
+	dcrRefillPerHr = 10.0
+	dcrIdleTimeout = 2 * time.Hour
 )
 
 var defaultDCRLimiter = &dcrRateLimiter{buckets: map[string]*dcrBucket{}}
@@ -73,19 +73,44 @@ func (l *dcrRateLimiter) allow(ip string) bool {
 
 // dcrClientIP extracts the request's caller IP. We trust X-Forwarded-For
 // when set (Orva is typically deployed behind a reverse proxy); the
-// limit is per-source-IP so spoofing the header just rate-limits the
-// attacker-chosen value, which is fine.
+// The old comment here said spoofing the header "just rate-limits the
+// attacker-chosen value, which is fine". It is not fine: this limiter is the
+// ONLY abuse control on POST /register (everything else there is metadata
+// validation, with no authentication), so a caller who can vary one header
+// has no rate limit at all -- and each distinct value allocates a bucket
+// that lives for hours.
+//
+// The header is only trusted when ORVA_TRUSTED_PROXY is set, which is the
+// operator asserting that something in front of Orva rewrites it. Otherwise
+// the peer address is the identity, which cannot be forged over TCP.
 func dcrClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// First entry is the original client per RFC 7239.
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
+	if trustForwardedFor() {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// First entry is the original client per RFC 7239.
+			candidate := xff
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				candidate = xff[:i]
+			}
+			// Normalise to a parsed IP so "1.2.3.4", " 1.2.3.4 " and
+			// "1.2.3.4:9999" cannot each claim their own bucket.
+			if ip := net.ParseIP(strings.TrimSpace(candidate)); ip != nil {
+				return ip.String()
+			}
 		}
-		return strings.TrimSpace(xff)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
 	return host
 }
+
+// TrustForwardedFor is set once at startup from ORVA_TRUSTED_PROXY. Off by
+// default: trusting the header unconditionally is what made this limiter
+// bypassable.
+var TrustForwardedFor bool
+
+func trustForwardedFor() bool { return TrustForwardedFor }

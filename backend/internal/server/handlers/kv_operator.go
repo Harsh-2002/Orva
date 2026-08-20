@@ -112,11 +112,16 @@ func (h *KVOperatorHandler) List(w http.ResponseWriter, r *http.Request) {
 		limit = 1000
 	}
 
-	entries, err := h.DB.KVListContext(r.Context(), fnID, prefix, limit)
+	// Use the cursor-capable list, as the SDK-facing twin already does. This
+	// endpoint had no cursor at all, and the dashboard renders "Showing first
+	// 200. Narrow the prefix to see more." -- so 5000 flat keys were simply
+	// not browsable.
+	page, err := h.DB.KVListWithCursorContext(r.Context(), fnID, prefix, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "kv list failed: "+err.Error(), reqID)
 		return
 	}
+	entries := page.Entries
 	total, err := h.DB.KVCountContext(r.Context(), fnID)
 	if err != nil {
 		// Soft-fail on the count — the list itself succeeded, surface 0
@@ -129,9 +134,10 @@ func (h *KVOperatorHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toWireEntry(e))
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{
-		"entries":   out,
-		"total":     total,
-		"truncated": len(entries) == limit,
+		"entries":     out,
+		"total":       total,
+		"next_cursor": page.NextCursor,
+		"truncated":   page.NextCursor != "",
 	})
 }
 
