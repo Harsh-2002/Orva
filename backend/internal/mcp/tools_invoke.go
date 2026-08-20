@@ -288,7 +288,11 @@ func registerInvokeTools(rc *regCtx) {
 			if !in.Confirm {
 				return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true")
 			}
-			if err := deps.DB.DeleteExecution(in.ExecutionID); err != nil {
+			found, err := deps.DB.DeleteExecution(in.ExecutionID)
+			if err == nil && !found {
+				err = fmt.Errorf("execution %s not found", in.ExecutionID)
+			}
+			if err != nil {
 				return nil, DeletedOutput{}, err
 			}
 			return nil, DeletedOutput{DeletedID: in.ExecutionID}, nil
@@ -311,7 +315,11 @@ func registerInvokeTools(rc *regCtx) {
 			}
 			out := BulkDeleteOutput{}
 			for _, id := range in.IDs {
-				if err := deps.DB.DeleteExecution(id); err != nil {
+				// Count rows that actually existed. Counting attempts meant
+				// 1000 garbage ids reported {deleted: 1000, failed: 0},
+				// which the tool presents to an agent as real accounting.
+				found, err := deps.DB.DeleteExecution(id)
+				if err != nil || !found {
 					out.Failed++
 				} else {
 					out.Deleted++

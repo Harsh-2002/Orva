@@ -494,6 +494,13 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	fn.Version++
 
 	if err := h.Registry.Set(fn); err != nil {
+		// Create reports this exact case as 409; Update reported 500, so a
+		// rename onto a taken name looked like a server fault.
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			respond.Error(w, http.StatusConflict, "CONFLICT",
+				"a function with that name already exists", reqID)
+			return
+		}
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to update function", reqID)
 		return
 	}

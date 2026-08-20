@@ -108,10 +108,10 @@ func (h *ExecutionHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, http.StatusOK, map[string]any{
-		"execution_id":   logs.ExecutionID,
-		"stdout":         logs.Stdout,
-		"stderr":         logs.Stderr,
-		"log_entries":    entries,
+		"execution_id": logs.ExecutionID,
+		"stdout":       logs.Stdout,
+		"stderr":       logs.Stderr,
+		"log_entries":  entries,
 	})
 }
 
@@ -165,8 +165,15 @@ func (h *ExecutionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "missing execution ID", reqID)
 		return
 	}
-	if err := h.DB.DeleteExecution(execID); err != nil {
+	found, err := h.DB.DeleteExecution(execID)
+	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
+		return
+	}
+	if !found {
+		// Reporting success for an id that never existed makes a typo look
+		// like a completed deletion.
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "execution not found", reqID)
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{"status": "deleted", "id": execID})
@@ -192,17 +199,24 @@ func (h *ExecutionHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "max 1000 ids per request", reqID)
 		return
 	}
-	deleted, failed := 0, 0
+	// deleted counts rows that actually existed. Counting attempts instead
+	// meant 1000 garbage ids reported {deleted: 1000, failed: 0}.
+	deleted, failed, missing := 0, 0, 0
 	for _, id := range body.IDs {
-		if err := h.DB.DeleteExecution(id); err != nil {
+		found, err := h.DB.DeleteExecution(id)
+		switch {
+		case err != nil:
 			failed++
-			continue
+		case !found:
+			missing++
+		default:
+			deleted++
 		}
-		deleted++
 	}
 	respond.JSON(w, http.StatusOK, map[string]any{
-		"deleted": deleted,
-		"failed":  failed,
+		"deleted":   deleted,
+		"not_found": missing,
+		"failed":    failed,
 	})
 }
 

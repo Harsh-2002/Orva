@@ -99,6 +99,14 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 			"function not found: "+name, reqID)
 		return
 	}
+	// Every other invoke entrypoint refuses an inactive function; this one
+	// did not, so orva.invoke("some-inactive-fn") from inside a sandbox ran
+	// it anyway.
+	if fn.Status != "active" {
+		respond.Error(w, http.StatusConflict, "NOT_ACTIVE",
+			"function is not active", reqID)
+		return
+	}
 
 	body, err := readBoundedBody(r.Body, 1<<20)
 	if err != nil {
@@ -287,6 +295,14 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND",
 			"function not found: "+name, reqID)
+		return
+	}
+	// Every other invoke entrypoint refuses an inactive function; this one
+	// did not, so orva.invoke("some-inactive-fn") from inside a sandbox ran
+	// it anyway.
+	if fn.Status != "active" {
+		respond.Error(w, http.StatusConflict, "NOT_ACTIVE",
+			"function is not active", reqID)
 		return
 	}
 

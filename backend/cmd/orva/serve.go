@@ -14,6 +14,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server"
 	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/spf13/cobra"
@@ -113,6 +114,13 @@ func runServe(cmd *cobra.Command, args []string) {
 	// own cleanup, which only covers a live process — a kill -9 mid-install
 	// leaks the whole working set under build-tmp/ permanently.
 	builder.SweepBuildScratch(cfg.Data.Dir)
+
+	// Reclaim NSJAIL.* cgroup directories left behind by a previous process.
+	// Workers are SIGKILLed, so nsjail never runs its own cleanup, and every
+	// spawn scans this directory to find its own cgroup -- an accumulation
+	// slows cold starts and eventually breaks memory sampling outright,
+	// which leaves the autoscaler permanently over-reserving.
+	sandbox.SweepOrphanCgroups()
 
 	// Trim execution history so the database does not grow without bound.
 	// Runs once now and daily thereafter; the window is the system_config key

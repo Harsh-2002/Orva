@@ -78,6 +78,12 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// restoreRestartExitCode is what the process exits with after a successful
+// restore. It must be non-zero so Restart=on-failure brings the service back
+// up; 70 is EX_SOFTWARE from sysexits.h, conventionally "internal state
+// requires a restart".
+const restoreRestartExitCode = 70
+
 // Restore handles POST /api/v1/restore?confirm=1. Body is a multipart
 // form with the archive in the `archive` field.
 //
@@ -145,8 +151,14 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	// timer is enough for the response to flush over a local socket;
 	// remote browsers will already have received it by the time the
 	// connection drops because we close the response above.
+	//
+	// Exit NON-zero. The shipped systemd unit uses Restart=on-failure with
+	// no RestartForceExitStatus, so exiting 0 here told systemd the service
+	// had finished its work and it stayed down -- a successful restore took
+	// the server offline permanently on bare metal. Docker's
+	// restart: unless-stopped masks it, which is why CI never saw it.
 	go func() {
 		time.Sleep(1 * time.Second)
-		os.Exit(0)
+		os.Exit(restoreRestartExitCode)
 	}()
 }

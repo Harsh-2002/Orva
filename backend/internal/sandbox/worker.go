@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -584,9 +587,24 @@ func (w *Worker) Kill() error {
 	if w.Cmd == nil || w.Cmd.Process == nil {
 		return nil
 	}
-	// Signal the whole process group (Setpgid=true at Spawn).
-	_ = syscall.Kill(-w.Cmd.Process.Pid, syscall.SIGKILL)
+	// Signal the whole process group (Setpgid=true at Spawn). Skip the raw
+	// group signal once the process is known reaped: the PID may have been
+	// recycled by then, and this call is not guarded the way Process.Kill is.
+	select {
+	case <-w.waitDone:
+	default:
+		_ = syscall.Kill(-w.Cmd.Process.Pid, syscall.SIGKILL)
+	}
 	_ = w.Cmd.Process.Kill()
+
+	// SIGKILL means nsjail never runs its own cleanup, so the NSJAIL.<pid>
+	// cgroup directory it created is left behind. Nothing else removes it,
+	// and every subsequent spawn ReadDirs that directory and reads
+	// cgroup.procs per entry to find its own -- so the leak is not just disk,
+	// it makes cgroup resolution slower on every cold start until it times
+	// out entirely, at which point memory sampling stops and the autoscaler
+	// permanently over-reserves.
+	w.removeCgroup()
 	// The Spawn-side reaper goroutine will pick up the SIGKILL exit and
 	// close waitDone. Caller does not block on it — w.Kill returns as soon
 	// as the signal is delivered.
@@ -707,4 +725,52 @@ func (r *ringBuffer) Snapshot(from int64) []byte {
 		copy(out[n:], r.buf[:want-n])
 	}
 	return out
+}
+
+// removeCgroup best-effort removes the cgroup directory nsjail created for
+// this worker. Safe to call more than once, and safe when the worker never
+// had one.
+//
+// rmdir on a cgroup only succeeds once it has no member processes, which is
+// what we want: if anything is somehow still inside, leave it alone and let
+// the startup sweep get it later.
+func (w *Worker) removeCgroup() {
+	path := w.GetCgroupPath()
+	if path == "" {
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		slog.Debug("could not remove worker cgroup", "path", path, "err", err)
+	}
+}
+
+// SweepOrphanCgroups removes NSJAIL.* cgroup directories left behind by
+// workers from a previous process. Called once at startup: a kill -9 of
+// orvad itself never reaches removeCgroup, and the directories accumulate
+// across restarts.
+//
+// Only empty directories are removed, so a cgroup belonging to a live
+// sandbox is never touched.
+func SweepOrphanCgroups() {
+	mount := cgroupv2Delegate()
+	if mount == "" {
+		return
+	}
+	entries, err := os.ReadDir(mount)
+	if err != nil {
+		return
+	}
+	removed := 0
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "NSJAIL.") {
+			continue
+		}
+		// rmdir fails with EBUSY while the cgroup still holds processes.
+		if err := os.Remove(filepath.Join(mount, e.Name())); err == nil {
+			removed++
+		}
+	}
+	if removed > 0 {
+		slog.Info("reclaimed orphaned nsjail cgroups", "count", removed, "mount", mount)
+	}
 }

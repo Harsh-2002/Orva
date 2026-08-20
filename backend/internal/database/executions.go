@@ -588,6 +588,11 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 	if params.Limit <= 0 {
 		params.Limit = 50
 	}
+	// Clamp the upper end too. Every sibling list endpoint does; this one
+	// only floored, so ?limit=100000000 materialised the whole table.
+	if params.Limit > 1000 {
+		params.Limit = 1000
+	}
 
 	query := "SELECT " + executionSelectColumns + " FROM executions WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM executions WHERE 1=1"
@@ -678,12 +683,26 @@ func (db *Database) GetExecutionLog(executionID string) (*ExecutionLog, error) {
 // execution_logs) and its captured request envelope (manual cleanup —
 // execution_requests dropped its FK in v0.4 to avoid async-batch FK
 // failures on the hot path; see dropExecutionRequestsFK).
-func (db *Database) DeleteExecution(id string) error {
-	if _, err := db.write.Exec("DELETE FROM execution_requests WHERE execution_id = ?", id); err != nil {
-		return err
+func (db *Database) DeleteExecution(id string) (bool, error) {
+	// Delete every child first, by the same list the purge uses. Two of them
+	// -- user_spans and execution_log_entries -- carry no declared FK, so
+	// CASCADE cannot reach them and they were left as permanently
+	// unreachable rows. The comment a few lines below has warned about
+	// exactly this; executionChildTables is the single list both paths use.
+	for _, t := range executionChildTables {
+		if _, err := db.write.Exec("DELETE FROM "+t+" WHERE execution_id = ?", id); err != nil {
+			return false, fmt.Errorf("delete %s: %w", t, err)
+		}
 	}
-	_, err := db.write.Exec("DELETE FROM executions WHERE id = ?", id)
-	return err
+	res, err := db.write.Exec(`DELETE FROM executions WHERE id = ?`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // executionChildTables are every table keyed by execution_id. Only

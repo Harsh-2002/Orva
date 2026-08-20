@@ -52,7 +52,16 @@ func New(path string) (*Database, error) {
 	// opened pool connection runs them on connect — without this, only the
 	// one connection that hosted the post-Open Exec call gets busy_timeout
 	// and concurrent readers race writers into SQLITE_BUSY.
-	const dsnPragmas = "_pragma=busy_timeout(10000)" +
+	// foreign_keys is per-CONNECTION, not per-database. It used to be set
+	// once at the end of the schema string, so it lived only on whichever
+	// pooled connection happened to serve that Exec -- if the driver ever
+	// recycled it, the replacement had FKs off and DeleteFunction, which
+	// relies entirely on ON DELETE CASCADE to clean up secrets, routes, kv
+	// and crons, silently left them behind. It also made the async writer's
+	// FK failures nondeterministic. PurgeOldExecutions already refuses to
+	// trust it; nothing else should have to.
+	const dsnPragmas = "_pragma=foreign_keys(ON)" +
+		"&_pragma=busy_timeout(10000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=cache_size(-64000)" +
