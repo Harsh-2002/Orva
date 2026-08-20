@@ -92,6 +92,19 @@ func runServe(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// The UUIDv7 migration renames function ids, and each function's code
+	// lives at <dataDir>/functions/<id>/. Complete (or resume) the matching
+	// directory rename before anything reads or reclaims that tree. This is
+	// fatal on failure by design: booting with ids that do not match the
+	// names on disk means every function fails to spawn and the GC then
+	// deletes the operator's only copy of their source as orphans.
+	if err := db.ReconcileFunctionDirs(cfg.Data.Dir); err != nil {
+		slog.Error("failed to reconcile function directories after id migration",
+			"error", err,
+			"hint", "function code is intact on disk; fix the cause and restart")
+		os.Exit(1)
+	}
+
 	// Round-G: fold any pre-existing flat code/ dirs into the new
 	// versions/<hash>/ layout. Idempotent — no-op on subsequent boots.
 	builder.MigrateLegacyCodeDirs(cfg.Data.Dir, db)
