@@ -88,17 +88,34 @@ func runBackupDownload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("backup failed: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	f, err := os.Create(out)
+	// 0600, not os.Create's 0666&^umask. This archive contains the SQLite
+	// database, every deployed function version, the secrets master key and
+	// the bootstrap admin API key -- the command's own help text says so.
+	// World-readable on a shared jump host or CI runner hands all of that to
+	// every local user. O_EXCL also makes the clobber check above atomic.
+	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	n, err := io.Copy(f, resp.Body)
 	if err != nil {
+		f.Close()
 		return fmt.Errorf("write archive: %w", err)
+	}
+	// Surface the close error. A short write that only fails on flush --
+	// ENOSPC being the obvious one -- otherwise printed "Saved" and exited 0
+	// with a truncated disaster-recovery archive.
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("finalize archive: %w", err)
 	}
 
 	abs, _ := filepath.Abs(out)
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"path": abs, "bytes": n})
+	}
+	if isQuiet(cmd) {
+		return nil
+	}
 	fmt.Printf("Saved %s (%s)\n", abs, formatBytes(n))
 	return nil
 }

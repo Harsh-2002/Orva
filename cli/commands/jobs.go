@@ -349,6 +349,9 @@ func runJobsDelete(cmd *cobra.Command, args []string) error {
 	}
 	resp.Body.Close()
 
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"deleted": true, "id": id})
+	}
 	okf(cmd, "Deleted job %s", id)
 	return nil
 }
