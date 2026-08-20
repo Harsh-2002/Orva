@@ -242,7 +242,11 @@ func (db *Database) AsyncInsertExecutionRequest(req *ExecutionRequest) {
 	if req.Truncated {
 		truncated = 1
 	}
-	db.AsyncExec(`
+	// Telemetry, not critical. This is the single largest payload the writer
+	// ever queues -- a captured request body up to replay_capture_max_bytes
+	// (1 MiB default) -- and capture is explicitly best-effort, so it does
+	// not belong in the queue whose whole point is not losing anything.
+	db.AsyncExecTelemetry(`
 		INSERT OR REPLACE INTO execution_requests (
 			execution_id, method, path, headers_json, body, truncated, captured_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
