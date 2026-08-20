@@ -20,6 +20,18 @@ Every API error returns the same envelope:
 
 Fields beyond `code` and `message` are optional and may be absent. Transient errors set both the `Retry-After` HTTP header and the `error.retry_after_s` body field; the header value matches the body and is RFC 7231-compliant for clients that don't parse the body.
 
+## Where these apply
+
+The invocation codes below — `FUNCTION_BUSY`, `MEMORY_EXHAUSTED`,
+`EGRESS_POLICY_UNAVAILABLE`, `TIMEOUT`, `SHUTTING_DOWN` and the rest — reach
+callers on **every** invoke path: `POST /fn/{id}`, custom routes, replay,
+function-to-function `orva.invoke()`, and the inbound-webhook trigger.
+
+That is new. Only `POST /fn/{id}` used the shared mapper; the other four
+flattened every failure to a bare `503 POOL_ERROR`, so an SDK retrying on
+those paths could not tell a concurrency cap it should back off from a host
+OOM it should not.
+
 ## Code reference
 
 ### 4xx — client errors
@@ -37,7 +49,10 @@ Fields beyond `code` and `message` are optional and may be absent. Transient err
 | `VERSION_GCD` | 410 | rollback / diff target's version tree was pruned by the GC; `details.available_hashes` lists survivors | no — pick a still-archived hash |
 | `METHOD_NOT_ALLOWED` | 405 | method not in the route's allowed list | no |
 | `NOT_ACTIVE` | 409 | function status is `error` or `inactive` | no — redeploy or activate |
-| `PAYLOAD_TOO_LARGE` | 413 | body exceeds `cfg.Server.MaxBodyBytes` (default 6 MB) | no — split or raise the cap |
+| `PAYLOAD_TOO_LARGE` | 413 | body exceeds `cfg.Server.MaxBodyBytes` (default 6 MB). Two paths: a `Content-Length` above the cap is refused up front; a **chunked** body with no `Content-Length` is refused when the read hits the cap. The chunked case used to be silently truncated and handed to the function with a 200. | no — send `Content-Length`, split the upload, or raise the cap |
+| `CHECKPOINT_BUSY` | 409 | `POST /system/vacuum` could not checkpoint the WAL because another connection holds a read lock. Previously the checkpoint's busy result was discarded and VACUUM ran against a stale WAL. | yes — retry shortly |
+| `CONFLICT` | 409 | `PUT /functions/{id}` renaming onto a name that already exists. Used to surface as a 500. | no — pick another name |
+| `NOT_FOUND` | 404 | `DELETE /executions/{id}` for an id that does not exist. Used to report success. | no |
 | `TOO_MANY_REQUESTS` | 429 | host-wide concurrency cap reached during TryAcquire grace | **yes** — back off briefly |
 | `RATE_LIMITED` | 429 | rate limit exceeded — per-function invoke limit (`rate_limit_per_min`, per client IP) or too many login attempts (per client IP) | **yes** — `Retry-After: 60` |
 | `FUNCTION_BUSY` | 429 | function at its own `max_concurrency` cap under the `reject` policy | **yes** — `Retry-After: 1`, or raise `max_concurrency` / switch the policy to `queue` |
@@ -88,5 +103,11 @@ Wire-level mapping lives in `internal/server/handlers/errmap.go` (`invokeError`,
 - `internal/sandbox/sandbox.go`: `ErrEgressPolicyMissing`
 - `internal/firewall/policy.go`: `ErrPolicyUnavailable`
 - `internal/builder/queue.go`: `ErrQueueFull`, `ErrQueueStopping`
+- `internal/proxy/proxy.go`: `ErrBodyTooLarge` — an inbound body over the cap,
+  including the chunked case the middleware's `Content-Length` check cannot see
+- `internal/sandbox/worker.go`: `ErrStreamTooLarge` — a streaming handler
+  exceeding the 32 MiB buffer a **non**-streaming caller has to accumulate into
+  (cron, jobs, function-to-function, inbound webhook). It has no `invokeError`
+  case yet, so it currently surfaces as `SANDBOX_ERROR`.
 
 Adding a new code: define a sentinel, return it from the relevant code path, add a case to `invokeError` (or `deployError`), append a row to the table above.

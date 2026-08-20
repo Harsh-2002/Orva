@@ -142,9 +142,14 @@ it is created, so they cannot vary per request. `ORVA_EXECUTION_ID`,
 by the adapter from the `x-orva-*` request headers on every invocation.
 
 Because the first five are baked in at spawn, changing `timeout_ms`,
-`memory_mb`, `cpus` or `env_vars` drains the idle workers so the next spawn
-picks up the new value. Changing `entrypoint` does **not** — redeploy to
-pick that up.
+`memory_mb`, `cpus`, `env_vars` or `entrypoint` drains the idle workers so
+the next spawn picks up the new value.
+
+`entrypoint` used to be the exception: it did not trigger the drain, so the
+PUT returned 200 while every warm worker kept serving the old handler
+indefinitely. It now behaves like the rest. (It is also validated as a
+contained relative path on write — it names a file inside the function's own
+code directory, and is read back by `GET /functions/{id}/source`.)
 
 ## Filesystem inside the sandbox
 

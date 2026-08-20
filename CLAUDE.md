@@ -38,7 +38,7 @@ make clean          # remove build/ and embedded artefacts
 ```
 go.mod, go.sum    Single Go module rooted at the repo (covers backend/ + cli/ + internal/)
 backend/          Go server (see backend/CLAUDE.md)
-  cmd/orva/       Server entry: registers commands.NewRoot() + serve/setup/init
+  cmd/orva/       Server entry: registers commands.NewRoot() + serve/setup
   internal/       Server packages (config, database, pool, proxy, mcp, …)
   runtimes/       Runtime adapter source: node, python
 cli/              Slim standalone CLI codebase (see cli/CLAUDE.md)
@@ -131,7 +131,7 @@ Go silently ignores unknown `-X` targets, so renaming the version package or any
 
 - **`adapters-embed` must run before any `go build`** — it copies `runtimes/` into `backend/cmd/orva/adapters/` for `//go:embed`. `make build` calls it automatically; bare `go build` does not.
 - **Full server and slim CLI are separate binaries with one command library** — the Linux
-  server build includes `serve` / `setup` / `init` plus every client command; `make cli`
+  server build includes `serve` / `setup` plus every client command; `make cli`
   builds the smaller cross-platform client without server packages.
 - **UI is embedded** in the Go binary via `//go:embed ui_dist`; `make build` alone reuses the last embedded snapshot. Run `make build-all` (or `make embed` first) to pick up frontend changes.
 - **nsjail required on Linux** for sandbox invocations; the server starts without it but every invocation fails until it is installed.

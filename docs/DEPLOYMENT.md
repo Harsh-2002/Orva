@@ -56,7 +56,7 @@ caddy, nginx, traefik, cloudflared. The browser's clipboard API
 silently fails on plain HTTP from non-localhost — the dashboard
 becomes partially broken.
 
-Once TLS is terminated upstream, set `ORVA_SECURE_COOKIES=true` so
+If your proxy forwards `X-Forwarded-Proto: https` (the nginx example below does), Orva sets the `Secure` flag on session cookies by itself. Set `ORVA_SECURE_COOKIES=true` only when it cannot see the real scheme so
 session cookies are only sent over HTTPS.
 
 Caddy example:
@@ -153,20 +153,21 @@ Execution history is pruned automatically: `system_config.execution_retention_da
 old `executions` rows together with their logs, captured requests, structured log
 entries and user spans. See [CONFIG.md](CONFIG.md).
 
-Build logs are **not** covered by that sweep and still grow unbounded. Manual
-prune:
+Build logs **are** covered: the same sweep removes `build_logs` for terminal
+deployments past the cutoff, along with finished `jobs`, `webhook_deliveries`
+and expired `sessions`. None of that needed a cron job before this was true,
+and none needs one now.
 
-```sql
--- run periodically (cron):
-docker exec orva sqlite3 /var/lib/orva/orva.db <<SQL
-DELETE FROM execution_logs WHERE execution_id IN
-  (SELECT id FROM executions WHERE started_at < datetime('now', '-7 days'));
-DELETE FROM executions WHERE started_at < datetime('now', '-7 days');
-DELETE FROM build_logs WHERE deployment_id IN
-  (SELECT id FROM deployments WHERE submitted_at < datetime('now', '-30 days'));
-VACUUM;
-SQL
+If you are catching up an instance that ran for a long time before this
+existed, a one-off compaction reclaims the space the sweep has since freed:
+
+```bash
+docker exec orva sqlite3 /var/lib/orva/orva.db "VACUUM;"
 ```
+
+Prefer `POST /api/v1/system/vacuum` (or the dashboard's Compact database
+button) over raw sqlite3 — it checkpoints the WAL first and reports a busy
+checkpoint instead of silently compacting a stale file.
 
 Docker stdout logs rotate via the daemon's `log-driver` config (the
 shipped `docker-compose.yml` sets `max-size: 10m, max-file: 5`).
@@ -198,8 +199,14 @@ docker run -d --name orva -p 8443:8443 \
 enrolls each sandbox PID in the host cgroup hierarchy, and omitting them
 makes every invocation fail with `Launching child process failed`.
 
-The DB schema migrations are idempotent additive ALTERs — running a
-newer image on an older volume is safe. **Downgrade is not.**
+The DB schema migrations are idempotent additive ALTERs, so running a newer
+image on an older volume is safe — with one carve-out. The **UUIDv7 id
+migration** rewrites every storage id and renames `<dataDir>/functions/<id>/`
+to match, in a boot step that is fatal on failure by design. It is idempotent
+and resumable, and your code is never at risk, but it is one-way: **back up
+before upgrading across it.** See [Upgrading across the UUIDv7 id
+migration](OPERATIONS.md#upgrading-across-the-uuidv7-id-migration).
+**Downgrade is not safe.**
 
 ### Bare metal
 
@@ -209,7 +216,12 @@ curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.s
 sudo systemctl start orva
 ```
 
-The installer is idempotent — same data dir is preserved.
+The installer is idempotent — same data dir is preserved. Re-running it also
+rewrites the systemd unit, which is how a unit predating
+`RestartForceExitStatus=70` picks that up. Without it, `orva backup restore`
+exits 70 to force a restart and systemd's `Restart=on-failure` leaves the
+service down instead. Verify with
+`systemctl cat orva | grep RestartForceExitStatus`.
 
 ### Downtime
 
@@ -222,11 +234,22 @@ Retry logic at the caller (or the SDK) handles it.
 ## Reverse proxy considerations
 
 - **Body size**: increase the proxy's body limit if you'll deploy
-  large tarballs. Default Orva cap is 6 MB for invoke bodies; the
+  large tarballs. Default Orva cap is 6 MB for invoke bodies (an
+  over-limit body now returns `413 PAYLOAD_TOO_LARGE`, including chunked
+  uploads that carry no `Content-Length`); the
   deploy endpoint accepts up to `system_config.max_code_size_bytes`
   (50 MB).
 - **Read timeout**: must exceed the longest function `timeout_ms`. SSE
   streams need a long read timeout (≥ 5 min recommended).
+- **`X-Forwarded-For`**: Orva **ignores** this header unless you set
+  `ORVA_TRUSTED_PROXY=true`. Left off, the OAuth dynamic-registration rate
+  limiter — the only abuse control on the unauthenticated `POST /register` —
+  keys on your proxy's own address, so every client shares one bucket. Turn
+  it on once a proxy you control is rewriting the header, and **not before**:
+  trusting a client-settable value means a caller can have no rate limit at
+  all simply by varying it.
+- **`X-Forwarded-Proto`**: forward it (the nginx example above does) and Orva
+  marks session cookies `Secure` automatically, without `ORVA_SECURE_COOKIES`.
 - **HTTP/2**: helps with the dashboard's parallel API calls. SSE works
   over both HTTP/1.1 and HTTP/2.
 - **WebSockets**: not used by Orva. SSE-only.

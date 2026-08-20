@@ -46,7 +46,7 @@ func registerSystemTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "system_health",
 			Title:       "System Health",
-			Description: "Health check for the Orva instance. Returns version, uptime, sandbox counters, and host resources. Use this to confirm an Orva instance is reachable before doing anything else.",
+			Description: "Health check for the Orva instance. Pings the database and checks the sandbox runtime, then returns status (healthy|degraded), database, sandbox_runtime, version, uptime, sandbox counters, and host resources. Use this to confirm an Orva instance is reachable AND able to run functions before doing anything else — a degraded status means invocations will fail.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, SystemHealthOutput, error) {

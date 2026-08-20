@@ -33,8 +33,21 @@ present. Full code catalog in [ERRORS.md](ERRORS.md).
 ## Auth
 
 ### `POST /api/v1/auth/onboard`
-First-run only. Creates the admin user. Returns 409 if a user already
-exists.
+First-run only. Creates the admin user.
+
+- **409 `ALREADY_SETUP`** — a user already exists.
+- **401 `UNAUTHORIZED`** — the instance is already in use (operator-minted
+  API keys, or deployed functions) and the caller presented no `admin` key.
+- **503 `UNAVAILABLE`** — the setup state could not be read. It fails closed
+  rather than assuming the instance is unclaimed.
+
+A virgin instance onboards with no credentials, which is the documented
+first-run flow: the auto-minted `bootstrap-admin` key does not count as use.
+The gate exists because `CreateUser` is only ever called here, so an operator
+who works exclusively through API keys never onboards — and unguarded, this
+endpoint (exempt from the auth middleware, handing back a session cookie that
+bypasses the permission model) would let anyone who can reach the port claim
+a working instance.
 
 ```json
 // request
@@ -54,6 +67,9 @@ Sets the session cookie.
 Returns the current user (cookie-authed).
 
 ### `GET /api/v1/auth/status`
+Reports whether any dashboard user exists. **Fails closed:** if the count
+cannot be read it answers `{"has_user": true}`, so a transient database error
+never advertises a claimable instance.
 Returns `{"has_user": bool}` so the UI knows whether to route to
 `/onboarding` or `/login`.
 
@@ -105,7 +121,7 @@ drains the warm pool so the next invocation picks up the new mode.
 List all functions. Optional `?status=active|inactive`, `?runtime=...`.
 
 ### `GET /api/v1/functions/{id}`
-Single function record.
+Single function record. Accepts a function **id or name**.
 
 ### `PUT /api/v1/functions/{id}`
 Partial update. Whitelisted fields: `name`, `description`, `entrypoint`,
@@ -114,13 +130,26 @@ Partial update. Whitelisted fields: `name`, `description`, `entrypoint`,
 `status`.
 
 `status` accepts only `active` | `inactive`. Setting `inactive` causes
-`POST /fn/<id>` to return 409 NOT_ACTIVE.
+`POST /fn/<id>` to return 409 NOT_ACTIVE — and, since this release, also
+blocks function-to-function `orva.invoke()` calls, which previously ran an
+inactive function anyway.
 
 `auth_mode` accepts `public` | `platform_key` | `signed` and governs how
-`POST /fn/<id>` is authorized. `concurrency_policy` accepts `reject` | `queue`
+`POST /fn/<id>` is authorized. Under `platform_key` the caller must present a
+key carrying the **`invoke`** permission (or a session cookie); a key scoped
+to `read`/`write` only gets 403. `concurrency_policy` accepts `reject` | `queue`
 and decides what happens once `max_concurrency` is reached (`reject` returns
 429 FUNCTION_BUSY). `rate_limit_per_min` is a per-client-IP cap; exceeding it
 returns 429 RATE_LIMITED with `Retry-After: 60`.
+
+`filename` defaults to the function's own `entrypoint` before falling back to
+`handler.js` / `handler.py`. It used to hardcode those two, so a function
+created with any other entrypoint deployed a file the builder then refused to
+find. `filename` and every `extras` key must be a contained relative path;
+traversal returns 400 `VALIDATION`.
+
+`extras` is REST-only — the MCP `deploy_function_inline` tool does not accept
+it.
 
 ### `DELETE /api/v1/functions/{id}`
 Removes the row + the on-disk versions dir. Irreversible.
@@ -132,7 +161,8 @@ Deploy from JSON.
 {
   "code": "module.exports = async () => ({ok:true});",
   "filename": "handler.js",
-  "dependencies": "lodash@^4.17.21"  // optional, becomes package.json or requirements.txt
+  "dependencies": "lodash@^4.17.21", // optional, becomes package.json or requirements.txt
+  "extras": {"tsconfig.json": "{...}"}  // optional support files written alongside the handler
 }
 ```
 
@@ -209,7 +239,15 @@ the build reaches a terminal state (`succeeded` | `failed`).
 ## Executions
 
 ### `GET /api/v1/executions`
-List recent invocations. Optional `?function_id=...`, `?limit=N`.
+List recent invocations. Optional `?function_id=...`, `?limit=N` (default 50,
+**capped at 1000**), `?since=`/`?until=` (RFC3339).
+
+> `since`/`until` are compared as **times**, not as text. They used to be raw
+> string comparisons against a differently-formatted stored value, so a
+> "last 1 hour" query returned nothing at all and `orva executions prune`
+> over-deleted by up to a day at the boundary.
+
+`GET /api/v1/functions` is likewise capped at 1000.
 
 ### `GET /api/v1/executions/{id}`
 Single execution row (status, duration, cold_start flag).
@@ -220,12 +258,22 @@ The function's stderr from this invocation.
 ### Execution lifecycle and observability
 
 - `GET /api/v1/executions/{id}/request` — return the captured invocation request.
-- `DELETE /api/v1/executions/{id}` — delete one execution record.
+- `DELETE /api/v1/executions/{id}` — delete one execution record. Returns
+  **404** for an id that does not exist; it used to report success.
 - `POST /api/v1/executions/bulk-delete` — delete matching execution records.
+  Responds `{deleted, not_found, failed}`. `deleted` counts rows that
+  actually existed: it used to count attempts, so 1000 unknown ids reported
+  `{deleted: 1000, failed: 0}`.
 - `POST /api/v1/executions/{id}/replay` — replay a captured request.
 - `GET /api/v1/traces` and `GET /api/v1/traces/{id}` — list trace-wide summaries with opaque stable cursors and inspect the complete causal waterfall.
 - `GET /api/v1/functions/{id}/baseline` — return the function's trace baseline.
-- `GET /api/v1/activity` — list the operator activity feed.
+- `GET /api/v1/activity` — list the operator activity feed. Filters:
+  `source`, `q`, `status_min` (≥ n; use `400` for errors), `status_max`
+  (≤ n; use `399` for successes), `since`/`until` (unix millis), `limit`.
+  Paginate with `cursor` **and** `cursor_id` from the previous response's
+  `next_cursor` / `next_cursor_id` — the feed is ordered `(ts, id)` and a
+  timestamp-only cursor silently skips every row sharing the last row's
+  millisecond.
 
 ## Secrets
 
@@ -244,7 +292,9 @@ Remove. Triggers a pool refresh.
 
 Operator-facing function resources use the normal API-key/session auth:
 
-- `GET /api/v1/functions/{id}/kv`
+- `GET /api/v1/functions/{id}/kv` — `prefix`, `limit` (default 200, max
+  1000) and `cursor`. Returns `next_cursor`; `truncated` reflects whether one
+  was issued. Page with it rather than narrowing the prefix.
 - `GET|PUT|DELETE /api/v1/functions/{id}/kv/{key}`
 - `POST /api/v1/functions/{id}/kv/{key}/incr`
 - `POST /api/v1/functions/{id}/kv/{key}/cas`
@@ -288,7 +338,8 @@ Outbound event delivery:
 - `GET|POST /api/v1/webhooks`
 - `GET|PUT|DELETE /api/v1/webhooks/{id}`
 - `POST /api/v1/webhooks/{id}/test`
-- `GET /api/v1/webhooks/{id}/deliveries`
+- `GET /api/v1/webhooks/{id}/deliveries` — accepts `?limit=` (default 100,
+  max 500). It used to be hardcoded to 100 with no parameter.
 - `POST /api/v1/webhooks/deliveries/{id}/retry`
 
 ## Routes
@@ -346,6 +397,8 @@ returns the plaintext key.
 {
   "name": "ci-deployer",
   "permissions": ["invoke", "read", "write"],   // optional, defaults to all 4
+  // expires_in_days is capped at 36500. Above that, time.Duration overflows
+  // and used to mint a key whose expires_at was already in the past.
   "expires_in_days": 90                          // or expires_at: "ISO timestamp"
 }
 ```
@@ -373,9 +426,14 @@ Authorization: Bearer orva_chn_<token>     # spec-standard, recommended
 X-Orva-API-Key: orva_chn_<token>           # parity with the REST API
 ```
 
-The REST endpoints below (CRUD on `/api/v1/channels`) are operator-
-managed and require an **API key** or session cookie — channel tokens
-themselves cannot manage channels.
+The REST endpoints below (CRUD on `/api/v1/channels`) are operator-managed
+and require an API key carrying the **`admin`** permission, or a session
+cookie — channel tokens themselves cannot manage channels.
+
+> **Changed:** these used to accept `read`/`write`. A channel token is a
+> long-lived bearer credential whose tools bypass the target function's
+> `auth_mode`, so a write-scoped key could mint itself a credential that
+> outranked it. Minting one is now gated like minting an API key.
 
 ### `GET /api/v1/channels`
 List channels. Returns `{channels: [...]}` with name, description,
@@ -432,6 +490,16 @@ Same data, JSON shape, used by the dashboard.
 Prometheus also scrapes the unauthenticated `GET /metrics` path.
 
 ### Backup, storage, and firewall administration
+
+Everything in this section requires the **`admin`** permission — including
+the firewall **reads** (`GET /firewall/rules`, `/firewall/status`,
+`/firewall/dns`).
+
+> **Changed:** the `/api/v1/firewall` surface used to be `read`/`write`.
+> Egress blocklists and the DNS every sandbox resolves through are
+> instance-wide security state, so a deploy-scoped key could repoint every
+> sandbox's resolver. Breaking for write-scoped automation touching these
+> endpoints.
 
 - `GET /api/v1/backup` and `POST /api/v1/restore` — download or restore an instance backup.
 - `GET /api/v1/system/storage` — inspect disk/database usage.

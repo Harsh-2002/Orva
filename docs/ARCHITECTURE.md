@@ -152,8 +152,8 @@ POST /api/v1/functions/{id}/deploy-inline   {code, dependencies}
      │      │     ├ if versions/<hash>/.orva-ready exists → cached short-circuit
      │      │     ├ scratch_dir = versions/<hash>.tmp.<rand>
      │      │     │     ├ extract tarball
-     │      │     │     ├ ValidateArchive (reject path-traversal symlinks)
-     │      │     │     ├ npm install / pip install (HOST-side, not in sandbox)
+     │      │     │     ├ ValidateArchive (reject path-traversal symlinks). Extraction recreates symlinks with a containment check — target resolved relative to the link's own directory, absolute targets refused — and rejects hard links outright. Links used to be silently dropped, which also made this validator's symlink branch unreachable
+     │      │     │     ├ npm install / pip install (inside nsjail via sandbox.RunBuild, under the same compiled egress policy a worker gets — not host-side), each bounded by build_timeout_seconds
      │      │     │     ├ install adapter wrapper (main.js / main.py)
      │      │     │     └ touch .orva-ready
      │      │     └ atomic os.Rename(scratch_dir, versions/<hash>)
@@ -231,7 +231,7 @@ Feature tables added since v0.2:
 | AI assistant         | `ai_conversations`, `ai_messages`, `ai_tool_calls`, `ai_provider_configs`, `ai_settings` |
 
 Schema lives in [`backend/internal/database/migrations.go`](../backend/internal/database/migrations.go) (~34 tables).
-Migrations are additive only — `CREATE TABLE IF NOT EXISTS` + idempotent ALTER columns run on every boot. AI message/tool-call rows cascade-delete with their `ai_conversations` parent; editing or deleting a chat message truncates the conversation tail by `seq` (see `DeleteMessagesFromSeq`).
+Migrations are additive only — `CREATE TABLE IF NOT EXISTS` + idempotent ALTER — with one carve-out: `migrate_to_uuidv7.go` rewrites primary keys, derives its FK children from `PRAGMA foreign_key_list`, rewrites seven undeclared soft references, and renames `<dataDir>/functions/<id>/` to match, driven by a map committed in the same transaction columns run on every boot. AI message/tool-call rows cascade-delete with their `ai_conversations` parent; editing or deleting a chat message truncates the conversation tail by `seq` (see `DeleteMessagesFromSeq`).
 
 ## Component responsibilities
 
@@ -301,7 +301,11 @@ Build queue + version archive + GC + first-boot migration.
 - `queue.go` — bounded channel + `runtime.NumCPU()` worker goroutines
 - `builder.go` — extract → validate → install deps → atomic publish
 - `activate.go` — symlink retarget for both deploy and rollback
-- `gc.go` — periodic prune of versions beyond `versions_to_keep`
+- `gc.go` — periodic prune of versions beyond `versions_to_keep`, plus the
+  build-cache bounds and the orphan-directory sweep. The orphan sweep refuses
+  to run while an id migration has unreconciled directory renames outstanding:
+  the database would hold new ids and the disk old ones, so every directory
+  would look like garbage
 - `migrate_fs.go` — one-shot upgrade of legacy `code/` dirs to `versions/<hash>/`
 - `validator.go` — archive sanity (path traversal, runtime entrypoint check)
 
@@ -311,9 +315,20 @@ SQLite access. No ORM — explicit queries, prepared statements where
 hot.
 
 - `migrations.go` — schema + idempotent ALTER loop
+- `migrate_to_uuidv7.go` — one-shot rewrite of every prefix-typed storage id to
+  UUIDv7. Child columns are derived from `PRAGMA foreign_key_list` rather than
+  hand-listed; undeclared "soft" references are the only hand-maintained part
+  and are verified before commit. Also records the functions old→new map so
+  `ReconcileFunctionDirs` can rename the on-disk trees to match
 - `async.go` — bounded priority writer: critical execution writes apply
   deadline-aware backpressure; droppable logs/spans/activity use a separate
-  telemetry queue with saturation counters. Both queues batch commits.
+  telemetry queue with saturation counters. Both queues batch commits, and are
+  bounded by **bytes** as well as slots (a single job can carry a captured
+  request body). A batch that fails is re-applied job-by-job under savepoints
+  so one bad statement cannot destroy its neighbours, and a batch that cannot
+  commit — a VACUUM holding the single write connection, say — is retained and
+  retried rather than dropped. Shutdown signals through a quit channel that
+  producers select on, so no send can race a closed channel.
 - `kv.go` — validated, context-aware per-function JSON KV operations and
   all-or-nothing batches; `kv_metrics.go` records operation latency/errors.
 - One file per resource: `functions.go`, `deployments.go`, `secrets.go`, etc.
@@ -322,12 +337,25 @@ hot.
 
 The bridge between HTTP and a sandbox worker.
 
-- `proxy.go` — encodes request as JSON frame, writes to worker stdin, reads response frame, propagates timeouts and errors
+- `proxy.go` — encodes request as JSON frame, writes to worker stdin, reads
+  response frame, propagates timeouts and errors. Owns
+  `SanitizeForwardedHeaders` (Orva credentials, the session cookie and the
+  whole inbound `x-orva-*` namespace never reach a sandbox) and
+  `applyFunctionResponseGuards` (function output runs in an opaque origin so
+  it cannot act as the dashboard)
 
 ### `backend/internal/registry/`
 
 In-memory function cache backed by SQLite. Hot path reads (every
 invocation) avoid a DB round-trip.
+
+`Get` and `Set` **copy** — nobody outside the registry ever holds the cached
+`*Function`. That is load-bearing, not defensive: handlers used to read the
+cached pointer, mutate it, and only then persist, so a rejected write left
+the cache reporting values the database never took, and the invoke path read
+the same fields the update path was writing. `Exists()` serves call sites
+that only need presence. A reflection test fails if a future reference-typed
+field is added to `Function` without teaching `Clone` about it.
 
 ### `backend/internal/secrets/`
 
@@ -426,7 +454,7 @@ Goroutines do almost everything. Critical concurrency primitives:
 - **Autoscaler**: one goroutine per `Manager`, ticks every second,
   evaluates each function's pool against its EWMA stable + panic
   windows.
-- **Reaper**: one goroutine per pool, sweeps idle workers past TTL.
+- **Reaper**: one goroutine per pool, sweeps dead and max-use workers. Idle expiry is a controller decision, not the reaper's — and `idle_ttl_seconds` applies only when `scale_to_zero` is enabled.
 - **GC**: one goroutine, prunes archived version dirs every 5 minutes.
 - **Build queue**: `runtime.NumCPU()` worker goroutines drain a job
   channel.

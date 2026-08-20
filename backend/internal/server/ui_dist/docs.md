@@ -488,6 +488,14 @@ exports.handler = async (event) => {
 }
 ```
 
+> **What `verified` rests on.** It is derived from the `x-orva-trigger`
+> header, which the server sets on the webhook path after checking the HMAC.
+> Orva strips the entire inbound `x-orva-*` namespace before a request reaches
+> your handler, so a caller hitting `/fn/<id>/` directly cannot set it — the
+> only way `verified` is true is that the signature check passed. The same
+> guarantee is what makes it safe to branch on `x-orva-trigger` to tell a cron
+> or job invocation from an HTTP one.
+
 ### Testing handlers without a server
 
 ```js
@@ -721,7 +729,7 @@ call directly. API key permissions scope the available tool set.
 > `resources/list`, `resources/templates/list`, `prompts/list`,
 > `resources/read` and `server/discover` results carry `ttlMs` and `cacheScope`.
 > Orva returns `cacheScope: "private"` because the catalog is permission-scoped
-> (a full-permission key lists 73 tools; a `read`-only key lists 27) and
+> (a full-permission key lists 73 tools; a `read`-only key lists 28) and
 > channel-specific (a channel token sees only that channel's functions) — a
 > shared cache entry would hand one caller another caller's tool surface.
 > `ttlMs` is `0` because the catalog changes on any deploy, channel edit, or
@@ -943,7 +951,7 @@ need to run a second service.
 | `GET /.well-known/oauth-protected-resource` | 9728 | Tells clients `/mcp` is OAuth-protected. |
 | `GET /.well-known/oauth-authorization-server` | 8414 | Authorization Server Metadata. |
 | `GET /.well-known/openid-configuration` | OIDC | Same metadata + OIDC fields (ChatGPT probes this). |
-| `POST /register` | 7591 | Dynamic Client Registration. Per-IP rate-limited. |
+| `POST /register` | 7591 | Dynamic Client Registration. Rate-limited per source address — the peer IP, or the first `X-Forwarded-For` entry only when `ORVA_TRUSTED_PROXY=true`. Behind a proxy without that flag every client shares one bucket. |
 | `GET/POST /oauth/authorize` | OAuth 2.1 | Server-rendered consent screen (uses session cookie). |
 | `POST /oauth/token` | OAuth 2.1 | `authorization_code` + `refresh_token` grants. |
 | `POST /oauth/revoke` | 7009 | Revoke an access or refresh token. |
@@ -954,6 +962,11 @@ tokens live 30 days and rotate on use. Tokens are stored as SHA-256
 hashes (mirroring Orva's API-key posture). The consent screen is
 gated by the Orva session cookie; if the user isn't logged in,
 the request bounces through `/web/login` and back.
+
+A client's REGISTERED scope is a ceiling, not just a default: the requested
+scope is intersected with it, so a client registered with `scope="read"`
+cannot be issued `admin`, and an empty intersection is refused with
+`invalid_scope`.
 
 DCR clients that don't request a specific scope get the full
 `read invoke write admin` scope by default — without RBAC, the alternative
@@ -1002,7 +1015,11 @@ Use whichever your MCP client supports. Most (Claude Code, Claude
 Desktop, Cursor, ChatGPT custom connector, etc.) default to
 `Authorization: Bearer`.
 
-Manage channels from the dashboard's **Channels** page or via REST:
+Manage channels from the dashboard's **Channels** page or via REST. Every
+endpoint below requires an API key with the **`admin`** permission (or a
+session cookie) — a channel token is a long-lived bearer credential whose
+tools bypass the target function's `auth_mode`, so minting one is gated like
+minting an API key. This used to accept `write`.
 
 | Endpoint | Method | Purpose |
 |---|---|---|
@@ -1256,7 +1273,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 <auth_modes>
 Configure auth_mode on the function record (editor Settings modal or PUT /api/v1/functions/<name>):
 - "public" (default) — anyone with the URL can invoke. If the function needs user auth, verify a JWT IN the handler.
-- "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. The key must carry the "invoke" permission; a key scoped to read/write only gets 403. Keys minted from the dashboard, the CLI, the bootstrap flow and OAuth all carry it. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API Keys page.
+- "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. The key must carry the "invoke" permission; a key scoped to read/write only gets 403. Keys minted from the CLI, the bootstrap flow and OAuth carry it; the dashboard's key form now has a permission selector (default invoke+read), so a dashboard key can be minted without it. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API Keys page.
 - "signed" — caller signs the request with HMAC-SHA256 over "<unix-timestamp>.<raw_body>" using ORVA_SIGNING_SECRET (a function secret). Headers: X-Orva-Timestamp, X-Orva-Signature: sha256=<hex>. ±5 min skew window. Use for partner integrations where you've shared a secret and want pure HTTP without OAuth.
 
 For end-user apps prefer in-handler JWT verification (Auth0, Clerk, Supabase, Firebase) — the platform stays out of the way. Pattern in Python:
@@ -1273,7 +1290,7 @@ Per-function rate limiting (rpm + burst) is configurable on the function record;
 The platform DOES inject CORS headers. Its middleware is the outermost wrapper and runs on every response, including /fn/ and custom routes.
 - OPTIONS never reaches your handler. The platform answers it 204 with a fixed Access-Control-Allow-Methods (GET, POST, PUT, DELETE, OPTIONS) and Access-Control-Allow-Headers (Content-Type, Authorization, X-Request-ID, X-Orva-API-Key). Do NOT write an "if method == OPTIONS" branch — it is dead code.
 - Access-Control-Allow-Origin is always set by the platform: "*" by default, or the caller's Origin plus Vary: Origin when ORVA_CORS_ORIGINS names an explicit allow-list. A request from an origin outside that list gets no Allow-Origin header at all.
-- On non-OPTIONS responses a header your handler returns REPLACES the platform's. That is how you narrow (or widen) Allow-Origin per function.
+- On non-OPTIONS responses a header your handler returns REPLACES the platform's, with two exceptions: Content-Security-Policy and X-Content-Type-Options are stamped afterwards and cannot be overridden (function output runs in an opaque origin so it cannot act as the dashboard), and hop-by-hop/framing headers (Content-Length, Content-Encoding, Transfer-Encoding, Connection, Keep-Alive, TE, Trailer, Upgrade, Proxy-Authenticate, Proxy-Authorization) are dropped rather than relayed. That is how you narrow (or widen) Allow-Origin per function.
 - A browser that needs a custom request header beyond the four above will fail preflight, and no handler change can fix it — the preflight response is the platform's.
 Pattern:
   # No OPTIONS branch: the platform already answered it.
@@ -1303,7 +1320,7 @@ Treat each handler as a tiny service. Apply these by default:
 4. Timeouts on outbound HTTPS. httpx default is no timeout — set timeout=10. node fetch default is also no timeout — pass an AbortSignal.timeout(10_000). 30 s sandbox cap means you get killed mid-request otherwise.
 5. Catch broad, return narrow. try/except around your business logic; map to 400 / 401 / 404 / 502 / 500 with a short message. Don't leak stack traces in production responses (log them, return a request id).
 6. Hot-path safety. Module-level work runs once per cold start and re-runs on warm timeout. Cache JWKS / config / heavy imports at module level. Don't open DB connections at import time if they can fail — lazy-init inside the handler with a simple cached singleton.
-7. JSON everywhere unless asked. Default Content-Type: application/json. Use text/html only when serving a web page.
+7. JSON everywhere unless asked. Default Content-Type: application/json. Use text/html only when serving a web page. HTML pages served from a function run in an OPAQUE origin (Orva sends a CSP sandbox so function output cannot act as the dashboard), so scripts and forms work but document.cookie, localStorage and sessionStorage do not — keep state server-side in the KV store.
 
 Anti-patterns to avoid:
 - Spawning subprocesses (blocked by the sandbox).

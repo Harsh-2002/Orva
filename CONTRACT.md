@@ -136,9 +136,21 @@ hand-maintained view — update it alongside if content changes.)
 ## 9. Must-not-break invariants
 
 - **SQLite migrations are additive-only** (`CREATE TABLE IF NOT EXISTS` + idempotent
-  `ALTER`), run on every boot. No `DROP`/destructive migrations.
-- `execution_requests` has **no FK** to `executions` (intentional, for async insert
-  ordering); the cascade is manual in `DeleteExecution`.
+  `ALTER`), run on every boot. No `DROP`/destructive migrations. **One carve-out:**
+  `migrate_to_uuidv7.go` rewrites primary keys and renames
+  `<dataDir>/functions/<id>/` to match. Its child columns are derived from
+  `PRAGMA foreign_key_list` — never hand-list them, that is how
+  `channel_functions` came to be missing — and the functions old→new map is
+  committed in the same transaction so `ReconcileFunctionDirs` can finish or
+  resume the rename. `serve.go` treats a rename failure as fatal, and the build
+  GC refuses to sweep orphans while one is outstanding: without the rename every
+  function fails to spawn and the GC deletes the operator's only copy of their
+  source.
+- `execution_requests`, `user_spans` and `execution_log_entries` have **no FK** to
+  `executions` (intentional, for async insert ordering). The cascade is manual, via
+  the single `executionChildTables` list, used by **both** `DeleteExecution` and
+  `PurgeOldExecutions`. Missing two of them is what let retention leave the two
+  fastest-growing tables growing.
 - **TypeScript deploys** rewrite the function's `Entrypoint` to `dist/handler.js`
   after a successful `tsc`; the validator on re-deploy checks the source `.ts`.
 - **nsjail `cmd.Wait()` is centralized in `Spawn`** (via `waitDone`); never call
@@ -154,6 +166,9 @@ hand-maintained view — update it alongside if content changes.)
   container start (so runtime upgrades roll out even with a persistent volume).
 - Installers **SHA-256-verify** downloads against `checksums.txt` with **no fail-open
   path** and no bypass env var.
+- The systemd unit **must** carry `RestartForceExitStatus=70`. `orva backup restore`
+  exits 70 deliberately to force a restart; with `Restart=on-failure` alone, exit 0
+  reads as "finished" and a successful restore leaves the server down.
 
 ## 10. Code style
 
