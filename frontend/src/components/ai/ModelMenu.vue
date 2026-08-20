@@ -81,12 +81,42 @@
         >
           Loading models…
         </p>
-        <p
+        <!-- The server returns 200 {models: [], error} when it cannot list
+             models, and its own comment says "the UI should let the user
+             type a model id manually". It never did: this branch was a dead
+             end and Send stays disabled without a selection, so a configured
+             provider whose /models call failed left the composer greyed out
+             with no explanation and no way forward. -->
+        <div
           v-else-if="!store.models.length"
-          class="px-3 py-2 text-xs text-foreground-muted leading-snug"
+          class="px-3 py-2 text-xs text-foreground-muted leading-snug space-y-2"
         >
-          {{ store.modelsError ? 'No models. Check the provider endpoint.' : 'No models reported.' }}
-        </p>
+          <p>
+            {{ store.modelsError
+              ? `Could not list models: ${store.modelsError}`
+              : 'The provider reported no models.' }}
+          </p>
+          <p>Enter a model id directly:</p>
+          <form
+            class="flex gap-1.5"
+            @submit.prevent="applyManualModel"
+          >
+            <input
+              v-model="manualModel"
+              type="text"
+              aria-label="Model id"
+              placeholder="e.g. claude-sonnet-5"
+              class="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs text-foreground placeholder-foreground-muted/50 focus:border-white focus:outline-none"
+            >
+            <button
+              type="submit"
+              :disabled="!manualModel.trim()"
+              class="rounded-md border border-border px-2 py-1.5 text-xs text-foreground hover:bg-surface-hover disabled:opacity-40"
+            >
+              Use
+            </button>
+          </form>
+        </div>
         <p
           v-else-if="!filteredModels.length"
           class="px-3 py-2 text-xs text-foreground-muted leading-snug"
@@ -128,6 +158,10 @@ defineProps({
 const store = useAIStore()
 
 const query = ref('')
+// Free-text model id, for the case the server explicitly anticipates:
+// ai_handler returns 200 {models: [], error} when listing fails and expects
+// the UI to let the operator type one.
+const manualModel = ref('')
 
 // Only surface the search box for genuinely long lists; short lists scan fine.
 const showSearch = computed(() => store.models.length > 6)
@@ -146,5 +180,12 @@ function pick(id, close) {
   store.selectModel(id)
   query.value = ''
   close()
+}
+
+function applyManualModel() {
+  const id = manualModel.value.trim()
+  if (!id) return
+  store.selectModel(id)
+  manualModel.value = ''
 }
 </script>
