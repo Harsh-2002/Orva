@@ -574,6 +574,9 @@ func runInboundDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	resp.Body.Close()
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"deleted": true, "id": args[1]})
+	}
 	okf(cmd, "Inbound webhook %s deleted", args[1])
 	return nil
 }

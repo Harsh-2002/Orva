@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
@@ -194,6 +196,16 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// entrypoint names a file inside the function's code directory and is
+	// read back by GET /source, so it must be contained before it is stored.
+	if req.Entrypoint != "" {
+		if err := safepath.Validate(req.Entrypoint); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid entrypoint: "+err.Error(), reqID)
+			return
+		}
+	}
+
 	// Apply defaults.
 	if req.Entrypoint == "" {
 		switch {
@@ -302,7 +314,18 @@ func (h *FunctionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fn, err := h.Registry.Get(fnID)
+	// Resolve by name as well as id. This was the ONLY function endpoint
+	// that would not -- Update, Delete, Deploy, Rollback, Diff and Source all
+	// do -- and the dashboard addresses functions by name everywhere while
+	// listing them with the default LIMIT of 20. The result was that opening
+	// any function outside the twenty most recent said "Function not found".
+	// The CLI already worked around it with ?limit=10000.
+	resolved, ok := h.resolveFnID(fnID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
+	fn, err := h.Registry.Get(resolved)
 	if err != nil {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
@@ -365,6 +388,34 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "status must be one of: active, inactive", reqID)
 		return
 	}
+	// The comment above claimed everything mutable was validated here. It
+	// was not: name, entrypoint, timeout, memory and cpus all went straight
+	// onto the record. `memory_mb: -1` was accepted and shipped
+	// ORVA_MEMORY_MB=-1 to the sandbox, and `entrypoint` was a path read
+	// back by GET /source with no containment at all.
+	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "name must not be empty", reqID)
+		return
+	}
+	if req.Entrypoint != nil {
+		if err := safepath.Validate(*req.Entrypoint); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid entrypoint: "+err.Error(), reqID)
+			return
+		}
+	}
+	if req.TimeoutMS != nil && *req.TimeoutMS <= 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "timeout_ms must be > 0", reqID)
+		return
+	}
+	if req.MemoryMB != nil && *req.MemoryMB <= 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "memory_mb must be > 0", reqID)
+		return
+	}
+	if req.CPUs != nil && *req.CPUs <= 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "cpus must be > 0", reqID)
+		return
+	}
 
 	// Track whether anything that affects the spawn config changed — if
 	// so, we drain the warm pool so the next invoke re-spawns with the
@@ -388,6 +439,10 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Entrypoint != nil {
 		fn.Entrypoint = *req.Entrypoint
+		// ORVA_ENTRYPOINT is baked into the worker at spawn and workers are
+		// not age-expired, so without a refresh the PUT returns 200 while
+		// every warm worker keeps running the old handler indefinitely.
+		spawnConfigChanged = true
 	}
 	if req.TimeoutMS != nil {
 		fn.TimeoutMS = *req.TimeoutMS
@@ -450,6 +505,13 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	fn.Version++
 
 	if err := h.Registry.Set(fn); err != nil {
+		// Create reports this exact case as 409; Update reported 500, so a
+		// rename onto a taken name looked like a server fault.
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			respond.Error(w, http.StatusConflict, "CONFLICT",
+				"a function with that name already exists", reqID)
+			return
+		}
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to update function", reqID)
 		return
 	}
@@ -593,8 +655,24 @@ func (h *FunctionHandler) GetSource(w http.ResponseWriter, r *http.Request) {
 			entrypoint = "handler.py"
 		}
 	}
-	src, err := os.ReadFile(codeDir + "/" + entrypoint)
+	srcPath, err := safepath.Join(codeDir, entrypoint)
 	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"entrypoint resolves outside the function's code directory", reqID)
+		return
+	}
+	src, err := os.ReadFile(srcPath)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			// Only "not deployed" may report an empty body. Anything else —
+			// EACCES, EIO, a dangling `current` symlink — used to render as a
+			// blank editor buffer that then overwrote the real handler on save.
+			slog.Error("read function source failed", "function", fn.ID,
+				"path", srcPath, "error", err)
+			respond.Error(w, http.StatusInternalServerError, "INTERNAL",
+				"failed to read function source", reqID)
+			return
+		}
 		// Code dir doesn't exist yet (not deployed).
 		respond.JSON(w, http.StatusOK, map[string]string{"code": "", "dependencies": ""})
 		return
@@ -692,6 +770,10 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 		Code         string `json:"code"`
 		Filename     string `json:"filename"`
 		Dependencies string `json:"dependencies"` // requirements.txt or package.json content
+		// Extras are additional files written alongside the handler --
+		// tsconfig.json for a TypeScript deploy, a small config file, etc.
+		// Paths are relative and contained the same way entrypoint is.
+		Extras map[string]string `json:"extras,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
@@ -702,13 +784,30 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Filename == "" {
+		// Default to the function's OWN entrypoint. Hardcoding handler.js /
+		// handler.py meant a function configured with any other entrypoint --
+		// which the MCP create_function tool requires you to set, advertising
+		// 'src/index.ts' as an example -- deployed a file the builder then
+		// refused to find: "entrypoint not found: src/index.ts".
 		switch {
+		case fn.Entrypoint != "":
+			req.Filename = fn.Entrypoint
 		case runtimeIsNode(fn.Runtime):
 			req.Filename = "handler.js"
 		case runtimeIsPython(fn.Runtime):
 			req.Filename = "handler.py"
-		default:
-			req.Filename = fn.Entrypoint
+		}
+	}
+	if err := safepath.Validate(req.Filename); err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"invalid filename: "+err.Error(), reqID)
+		return
+	}
+	for name := range req.Extras {
+		if err := safepath.Validate(name); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid extra file "+strconv.Quote(name)+": "+err.Error(), reqID)
+			return
 		}
 	}
 
@@ -736,6 +835,16 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 	if depsFilename != "" {
 		tw.WriteHeader(&tar.Header{Name: depsFilename, Size: int64(len(req.Dependencies)), Mode: 0644})
 		tw.Write([]byte(req.Dependencies))
+	}
+	// Support files. The TypeScript template ships a tsconfig.json this way,
+	// and the builder gates its tsc step on that file existing -- without a
+	// channel for it the template could never actually compile.
+	for name, content := range req.Extras {
+		if name == req.Filename || name == depsFilename {
+			continue // the handler and deps files are already written
+		}
+		tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(content)), Mode: 0644})
+		tw.Write([]byte(content))
 	}
 	tw.Close()
 	gw.Close()

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -280,14 +281,23 @@ func deployInline(ctx context.Context, deps Deps, in DeployInlineInput) (*mcpsdk
 
 	filename := in.Filename
 	if filename == "" {
+		// Default to the function's OWN entrypoint. The fn.Entrypoint branch
+		// below was unreachable, so a function created through create_function
+		// -- which REQUIRES entrypoint and advertises 'src/index.ts' as an
+		// example -- deployed handler.js and then failed the build with
+		// "entrypoint not found: src/index.ts". Following the server's own
+		// instructions produced a broken deploy.
 		switch {
+		case fn.Entrypoint != "":
+			filename = fn.Entrypoint
 		case runtimeIsNode(fn.Runtime):
 			filename = "handler.js"
 		case runtimeIsPython(fn.Runtime):
 			filename = "handler.py"
-		default:
-			filename = fn.Entrypoint
 		}
+	}
+	if err := safepath.Validate(filename); err != nil {
+		return nil, DeployInlineOutput{}, fmt.Errorf("invalid filename: %w", err)
 	}
 	depsFilename := ""
 	if in.Dependencies != "" {

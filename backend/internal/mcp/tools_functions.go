@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -238,20 +239,50 @@ func registerFunctionTools(rc *regCtx) {
 			if lim > 200 {
 				lim = 200
 			}
-			res, err := deps.DB.ListFunctions(database.ListFunctionsParams{
+			// The search filter runs in Go, so it has to see every candidate
+			// row -- not just the current page. Filtering AFTER pagination
+			// searched only the rows that happened to be on the page while
+			// reporting the unfiltered count, so on 200 functions
+			// search:"payments" scanned the newest 50 and returned
+			// "total: 200" beside one result.
+			q := strings.ToLower(strings.TrimSpace(in.Search))
+			params := database.ListFunctionsParams{
 				Status: in.Status, Runtime: in.Runtime, Limit: lim, Offset: in.Offset,
-			})
+			}
+			if q != "" {
+				// Fetch wide, filter, then page by hand.
+				params.Limit = 1000
+				params.Offset = 0
+			}
+			res, err := deps.DB.ListFunctions(params)
 			if err != nil {
 				return nil, ListFunctionsOutput{}, err
 			}
 			out := ListFunctionsOutput{Total: res.Total, Limit: lim, Offset: in.Offset}
-			q := strings.ToLower(strings.TrimSpace(in.Search))
+			matched := make([]*database.Function, 0, len(res.Functions))
 			for _, fn := range res.Functions {
 				if q != "" {
 					if !strings.Contains(strings.ToLower(fn.Name), q) && !strings.Contains(strings.ToLower(fn.ID), q) {
 						continue
 					}
 				}
+				matched = append(matched, fn)
+			}
+			if q != "" {
+				// Total must describe the filtered set, then apply the
+				// caller's window to it.
+				out.Total = len(matched)
+				start := in.Offset
+				if start > len(matched) {
+					start = len(matched)
+				}
+				end := start + lim
+				if end > len(matched) {
+					end = len(matched)
+				}
+				matched = matched[start:end]
+			}
+			for _, fn := range matched {
 				out.Functions = append(out.Functions, toFunctionView(ctx, fn, deps))
 			}
 			return nil, out, nil
@@ -407,6 +438,9 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 				"to spawn.",
 		)
 	}
+	if err := safepath.Validate(in.Entrypoint); err != nil {
+		return nil, fmt.Errorf("invalid entrypoint: %w", err)
+	}
 	if in.TimeoutMS <= 0 {
 		return nil, errors.New(
 			"timeout_ms is required and must be > 0: per-invocation cap " +
@@ -518,6 +552,29 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 	drainPool := false
 	networkModeChanged := false
 
+	// Validate everything BEFORE applying any of it. This handler used to
+	// mutate first and validate second, and resolveFunction hands back the
+	// live registry object, so a rejected auth_mode still left the changed
+	// memory/cpu/timeout visible to the next spawn while the database kept
+	// the old values. The REST handler has always guarded against this.
+	if in.Entrypoint != nil {
+		if err := safepath.Validate(*in.Entrypoint); err != nil {
+			return nil, fmt.Errorf("invalid entrypoint: %w", err)
+		}
+	}
+	if in.Name != nil && strings.TrimSpace(*in.Name) == "" {
+		return nil, errors.New("name must not be empty")
+	}
+	if in.TimeoutMS != nil && *in.TimeoutMS <= 0 {
+		return nil, errors.New("timeout_ms must be > 0")
+	}
+	if in.MemoryMB != nil && *in.MemoryMB <= 0 {
+		return nil, errors.New("memory_mb must be > 0")
+	}
+	if in.CPUs != nil && *in.CPUs <= 0 {
+		return nil, errors.New("cpus must be > 0")
+	}
+
 	if in.Name != nil {
 		fn.Name = *in.Name
 	}
@@ -526,6 +583,7 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 	}
 	if in.Entrypoint != nil {
 		fn.Entrypoint = *in.Entrypoint
+		drainPool = true // ORVA_ENTRYPOINT is baked in at spawn
 	}
 	if in.TimeoutMS != nil {
 		if *in.TimeoutMS != fn.TimeoutMS {
@@ -618,7 +676,11 @@ func readFunctionSource(deps Deps, fn *database.Function) (GetFunctionSourceOutp
 		return out, errors.New("data dir not configured")
 	}
 	currentDir := filepath.Join(deps.DataDir, "functions", fn.ID, "current")
-	codeBytes, err := os.ReadFile(filepath.Join(currentDir, fn.Entrypoint))
+	codePath, err := safepath.Join(currentDir, fn.Entrypoint)
+	if err != nil {
+		return out, fmt.Errorf("entrypoint resolves outside the function's code directory: %w", err)
+	}
+	codeBytes, err := os.ReadFile(codePath)
 	if err == nil {
 		out.Code = string(codeBytes)
 	}

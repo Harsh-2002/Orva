@@ -420,6 +420,12 @@ func onboardAndLogin(t *testing.T, tc *testContext, username, password string) *
 	})
 	req := httptest.NewRequest("POST", "/api/v1/auth/onboard", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	// This harness seeds an admin API key, i.e. an instance that `orva setup`
+	// has already provisioned. Onboarding such an instance requires proving
+	// control of it, exactly as the operator does with the bootstrap key
+	// printed at setup -- otherwise a stranger could claim it, and a session
+	// cookie bypasses the permission model entirely.
+	req.Header.Set("X-Orva-API-Key", tc.apiKey)
 	w := httptest.NewRecorder()
 	tc.srv.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

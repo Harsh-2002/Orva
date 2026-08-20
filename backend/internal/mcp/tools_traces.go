@@ -236,8 +236,14 @@ func registerTraceTools(rc *regCtx) {
 				BeforeTraceID:   beforeTraceID,
 				LegacyBefore:    legacyBefore,
 			}
-			if params.Limit <= 0 || params.Limit > 200 {
+			// Clamp, do not reset. Asking for 500 used to silently return 50
+			// -- fewer rows than the caller would have got by not asking at
+			// all, which reads as "there are only 50".
+			if params.Limit <= 0 {
 				params.Limit = 50
+			}
+			if params.Limit > 200 {
+				params.Limit = 200
 			}
 			summaries, err := deps.DB.ListTraceSummaries(params)
 			if err != nil {

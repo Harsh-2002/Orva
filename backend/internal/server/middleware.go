@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/internal/ids"
+
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 )
 
 type contextKey string
@@ -43,7 +45,18 @@ type Actor struct {
 
 // WithActor returns a new context carrying the actor for downstream
 // readers (notably loggerMiddleware → activity log).
+// WithActor stores the actor for logging AND mirrors its id into the shared
+// auth package's context, which the handlers package can read without an
+// import cycle. That cycle is why audit fields like
+// channel_functions.added_by_actor_id were hardcoded to "".
 func WithActor(ctx context.Context, a *Actor) context.Context {
+	if a != nil {
+		ctx = auth.WithActorID(ctx, a.ID)
+	}
+	return withActorOnly(ctx, a)
+}
+
+func withActorOnly(ctx context.Context, a *Actor) context.Context {
 	if a == nil {
 		return ctx
 	}
@@ -376,7 +389,7 @@ func corsMiddleware(origins []string, next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", o)
 			}
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Orva-API-Key")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 

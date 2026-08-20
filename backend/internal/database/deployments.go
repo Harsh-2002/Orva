@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -353,4 +354,28 @@ func scanDeploymentRows(rows *sql.Rows) (*Deployment, error) {
 		}
 	}
 	return &d, nil
+}
+
+// RequeueStuckDeployments fails deployments abandoned mid-build.
+//
+// Only FinishDeployment and FinishRollbackDeployment ever set a terminal
+// status, and both run in-process after the build starts -- so a restart
+// mid-build left the row at 'queued' or 'building' forever. The dashboard
+// showed a spinner that never resolved, and nothing on boot reconciled it.
+// Failing them is correct rather than requeueing: the tarball lives in a
+// scratch dir that SweepBuildScratch reclaims on the same boot, so there is
+// nothing left to build from.
+func (db *Database) RequeueStuckDeployments() (int64, error) {
+	res, err := db.write.Exec(`
+		UPDATE deployments
+		SET status = 'failed',
+		    finished_at = CURRENT_TIMESTAMP,
+		    error_message = COALESCE(NULLIF(error_message, ''),
+		        'abandoned: the server restarted while this build was in progress')
+		WHERE status IN ('queued', 'building')`)
+	if err != nil {
+		return 0, fmt.Errorf("requeue stuck deployments: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

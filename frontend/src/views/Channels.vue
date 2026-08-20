@@ -221,7 +221,7 @@
           v-if="channels.length === 0"
           class="px-6 py-8 text-center text-sm text-foreground-muted"
         >
-          No channels yet.
+          {{ loadError ? `Could not load channels: ${loadError}` : 'No channels yet.' }}
         </li>
       </ul>
 
@@ -301,6 +301,12 @@
             <td class="px-6 py-4 text-right">
               <div class="inline-flex justify-end gap-1">
                 <IconButton
+                  :icon="Pencil"
+                  title="Edit the functions in this channel"
+                  :disabled="savingFunctionsFor === c.id"
+                  @click="openEditFunctions(c)"
+                />
+                <IconButton
                   :icon="RotateCcw"
                   title="Rotate token"
                   @click="rotate(c)"
@@ -319,7 +325,12 @@
               colspan="6"
               class="px-6 py-8 text-center text-foreground-muted"
             >
-              No channels yet. Click <span class="text-white">New channel</span> to bundle functions for an agent.
+              <template v-if="loadError">
+                Could not load channels: {{ loadError }}
+              </template>
+              <template v-else>
+                No channels yet. Click <span class="text-white">New channel</span> to bundle functions for an agent.
+              </template>
             </td>
           </tr>
         </tbody>
@@ -329,8 +340,8 @@
     <!-- Function picker modal. -->
     <FunctionPickerModal
       v-if="pickerOpen"
-      :selected="newChannel.functionIds"
-      @close="pickerOpen = false"
+      :selected="editingChannel ? editingFunctionIds : newChannel.functionIds"
+      @close="closePicker"
       @apply="onPickerApply"
     />
   </div>
@@ -340,7 +351,7 @@
 defineOptions({ name: 'ChannelsView' })
 
 import { ref, computed, onMounted } from 'vue'
-import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle } from '@lucide/vue'
+import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import FunctionPickerModal from '@/components/channels/FunctionPickerModal.vue'
@@ -349,6 +360,8 @@ import {
   createChannel,
   rotateChannel,
   deleteChannel,
+  setChannelFunctions,
+  getChannel,
 } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
 import { formatRelative, isExpired } from '@/utils/time'
@@ -379,9 +392,18 @@ const canSubmit = computed(
   () => newChannel.value.name.trim() && newChannel.value.functionIds.length > 0,
 )
 
+// A failed fetch used to render "No channels yet", which reads as "you have
+// none" rather than "we could not ask".
+const loadError = ref('')
+
 const load = async () => {
-  const res = await listChannels()
-  channels.value = res.data.channels || []
+  try {
+    const res = await listChannels()
+    channels.value = res.data.channels || []
+    loadError.value = ''
+  } catch (e) {
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  }
 }
 
 const openCreate = () => {
@@ -393,9 +415,74 @@ const cancelCreate = () => {
   creating.value = false
 }
 
-const onPickerApply = (ids) => {
-  newChannel.value.functionIds = ids
+// Editing a channel's function set. setChannelFunctions was exported from
+// the API module and imported by nothing, so the only channel operations the
+// dashboard offered were Rotate and Delete -- changing which functions an
+// agent could reach meant deleting the channel and re-issuing its token to
+// whoever was using it.
+const editingChannel = ref(null)
+const editingFunctionIds = ref([])
+const savingFunctionsFor = ref('')
+
+// The LIST response carries no function rows -- Channel.FunctionIDs is
+// documented as zero-length on List* -- so the detail has to be fetched
+// before the picker can show what is currently selected.
+const openEditFunctions = async (c) => {
+  savingFunctionsFor.value = c.id
+  try {
+    const res = await getChannel(c.id)
+    editingChannel.value = { ...c, functions: res.data?.functions || [] }
+    editingFunctionIds.value = res.data?.function_ids || []
+    pickerOpen.value = true
+  } catch (e) {
+    confirmStore.notify({
+      title: 'Failed to load channel',
+      message: e?.response?.data?.error?.message || 'Unknown error',
+      danger: true,
+    })
+  } finally {
+    savingFunctionsFor.value = ''
+  }
+}
+
+const closePicker = () => {
   pickerOpen.value = false
+  editingChannel.value = null
+}
+
+const onPickerApply = async (ids) => {
+  if (!editingChannel.value) {
+    newChannel.value.functionIds = ids
+    pickerOpen.value = false
+    return
+  }
+  const target = editingChannel.value
+  savingFunctionsFor.value = target.id
+  pickerOpen.value = false
+  editingChannel.value = null
+  try {
+    // Carry the existing per-function tool descriptions through, or the
+    // replace drops them -- the same way the CLI used to.
+    const descriptions = {}
+    for (const f of target.functions || []) {
+      if (f.description && ids.includes(f.function_id)) {
+        descriptions[f.function_id] = f.description
+      }
+    }
+    await setChannelFunctions(target.id, {
+      function_ids: ids,
+      ...(Object.keys(descriptions).length ? { descriptions } : {}),
+    })
+    await load()
+  } catch (e) {
+    confirmStore.notify({
+      title: 'Failed to update channel functions',
+      message: e?.response?.data?.error?.message || 'Unknown error',
+      danger: true,
+    })
+  } finally {
+    savingFunctionsFor.value = ''
+  }
 }
 
 const submitCreate = async () => {

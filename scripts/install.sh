@@ -773,6 +773,10 @@ User=${SERVICE_USER}
 Group=${SERVICE_USER}
 ExecStart=${PREFIX}/bin/orva serve
 Restart=on-failure
+# The restore endpoint exits 70 on purpose to force a restart under
+# Restart=on-failure. Listed explicitly so the intent survives a future
+# change to the Restart= policy.
+RestartForceExitStatus=70
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM

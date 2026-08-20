@@ -33,11 +33,11 @@ const maxRepeatedToolFailures = 3
 // Tool is one callable the agent may offer the model, plus the metadata that
 // drives approval gating and UI grouping.
 type Tool struct {
-	Def              llm.ToolDef
-	Group            string
-	Perm             string // read | write | invoke | admin
-	ReadOnly         bool
-	Destructive      bool
+	Def         llm.ToolDef
+	Group       string
+	Perm        string // read | write | invoke | admin
+	ReadOnly    bool
+	Destructive bool
 }
 
 // Dispatcher executes a tool by name with raw JSON arguments and returns the
@@ -65,10 +65,15 @@ type Sink interface {
 
 // Config is the per-run agent configuration (resolved from ai_settings).
 type Config struct {
-	Provider       string
-	Model          string
-	Thinking       string  // off | standard | deep
-	System         string  // system prompt
+	Provider string
+	Model    string
+	Thinking string // off | standard | deep
+	System   string // system prompt
+	// Temperature is plumbed all the way to the gateway but is never
+	// assigned by any caller, so every turn runs at the provider default.
+	// Left in place because the plumbing is correct and a caller can start
+	// setting it without further work; documented so it does not read as a
+	// knob someone can already turn.
 	Temperature    *float64
 	ApprovalPolicy string // all_writes | destructive_only | auto
 	MaxIterations  int

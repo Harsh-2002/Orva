@@ -370,7 +370,19 @@ curl -s -X POST $BASE/api/v1/auth/onboard -H 'Content-Type: application/json' \
      -d '{"username":"admin","password":"at-least-8-chars"}'   # 200 + Set-Cookie: session_token
 ```
 
-A second call returns **409 `ALREADY_SETUP`**. The field is `username`, not
+On a **virgin** instance that is all you need — the auto-minted
+`bootstrap-admin` key does not count as use. Against an instance that has
+operator-minted API keys or deployed functions, onboarding requires proof of
+control and returns **401** without one:
+
+```bash
+curl -s -X POST $BASE/api/v1/auth/onboard \
+     -H 'Content-Type: application/json' -H "X-Orva-API-Key: $API_KEY" \
+     -d '{"username":"admin","password":"at-least-8-chars"}'
+```
+
+A second call returns **409 `ALREADY_SETUP`** (the user-count check runs
+first). The field is `username`, not
 `email`. The API minimum is 8 characters; the onboarding UI enforces 10 plus
 lower/upper/digit/symbol. Login is rate-limited to 10/min/IP.
 
@@ -2168,7 +2180,9 @@ it; fix rather than route around where you can.
 | `test/loadtest.sh` | Broken **and** destructive. `fuser -k 8443/tcp` kills whatever holds 8443; `rm -f ~/.orva/orva.db*` destroys the default-datadir DB; `HEY=~/go/bin/hey` with no guard; `orva=./orva` points at a gitignored repo-root binary; and `grep -q "deployed"` can never match because the CLI prints `Deploy submitted (deployment …)`, so all 6 deploys report `✗ FAILED` even when they succeed. It reads no env vars, so it cannot be retargeted. **`[UNVERIFIED]` — deliberately never executed.** |
 | `test/atscale.sh` | Its header claims it asserts budget, isolation, and no-503; the file contains **no check or assert of any kind** and no verdict. It has **zero `DELETE` calls** and permanently leaves 20 functions (`ascale-node-1..10`, `ascale-py-1..10`) — and it is a member of `run-all.sh`, so the umbrella litters any instance it is pointed at. |
 | `test/tracing-test.sh` | Ignores `BASE_URL`/`API_KEY`, so `run-all.sh` cannot drive it (§3.4). Its header documents `T3: Job propagation` and `T4: Cron is a root trace`; **neither exists in the file** — it runs T1, T2, T5, T6, T7. Two docs repeat the fiction. |
-| `test/onboarding-flow.sh` | Reports `pass` while asserting nothing on any non-virgin instance — i.e. inside `run-all.sh`, always. Its 13 checks are real and all pass on a virgin DB (verified, §3.4), but it never deletes the user it creates, so it is single-shot even there. |
+| `test/onboarding-flow.sh` | Reports `pass` while asserting nothing on any non-virgin instance — i.e. inside `run-all.sh`, always. Its 13 checks are real and all pass on a virgin DB. Against an instance that
+is already in use (operator-minted API keys, or deployed functions) onboarding
+requires an admin key — set `API_KEY` or check 1 fails with 401 (verified, §3.4), but it never deletes the user it creates, so it is single-shot even there. |
 | `test/install/failure-modes.sh` | Cannot pass. It does `jq -r '.[].name'` on `/api/v1/functions`, which returns an **object** `{"functions":[…],"total":N}` — jq errors, the marker check always fails, and it reports "marker function did not survive reinstall". Its sibling `uninstall-flow.sh` uses the correct `jq -r '.functions[]? .name'`. Its onboard call also posts `{"email":…}` where the API requires `username`. Nobody noticed because CI lints it and never runs it. |
 | `test/install/matrix.sh` | The one genuinely dev-safe script in that directory, documented as the opposite: its header calls itself "the default gate in CI and locally" and references an `install-test.sh` that does not exist. CI never invokes it, and it is not marked executable (mode **664** — `bash test/install/matrix.sh` works, `./test/install/matrix.sh` does not). |
 | `test/ceiling.sh` | Parses `orva_host_mem_free_mb`, a metric that no longer exists (the exposition has `orva_host_mem_{total,available,reserved}_bytes`), and the value is discarded anyway. Its `mem_mb` column needs docker and a published port, so on a systemd install it is a constant 0. |
@@ -2191,7 +2205,6 @@ it; fix rather than route around where you can.
 | `test/e2e/CLAUDE.md` | the CLI coverage confirms "slim-CLI ↔ full-server parity" | `harness.py` defaults `ORVA_BIN` to the **full server** binary; parity is actually proven by `test/cli/command-tree.sh` |
 | README, `test/e2e/CLAUDE.md` | the `sudo cat /var/lib/orva/.admin-key` key recipe | that file does not exist on a browser-onboarded instance (§2.6) |
 | `docs/CAPACITY.md` | "`secrets-test.sh` ✓ 8/8", "`routes-test.sh` ✓ 7/7", "`onboarding-flow.sh` ✓ 13/13" | today's real counts are 6 and 6 without `hey` and a `sqlite3`-equipped container. The `13/13` is the one that holds — but only on a virgin DB, a precondition CAPACITY.md does not state; on any instance with a user it is 0 (§3.4). Check counts are environment-dependent, so any absolute number in prose is a future lie |
-| `orva init` | writes `orva.yaml` and says "run: `orva serve --config orva.yaml`" | dead. `orva serve` has no `--config` flag and nothing in the repo ever reads that file |
 | the dev instance's stored AI system prompt | "Node 22/24 … Python 3.13/3.14" | two generic runtimes, latest-stable only. DB state, possibly an operator override |
 
 **One entry withdrawn from that table.** An earlier revision listed CONTRACT §7

@@ -4,7 +4,7 @@ Orva is configured entirely through environment variables. There is no
 config file — every knob that needs operator input is an env var. A bare
 `docker run` with no env set works out of the box.
 
-On startup, Orva logs which of the 10 supported env vars it found set and
+On startup, Orva logs which of the 11 supported env vars it found set and
 how many are at their defaults.
 
 Every variable below has an observable runtime effect. A knob that an
@@ -20,12 +20,13 @@ names that stopped doing anything are deleted rather than deprecated.
 | `ORVA_DATA_DIR` | `~/.orva` (dev) / `/var/lib/orva` (Docker) | Root for SQLite DB, function code, and rootfs trees. DB and rootfs paths are derived automatically. |
 | `ORVA_HOST` | `0.0.0.0` | Bind address for the HTTP listener. Set to `127.0.0.1` to listen on loopback only (recommended behind a reverse proxy). |
 | `ORVA_PORT` | `8443` | Listen port — plain HTTP, no TLS. Set to `8080` when a reverse proxy owns 8443. |
-| `ORVA_WRITE_TIMEOUT_SEC` | `60` | Response write timeout. Must exceed your longest function `timeout_ms` or Orva will cut the response. |
+| `ORVA_WRITE_TIMEOUT_SEC` | `60` | Response write timeout. Must exceed your longest function `timeout_ms` for **buffered** responses, or Orva will cut them off. It does **not** bound streaming responses: the write deadline is cleared on the streaming path, which is governed by `stream_max_seconds` (default 300) instead. |
 | `ORVA_MAX_BODY_BYTES` | `6291456` | Max request body (bytes) for `/api/v1/*` JSON endpoints. Function code uploads (`/deploy`, `/deploy-inline`) and `/restore` are exempt — those are bounded by the 50 MB code-size cap instead. |
 | `ORVA_CORS_ORIGINS` | `*` | Comma-separated allow-list of browser origins for the API/dashboard. Default allows all; set an explicit list (e.g. `https://orva.example`) to lock it down. With an explicit list Orva echoes back the request's own `Origin` when it is a member and sends `Vary: Origin`; a request from an unlisted origin gets no `Access-Control-Allow-Origin` at all. The same list also gates `/mcp`: a browser request with an unlisted `Origin` is rejected 403 before auth, while requests with no `Origin` (every non-browser MCP client) are always allowed. Narrowing this therefore affects third-party agent-channel consumers too, not just the dashboard. |
 | `ORVA_SECCOMP_POLICY` | `default` | Seccomp policy applied to every sandbox: `default` / `strict` / `permissive` / `disabled`. An unrecognized value is ignored (stays `default`). |
 | `ORVA_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `ORVA_SECURE_COOKIES` | `false` | Set to `true` when Orva is behind an HTTPS reverse proxy. Adds the `Secure` flag to session cookies. |
+| `ORVA_SECURE_COOKIES` | `false` | Force the `Secure` flag on session cookies. Orva already sets it automatically when the request arrives over TLS or carries `X-Forwarded-Proto: https`; set this when neither is visible to it. |
+| `ORVA_TRUSTED_PROXY` | `false` | Set to `true` only when a reverse proxy in front of Orva sets `X-Forwarded-For`. It makes Orva trust that header for the OAuth dynamic-registration rate limiter's client identity. Leave it off otherwise: trusting a client-settable header would let a caller bypass that limit by varying one value per request. |
 | `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Single-operator instances can set this to `30`. |
 | `ORVA_PPROF_ADDR` | (unset) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
 | `ORVA_INTERNAL_API_BASE` | (auto-detected) | The base URL sandboxed functions use to reach Orva's own internal SDK endpoints (KV, jobs, function-to-function). Orva probes for a routable address at startup — from inside a sandbox `127.0.0.1` is the sandbox's own loopback, so this is deliberately **not** a loopback address. Set it only on network setups the probe gets wrong (overlay networks, Swarm, k8s), as `http://host:port`. The compiled egress policy emits a narrow allow rule for exactly this address and port, so an operator blocking private ranges does not cut off the SDK. |
@@ -74,11 +75,11 @@ nothing read it, so setting it silently did nothing.
 environment:
   ORVA_WRITE_TIMEOUT_SEC: "90"    # headroom above your longest function timeout
   ORVA_SESSION_DAYS: "30"         # single-operator instance
-  ORVA_SECURE_COOKIES: "true"     # behind an HTTPS reverse proxy
+  ORVA_SECURE_COOKIES: "true"     # only if neither TLS nor X-Forwarded-Proto reaches Orva
 ```
 
 Orva does not terminate TLS. Run a reverse proxy (nginx, Caddy, Traefik)
-in front and set `ORVA_SECURE_COOKIES=true` when you do. See
+in front and set `ORVA_SECURE_COOKIES=true` only if your proxy forwards neither TLS nor `X-Forwarded-Proto: https` — Orva sets the flag automatically when it can see the real scheme. See
 [DEPLOYMENT.md](DEPLOYMENT.md) for proxy config examples.
 
 ---
@@ -115,7 +116,7 @@ curl -X PUT -H "X-Orva-API-Key: $KEY" -H 'Content-Type: application/json' \
 
 ---
 
-## Runtime-tunable: execution history retention
+## Runtime-tunable: data retention
 
 Every invocation writes an `executions` row plus its logs, and — when replay
 capture is enabled — the captured request. Those are trimmed on a schedule so
@@ -123,7 +124,19 @@ the database does not grow without bound.
 
 | Setting (`system_config` key) | Default | Meaning |
 |---|---|---|
-| `execution_retention_days` | `30` | Delete executions, their logs and their captured requests once they are older than this many days. **`0` disables purging entirely** (keep everything). |
+| `execution_retention_days` | `30` | Delete finished rows older than this many days. **`0` disables purging entirely** (keep everything). |
+
+The sweep covers executions and their children (logs, captured requests,
+structured log entries, user spans) **and**, past the same cutoff:
+`jobs`, `webhook_deliveries` and `build_logs`. Only **terminal** rows are
+removed — a pending or running job is left alone regardless of age, so
+nothing is swept out from under the scheduler. Expired `sessions` are removed
+on every pass regardless of the window.
+
+Deployment **rows** are deliberately kept: they are the rollback audit trail
+the dashboard lists, and `build_logs` is where the volume actually is.
+On-disk version pruning is the version GC's job (`versions_to_keep`), not
+this setting's.
 
 The first purge is deliberately delayed by an hour after startup, then runs
 every 24 hours. The delay exists so that an operator upgrading into a build

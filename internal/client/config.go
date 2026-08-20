@@ -99,8 +99,42 @@ func SaveCLIConfig(cfg *CLIConfig) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	// Write to a temp file and rename into place, rather than WriteFile.
+	//
+	// Two reasons. WriteFile's mode argument only applies at CREATION, so a
+	// config that already existed at 0644 -- copied with `cp` to make a
+	// second profile, restored from a dotfiles repo, or laid down by config
+	// management -- kept 0644 and `orva login` wrote the API key into a
+	// world-readable file while reporting success. And WriteFile truncates
+	// in place, so a concurrent `orva invoke` reading mid-write parsed
+	// partial YAML and silently fell back to the default endpoint with no
+	// key. Rename is atomic; readers see the old file or the new one.
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("secure temp config: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return fmt.Errorf("write config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	// Belt and braces for a pre-existing file whose mode we just replaced:
+	// rename carries the temp file's 0600, but an operator who chmod'd the
+	// directory or uses a filesystem with odd semantics still gets checked.
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("secure config: %w", err)
 	}
 	return nil
 }

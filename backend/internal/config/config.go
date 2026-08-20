@@ -18,6 +18,7 @@ var SupportedEnvVars = []string{
 	"ORVA_SECCOMP_POLICY",
 	"ORVA_SECURE_COOKIES",
 	"ORVA_SESSION_DAYS",
+	"ORVA_TRUSTED_PROXY",
 	"ORVA_WRITE_TIMEOUT_SEC",
 }
 
@@ -78,7 +79,12 @@ type LoggingConfig struct {
 type SecurityConfig struct {
 	CORSOrigins   []string
 	SecureCookies bool
-	SessionDays   int
+	// TrustedProxy asserts that something in front of Orva sets
+	// X-Forwarded-For. Off by default: the OAuth DCR rate limiter is the
+	// only abuse control on POST /register, and trusting the header by
+	// default made it bypassable by varying one header per request.
+	TrustedProxy bool
+	SessionDays  int
 }
 
 type DataConfig struct {
@@ -156,6 +162,10 @@ func applyEnvOverrides(cfg *Config) []string {
 	if v := os.Getenv("ORVA_SECURE_COOKIES"); v == "true" || v == "1" {
 		active = append(active, "ORVA_SECURE_COOKIES")
 		cfg.Security.SecureCookies = true
+	}
+	if v := os.Getenv("ORVA_TRUSTED_PROXY"); v == "true" || v == "1" {
+		active = append(active, "ORVA_TRUSTED_PROXY")
+		cfg.Security.TrustedProxy = true
 	}
 	if v := os.Getenv("ORVA_SESSION_DAYS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

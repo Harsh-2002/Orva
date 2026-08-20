@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"errors"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
@@ -53,6 +54,11 @@ const sessionCookieName = "session_token"
 // sandbox, and the two differ on purpose — a third-party Authorization
 // belongs to the function, but must never be persisted in a captured
 // request. A future credential header belongs in both.
+// ErrBodyTooLarge is returned when the inbound request body exceeds the
+// configured cap. Callers map it to 413; the invoke error mapper keys on it
+// via errors.Is.
+var ErrBodyTooLarge = errors.New("request body too large")
+
 func SanitizeForwardedHeaders(h http.Header) map[string]string {
 	out := make(map[string]string, len(h))
 	for k, vs := range h {
@@ -87,6 +93,27 @@ func SanitizeForwardedHeaders(h http.Header) map[string]string {
 			if v := strings.Join(vs, ", "); !isOrvaCredential(v) {
 				out["authorization"] = v
 			}
+
+		case strings.HasPrefix(strings.ToLower(k), "x-orva-"):
+			// The x-orva- namespace is the server talking to its own
+			// adapter, never the caller. Forward is about to set the ones
+			// that matter, but it does not set all of them, and the two it
+			// leaves alone were both load-bearing:
+			//
+			//   x-orva-trigger    — orva.webhook.parse(event).verified is
+			//     defined as trigger === "inbound_webhook", and the docs
+			//     tell handlers to gate on it. A caller who set the header
+			//     on a direct /fn/ request passed that check with no HMAC
+			//     ever being computed. The shipped cron template branches
+			//     on trigger === "cron" to delete KV rows.
+			//
+			//   x-orva-call-depth — seeds ORVA_CALL_DEPTH, which the SDK
+			//     forwards on nested invokes and the F2F endpoint trusts.
+			//     A negative value defeated the recursion cap outright.
+			//
+			// Dropping the whole namespace rather than a denylist of two:
+			// the next header added here would otherwise inherit the bug.
+			continue
 
 		default:
 			// RFC 9110 §5.2: repeated field lines are equivalent to one
@@ -286,7 +313,22 @@ func (p *Proxy) Forward(
 	defer releaseExecution()
 
 	// Serialize the HTTP request into JSON for the adapter.
-	body, _ := io.ReadAll(r.Body)
+	//
+	// Check the read error. MaxBytesReader is installed by the body-size
+	// middleware, but that middleware's cheap up-front rejection only fires
+	// when Content-Length is PRESENT -- a chunked upload has none, so an
+	// over-limit chunked POST reached here, was truncated at the cap, and
+	// was handed to the function as a short body with a 200. Silent
+	// truncation of a request body is worse than a 413.
+	body, bodyErr := io.ReadAll(r.Body)
+	if bodyErr != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(bodyErr, &mbe) {
+			return nil, fmt.Errorf("request body exceeds the configured cap of %d bytes: %w",
+				mbe.Limit, ErrBodyTooLarge)
+		}
+		return nil, fmt.Errorf("read request body: %w", bodyErr)
+	}
 
 	// Compute the path the function sees.
 	path := r.URL.Path
@@ -417,8 +459,16 @@ func (p *Proxy) Forward(
 		coldStartStr = "true"
 	}
 	for k, v := range dres.Headers {
+		if hopByHopResponseHeader(k) {
+			// The adapter copies every header off its fetch Response, so an
+			// idiomatic proxy handler forwards content-length (compressed)
+			// and content-encoding: gzip alongside a body Go has already
+			// decoded. Go honours the explicit length and truncates.
+			continue
+		}
 		w.Header().Set(k, v)
 	}
+	applyFunctionResponseGuards(w)
 	w.Header().Set("X-Orva-Execution-ID", execID)
 	w.Header().Set("X-Orva-Cold-Start", coldStartStr)
 
@@ -434,10 +484,16 @@ func (p *Proxy) Forward(
 		// which on a buffered handler equals total response time.
 		w.Header().Set("X-Orva-Duration-MS", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
 		w.WriteHeader(sc)
-		n, _ := w.Write([]byte(dres.Body))
+		// Check the write error. Discarding it recorded the execution as a
+		// success when the client got nothing -- a broken pipe mid-body is
+		// exactly the case where the executions row should not say 200.
+		n, werr := w.Write([]byte(dres.Body))
 		result.StatusCode = sc
 		result.ResponseSize = n
 		result.Wrote = true
+		if werr != nil {
+			return result, fmt.Errorf("write response: %w", werr)
+		}
 		return result, nil
 	}
 
@@ -486,6 +542,15 @@ func (p *Proxy) Forward(
 	w.Header().Set("X-Orva-Ttfb-Ms", strconv.FormatInt(time.Since(startTime).Milliseconds(), 10))
 
 	flusher, _ := w.(http.Flusher)
+
+	// Clear the server's write deadline for the streaming path, as the SSE
+	// handler, the AI chat handler and the build-log handler all already do.
+	// Without it a stream is severed at the default 60s WriteTimeout and the
+	// worker is killed as a "client disconnect" -- while stream_max_seconds
+	// defaults to 300 and is the cap the operator is told governs this. A
+	// two-minute stream died at sixty seconds regardless of configuration.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
 	w.WriteHeader(sc)
 	if flusher != nil {
 		flusher.Flush() // push headers immediately so TTFB is measurable
@@ -621,4 +686,46 @@ func (p *Proxy) captureRequest(execID, method, path string, hdr http.Header, bod
 		Truncated:   truncated,
 		CapturedAt:  time.Now().UnixMilli(),
 	})
+}
+
+// hopByHopResponseHeader reports whether a header the adapter handed back
+// describes ITS transfer rather than ours, and so must not be relayed.
+func hopByHopResponseHeader(k string) bool {
+	switch strings.ToLower(strings.TrimSpace(k)) {
+	case "content-length", "content-encoding", "transfer-encoding",
+		"connection", "keep-alive", "proxy-authenticate",
+		"proxy-authorization", "te", "trailer", "upgrade":
+		return true
+	}
+	return false
+}
+
+// applyFunctionResponseGuards stops function output from acting as the
+// dashboard.
+//
+// Function responses share an origin with /web and /api, the session cookie
+// is Path=/ with SameSite=Lax, and auth_mode defaults to "none" -- so a
+// public function that reflects any part of its input is same-origin XSS:
+// script in that response could drive /api/v1/keys with the operator's
+// cookie attached.
+//
+// The control is the ORIGIN, not the content. `sandbox` without
+// allow-same-origin puts the document in an opaque origin, so its script
+// cannot read or issue credentialed same-origin requests to the control
+// plane. Scripts and forms are explicitly allowed, because functions
+// legitimately serve interactive pages: Orva ships a guestbook template that
+// posts a form and runs an inline character counter, and the first version
+// of this policy -- default-src 'none' with a bare `sandbox` -- made every
+// such page inert.
+//
+// allow-scripts WITHOUT allow-same-origin is the safe pairing. Granting both
+// together would let the document remove its own sandbox.
+//
+// Applied after the adapter's own headers and unconditionally, so a handler
+// cannot opt itself out.
+func applyFunctionResponseGuards(w http.ResponseWriter) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy",
+		"sandbox allow-scripts allow-forms allow-popups allow-downloads; "+
+			"frame-ancestors 'none'; base-uri 'none'")
 }

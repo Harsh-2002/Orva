@@ -10,6 +10,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"strconv"
 )
 
 // WebhooksHandler exposes operator-managed webhook subscription CRUD
@@ -224,7 +225,19 @@ func (h *WebhooksHandler) Test(w http.ResponseWriter, r *http.Request) {
 func (h *WebhooksHandler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	id := r.PathValue("id")
-	deliveries, err := h.DB.ListDeliveriesForSubscription(id, 100)
+	// Honour ?limit. This was hardcoded to 100 with no parameter at all,
+	// while the DB layer accepts up to 500, so there was no way to see past
+	// the newest hundred deliveries.
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	deliveries, err := h.DB.ListDeliveriesForSubscription(id, limit)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "list deliveries failed: "+err.Error(), reqID)
 		return
@@ -291,7 +304,7 @@ func normalizeEvents(in []string) []string {
 func validateEventNames(events []string) error {
 	for _, e := range events {
 		if _, ok := allowedEvents[e]; !ok {
-			return errors.New("unknown event name: " + e + " (see GET /api/v1/webhooks/events for catalog)")
+			return errors.New("unknown event name: " + e + " (see the Webhooks page in the dashboard, or docs/reference.md, for the event catalog)")
 		}
 	}
 	return nil

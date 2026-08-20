@@ -29,7 +29,7 @@
           size="xs"
           :active="statusFilter === opt.value"
           class="shrink-0 snap-start"
-          @click="statusFilter = opt.value"
+          @click="selectStatus(opt.value)"
         >
           {{ opt.label }}
           <span
@@ -348,6 +348,10 @@ const confirmStore = useConfirmStore()
 const jobs = ref([])
 const functions = ref([])
 const statusFilter = ref('all')
+// countSource is always an unfiltered page: the pills count from it so they
+// stay meaningful while a filter narrows the table.
+const countSource = ref([])
+const truncated = ref(false)
 let pollTimer = null
 
 // Enqueue drawer state. scheduleLater toggles whether the request body
@@ -372,14 +376,11 @@ const statusOptions = [
 ]
 
 const totalCount = computed(() => jobs.value.length)
-const filteredJobs = computed(() =>
-  statusFilter.value === 'all'
-    ? jobs.value
-    : jobs.value.filter((j) => j.status === statusFilter.value)
-)
+// The server already applied the filter; no second pass in the browser.
+const filteredJobs = computed(() => jobs.value)
 const counts = computed(() => {
-  const c = { all: jobs.value.length }
-  for (const j of jobs.value) c[j.status] = (c[j.status] || 0) + 1
+  const c = { all: countSource.value.length }
+  for (const j of countSource.value) c[j.status] = (c[j.status] || 0) + 1
   return c
 })
 
@@ -408,10 +409,35 @@ const formatDate = (s) => {
   })
 }
 
+const PAGE = 200
+
+// Jobs were fetched as a hard-capped 200 rows and filtered in the browser,
+// so past 200 jobs the "Failed" pill listed whatever failures happened to be
+// in the newest page rather than the failures. The backend has supported a
+// server-side status filter all along.
+//
+// The count pills are derived from an UNFILTERED page, so when a status is
+// selected we fetch both: the filtered list is what the table shows, the
+// unfiltered page is what the pills count. Two requests only while a filter
+// is active.
+// Changing the filter now has to refetch, because the narrowing happens on
+// the server rather than in a computed over already-loaded rows.
+const selectStatus = async (value) => {
+  statusFilter.value = value
+  await loadJobs()
+}
+
 const loadJobs = async () => {
   try {
-    const res = await listJobs({ limit: 200 })
-    jobs.value = res.data.jobs || []
+    const [all, filtered] = await Promise.all([
+      listJobs({ limit: PAGE }),
+      statusFilter.value === 'all'
+        ? Promise.resolve(null)
+        : listJobs({ limit: PAGE, status: statusFilter.value }),
+    ])
+    countSource.value = all.data.jobs || []
+    jobs.value = filtered ? (filtered.data.jobs || []) : countSource.value
+    truncated.value = countSource.value.length === PAGE
   } catch (e) {
     console.error('Failed to load jobs', e)
   }

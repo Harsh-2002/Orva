@@ -32,7 +32,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestSupportedEnvVars(t *testing.T) {
-	const expected = 10
+	const expected = 11
 	if len(SupportedEnvVars) != expected {
 		t.Errorf("SupportedEnvVars: want %d entries, got %d (%v)", expected, len(SupportedEnvVars), SupportedEnvVars)
 	}
@@ -46,6 +46,7 @@ func TestSupportedEnvVars(t *testing.T) {
 		"ORVA_SECCOMP_POLICY":    true,
 		"ORVA_SECURE_COOKIES":    true,
 		"ORVA_SESSION_DAYS":      true,
+		"ORVA_TRUSTED_PROXY":     true,
 		"ORVA_WRITE_TIMEOUT_SEC": true,
 	}
 	for _, v := range SupportedEnvVars {
@@ -72,6 +73,7 @@ var validSample = map[string]string{
 	"ORVA_SECCOMP_POLICY":    "strict",
 	"ORVA_SECURE_COOKIES":    "true",
 	"ORVA_SESSION_DAYS":      "30",
+	"ORVA_TRUSTED_PROXY":     "true",
 	"ORVA_WRITE_TIMEOUT_SEC": "120",
 }
 

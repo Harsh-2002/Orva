@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // KeyHandler handles API key management endpoints.
@@ -56,6 +57,16 @@ func (h *KeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve expiry: explicit ExpiresAt wins; ExpiresInDays is the UI shortcut.
+	//
+	// Cap the input. time.Duration is int64 NANOSECONDS, so it overflows at
+	// roughly 106,751 days: expires_in_days: 200000 wrapped NEGATIVE and
+	// minted a 201 Created credential whose expires_at was already in the
+	// past, handing back a one-time plaintext that never worked.
+	if req.ExpiresInDays != nil && *req.ExpiresInDays > maxExpiresInDays {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			fmt.Sprintf("expires_in_days must be <= %d", maxExpiresInDays), reqID)
+		return
+	}
 	if req.ExpiresAt == nil && req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
 		t := time.Now().UTC().Add(time.Duration(*req.ExpiresInDays) * 24 * time.Hour)
 		req.ExpiresAt = &t
@@ -171,3 +182,8 @@ func extractKeyID(path string) string {
 	}
 	return remainder
 }
+
+// maxExpiresInDays bounds the expires_in_days shortcut. time.Duration is
+// int64 nanoseconds, which overflows at about 106,751 days; anything near
+// that is nonsense as a credential lifetime anyway. 100 years is generous.
+const maxExpiresInDays = 36500

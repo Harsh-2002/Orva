@@ -216,6 +216,12 @@
       >
         Save defaults
       </Button>
+      <p
+        v-if="settingsError"
+        class="mt-2 text-xs text-danger"
+      >
+        {{ settingsError }}
+      </p>
     </section>
   </div>
 </template>
@@ -290,6 +296,10 @@ const baseURLHint = computed(() =>
     : 'For custom / self-hosted endpoints. Either with or without /v1 works. A private LAN address works too.')
 const savingProvider = ref(false)
 const savingSettings = ref(false)
+// The radios v-model straight onto the store, so a rejected save left the
+// new choice displayed as though it had stuck. try/finally with no catch
+// meant nothing ever surfaced the failure.
+const settingsError = ref('')
 
 onMounted(async () => {
   await store.loadSettings()
@@ -319,8 +329,16 @@ async function onSaveProvider() {
 
 async function onSaveSettings() {
   savingSettings.value = true
+  settingsError.value = ''
   try {
     await store.saveSettings(store.settings)
+  } catch (e) {
+    settingsError.value =
+      e?.response?.data?.error?.message || e?.message || 'Failed to save settings'
+    // Re-read so the UI stops showing a value the server rejected.
+    try {
+      await store.loadSettings?.()
+    } catch { /* leave the error message as the signal */ }
   } finally {
     savingSettings.value = false
   }

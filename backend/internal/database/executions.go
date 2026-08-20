@@ -242,7 +242,11 @@ func (db *Database) AsyncInsertExecutionRequest(req *ExecutionRequest) {
 	if req.Truncated {
 		truncated = 1
 	}
-	db.AsyncExec(`
+	// Telemetry, not critical. This is the single largest payload the writer
+	// ever queues -- a captured request body up to replay_capture_max_bytes
+	// (1 MiB default) -- and capture is explicitly best-effort, so it does
+	// not belong in the queue whose whole point is not losing anything.
+	db.AsyncExecTelemetry(`
 		INSERT OR REPLACE INTO execution_requests (
 			execution_id, method, path, headers_json, body, truncated, captured_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -584,6 +588,11 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 	if params.Limit <= 0 {
 		params.Limit = 50
 	}
+	// Clamp the upper end too. Every sibling list endpoint does; this one
+	// only floored, so ?limit=100000000 materialised the whole table.
+	if params.Limit > 1000 {
+		params.Limit = 1000
+	}
 
 	query := "SELECT " + executionSelectColumns + " FROM executions WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM executions WHERE 1=1"
@@ -599,14 +608,21 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 		countQuery += " AND status = ?"
 		args = append(args, params.Status)
 	}
+	// Compare as time, not as text. started_at is stored space-separated
+	// (Go's time layout, hence the ' +0000 UTC' fixups elsewhere in this
+	// file) while every client sends RFC3339 with a 'T'. ' ' (0x20) sorts
+	// below 'T' (0x54), so a raw string comparison puts every row from the
+	// cutoff's OWN DATE below the cutoff: "last 1 hour" returned nothing at
+	// all, and executions prune over-deleted by up to a day at the boundary.
+	// The sibling trace query already does this correctly.
 	if params.Since != "" {
-		query += " AND started_at >= ?"
-		countQuery += " AND started_at >= ?"
+		query += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) >= julianday(?)"
+		countQuery += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) >= julianday(?)"
 		args = append(args, params.Since)
 	}
 	if params.Until != "" {
-		query += " AND started_at < ?"
-		countQuery += " AND started_at < ?"
+		query += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) < julianday(?)"
+		countQuery += " AND julianday(replace(started_at, ' +0000 UTC', 'Z')) < julianday(?)"
 		args = append(args, params.Until)
 	}
 	if params.Search != "" {
@@ -667,12 +683,26 @@ func (db *Database) GetExecutionLog(executionID string) (*ExecutionLog, error) {
 // execution_logs) and its captured request envelope (manual cleanup —
 // execution_requests dropped its FK in v0.4 to avoid async-batch FK
 // failures on the hot path; see dropExecutionRequestsFK).
-func (db *Database) DeleteExecution(id string) error {
-	if _, err := db.write.Exec("DELETE FROM execution_requests WHERE execution_id = ?", id); err != nil {
-		return err
+func (db *Database) DeleteExecution(id string) (bool, error) {
+	// Delete every child first, by the same list the purge uses. Two of them
+	// -- user_spans and execution_log_entries -- carry no declared FK, so
+	// CASCADE cannot reach them and they were left as permanently
+	// unreachable rows. The comment a few lines below has warned about
+	// exactly this; executionChildTables is the single list both paths use.
+	for _, t := range executionChildTables {
+		if _, err := db.write.Exec("DELETE FROM "+t+" WHERE execution_id = ?", id); err != nil {
+			return false, fmt.Errorf("delete %s: %w", t, err)
+		}
 	}
-	_, err := db.write.Exec("DELETE FROM executions WHERE id = ?", id)
-	return err
+	res, err := db.write.Exec(`DELETE FROM executions WHERE id = ?`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // executionChildTables are every table keyed by execution_id. Only
@@ -712,8 +742,52 @@ func (db *Database) PurgeOldExecutions(retentionDays int) error {
 		}
 	}
 
-	_, err := db.write.Exec("DELETE FROM executions WHERE started_at < ?", cutoff)
-	return err
+	if _, err := db.write.Exec("DELETE FROM executions WHERE started_at < ?", cutoff); err != nil {
+		return err
+	}
+	return db.purgeOtherRetainedTables(cutoff)
+}
+
+// purgeOtherRetainedTables trims the finished rows that also accumulate
+// forever.
+//
+// Retention was documented as the reason "the database does not grow
+// without bound", but only executions (and its children) and activity_log
+// were ever swept. jobs, webhook_deliveries, deployments, build_logs and
+// expired sessions had no time-based deletion at all -- they inherit
+// ON DELETE CASCADE from their parent function, so they were only ever
+// reclaimed by deleting the function itself.
+//
+// Only terminal rows are removed: anything still pending or running is left
+// alone regardless of age, so a long-scheduled job is never swept out from
+// under the scheduler.
+func (db *Database) purgeOtherRetainedTables(cutoff string) error {
+	stmts := []struct{ what, sql string }{
+		{"jobs", `DELETE FROM jobs
+			WHERE status IN ('succeeded','failed','cancelled')
+			  AND COALESCE(finished_at, created_at) < ?`},
+		{"webhook_deliveries", `DELETE FROM webhook_deliveries
+			WHERE status IN ('succeeded','failed','cancelled')
+			  AND COALESCE(finished_at, created_at) < ?`},
+		// build_logs only. The deployment ROW is small metadata and is the
+		// rollback audit trail the dashboard lists; the log lines are the
+		// bulk. Version pruning on disk is the version GC's job.
+		{"build_logs", `DELETE FROM build_logs WHERE deployment_id IN (
+			SELECT id FROM deployments
+			WHERE status IN ('succeeded','failed')
+			  AND submitted_at < ?)`},
+		{"sessions", `DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP`},
+	}
+	for _, st := range stmts {
+		args := []any{cutoff}
+		if st.what == "sessions" {
+			args = nil
+		}
+		if _, err := db.write.Exec(st.sql, args...); err != nil {
+			return fmt.Errorf("purge %s: %w", st.what, err)
+		}
+	}
+	return nil
 }
 
 // scanExecutionFields uses the package-level rowScanner interface

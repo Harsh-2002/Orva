@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,23 @@ func NewClient(baseURL, apiKey string) *Client {
 		APIKey:  apiKey,
 		HTTP: &http.Client{
 			Timeout: 120 * time.Second,
+			// Go strips only its own six auth headers on a cross-host
+			// redirect (Authorization, WWW-Authenticate, Cookie, Cookie2,
+			// Proxy-Authorization, Proxy-Authenticate). X-Orva-API-Key is a
+			// custom header, so it was copied verbatim to whatever host a
+			// 302 named -- a stale ORVA_ENDPOINT, a captive portal, or a
+			// reverse proxy misconfigured to redirect /api/v1/* would
+			// receive the operator's key in full, up to ten hops deep.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return errors.New("stopped after 10 redirects")
+				}
+				if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+					req.Header.Del("X-Orva-API-Key")
+					req.Header.Del("Authorization")
+				}
+				return nil
+			},
 		},
 	}
 }

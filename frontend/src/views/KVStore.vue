@@ -68,7 +68,15 @@
         v-if="truncated"
         class="text-xs text-amber-400/80"
       >
-        Showing first {{ rows.length }}. Narrow the prefix to see more.
+        Showing {{ rows.length }} of {{ total }}.
+        <button
+          class="underline hover:text-foreground"
+          :disabled="loading"
+          @click="refresh({ append: true })"
+        >
+          Load more
+        </button>
+        or narrow the prefix.
       </span>
     </div>
 
@@ -468,16 +476,25 @@ const totalSize = computed(() =>
 )
 
 // ── Fetch ───────────────────────────────────────────────────────────
-const refresh = async () => {
+// nextCursor drives "Load more". The endpoint had no cursor at all, so the
+// only advice this page could offer past 200 keys was "narrow the prefix",
+// which does not help someone with 5000 flat keys.
+const nextCursor = ref('')
+
+const refresh = async ({ append = false } = {}) => {
   loading.value = true
   try {
     const params = { limit: 200 }
     if (prefix.value) params.prefix = prefix.value
+    if (append && nextCursor.value) params.cursor = nextCursor.value
     const res = await kvList(fnName.value, params)
-    rows.value = res.data?.entries || []
+    const page = res.data?.entries || []
+    rows.value = append ? [...rows.value, ...page] : page
     total.value = res.data?.total ?? rows.value.length
+    nextCursor.value = res.data?.next_cursor || ''
     truncated.value = !!res.data?.truncated
   } catch (e) {
+    if (!append) rows.value = []
     console.error('kvList failed', e)
     confirmStore.notify({
       title: 'Failed to load KV',

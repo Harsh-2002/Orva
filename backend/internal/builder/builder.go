@@ -413,6 +413,37 @@ func extractTarGz(archivePath, destDir string) error {
 			if err := os.Chmod(target, os.FileMode(hdr.Mode)); err != nil {
 				return err
 			}
+
+		case tar.TypeSymlink, tar.TypeLink:
+			// Links are REFUSED, never recreated.
+			//
+			// An earlier version of this recreated symlinks after a lexical
+			// containment check. CodeQL flagged it (go/unsafe-unzip-symlink)
+			// and was right to: a lexical check cannot see through a chain.
+			// Extract "a -> ." and then a later entry "a/../../evil" and the
+			// second write resolves through the first link at write time, so
+			// every path this loop validated by string manipulation can still
+			// land outside the root. That containment check was also wrong in
+			// the other direction -- it anchored to the LINK's directory
+			// rather than the extraction root, rejecting an ordinary
+			// "sub/lib.js -> ../shared.js".
+			//
+			// Nothing here needs to create a link. `orva deploy` now
+			// DEREFERENCES symlinks when building the archive: a link to a
+			// regular file is packed as that file's contents under the link's
+			// name, which is what `tar -h` does and produces an equivalent
+			// tree with none of this risk. So a link entry reaching this
+			// point came from somewhere else, and refusing it is both safe
+			// and honest -- unlike the original behaviour, which dropped link
+			// entries silently and accepted the archive minus its links.
+			kind := "symlink"
+			if hdr.Typeflag == tar.TypeLink {
+				kind = "hard link"
+			}
+			return fmt.Errorf(
+				"%s entries are not supported in deploy archives: %s -> %s "+
+					"(deploy dereferences symlinks when packing; re-run `orva deploy`)",
+				kind, hdr.Name, hdr.Linkname)
 		}
 	}
 	return nil
@@ -465,6 +496,7 @@ func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtim
 			fnID:     fnID,
 			codeDir:  codeDir,
 			stream:   "npm",
+			timeout:  b.buildStepTimeout(),
 			// --prefix is redundant now that the jail's cwd is the code dir,
 			// but it keeps the resolved install root explicit and matches
 			// what operators see in the build log.
@@ -502,6 +534,7 @@ func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtim
 			fnID:     fnID,
 			codeDir:  codeDir,
 			stream:   "pip",
+			timeout:  b.buildStepTimeout(),
 			argv: []string{
 				pythonPipBin,
 				"install", "-r", sandbox.BuildCodeDir + "/requirements.txt",
@@ -851,4 +884,21 @@ func pipPlatformTag() string {
 		return "manylinux2014_aarch64"
 	}
 	return "manylinux2014_x86_64"
+}
+
+// buildStepTimeout returns the per-step deadline from build_timeout_seconds.
+//
+// npm install and pip install had NO timeout at all -- queue.go passes
+// context.Background() and neither step set one, so only tsc was bounded. A
+// registry connection that hangs left the deployment showing "deps" forever
+// and burned a build-queue slot permanently, and nothing resets a stuck
+// deployment on boot either.
+func (b *Builder) buildStepTimeout() time.Duration {
+	secs := 300
+	if b.DB != nil {
+		if v := b.DB.GetSystemConfigInt("build_timeout_seconds", 300); v > 0 {
+			secs = v
+		}
+	}
+	return time.Duration(secs) * time.Second
 }

@@ -14,6 +14,8 @@ import (
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
+	"io/fs"
+	"sort"
 )
 
 var deployCmd = &cobra.Command{
@@ -93,10 +95,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Create tar.gz archive.
 	archivePath, err := createArchive(srcPath)
+	// Register the cleanup BEFORE the error check: createArchive creates its
+	// temp file first and can fail after, so every failed deploy used to
+	// leave a partial orva-deploy-*.tar.gz behind in /tmp.
+	if archivePath != "" {
+		defer os.Remove(archivePath)
+	}
 	if err != nil {
 		return fmt.Errorf("create archive: %w", err)
 	}
-	defer os.Remove(archivePath)
 
 	// Upload via multipart POST.
 	resp, err := uploadDeploy(client, fnID, archivePath)
@@ -206,9 +213,17 @@ func resolveOrCreateFunction(cmd *cobra.Command, client *cli.Client, name, runti
 		}
 		if decodeJSON(resp, &result) == nil {
 			for _, fn := range result.Functions {
-				if fn.Name == name {
-					return fn.ID, nil
+				if fn.Name != name {
+					continue
 				}
+				// --entrypoint and --runtime were applied only on the CREATE
+				// path below, so redeploying an existing function with a
+				// changed value silently kept the old one and exited 0. Apply
+				// them here too.
+				if err := applyDeployOverrides(cmd, client, fn.ID, runtime, entrypoint); err != nil {
+					return "", err
+				}
+				return fn.ID, nil
 			}
 		}
 	}
@@ -316,6 +331,49 @@ func createArchive(srcDir string) (string, error) {
 			return err
 		}
 
+		// filepath.Walk uses Lstat, so a symlink arrives as a symlink, and
+		// FileInfoHeader emits a zero-size TypeSymlink header. The original
+		// code then fell through to Open+Copy and wrote the target's CONTENT
+		// into that zero-size entry: "archive/tar: write too long", which
+		// aborted the whole deploy. A lib.js -> shared.js link is ordinary in
+		// a JS project.
+		//
+		// DEREFERENCE rather than archiving the link, which is what `tar -h`
+		// does. Packing links would mean the server has to recreate them, and
+		// recreating a link from an untrusted archive is genuinely unsafe:
+		// lexical containment cannot see through a chain, so an early link
+		// entry can redirect a later write outside the extraction root. The
+		// builder therefore refuses link entries outright, and dereferencing
+		// here is what keeps ordinary projects deployable.
+		if info.Mode()&fs.ModeSymlink != 0 {
+			resolved, err := os.Stat(path) // follows the link
+			if err != nil {
+				return fmt.Errorf("symlink %s is broken: %w", relPath, err)
+			}
+			if resolved.IsDir() {
+				// Walking through it could duplicate a whole tree, or loop
+				// forever on a cycle. Say so rather than silently omitting it.
+				return fmt.Errorf(
+					"%s is a symlink to a directory, which deploy cannot pack; "+
+						"replace it with the directory itself or exclude it", relPath)
+			}
+			hdr, err := tar.FileInfoHeader(resolved, "")
+			if err != nil {
+				return err
+			}
+			hdr.Name = relPath
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(tw, f)
+			return err
+		}
+
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
@@ -327,6 +385,10 @@ func createArchive(srcDir string) (string, error) {
 		}
 
 		if info.IsDir() {
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			// Sockets, devices and FIFOs have no meaningful archive form.
 			return nil
 		}
 
@@ -381,4 +443,40 @@ func uploadDeploy(client *cli.Client, fnID, archivePath string) (*http.Response,
 	}
 
 	return client.HTTP.Do(req)
+}
+
+// applyDeployOverrides PATCHes runtime/entrypoint onto an existing function
+// when the caller passed them explicitly. Only sends what was set, so a
+// plain `orva deploy` never rewrites configuration the operator did not ask
+// to change.
+func applyDeployOverrides(cmd *cobra.Command, client *cli.Client, fnID, runtime, entrypoint string) error {
+	body := map[string]string{}
+	if cmd.Flags().Changed("runtime") && runtime != "" {
+		body["runtime"] = runtime
+	}
+	if cmd.Flags().Changed("entrypoint") && entrypoint != "" {
+		body["entrypoint"] = entrypoint
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	resp, err := client.Put("/api/v1/functions/"+fnID, body)
+	if err != nil {
+		return fmt.Errorf("apply deploy overrides: %w", err)
+	}
+	defer resp.Body.Close()
+	if err := checkResponse(resp); err != nil {
+		return fmt.Errorf("apply deploy overrides: %w", err)
+	}
+	infof(cmd, "Updated %s on the existing function.", strings.Join(keysOf(body), " and "))
+	return nil
+}
+
+func keysOf(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

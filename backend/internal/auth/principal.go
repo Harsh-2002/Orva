@@ -4,10 +4,10 @@
 //
 //   - orva_<hex>      → operator API key, gates by permission set
 //   - orva_chn_<hex>  → agent channel, exposes a fixed function set
-//                       as MCP tools; not accepted by /api/v1/*
+//     as MCP tools; not accepted by /api/v1/*
 //   - orva_oat_<hex>  → OAuth-issued access token (claude.ai web,
-//                       ChatGPT web, etc.); operator-equivalent power
-//                       gated by scope→permission mapping
+//     ChatGPT web, etc.); operator-equivalent power
+//     gated by scope→permission mapping
 //
 // Each resolver builds a *Principal so downstream middleware (activity
 // logging, MCP tool registration) doesn't have to care which path the
@@ -17,14 +17,16 @@
 // attribution before this refactor.
 package auth
 
+import "context"
+
 import "time"
 
 // Kind values for Principal.Kind. Use the constants instead of bare
 // strings so a typo in middleware doesn't silently bypass an actor-
 // type filter.
 const (
-	KindAPIKey    = "api_key"
-	KindOAuth     = "oauth"
+	KindAPIKey  = "api_key"
+	KindOAuth   = "oauth"
 	KindChannel = "channel"
 )
 
@@ -81,4 +83,33 @@ type ChannelRef struct {
 	Description  string
 	Instructions string   // optional per-channel serverInstructions override
 	FunctionIDs  []string // populated from channel_functions junction
+}
+
+// --- Actor identity in request context ---
+//
+// The auth middleware lives in the server package and the handlers package
+// cannot import it without a cycle, which is why audit fields like
+// channel_functions.added_by_actor_id were written as "" with a comment
+// promising a follow-up. This package is already imported by both sides, so
+// the key lives here.
+
+type actorIDCtxKey struct{}
+
+// WithActorID stashes the authenticated actor's id (an api_keys.id, an
+// OAuth client id, or a session prefix) for handlers that record who did
+// something.
+func WithActorID(ctx context.Context, id string) context.Context {
+	if id == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, actorIDCtxKey{}, id)
+}
+
+// ActorID returns the authenticated actor's id, or "" when the request was
+// unauthenticated or predates the middleware setting it.
+func ActorID(ctx context.Context) string {
+	if v, ok := ctx.Value(actorIDCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
 }

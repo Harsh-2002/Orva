@@ -1465,7 +1465,16 @@ const runtimes = [
 const isPythonRuntime = (rt) => rt === 'python'
 const isNodeRuntime   = (rt) => rt === 'node'
 
+// Support files and entrypoint carried over from a template. Both used to
+// be dropped by applyTemplate, which made the TypeScript template
+// undeployable from the dashboard: the builder gates its tsc step on
+// tsconfig.json existing, and that file only lives in the template's
+// `extras`.
+const templateExtras = ref({})
+const templateEntrypoint = ref('')
+
 const fileName = computed(() => {
+  if (templateEntrypoint.value) return templateEntrypoint.value
   if (isPythonRuntime(form.value.runtime)) return 'handler.py'
   if (isNodeRuntime(form.value.runtime))   return 'handler.js'
   return 'handler.js'
@@ -1501,6 +1510,10 @@ const setRuntime = (rt) => {
   if (!isEditing.value) {
     templateId.value = ''
     dependencyText.value = ''
+    // Clearing the template must clear what it carried, or a TypeScript
+    // entrypoint and tsconfig would survive a switch to Python.
+    templateExtras.value = {}
+    templateEntrypoint.value = ''
   }
 }
 
@@ -1575,6 +1588,12 @@ const applyTemplate = () => {
   if (selected) {
     code.value = selected.code
     dependencyText.value = selected.deps || ''
+    // Carry the template's support files and entrypoint. Both were dropped
+    // here, which made the TypeScript template undeployable: the builder
+    // gates its tsc step on tsconfig.json existing, and that file only ever
+    // lived in the template's `extras`.
+    templateExtras.value = selected.extras ? { ...selected.extras } : {}
+    templateEntrypoint.value = selected.entrypoint || ''
     // Pre-fill the function's description from the template if the user
     // hasn't typed one yet — saves a step on quick-create flows and
     // ensures the function ships with a meaningful one-liner.
@@ -1769,6 +1788,8 @@ const resetEditorState = () => {
   autoDetected.value = false
   runtimeManuallySet.value = false
   templateId.value = ''
+  templateExtras.value = {}
+  templateEntrypoint.value = ''
 }
 
 const loadRouteData = async () => {
@@ -2093,6 +2114,9 @@ const runDeploy = async () => {
       code: code.value,
       filename: fileName.value,
       dependencies: dependencyText.value || '',
+      ...(Object.keys(templateExtras.value).length
+        ? { extras: templateExtras.value }
+        : {}),
     })
 
     const depId = deployRes.data.deployment_id

@@ -140,6 +140,20 @@ func (g *GC) tick(ctx context.Context) {
 		}
 		return
 	}
+
+	// The same asymmetry, for the other way ids and directory names can
+	// disagree: the UUIDv7 migration rewrites every function id, and the
+	// matching rename of functions/<id>/ is recorded and applied separately.
+	// While that record is outstanding, `live` holds new ids and the disk
+	// holds old ones, so EVERY directory looks like an orphan. Boot normally
+	// reconciles before the GC ever starts; this is the backstop for the
+	// window where it has not, or could not.
+	if g.db != nil && g.db.HasPendingFunctionDirRenames() {
+		slog.Warn("gc: function id migration has unreconciled directory renames; " +
+			"skipping orphan sweeps until they are applied")
+		return
+	}
+
 	g.sweepBuildCaches(ctx, live)
 	g.sweepOrphanFunctionDirs(ctx, live)
 }

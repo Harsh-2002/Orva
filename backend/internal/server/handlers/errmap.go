@@ -10,6 +10,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/proxy"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
@@ -28,6 +29,14 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 	opts.Message = err.Error()
 
 	switch {
+	// — Request shape —
+	case errors.Is(err, proxy.ErrBodyTooLarge):
+		return http.StatusRequestEntityTooLarge, respond.ErrorOpts{
+			Code: "PAYLOAD_TOO_LARGE", Message: err.Error(),
+			RequestID: requestID,
+			Hint:      "send Content-Length, split the upload, or raise the body cap",
+		}
+
 	// — Pool / capacity / memory —
 	case errors.Is(err, pool.ErrManagerClosed):
 		return http.StatusServiceUnavailable, respond.ErrorOpts{

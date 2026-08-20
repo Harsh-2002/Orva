@@ -10,8 +10,8 @@ import (
 // rules are seeded by Migrate(); custom rules come from the operator.
 type BlocklistRule struct {
 	ID        int64     `json:"id"`
-	Kind      string    `json:"kind"`       // 'default' | 'suggested' | 'custom'
-	RuleType  string    `json:"rule_type"`  // 'cidr' | 'hostname' | 'wildcard'
+	Kind      string    `json:"kind"`      // 'default' | 'suggested' | 'custom'
+	RuleType  string    `json:"rule_type"` // 'cidr' | 'hostname' | 'wildcard'
 	Value     string    `json:"value"`
 	Label     string    `json:"label,omitempty"`
 	Enabled   bool      `json:"enabled"`
@@ -184,4 +184,14 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// GetBlocklistRuleKind returns a rule's kind ('custom' or a seeded kind) so
+// callers can refuse an un-editable rule before performing any write. The
+// enable and edit statements match different rule sets and are not in a
+// transaction, so "can I edit this" has to be answered first.
+func (db *Database) GetBlocklistRuleKind(id int64) (string, error) {
+	var kind string
+	err := db.read.QueryRow(`SELECT kind FROM egress_blocklist WHERE id = ?`, id).Scan(&kind)
+	return kind, err
 }

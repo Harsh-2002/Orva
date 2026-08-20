@@ -195,6 +195,9 @@ func runKeysRevoke(cmd *cobra.Command, args []string) error {
 	}
 	resp.Body.Close()
 
+	if outputJSON(cmd) {
+		return emitJSON(map[string]any{"revoked": true, "id": keyID})
+	}
 	okf(cmd, "Revoked API key %s", keyID)
 	return nil
 }

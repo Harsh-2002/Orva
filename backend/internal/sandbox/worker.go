@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -210,6 +213,13 @@ func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte
 		// Caller used the back-compat path on a streaming handler. Drain
 		// chunks into a buffer so the existing single-write path still
 		// works; this is the path tests + non-HTTP callers take.
+		//
+		// Bounded, because "non-HTTP callers" is not a niche: cron, jobs,
+		// F2F and the inbound-webhook trigger all use Dispatch rather than
+		// DispatchEx. A handler that streams a large body works fine over
+		// /fn/ and used to OOM-kill orvad when the SAME function was fired
+		// by cron -- the buffer, the string copy and the JSON envelope are
+		// roughly four to six times the payload, all resident at once.
 		var buf []byte
 		for {
 			kind, data, err := res.NextFrame(ctx)
@@ -220,6 +230,11 @@ func (w *Worker) Dispatch(ctx context.Context, eventJSON []byte) ([]byte, []byte
 				break
 			}
 			if kind == "chunk" {
+				if len(buf)+len(data) > maxBufferedStreamBytes {
+					return nil, res.Stderr(), fmt.Errorf(
+						"streamed response exceeds %d bytes on a non-streaming caller: %w",
+						maxBufferedStreamBytes, ErrStreamTooLarge)
+				}
 				buf = append(buf, data...)
 			}
 		}
@@ -579,14 +594,38 @@ func (w *Worker) Quit(grace time.Duration) error {
 // loser sees "Wait was already called" and returns without reaping).
 // Pre-fix this was the path that produced <defunct> nsjail entries after
 // streaming-client disconnects: markDead → pool kill → duplicate Wait.
+// maxBufferedStreamBytes caps what Dispatch will accumulate from a
+// streaming handler. 32 MiB is far above any sane buffered response and far
+// below what would threaten the daemon.
+const maxBufferedStreamBytes = 32 << 20
+
+// ErrStreamTooLarge is returned when a streaming handler's output exceeds
+// what a non-streaming caller can safely buffer.
+var ErrStreamTooLarge = errors.New("streamed response too large to buffer")
+
 func (w *Worker) Kill() error {
 	w.markDead()
 	if w.Cmd == nil || w.Cmd.Process == nil {
 		return nil
 	}
-	// Signal the whole process group (Setpgid=true at Spawn).
-	_ = syscall.Kill(-w.Cmd.Process.Pid, syscall.SIGKILL)
+	// Signal the whole process group (Setpgid=true at Spawn). Skip the raw
+	// group signal once the process is known reaped: the PID may have been
+	// recycled by then, and this call is not guarded the way Process.Kill is.
+	select {
+	case <-w.waitDone:
+	default:
+		_ = syscall.Kill(-w.Cmd.Process.Pid, syscall.SIGKILL)
+	}
 	_ = w.Cmd.Process.Kill()
+
+	// SIGKILL means nsjail never runs its own cleanup, so the NSJAIL.<pid>
+	// cgroup directory it created is left behind. Nothing else removes it,
+	// and every subsequent spawn ReadDirs that directory and reads
+	// cgroup.procs per entry to find its own -- so the leak is not just disk,
+	// it makes cgroup resolution slower on every cold start until it times
+	// out entirely, at which point memory sampling stops and the autoscaler
+	// permanently over-reserves.
+	w.removeCgroup()
 	// The Spawn-side reaper goroutine will pick up the SIGKILL exit and
 	// close waitDone. Caller does not block on it — w.Kill returns as soon
 	// as the signal is delivered.
@@ -707,4 +746,52 @@ func (r *ringBuffer) Snapshot(from int64) []byte {
 		copy(out[n:], r.buf[:want-n])
 	}
 	return out
+}
+
+// removeCgroup best-effort removes the cgroup directory nsjail created for
+// this worker. Safe to call more than once, and safe when the worker never
+// had one.
+//
+// rmdir on a cgroup only succeeds once it has no member processes, which is
+// what we want: if anything is somehow still inside, leave it alone and let
+// the startup sweep get it later.
+func (w *Worker) removeCgroup() {
+	path := w.GetCgroupPath()
+	if path == "" {
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		slog.Debug("could not remove worker cgroup", "path", path, "err", err)
+	}
+}
+
+// SweepOrphanCgroups removes NSJAIL.* cgroup directories left behind by
+// workers from a previous process. Called once at startup: a kill -9 of
+// orvad itself never reaches removeCgroup, and the directories accumulate
+// across restarts.
+//
+// Only empty directories are removed, so a cgroup belonging to a live
+// sandbox is never touched.
+func SweepOrphanCgroups() {
+	mount := cgroupv2Delegate()
+	if mount == "" {
+		return
+	}
+	entries, err := os.ReadDir(mount)
+	if err != nil {
+		return
+	}
+	removed := 0
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "NSJAIL.") {
+			continue
+		}
+		// rmdir fails with EBUSY while the cgroup still holds processes.
+		if err := os.Remove(filepath.Join(mount, e.Name())); err == nil {
+			removed++
+		}
+	}
+	if removed > 0 {
+		slog.Info("reclaimed orphaned nsjail cgroups", "count", removed, "mount", mount)
+	}
 }

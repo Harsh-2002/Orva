@@ -34,7 +34,7 @@ cli/
     ├── jobs.go           # `orva jobs …`
     ├── keys.go           # `orva keys …`
     ├── kv.go             # `orva kv list/get/put/delete/incr/cas`
-    ├── login.go          # `orva login --endpoint --api-key [--test]`
+    ├── login.go          # `orva login --endpoint --api-key [--test]` (use `--api-key -` to read the key from stdin; argv is visible in `ps` and lands in shell history)
     ├── logs.go           # `orva logs [--follow]` (SSE)
     ├── pool.go           # `orva pool get/set` (per-fn warm-pool autoscaler)
     ├── rollback.go       # `orva rollback <fn> [deployment-id|--code-hash]`

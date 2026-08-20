@@ -56,14 +56,16 @@ type ActivityFilter struct {
 	SinceMS   int64  // ts >= since
 	UntilMS   int64  // ts < until
 	StatusMin int    // status >= n  (use 400 for "errors only")
+	StatusMax int    // status <= n  (use 399 for "successes only")
 	Search    string // LIKE on path / summary / actor_label
 	Limit     int    // default 200, max 1000
-	Cursor    int64  // ts threshold (descending paginate; ts < cursor)
+	Cursor    int64  // ts threshold (descending paginate)
+	CursorID  int64  // tie-break within the cursor's millisecond (row id)
 }
 
 // ListActivity returns rows newest-first. The next-page cursor is the
 // last row's ts; pass it back as Cursor on the next call.
-func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCursor int64, err error) {
+func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCursor int64, nextCursorID int64, err error) {
 	if f.Limit <= 0 {
 		f.Limit = 200
 	}
@@ -89,6 +91,10 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 		conds = append(conds, "ts < ?")
 		args = append(args, f.UntilMS)
 	}
+	if f.StatusMax > 0 {
+		conds = append(conds, "status <= ?")
+		args = append(args, f.StatusMax)
+	}
 	if f.StatusMin > 0 {
 		conds = append(conds, "status >= ?")
 		args = append(args, f.StatusMin)
@@ -99,8 +105,21 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 		args = append(args, needle, needle, needle)
 	}
 	if f.Cursor > 0 {
-		conds = append(conds, "ts < ?")
-		args = append(args, f.Cursor)
+		// Two-key cursor, matching the ORDER BY below.
+		//
+		// The ordering is (ts DESC, id DESC) but the cursor carried only ts
+		// and resumed with a strict `ts <`, so every row sharing the last
+		// row's millisecond was skipped -- silently dropping activity
+		// whenever a page boundary landed inside a burst, which is exactly
+		// when several rows share a timestamp. The traces list already uses
+		// the correct two-key form.
+		if f.CursorID > 0 {
+			conds = append(conds, "(ts < ? OR (ts = ? AND id < ?))")
+			args = append(args, f.Cursor, f.Cursor, f.CursorID)
+		} else {
+			conds = append(conds, "ts < ?")
+			args = append(args, f.Cursor)
+		}
 	}
 
 	where := ""
@@ -118,7 +137,7 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 
 	res, err := db.read.Query(q, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	defer res.Close()
 
@@ -129,17 +148,18 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 			&r.Method, &r.Path, &r.Status, &r.DurationMS, &r.Summary,
 			&r.RequestID, &r.Metadata, &r.TraceID,
 		); err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		rows = append(rows, r)
 	}
 	if err := res.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	if len(rows) == f.Limit {
-		nextCursor = rows[len(rows)-1].TS
+		last := rows[len(rows)-1]
+		nextCursor, nextCursorID = last.TS, last.ID
 	}
-	return rows, nextCursor, nil
+	return rows, nextCursor, nextCursorID, nil
 }
 
 // SweepActivity drops rows older than the configured retention window

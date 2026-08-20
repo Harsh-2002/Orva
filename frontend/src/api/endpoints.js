@@ -395,7 +395,12 @@ export const getTrace = (traceID) => apiClient.get(`/traces/${traceID}`)
 export const listTraces = (params = {}) => apiClient.get('/traces', { params })
 
 // Per-function rolling baseline (P95/P99/mean over the last N samples).
-// Drives the "P95: Xms · K anomalies" chip on function detail pages.
+//
+// Currently UNUSED: no view imports this. The chip it was written for was
+// never built, and the "P95 / anomalies" figures the trace waterfall shows
+// come from the trace payload, not from here. Kept because the route exists
+// server-side (GET /api/v1/functions/{id}/baseline) and this is its
+// binding -- but it drives nothing today.
 export const getFunctionBaseline = (idOrName) =>
   apiClient.get(`/functions/${idOrName}/baseline`)
 

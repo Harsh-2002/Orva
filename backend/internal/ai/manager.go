@@ -73,6 +73,11 @@ var ErrConversationBusy = errors.New("a turn is already in progress for this con
 // instance work while bounding provider cost and automatically invoked tools.
 const maxToolIterationsPerTurn = 25
 
+// maxTurnDuration bounds one AI turn end to end. Deep thinking plus several
+// tool calls is legitimately slow, so this is generous -- it exists to stop
+// a wedged turn holding its conversation lock forever, not to police speed.
+const maxTurnDuration = 30 * time.Minute
+
 // tryLockConv marks a conversation busy, returning false if it already is.
 func (m *Manager) tryLockConv(id string) bool {
 	m.convMu.Lock()
@@ -268,6 +273,14 @@ func (m *Manager) Chat(ctx context.Context, sink Sink, p Principal, params ChatP
 	}
 	defer m.unlockConv(convID)
 
+	// Bound the turn. There was no deadline anywhere in this package, so a
+	// client that connected and then stopped reading blocked Send forever --
+	// the deferred unlockConv never ran, and that conversation returned 409
+	// ErrConversationBusy for the rest of the process lifetime with no way
+	// to clear it short of a restart.
+	ctx, cancelTurn := context.WithTimeout(ctx, maxTurnDuration)
+	defer cancelTurn()
+
 	runner, err := m.buildRunner(ctx, p.Perms, cfg, firstTurn)
 	if err != nil {
 		_ = sink.Send("error", map[string]any{"message": err.Error()})
@@ -283,6 +296,11 @@ func (m *Manager) Resume(ctx context.Context, sink Sink, p Principal, convID, to
 		return ErrConversationBusy
 	}
 	defer m.unlockConv(convID)
+
+	// Same bound as Chat: a stalled turn must not hold the conversation
+	// lock for the process lifetime.
+	ctx, cancelTurn := context.WithTimeout(ctx, maxTurnDuration)
+	defer cancelTurn()
 	settings := m.resolvedSettings()
 	cfg := agent.Config{
 		Provider:       settings.Provider,
@@ -348,6 +366,11 @@ func (m *Manager) RegenerateLast(ctx context.Context, sink Sink, p Principal, co
 		return ErrConversationBusy
 	}
 	defer m.unlockConv(convID)
+
+	// Same bound as Chat: a stalled turn must not hold the conversation
+	// lock for the process lifetime.
+	ctx, cancelTurn := context.WithTimeout(ctx, maxTurnDuration)
+	defer cancelTurn()
 	msgs, err := m.db.ListMessages(convID, 0)
 	if err != nil {
 		_ = sink.Send("error", map[string]any{"message": err.Error()})
@@ -380,6 +403,9 @@ func (m *Manager) EditAndResend(ctx context.Context, sink Sink, p Principal, con
 		return ErrConversationBusy
 	}
 	defer m.unlockConv(convID)
+
+	// No turn deadline here: this is a pure database truncation with no
+	// model call and no streaming sink to block on.
 	msg, err := m.db.GetMessage(messageID)
 	if err != nil || msg.ConversationID != convID {
 		e := fmt.Errorf("message not found")
@@ -405,6 +431,9 @@ func (m *Manager) DeleteMessageFrom(convID, messageID string) error {
 		return ErrConversationBusy
 	}
 	defer m.unlockConv(convID)
+
+	// No turn deadline here: a pure database truncation, with no model call
+	// and no streaming sink to block on.
 	msg, err := m.db.GetMessage(messageID)
 	if err != nil || msg.ConversationID != convID {
 		return fmt.Errorf("message not found")
@@ -803,10 +832,16 @@ func (m *Manager) ListProviders() ([]ProviderView, error) {
 // and only used on this request; an empty APIKey on update leaves the stored
 // key untouched.
 type ProviderInput struct {
-	Provider    string `json:"provider"`
-	Label       string `json:"label"`
-	APIKey      string `json:"api_key"`
-	BaseURL     string `json:"base_url"`
+	Provider string `json:"provider"`
+	Label    string `json:"label"`
+	APIKey   string `json:"api_key"`
+	BaseURL  string `json:"base_url"`
+	// ExtraConfig is accepted, encrypted, persisted and round-tripped by the
+	// API, and is read by NOTHING -- llm/account.go builds a provider from
+	// the base URL and key alone. Setting e.g. a Bedrock region here saves
+	// successfully and changes no behaviour. Kept on the wire so existing
+	// stored values are not dropped, but a non-empty value now warns rather
+	// than silently doing nothing.
 	ExtraConfig string `json:"extra_config"`
 	Enabled     *bool  `json:"enabled"`
 }
@@ -820,6 +855,11 @@ func (m *Manager) SaveProvider(in ProviderInput) (ProviderView, error) {
 	baseURL := normalizeBaseURL(in.BaseURL)
 	if provider == "ollama" && baseURL == "" {
 		return ProviderView{}, fmt.Errorf("base_url is required for ollama")
+	}
+	if strings.TrimSpace(in.ExtraConfig) != "" {
+		slog.Warn("ai provider extra_config is stored but not applied; "+
+			"the gateway is configured from base_url and api_key only",
+			"provider", provider)
 	}
 	cfg := &database.AIProviderConfig{
 		Provider:    provider,

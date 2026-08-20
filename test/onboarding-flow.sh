@@ -10,6 +10,21 @@ set -euo pipefail
 BASE="${BASE_URL:-http://localhost:18443}"
 CONTAINER="${ORVA_CONTAINER:-}"
 
+# Onboarding is unauthenticated ONLY while the instance is unused. Once it
+# has operator-minted API keys or deployed functions it is claimed, and
+# creating a dashboard user requires proving control -- otherwise an
+# API-key-only operator (who never onboards, so has_user stays false) leaves
+# the endpoint open to anyone who can reach the port, and a session cookie
+# bypasses the permission model entirely.
+#
+# Point this at a scratch instance and it needs nothing. Against an instance
+# that has been used, set API_KEY to an admin key.
+API_KEY="${API_KEY:-}"
+ONBOARD_AUTH=()
+if [ -n "$API_KEY" ]; then
+    ONBOARD_AUTH=(-H "X-Orva-API-Key: $API_KEY")
+fi
+
 PASS=0; FAIL=0
 check() {
     local label="$1" cond="$2"
@@ -36,12 +51,13 @@ check "/api/v1/auth/status returns has_user=false on fresh DB" \
 # 2. Onboard.
 USER="onboard-$(date +%s)"
 PASS_PW="orvatest-pwd-1234"
-onboard_resp=$(curl -sfi -c "$JAR" -X POST "$BASE/api/v1/auth/onboard" \
-    -H "Content-Type: application/json" \
+onboard_resp=$(curl -si -c "$JAR" -X POST "$BASE/api/v1/auth/onboard" \
+    -H "Content-Type: application/json" "${ONBOARD_AUTH[@]}" \
     -d "{\"username\":\"$USER\",\"password\":\"$PASS_PW\"}")
 onboard_code=$(echo "$onboard_resp" | head -1 | awk '{print $2}')
 check "/api/v1/auth/onboard → 200" \
-    "$([ "$onboard_code" = 200 ] && echo ok || echo fail)" "got=$onboard_code"
+    "$([ "$onboard_code" = 200 ] && echo ok || echo fail)" \
+    "got=$onboard_code (401 means the instance is already in use — set API_KEY to an admin key)"
 
 # 3. Cookie checks. curl's Netscape jar prefixes HttpOnly cookies with
 # `#HttpOnly_<host>`, so we can't filter out leading-`#` lines blindly.

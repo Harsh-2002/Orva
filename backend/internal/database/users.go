@@ -11,10 +11,10 @@ import (
 )
 
 type User struct {
-	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           int64      `json:"id"`
+	Username     string     `json:"username"`
+	PasswordHash string     `json:"-"`
+	CreatedAt    time.Time  `json:"created_at"`
 	LastLogin    *time.Time `json:"last_login"`
 }
 
@@ -86,10 +86,16 @@ func (db *Database) CreateSession(userID int64, ttl time.Duration) (*Session, er
 	token := hex.EncodeToString(tokenBytes)
 
 	session := &Session{
-		Token:     token,
-		UserID:    userID,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(ttl),
+		Token:  token,
+		UserID: userID,
+		// UTC, because every validity check compares this against SQLite's
+		// CURRENT_TIMESTAMP, which is UTC. Storing local time made the
+		// effective TTL wrong by the server's offset: a configured 24h
+		// expired after 17h under TZ=America/Los_Angeles (logging users out
+		// while the browser still held a live cookie) and survived 29.5h
+		// under Asia/Kolkata. The OAuth tables already do this correctly.
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(ttl),
 	}
 
 	_, err := db.write.Exec(

@@ -114,7 +114,16 @@
             v-if="!filtered.length && !loading && search"
             class="px-6 py-8 text-center text-sm text-foreground-muted space-y-3"
           >
-            <div>No matches for "{{ search }}".</div>
+            <div>
+              No matches for "{{ search }}" in the {{ functions.length }} loaded.
+            </div>
+            <div
+              v-if="hasMore"
+              class="text-xs"
+            >
+              Search only covers what is loaded; {{ total - functions.length }} more
+              have not been fetched yet.
+            </div>
             <button
               class="text-xs text-foreground hover:text-white underline underline-offset-2"
               @click="search = ''"
@@ -266,7 +275,16 @@
                 class="px-6 py-8 text-center text-foreground-muted"
               >
                 <div class="space-y-3">
-                  <div>No matches for "{{ search }}".</div>
+                  <div>
+                    No matches for "{{ search }}" in the {{ functions.length }} loaded.
+                  </div>
+                  <div
+                    v-if="hasMore"
+                    class="text-xs"
+                  >
+                    Search only covers what is loaded; {{ total - functions.length }} more
+                    have not been fetched yet.
+                  </div>
                   <button
                     class="text-xs text-foreground hover:text-white underline underline-offset-2"
                     @click="search = ''"
@@ -383,6 +401,12 @@ const deletingId = ref('')
 const bulkDeleting = ref(false)
 const selected = ref(new Set())
 
+// Client-side search over the LOADED rows only. The backend has no `q`
+// parameter, so typing the name of a function that has not been paged in
+// yet returns "no results" even though it exists -- which is most functions
+// on an instance with more than a page of them. Mitigated rather than
+// solved: the empty state now says so, and Load more widens what is
+// searchable. A server-side filter is the real fix.
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return functions.value
@@ -450,6 +474,22 @@ const fetchPage = async (offset) => {
 }
 
 const loadMore = () => fetchPage(functions.value.length)
+
+// Re-fetch every page the user currently has open, in one request, so a
+// background refresh preserves their scroll position and their expansion.
+const reloadLoaded = async () => {
+  const want = Math.max(functions.value.length, PAGE_SIZE)
+  loading.value = true
+  try {
+    const res = await listFunctions({ limit: want, offset: 0 })
+    functions.value = res.data.functions || []
+    total.value = res.data.total ?? functions.value.length
+  } catch (e) {
+    console.error(e)
+  } finally {
+    loading.value = false
+  }
+}
 const refresh = () => fetchPage(0)
 
 const deleteFn = async (fn) => {
@@ -520,7 +560,11 @@ const scheduleRefresh = () => {
   if (refreshTimer) return
   refreshTimer = setTimeout(() => {
     refreshTimer = null
-    fetchPage(0)
+    // Refresh what is currently LOADED, not just the first page. fetchPage(0)
+    // replaces the whole list, so any SSE event -- and a deploy emits a burst
+    // of them -- collapsed an expanded list back to 25 rows underneath
+    // someone who had clicked Load more and was scrolling.
+    reloadLoaded()
   }, 300)
 }
 let unsubFn = null

@@ -257,6 +257,30 @@ func (h *FirewallHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// Refuse an un-editable rule BEFORE either write. The two statements
+		// disagree about what they match -- SetBlocklistRuleEnabled matches
+		// any kind, UpdateBlocklistRuleValue only kind='custom' -- and they
+		// are not in a transaction. So PUT {enabled:false, label:"..."} on a
+		// seeded rule (the 169.254.0.0/16 metadata block, say) disabled it,
+		// THEN returned 400 "not editable": the operator read a rejection
+		// while the metadata block was actually off, and the early return
+		// skipped refreshEnforcement so nothing recompiled either.
+		if editing {
+			kind, err := h.DB.GetBlocklistRuleKind(id)
+			if errors.Is(err, sql.ErrNoRows) {
+				respond.Error(w, http.StatusNotFound, "NOT_FOUND", "rule not found", reqID)
+				return
+			}
+			if err != nil {
+				respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
+				return
+			}
+			if kind != "custom" {
+				respond.Error(w, http.StatusBadRequest, "VALIDATION",
+					"seeded rules cannot be edited; they can only be enabled or disabled", reqID)
+				return
+			}
+		}
 		if req.Enabled != nil {
 			if err := h.DB.SetBlocklistRuleEnabled(id, *req.Enabled); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -390,7 +414,18 @@ func (h *FirewallHandler) PutDNS(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
 		return
 	}
-	if err := h.DB.SetSystemConfig("dns_search", strings.TrimSpace(req.Search)); err != nil {
+	// resolv.conf is rendered as "search %s\n" BEFORE the nameserver lines,
+	// so a newline here injects a line that wins: "corp.local\nnameserver
+	// 203.0.113.9" makes the attacker's resolver primary for every egress
+	// sandbox, persisted in system_config. Servers and record hosts were
+	// already validated; this field only had TrimSpace.
+	search, err := sanitizeDNSSearch(req.Search)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"invalid dns search: "+err.Error(), reqID)
+		return
+	}
+	if err := h.DB.SetSystemConfig("dns_search", search); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
 		return
 	}
@@ -447,4 +482,39 @@ func parseRuleID(path string) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// sanitizeDNSSearch validates the resolv.conf "search" field.
+//
+// firewall/dns.go renders it as "search %s\n" BEFORE the nameserver lines,
+// and resolv.conf uses the first nameserver it sees, so a newline here
+// installs a resolver of the caller's choosing for every egress-enabled
+// sandbox — persisted in system_config. Servers and record hosts were
+// already validated; this field only had TrimSpace.
+//
+// Control characters are rejected outright rather than being absorbed by
+// the field split. strings.Fields would happily turn
+// "corp.local\nnameserver 1.2.3.4" into three legal-looking labels and
+// rejoin them harmlessly, which is safe but silently rewrites the
+// operator's input instead of telling them it was wrong.
+func sanitizeDNSSearch(raw string) (string, error) {
+	for _, r := range raw {
+		if r == 0x7f || (r < 0x20 && r != ' ' && r != '\t') {
+			return "", fmt.Errorf("control character %q is not allowed", r)
+		}
+		if r == '\n' || r == '\r' {
+			return "", errors.New("line breaks are not allowed")
+		}
+	}
+	fields := strings.Fields(raw)
+	// resolv.conf historically caps the search list at 6 entries.
+	if len(fields) > 6 {
+		return "", errors.New("at most 6 search domains")
+	}
+	for _, d := range fields {
+		if !validHostnameRe.MatchString(d) {
+			return "", fmt.Errorf("%q is not a valid domain: use letters, digits, dots or hyphens", d)
+		}
+	}
+	return strings.Join(fields, " "), nil
 }

@@ -30,7 +30,7 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 
 | Path | Purpose |
 |---|---|
-| `src/api/client.js` | Axios instance; injects `X-Orva-API-Key` auth header |
+| `src/api/client.js` | Axios instance; injects `X-Orva-API-Key`, and dispatches an `orva:unauthorized` window event on any 401 — `App.vue` listens and redirects to sign-in, because an expired session used to leave every list silently blank auth header |
 | `src/api/endpoints.js` | Every API helper function (one per endpoint) |
 | `src/router/` | Vue Router route table |
 | `src/stores/auth.js` | Auth state + login/logout |

@@ -163,7 +163,7 @@ endpoint) and optional per-write approval.
 ## Configuration
 
 Defaults work out of the box. Common knobs: `ORVA_PORT` (8443), `ORVA_DATA_DIR`
-(`/var/lib/orva`), `ORVA_SECURE_COOKIES` (set `true` behind HTTPS). Full reference:
+(`/var/lib/orva`), `ORVA_SECURE_COOKIES` (only needed if neither TLS nor `X-Forwarded-Proto` reaches Orva — it sets the flag itself when it can see the real scheme). Full reference:
 [docs/CONFIG.md](docs/CONFIG.md).
 
 ---

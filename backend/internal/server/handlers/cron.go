@@ -168,6 +168,12 @@ func (h *CronHandler) Update(w http.ResponseWriter, r *http.Request) {
 		row.Timezone = tz
 		changed = true
 	}
+	// Capture the PRIOR enabled state before overwriting it. The recompute
+	// below keys on "disabled -> enabled", but read row.Enabled after this
+	// assignment, so it was true for any edit of an already-enabled
+	// schedule -- and pushed next_run_at forward, silently skipping a fire
+	// that was already due.
+	wasEnabled := row.Enabled
 	if req.Enabled != nil {
 		row.Enabled = *req.Enabled
 	}
@@ -183,7 +189,7 @@ func (h *CronHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Recompute next_run_at when the expression OR timezone changes, or
 	// when toggling from disabled→enabled (so a long-paused schedule
 	// fires soon, not according to its stale next_run_at).
-	if changed || row.Enabled {
+	if changed || (row.Enabled && !wasEnabled) {
 		sched, _ := scheduler.ParseCronExpr(row.CronExpr)
 		loc, _, _ := resolveTZ(row.Timezone)
 		next := sched.Next(time.Now().In(loc)).UTC()

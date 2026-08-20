@@ -69,7 +69,7 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 | `loadtest.sh` | Multi-phase load test with `hey` (`-n`/`-c`): hello, mixed Node/Python, CPU, slow (500ms), error phases |
 | `atscale.sh` | Multi-function deploy + isolation: deploy 20 mixed fns, idle-RAM baseline, hammer 5 with `hey` asserting cross-fn isolation + autoscaler scale counts; TSV to stdout |
 | `ceiling.sh` | Sustained-load ramp (120s/step after a 60s warmup) to find the real throughput ceiling; emits CSV (rps/p50/p95/p99/err/mem). Positional args: `<api-key> <fn-id> [base-url]` |
-| `onboarding-flow.sh` | Auth/session onboarding flow via curl: onboard → session cookie → /auth/me → refresh (token rotation) → logout → SQLite persistence. No deploy/invoke/KV |
+| `onboarding-flow.sh` | Auth/session onboarding flow via curl: onboard → session cookie → /auth/me. Onboarding is unauthenticated only while the instance is unused; against one that has operator-minted keys or deployed functions, set `API_KEY` to an admin key → refresh (token rotation) → logout → SQLite persistence. No deploy/invoke/KV |
 | `heavy-deploy-test.sh` | Large deploy + streaming chunked response validation |
 
 ## Subdirectories

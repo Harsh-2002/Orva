@@ -140,20 +140,21 @@ network call to a slow / blocked registry, or a missing wheel forcing
 a source build.
 
 **Fix.** `docker logs orva | tail -100` shows the npm/pip stderr.
-Stuck builds time out at the Go context level (no explicit cap today;
-planned). Restart orvad to kill the stuck child:
+Builds are bounded by `build_timeout_seconds` (default 300). That knob now
+covers `npm install` and `pip install` as well as `tsc` — previously only
+`tsc` was capped, so a hung registry connection could hold a build slot
+indefinitely. If a build is genuinely wedged, restart orvad to kill the
+child:
 
 ```bash
 docker restart orva
 ```
 
-The deployment row stays in `building` state forever — manually mark
-it failed:
-
-```sql
-docker exec orva sqlite3 /var/lib/orva/orva.db \
-  "UPDATE deployments SET status='failed', error_message='killed-by-operator' WHERE id='019df210-1234-7000-8000-deadbeef0001'"
-```
+The deployment row does **not** need fixing by hand any more: on boot Orva
+fails any deployment abandoned in `queued` or `building`, with
+`error_message = "abandoned: the server restarted while this build was in
+progress"`. Nothing reconciled those rows before, so they sat as a spinner
+that never resolved.
 
 ## Symptom: rollback fails with `VERSION_GCD`
 
@@ -263,6 +264,64 @@ sudo nft delete table inet orva_firewall
 
 Orva never creates that table again, so a "table not found" error here just
 means there was nothing to remove.
+
+## Upgrading across the UUIDv7 id migration
+
+The first boot of a build containing this migration rewrites every storage
+id — including `functions.id` — to a UUIDv7. A function's code lives at
+`<dataDir>/functions/<id>/`, and every path in the server is built from the
+database id, so the directories have to move with the ids.
+
+They do, and the two halves cannot drift: the old→new map is committed
+inside the same transaction as the rewrite, and `ReconcileFunctionDirs`
+renames from that record on boot. It is idempotent and resumable, so a crash
+between the commit and the rename is repaired on the next start rather than
+leaving code stranded under a name nothing will look up. The build GC also
+refuses to sweep orphaned function directories while a rename is
+outstanding.
+
+**Back up before upgrading.** The migration is one-way: there is no down
+migration, and the ids are freshly generated rather than derived, so they
+cannot be recomputed.
+
+**If boot fails with `failed to reconcile function directories after id
+migration`:** your function code is intact on disk. The message names the
+cause — almost always a permissions or disk-space problem under `functions/`.
+Fix that and restart; the rename resumes where it stopped. Do **not** delete
+anything under `functions/` to "clean up".
+
+**If boot fails with `integrity check failed`** on an older build, the
+migration refused to commit and rolled back, so the database is untouched and
+unmigrated. Upgrade to a build containing this fix and start again.
+
+## Backup and restore
+
+`orva backup download` writes an archive containing the SQLite database,
+every deployed function version, the secrets master key, and the bootstrap
+admin API key. It is written mode `0600` — treat it as the credential it is.
+
+`orva backup restore` replaces the live data directory and then **exits with
+status 70** so the supervisor restarts the process against the restored
+files. That is deliberate: it used to exit 0, and systemd's
+`Restart=on-failure` reads 0 as "finished successfully" and leaves the
+service down — a successful restore was a self-inflicted outage on bare
+metal. Docker's `restart: unless-stopped` masks it, which is why it went
+unnoticed.
+
+The unit the installer ships now carries:
+
+```ini
+Restart=on-failure
+RestartForceExitStatus=70
+```
+
+**If your unit predates this**, add that line — or re-run `install.sh`, which
+rewrites the unit — or your server will stay down after a restore. Check
+with:
+
+```bash
+systemctl cat orva | grep RestartForceExitStatus
+```
 
 ## Logs
 

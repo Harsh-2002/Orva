@@ -6,6 +6,9 @@ import (
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
+	"io"
+	"os"
+	"strings"
 )
 
 var loginCmd = &cobra.Command{
@@ -23,7 +26,7 @@ they are written to disk.
 
 func init() {
 	loginCmd.Flags().String("endpoint", "", "Orva API endpoint URL (required)")
-	loginCmd.Flags().String("api-key", "", "API key for authentication (required)")
+	loginCmd.Flags().String("api-key", "", "API key for authentication (required; use - or @- to read from stdin)")
 	loginCmd.Flags().Bool("test", false, "verify credentials against the server before saving")
 	loginCmd.MarkFlagRequired("endpoint")
 	loginCmd.MarkFlagRequired("api-key")
@@ -33,6 +36,21 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	endpoint, _ := cmd.Flags().GetString("endpoint")
 	apiKey, _ := cmd.Flags().GetString("api-key")
 	test, _ := cmd.Flags().GetBool("test")
+
+	// Accept the key on stdin. The only documented way to persist a key put
+	// it in argv, where any local user can read it out of `ps` and where it
+	// lands in shell history. `orva secrets set` already supports --value @-
+	// for exactly this reason.
+	if apiKey == "-" || apiKey == "@-" {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read api key from stdin: %w", err)
+		}
+		apiKey = strings.TrimSpace(string(b))
+	}
+	if apiKey == "" {
+		return fmt.Errorf("api key is empty")
+	}
 
 	if test {
 		infof(cmd, "Testing credentials against %s ...", endpoint)

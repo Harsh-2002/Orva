@@ -71,7 +71,13 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	// the pool runs out of workers.
 	depth := 0
 	if v := r.Header.Get("X-Orva-Call-Depth"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		// Clamp at zero. The proxy no longer forwards an inbound
+		// x-orva-call-depth into the sandbox, so this value should always be
+		// one the SDK echoed back from us — but the cap is the only thing
+		// bounding F2F recursion, and a negative value defeats it entirely
+		// (depth+1 > max is false forever). Cheap to make that unreachable
+		// from here as well as from the proxy.
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			depth = n
 		}
 	}
@@ -91,6 +97,14 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND",
 			"function not found: "+name, reqID)
+		return
+	}
+	// Every other invoke entrypoint refuses an inactive function; this one
+	// did not, so orva.invoke("some-inactive-fn") from inside a sandbox ran
+	// it anyway.
+	if fn.Status != "active" {
+		respond.Error(w, http.StatusConflict, "NOT_ACTIVE",
+			"function is not active", reqID)
 		return
 	}
 
@@ -118,8 +132,15 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 
 	acq, err := h.Pool.Acquire(ctx, fn.ID)
 	if err != nil {
-		respond.Error(w, http.StatusServiceUnavailable, "POOL_ERROR",
-			"pool acquire: "+err.Error(), reqID)
+		// Use the shared taxonomy rather than flattening everything to a
+		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
+		// Retry-After), MEMORY_EXHAUSTED, EGRESS_POLICY_UNAVAILABLE and
+		// TIMEOUT; without it an SDK retrying on this path cannot tell a
+		// concurrency cap it should back off from from a host OOM it should
+		// not, and the error codes documented in docs/ERRORS.md only ever
+		// appeared on one of the five invoke entrypoints.
+		status, opts := invokeError(err, fn, reqID)
+		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
 	var reqErr error
@@ -175,6 +196,11 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 			durationMS, http.StatusBadGateway, errMsg, 0,
 		)
 		if h.Metrics != nil {
+			// Count the invocation, not just the baseline. These paths fed
+			// Baselines but never the counters, so orva_invocations_total and
+			// the dashboard percentiles excluded them entirely.
+			h.Metrics.RecordInvocation(acq.ColdStart)
+			h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
 			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", acq.ColdStart, durationMS)
 		}
 		respond.Error(w, http.StatusBadGateway, "INVOKE_FAILED", errMsg, reqID)
@@ -211,6 +237,11 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		durationMS, statusCode, "", respSize,
 	)
 	if h.Metrics != nil {
+		// Count the invocation, not just the baseline. These paths fed
+		// Baselines but never the counters, so orva_invocations_total and
+		// the dashboard percentiles excluded them entirely.
+		h.Metrics.RecordInvocation(acq.ColdStart)
+		h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
 		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
 	}
 
@@ -257,7 +288,13 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 
 	depth := 0
 	if v := r.Header.Get("X-Orva-Call-Depth"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		// Clamp at zero. The proxy no longer forwards an inbound
+		// x-orva-call-depth into the sandbox, so this value should always be
+		// one the SDK echoed back from us — but the cap is the only thing
+		// bounding F2F recursion, and a negative value defeats it entirely
+		// (depth+1 > max is false forever). Cheap to make that unreachable
+		// from here as well as from the proxy.
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			depth = n
 		}
 	}
@@ -275,6 +312,14 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND",
 			"function not found: "+name, reqID)
+		return
+	}
+	// Every other invoke entrypoint refuses an inactive function; this one
+	// did not, so orva.invoke("some-inactive-fn") from inside a sandbox ran
+	// it anyway.
+	if fn.Status != "active" {
+		respond.Error(w, http.StatusConflict, "NOT_ACTIVE",
+			"function is not active", reqID)
 		return
 	}
 
@@ -297,8 +342,15 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 
 	acq, err := h.Pool.Acquire(ctx, fn.ID)
 	if err != nil {
-		respond.Error(w, http.StatusServiceUnavailable, "POOL_ERROR",
-			"pool acquire: "+err.Error(), reqID)
+		// Use the shared taxonomy rather than flattening everything to a
+		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
+		// Retry-After), MEMORY_EXHAUSTED, EGRESS_POLICY_UNAVAILABLE and
+		// TIMEOUT; without it an SDK retrying on this path cannot tell a
+		// concurrency cap it should back off from from a host OOM it should
+		// not, and the error codes documented in docs/ERRORS.md only ever
+		// appeared on one of the five invoke entrypoints.
+		status, opts := invokeError(err, fn, reqID)
+		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
 	var reqErr error
@@ -374,6 +426,11 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 			durationMS, statusCode, "", len(dres.Body),
 		)
 		if h.Metrics != nil {
+			// Count the invocation, not just the baseline. These paths fed
+			// Baselines but never the counters, so orva_invocations_total and
+			// the dashboard percentiles excluded them entirely.
+			h.Metrics.RecordInvocation(acq.ColdStart)
+			h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
 			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
 		}
 		return
@@ -436,6 +493,11 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 		durationMS, statusCode, errMsg, totalBytes,
 	)
 	if h.Metrics != nil {
+		// Count the invocation, not just the baseline. These paths fed
+		// Baselines but never the counters, so orva_invocations_total and
+		// the dashboard percentiles excluded them entirely.
+		h.Metrics.RecordInvocation(acq.ColdStart)
+		h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
 		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
 	}
 }

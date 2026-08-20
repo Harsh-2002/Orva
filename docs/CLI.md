@@ -102,7 +102,11 @@ Unblock-File "$env:LocalAppData\Programs\orva\orva.exe"
 
 ```bash
 # 1. One-time: save endpoint + API key to ~/.orva/config.yaml (mode 0600).
-orva login --endpoint https://orva.example.com --api-key orva_…
+#    Prefer the stdin form: a key passed on the command line is visible to
+#    every local user via `ps` and lands in your shell history.
+printf %s "$ORVA_KEY" | orva login --endpoint https://orva.example.com --api-key -
+
+#    (--api-key orva_… still works, with that caveat.)
 
 # 2. Verify connectivity.
 orva system health
@@ -375,10 +379,22 @@ orva backup download -f /backups/orva-$(date +%F).tar.gz
 orva backup restore /backups/orva-2026-05-15.tar.gz --yes
 ```
 
-After a successful restore the server exits cleanly so its supervisor
+After a successful restore the server exits with status **70** so its supervisor
 (systemd / `docker restart: unless-stopped`) reopens the new files.
 The CLI sees a connection reset — that's the expected happy-path
 signal. Reconnect in ~5 seconds.
+
+> ⚠️ **Non-zero on purpose.** It used to exit 0, and systemd's
+> `Restart=on-failure` reads 0 as "the job finished" and leaves the service
+> **down** — so a successful restore was an outage on bare metal. Docker's
+> `restart: unless-stopped` hides this. The shipped unit now carries
+> `RestartForceExitStatus=70`; a unit created before that needs the line
+> added, or re-run `install.sh`. Check with
+> `systemctl cat orva | grep RestartForceExitStatus`.
+
+> The downloaded archive is written mode `0600`, because it contains the
+> database, every function version, the secrets master key and the bootstrap
+> admin key.
 
 > ⚠️ Backup archives contain `keys/master.key`. Treat the file as
 > sensitive (encrypted disk, S3 + SSE, etc.). Same posture as a password
@@ -443,6 +459,13 @@ orva keys revoke key_…                    # prompts; pass --yes to skip
 ```
 
 ### Channels (curated MCP toolboxes)
+
+> **Requires an `admin` key.** A channel token is a long-lived bearer
+> credential whose tools bypass the target function's `auth_mode`, so minting
+> one is gated like minting an API key. This changed: it used to need only
+> `write`, which let a write-scoped key issue itself a credential that
+> outranked it.
+
 
 ```bash
 # Bundle N functions under a name + a static bearer token. Presenting
@@ -528,6 +551,12 @@ orva traces baseline greeter            # rolling p95/p99/mean latency
 
 ### Egress policy (`orva firewall`)
 
+> **Requires an `admin` key** for every subcommand, reads included. Egress
+> blocklists and sandbox DNS are instance-wide security state, so they are
+> gated like backup and key minting. This changed: the surface used to be
+> `read`/`write`.
+
+
 The blocklist applied to every sandbox running with `network_mode=egress`.
 A rule is a **CIDR** (or bare IP) or an **exact hostname**; hostnames are
 resolved to addresses on a timer. Built-in rules can be toggled but not
@@ -573,6 +602,11 @@ orva dns set --server "" --search ""                   # reset to defaults
 ```
 
 ### Warm-pool autoscaler
+
+> `idle_ttl_seconds` applies **only** when `scale_to_zero` is enabled — it is
+> the grace period before dropping the last worker, not a general idle-recycle
+> timer. With the default `scale_to_zero: false` it has no effect.
+
 
 Per-function warm-sandbox tuning. Always pass `--fn`. Only the fields you
 specify change; the rest keep their current values.
@@ -858,7 +892,7 @@ a fully clean slate.
 
 The `orva` you install via `install-cli.sh` / `install-cli.ps1` is the
 **slim CLI build** — it can talk to any remote orvad, but it doesn't
-have `orva serve`, `orva setup`, or `orva init`. Those live in the
+have `orva serve` or `orva setup`. Those live in the
 server binary at `/opt/orva/bin/orva` after a `scripts/install.sh`
 deployment.
 
@@ -876,7 +910,6 @@ perspective; the slim CLI is just smaller.
 | Size | ~20 MB | ~55 MB |
 | `orva serve` | ❌ | ✅ |
 | `orva setup` | ❌ | ✅ |
-| `orva init` | ❌ | ✅ |
 | All other subcommands | ✅ | ✅ |
 
 ---

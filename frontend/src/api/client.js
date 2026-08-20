@@ -29,6 +29,13 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response) {
       console.error('API Error:', error.response.data)
+      // An expired session used to leave every list silently blank with no
+      // prompt, because nothing inspected the status. Dispatch an event the
+      // shell listens for so the user is told to sign in again instead of
+      // being shown an empty dashboard.
+      if (error.response.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('orva:unauthorized'))
+      }
     } else if (error.request) {
       console.error('Network Error:', error.message)
     }

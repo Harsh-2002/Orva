@@ -351,3 +351,74 @@ func TestGCStillSweepsOrphansWhenFunctionsExist(t *testing.T) {
 		t.Error("an orphan must still be reclaimed when the DB is non-empty")
 	}
 }
+
+// TestGCSkipsOrphanSweepWhileIDRenamesArePending is the data-loss guard for
+// the UUIDv7 migration. That migration rewrites every functions.id, and the
+// matching rename of functions/<id>/ is recorded and applied separately.
+// While the record is outstanding the database holds new ids and the disk
+// still holds old ones, so EVERY directory looks like an orphan — including
+// live functions whose code is the operator's only copy.
+//
+// Without the guard this test's tree is deleted.
+func TestGCSkipsOrphanSweepWhileIDRenamesArePending(t *testing.T) {
+	data := t.TempDir()
+	db := newGCTestDB(t)
+
+	// The database has already been rewritten to the new id...
+	insertFn(t, db, "01a02068-314f-7130-90d6-5a51a313f029")
+
+	// ...while the disk still carries the legacy name, back-dated so the
+	// in-flight grace window cannot be what saves it.
+	legacy := filepath.Join(data, "functions", "fn_legacyid123456")
+	mkTree(t, filepath.Join(legacy, "versions", "aaa"), 128)
+	old := time.Now().Add(-2 * time.Hour)
+	for _, p := range []string{filepath.Join(legacy, "versions"), legacy} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := db.SetSystemConfig(database.PendingFnRenamesKey,
+		`[{"old":"fn_legacyid123456","new":"01a02068-314f-7130-90d6-5a51a313f029"}]`); err != nil {
+		t.Fatal(err)
+	}
+
+	NewGC(data, db).tick(t.Context())
+
+	if !exists(legacy) {
+		t.Fatal("GC deleted function source while an id-rename was pending — " +
+			"this is the operator's only copy of their code")
+	}
+}
+
+// TestGCResumesOrphanSweepAfterRenamesReconciled — the guard must lift once
+// the record is cleared, or a single migration disables the GC forever.
+func TestGCResumesOrphanSweepAfterRenamesReconciled(t *testing.T) {
+	data := t.TempDir()
+	db := newGCTestDB(t)
+	insertFn(t, db, "live")
+
+	orphan := filepath.Join(data, "functions", "orphan")
+	mkTree(t, filepath.Join(orphan, "versions", "bbb"), 128)
+	mkTree(t, filepath.Join(data, "functions", "live", "versions", "aaa"), 128)
+	old := time.Now().Add(-2 * time.Hour)
+	for _, p := range []string{filepath.Join(orphan, "versions"), orphan} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// No pending record: this is the normal steady state after reconcile.
+	if db.HasPendingFunctionDirRenames() {
+		t.Fatal("fixture should start with no pending renames")
+	}
+
+	NewGC(data, db).tick(t.Context())
+
+	if exists(orphan) {
+		t.Error("orphan sweep did not resume once renames were reconciled")
+	}
+	if !exists(filepath.Join(data, "functions", "live")) {
+		t.Fatal("a live function's code tree must never be removed")
+	}
+}

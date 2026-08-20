@@ -18,6 +18,11 @@ type DeploymentHandler struct {
 	DB *database.Database
 }
 
+// buildLogPageSize is how many log lines one poll ships. A full page means
+// "there is more" -- the stream must keep draining before it can conclude
+// the build is over.
+const buildLogPageSize = 1000
+
 // Get — GET /api/v1/deployments/{id}
 func (h *DeploymentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -127,7 +132,7 @@ func (h *DeploymentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var last int64 = 0
 	for {
 		// Ship any new log lines.
-		lines, err := h.DB.GetBuildLogs(id, last, 1000)
+		lines, err := h.DB.GetBuildLogs(id, last, buildLogPageSize)
 		if err != nil {
 			send("error", map[string]string{"message": err.Error()})
 			return
@@ -137,6 +142,17 @@ func (h *DeploymentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if l.Seq > last {
 				last = l.Seq
 			}
+		}
+
+		// Only consider the build finished once a poll comes back SHORT.
+		//
+		// GetBuildLogs caps at 1000 rows, so a full page means there is
+		// almost certainly more waiting. Checking terminal state regardless
+		// meant a build that failed after 2500 lines shipped the first 1000
+		// and then returned on the terminal check -- the client never saw
+		// the actual error, which is the one line that mattered.
+		if len(lines) == buildLogPageSize {
+			continue
 		}
 
 		// Check terminal state.

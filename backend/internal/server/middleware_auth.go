@@ -210,6 +210,23 @@ func requiredPermission(method, path string) string {
 	if path == "/api/v1/pool/config" && (method == http.MethodPut || method == http.MethodPost) {
 		return "admin"
 	}
+	// Channel tokens are long-lived bearer credentials whose tools route
+	// straight into invokeFunction, which bypasses the function's auth_mode
+	// by design. Minting one at "write" while minting an API key needs
+	// "admin" let a write-scoped key issue itself a credential outranking
+	// itself: a CI key deliberately scoped without "invoke" could create a
+	// channel over a payments function and then call it unsigned. Expiry is
+	// opt-in, so the token also outlived the key that made it.
+	if strings.HasPrefix(path, "/api/v1/channels") {
+		return "admin"
+	}
+	// The firewall surface is instance-wide security policy: egress
+	// blocklists, and the DNS every sandbox resolves through. At "write" a
+	// key scoped for deploys could repoint every sandbox's resolver. Same
+	// class as backup and key minting, so gate it the same way.
+	if strings.HasPrefix(path, "/api/v1/firewall") {
+		return "admin"
+	}
 	// Backup / restore touch the entire data dir; admin-only.
 	if path == "/api/v1/backup" || path == "/api/v1/restore" {
 		return "admin"

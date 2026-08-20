@@ -211,6 +211,12 @@
                   @click="openTest(row)"
                 />
                 <IconButton
+                  :icon="row.active ? Pause : Play"
+                  :title="row.active ? 'Pause this trigger' : 'Resume this trigger'"
+                  :disabled="busyId === row.id"
+                  @click="toggleActive(row)"
+                />
+                <IconButton
                   :icon="Trash2"
                   variant="danger"
                   title="Delete"
@@ -377,11 +383,11 @@
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Plus, Trash2, Send, RefreshCw } from '@lucide/vue'
+import { Plus, Trash2, Send, RefreshCw, Pause, Play } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Drawer from '@/components/common/Drawer.vue'
-import { listInboundWebhooks, createInboundWebhook, deleteInboundWebhook } from '@/api/endpoints'
+import { listInboundWebhooks, createInboundWebhook, deleteInboundWebhook, updateInboundWebhook } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 
 const route = useRoute()
@@ -422,9 +428,11 @@ const refresh = async () => {
   try {
     // The inbound-webhook sub-resource endpoints (list/create/delete) resolve
     // names to ids server-side, so the URL slug works directly for every call.
-    // We deliberately do NOT fetch the canonical id first: GET /functions/{id}
-    // only accepts a UUID, so resolving the name there just to discard it fired a
-    // guaranteed 404 (and a console error) on every page load.
+    // We still do not fetch the canonical id first -- it would be a wasted
+    // round trip. (The note that used to be here said GET /functions/{id}
+    // accepts only a UUID and would 404 on a name; that was true, and is the
+    // bug that also made older functions unopenable from the dashboard. It
+    // now resolves names like every other function endpoint.)
     if (!fnId.value) fnId.value = fnName.value
     const res = await listInboundWebhooks(fnId.value)
     rows.value = res.data?.inbound_webhooks || []
@@ -491,6 +499,30 @@ const confirmRemove = async (row) => {
       message: e?.response?.data?.error?.message || e.message,
       danger: true,
     })
+  }
+}
+
+const busyId = ref('')
+
+// The badge rendered active/paused from the start, but there was no way to
+// change it: updateInboundWebhook was exported from the API module and
+// imported by nothing, though the server has always supported the PUT. The
+// only way to stop a trigger was to delete it, which destroys its secret and
+// its URL -- so pausing a noisy integration for ten minutes meant re-issuing
+// credentials to whoever was calling it.
+const toggleActive = async (row) => {
+  busyId.value = row.id
+  try {
+    await updateInboundWebhook(fnId.value, row.id, { active: !row.active })
+    await refresh()
+  } catch (e) {
+    confirmStore.notify({
+      title: row.active ? 'Failed to pause trigger' : 'Failed to resume trigger',
+      message: e?.response?.data?.error?.message || 'Unknown error',
+      danger: true,
+    })
+  } finally {
+    busyId.value = ''
   }
 }
 

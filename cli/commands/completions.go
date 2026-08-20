@@ -139,7 +139,9 @@ func wireCompletions(root *cobra.Command) {
 	for _, path := range [][]string{
 		{"invoke"}, {"diff"}, {"rollback"}, {"logs"},
 		{"functions", "get"}, {"functions", "delete"}, {"functions", "update"}, {"functions", "purge-cache"},
-		{"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
+		// deployments get/logs are NOT here: they take a deployment ID, and
+		// offering function names for them completed the wrong thing.
+		{"deployments", "list"},
 	} {
 		if c, _, err := root.Find(path); err == nil && c.Name() == path[len(path)-1] {
 			c.ValidArgsFunction = completeFunctionNames

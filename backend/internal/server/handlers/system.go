@@ -187,12 +187,18 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 	if h.DB != nil {
 		writer := h.DB.WriterStats()
 		writerStatus := "ok"
+		// Slot depth alone under-reports: a queue holding a handful of
+		// captured request bodies is megabytes deep at 1% of its slots.
 		if (writer.CriticalCap > 0 && writer.CriticalDepth*100/writer.CriticalCap >= 80) ||
-			(writer.TelemetryCap > 0 && writer.TelemetryDepth*100/writer.TelemetryCap >= 80) {
+			(writer.TelemetryCap > 0 && writer.TelemetryDepth*100/writer.TelemetryCap >= 80) ||
+			(writer.CriticalCapBytes > 0 && writer.CriticalBytes*100/writer.CriticalCapBytes >= 80) ||
+			(writer.TelemetryCapBytes > 0 && writer.TelemetryBytes*100/writer.TelemetryCapBytes >= 80) {
 			writerStatus = "saturated"
 		}
 		resp["writer"] = map[string]any{
 			"status": writerStatus, "critical_queue_depth": writer.CriticalDepth,
+			"critical_queue_bytes":  writer.CriticalBytes,
+			"telemetry_queue_bytes": writer.TelemetryBytes,
 			"telemetry_queue_depth": writer.TelemetryDepth,
 			"critical_timeouts":     writer.CriticalTimeouts,
 			"critical_failures":     writer.CriticalFailures,
@@ -555,8 +561,20 @@ func (h *SystemStorageHandler) Vacuum(w http.ResponseWriter, r *http.Request) {
 	// committed-but-uncheckpointed pages live in orva.db-wal, and the
 	// shrink we're about to do isn't visible to operators looking at
 	// `ls -la orva.db`. TRUNCATE truncates the WAL afterwards.
-	if _, err := h.DB.WriteDB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+	// wal_checkpoint returns a ROW -- (busy, log_pages, checkpointed_pages) --
+	// and reports contention through busy=1, not through an error. Exec
+	// discards the row, so a checkpoint that was blocked by a reader read as
+	// complete success and the VACUUM below then ran against an
+	// uncheckpointed WAL.
+	var busy, logPages, checkpointed int
+	if err := h.DB.WriteDB().QueryRow(`PRAGMA wal_checkpoint(TRUNCATE)`).
+		Scan(&busy, &logPages, &checkpointed); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "VACUUM_FAILED", "wal_checkpoint: "+err.Error(), "")
+		return
+	}
+	if busy != 0 {
+		respond.Error(w, http.StatusConflict, "CHECKPOINT_BUSY",
+			"could not checkpoint the WAL: another connection is holding a read lock; retry shortly", "")
 		return
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server"
 	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/spf13/cobra"
@@ -92,6 +93,19 @@ func runServe(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// The UUIDv7 migration renames function ids, and each function's code
+	// lives at <dataDir>/functions/<id>/. Complete (or resume) the matching
+	// directory rename before anything reads or reclaims that tree. This is
+	// fatal on failure by design: booting with ids that do not match the
+	// names on disk means every function fails to spawn and the GC then
+	// deletes the operator's only copy of their source as orphans.
+	if err := db.ReconcileFunctionDirs(cfg.Data.Dir); err != nil {
+		slog.Error("failed to reconcile function directories after id migration",
+			"error", err,
+			"hint", "function code is intact on disk; fix the cause and restart")
+		os.Exit(1)
+	}
+
 	// Round-G: fold any pre-existing flat code/ dirs into the new
 	// versions/<hash>/ layout. Idempotent — no-op on subsequent boots.
 	builder.MigrateLegacyCodeDirs(cfg.Data.Dir, db)
@@ -100,6 +114,24 @@ func runServe(cmd *cobra.Command, args []string) {
 	// own cleanup, which only covers a live process — a kill -9 mid-install
 	// leaks the whole working set under build-tmp/ permanently.
 	builder.SweepBuildScratch(cfg.Data.Dir)
+
+	// Fail deployments abandoned mid-build. Only the finish paths set a
+	// terminal status and both run in-process, so a restart left the row at
+	// 'queued'/'building' forever and the dashboard span a spinner that
+	// never resolved. The tarball they would have built from is in the
+	// scratch dir the sweep above just reclaimed.
+	if n, err := db.RequeueStuckDeployments(); err != nil {
+		slog.Warn("could not reconcile stuck deployments", "error", err)
+	} else if n > 0 {
+		slog.Info("failed deployments abandoned by a previous run", "count", n)
+	}
+
+	// Reclaim NSJAIL.* cgroup directories left behind by a previous process.
+	// Workers are SIGKILLed, so nsjail never runs its own cleanup, and every
+	// spawn scans this directory to find its own cgroup -- an accumulation
+	// slows cold starts and eventually breaks memory sampling outright,
+	// which leaves the autoscaler permanently over-reserving.
+	sandbox.SweepOrphanCgroups()
 
 	// Trim execution history so the database does not grow without bound.
 	// Runs once now and daily thereafter; the window is the system_config key

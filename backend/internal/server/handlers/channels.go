@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"time"
 
+	"fmt"
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // ChannelHandler powers /api/v1/channels. A channel is a named
@@ -49,12 +51,12 @@ func hashChannelToken(plaintext string) string {
 // ── request/response types ───────────────────────────────────────────
 
 type createChannelRequest struct {
-	Name         string            `json:"name"`
-	Description  string            `json:"description,omitempty"`
-	FunctionIDs  []string          `json:"function_ids"`
-	Descriptions map[string]string `json:"descriptions,omitempty"`
-	ExpiresAt    *time.Time        `json:"expires_at,omitempty"`
-	ExpiresInDays *int             `json:"expires_in_days,omitempty"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description,omitempty"`
+	FunctionIDs   []string          `json:"function_ids"`
+	Descriptions  map[string]string `json:"descriptions,omitempty"`
+	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
+	ExpiresInDays *int              `json:"expires_in_days,omitempty"`
 }
 
 type updateChannelRequest struct {
@@ -137,6 +139,16 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve expiry: explicit ExpiresAt wins; ExpiresInDays is the UI shortcut.
+	//
+	// Cap the input. time.Duration is int64 NANOSECONDS, so it overflows at
+	// roughly 106,751 days: expires_in_days: 200000 wrapped NEGATIVE and
+	// minted a 201 Created credential whose expires_at was already in the
+	// past, handing back a one-time plaintext that never worked.
+	if req.ExpiresInDays != nil && *req.ExpiresInDays > maxExpiresInDays {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			fmt.Sprintf("expires_in_days must be <= %d", maxExpiresInDays), reqID)
+		return
+	}
 	if req.ExpiresAt == nil && req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
 		t := time.Now().UTC().Add(time.Duration(*req.ExpiresInDays) * 24 * time.Hour)
 		req.ExpiresAt = &t
@@ -160,12 +172,12 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to create channel", reqID)
 		return
 	}
-	// added_by_actor_id stays empty for v1 — the auth middleware
-	// stashes the Actor in request context but the handlers package
-	// can't import the server package without a cycle. Audit field
-	// will be populated in a follow-up that lifts Actor into a shared
-	// context package.
-	actorID := ""
+	// The audit field. This was hardcoded "" with a comment blaming an
+	// import cycle: the middleware stashed the Actor in the server package's
+	// context, which handlers cannot import. The shared auth package -- which
+	// both sides already import -- now carries the id, so the column records
+	// who actually made the change instead of being NULL on every row.
+	actorID := auth.ActorID(r.Context())
 	if err := h.DB.SetChannelFunctions(channel.ID, req.FunctionIDs, req.Descriptions, actorID); err != nil {
 		// Roll back — the DAL doesn't wrap the create+set in one
 		// transaction, so we delete the channel we just made if the
@@ -177,14 +189,14 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, http.StatusCreated, map[string]any{
-		"id":            channel.ID,
-		"name":          channel.Name,
-		"description":   channel.Description,
-		"token":         plaintext,
-		"prefix":        channel.TokenPrefix,
-		"function_ids":  req.FunctionIDs,
-		"expires_at":    channel.ExpiresAt,
-		"created_at":    channel.CreatedAt,
+		"id":           channel.ID,
+		"name":         channel.Name,
+		"description":  channel.Description,
+		"token":        plaintext,
+		"prefix":       channel.TokenPrefix,
+		"function_ids": req.FunctionIDs,
+		"expires_at":   channel.ExpiresAt,
+		"created_at":   channel.CreatedAt,
 	})
 }
 
@@ -203,16 +215,16 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	cfRows, _ := h.DB.ListChannelFunctionRecords(c.ID)
 	respond.JSON(w, http.StatusOK, map[string]any{
-		"id":             c.ID,
-		"name":           c.Name,
-		"description":    c.Description,
-		"prefix":         c.TokenPrefix,
-		"function_ids":   c.FunctionIDs,
-		"functions":      cfRows,
-		"expires_at":     c.ExpiresAt,
-		"created_at":     c.CreatedAt,
-		"updated_at":     c.UpdatedAt,
-		"last_used_at":   c.LastUsedAt,
+		"id":           c.ID,
+		"name":         c.Name,
+		"description":  c.Description,
+		"prefix":       c.TokenPrefix,
+		"function_ids": c.FunctionIDs,
+		"functions":    cfRows,
+		"expires_at":   c.ExpiresAt,
+		"created_at":   c.CreatedAt,
+		"updated_at":   c.UpdatedAt,
+		"last_used_at": c.LastUsedAt,
 	})
 }
 
@@ -280,12 +292,12 @@ func (h *ChannelHandler) SetFunctions(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_FUNCTION", err.Error(), reqID)
 		return
 	}
-	// added_by_actor_id stays empty for v1 — the auth middleware
-	// stashes the Actor in request context but the handlers package
-	// can't import the server package without a cycle. Audit field
-	// will be populated in a follow-up that lifts Actor into a shared
-	// context package.
-	actorID := ""
+	// The audit field. This was hardcoded "" with a comment blaming an
+	// import cycle: the middleware stashed the Actor in the server package's
+	// context, which handlers cannot import. The shared auth package -- which
+	// both sides already import -- now carries the id, so the column records
+	// who actually made the change instead of being NULL on every row.
+	actorID := auth.ActorID(r.Context())
 	if err := h.DB.SetChannelFunctions(id, req.FunctionIDs, req.Descriptions, actorID); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "update failed", reqID)
 		return

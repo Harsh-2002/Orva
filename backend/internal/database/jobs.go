@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"time"
 
+	"fmt"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
@@ -14,17 +15,17 @@ import (
 // A failed run with attempts < max_attempts is reset to pending with
 // scheduled_at advanced by the worker's exponential backoff.
 type Job struct {
-	ID           string     `json:"id"`
-	FunctionID   string     `json:"function_id"`
-	Payload      []byte     `json:"payload"`
-	Status       string     `json:"status"`
-	ScheduledAt  time.Time  `json:"scheduled_at"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
-	Attempts     int        `json:"attempts"`
-	MaxAttempts  int        `json:"max_attempts"`
-	LastError    string     `json:"last_error,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID          string     `json:"id"`
+	FunctionID  string     `json:"function_id"`
+	Payload     []byte     `json:"payload"`
+	Status      string     `json:"status"`
+	ScheduledAt time.Time  `json:"scheduled_at"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Attempts    int        `json:"attempts"`
+	MaxAttempts int        `json:"max_attempts"`
+	LastError   string     `json:"last_error,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
 
 	// FunctionName is filled by the LIST endpoint via JOIN — not stored
 	// on the row itself. Empty if the join couldn't find a match (deleted
@@ -35,17 +36,17 @@ type Job struct {
 	// enqueued them so the eventual execution lands in the same trace
 	// as the caller. EnqueuedByFunctionID is denormalised so list views
 	// can show "enqueued by send-summary" without a join.
-	TraceID                 string `json:"trace_id,omitempty"`
-	ParentSpanID            string `json:"parent_span_id,omitempty"`
-	EnqueuedByFunctionID    string `json:"enqueued_by_function_id,omitempty"`
+	TraceID              string `json:"trace_id,omitempty"`
+	ParentSpanID         string `json:"parent_span_id,omitempty"`
+	EnqueuedByFunctionID string `json:"enqueued_by_function_id,omitempty"`
 
 	// v0.6 idempotency: when set, the enqueue path dedupes against any
 	// row with the same (function_id, idempotency_key) created within the
 	// window. Cleared on the resulting Job rows for already-replayed
 	// requests so callers can branch on Replayed.
-	IdempotencyKey            string `json:"idempotency_key,omitempty"`
-	IdempotencyWindowSeconds  int    `json:"idempotency_window_seconds,omitempty"`
-	Replayed                  bool   `json:"replayed,omitempty"`
+	IdempotencyKey           string `json:"idempotency_key,omitempty"`
+	IdempotencyWindowSeconds int    `json:"idempotency_window_seconds,omitempty"`
+	Replayed                 bool   `json:"replayed,omitempty"`
 }
 
 // NewJobID returns a fresh UUIDv7. Replaces the legacy job_<hex> form.
@@ -196,8 +197,13 @@ func (db *Database) GetJob(id string) (*Job, error) {
 // ListJobs returns recent jobs joined with function_name. Optional
 // status / function filters; default limit 50.
 func (db *Database) ListJobs(status, functionID string, limit int) ([]*Job, error) {
-	if limit <= 0 || limit > 500 {
+	// Clamp, do not reset: an over-cap request returning the DEFAULT gives
+	// the caller fewer rows than asking for nothing would have.
+	if limit <= 0 {
 		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
 	}
 	q := `
 		SELECT j.id, j.function_id, j.payload, j.status, j.scheduled_at,
@@ -321,7 +327,15 @@ func (db *Database) MarkJobFailure(id string, errMsg string, attempts, maxAttemp
 		return err
 	}
 	// Exponential backoff capped at 1h. attempt=1 → 2s, 2 → 4s, 3 → 8s, ...
-	delaySec := 1 << attempts
+	// Clamp the shift before shifting. attempts is caller-controlled through
+	// max_attempts, and at 63 the shift goes negative, skips the > 3600 cap,
+	// and lands scheduled_at in the past -- so a failing job is re-claimed
+	// every scheduler tick with zero backoff, spawning a sandbox each time.
+	shift := attempts
+	if shift > 12 {
+		shift = 12
+	}
+	delaySec := 1 << shift
 	if delaySec > 3600 {
 		delaySec = 3600
 	}
@@ -346,4 +360,66 @@ func (db *Database) RetryJob(id string) error {
 func (db *Database) DeleteJob(id string) error {
 	_, err := db.write.Exec(`DELETE FROM jobs WHERE id = ?`, id)
 	return err
+}
+
+// StuckLease is how long a row may sit in 'running' before RequeueStuck
+// treats its worker as gone. Generous relative to any real job, because
+// requeueing a job that is actually still running would double-execute it.
+const StuckLease = 30 * time.Minute
+
+// RequeueStuck returns jobs and webhook deliveries abandoned in 'running'
+// back to 'pending'.
+//
+// Claiming flips a row to 'running', and only 'pending' rows are ever
+// claimed again. There was no lease, no visibility timeout, and no boot
+// reconcile, so a restart mid-job -- a deploy, an OOM kill, or simply a
+// shutdown where Scheduler.Stop's grace period expires while work is still
+// running, which it logs as happening -- stranded that row forever. It was
+// never retried despite max_attempts, never marked failed, and invisible in
+// failed lists; the only recovery was retrying each one by hand.
+//
+// Rows that have already exhausted max_attempts are failed rather than
+// requeued, so an unrunnable job cannot cycle forever.
+func (db *Database) RequeueStuck(now time.Time) (jobs int64, deliveries int64, err error) {
+	cutoff := now.UTC().Add(-StuckLease)
+
+	res, err := db.write.Exec(`
+		UPDATE jobs SET status = 'pending', started_at = NULL
+		WHERE status = 'running'
+		  AND (started_at IS NULL OR started_at < ?)
+		  AND attempts < max_attempts`, cutoff)
+	if err != nil {
+		return 0, 0, fmt.Errorf("requeue stuck jobs: %w", err)
+	}
+	jobs, _ = res.RowsAffected()
+
+	if _, err := db.write.Exec(`
+		UPDATE jobs SET status = 'failed', finished_at = ?,
+		    last_error = COALESCE(NULLIF(last_error, ''), 'abandoned: worker did not report a result')
+		WHERE status = 'running'
+		  AND (started_at IS NULL OR started_at < ?)
+		  AND attempts >= max_attempts`, now.UTC(), cutoff); err != nil {
+		return jobs, 0, fmt.Errorf("fail exhausted stuck jobs: %w", err)
+	}
+
+	res, err = db.write.Exec(`
+		UPDATE webhook_deliveries SET status = 'pending', started_at = NULL
+		WHERE status = 'running'
+		  AND (started_at IS NULL OR started_at < ?)
+		  AND attempts < max_attempts`, cutoff)
+	if err != nil {
+		return jobs, 0, fmt.Errorf("requeue stuck deliveries: %w", err)
+	}
+	deliveries, _ = res.RowsAffected()
+
+	if _, err := db.write.Exec(`
+		UPDATE webhook_deliveries SET status = 'failed', finished_at = ?,
+		    last_error = COALESCE(NULLIF(last_error, ''), 'abandoned: worker did not report a result')
+		WHERE status = 'running'
+		  AND (started_at IS NULL OR started_at < ?)
+		  AND attempts >= max_attempts`, now.UTC(), cutoff); err != nil {
+		return jobs, deliveries, fmt.Errorf("fail exhausted stuck deliveries: %w", err)
+	}
+
+	return jobs, deliveries, nil
 }

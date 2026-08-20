@@ -4,31 +4,53 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 )
 
 type Function struct {
-	ID                 string            `json:"id"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Runtime            string            `json:"runtime"`
-	Entrypoint         string            `json:"entrypoint"`
-	Image              string            `json:"image"`
-	TimeoutMS          int64             `json:"timeout_ms"`
-	MemoryMB           int64             `json:"memory_mb"`
-	CPUs               float64           `json:"cpus"`
-	EnvVars            map[string]string `json:"env_vars"`
-	NetworkMode        string            `json:"network_mode"`
-	MaxConcurrency     int               `json:"max_concurrency"`     // 0 = unlimited
-	ConcurrencyPolicy  string            `json:"concurrency_policy"`  // "queue" | "reject"
-	AuthMode           string            `json:"auth_mode"`           // "none" | "platform_key" | "signed"
-	RateLimitPerMin    int               `json:"rate_limit_per_min"`  // per-IP, 0 = unlimited
-	Version            int               `json:"version"`
-	Status             string            `json:"status"`
-	CodeHash           string            `json:"code_hash"`
-	ImageSize          int64             `json:"image_size"`
-	CreatedAt          time.Time         `json:"created_at"`
-	UpdatedAt          time.Time         `json:"updated_at"`
+	ID                string            `json:"id"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description"`
+	Runtime           string            `json:"runtime"`
+	Entrypoint        string            `json:"entrypoint"`
+	Image             string            `json:"image"`
+	TimeoutMS         int64             `json:"timeout_ms"`
+	MemoryMB          int64             `json:"memory_mb"`
+	CPUs              float64           `json:"cpus"`
+	EnvVars           map[string]string `json:"env_vars"`
+	NetworkMode       string            `json:"network_mode"`
+	MaxConcurrency    int               `json:"max_concurrency"`    // 0 = unlimited
+	ConcurrencyPolicy string            `json:"concurrency_policy"` // "queue" | "reject"
+	AuthMode          string            `json:"auth_mode"`          // "none" | "platform_key" | "signed"
+	RateLimitPerMin   int               `json:"rate_limit_per_min"` // per-IP, 0 = unlimited
+	Version           int               `json:"version"`
+	Status            string            `json:"status"`
+	CodeHash          string            `json:"code_hash"`
+	ImageSize         int64             `json:"image_size"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+}
+
+// Clone returns a deep copy safe to hand out and mutate independently.
+//
+// EnvVars is the only reference-typed field, so it is the only one that
+// needs work; nil-ness is preserved because "no env" and "empty env" are
+// distinguishable at the call sites that build spawn environments.
+// time.Time carries a *Location pointer that must NOT be deep-copied —
+// locations are immutable and shared by design.
+//
+// TestFunctionCloneCoversEveryReferenceField pins this against a future
+// field being added without updating it.
+func (f *Function) Clone() *Function {
+	if f == nil {
+		return nil
+	}
+	cp := *f
+	if f.EnvVars != nil {
+		cp.EnvVars = maps.Clone(f.EnvVars)
+	}
+	return &cp
 }
 
 // ConcurrencyPolicy values.
@@ -81,12 +103,12 @@ func ValidNetworkMode(s string) bool {
 //	                  Secret lives in the function's secret store under the
 //	                  key ORVA_SIGNING_SECRET.
 const (
-	AuthModeNone         = "none"
-	AuthModePlatformKey  = "platform_key"
-	AuthModeSigned       = "signed"
-	SigningSecretKey     = "ORVA_SIGNING_SECRET"
-	SignatureHeader      = "X-Orva-Signature"
-	SignatureTimestamp   = "X-Orva-Timestamp"
+	AuthModeNone        = "none"
+	AuthModePlatformKey = "platform_key"
+	AuthModeSigned      = "signed"
+	SigningSecretKey    = "ORVA_SIGNING_SECRET"
+	SignatureHeader     = "X-Orva-Signature"
+	SignatureTimestamp  = "X-Orva-Timestamp"
 )
 
 func ValidAuthMode(s string) bool {
@@ -139,6 +161,9 @@ type ListFunctionsResult struct {
 func (db *Database) ListFunctions(params ListFunctionsParams) (*ListFunctionsResult, error) {
 	if params.Limit <= 0 {
 		params.Limit = 20
+	}
+	if params.Limit > 1000 {
+		params.Limit = 1000
 	}
 
 	query := "SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE 1=1"
