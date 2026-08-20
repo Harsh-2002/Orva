@@ -742,8 +742,52 @@ func (db *Database) PurgeOldExecutions(retentionDays int) error {
 		}
 	}
 
-	_, err := db.write.Exec("DELETE FROM executions WHERE started_at < ?", cutoff)
-	return err
+	if _, err := db.write.Exec("DELETE FROM executions WHERE started_at < ?", cutoff); err != nil {
+		return err
+	}
+	return db.purgeOtherRetainedTables(cutoff)
+}
+
+// purgeOtherRetainedTables trims the finished rows that also accumulate
+// forever.
+//
+// Retention was documented as the reason "the database does not grow
+// without bound", but only executions (and its children) and activity_log
+// were ever swept. jobs, webhook_deliveries, deployments, build_logs and
+// expired sessions had no time-based deletion at all -- they inherit
+// ON DELETE CASCADE from their parent function, so they were only ever
+// reclaimed by deleting the function itself.
+//
+// Only terminal rows are removed: anything still pending or running is left
+// alone regardless of age, so a long-scheduled job is never swept out from
+// under the scheduler.
+func (db *Database) purgeOtherRetainedTables(cutoff string) error {
+	stmts := []struct{ what, sql string }{
+		{"jobs", `DELETE FROM jobs
+			WHERE status IN ('succeeded','failed','cancelled')
+			  AND COALESCE(finished_at, created_at) < ?`},
+		{"webhook_deliveries", `DELETE FROM webhook_deliveries
+			WHERE status IN ('succeeded','failed','cancelled')
+			  AND COALESCE(finished_at, created_at) < ?`},
+		// build_logs only. The deployment ROW is small metadata and is the
+		// rollback audit trail the dashboard lists; the log lines are the
+		// bulk. Version pruning on disk is the version GC's job.
+		{"build_logs", `DELETE FROM build_logs WHERE deployment_id IN (
+			SELECT id FROM deployments
+			WHERE status IN ('succeeded','failed')
+			  AND submitted_at < ?)`},
+		{"sessions", `DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP`},
+	}
+	for _, st := range stmts {
+		args := []any{cutoff}
+		if st.what == "sessions" {
+			args = nil
+		}
+		if _, err := db.write.Exec(st.sql, args...); err != nil {
+			return fmt.Errorf("purge %s: %w", st.what, err)
+		}
+	}
+	return nil
 }
 
 // scanExecutionFields uses the package-level rowScanner interface

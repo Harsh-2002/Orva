@@ -145,8 +145,11 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	acq, err := h.Pool.Acquire(ctx, fn.ID)
 	if err != nil {
-		respond.Error(w, http.StatusServiceUnavailable, "POOL_ERROR",
-			"pool acquire failed", reqID)
+		// Shared taxonomy, as on the HTTP invoke path: a webhook sender
+		// retrying needs FUNCTION_BUSY + Retry-After to be distinguishable
+		// from MEMORY_EXHAUSTED, not a flat 503.
+		status, opts := invokeError(err, fn, reqID)
+		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
 	var reqErr error
@@ -209,6 +212,11 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			durationMS, 0, errMsg, 0,
 		)
 		if h.Metrics != nil {
+			// Count the invocation, not just the baseline. These paths fed
+			// Baselines but never the counters, so orva_invocations_total and
+			// the dashboard percentiles excluded them entirely.
+			h.Metrics.RecordInvocation(acq.ColdStart)
+			h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
 			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", false, durationMS)
 		}
 		if len(stderr) > 0 {
@@ -248,6 +256,11 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		durationMS, statusCode, "", len(fnResp.Body),
 	)
 	if h.Metrics != nil {
+		// Count the invocation, not just the baseline. These paths fed
+		// Baselines but never the counters, so orva_invocations_total and
+		// the dashboard percentiles excluded them entirely.
+		h.Metrics.RecordInvocation(acq.ColdStart)
+		h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
 		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, false, durationMS)
 	}
 	if len(stderr) > 0 {

@@ -5,15 +5,16 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/internal/ids"
+	"strings"
 )
 
 // CronSchedule is a persisted cron job that fires a function on a schedule.
 // The scheduler goroutine consumes DueSchedules() and updates rows via
 // UpdateAfterRun() once each invocation finishes.
 type CronSchedule struct {
-	ID         string     `json:"id"`
-	FunctionID string     `json:"function_id"`
-	CronExpr   string     `json:"cron_expr"`
+	ID         string `json:"id"`
+	FunctionID string `json:"function_id"`
+	CronExpr   string `json:"cron_expr"`
 	// Timezone is the IANA name (e.g. "Asia/Kolkata", "America/Los_Angeles",
 	// "UTC") that the cron expression is interpreted against. A row with
 	// CronExpr "0 9 * * *" and Timezone "Asia/Kolkata" fires at 9 AM IST,
@@ -81,6 +82,13 @@ func (db *Database) UpsertCronScheduleByName(s *CronSchedule) (string, error) {
 	// Look up the existing row first. Two paths:
 	//   - exists: UPDATE in place; return the existing id
 	//   - absent: INSERT a new row
+	// NOTE: this is a read-then-write, not an atomic upsert -- the doc
+	// comment above used to claim the unique index made it atomic, which it
+	// does not; the index is what DETECTS the collision, and without a
+	// recovery path the loser just gets a raw UNIQUE constraint error. Two
+	// instances of the same function booting together and both calling
+	// orva.crons.upsert() is the realistic case. EnqueueJob already handles
+	// the identical race correctly; the recovery below copies it.
 	var existingID string
 	err := db.read.QueryRow(
 		`SELECT id FROM cron_schedules WHERE function_id = ? AND name = ?`,
@@ -102,6 +110,20 @@ func (db *Database) UpsertCronScheduleByName(s *CronSchedule) (string, error) {
 			s.Payload, s.Name, s.CreatedAt, s.UpdatedAt,
 		)
 		if err != nil {
+			// Lost the race: another caller inserted the same
+			// (function_id, name) between our SELECT and this INSERT. Recover
+			// by re-reading and updating in place, which is what an upsert is
+			// supposed to do -- returning the raw constraint error surfaced
+			// to SDK callers as a 500.
+			if isUniqueConstraintErr(err) {
+				var raced string
+				if e := db.read.QueryRow(
+					`SELECT id FROM cron_schedules WHERE function_id = ? AND name = ?`,
+					s.FunctionID, s.Name).Scan(&raced); e == nil && raced != "" {
+					s.ID = raced
+					return s.ID, db.updateCronScheduleInPlace(s, now)
+				}
+			}
 			return "", err
 		}
 		return s.ID, nil
@@ -112,8 +134,18 @@ func (db *Database) UpsertCronScheduleByName(s *CronSchedule) (string, error) {
 	// Update path. Preserve last_run_at / last_status — those are
 	// scheduler-owned and shouldn't be reset by a re-upsert.
 	s.ID = existingID
+	if err := db.updateCronScheduleInPlace(s, now); err != nil {
+		return "", err
+	}
+	return existingID, nil
+}
+
+// updateCronScheduleInPlace applies the mutable fields of an upsert to an
+// existing row. last_run_at and last_status are scheduler-owned and are
+// deliberately preserved across a re-upsert.
+func (db *Database) updateCronScheduleInPlace(s *CronSchedule, now time.Time) error {
 	s.UpdatedAt = now
-	_, err = db.write.Exec(`
+	_, err := db.write.Exec(`
 		UPDATE cron_schedules
 		   SET cron_expr   = ?,
 		       timezone    = ?,
@@ -123,11 +155,13 @@ func (db *Database) UpsertCronScheduleByName(s *CronSchedule) (string, error) {
 		       updated_at  = ?
 		 WHERE id = ?`,
 		s.CronExpr, s.Timezone, boolToInt(s.Enabled),
-		nullTime(s.NextRunAt), s.Payload, s.UpdatedAt, existingID)
-	if err != nil {
-		return "", err
-	}
-	return existingID, nil
+		nullTime(s.NextRunAt), s.Payload, s.UpdatedAt, s.ID)
+	return err
+}
+
+// isUniqueConstraintErr reports whether err is SQLite's UNIQUE violation.
+func isUniqueConstraintErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func (db *Database) GetCronSchedule(id string) (*CronSchedule, error) {

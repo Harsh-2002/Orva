@@ -14,11 +14,11 @@ import (
 )
 
 // Token / code lifetimes. Tuned for browser-based MCP connectors:
-// - 1h access token: short enough that revocation propagates fast,
-//   long enough that a chat session doesn't refresh constantly.
-// - 30d refresh: matches how long claude.ai/ChatGPT keep connectors
-//   "warm" between user sessions before re-prompting consent.
-// - 10m code TTL: standard OAuth 2.1 §1.3.1 — plenty for a redirect.
+//   - 1h access token: short enough that revocation propagates fast,
+//     long enough that a chat session doesn't refresh constantly.
+//   - 30d refresh: matches how long claude.ai/ChatGPT keep connectors
+//     "warm" between user sessions before re-prompting consent.
+//   - 10m code TTL: standard OAuth 2.1 §1.3.1 — plenty for a redirect.
 const (
 	accessTokenLifetime  = 1 * time.Hour
 	refreshTokenLifetime = 30 * 24 * time.Hour
@@ -254,6 +254,19 @@ func (h *Handler) AuthorizeGET(w http.ResponseWriter, r *http.Request) {
 	if scope == "" {
 		scope = client.Scope
 	}
+	// The client's registered scope is a CEILING, not just a default. It was
+	// only ever used to fill in an omitted value, and the requested scope was
+	// then checked against the globally-supported set alone -- so a client
+	// registered with scope="read" could simply ask for "admin" and get it.
+	// IntersectScope exists for exactly this and had no callers, despite its
+	// doc saying "the issued token never exceeds either side".
+	if client.Scope != "" {
+		scope = NormaliseScope(IntersectScope(ParseScope(scope), ParseScope(client.Scope)))
+		if strings.TrimSpace(scope) == "" {
+			redirectWithError(w, r, req.RedirectURI, "invalid_scope", req.State)
+			return
+		}
+	}
 	if !IsValidScope(scope) {
 		redirectWithError(w, r, req.RedirectURI, "invalid_scope", req.State)
 		return
@@ -333,6 +346,19 @@ func (h *Handler) AuthorizePOST(w http.ResponseWriter, r *http.Request) {
 	scope := req.Scope
 	if scope == "" {
 		scope = client.Scope
+	}
+	// The client's registered scope is a CEILING, not just a default. It was
+	// only ever used to fill in an omitted value, and the requested scope was
+	// then checked against the globally-supported set alone -- so a client
+	// registered with scope="read" could simply ask for "admin" and get it.
+	// IntersectScope exists for exactly this and had no callers, despite its
+	// doc saying "the issued token never exceeds either side".
+	if client.Scope != "" {
+		scope = NormaliseScope(IntersectScope(ParseScope(scope), ParseScope(client.Scope)))
+		if strings.TrimSpace(scope) == "" {
+			redirectWithError(w, r, req.RedirectURI, "invalid_scope", req.State)
+			return
+		}
 	}
 	if !IsValidScope(scope) {
 		redirectWithError(w, r, req.RedirectURI, "invalid_scope", req.State)

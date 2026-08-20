@@ -166,8 +166,15 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	acq, err := h.Pool.Acquire(ctx, fn.ID)
 	if err != nil {
-		respond.Error(w, http.StatusServiceUnavailable, "POOL_ERROR",
-			"pool acquire: "+err.Error(), reqID)
+		// Use the shared taxonomy rather than flattening everything to a
+		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
+		// Retry-After), MEMORY_EXHAUSTED, EGRESS_POLICY_UNAVAILABLE and
+		// TIMEOUT; without it an SDK retrying on this path cannot tell a
+		// concurrency cap it should back off from from a host OOM it should
+		// not, and the error codes documented in docs/ERRORS.md only ever
+		// appeared on one of the five invoke entrypoints.
+		status, opts := invokeError(err, fn, reqID)
+		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
 	var reqErr error

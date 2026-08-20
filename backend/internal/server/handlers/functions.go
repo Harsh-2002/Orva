@@ -314,7 +314,18 @@ func (h *FunctionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fn, err := h.Registry.Get(fnID)
+	// Resolve by name as well as id. This was the ONLY function endpoint
+	// that would not -- Update, Delete, Deploy, Rollback, Diff and Source all
+	// do -- and the dashboard addresses functions by name everywhere while
+	// listing them with the default LIMIT of 20. The result was that opening
+	// any function outside the twenty most recent said "Function not found".
+	// The CLI already worked around it with ?limit=10000.
+	resolved, ok := h.resolveFnID(fnID)
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
+	fn, err := h.Registry.Get(resolved)
 	if err != nil {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return

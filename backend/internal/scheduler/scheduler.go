@@ -465,6 +465,14 @@ func (s *Scheduler) recordExecution(execID, fnID, status string, statusCode int,
 	}
 	s.db.AsyncInsertExecutionFinal(exec, durationMS, statusCode, errMsg, 0)
 	if s.metrics != nil {
+		// Feed the invocation counters too, not just the baselines. Only the
+		// HTTP paths did this, so orva_invocations_total, the cold/warm
+		// counters and the dashboard's p50/p95/p99 all excluded cron, jobs,
+		// F2F and inbound webhooks entirely -- an instance whose workload is
+		// cron-driven reported zero invocations while its executions table
+		// filled up.
+		s.metrics.RecordInvocation(false)
+		s.metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
 		s.metrics.Baselines.FinalizeExecution(s.db, execID, fnID, status, false, durationMS)
 	}
 	if len(stderr) > 0 {
