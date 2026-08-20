@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -139,4 +140,57 @@ func cut(s string, sep byte) (before, after string, found bool) {
 		}
 	}
 	return s, "", false
+}
+
+// TestSanitizeDropsInboundOrvaNamespace — the x-orva- namespace is the
+// server talking to its own adapter. A caller who could inject into it
+// forged two guarantees the product documents:
+//
+//   - orva.webhook.parse(event).verified is literally
+//     trigger === "inbound_webhook", and the reference tells handlers to
+//     return 401 when it is false. Setting the header on a direct /fn/
+//     call satisfied that check with no HMAC involved.
+//   - x-orva-call-depth seeds ORVA_CALL_DEPTH, which the SDK forwards on
+//     nested invokes and the F2F endpoint compares against its cap. A
+//     negative value disabled the cap.
+func TestSanitizeDropsInboundOrvaNamespace(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Orva-Trigger", "inbound_webhook")
+	h.Set("X-Orva-Call-Depth", "-1000000")
+	h.Set("X-Orva-Inbound-Webhook-Id", "attacker-chosen")
+	h.Set("x-orva-function-id", "someone-elses-function")
+	h.Set("X-Orva-Trace-Id", "forged")
+	// A caller header that must still come through untouched.
+	h.Set("X-GitHub-Event", "push")
+
+	got := SanitizeForwardedHeaders(h)
+
+	for k := range got {
+		if strings.HasPrefix(strings.ToLower(k), "x-orva-") {
+			t.Errorf("inbound %q survived sanitization with value %q", k, got[k])
+		}
+	}
+	if got["x-github-event"] != "push" {
+		t.Errorf("third-party header was dropped: %q", got["x-github-event"])
+	}
+}
+
+// TestServerStampedOrvaHeadersStillReachTheSandbox — dropping the namespace
+// must not break the server's own tagging, which is applied after
+// sanitization. This pins the ordering the fix depends on.
+func TestServerStampedOrvaHeadersStillReachTheSandbox(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Orva-Trigger", "inbound_webhook") // forged by the caller
+
+	got := SanitizeForwardedHeaders(h)
+	// What inbound_webhook_trigger.go and proxy.Forward do next:
+	got["x-orva-trigger"] = "http"
+	got["x-orva-function-id"] = "real-fn-id"
+
+	if got["x-orva-trigger"] != "http" {
+		t.Errorf("server-stamped trigger = %q, want http", got["x-orva-trigger"])
+	}
+	if got["x-orva-function-id"] != "real-fn-id" {
+		t.Errorf("server-stamped function id = %q", got["x-orva-function-id"])
+	}
 }

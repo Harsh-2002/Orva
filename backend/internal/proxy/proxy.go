@@ -88,6 +88,27 @@ func SanitizeForwardedHeaders(h http.Header) map[string]string {
 				out["authorization"] = v
 			}
 
+		case strings.HasPrefix(strings.ToLower(k), "x-orva-"):
+			// The x-orva- namespace is the server talking to its own
+			// adapter, never the caller. Forward is about to set the ones
+			// that matter, but it does not set all of them, and the two it
+			// leaves alone were both load-bearing:
+			//
+			//   x-orva-trigger    — orva.webhook.parse(event).verified is
+			//     defined as trigger === "inbound_webhook", and the docs
+			//     tell handlers to gate on it. A caller who set the header
+			//     on a direct /fn/ request passed that check with no HMAC
+			//     ever being computed. The shipped cron template branches
+			//     on trigger === "cron" to delete KV rows.
+			//
+			//   x-orva-call-depth — seeds ORVA_CALL_DEPTH, which the SDK
+			//     forwards on nested invokes and the F2F endpoint trusts.
+			//     A negative value defeated the recursion cap outright.
+			//
+			// Dropping the whole namespace rather than a denylist of two:
+			// the next header added here would otherwise inherit the bug.
+			continue
+
 		default:
 			// RFC 9110 §5.2: repeated field lines are equivalent to one
 			// comma-joined value.
@@ -417,8 +438,16 @@ func (p *Proxy) Forward(
 		coldStartStr = "true"
 	}
 	for k, v := range dres.Headers {
+		if hopByHopResponseHeader(k) {
+			// The adapter copies every header off its fetch Response, so an
+			// idiomatic proxy handler forwards content-length (compressed)
+			// and content-encoding: gzip alongside a body Go has already
+			// decoded. Go honours the explicit length and truncates.
+			continue
+		}
 		w.Header().Set(k, v)
 	}
+	applyFunctionResponseGuards(w)
 	w.Header().Set("X-Orva-Execution-ID", execID)
 	w.Header().Set("X-Orva-Cold-Start", coldStartStr)
 
@@ -621,4 +650,38 @@ func (p *Proxy) captureRequest(execID, method, path string, hdr http.Header, bod
 		Truncated:   truncated,
 		CapturedAt:  time.Now().UnixMilli(),
 	})
+}
+
+// hopByHopResponseHeader reports whether a header the adapter handed back
+// describes ITS transfer rather than ours, and so must not be relayed.
+func hopByHopResponseHeader(k string) bool {
+	switch strings.ToLower(strings.TrimSpace(k)) {
+	case "content-length", "content-encoding", "transfer-encoding",
+		"connection", "keep-alive", "proxy-authenticate",
+		"proxy-authorization", "te", "trailer", "upgrade":
+		return true
+	}
+	return false
+}
+
+// applyFunctionResponseGuards stops function output from acting as the
+// dashboard.
+//
+// Function responses are served from the same origin as /web and /api, and
+// the session cookie is Path=/ with SameSite=Lax. auth_mode defaults to
+// "none", so any public function that reflects part of its input is
+// same-origin XSS: script in that response can drive /api/v1/keys with the
+// operator's cookie attached. A separate host for /fn/ would be the
+// structural fix; these headers are the contained one.
+//
+// Set before the adapter's own headers would be, then unconditionally
+// overwritten here, so a handler cannot opt itself out.
+func applyFunctionResponseGuards(w http.ResponseWriter) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// No inline script, no script from anywhere, nothing embeddable. Function
+	// output is data and documents, not part of the dashboard application.
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; "+
+			"font-src data:; form-action 'none'; frame-ancestors 'none'; "+
+			"base-uri 'none'; sandbox allow-downloads")
 }

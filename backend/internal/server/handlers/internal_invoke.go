@@ -71,7 +71,13 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	// the pool runs out of workers.
 	depth := 0
 	if v := r.Header.Get("X-Orva-Call-Depth"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		// Clamp at zero. The proxy no longer forwards an inbound
+		// x-orva-call-depth into the sandbox, so this value should always be
+		// one the SDK echoed back from us — but the cap is the only thing
+		// bounding F2F recursion, and a negative value defeats it entirely
+		// (depth+1 > max is false forever). Cheap to make that unreachable
+		// from here as well as from the proxy.
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			depth = n
 		}
 	}
@@ -257,7 +263,13 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 
 	depth := 0
 	if v := r.Header.Get("X-Orva-Call-Depth"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		// Clamp at zero. The proxy no longer forwards an inbound
+		// x-orva-call-depth into the sandbox, so this value should always be
+		// one the SDK echoed back from us — but the cap is the only thing
+		// bounding F2F recursion, and a negative value defeats it entirely
+		// (depth+1 > max is false forever). Cheap to make that unreachable
+		// from here as well as from the proxy.
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			depth = n
 		}
 	}
