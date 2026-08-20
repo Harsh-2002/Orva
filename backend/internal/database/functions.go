@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -29,6 +30,27 @@ type Function struct {
 	ImageSize          int64             `json:"image_size"`
 	CreatedAt          time.Time         `json:"created_at"`
 	UpdatedAt          time.Time         `json:"updated_at"`
+}
+
+// Clone returns a deep copy safe to hand out and mutate independently.
+//
+// EnvVars is the only reference-typed field, so it is the only one that
+// needs work; nil-ness is preserved because "no env" and "empty env" are
+// distinguishable at the call sites that build spawn environments.
+// time.Time carries a *Location pointer that must NOT be deep-copied —
+// locations are immutable and shared by design.
+//
+// TestFunctionCloneCoversEveryReferenceField pins this against a future
+// field being added without updating it.
+func (f *Function) Clone() *Function {
+	if f == nil {
+		return nil
+	}
+	cp := *f
+	if f.EnvVars != nil {
+		cp.EnvVars = maps.Clone(f.EnvVars)
+	}
+	return &cp
 }
 
 // ConcurrencyPolicy values.

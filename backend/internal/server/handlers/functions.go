@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
@@ -194,6 +196,16 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// entrypoint names a file inside the function's code directory and is
+	// read back by GET /source, so it must be contained before it is stored.
+	if req.Entrypoint != "" {
+		if err := safepath.Validate(req.Entrypoint); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid entrypoint: "+err.Error(), reqID)
+			return
+		}
+	}
+
 	// Apply defaults.
 	if req.Entrypoint == "" {
 		switch {
@@ -365,6 +377,34 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "status must be one of: active, inactive", reqID)
 		return
 	}
+	// The comment above claimed everything mutable was validated here. It
+	// was not: name, entrypoint, timeout, memory and cpus all went straight
+	// onto the record. `memory_mb: -1` was accepted and shipped
+	// ORVA_MEMORY_MB=-1 to the sandbox, and `entrypoint` was a path read
+	// back by GET /source with no containment at all.
+	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "name must not be empty", reqID)
+		return
+	}
+	if req.Entrypoint != nil {
+		if err := safepath.Validate(*req.Entrypoint); err != nil {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				"invalid entrypoint: "+err.Error(), reqID)
+			return
+		}
+	}
+	if req.TimeoutMS != nil && *req.TimeoutMS <= 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "timeout_ms must be > 0", reqID)
+		return
+	}
+	if req.MemoryMB != nil && *req.MemoryMB <= 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "memory_mb must be > 0", reqID)
+		return
+	}
+	if req.CPUs != nil && *req.CPUs <= 0 {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "cpus must be > 0", reqID)
+		return
+	}
 
 	// Track whether anything that affects the spawn config changed — if
 	// so, we drain the warm pool so the next invoke re-spawns with the
@@ -388,6 +428,10 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Entrypoint != nil {
 		fn.Entrypoint = *req.Entrypoint
+		// ORVA_ENTRYPOINT is baked into the worker at spawn and workers are
+		// not age-expired, so without a refresh the PUT returns 200 while
+		// every warm worker keeps running the old handler indefinitely.
+		spawnConfigChanged = true
 	}
 	if req.TimeoutMS != nil {
 		fn.TimeoutMS = *req.TimeoutMS
@@ -593,8 +637,24 @@ func (h *FunctionHandler) GetSource(w http.ResponseWriter, r *http.Request) {
 			entrypoint = "handler.py"
 		}
 	}
-	src, err := os.ReadFile(codeDir + "/" + entrypoint)
+	srcPath, err := safepath.Join(codeDir, entrypoint)
 	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"entrypoint resolves outside the function's code directory", reqID)
+		return
+	}
+	src, err := os.ReadFile(srcPath)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			// Only "not deployed" may report an empty body. Anything else —
+			// EACCES, EIO, a dangling `current` symlink — used to render as a
+			// blank editor buffer that then overwrote the real handler on save.
+			slog.Error("read function source failed", "function", fn.ID,
+				"path", srcPath, "error", err)
+			respond.Error(w, http.StatusInternalServerError, "INTERNAL",
+				"failed to read function source", reqID)
+			return
+		}
 		// Code dir doesn't exist yet (not deployed).
 		respond.JSON(w, http.StatusOK, map[string]string{"code": "", "dependencies": ""})
 		return

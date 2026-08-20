@@ -34,10 +34,18 @@ func GenerateID() (string, error) {
 
 // Get retrieves a function by ID. It checks the in-memory cache first,
 // falling back to SQLite on a miss.
+//
+// The returned value is always a COPY. Handing out the cached pointer let
+// callers mutate the cache in place: an update handler that applied fields
+// before persisting left the cache reporting the new values even when the
+// write failed, and the invoke path read those same fields on every request
+// while the update handler wrote them, unsynchronized. Copying on the way
+// out makes the cached object immutable after publication by construction,
+// which is what both problems actually needed.
 func (r *Registry) Get(id string) (*database.Function, error) {
 	// Cache hit
 	if v, ok := r.cache.Load(id); ok {
-		return v.(*database.Function), nil
+		return v.(*database.Function).Clone(), nil
 	}
 
 	// Cache miss – read from database
@@ -46,9 +54,23 @@ func (r *Registry) Get(id string) (*database.Function, error) {
 		return nil, err
 	}
 
-	// Populate cache
-	r.cache.Store(fn.ID, fn)
+	// Populate cache with our own copy, hand the caller theirs.
+	r.cache.Store(fn.ID, fn.Clone())
 	return fn, nil
+}
+
+// Exists reports whether a function id resolves, without paying for a copy.
+// Use this instead of discarding Get's result.
+func (r *Registry) Exists(id string) bool {
+	if _, ok := r.cache.Load(id); ok {
+		return true
+	}
+	fn, err := r.db.GetFunction(id)
+	if err != nil || fn == nil {
+		return false
+	}
+	r.cache.Store(fn.ID, fn.Clone())
+	return true
 }
 
 // Set writes a function to SQLite and updates the cache.
@@ -94,13 +116,19 @@ func (r *Registry) set(fn *database.Function, publish bool) error {
 		action = "updated"
 	}
 
-	// Invalidate (remove then store fresh) to ensure consistency.
+	// Copy on the way IN as well. The build queue calls SetSilent and then
+	// keeps mutating the same struct for the rest of a multi-minute build,
+	// so storing the caller's pointer would leave the cache aliased to
+	// something still being written. Publish the copy, not the original.
+	cached := fn.Clone()
 	r.cache.Delete(fn.ID)
-	r.cache.Store(fn.ID, fn)
+	r.cache.Store(fn.ID, cached)
 	if publish && r.PublishEvent != nil {
+		// The SSE hub marshals this on another goroutine, arbitrarily later —
+		// another reader that must not see the caller's live struct.
 		r.PublishEvent("function", map[string]any{
 			"action":   action,
-			"function": fn,
+			"function": cached,
 		})
 	}
 	return nil
@@ -133,7 +161,7 @@ func (r *Registry) LoadAll() error {
 		return fmt.Errorf("load all functions: %w", err)
 	}
 	for _, fn := range result.Functions {
-		r.cache.Store(fn.ID, fn)
+		r.cache.Store(fn.ID, fn.Clone())
 	}
 	return nil
 }

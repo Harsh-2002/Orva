@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -407,6 +408,9 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 				"to spawn.",
 		)
 	}
+	if err := safepath.Validate(in.Entrypoint); err != nil {
+		return nil, fmt.Errorf("invalid entrypoint: %w", err)
+	}
 	if in.TimeoutMS <= 0 {
 		return nil, errors.New(
 			"timeout_ms is required and must be > 0: per-invocation cap " +
@@ -518,6 +522,29 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 	drainPool := false
 	networkModeChanged := false
 
+	// Validate everything BEFORE applying any of it. This handler used to
+	// mutate first and validate second, and resolveFunction hands back the
+	// live registry object, so a rejected auth_mode still left the changed
+	// memory/cpu/timeout visible to the next spawn while the database kept
+	// the old values. The REST handler has always guarded against this.
+	if in.Entrypoint != nil {
+		if err := safepath.Validate(*in.Entrypoint); err != nil {
+			return nil, fmt.Errorf("invalid entrypoint: %w", err)
+		}
+	}
+	if in.Name != nil && strings.TrimSpace(*in.Name) == "" {
+		return nil, errors.New("name must not be empty")
+	}
+	if in.TimeoutMS != nil && *in.TimeoutMS <= 0 {
+		return nil, errors.New("timeout_ms must be > 0")
+	}
+	if in.MemoryMB != nil && *in.MemoryMB <= 0 {
+		return nil, errors.New("memory_mb must be > 0")
+	}
+	if in.CPUs != nil && *in.CPUs <= 0 {
+		return nil, errors.New("cpus must be > 0")
+	}
+
 	if in.Name != nil {
 		fn.Name = *in.Name
 	}
@@ -526,6 +553,7 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 	}
 	if in.Entrypoint != nil {
 		fn.Entrypoint = *in.Entrypoint
+		drainPool = true // ORVA_ENTRYPOINT is baked in at spawn
 	}
 	if in.TimeoutMS != nil {
 		if *in.TimeoutMS != fn.TimeoutMS {
@@ -618,7 +646,11 @@ func readFunctionSource(deps Deps, fn *database.Function) (GetFunctionSourceOutp
 		return out, errors.New("data dir not configured")
 	}
 	currentDir := filepath.Join(deps.DataDir, "functions", fn.ID, "current")
-	codeBytes, err := os.ReadFile(filepath.Join(currentDir, fn.Entrypoint))
+	codePath, err := safepath.Join(currentDir, fn.Entrypoint)
+	if err != nil {
+		return out, fmt.Errorf("entrypoint resolves outside the function's code directory: %w", err)
+	}
+	codeBytes, err := os.ReadFile(codePath)
 	if err == nil {
 		out.Code = string(codeBytes)
 	}
