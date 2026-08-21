@@ -12,6 +12,10 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
 
 ## Unreleased
 
+Nothing yet.
+
+## v2026.08.21
+
 ### Breaking
 
 - **`POST /api/v1/channels` now requires the `admin` permission** (was `write`).
@@ -172,6 +176,22 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   egress policy is compiled" — a security alarm — on any transient error, and
   an expired session left every list silently blank rather than prompting a
   sign-in.
+
+### Verified
+
+Beyond CI's gate (`test/e2e/run.py` with `ORVA_REQUIRE_SANDBOX=1` on amd64 and
+arm64, six server installers, six CLI installers, native systemd, docker
+smoke, `-race`, govulncheck):
+
+- **The id migration was rehearsed against the real binary**
+  (`test/migration-rehearsal.sh`): a seeded legacy data dir, three boots, and a
+  GC tick waited out — ids moved, directories followed, `current` resolved,
+  source survived, and the migration did not re-run once its marker was set.
+- **`test/atscale.sh` was run against a live instance** with nsjail and both
+  runtime rootfs trees: 20 functions deployed, 5 hammered concurrently.
+  nsjail process count matched the pool exactly (32 vs 32) and every pool
+  stayed within its `effective_max`. Throughput figures from that run are a
+  smoke test, not a benchmark — the host was shared.
 
 ## v2026.08.05
 
