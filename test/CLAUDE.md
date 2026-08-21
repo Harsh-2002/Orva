@@ -71,6 +71,7 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 | `ceiling.sh` | Sustained-load ramp (120s/step after a 60s warmup) to find the real throughput ceiling; emits CSV (rps/p50/p95/p99/err/mem). Positional args: `<api-key> <fn-id> [base-url]` |
 | `onboarding-flow.sh` | Auth/session onboarding flow via curl: onboard → session cookie → /auth/me. Onboarding is unauthenticated only while the instance is unused; against one that has operator-minted keys or deployed functions, set `API_KEY` to an admin key → refresh (token rotation) → logout → SQLite persistence. No deploy/invoke/KV |
 | `heavy-deploy-test.sh` | Large deploy + streaming chunked response validation |
+| `migration-rehearsal.sh` | Upgrade rehearsal for the UUIDv7 id migration. **Self-contained** — boots the real binary against a scratch data dir it seeds itself, so unlike the rest of this directory it needs no running instance, no `API_KEY`, no nsjail and no Docker. Asserts ids move, `functions/<id>/` follows, `current` still resolves, and the source survives a GC tick (the window in which a broken migration deletes it). `test/migration-rehearsal/` holds its Go fixture builder. |
 
 ## Subdirectories
 

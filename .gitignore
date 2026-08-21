@@ -77,3 +77,6 @@ reddit.md
 
 # Design-tooling artifacts (impeccable critique snapshots)
 .impeccable/
+
+# `go build ./test/...` drops the rehearsal harness binary at the repo root.
+/migration-rehearsal

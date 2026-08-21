@@ -113,6 +113,11 @@ hand-maintained view — update it alongside if content changes.)
   testing**).
 - **Two-stage: verify on push/PR, ship on tag.** `ci.yml` runs on PRs and every push
   to `main` (docs-only changes skip only the fast lint/go/ui/docker jobs).
+- **Move `CHANGELOG.md`'s `## Unreleased` section under the new version heading
+  before tagging.** Releases are dated, not semver, so "breaking" is never
+  implied by the version — it has to be written down. Anything an operator must
+  do differently, or that will 403/behave differently after upgrading, belongs
+  in **Breaking** or **Upgrade notes**.
 - **Ship on `vYYYY.MM.DD` tag** (zero-padded). `release.yml`'s `gate` job confirms
   `CI` already concluded `success` for that exact commit (a status lookup, not a
   re-run), then builds + publishes. It refuses to build on missing/red CI.

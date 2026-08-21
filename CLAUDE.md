@@ -95,6 +95,9 @@ the newest published release. If you ever delete an old release by hand, publish
 **first** — deleting the current release before its replacement is live opens a window where
 "latest" resolves to 404. The flow:
 
+0. **Update `CHANGELOG.md`** — move `## Unreleased` under the new `vYYYY.MM.DD`
+   heading. Breaking changes and upgrade steps must be written there before the
+   tag exists; a dated version cannot signal them on its own.
 1. **Merge to `main`** and wait for **CI** to go green on the merge commit. This is the
    verification — the release will not re-run it.
 2. **Tag today's date and push** (zero-padded `vYYYY.MM.DD`):

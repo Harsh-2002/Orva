@@ -284,6 +284,14 @@ outstanding.
 migration, and the ids are freshly generated rather than derived, so they
 cannot be recomputed.
 
+**Rehearse it if you want certainty.** `bash test/migration-rehearsal.sh`
+boots the real binary against a data dir it seeds with legacy ids, a channel
+binding, soft references and function code on disk, then asserts that every
+id moved, every directory followed, `current` still resolves, and the source
+survived a GC tick — which is the window in which a broken migration deletes
+it. It needs neither nsjail nor Docker, so it runs anywhere the binary
+builds.
+
 **If boot fails with `failed to reconcile function directories after id
 migration`:** your function code is intact on disk. The message names the
 cause — almost always a permissions or disk-space problem under `functions/`.
