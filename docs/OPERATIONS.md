@@ -302,6 +302,41 @@ anything under `functions/` to "clean up".
 migration refused to commit and rolled back, so the database is untouched and
 unmigrated. Upgrade to a build containing this fix and start again.
 
+## Symptom: nsjail cgroups accumulating under the delegate
+
+**Diagnosis.** Workers are SIGKILLed, so nsjail never runs its own cleanup
+and the `NSJAIL.<pid>` cgroup directory it created is left behind. Beyond
+disk, every spawn scans that directory and reads `cgroup.procs` per entry to
+find its own, so an accumulation slows cold starts and eventually makes
+cgroup resolution time out — at which point memory sampling stops producing
+samples and the autoscaler permanently over-reserves.
+
+**Fix.** Orva reclaims them in three places, and you should not need to
+intervene:
+
+- when a worker is reaped, if its cgroup path was resolved;
+- on every GC tick, for the ones it was not — nsjail names the directory
+  after the jailed *child's* pid, so finding it requires a scan that gives up
+  after 500ms, and under churn a worker is often gone before that completes;
+- at startup, for anything a previous process left behind.
+
+The sweep only removes directories that accept an `rmdir`, which a cgroup
+still holding a task refuses with `EBUSY` — so a live sandbox's cgroup is
+never at risk.
+
+**Verify.** The steady-state count should equal live workers:
+
+```bash
+# the delegate Orva resolved (see the --cgroupv2_mount arg on any nsjail proc)
+ls /sys/fs/cgroup/<delegate> | grep -c '^NSJAIL\.'
+pgrep -P "$(pgrep -f '/orva serve')" -f nsjail | wc -l
+```
+
+Between GC ticks the first number runs ahead; after a tick they converge. If
+they stay far apart, check that orvad can actually write to the delegate —
+on bare metal that is what `Delegate=yes` in the unit provides, and without
+it every removal fails with `EACCES` and is skipped.
+
 ## Backup and restore
 
 `orva backup download` writes an archive containing the SQLite database,

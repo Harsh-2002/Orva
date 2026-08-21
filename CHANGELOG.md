@@ -102,7 +102,9 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   loop, spawning a sandbox every scheduler tick.
 - nsjail cgroups leaked on every worker kill. Beyond disk, every spawn scans
   that directory, so the leak eventually broke memory sampling and left the
-  autoscaler permanently over-reserving.
+  autoscaler permanently over-reserving. Reclaimed at reap time, on every GC
+  tick, and at startup — measured on a load run, 224 spawns previously left
+  82 directories behind.
 
 ### Fixed — security
 

@@ -171,6 +171,16 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		_ = cmd.Wait()
 		w.dead.Store(true)
 		close(w.waitDone)
+
+		// Reclaim the cgroup HERE, not at Kill time. nsjail is SIGKILLed, so
+		// it never runs its own cleanup and the NSJAIL.<pid> directory it
+		// created is left behind; but rmdir on a cgroup fails with EBUSY
+		// while it still holds processes, and immediately after sending
+		// SIGKILL it does. Doing it once the process is genuinely reaped is
+		// the only point where the directory is empty -- and it covers every
+		// exit path, including a worker that exits on its own, which Kill
+		// never observes.
+		w.removeCgroup()
 	}()
 
 	// Resolve the nsjail cgroup path asynchronously. nsjail names the cgroup
@@ -618,14 +628,10 @@ func (w *Worker) Kill() error {
 	}
 	_ = w.Cmd.Process.Kill()
 
-	// SIGKILL means nsjail never runs its own cleanup, so the NSJAIL.<pid>
-	// cgroup directory it created is left behind. Nothing else removes it,
-	// and every subsequent spawn ReadDirs that directory and reads
-	// cgroup.procs per entry to find its own -- so the leak is not just disk,
-	// it makes cgroup resolution slower on every cold start until it times
-	// out entirely, at which point memory sampling stops and the autoscaler
-	// permanently over-reserves.
-	w.removeCgroup()
+	// The cgroup is reclaimed by the reaper goroutine once cmd.Wait() has
+	// returned. Doing it here would race the dying process: rmdir on a
+	// cgroup that still holds a task fails with EBUSY, which is exactly the
+	// state a process is in microseconds after SIGKILL.
 	// The Spawn-side reaper goroutine will pick up the SIGKILL exit and
 	// close waitDone. Caller does not block on it — w.Kill returns as soon
 	// as the signal is delivered.

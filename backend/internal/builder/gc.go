@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
 // GC prunes archived version directories beyond a configurable retention
@@ -156,6 +157,21 @@ func (g *GC) tick(ctx context.Context) {
 
 	g.sweepBuildCaches(ctx, live)
 	g.sweepOrphanFunctionDirs(ctx, live)
+
+	// Reclaim nsjail cgroups whose process is gone.
+	//
+	// Worker.Kill removes the cgroup when it can, but that path depends on
+	// having RESOLVED the directory first -- nsjail names it after the jailed
+	// CHILD's pid, so finding it means scanning cgroup.procs, and the scan
+	// gives up after 500ms. Under churn a worker is frequently killed before
+	// resolution completes, so the fast path silently misses it. Measured on
+	// a load run: 224 spawns left 82 directories behind.
+	//
+	// This sweep needs no resolution: rmdir on a cgroup that still holds a
+	// task fails with EBUSY, so removing every NSJAIL.* directory that will
+	// accept a rmdir is safe by construction and catches whatever the fast
+	// path missed.
+	sandbox.SweepOrphanCgroups()
 }
 
 // tryFnLock takes the per-function lock without blocking. The bool is false

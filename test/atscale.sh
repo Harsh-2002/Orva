@@ -189,9 +189,12 @@ for name in "${LOAD_FNS[@]}"; do
     f="$TMPDIR/$name.hey"
     # Default to 0 so empty `hey` output (timeout/blip) doesn't break awk.
     rps=$(awk '/Requests\/sec/ {print $2; exit}' "$f")
-    p50=$(awk '/50%/ {print $2; exit}' "$f")
-    p95=$(awk '/95%/ {print $2; exit}' "$f")
-    p99=$(awk '/99%/ {print $2; exit}' "$f")
+    # hey prints "  50%% in 0.0009 secs" -- the value is field THREE. Reading
+    # $2 yields the literal word "in", which multiplied by 1000 below is 0,
+    # so every latency percentile this harness reported was silently zero.
+    p50=$(awk '/ 50%/ {print $3; exit}' "$f")
+    p95=$(awk '/ 95%/ {print $3; exit}' "$f")
+    p99=$(awk '/ 99%/ {print $3; exit}' "$f")
     # Pass via -v so unset values become 0 inside awk, no shell expansion glitches.
     p50_ms=$(awk -v v="${p50:-0}" 'BEGIN{print v*1000}')
     p95_ms=$(awk -v v="${p95:-0}" 'BEGIN{print v*1000}')
@@ -201,11 +204,59 @@ done
 
 # ── Phase 6: Process leak check ─────────────────────────────────────────
 echo "# phase 6: nsjail process count (should match sum(idle+busy+spawning)) " >&2
-container=$(docker ps --filter "publish=${BASE##*:}" --format '{{.Names}}' | head -1)
+# Two deployments to support, and docker may be present but unauthorized --
+# in which case `docker ps` fails and, under set -e, used to abort the whole
+# run right before the one check this phase exists for.
+container=""
+if command -v docker >/dev/null 2>&1; then
+    container=$(docker ps --filter "publish=${BASE##*:}" --format '{{.Names}}' 2>/dev/null | head -1 || true)
+fi
+
+port="${BASE##*:}"
+port="${port%%/*}"
+
 if [ -n "$container" ]; then
     nsjail_count=$(docker exec "$container" sh -c 'ls /proc/[0-9]*/cmdline 2>/dev/null | xargs -I{} sh -c "tr \"\\000\" \" \" < {}; echo" 2>/dev/null | grep -c nsjail || true')
-    expected=$(echo "$metrics" | jq -r '[.pools[] | .idle + .busy + .spawning] | add // 0')
-    echo "process_check	nsjail_running=$nsjail_count	expected=$expected"
+    source_label="container:$container"
+else
+    # Bare metal. Count only the nsjail processes belonging to THE ORVAD
+    # UNDER TEST, by finding the pid listening on our port and counting its
+    # direct children.
+    #
+    # A host-wide `pgrep nsjail` is wrong and will report a phantom leak: the
+    # Docker deployment runs with --pid host (nsjail needs it), so a
+    # containerized Orva's sandboxes are fully visible in the host pid
+    # namespace. Any other instance on the box gets counted too.
+    # ss only reveals the owning pid for sockets this user owns, so a
+    # root-run orvad is invisible without privileges. Fall back to matching
+    # the daemon by command line, and let the caller override outright.
+    orvad_pid="${ORVA_ATSCALE_PID:-}"
+    if [ -z "$orvad_pid" ]; then
+        orvad_pid=$(ss -ltnp 2>/dev/null | grep -w "$port" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+    fi
+    if [ -z "$orvad_pid" ]; then
+        orvad_pid=$(pgrep -f '(^|/)orva serve' 2>/dev/null | head -1 || true)
+    fi
+    if [ -z "$orvad_pid" ]; then
+        echo "process_check	SKIPPED	could not identify the orvad pid on $port (set ORVA_ATSCALE_PID)" >&2
+        echo "# DONE" >&2
+        exit 0
+    fi
+    nsjail_count=$(pgrep -P "$orvad_pid" -f nsjail 2>/dev/null | grep -c . || true)
+    source_label="host:pid=$orvad_pid"
+fi
+
+expected=$(echo "$metrics" | jq -r '[.pools[] | .idle + .busy + .spawning] | add // 0')
+echo "process_check	source=$source_label	nsjail_running=$nsjail_count	expected=$expected"
+
+# The two samples are seconds apart and the pool is live, so exact equality is
+# not the bar; a persistent excess is.
+if [ "$nsjail_count" -gt "$((expected + 3))" ]; then
+    echo "process_check	VERDICT=LEAK	nsjail processes ($nsjail_count) exceed idle+busy+spawning ($expected) beyond the sampling window" >&2
+elif [ "$((nsjail_count + 3))" -lt "$expected" ]; then
+    echo "process_check	VERDICT=UNDERCOUNT	fewer nsjail processes ($nsjail_count) than the pool believes it has ($expected)" >&2
+else
+    echo "process_check	VERDICT=OK	nsjail=$nsjail_count vs pool=$expected" >&2
 fi
 
 echo "# DONE" >&2
