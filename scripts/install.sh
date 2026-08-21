@@ -527,14 +527,57 @@ ensure_downloader() {
 }
 
 # ── Version resolution ───────────────────────────────────────────────────────
+#
+# Two independent sources, because the API one is rate-limited and that limit
+# is shared by IP. Unauthenticated api.github.com allows 60 requests/hour, so
+# a NAT'd office, a CI runner, or a second install on the same box gets a 403
+# and the install dies with "could not resolve latest release tag" -- which
+# reads like Orva has no releases, not like a rate limit. curl --retry does
+# not help: 403 is not a transient status, so it is never retried.
+#
+# The fallback is the plain /releases/latest redirect, which is ordinary web
+# traffic rather than API traffic and is not subject to that quota. It
+# resolves to .../releases/tag/<tag>, so the tag is the last path segment.
 resolve_version() {
     if [ -n "$VERSION" ]; then log "version: $VERSION"; return; fi
     if [ "$DRYRUN" = "1" ]; then VERSION="latest"; log "version: latest (dryrun)"; return; fi
     log "resolving latest release from GitHub"
-    VERSION=$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
-        "https://api.github.com/repos/${REPO}/releases/latest" \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
-    [ -n "$VERSION" ] || die "could not resolve latest release tag (pass --version)"
+
+    # An authenticated call gets 5000/hour instead of 60. Honour a token if
+    # the environment already has one (CI usually does); never require it.
+    rv_auth=""
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        rv_auth="Authorization: Bearer ${GITHUB_TOKEN}"
+    fi
+
+    if [ -n "$rv_auth" ]; then
+        VERSION=$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            -H "$rv_auth" "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
+    else
+        VERSION=$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
+    fi
+
+    if [ -z "$VERSION" ]; then
+        warn "GitHub API did not answer (rate limit?) — falling back to the release redirect"
+        rv_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' --retry 3 --retry-delay 2 \
+            --connect-timeout 15 "https://github.com/${REPO}/releases/latest" 2>/dev/null)
+        case "$rv_url" in
+            */releases/tag/*) VERSION="${rv_url##*/}" ;;
+            *)                VERSION="" ;;
+        esac
+    fi
+
+    # Guard against a redirect that lands somewhere unexpected: every Orva tag
+    # is vYYYY.MM.DD, and feeding a bogus value downstream would build asset
+    # URLs that 404 much later with a far less obvious message.
+    case "$VERSION" in
+        v[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]) ;;
+        "") die "could not resolve latest release tag (pass --version)" ;;
+        *)  die "resolved an unexpected release tag '$VERSION' (pass --version)" ;;
+    esac
     log "version: $VERSION"
 }
 
