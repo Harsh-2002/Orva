@@ -2,10 +2,10 @@
   <div class="space-y-6">
     <header class="flex items-start justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-headline">
+        <h1 class="text-xl font-semibold text-white tracking-tight">
           Traces
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Invocation chains across functions and triggers.
         </p>
       </div>
@@ -42,7 +42,7 @@
           <input
             v-model.trim="fnFilter"
             placeholder="Function ID or exact name…"
-            class="h-10 w-full bg-background border border-border rounded-md pl-8 pr-3 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="h-10 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             @keydown.enter="refresh"
           >
         </label>
@@ -132,8 +132,17 @@
       >
         Trace results
       </h2>
+      <!-- Track budget, and why these widths: the section is overflow-hidden
+           inside a document that suppresses horizontal scroll, so anything
+           wider than the content box is clipped silently rather than
+           scrolled. At md the content box is 707 px (768 minus 2x p-page) =
+           46.5rem at this project's 95 % root; tracks + 5x gap-3 + px-4 must
+           stay under that. The old set needed 50.75rem and lopped the Status
+           column off every tablet. This one needs 44.75rem, so it also
+           survives the narrower box at lg, where the sidebar takes 13rem
+           back. Keep the two grid-cols values below identical. -->
       <div
-        class="hidden md:grid grid-cols-[8rem_8rem_minmax(10rem,1fr)_6rem_6rem_7rem] gap-3 px-4 py-3 text-xs text-foreground-muted uppercase tracking-label bg-surface border-b border-border"
+        class="hidden md:grid grid-cols-[8rem_6.5rem_minmax(8rem,1fr)_4.5rem_5rem_7rem] gap-3 px-4 py-3 text-xs text-foreground-muted uppercase tracking-label bg-surface border-b border-border"
         aria-hidden="true"
       >
         <span>Time</span><span>Trace</span><span>Entry function</span><span>Duration</span><span>Spans</span><span>Status</span>
@@ -147,7 +156,7 @@
           :aria-label="traceLabel(item)"
           @click="openTrace(item.trace_id)"
         >
-          <span class="grid grid-cols-1 md:grid-cols-[8rem_8rem_minmax(10rem,1fr)_6rem_6rem_7rem] gap-2 md:gap-3 md:items-center text-xs">
+          <span class="grid grid-cols-1 md:grid-cols-[8rem_6.5rem_minmax(8rem,1fr)_4.5rem_5rem_7rem] gap-2 md:gap-3 md:items-center text-xs">
             <time class="font-mono text-foreground-muted whitespace-nowrap">{{ formatTime(item.started_at) }}</time>
             <code class="font-mono text-foreground-muted">{{ shortID(item.trace_id) }}</code>
             <span class="min-w-0">
@@ -160,10 +169,14 @@
             </span>
             <span class="font-mono text-white md:text-foreground-muted">{{ item.duration_ms }}ms</span>
             <span class="text-foreground-muted">{{ item.span_count }} span{{ item.span_count === 1 ? '' : 's' }}</span>
+            <!-- The flag is decorative here: the row button carries an
+                 aria-label, which replaces the accessible name of everything
+                 inside it, so a label on this icon would never be read.
+                 traceLabel() carries the outlier wording instead. -->
             <span class="flex items-center gap-2"><StatusBadge :status="item.status" /><Flag
               v-if="item.is_outlier"
               class="w-3.5 h-3.5 text-warning-fg"
-              aria-label="Latency outlier"
+              aria-hidden="true"
             /></span>
           </span>
         </button>
@@ -255,7 +268,24 @@ const toggleOutlier = () => { outlierOnly.value = !outlierOnly.value; refresh() 
 const openTrace = (traceID) => router.push(`/traces/${traceID}`)
 const formatTime = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 const relationshipSummary = (item) => item.external_parent_span_id ? `External · ${item.trigger || 'entry'}` : (item.trigger || 'entry')
-const traceLabel = (item) => `${item.function_name || item.root_function_id}, ${item.status}, ${item.duration_ms} milliseconds, ${item.span_count} spans`
+// An aria-label on the row button replaces the accessible name computed from
+// its subtree, so everything drawn inside the row has to be restated here or it
+// is inaudible: the timestamp, the error and cold-start counts, and the outlier
+// flag — which has no other representation in the list, so filtering by
+// Outliers would otherwise produce a list whose defining property is silent.
+const traceLabel = (item) => {
+  const parts = [
+    item.function_name || item.root_function_id,
+    formatTime(item.started_at),
+    item.status,
+    `${item.duration_ms} milliseconds`,
+    `${item.span_count} span${item.span_count === 1 ? '' : 's'}`,
+  ]
+  if (item.error_count) parts.push(`${item.error_count} error${item.error_count === 1 ? '' : 's'}`)
+  if (item.cold_start_count) parts.push(`${item.cold_start_count} cold start${item.cold_start_count === 1 ? '' : 's'}`)
+  if (item.is_outlier) parts.push('latency outlier')
+  return parts.join(', ')
+}
 
 onMounted(refresh)
 </script>

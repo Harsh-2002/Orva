@@ -1,32 +1,41 @@
 <template>
   <!-- Mobile top bar — only shown <lg. Holds a hamburger that opens the
        sidebar as a drawer over the page. Above lg the sidebar is inline.
-       pt-safe keeps the bar clear of the iOS notch / status bar in PWA
-       mode; on non-notched hardware the inset is 0 and nothing changes. -->
+
+       The safe-area inset pads the <header>, while the 56 px content row is an
+       inner div. Putting both on one element (h-14 + pt-safe) made the inset
+       eat the row instead of adding to it, so on a notched phone in standalone
+       mode the mark and the hamburger were squeezed into whatever height was
+       left. Layout.vue offsets the page by pt-topbar, which is this same
+       56 px + inset sum. -->
+  <!-- z-40, one above the drawer backdrop. They used to both be z-30, so the
+       backdrop won on DOM order and sat on top of this header: with the menu
+       open, tapping the X did nothing, because the backdrop was swallowing the
+       pointer event. The close control has to outrank the scrim that its own
+       drawer puts up. -->
   <header
-    class="lg:hidden fixed top-0 inset-x-0 h-14 bg-background border-b border-border z-30 flex items-center justify-between px-4 pt-safe pl-safe pr-safe"
+    class="lg:hidden fixed top-0 inset-x-0 bg-background border-b border-border z-40 pt-safe pl-safe pr-safe"
   >
-    <div class="flex items-center gap-2 text-white font-mono">
-      <OrvaLogo class="w-6 h-6" />
-      <span class="font-bold tracking-tight">Orva</span>
+    <div class="h-14 flex items-center justify-between px-4">
+      <BrandLockup />
+      <button
+        ref="toggleBtn"
+        class="p-2 rounded-md text-foreground-muted hover:text-white hover:bg-surface transition-colors touch-expand-iconbtn"
+        :aria-label="open ? 'Close menu' : 'Open menu'"
+        :aria-expanded="open"
+        aria-controls="primary-navigation"
+        @click="open = !open"
+      >
+        <Menu
+          v-if="!open"
+          class="w-5 h-5"
+        />
+        <X
+          v-else
+          class="w-5 h-5"
+        />
+      </button>
     </div>
-    <button
-      ref="toggleBtn"
-      class="p-2 rounded-md text-foreground-muted hover:text-white hover:bg-surface transition-colors touch-expand-iconbtn"
-      :aria-label="open ? 'Close menu' : 'Open menu'"
-      :aria-expanded="open"
-      aria-controls="primary-navigation"
-      @click="open = !open"
-    >
-      <Menu
-        v-if="!open"
-        class="w-5 h-5"
-      />
-      <X
-        v-else
-        class="w-5 h-5"
-      />
-    </button>
   </header>
 
   <!-- Backdrop (mobile only when drawer open). -->
@@ -52,10 +61,7 @@
     @touchend="onTouchEnd"
   >
     <div class="h-16 flex items-center px-6 border-b border-border">
-      <div class="flex items-center gap-3 text-white font-mono tracking-tight text-lg">
-        <OrvaLogo class="w-8 h-8" />
-        <span class="font-bold tracking-tight text-white">Orva</span>
-      </div>
+      <BrandLockup />
     </div>
 
     <nav class="flex-1 p-3 space-y-1 overflow-y-auto scrollable">
@@ -64,7 +70,7 @@
         :key="item.path"
         :to="item.path"
         :class="[
-          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
           isActive(item.path)
             ? 'text-white bg-primary/15'
             : 'text-foreground-muted hover:text-white hover:bg-surface-hover'
@@ -86,7 +92,7 @@
       >
         <button
           type="button"
-          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-hover hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium touch-expand-sm text-foreground-muted transition-colors hover:bg-surface-hover hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
           :class="groupIsActive(group) ? 'text-white' : ''"
           :aria-expanded="expandedGroups[group.id]"
           :aria-controls="`nav-group-${group.id}`"
@@ -112,7 +118,7 @@
             :key="item.path"
             :to="item.path"
             :class="[
-              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 group font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
               isActive(item.path)
                 ? 'text-white bg-primary/15'
                 : 'text-foreground-muted hover:text-white hover:bg-surface-hover'
@@ -134,7 +140,7 @@
           :key="item.path"
           :to="item.path"
           :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+            'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
             isActive(item.path)
               ? 'text-white bg-primary/15'
               : 'text-foreground-muted hover:text-white hover:bg-surface-hover'
@@ -155,7 +161,7 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import OrvaLogo from '../OrvaLogo.vue'
+import BrandLockup from './BrandLockup.vue'
 import {
   Gauge,
   MessagesSquare,

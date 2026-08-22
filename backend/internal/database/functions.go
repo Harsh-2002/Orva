@@ -27,9 +27,17 @@ type Function struct {
 	Version           int               `json:"version"`
 	Status            string            `json:"status"`
 	CodeHash          string            `json:"code_hash"`
-	ImageSize         int64             `json:"image_size"`
-	CreatedAt         time.Time         `json:"created_at"`
-	UpdatedAt         time.Time         `json:"updated_at"`
+	// RunEntrypoint is the file the sandbox executes when it differs from the
+	// file the operator authored, which happens only for TypeScript (tsc emits
+	// dist/handler.js from handler.ts). Empty means "same as Entrypoint".
+	RunEntrypoint string `json:"run_entrypoint"`
+	// ActiveDeploymentID names the deployment currently serving. Rollback
+	// moves this pointer rather than appending a new deployment, so the
+	// history stays "the versions you deployed" and exactly one is live.
+	ActiveDeploymentID string    `json:"active_deployment_id"`
+	ImageSize          int64     `json:"image_size"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // Clone returns a deep copy safe to hand out and mutate independently.
@@ -126,24 +134,24 @@ func (db *Database) InsertFunction(fn *Function) error {
 	}
 
 	err = db.write.QueryRow(`
-		INSERT INTO functions (id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO functions (id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING created_at, updated_at`,
 		fn.ID, fn.Name, fn.Description, fn.Runtime, fn.Entrypoint, fn.Image,
 		fn.TimeoutMS, fn.MemoryMB, fn.CPUs, string(envJSON),
 		fn.NetworkMode, fn.MaxConcurrency, fn.ConcurrencyPolicy,
 		fn.AuthMode, fn.RateLimitPerMin,
-		fn.Version, fn.Status, fn.CodeHash, fn.ImageSize,
+		fn.Version, fn.Status, fn.CodeHash, fn.ImageSize, fn.ActiveDeploymentID, fn.RunEntrypoint,
 	).Scan(&fn.CreatedAt, &fn.UpdatedAt)
 	return err
 }
 
 func (db *Database) GetFunction(id string) (*Function, error) {
-	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE id = ?`, id))
+	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE id = ?`, id))
 }
 
 func (db *Database) GetFunctionByName(name string) (*Function, error) {
-	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE name = ?`, name))
+	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE name = ?`, name))
 }
 
 type ListFunctionsParams struct {
@@ -166,7 +174,7 @@ func (db *Database) ListFunctions(params ListFunctionsParams) (*ListFunctionsRes
 		params.Limit = 1000
 	}
 
-	query := "SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, created_at, updated_at FROM functions WHERE 1=1"
+	query := "SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM functions WHERE 1=1"
 	var args []any
 
@@ -219,7 +227,7 @@ func (db *Database) UpdateFunction(fn *Function) error {
 			timeout_ms = ?, memory_mb = ?, cpus = ?, env_vars = ?,
 			network_mode = ?, max_concurrency = ?, concurrency_policy = ?,
 			auth_mode = ?, rate_limit_per_min = ?,
-			version = ?, status = ?, code_hash = ?,
+			version = ?, status = ?, code_hash = ?, active_deployment_id = ?, run_entrypoint = ?,
 			image_size = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 		RETURNING created_at, updated_at`,
@@ -227,7 +235,7 @@ func (db *Database) UpdateFunction(fn *Function) error {
 		fn.TimeoutMS, fn.MemoryMB, fn.CPUs, string(envJSON),
 		fn.NetworkMode, fn.MaxConcurrency, fn.ConcurrencyPolicy,
 		fn.AuthMode, fn.RateLimitPerMin,
-		fn.Version, fn.Status, fn.CodeHash,
+		fn.Version, fn.Status, fn.CodeHash, fn.ActiveDeploymentID, fn.RunEntrypoint,
 		fn.ImageSize, fn.ID,
 	).Scan(&fn.CreatedAt, &fn.UpdatedAt)
 	return err
@@ -249,7 +257,7 @@ func scanFunction(row *sql.Row) (*Function, error) {
 		&fn.NetworkMode, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
 		&fn.AuthMode, &fn.RateLimitPerMin,
 		&fn.Version, &fn.Status, &codeHash,
-		&fn.ImageSize, &fn.CreatedAt, &fn.UpdatedAt,
+		&fn.ImageSize, &fn.ActiveDeploymentID, &fn.RunEntrypoint, &fn.CreatedAt, &fn.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -277,7 +285,7 @@ func scanFunctionRow(rows *sql.Rows) (*Function, error) {
 		&fn.NetworkMode, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
 		&fn.AuthMode, &fn.RateLimitPerMin,
 		&fn.Version, &fn.Status, &codeHash,
-		&fn.ImageSize, &fn.CreatedAt, &fn.UpdatedAt,
+		&fn.ImageSize, &fn.ActiveDeploymentID, &fn.RunEntrypoint, &fn.CreatedAt, &fn.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err

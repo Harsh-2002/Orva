@@ -116,16 +116,29 @@
         </div>
       </div>
       <div>
-        <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Description (optional)</label>
+        <label
+          for="channel-description"
+          class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+        >Description (optional)</label>
         <input
+          id="channel-description"
           v-model="newChannel.description"
           placeholder="What this channel is for"
           class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
         >
       </div>
-      <div>
+      <!-- A <label> cannot name a button, and this one pointed at nothing: it
+           captions the picker below it. Named group instead, matching the shape
+           used for the Webhooks event chips. -->
+      <div
+        role="group"
+        aria-labelledby="channel-functions-label"
+      >
         <div class="flex items-center justify-between mb-1.5">
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide">Functions</label>
+          <span
+            id="channel-functions-label"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide"
+          >Functions</span>
           <span
             v-if="newChannel.functionIds.length > 0"
             class="text-[11px] text-foreground-muted"
@@ -141,9 +154,9 @@
       </div>
       <div
         v-if="createError"
-        class="rounded-md border border-red-700/40 bg-red-950/30 p-3 text-xs text-red-200 flex items-start gap-2"
+        class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg flex items-start gap-2"
       >
-        <AlertCircle class="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <AlertCircle class="w-4 h-4 text-danger-fg shrink-0 mt-0.5" />
         <span>{{ createError }}</span>
       </div>
       <div class="flex gap-2 pt-1">
@@ -165,7 +178,9 @@
 
     <!-- Channels list — mirrors ApiKeys.vue table chrome exactly:
          px-6 py-4 cells, `<th>` labels on own line, hover row tint,
-         IconButton actions, amber "Never used" / red "Expired" hints. -->
+         IconButton actions, and the same semantic warning/danger tokens
+         for the "Never used" / "Expired" hints, so an identical state
+         reads as an identical colour across the two views. -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
@@ -193,16 +208,22 @@
                 <span v-if="c.last_used_at">used {{ formatRelative(c.last_used_at) }}</span>
                 <span
                   v-else
-                  class="text-amber-400/80"
+                  class="text-warning-fg"
                 >never used</span>
                 <span
                   v-if="c.expires_at && isExpired(c.expires_at)"
-                  class="text-red-400"
+                  class="text-danger-fg"
                 >expired</span>
                 <span v-else-if="c.expires_at">expires {{ formatRelative(c.expires_at) }}</span>
               </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
+              <IconButton
+                :icon="Pencil"
+                title="Edit the functions in this channel"
+                :disabled="savingFunctionsFor === c.id"
+                @click="openEditFunctions(c)"
+              />
               <IconButton
                 :icon="RotateCcw"
                 title="Rotate token"
@@ -228,22 +249,40 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-6 py-3 font-medium">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium"
+            >
               Name
             </th>
-            <th class="px-6 py-3 font-medium">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium"
+            >
               Functions
             </th>
-            <th class="px-6 py-3 font-medium hidden sm:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden sm:table-cell"
+            >
               Prefix
             </th>
-            <th class="px-6 py-3 font-medium hidden md:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden md:table-cell"
+            >
               Last used
             </th>
-            <th class="px-6 py-3 font-medium hidden lg:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden lg:table-cell"
+            >
               Expires
             </th>
-            <th class="px-6 py-3 font-medium text-right">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium text-right"
+            >
               Actions
             </th>
           </tr>
@@ -281,7 +320,7 @@
               >{{ formatRelative(c.last_used_at) }}</span>
               <span
                 v-else
-                class="text-amber-400/70 text-xs"
+                class="text-warning-fg text-xs"
               >Never used</span>
             </td>
             <td class="px-6 py-4 hidden lg:table-cell">
@@ -291,7 +330,7 @@
               >Never</span>
               <span
                 v-else-if="isExpired(c.expires_at)"
-                class="text-red-400 text-xs"
+                class="text-danger-fg text-xs"
               >Expired {{ formatRelative(c.expires_at) }}</span>
               <span
                 v-else

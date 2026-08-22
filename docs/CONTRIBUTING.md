@@ -67,7 +67,7 @@ backend/
 frontend/
   src/
     api/            axios client + endpoint helpers
-    components/     reusable Vue components (EditorCard, StatusBadge, Drawer)
+    components/     reusable Vue components (Button, StatusBadge, Drawer, RuntimeTag)
     stores/         Pinia stores (auth, system, events)
     views/          one file per route (Dashboard, Editor, Functions, ...)
 

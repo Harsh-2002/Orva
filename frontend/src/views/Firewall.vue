@@ -12,13 +12,21 @@
           </p>
         </div>
         <div class="flex items-center gap-2">
+          <!--
+            "Refresh policy", not "Apply now". Adding, editing, toggling or
+            deleting a rule already compiles and publishes a new generation on
+            its own -- nothing is pending. This button re-resolves hostname
+            rules to their current IPs (DNS moves) and recompiles, which is also
+            how you recover from a failed compile. Calling it "Apply" taught the
+            opposite: that blocks sat inert until it was pressed.
+          -->
           <Button
             variant="secondary"
             size="sm"
             :loading="resolving"
             @click="forceResolve"
           >
-            <RefreshCw class="w-4 h-4" /> Apply now
+            <RefreshCw class="w-4 h-4" /> Refresh policy
           </Button>
           <Button
             size="sm"
@@ -255,7 +263,7 @@
           </span>
           <button
             v-if="dns.servers.length || dns.search || dns.records.length"
-            class="text-xs text-foreground-muted hover:text-white px-2 py-1 transition-colors"
+            class="inline-flex items-center text-xs text-foreground-muted hover:text-white px-2 py-1 transition-colors touch-expand-sm"
             @click="resetDNS"
           >
             Reset
@@ -306,7 +314,7 @@
         <button
           v-for="tab in filterTabs"
           :key="tab.id"
-          class="rule-filter"
+          class="rule-filter touch-expand-sm"
           :class="{ active: filter === tab.id }"
           @click="filter = tab.id"
         >
@@ -370,16 +378,20 @@
           Block an IP, network, or hostname. Wildcards are not supported.
         </p>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">
+          <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">
             What is it?
-          </label>
-          <div class="grid grid-cols-2 gap-2">
+          </div>
+          <div
+            class="grid grid-cols-2 gap-2"
+            role="group"
+            aria-label="Rule type"
+          >
             <button
               v-for="opt in typeOptions"
               :key="opt.value"
               class="px-2 py-2 rounded border text-xs font-medium transition-colors flex flex-col items-center gap-1"
               :class="newRule.rule_type === opt.value
-                ? 'bg-white text-black border-white'
+                ? 'bg-primary text-primary-foreground border-primary'
                 : 'bg-surface-hover text-foreground-muted border-border hover:border-foreground-muted'"
               @click="newRule.rule_type = opt.value"
             >
@@ -435,7 +447,7 @@
 
 <script setup>
 /* eslint-disable vue/one-component-per-file -- Private render components share this page's state and styling. */
-import { computed, h, onMounted, onActivated, ref, defineComponent } from 'vue'
+import { computed, h, onMounted, onActivated, onDeactivated, ref, defineComponent } from 'vue'
 import {
   Plus, RefreshCw, ShieldAlert, ShieldOff, ShieldCheck,
   AlertTriangle, Globe, Globe2, Asterisk, Hash, Trash2,
@@ -793,10 +805,10 @@ const statusBannerText = computed(() => {
 const statusRemedy = computed(() => {
   switch (policyState.value) {
     case 'unenforced':
-      return 'Hit Apply now to recompile. There is nothing to install: if invocations fail with a sandbox error instead, nsjail needs /dev/net/tun (Docker: --device /dev/net/tun).'
+      return 'Hit Refresh policy to recompile. There is nothing to install: if invocations fail with a sandbox error instead, nsjail needs /dev/net/tun (Docker: --device /dev/net/tun).'
     case 'stale':
     case 'degraded':
-      return 'Fix the reported rule or resolver, then hit Apply now to recompile.'
+      return 'Fix the reported rule or resolver, then hit Refresh policy to recompile.'
     default:
       return ''
   }
@@ -912,7 +924,18 @@ const forceResolve = async () => {
 
 const loadAll = async () => { await Promise.all([load(), loadDNS()]) }
 onMounted(loadAll)
-onActivated(loadAll)
+
+// Layout.vue keep-alives every route, and onActivated fires on the first mount
+// too — where onMounted has already loaded. Without the flag the page issued
+// both GETs twice, and the slower first response could land after the second
+// and repaint the status banner from stale data.
+let wasDeactivated = false
+onActivated(() => {
+  if (!wasDeactivated) return
+  wasDeactivated = false
+  loadAll()
+})
+onDeactivated(() => { wasDeactivated = true })
 
 // ── PanelSection component (matches Docs page aesthetic) ─────────────
 // Named PanelSection, not Section: a bare "Section" collides with the
@@ -1024,11 +1047,21 @@ const RuleCard = defineComponent({
               p.busy ? 'busy' : '',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
             ],
+            // role=switch + aria-checked is the only way the stored position
+            // reaches a screen reader: the colour states say it to the eye, and
+            // the title says the action to take, not the state it is in. The
+            // name is the rule itself so an audit can be read straight down the
+            // list without flipping anything to hear the label change.
+            role: 'switch',
+            'aria-checked': p.rule.enabled,
+            'aria-label': `Block ${p.rule.value}`,
             disabled: p.busy || toggleBlocked.value,
             title: toggleTitle.value,
             onClick: () => emit('toggle'),
           }, [
-            h('span', { class: 'rule-toggle-knob' }),
+            h('span', { class: 'rule-toggle-track' }, [
+              h('span', { class: 'rule-toggle-knob' }),
+            ]),
           ]),
         ]),
 
@@ -1059,6 +1092,7 @@ const RuleCard = defineComponent({
           ? h('button', {
               class: 'rule-card-delete',
               title: 'Remove this block',
+              'aria-label': `Remove block ${p.rule.value}`,
               onClick: () => emit('delete'),
             }, [h(Trash2, { class: 'w-3.5 h-3.5' })])
           : null,
@@ -1072,8 +1106,9 @@ const RuleCard = defineComponent({
    and Vue's data-v- attribute doesn't reach those nodes. All class
    names are firewall-prefixed (.rule-*, .resolved-chip, .empty-card)
    so collision risk is nil. */
-/* Filter tabs above the rule grid. Pill-row pattern; the active tab gets
-   a white border so it reads as "selected" without screaming. */
+/* Filter tabs above the rule grid. Pill-row pattern; the selected tab fills
+   with the violet accent, the same treatment Button variant="chip" gives every
+   other filter strip in the dashboard. */
 .rule-filterbar {
   display: flex;
   flex-wrap: wrap;
@@ -1098,9 +1133,9 @@ const RuleCard = defineComponent({
   border-color: var(--color-foreground-muted);
 }
 .rule-filter.active {
-  color: white;
-  border-color: white;
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-primary-foreground);
+  border-color: var(--color-primary);
+  background: var(--color-primary);
 }
 .rule-filter-count {
   font-family: var(--font-mono);
@@ -1147,10 +1182,10 @@ const RuleCard = defineComponent({
 /* Warning tone, not danger: the policy is enforced, just not the newest
    generation yet, and it resolves itself within a minute. */
 .policy-chip-pending {
-  border-color: var(--color-warning, #b45309);
+  border-color: var(--color-warning);
 }
 .policy-chip-pending .policy-chip-v {
-  color: var(--color-warning, #f59e0b);
+  color: var(--color-warning);
 }
 
 /* Stored-but-not-enforced callout above the rule grid. Danger tone, not
@@ -1199,8 +1234,8 @@ const RuleCard = defineComponent({
   transition: border-color 150ms ease, background-color 150ms ease;
 }
 .rule-card.is-on {
-  border-color: rgba(34, 197, 94, 0.35);
-  background: linear-gradient(180deg, rgba(34, 197, 94, 0.04) 0%, var(--color-surface) 60%);
+  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-success) 4%, transparent) 0%, var(--color-surface) 60%);
 }
 .rule-card.is-off {
   opacity: 0.78;
@@ -1271,28 +1306,41 @@ const RuleCard = defineComponent({
   gap: 0.3rem;
 }
 
-/* Pill toggle — distinct on/off colour states so the meaning is obvious. */
+/* Pill toggle — distinct on/off colour states so the meaning is obvious.
+   The <button> is a bare hit box and .rule-toggle-track is the painted pill.
+   The split is what lets the target reach 44px on a coarse pointer without the
+   switch itself inflating: padding would have stretched the pill, and the
+   ::before overlay style.css removed used to cover the card beside it. On a
+   fine pointer the button hugs the track, so the box is unchanged at 36x20. */
 .rule-toggle {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.rule-toggle-track {
+  display: inline-flex;
+  align-items: center;
   width: 36px;
   height: 20px;
   border-radius: 999px;
   border: 1px solid var(--color-border);
   background: var(--color-background);
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
   transition: background-color 150ms ease, border-color 150ms ease;
 }
-.rule-toggle.on {
-  background: rgba(34, 197, 94, 0.4);
-  border-color: rgba(34, 197, 94, 0.55);
+.rule-toggle.on .rule-toggle-track {
+  background: color-mix(in srgb, var(--color-success) 40%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 55%, transparent);
 }
 /* Stored position of a rule that is not actually in force. Same knob travel as
    .on so the operator still sees which way the switch is set, without the
    green that would claim the block is live. */
-.rule-toggle.inert {
+.rule-toggle.inert .rule-toggle-track {
   background: var(--color-background);
   border-color: var(--color-danger-ring);
 }
@@ -1321,6 +1369,14 @@ const RuleCard = defineComponent({
 }
 .rule-toggle.inert.is-set .rule-toggle-knob {
   transform: translateX(16px);
+}
+/* On/off is the primary control on this page and it painted a 36x20 target.
+   Only the hit box grows; the track keeps its mouse-density proportions. */
+@media (pointer: coarse) {
+  .rule-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .rule-card-why {
@@ -1384,12 +1440,34 @@ const RuleCard = defineComponent({
   opacity: 0;
   transition: color 150ms ease, background-color 150ms ease, opacity 150ms ease;
 }
-.rule-card:hover .rule-card-delete {
+.rule-card:hover .rule-card-delete,
+.rule-card:focus-within .rule-card-delete,
+.rule-card-delete:focus-visible {
   opacity: 1;
 }
 .rule-card-delete:hover {
   color: var(--color-danger-fg);
   background: var(--color-background);
+}
+/* Hover-to-reveal is not a gesture a touch screen has, so the only way to drop
+   a custom block was to guess the button was there. Show it outright. */
+@media (hover: none) {
+  .rule-card-delete {
+    opacity: 1;
+  }
+}
+/* At 44px the absolute box would have reached across the toggle's own expanded
+   target and under the title, so on a coarse pointer it rejoins the flow as the
+   card's last row instead. Permanently visible there, hence the real border:
+   with nothing to hover, a borderless icon reads as decoration. */
+@media (pointer: coarse) {
+  .rule-card-delete {
+    position: static;
+    align-self: flex-end;
+    width: 44px;
+    height: 44px;
+    border-color: var(--color-border);
+  }
 }
 
 /* Empty-state card for "no custom rules". */
@@ -1441,7 +1519,7 @@ const RuleCard = defineComponent({
 .dns-chip.muted {
   color: var(--color-foreground-muted);
   border-color: var(--color-border);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--color-foreground) 2%, transparent);
 }
 .dns-chip-x {
   margin-left: 0.15rem;
@@ -1462,6 +1540,25 @@ const RuleCard = defineComponent({
 .dns-chip-x:hover {
   color: var(--color-danger-fg);
   background: var(--color-danger-tint);
+}
+/* The × is the only way to drop a resolver or a host override, and at 16px it
+   was smaller than the chip behind it, so a miss hit the chip and did nothing.
+   The chips that carry one give up their vertical padding in exchange, so the
+   row grows to the target's height rather than well past it. */
+@media (pointer: coarse) {
+  .dns-chip-x {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 18px;
+  }
+  /* Both selectors are two-class on purpose: the .dns-chip and .dns-record
+     padding shorthands are declared below this block and would otherwise win
+     the tie on source order. */
+  .dns-chips .dns-chip,
+  .dns-records .dns-record {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
 }
 
 .dns-form {
@@ -1492,6 +1589,23 @@ const RuleCard = defineComponent({
 .dns-input.narrow {
   width: 14ch;        /* search domain etc. */
 }
+/* The ch-based widths and 12px type above are a mouse-density choice, and on a
+   coarse pointer they cost twice: 12px re-triggers iOS focus zoom (the global
+   16px pin in style.css is element-level, so this class outranks it), and the
+   31px box is under the touch floor. Widths go fluid here because 18ch at 16px
+   is wider than the phone row it sits in. */
+@media (pointer: coarse) {
+  .dns-input,
+  .dns-input.host,
+  .dns-input.narrow {
+    font-size: 16px;
+    min-height: 44px;
+    width: 100%;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}
+
 .dns-input::placeholder {
   color: var(--color-foreground-muted);
   opacity: 0.7;

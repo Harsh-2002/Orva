@@ -35,6 +35,9 @@
                    sm:w-[var(--drawer-w,560px)]"
             :style="{ '--drawer-w': width }"
             tabindex="-1"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="title || 'Panel'"
             @keydown.esc="close"
           >
             <header class="px-5 py-3 border-b border-border flex items-center justify-between shrink-0">
@@ -70,8 +73,9 @@
 <script setup>
 defineOptions({ name: 'CommonDrawer' })
 
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, toRef, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { X } from '@lucide/vue'
+import { useFocusTrap } from '@/composables/useFocusTrap'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -91,6 +95,15 @@ watch(() => props.modelValue, async (v) => {
     root.value?.focus?.()
   }
 })
+
+// Modal, ConfirmDialog and CommandPalette all trap focus; this was the one
+// teleported surface that did not, and Teleport appends it after #app, so
+// Shift-Tab from its first control walked backwards into the page behind it.
+// That page is not dimmed and the drawer's click-catcher only stops the mouse,
+// so a keyboard user could activate a delete button on a row underneath while
+// the drawer was open. It backs the detail panels on Activity, Invocations,
+// Deployments, Jobs and KVStore, so it is the widest dialog surface here.
+useFocusTrap(root, toRef(props, 'modelValue'))
 
 const onKey = (e) => {
   if (e.key === 'Escape' && props.modelValue) close()

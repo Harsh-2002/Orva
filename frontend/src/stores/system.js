@@ -17,6 +17,7 @@ export const useSystemStore = defineStore('system', () => {
   // patched in-place as `metrics` events stream in.
   const metrics = ref(null)
   const functionsCount = ref(0)
+  const functionNames = ref({})
   const recentInvocations = ref([])
 
   // poolHistory[fn_id] = ring of recent stable-rate values for sparkline.
@@ -58,11 +59,14 @@ export const useSystemStore = defineStore('system', () => {
       const [metricsRes, fnRes, invRes, healthRes] = await Promise.all([
         getMetricsJSON(),
         listFunctions().catch(() => ({ data: { functions: [], total: 0 } })),
-        listInvocations({ limit: 20 }).catch(() => ({ data: { executions: [] } })),
+        listInvocations({ limit: 50 }).catch(() => ({ data: { executions: [] } })),
         getHealth().catch(() => ({ data: null })),
       ])
       applyMetrics(metricsRes.data)
       functionsCount.value = fnRes.data.total ?? (fnRes.data.functions || []).length
+      functionNames.value = Object.fromEntries(
+        (fnRes.data.functions || []).map((f) => [f.id, f.name]),
+      )
       recentInvocations.value = invRes.data.executions || []
       if (healthRes.data) {
         buildInfo.value = {
@@ -122,6 +126,7 @@ export const useSystemStore = defineStore('system', () => {
     isConnected,
     metrics,
     functionsCount,
+    functionNames,
     recentInvocations,
     poolHistory,
     buildInfo,

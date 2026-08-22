@@ -1,7 +1,13 @@
 <template>
-  <div class="flex h-screen w-full bg-background overflow-hidden font-sans antialiased text-foreground">
+  <!-- h-dvh, not h-screen: 100vh is the *large* viewport on mobile Safari and
+       Chrome, so with the URL bar showing, the shell was taller than the
+       visible area and the bottom of every scroll container sat under the
+       browser chrome. Modal.vue and ConfirmDialog.vue already sized themselves
+       with dvh, which is why overlays behaved on a phone while the page behind
+       them did not. -->
+  <div class="flex h-dvh w-full bg-background overflow-hidden font-sans antialiased text-foreground">
     <Sidebar />
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden relative pt-14 lg:pt-0">
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden relative pt-topbar lg:pt-0">
       <!-- keep-alive caches mounted views across navigations. Without it,
            clicking back to a previously-visited route re-creates the view,
            which means another onMounted() + fetch + brief empty-state

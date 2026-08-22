@@ -78,7 +78,7 @@
               :key="f.id"
               :value="f.id"
             >
-              {{ f.name }} ({{ f.runtime }})
+              {{ f.name }} ({{ runtimeLabel(f.runtime) }})
             </option>
           </select>
         </div>
@@ -140,6 +140,14 @@
       </template>
     </Drawer>
 
+    <LoadError
+      v-if="loadError"
+      what="Jobs"
+      :message="loadError"
+      :on-retry="loadJobs"
+      class="mb-3"
+    />
+
     <!-- Table. -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
       <!-- Mobile (<sm) stacked-card list. Surfaces every column the
@@ -162,14 +170,14 @@
               <div class="mt-2">
                 <span
                   class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border"
-                  :class="statusPill(job.status).classes"
+                  :class="statusPill(jobStatus(job)).classes"
                 >
                   <component
-                    :is="statusPill(job.status).icon"
+                    :is="statusPill(jobStatus(job)).icon"
                     class="w-3 h-3 shrink-0"
                     aria-hidden="true"
                   />
-                  {{ job.status }}
+                  {{ jobStatus(job) }}
                 </span>
               </div>
               <p
@@ -218,7 +226,7 @@
           </div>
         </li>
         <li
-          v-if="filteredJobs.length === 0"
+          v-if="loaded && !loadError && filteredJobs.length === 0"
           class="px-4 py-12 text-center"
         >
           <p class="text-foreground-muted text-sm">
@@ -233,22 +241,22 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3 font-medium">
+            <th class="px-6 py-3 font-medium">
               Function
             </th>
-            <th class="px-4 py-3 font-medium">
+            <th class="px-6 py-3 font-medium">
               Status
             </th>
-            <th class="px-4 py-3 font-medium hidden md:table-cell">
+            <th class="px-6 py-3 font-medium hidden md:table-cell">
               Attempts
             </th>
-            <th class="px-4 py-3 font-medium hidden lg:table-cell">
+            <th class="px-6 py-3 font-medium hidden lg:table-cell">
               Scheduled
             </th>
-            <th class="px-4 py-3 font-medium hidden xl:table-cell">
+            <th class="px-6 py-3 font-medium hidden xl:table-cell">
               Finished
             </th>
-            <th class="px-4 py-3 font-medium text-right">
+            <th class="px-6 py-3 font-medium text-right">
               Actions
             </th>
           </tr>
@@ -259,23 +267,23 @@
             :key="job.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-4 py-3 font-medium text-white">
+            <td class="px-6 py-4 font-medium text-white">
               <div class="flex flex-col">
                 <span>{{ job.function_name || job.function_id }}</span>
                 <span class="text-[10px] text-foreground-muted font-mono">{{ job.id }}</span>
               </div>
             </td>
-            <td class="px-4 py-3">
+            <td class="px-6 py-4">
               <span
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border"
-                :class="statusPill(job.status).classes"
+                :class="statusPill(jobStatus(job)).classes"
               >
                 <component
-                  :is="statusPill(job.status).icon"
+                  :is="statusPill(jobStatus(job)).icon"
                   class="w-3 h-3 shrink-0"
                   aria-hidden="true"
                 />
-                {{ job.status }}
+                {{ jobStatus(job) }}
               </span>
               <p
                 v-if="job.last_error"
@@ -285,16 +293,16 @@
                 {{ job.last_error }}
               </p>
             </td>
-            <td class="px-4 py-3 text-foreground-muted text-xs hidden md:table-cell">
+            <td class="px-6 py-4 text-foreground-muted text-xs hidden md:table-cell">
               {{ job.attempts }} / {{ job.max_attempts }}
             </td>
-            <td class="px-4 py-3 text-foreground-muted text-xs hidden lg:table-cell">
+            <td class="px-6 py-4 text-foreground-muted text-xs hidden lg:table-cell">
               {{ formatDate(job.scheduled_at) }}
             </td>
-            <td class="px-4 py-3 text-foreground-muted text-xs hidden xl:table-cell">
+            <td class="px-6 py-4 text-foreground-muted text-xs hidden xl:table-cell">
               {{ job.finished_at ? formatDate(job.finished_at) : EMPTY }}
             </td>
-            <td class="px-4 py-3 text-right">
+            <td class="px-6 py-4 text-right">
               <div class="inline-flex items-center gap-1">
                 <IconButton
                   v-if="job.status === 'failed'"
@@ -312,10 +320,10 @@
               </div>
             </td>
           </tr>
-          <tr v-if="filteredJobs.length === 0">
+          <tr v-if="loaded && !loadError && filteredJobs.length === 0">
             <td
               colspan="6"
-              class="px-4 py-12 text-center"
+              class="px-6 py-12 text-center"
             >
               <p class="text-foreground-muted text-sm">
                 {{ statusFilter === 'all' ? 'No jobs yet.' : `No ${statusFilter} jobs.` }}
@@ -335,17 +343,21 @@
 defineOptions({ name: 'JobsView' })
 
 import { EMPTY } from '@/utils/format'
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { Trash2, RotateCcw, RefreshCcw, Plus, CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
 import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Drawer from '@/components/common/Drawer.vue'
+import LoadError from '@/components/common/LoadError.vue'
+import { runtimeLabel } from '@/utils/runtime'
 
 const confirmStore = useConfirmStore()
 
 const jobs = ref([])
+const loadError = ref('')
+const loaded = ref(false)
 const functions = ref([])
 const statusFilter = ref('all')
 // countSource is always an unfiltered page: the pills count from it so they
@@ -387,10 +399,27 @@ const counts = computed(() => {
 // State is encoded three ways — color token + glyph + the status text —
 // so it never relies on hue alone (WCAG 1.4.1). No animate-pulse on the
 // running state: motion budget is <=150ms, so it uses a static info token.
+// jobStatus separates the two things the stored status conflates.
+//
+// A job that fails and has attempts left goes back to 'pending' with a later
+// scheduled_at (database/jobs.go RequeueForRetry), so a job that has already
+// failed twice and is backing off is stored identically to one that has never
+// run. The operator scanning this page cannot tell "waiting to start" from
+// "failing repeatedly", which is the difference they came to find.
+//
+// attempts already distinguishes them, and the API already returns it, so this
+// needs no schema change: pending with attempts spent is a retry.
+const jobStatus = (job) =>
+  job.status === 'pending' && (job.attempts || 0) > 0 ? 'retrying' : job.status
+
 const statusPill = (s) => {
   switch (s) {
     case 'pending':
       return { classes: 'bg-warning-tint text-warning-fg border-warning-ring', icon: Clock }
+    case 'retrying':
+      // Danger, not warning: it has already failed. The count beside it says
+      // how close this is to being given up on.
+      return { classes: 'bg-danger-tint text-danger-fg border-danger-ring', icon: RotateCcw }
     case 'running':
       return { classes: 'bg-info-tint text-info-fg border-info-ring', icon: Clock }
     case 'succeeded':
@@ -438,8 +467,13 @@ const loadJobs = async () => {
     countSource.value = all.data.jobs || []
     jobs.value = filtered ? (filtered.data.jobs || []) : countSource.value
     truncated.value = countSource.value.length === PAGE
+    loadError.value = ''
   } catch (e) {
-    console.error('Failed to load jobs', e)
+    // A failed fetch must not fall through to "No jobs yet" -- that tells the
+    // operator they have nothing when we simply do not know.
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  } finally {
+    loaded.value = true
   }
 }
 
@@ -520,18 +554,34 @@ const submitEnqueue = async () => {
   }
 }
 
-onMounted(() => {
-  loadJobs()
-  // Auto-refresh every 5s while the page is open so running jobs
-  // visibly transition. Guard against double-starting (HMR / remount)
-  // so we never leak a second interval; cleared on unmount.
+// Auto-refresh every 5s while the page is on screen so running jobs
+// visibly transition. Starting is guarded so an HMR pass or a re-entry
+// can never leak a second interval.
+const startPoll = () => {
   if (!pollTimer) pollTimer = setInterval(loadJobs, 5000)
-})
-
-onBeforeUnmount(() => {
+}
+const stopPoll = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
   }
+}
+
+onMounted(() => {
+  loadJobs()
+  startPoll()
 })
+
+// Layout.vue wraps views in <keep-alive>, so navigating away deactivates this
+// view rather than unmounting it: onBeforeUnmount alone left the poll hitting
+// the API for the rest of the session. onActivated also fires on the first
+// mount, where onMounted has already loaded and started the timer, so the
+// running timer is what tells the two apart.
+onActivated(() => {
+  if (pollTimer) return
+  loadJobs()
+  startPoll()
+})
+onDeactivated(stopPoll)
+onUnmounted(stopPoll)
 </script>

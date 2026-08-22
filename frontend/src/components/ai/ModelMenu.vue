@@ -12,6 +12,7 @@
     <template #trigger="{ open, toggle }">
       <button
         :id="triggerId || undefined"
+        ref="triggerBtn"
         type="button"
         class="inline-flex items-center gap-1.5 transition-colors focus-visible:outline-none"
         :class="wide
@@ -19,6 +20,8 @@
           : 'touch-expand-sm h-8 max-w-[180px] rounded-lg px-2.5 text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface'"
         :title="store.selectedModel || 'Select model'"
         aria-label="Select model"
+        aria-haspopup="menu"
+        :aria-expanded="open"
         @click="onToggle(open, toggle)"
       >
         <Cpu class="w-3.5 h-3.5 shrink-0" />
@@ -28,7 +31,11 @@
     </template>
 
     <template #default="{ close }">
-      <div class="max-h-[60dvh] overflow-y-auto scrollable py-1">
+      <div
+        ref="panelBody"
+        class="py-1"
+        @keydown="(e) => onMenuKeydown(e, close)"
+      >
         <!-- Provider switch (only when there's more than one configured). -->
         <template v-if="store.providers.length > 1">
           <p class="px-3 pt-1.5 pb-1 text-xs uppercase tracking-label text-foreground-muted">
@@ -38,14 +45,16 @@
             v-for="p in store.providers"
             :key="p.id"
             type="button"
-            class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:bg-surface-hover"
+            class="flex w-full items-center gap-2.5 px-3 py-1.5 touch-expand-sm text-left text-sm transition-colors focus-visible:outline-none focus-visible:bg-surface-hover"
             :class="store.selectedProviderId === p.id ? 'text-white bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
+            role="menuitemradio"
+            :aria-checked="store.selectedProviderId === p.id"
             @click="store.selectProvider(p.id)"
           >
             <span class="flex-1 truncate">{{ p.label || p.provider }}</span>
             <Check
               v-if="store.selectedProviderId === p.id"
-              class="w-3.5 h-3.5 shrink-0 text-primary"
+              class="w-3.5 h-3.5 shrink-0 text-link"
             />
           </button>
           <div class="my-1 border-t border-border" />
@@ -63,15 +72,19 @@
           <div class="relative">
             <Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground-muted" />
             <!-- Matches the app's input vocabulary (Input.vue): white focus
-                 ring, /50 placeholder, 16px on mobile so iOS doesn't zoom on
-                 focus. bg-surface (not bg-background) for contrast against the
-                 popover's bg-background panel. -->
+                 ring, /50 placeholder, bg-surface (not bg-background) for
+                 contrast against the popover's bg-background panel.
+                 Deliberately no text-base here: it reads as the iOS anti-zoom
+                 trick but computes to 15.2px under the 95% root, and a class
+                 outranks the element selector the global coarse-pointer floor
+                 in style.css uses, so setting it actually re-enabled the zoom
+                 this comment used to claim it prevented. -->
             <input
               v-model="query"
               type="text"
               aria-label="Search models"
               placeholder="Search models…"
-              class="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-2.5 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:border-white focus:outline-none focus:ring-1 focus:ring-white"
+              class="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-2.5 text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:border-white focus:outline-none focus:ring-1 focus:ring-white"
             >
           </div>
         </div>
@@ -106,12 +119,12 @@
               type="text"
               aria-label="Model id"
               placeholder="e.g. claude-sonnet-5"
-              class="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs text-foreground placeholder-foreground-muted/50 focus:border-white focus:outline-none"
+              class="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-sm text-foreground placeholder-foreground-muted/50 focus:border-white focus:outline-none"
             >
             <button
               type="submit"
               :disabled="!manualModel.trim()"
-              class="rounded-md border border-border px-2 py-1.5 text-xs text-foreground hover:bg-surface-hover disabled:opacity-40"
+              class="touch-expand-sm rounded-md border border-border px-2 py-1.5 text-xs text-foreground hover:bg-surface-hover disabled:opacity-40"
             >
               Use
             </button>
@@ -128,14 +141,16 @@
           v-else
           :key="m.id"
           type="button"
-          class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-mono transition-colors focus-visible:outline-none focus-visible:bg-surface-hover"
+          class="flex w-full items-center gap-2.5 px-3 py-1.5 touch-expand-sm text-left text-sm font-mono transition-colors focus-visible:outline-none focus-visible:bg-surface-hover"
           :class="store.selectedModel === m.id ? 'text-white bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
+          role="menuitemradio"
+          :aria-checked="store.selectedModel === m.id"
           @click="pick(m.id, close)"
         >
           <span class="flex-1 truncate">{{ m.id }}</span>
           <Check
             v-if="store.selectedModel === m.id"
-            class="w-3.5 h-3.5 shrink-0 text-primary"
+            class="w-3.5 h-3.5 shrink-0 text-link"
           />
         </button>
       </div>
@@ -147,6 +162,7 @@
 import { ref, computed, watch } from 'vue'
 import { Cpu, ChevronDown, Check, Search } from '@lucide/vue'
 import Popover from '@/components/common/Popover.vue'
+import { useMenuFocus } from '@/composables/useMenuFocus'
 import { useAIStore } from '@/stores/ai'
 import { filterModels } from '@/utils/modelSearch'
 
@@ -156,6 +172,12 @@ defineProps({
 })
 
 const store = useAIStore()
+
+// Popover teleports its panel to <body>; without moving focus into it, Tab from
+// the trigger leaves the composer entirely and Escape never reaches the panel.
+const triggerBtn = ref(null)
+const panelBody = ref(null)
+const { onMenuKeydown } = useMenuFocus(panelBody, triggerBtn)
 
 const query = ref('')
 // Free-text model id, for the case the server explicitly anticipates:

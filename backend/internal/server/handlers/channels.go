@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"fmt"
@@ -169,6 +170,15 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:   req.ExpiresAt,
 	}
 	if err := h.DB.InsertChannel(channel); err != nil {
+		// A duplicate name is the caller's mistake, not ours. Every sibling
+		// create returns 409 for a UNIQUE violation (functions, fixtures,
+		// firewall rules); this one reported 500 INTERNAL, which tells an
+		// operator -- and any retry logic -- that the server broke and the
+		// request is worth repeating. It is not.
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			respond.Error(w, http.StatusConflict, "CONFLICT", "channel name already exists", reqID)
+			return
+		}
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to create channel", reqID)
 		return
 	}

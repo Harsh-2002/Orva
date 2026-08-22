@@ -19,7 +19,7 @@
         Build info
         <span class="ml-auto text-xs font-normal text-foreground-muted group-open:hidden">{{ buildInfo?.version || EMPTY }}</span>
       </summary>
-      <dl class="mt-4 grid grid-cols-[max-content,1fr] gap-x-6 gap-y-2 text-xs">
+      <dl class="mt-4 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-xs">
         <dt class="text-foreground-muted">
           Version
         </dt>
@@ -46,9 +46,12 @@
         </dt>
         <dd class="font-mono text-white flex items-center gap-2 min-w-0">
           <span class="truncate">{{ buildInfo?.image || EMPTY }}</span>
+          <!-- p-1 around a 13px icon lands at 21x21 on a phone. touch-expand-*
+               grows the real box on coarse pointers only; a button centres its
+               own content, so the glyph stays put. -->
           <button
             v-if="buildInfo?.image"
-            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors shrink-0"
+            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors shrink-0 touch-expand-iconbtn"
             title="Copy image reference"
             aria-label="Copy image reference"
             @click="copyImage"
@@ -73,7 +76,7 @@
       class="scroll-mt-6 space-y-4 border-b border-border pb-8"
     >
       <div>
-        <h2 class="text-base font-semibold text-white flex items-center gap-2">
+        <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
           <MessagesSquare class="w-4 h-4 text-foreground-muted" />
           AI assistant
         </h2>
@@ -87,7 +90,7 @@
     <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
             <HardDrive class="w-4 h-4 text-foreground-muted" />
             Storage
           </h2>
@@ -114,9 +117,14 @@
         Loading storage stats…
       </div>
 
+      <!-- Every outcome panel on this page is conditionally rendered, so the
+           insertion itself is what announces: role="alert" for failures,
+           role="status" for successes. Without them a screen-reader operator
+           submits a form here and hears nothing at all (WCAG 4.1.3). -->
       <div
         v-if="storageError"
         class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
+        role="alert"
       >
         <div class="font-semibold mb-1">
           Failed to load storage stats
@@ -198,6 +206,7 @@
       <div
         v-if="lastVacuum"
         class="rounded-md border border-success-ring bg-success-tint p-3 text-xs text-success-fg"
+        role="status"
       >
         Compacted in {{ lastVacuum.duration_ms }} ms and freed
         <span class="font-mono">{{ formatBytes(lastVacuum.freed_bytes) }}</span>
@@ -207,6 +216,7 @@
       <div
         v-if="vacuumError"
         class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
+        role="alert"
       >
         <div class="font-semibold mb-1">
           Compact failed
@@ -220,7 +230,7 @@
     <!-- Account card — change password + logout. -->
     <section class="space-y-4 border-b border-border pb-8">
       <div>
-        <h2 class="text-base font-semibold text-white flex items-center gap-2">
+        <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
           <KeyRound class="w-4 h-4 text-foreground-muted" />
           Account
         </h2>
@@ -288,12 +298,17 @@
           v-if="pwError"
           id="pw-error"
           class="rounded-md border border-danger-ring bg-danger-tint p-2.5 text-xs text-danger-fg"
+          role="alert"
         >
           {{ pwError }}
         </div>
+        <!-- A successful submit clears the three fields and leaves focus on the
+             button, so aria-describedby on the inputs never gets read: the
+             success panel has to announce itself. -->
         <div
           v-if="pwSuccess"
           class="rounded-md border border-success-ring bg-success-tint p-2.5 text-xs text-success-fg"
+          role="status"
         >
           Password updated successfully.
         </div>
@@ -327,7 +342,7 @@
     <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
             <Plug class="w-4 h-4 text-foreground-muted" />
             Connected applications
           </h2>
@@ -335,7 +350,7 @@
             OAuth clients with access to this instance. Add connectors from
             <RouterLink
               to="/docs#mcp"
-              class="text-primary hover:underline"
+              class="text-link hover:underline"
             >
               Docs
             </RouterLink>
@@ -352,6 +367,7 @@
       <div
         v-if="connectedAppsError"
         class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
+        role="alert"
       >
         <div class="font-semibold mb-1">
           Failed to load connected apps
@@ -377,14 +393,18 @@
         </p>
       </div>
 
+      <!-- No negative margin here: the section has no horizontal padding of its
+           own (the page inset comes from Layout's p-page), so -mx-5 had nothing
+           to cancel and pushed the row rules 19px past the section's own
+           border-b on both sides — clipped, not scrolled, at phone widths. -->
       <ul
         v-else
-        class="divide-y divide-border -mx-5"
+        class="divide-y divide-border"
       >
         <li
           v-for="app in connectedApps"
           :key="app.id"
-          class="px-5 py-3 flex items-start gap-3"
+          class="py-3 flex items-start gap-3"
         >
           <component
             :is="iconForClient(app.client_name).icon"
@@ -421,7 +441,7 @@
           </div>
           <button
             type="button"
-            class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 shrink-0 self-center"
+            class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 shrink-0 self-center touch-expand-xs"
             :disabled="revokingId === app.id"
             @click="revokeApp(app)"
           >
@@ -438,7 +458,7 @@
     <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
             <Monitor class="w-4 h-4 text-foreground-muted" />
             Active sessions
           </h2>
@@ -457,6 +477,7 @@
       <div
         v-if="sessionsError"
         class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
+        role="alert"
       >
         <div class="font-semibold mb-1">
           Failed to load sessions
@@ -468,12 +489,12 @@
 
       <ul
         v-else
-        class="divide-y divide-border -mx-5"
+        class="divide-y divide-border"
       >
         <li
           v-for="s in sessions"
           :key="s.prefix"
-          class="px-5 py-3 flex items-start gap-3"
+          class="py-3 flex items-start gap-3"
         >
           <Monitor
             class="w-5 h-5 mt-0.5 shrink-0"
@@ -501,7 +522,7 @@
           <button
             v-if="!s.current"
             type="button"
-            class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 shrink-0 self-center"
+            class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 shrink-0 self-center touch-expand-xs"
             :disabled="revokingPrefix === s.prefix"
             @click="revokeOtherSession(s)"
           >
@@ -516,7 +537,7 @@
     <section class="space-y-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
             <DatabaseBackup class="w-4 h-4 text-foreground-muted" />
             Backup &amp; Restore
           </h2>
@@ -559,6 +580,7 @@
       <div
         v-if="restoreError"
         class="rounded-md border border-danger-ring bg-danger-tint p-3 text-xs text-danger-fg"
+        role="alert"
       >
         <div class="font-semibold mb-1">
           Restore failed
@@ -570,11 +592,12 @@
       <div
         v-if="restoreOk"
         class="rounded-md border border-success-ring bg-success-tint p-3 text-xs text-success-fg"
+        role="status"
       >
         Restore complete. The server is restarting to load the new data. Reload in
         a few seconds.
         <button
-          class="underline ml-1"
+          class="underline ml-1 touch-expand-xs"
           @click="reload"
         >
           Reload now

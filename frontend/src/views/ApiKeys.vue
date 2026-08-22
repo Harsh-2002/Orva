@@ -15,14 +15,16 @@
       </Button>
     </div>
 
-    <!-- One-time secret reveal after Create. Stays visible until dismissed. -->
+    <!-- One-time secret reveal after Create. Stays visible until dismissed.
+         House notice shape: semantic tint + ring on the card, tint foreground
+         on the heading, so it reads the same as every other warning block. -->
     <div
       v-if="createdKey"
-      class="bg-background border border-amber-700/40 rounded-lg p-4 space-y-2"
+      class="rounded-lg border border-warning-ring bg-warning-tint p-4 space-y-3"
     >
       <div class="flex items-start justify-between gap-3">
         <div>
-          <h2 class="text-xs font-bold text-amber-300 uppercase tracking-wider">
+          <h2 class="text-xs font-bold text-warning-fg uppercase tracking-wider">
             Copy this key now
           </h2>
           <div class="text-xs text-foreground-muted mt-0.5">
@@ -30,7 +32,7 @@
           </div>
         </div>
         <button
-          class="text-foreground-muted hover:text-white"
+          class="inline-flex items-center justify-center shrink-0 rounded text-foreground-muted hover:text-white transition-colors touch-expand-iconbtn"
           title="Dismiss"
           aria-label="Dismiss API key"
           @click="createdKey = ''"
@@ -41,7 +43,7 @@
       <div class="flex items-center gap-2">
         <code class="flex-1 font-mono text-sm text-white break-all bg-surface px-3 py-2 rounded border border-border">{{ createdKey }}</code>
         <button
-          class="px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5 text-xs"
+          class="shrink-0 px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5 text-xs touch-expand-sm"
           @click="copyCreated"
         >
           <Check
@@ -133,7 +135,7 @@
         </div>
         <p
           v-if="!newKey.permissions.length"
-          class="text-xs text-danger mt-1.5"
+          class="text-xs text-danger-fg mt-1.5"
         >
           Select at least one permission.
         </p>
@@ -156,6 +158,14 @@
     </div>
 
     <!-- Keys list. -->
+    <LoadError
+      v-if="loadError"
+      what="API keys"
+      :message="loadError"
+      :on-retry="loadKeys"
+      class="mb-3"
+    />
+
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
       <!-- Mobile (<sm) stacked-row list — name + prefix on the primary
            line, last-used + expires as secondary metadata, delete on
@@ -198,7 +208,7 @@
           </div>
         </li>
         <li
-          v-if="keys.length === 0"
+          v-if="loaded && !loadError && keys.length === 0"
           class="px-6 py-8 text-center text-sm text-foreground-muted"
         >
           No API keys yet.
@@ -294,7 +304,7 @@
               />
             </td>
           </tr>
-          <tr v-if="keys.length === 0">
+          <tr v-if="loaded && !loadError && keys.length === 0">
             <td
               colspan="6"
               class="px-6 py-8 text-center text-foreground-muted"
@@ -314,6 +324,7 @@ import { ref, onMounted } from 'vue'
 import { KeyRound, Copy, Check, X, Trash2 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import LoadError from '@/components/common/LoadError.vue'
 import { listApiKeys, createApiKey, deleteApiKey } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
 import { formatRelative, isExpired } from '@/utils/time'
@@ -322,6 +333,8 @@ import { useConfirmStore } from '@/stores/confirm'
 const confirmStore = useConfirmStore()
 
 const keys = ref([])
+const loadError = ref('')
+const loaded = ref(false)
 const createdKey = ref('')
 const createdCopied = ref(false)
 const creating = ref(false)
@@ -340,8 +353,18 @@ const defaultPermissions = () => ['invoke', 'read']
 const newKey = ref({ name: '', expiresInDays: 0, permissions: defaultPermissions() })
 
 const loadKeys = async () => {
-  const res = await listApiKeys()
-  keys.value = res.data.keys || []
+  try {
+    const res = await listApiKeys()
+    keys.value = res.data.keys || []
+    loadError.value = ''
+  } catch (e) {
+    // Without this the list stayed empty and the view asserted "No API keys
+    // yet" -- reassuring, and wrong, on the one screen where believing you have
+    // no credentials outstanding actually matters.
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  } finally {
+    loaded.value = true
+  }
 }
 
 const openCreate = () => {

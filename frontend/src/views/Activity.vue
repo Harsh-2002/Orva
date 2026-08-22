@@ -72,17 +72,32 @@
     </div>
 
     <!-- Table -->
+    <LoadError
+      v-if="loadError"
+      what="Activity"
+      :message="loadError"
+      :on-retry="reset"
+      class="mb-3"
+    />
+
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
           v-for="row in rows"
           :key="rowKey(row)"
-          class="px-4 py-3 cursor-pointer hover:bg-surface-hover transition-colors"
-          @click="openDrawer(row)"
+          class="hover:bg-surface-hover transition-colors"
         >
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0 flex-1">
+          <!-- The card body is the drawer trigger. It has to be a real
+               button: the @click used to sit on the bare <li>, which put
+               the detail drawer out of reach of the keyboard entirely. -->
+          <button
+            type="button"
+            class="w-full text-left cursor-pointer px-4 py-3 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            :aria-label="detailLabel(row)"
+            @click="openDrawer(row)"
+          >
+            <div class="min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <SourceTag :source="row.source" />
                 <StatusBadge
@@ -108,41 +123,41 @@
                 >{{ row.actor_label || row.actor_id }}</span>
               </div>
             </div>
-          </div>
+          </button>
         </li>
         <li
-          v-if="!rows.length"
+          v-if="loaded && !loadError && !rows.length"
           class="px-6 py-12 text-center text-sm text-foreground-muted"
         >
-          Requests and tool calls appear here.
+          {{ emptyMessage }}
         </li>
       </ul>
 
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3 w-32">
+            <th class="px-6 py-3 w-32">
               Time
             </th>
-            <th class="px-4 py-3 w-24">
+            <th class="px-6 py-3 w-24">
               Source
             </th>
-            <th class="px-4 py-3 w-40 hidden md:table-cell">
+            <th class="px-6 py-3 w-40 hidden md:table-cell">
               Actor
             </th>
-            <th class="px-4 py-3 w-20 hidden sm:table-cell">
+            <th class="px-6 py-3 w-20 hidden sm:table-cell">
               Method
             </th>
-            <th class="px-4 py-3">
+            <th class="px-6 py-3">
               Path / Tool
             </th>
-            <th class="px-4 py-3 w-16 hidden sm:table-cell">
+            <th class="px-6 py-3 w-16 hidden sm:table-cell">
               Status
             </th>
-            <th class="px-4 py-3 w-20 hidden lg:table-cell">
+            <th class="px-6 py-3 w-20 hidden lg:table-cell">
               Duration
             </th>
-            <th class="px-4 py-3 hidden xl:table-cell">
+            <th class="px-6 py-3 hidden xl:table-cell">
               Summary
             </th>
           </tr>
@@ -154,13 +169,23 @@
             class="hover:bg-surface-hover cursor-pointer transition-colors"
             @click="openDrawer(row)"
           >
-            <td class="px-4 py-2.5 font-mono text-xs text-foreground-muted">
-              {{ formatTime(row.ts) }}
+            <td class="px-6 py-4 font-mono text-xs text-foreground-muted">
+              <!-- Row clicks stay on the <tr> for the mouse, but the drawer
+                   needs a real control to be reachable by keyboard. Rendered
+                   bare, so the desktop cell looks exactly as it did. -->
+              <button
+                type="button"
+                class="touch-expand-sm text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :aria-label="detailLabel(row)"
+                @click.stop="openDrawer(row)"
+              >
+                {{ formatTime(row.ts) }}
+              </button>
             </td>
-            <td class="px-4 py-2.5">
+            <td class="px-6 py-4">
               <SourceTag :source="row.source" />
             </td>
-            <td class="px-4 py-2.5 hidden md:table-cell">
+            <td class="px-6 py-4 hidden md:table-cell">
               <div class="text-xs text-white truncate max-w-[200px]">
                 {{ row.actor_label || row.actor_id || EMPTY }}
               </div>
@@ -171,13 +196,13 @@
                 {{ row.actor_id }}
               </div>
             </td>
-            <td class="px-4 py-2.5 text-xs font-mono text-foreground-muted hidden sm:table-cell">
+            <td class="px-6 py-4 text-xs font-mono text-foreground-muted hidden sm:table-cell">
               {{ row.method || EMPTY }}
             </td>
-            <td class="px-4 py-2.5 text-xs font-mono text-white truncate max-w-[440px]">
+            <td class="px-6 py-4 text-xs font-mono text-white truncate max-w-[440px]">
               {{ row.path || EMPTY }}
             </td>
-            <td class="px-4 py-2.5 hidden sm:table-cell">
+            <td class="px-6 py-4 hidden sm:table-cell">
               <StatusBadge
                 v-if="row.status"
                 :status="statusLabel(row.status)"
@@ -187,19 +212,19 @@
                 class="text-foreground-muted text-xs"
               >{{ EMPTY }}</span>
             </td>
-            <td class="px-4 py-2.5 text-xs font-mono text-foreground-muted hidden lg:table-cell">
+            <td class="px-6 py-4 text-xs font-mono text-foreground-muted hidden lg:table-cell">
               {{ formatDuration(row.duration_ms) }}
             </td>
-            <td class="px-4 py-2.5 text-xs text-foreground-muted truncate max-w-[280px] hidden xl:table-cell">
+            <td class="px-6 py-4 text-xs text-foreground-muted truncate max-w-[280px] hidden xl:table-cell">
               {{ row.summary }}
             </td>
           </tr>
-          <tr v-if="!rows.length">
+          <tr v-if="loaded && !loadError && !rows.length">
             <td
               colspan="8"
-              class="px-4 py-12 text-center text-foreground-muted text-sm"
+              class="px-6 py-12 text-center text-foreground-muted text-sm"
             >
-              Requests and tool calls appear here.
+              {{ emptyMessage }}
             </td>
           </tr>
         </tbody>
@@ -213,12 +238,12 @@
          and rejoins the top when they come back. -->
     <div
       v-if="totalPages > 1"
-      class="flex items-center justify-between text-xs"
+      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs"
     >
       <div class="text-foreground-muted">
         Page {{ page }} of {{ totalPages }} · {{ totalKnown }}{{ hasMoreBeyondKnown ? '+' : '' }} rows
       </div>
-      <div class="flex items-center gap-1">
+      <div class="flex flex-wrap items-center gap-1">
         <Button
           variant="secondary"
           size="xs"
@@ -374,6 +399,7 @@ import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import SourceTag from '@/components/common/SourceTag.vue'
+import LoadError from '@/components/common/LoadError.vue'
 import { listActivity } from '@/api/endpoints'
 import { useEventsStore } from '@/stores/events'
 
@@ -401,12 +427,29 @@ const rangeOptions = [
   { label: '7d', value: '7d' },
 ]
 
+const DEFAULT_RANGE = '24h'
+
 const filters = ref({
   q: '',
   source: '',
   statusBucket: '',
-  range: '24h',
+  range: DEFAULT_RANGE,
 })
+
+// An empty list reads the same whether nothing has been recorded yet or the
+// filters excluded everything, and the operator's next move differs. The time
+// range counts only when it is not the default view.
+const hasActiveFilter = computed(() =>
+  !!filters.value.q ||
+  !!filters.value.source ||
+  !!filters.value.statusBucket ||
+  filters.value.range !== DEFAULT_RANGE
+)
+const emptyMessage = computed(() =>
+  hasActiveFilter.value
+    ? 'No activity matches these filters.'
+    : 'Requests and tool calls appear here.'
+)
 
 // ── State ───────────────────────────────────────────────────────────
 // historyRows  = rows fetched for the current page (server-side).
@@ -417,6 +460,8 @@ const filters = ref({
 // hands back next_cursor when more rows exist; we use it to detect
 // whether the next page exists without forcing an upfront full count.
 const historyRows = ref([])
+const loadError = ref('')
+const loaded = ref(false)
 const liveRows    = ref([])
 const drawerOpen  = ref(false)
 const drawerRow   = ref(null)
@@ -485,6 +530,17 @@ const buildParams = (extra = {}) => {
 // the server returned at the end of page N-1).
 const goToPage = async (p) => {
   if (p < 1) return
+  try {
+    await fetchPage(p)
+    loadError.value = ''
+  } catch (e) {
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  } finally {
+    loaded.value = true
+  }
+}
+
+const fetchPage = async (p) => {
   // We can only go forward as far as we have a recorded cursor for.
   if (p > pages.value.length + 1) return
 
@@ -611,6 +667,14 @@ const statusLabel = (status) => {
   return 'pending'
 }
 const rowKey = (row) => row.id ? `db-${row.id}` : `live-${row.ts}-${row.request_id}-${row.path}`
+// Accessible name for the row trigger. EMPTY is a bare dash glyph, so build
+// this from words a screen reader can actually read out.
+const detailLabel = (row) => {
+  const what = [row.method, row.path].filter(Boolean).join(' ') || 'request'
+  return row.ts
+    ? `Open activity details for ${what} at ${formatTime(row.ts)}`
+    : `Open activity details for ${what}`
+}
 
 // ── Lifecycle ──────────────────────────────────────────────────────
 const subscribeLive = () => {

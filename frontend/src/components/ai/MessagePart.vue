@@ -98,6 +98,16 @@ onBeforeUnmount(() => clearTimeout(parseTimer))
 </template>
 
 <style scoped>
+/* A bare URL, a base64 blob or a UUID carries no break opportunity, so its
+   min-content width exceeds the chat column and the whole timeline slides
+   sideways under the fixed composer instead of wrapping. `linkify` turns bare
+   URLs into anchors, hence the <a> here too. The property inherits, so this
+   also covers inline <code> and <strong> inside the prose. */
+.md-body :deep(p),
+.md-body :deep(li),
+.md-body :deep(a) {
+  overflow-wrap: anywhere;
+}
 .md-body :deep(p) {
   margin: 0.25rem 0;
 }
@@ -108,8 +118,8 @@ onBeforeUnmount(() => clearTimeout(parseTimer))
   margin-bottom: 0;
 }
 .md-body :deep(pre) {
-  background: var(--color-background, #12111c);
-  border: 1px solid var(--color-border, #2d2b42);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
   border-radius: 0.5rem;
   padding: 0.75rem;
   overflow-x: auto;
@@ -167,7 +177,7 @@ onBeforeUnmount(() => clearTimeout(parseTimer))
 }
 .md-body :deep(hr) {
   border: 0;
-  border-top: 1px solid var(--color-border, #2d2b42);
+  border-top: 1px solid var(--color-border);
   margin: 0.75rem 0;
 }
 .md-body :deep(table) {
@@ -179,18 +189,18 @@ onBeforeUnmount(() => clearTimeout(parseTimer))
 }
 .md-body :deep(th),
 .md-body :deep(td) {
-  border: 1px solid var(--color-border, #2d2b42);
+  border: 1px solid var(--color-border);
   padding: 0.35rem 0.6rem;
   text-align: left;
 }
 .md-body :deep(th) {
-  background: var(--color-surface, #1a1929);
+  background: var(--color-surface);
   font-weight: 600;
 }
 .md-body :deep(blockquote) {
-  border-left: 2px solid var(--color-border, #2d2b42);
+  border-left: 2px solid var(--color-border);
   padding-left: 0.75rem;
   margin: 0.5rem 0;
-  color: var(--color-foreground-muted, #a3a3b3);
+  color: var(--color-foreground-muted);
 }
 </style>

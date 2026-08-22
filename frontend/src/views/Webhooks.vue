@@ -1,41 +1,151 @@
 <template>
-  <div class="space-y-4">
-    <!-- Page header -->
-    <div class="flex items-center justify-between gap-4 flex-wrap">
-      <h1 class="text-xl font-semibold text-white tracking-tight">
-        Webhooks
-      </h1>
+  <div class="space-y-6">
+    <!-- Page header. Title and subhead are one block so the subhead sits at
+         its own mt-1.5 rather than picking up the page's section rhythm on
+         top of it, the way every other list view is built. -->
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-xl font-semibold text-white tracking-tight">
+          Webhooks
+        </h1>
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+          Send signed system events to external URLs.
+        </p>
+      </div>
       <Button @click="openCreate">
         <Plus class="w-4 h-4" />
         New webhook
       </Button>
     </div>
 
-    <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-      Send signed system events to external URLs.
-    </p>
+    <!-- Subscriptions list. The table used to render at every width with
+         four of its six columns hidden, which put the row actions ~230px
+         to the right of a 375px viewport. Mobile now gets stacked cards
+         carrying every column and every action; the table starts at sm. -->
+    <LoadError
+      v-if="loadError"
+      what="Webhooks"
+      :message="loadError"
+      :on-retry="loadSubscriptions"
+      class="mb-3"
+    />
 
-    <!-- Subscriptions table -->
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
-      <table class="w-full text-sm text-left">
+      <ul class="sm:hidden divide-y divide-border">
+        <li
+          v-for="sub in subscriptions"
+          :key="sub.id"
+          class="px-4 py-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <!-- The desktop row opens deliveries on row click; on the card
+                 that affordance is a real button so it stays reachable by
+                 keyboard and announces itself. -->
+            <button
+              type="button"
+              class="min-w-0 flex-1 text-left rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              @click="openDeliveries(sub)"
+            >
+              <div class="font-medium text-white truncate">
+                {{ sub.name }}
+              </div>
+              <div class="text-[10px] text-foreground-muted font-mono break-all">
+                {{ sub.id }}
+              </div>
+              <div class="mt-1 text-xs text-foreground-muted font-mono break-all">
+                {{ sub.url }}
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                <span
+                  class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border"
+                  :class="statusPill(sub)"
+                >
+                  <span
+                    class="w-1.5 h-1.5 rounded-full"
+                    :class="statusDot(sub)"
+                  />
+                  {{ statusLabel(sub) }}
+                </span>
+                <span
+                  v-for="ev in eventsBadgeList(sub)"
+                  :key="ev"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-surface border border-border text-foreground font-mono"
+                >{{ ev }}</span>
+              </div>
+              <div class="mt-1.5 text-[11px] text-foreground-muted">
+                Last delivery {{ sub.last_delivery_at ? formatDate(sub.last_delivery_at) : EMPTY }}
+              </div>
+            </button>
+            <div class="flex items-center gap-1 shrink-0">
+              <IconButton
+                :icon="Zap"
+                title="Send test event"
+                @click="testSubscription(sub)"
+              />
+              <IconButton
+                :icon="Edit"
+                title="Edit"
+                @click="openEdit(sub)"
+              />
+              <IconButton
+                :icon="Trash2"
+                variant="danger"
+                title="Delete"
+                @click="removeSubscription(sub)"
+              />
+            </div>
+          </div>
+        </li>
+        <li
+          v-if="loaded && !loadError && subscriptions.length === 0"
+          class="px-4 py-12 text-center"
+        >
+          <p class="text-foreground-muted text-sm">
+            No webhooks yet.
+          </p>
+          <p class="text-foreground-muted text-xs mt-1">
+            Add an endpoint to receive signed system events.
+          </p>
+        </li>
+      </ul>
+
+      <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3 font-medium">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium"
+            >
               Name
             </th>
-            <th class="px-4 py-3 font-medium hidden md:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden md:table-cell"
+            >
               URL
             </th>
-            <th class="px-4 py-3 font-medium hidden sm:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium"
+            >
               Events
             </th>
-            <th class="px-4 py-3 font-medium">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium"
+            >
               Status
             </th>
-            <th class="px-4 py-3 font-medium hidden lg:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium hidden lg:table-cell"
+            >
               Last delivery
             </th>
-            <th class="px-4 py-3 font-medium text-right">
+            <th
+              scope="col"
+              class="px-6 py-3 font-medium text-right"
+            >
               Actions
             </th>
           </tr>
@@ -44,19 +154,28 @@
           <tr
             v-for="sub in subscriptions"
             :key="sub.id"
-            class="hover:bg-surface/40 transition-colors cursor-pointer"
-            @click="openDeliveries(sub)"
+            class="hover:bg-surface/40 transition-colors"
           >
-            <td class="px-4 py-3 font-medium text-white">
-              <div class="flex flex-col">
-                <span>{{ sub.name }}</span>
-                <span class="text-xs text-foreground-muted font-mono">{{ sub.id }}</span>
-              </div>
+            <td class="px-6 py-4 font-medium text-white">
+              <!-- The drawer trigger is a real button, as it already is on the
+                   mobile card. It used to be a @click on the bare <tr>, which
+                   left delivery history unreachable by keyboard at every width
+                   the table renders at, with no other route to it. -->
+              <button
+                type="button"
+                class="touch-expand-sm w-full text-left cursor-pointer rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                @click="openDeliveries(sub)"
+              >
+                <div class="flex flex-col">
+                  <span>{{ sub.name }}</span>
+                  <span class="text-xs text-foreground-muted font-mono">{{ sub.id }}</span>
+                </div>
+              </button>
             </td>
-            <td class="px-4 py-3 text-xs text-foreground-muted truncate max-w-xs hidden md:table-cell">
+            <td class="px-6 py-4 text-xs text-foreground-muted truncate max-w-xs hidden md:table-cell">
               {{ sub.url }}
             </td>
-            <td class="px-4 py-3 hidden sm:table-cell">
+            <td class="px-6 py-4">
               <div class="flex flex-wrap gap-1">
                 <span
                   v-for="ev in eventsBadgeList(sub)"
@@ -65,7 +184,7 @@
                 >{{ ev }}</span>
               </div>
             </td>
-            <td class="px-4 py-3">
+            <td class="px-6 py-4">
               <span
                 class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border"
                 :class="statusPill(sub)"
@@ -77,13 +196,10 @@
                 {{ statusLabel(sub) }}
               </span>
             </td>
-            <td class="px-4 py-3 text-foreground-muted text-xs hidden lg:table-cell">
+            <td class="px-6 py-4 text-foreground-muted text-xs hidden lg:table-cell">
               {{ sub.last_delivery_at ? formatDate(sub.last_delivery_at) : EMPTY }}
             </td>
-            <td
-              class="px-4 py-3 text-right"
-              @click.stop
-            >
+            <td class="px-6 py-4 text-right">
               <div class="inline-flex items-center gap-1">
                 <IconButton
                   :icon="Zap"
@@ -104,10 +220,10 @@
               </div>
             </td>
           </tr>
-          <tr v-if="subscriptions.length === 0">
+          <tr v-if="loaded && !loadError && subscriptions.length === 0">
             <td
               colspan="6"
-              class="px-4 py-12 text-center"
+              class="px-6 py-12 text-center"
             >
               <p class="text-foreground-muted text-sm">
                 No webhooks yet.
@@ -133,16 +249,24 @@
         class="space-y-4"
       >
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Name</label>
+          <label
+            for="webhook-name"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Name</label>
           <input
+            id="webhook-name"
             v-model="form.name"
             placeholder="ops-slack"
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
         </div>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Receiver URL</label>
+          <label
+            for="webhook-url"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Receiver URL</label>
           <input
+            id="webhook-url"
             v-model="form.url"
             placeholder="https://hooks.slack.com/services/..."
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
@@ -152,8 +276,15 @@
           </p>
         </div>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Events</label>
-          <div class="flex flex-wrap gap-1.5">
+          <span
+            id="webhook-events-label"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Events</span>
+          <div
+            class="flex flex-wrap gap-1.5"
+            role="group"
+            aria-labelledby="webhook-events-label"
+          >
             <Button
               v-for="ev in allEvents"
               :key="ev.value"
@@ -167,7 +298,7 @@
             </Button>
           </div>
           <p class="text-xs text-foreground-muted mt-1.5">
-            Pick <code class="font-mono">*</code> to receive every event. Each badge above is one of the 8 system events that can fire today.
+            Pick <code class="font-mono">*</code> to receive every event. The badges beside it are the {{ systemEventCount }} system events that can fire today.
           </p>
         </div>
         <div class="flex items-center gap-2 pt-1">
@@ -230,79 +361,71 @@
       </template>
     </Modal>
 
-    <!-- Deliveries drawer -->
-    <div
-      v-if="drawerSub"
-      class="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-end z-50"
-      @click.self="closeDrawer"
+    <!-- Deliveries drawer. Shared Drawer.vue rather than a hand-rolled
+         overlay, so Esc-to-close, the mobile bottom-sheet shape and the
+         safe-area padding come for free. 42rem keeps the desktop panel
+         the width the old max-w-2xl gave it. -->
+    <Drawer
+      :model-value="drawerOpen"
+      width="42rem"
+      @update:model-value="$event ? null : closeDrawer()"
     >
-      <div class="bg-background border-l border-border w-full max-w-2xl h-full overflow-y-auto">
-        <div class="border-b border-border px-6 py-4 flex items-center justify-between bg-surface sticky top-0">
-          <div class="min-w-0">
-            <h2 class="text-base font-semibold text-foreground truncate">
-              Deliveries · {{ drawerSub.name }}
-            </h2>
-            <p class="text-xs text-foreground-muted font-mono truncate">
-              {{ drawerSub.id }}
-            </p>
-          </div>
-          <IconButton
-            :icon="X"
-            title="Close"
-            @click="closeDrawer"
-          />
-        </div>
+      <template #title>
+        Deliveries · {{ drawerSub?.name }}
+      </template>
 
-        <div class="p-4 space-y-2">
-          <div
-            v-if="!deliveries.length"
-            class="text-center text-foreground-muted text-sm py-12"
-          >
-            No deliveries yet. Trigger a system event or use
-            <span class="text-foreground">Send test event</span> to seed one.
-          </div>
-          <div
-            v-for="d in deliveries"
-            :key="d.id"
-            class="bg-surface border border-border rounded p-3 space-y-1.5"
-          >
-            <div class="flex items-center justify-between gap-2 flex-wrap">
-              <code class="text-xs font-mono text-foreground">{{ d.event_name }}</code>
-              <span
-                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border"
-                :class="deliveryPill(d.status)"
-              >
-                {{ d.status }}
-              </span>
-            </div>
-            <div class="flex items-center justify-between text-xs text-foreground-muted gap-2 flex-wrap">
-              <span class="font-mono">{{ d.id }}</span>
-              <span>{{ formatDate(d.created_at) }}</span>
-            </div>
-            <div class="flex items-center justify-between text-xs text-foreground-muted gap-2 flex-wrap">
-              <span>attempts {{ d.attempts }} / {{ d.max_attempts }}</span>
-              <span v-if="d.response_status">HTTP {{ d.response_status }}</span>
-            </div>
-            <p
-              v-if="d.last_error"
-              class="text-xs text-danger-fg truncate"
-              :title="d.last_error"
+      <div class="p-4 space-y-2">
+        <p class="text-xs text-foreground-muted font-mono break-all">
+          {{ drawerSub?.id }}
+        </p>
+        <div
+          v-if="!deliveries.length"
+          class="text-center text-foreground-muted text-sm py-12"
+        >
+          No deliveries yet. Trigger a system event or use
+          <span class="text-foreground">Send test event</span> to seed one.
+        </div>
+        <div
+          v-for="d in deliveries"
+          :key="d.id"
+          class="bg-surface border border-border rounded p-3 space-y-1.5"
+        >
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <code class="text-xs font-mono text-foreground">{{ d.event_name }}</code>
+            <span
+              class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border"
+              :class="deliveryPill(d.status)"
             >
-              {{ d.last_error }}
-            </p>
-            <Button
-              v-if="d.status === 'failed'"
-              size="xs"
-              variant="ghost"
-              @click="retryDelivery(d)"
-            >
-              <RotateCcw class="w-3.5 h-3.5" />
-              Retry
-            </Button>
+              {{ d.status }}
+            </span>
           </div>
+          <div class="flex items-center justify-between text-xs text-foreground-muted gap-2 flex-wrap">
+            <span class="font-mono break-all">{{ d.id }}</span>
+            <span>{{ formatDate(d.created_at) }}</span>
+          </div>
+          <div class="flex items-center justify-between text-xs text-foreground-muted gap-2 flex-wrap">
+            <span>attempts {{ d.attempts }} / {{ d.max_attempts }}</span>
+            <span v-if="d.response_status">HTTP {{ d.response_status }}</span>
+          </div>
+          <p
+            v-if="d.last_error"
+            class="text-xs text-danger-fg truncate"
+            :title="d.last_error"
+          >
+            {{ d.last_error }}
+          </p>
+          <Button
+            v-if="d.status === 'failed'"
+            size="xs"
+            variant="ghost"
+            @click="retryDelivery(d)"
+          >
+            <RotateCcw class="w-3.5 h-3.5" />
+            Retry
+          </Button>
         </div>
       </div>
-    </div>
+    </Drawer>
   </div>
 </template>
 
@@ -310,9 +433,9 @@
 defineOptions({ name: 'WebhooksView' })
 
 import { EMPTY } from '@/utils/format'
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import {
-  Plus, Edit, Trash2, X, CheckCircle, Copy, Check, Zap, RotateCcw,
+  Plus, Edit, Trash2, CheckCircle, Copy, Check, Zap, RotateCcw,
 } from '@lucide/vue'
 import {
   listWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook,
@@ -322,7 +445,9 @@ import { useConfirmStore } from '@/stores/confirm'
 import { copyText } from '@/utils/clipboard'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import LoadError from '@/components/common/LoadError.vue'
 import Modal from '@/components/common/Modal.vue'
+import Drawer from '@/components/common/Drawer.vue'
 
 const confirmStore = useConfirmStore()
 
@@ -341,7 +466,13 @@ const allEvents = [
   { value: 'job.failed' },
 ]
 
+// '*' is the catch-all, not an event, so it doesn't count toward the
+// number quoted in the picker's help text.
+const systemEventCount = allEvents.filter((e) => e.value !== '*').length
+
 const subscriptions = ref([])
+const loadError = ref('')
+const loaded = ref(false)
 const showForm = ref(false)
 const editingId = ref(null)
 const saving = ref(false)
@@ -349,6 +480,7 @@ const mintedSecret = ref('')
 const mintedCopied = ref(false)
 const form = ref({ name: '', url: '', events: ['*'], enabled: true })
 
+const drawerOpen = ref(false)
 const drawerSub = ref(null)
 const deliveries = ref([])
 let drawerPollTimer = null
@@ -404,8 +536,11 @@ const loadSubscriptions = async () => {
   try {
     const res = await listWebhooks()
     subscriptions.value = res.data.subscriptions || []
+    loadError.value = ''
   } catch (e) {
-    console.error('Failed to load webhooks', e)
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  } finally {
+    loaded.value = true
   }
 }
 
@@ -502,18 +637,29 @@ const testSubscription = async (sub) => {
     await testWebhook(sub.id)
     confirmStore.notify({
       title: 'Test event queued',
-      message: `Will deliver to ${sub.url} within 5s. Open the row to watch the delivery.`,
+      message: `Will deliver to ${sub.url} within 5s. Open the webhook to watch the delivery.`,
     })
   } catch (e) {
     confirmStore.notify({ title: 'Test failed', message: e.message, danger: true })
   }
 }
 
+const stopDrawerPoll = () => {
+  if (drawerPollTimer) clearInterval(drawerPollTimer)
+  drawerPollTimer = null
+}
+const startDrawerPoll = (id) => {
+  stopDrawerPoll()
+  // Auto-refresh while the drawer is open so retries become visible.
+  drawerPollTimer = setInterval(() => loadDeliveries(id), 4000)
+}
+
 const openDeliveries = async (sub) => {
   drawerSub.value = sub
+  deliveries.value = []
+  drawerOpen.value = true
   await loadDeliveries(sub.id)
-  // Auto-refresh while drawer is open so retries become visible.
-  drawerPollTimer = setInterval(() => loadDeliveries(sub.id), 4000)
+  startDrawerPoll(sub.id)
 }
 const loadDeliveries = async (id) => {
   try {
@@ -524,10 +670,10 @@ const loadDeliveries = async (id) => {
   }
 }
 const closeDrawer = () => {
-  drawerSub.value = null
-  deliveries.value = []
-  if (drawerPollTimer) clearInterval(drawerPollTimer)
-  drawerPollTimer = null
+  drawerOpen.value = false
+  stopDrawerPoll()
+  // drawerSub/deliveries stay put until the next open: the panel is still on
+  // screen for the length of its slide-out and would otherwise blank out.
 }
 
 const retryDelivery = async (d) => {
@@ -540,7 +686,22 @@ const retryDelivery = async (d) => {
 }
 
 onMounted(() => loadSubscriptions())
-onBeforeUnmount(() => {
-  if (drawerPollTimer) clearInterval(drawerPollTimer)
+
+// Layout.vue wraps views in <keep-alive>, so navigating away deactivates this
+// view rather than unmounting it: without onDeactivated the 4s delivery poll
+// would keep firing for the rest of the session. onActivated also runs on the
+// first mount, where onMounted has already loaded and no drawer is open, so
+// the deactivated flag keeps that pass from double-fetching.
+let wasDeactivated = false
+onActivated(() => {
+  if (!wasDeactivated) return
+  wasDeactivated = false
+  loadSubscriptions()
+  if (drawerOpen.value && drawerSub.value) startDrawerPoll(drawerSub.value.id)
 })
+onDeactivated(() => {
+  wasDeactivated = true
+  stopDrawerPoll()
+})
+onUnmounted(stopDrawerPoll)
 </script>

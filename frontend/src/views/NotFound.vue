@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-background px-6 py-16">
+  <div class="min-h-dvh flex items-center justify-center bg-background px-6 py-16">
     <div class="max-w-lg w-full">
       <div class="flex items-center gap-3 mb-10">
         <OrvaLogo class="w-7 h-7" />

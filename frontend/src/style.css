@@ -47,6 +47,11 @@
   --color-warning-fg:   #fbbf24;
   --color-warning-ring: rgba(234, 179, 8, 0.30);
 
+  /* Solid-fill danger surface. #ef4444 is the right red for text, borders and
+     tints against the near-black background, but white on it measures 3.76:1 --
+     under the 4.5:1 AA floor, which is what the "Log out" button was failing.
+     A filled control needs a darker red than a drawn one; this is 5.62:1. */
+  --color-danger-solid: #c62828;
   --color-danger-tint:  rgba(239, 68, 68, 0.15);
   --color-danger-fg:    #f87171;
   --color-danger-ring:  rgba(239, 68, 68, 0.30);
@@ -54,6 +59,15 @@
   --color-info-tint:    rgba(56, 189, 248, 0.15);
   --color-info-fg:      #7dd3fc;
   --color-info-ring:    rgba(56, 189, 248, 0.30);
+
+  /* Runtime identity tints. Not status, and deliberately not the vendors'
+     saturated brand colours: these sit next to status pills in dense rows, and
+     a full-strength Python blue or Node green would read as a state change.
+     Desaturated toward the graphite surface so the runtime mark identifies
+     without competing. Tokens rather than raw palette classes so a theme can
+     move them, and so "which blue is the Python one" has one answer. */
+  --color-runtime-node:   #8fbf7f;
+  --color-runtime-python: #7fa8d4;
 
   /* Spacing scale extensions surfaced as Tailwind utilities (p-page, gap-tight,
      px-section, etc.). Names track DESIGN.md's rhythm: tight is sibling-within-
@@ -246,6 +260,13 @@ select::-ms-expand {
   padding-left: max(env(safe-area-inset-left, 0px), 0px);
   padding-right: max(env(safe-area-inset-right, 0px), 0px);
 }
+/* Offset for content sitting under the fixed mobile top bar.
+   The bar is a 56 px content row plus whatever the status-bar inset is, so a
+   flat `pt-14` slid the first row under it in standalone mode. This is the one
+   value both sides read, which is the only way the two stay in step. */
+@utility pt-topbar {
+  padding-top: calc(3.5rem + max(env(safe-area-inset-top, 0px), 0px));
+}
 /* Inset variants — when an absolute / fixed element should be
    inset from the safe area rather than padded inside it. */
 @utility inset-y-safe {
@@ -264,6 +285,7 @@ select::-ms-expand {
    ============================================================ */
 .touch-expand-xs,
 .touch-expand-sm,
+.touch-expand-md,
 .touch-expand-iconbtn {
   position: relative;
 }
@@ -271,12 +293,39 @@ select::-ms-expand {
 @media (pointer: coarse) {
   .touch-expand-xs,
   .touch-expand-sm,
+  .touch-expand-md,
   .touch-expand-iconbtn {
     min-height: 44px;
-  }
-
-  .touch-expand-iconbtn {
+    /* Width too, not just height. A Button whose slot holds only an icon came
+       out 35px wide while measuring a compliant 44px tall, because the height
+       floor was the only one set. A button carrying text is already wider than
+       44px, so this floor only ever bites on the icon-only case. */
     min-width: 44px;
+  }
+}
+
+/* ============================================================
+   Form controls on touch hardware
+   ------------------------------------------------------------
+   iOS Safari zooms the viewport whenever a focused control renders
+   below 16px, then leaves the page zoomed and horizontally shifted.
+   The usual fix (`text-base` on mobile) does not work here: the root
+   is scaled to 95% above, so 1rem computes to 15.2px and text-base
+   is still under the threshold. Pin the real pixel value instead, and
+   only on coarse pointers so the dense 12-13px desktop register is
+   untouched. 16px is a floor, not a look: it applies at the moment of
+   focus, which is when the zoom would otherwise fire.
+   ============================================================ */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+    /* The same 44px floor the touch-expand-* helpers give buttons. Form
+       controls were sized by padding alone and landed at 30-41px, so a field
+       was a smaller target than the button next to it. Height only: width is
+       set by the layout and a text field is already wide. */
+    min-height: 44px;
   }
 }
 

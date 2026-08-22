@@ -199,17 +199,27 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	fn.Image = result.ImageTag
 	fn.ImageSize = result.ImageSize
 	fn.CodeHash = result.CodeHash
-	// For TypeScript deploys the builder rewrites the entrypoint from
-	// the user's `handler.ts` to the compiled `<outDir>/<stem>.js`. We
-	// persist this back onto the function row so the pool's buildEnv
-	// can publish ORVA_ENTRYPOINT to the sandbox at spawn time. For
-	// non-TS deploys result.Entrypoint == fn.Entrypoint, so this is a
-	// no-op assignment.
-	if result.Entrypoint != "" {
-		fn.Entrypoint = result.Entrypoint
+	// A TypeScript build emits `<outDir>/<stem>.js` from the operator's
+	// `handler.ts`. That path is recorded as the RUN entrypoint; fn.Entrypoint
+	// keeps naming the file the operator wrote.
+	//
+	// The two used to be one column, so a TS deploy erased the authored name.
+	// The editor then served compiled JavaScript, a re-deploy from the
+	// dashboard failed on a path nobody had typed, and three readers carried
+	// private heuristics to guess the original back.
+	//
+	// Empty when the build did not move it, which is every non-TS function.
+	if result.Entrypoint != "" && result.Entrypoint != fn.Entrypoint {
+		fn.RunEntrypoint = result.Entrypoint
+	} else {
+		fn.RunEntrypoint = ""
 	}
 	fn.Status = "active"
 	fn.Version++
+	// This build is now what serves. The pointer is what the deployments list
+	// reads to mark a version live, so a rollback can move it to an older row
+	// instead of appending a new one.
+	fn.ActiveDeploymentID = job.DeploymentID
 	// Silent: deployment.succeeded covers this transition for webhook
 	// subscribers; the dashboard already sees the deployment event too.
 	if err := q.reg.SetSilent(fn); err != nil {

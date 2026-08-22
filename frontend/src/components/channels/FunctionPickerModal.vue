@@ -93,7 +93,11 @@
                 {{ fn.description }}
               </div>
             </div>
-            <code class="text-[11px] text-foreground-muted font-mono shrink-0">{{ fn.runtime }}</code>
+            <RuntimeTag
+              :runtime="fn.runtime"
+              with-label
+              class="shrink-0"
+            />
           </li>
         </ul>
       </div>
@@ -127,6 +131,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { Search, X } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
+import RuntimeTag from '@/components/common/RuntimeTag.vue'
 import { listFunctions } from '@/api/endpoints'
 
 const props = defineProps({

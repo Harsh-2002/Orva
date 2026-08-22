@@ -10,11 +10,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // InboundWebhookHandler exposes per-function CRUD for inbound triggers.
@@ -154,6 +155,45 @@ func (h *InboundWebhookHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond.JSON(w, http.StatusOK, row)
+}
+
+// Sign handles POST /api/v1/functions/{fn_id}/inbound-webhooks/{id}/sign.
+//
+// It returns the headers that make the supplied body verify against this
+// trigger, so the dashboard's test can exercise the real /webhook/{id} path
+// without the operator having to paste back a secret the server already holds
+// -- and for every signature format, not just the two a browser can produce.
+func (h *InboundWebhookHandler) Sign(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
+	if !ok {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
+	row, err := h.DB.GetInboundWebhook(r.PathValue("id"))
+	if err != nil || row.FunctionID != fnID {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "inbound webhook not found", reqID)
+		return
+	}
+
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
+		return
+	}
+
+	headers, err := signInboundTest(row, []byte(req.Body), time.Now().Unix())
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		return
+	}
+	// The secret itself is never returned -- only the derived headers.
+	respond.JSON(w, http.StatusOK, map[string]any{
+		"headers":          headers,
+		"signature_format": row.SignatureFormat,
+	})
 }
 
 // Update handles PUT /api/v1/functions/{fn_id}/inbound-webhooks/{id}.

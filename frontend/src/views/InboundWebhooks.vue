@@ -1,7 +1,10 @@
 <template>
   <div class="space-y-6">
-    <!-- Header -->
-    <div class="flex items-start justify-between gap-4">
+    <!-- Header. The title block plus the count + Refresh + New trigger
+         toolbar has a min-content width wider than a 375 px content box,
+         and a non-wrapping row is silently clipped under the global
+         overflow-x: hidden. Column under sm, the original row from sm up. -->
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Inbound webhooks
@@ -17,7 +20,7 @@
           from external services.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs text-foreground-muted">
           {{ rows.length }} {{ rows.length === 1 ? 'trigger' : 'triggers' }}
         </span>
@@ -45,14 +48,14 @@
     <!-- Just-created banner: shows the plaintext secret ONCE. -->
     <div
       v-if="lastCreated"
-      class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 space-y-3"
+      class="rounded-lg border border-warning-ring bg-warning-tint p-4 space-y-3"
     >
       <div class="flex items-center justify-between gap-4">
-        <div class="text-sm text-amber-200 font-medium">
+        <div class="text-sm text-warning-fg font-medium">
           Trigger created. Copy the secret now. It will not be shown again.
         </div>
         <button
-          class="text-xs text-amber-200/80 hover:text-white"
+          class="inline-flex items-center shrink-0 rounded px-2 -mx-2 touch-expand-sm text-xs text-warning-fg hover:text-white transition-colors"
           @click="lastCreated = null"
         >
           Dismiss
@@ -63,7 +66,7 @@
           <span class="text-foreground-muted uppercase tracking-wider text-[10px]">URL</span>
           <code class="ml-2 font-mono text-white break-all">{{ origin + lastCreated.trigger_url }}</code>
           <button
-            class="ml-2 text-amber-200 hover:text-white"
+            class="inline-flex items-center rounded px-2 touch-expand-sm text-warning-fg hover:text-white transition-colors"
             @click="copy(origin + lastCreated.trigger_url)"
           >
             Copy URL
@@ -73,7 +76,7 @@
           <span class="text-foreground-muted uppercase tracking-wider text-[10px]">Secret</span>
           <code class="ml-2 font-mono text-white break-all">{{ lastCreated.secret }}</code>
           <button
-            class="ml-2 text-amber-200 hover:text-white"
+            class="inline-flex items-center rounded px-2 touch-expand-sm text-warning-fg hover:text-white transition-colors"
             @click="copy(lastCreated.secret)"
           >
             Copy secret
@@ -102,7 +105,7 @@
                 <span
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border"
                   :class="row.active
-                    ? 'bg-success/10 text-success border-success/30'
+                    ? 'bg-success-tint text-success-fg border-success-ring'
                     : 'bg-surface text-foreground-muted border-border'"
                 >{{ row.active ? 'active' : 'paused' }}</span>
               </div>
@@ -111,6 +114,12 @@
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
                 <span class="font-mono">{{ row.signature_format }}</span>
+                <!-- secret_preview is an lg+ column on desktop, so the card is
+                     the only place a phone can see which secret is in force. -->
+                <span
+                  v-if="row.secret_preview"
+                  class="font-mono"
+                >{{ row.secret_preview }}</span>
                 <span>created {{ formatDate(row.created_at) }}</span>
               </div>
             </div>
@@ -120,6 +129,12 @@
                 variant="success"
                 title="Send a test payload"
                 @click="openTest(row)"
+              />
+              <IconButton
+                :icon="row.active ? Pause : Play"
+                :title="row.active ? 'Pause this trigger' : 'Resume this trigger'"
+                :disabled="busyId === row.id"
+                @click="toggleActive(row)"
               />
               <IconButton
                 :icon="Trash2"
@@ -141,25 +156,46 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3">
+            <th
+              scope="col"
+              class="px-6 py-3"
+            >
               Name
             </th>
-            <th class="px-4 py-3 hidden md:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 hidden md:table-cell"
+            >
               URL
             </th>
-            <th class="px-4 py-3 hidden sm:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 hidden sm:table-cell"
+            >
               Format
             </th>
-            <th class="px-4 py-3 hidden lg:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 hidden lg:table-cell"
+            >
               Secret
             </th>
-            <th class="px-4 py-3 hidden md:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 hidden md:table-cell"
+            >
               Active
             </th>
-            <th class="px-4 py-3 hidden lg:table-cell">
+            <th
+              scope="col"
+              class="px-6 py-3 hidden lg:table-cell"
+            >
               Created
             </th>
-            <th class="px-4 py-3 text-right">
+            <th
+              scope="col"
+              class="px-6 py-3 text-right"
+            >
               Actions
             </th>
           </tr>
@@ -170,39 +206,39 @@
             :key="row.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-4 py-3 font-medium text-white">
+            <td class="px-6 py-4 font-medium text-white">
               <div class="flex flex-col">
                 <span>{{ row.name }}</span>
                 <span class="text-xs text-foreground-muted font-mono">{{ row.id }}</span>
               </div>
             </td>
-            <td class="px-4 py-3 font-mono text-xs text-foreground-muted hidden md:table-cell">
+            <td class="px-6 py-4 font-mono text-xs text-foreground-muted hidden md:table-cell">
               <span class="break-all">{{ origin }}/webhook/{{ row.id }}</span>
             </td>
-            <td class="px-4 py-3 hidden sm:table-cell">
+            <td class="px-6 py-4 hidden sm:table-cell">
               <span
                 class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-surface text-foreground-muted border-border font-mono"
               >
                 {{ row.signature_format }}
               </span>
             </td>
-            <td class="px-4 py-3 font-mono text-xs text-foreground-muted hidden lg:table-cell">
+            <td class="px-6 py-4 font-mono text-xs text-foreground-muted hidden lg:table-cell">
               {{ row.secret_preview }}
             </td>
-            <td class="px-4 py-3 hidden md:table-cell">
+            <td class="px-6 py-4 hidden md:table-cell">
               <span
                 class="inline-flex items-center px-2 py-0.5 rounded text-xs border"
                 :class="row.active
-                  ? 'bg-success/10 text-success border-success/30'
+                  ? 'bg-success-tint text-success-fg border-success-ring'
                   : 'bg-surface text-foreground-muted border-border'"
               >
                 {{ row.active ? 'active' : 'paused' }}
               </span>
             </td>
-            <td class="px-4 py-3 text-foreground-muted text-xs hidden lg:table-cell">
+            <td class="px-6 py-4 text-foreground-muted text-xs hidden lg:table-cell">
               {{ formatDate(row.created_at) }}
             </td>
-            <td class="px-4 py-3 text-right">
+            <td class="px-6 py-4 text-right">
               <div class="inline-flex items-center gap-1">
                 <IconButton
                   :icon="Send"
@@ -228,7 +264,7 @@
           <tr v-if="!loading && !rows.length">
             <td
               colspan="7"
-              class="px-4 py-12 text-center text-foreground-muted text-sm"
+              class="px-6 py-12 text-center text-foreground-muted text-sm"
             >
               No inbound triggers yet.
             </td>
@@ -245,16 +281,24 @@
     >
       <div class="p-5 space-y-5 text-sm">
         <div>
-          <label class="text-xs uppercase tracking-wider text-foreground-muted">Name</label>
+          <label
+            for="inbound-name"
+            class="text-xs uppercase tracking-wider text-foreground-muted"
+          >Name</label>
           <input
+            id="inbound-name"
             v-model="create.name"
             placeholder="e.g. github-deploys"
             class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
           >
         </div>
         <div>
-          <label class="text-xs uppercase tracking-wider text-foreground-muted">Signature format</label>
+          <label
+            for="inbound-format"
+            class="text-xs uppercase tracking-wider text-foreground-muted"
+          >Signature format</label>
           <select
+            id="inbound-format"
             v-model="create.format"
             class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
           >
@@ -307,8 +351,11 @@
       </template>
     </Drawer>
 
-    <!-- Test drawer — operator pastes the secret they captured at create
-         time. Browser computes the HMAC and POSTs to the trigger URL. -->
+    <!-- Test drawer. The server signs with the secret it already holds and
+         returns the headers; the browser then POSTs to the real /webhook/{id}
+         path, so the test exercises the same verification a provider hits.
+         This used to ask the operator to paste the secret back in and sign in
+         the browser, which could only produce 2 of the 5 formats. -->
     <Drawer
       v-model="test.open"
       :title="`Test ${test.row?.name || 'trigger'}`"
@@ -319,23 +366,16 @@
         class="p-5 space-y-5 text-sm"
       >
         <p class="text-xs text-foreground-muted">
-          Paste the plaintext secret you captured when you created this trigger.
-          Orva does not store the plaintext; it can only show the preview
-          ({{ test.row.secret_preview }}).
+          Signed as <span class="font-mono text-foreground">{{ test.row.signature_format }}</span>
+          and delivered to the live trigger URL.
         </p>
         <div>
-          <label class="text-xs uppercase tracking-wider text-foreground-muted">Secret</label>
-          <input
-            v-model="test.secret"
-            type="password"
-            placeholder="paste 64-hex secret"
-            spellcheck="false"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-white"
-          >
-        </div>
-        <div>
-          <label class="text-xs uppercase tracking-wider text-foreground-muted">Body (raw)</label>
+          <label
+            for="inbound-test-body"
+            class="text-xs uppercase tracking-wider text-foreground-muted"
+          >Body (raw)</label>
           <textarea
+            id="inbound-test-body"
             v-model="test.body"
             rows="6"
             spellcheck="false"
@@ -367,7 +407,7 @@
           </Button>
           <Button
             size="sm"
-            :disabled="testing || !test.secret.trim()"
+            :disabled="testing"
             :loading="testing"
             @click="runTest"
           >
@@ -387,8 +427,9 @@ import { Plus, Trash2, Send, RefreshCw, Pause, Play } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Drawer from '@/components/common/Drawer.vue'
-import { listInboundWebhooks, createInboundWebhook, deleteInboundWebhook, updateInboundWebhook } from '@/api/endpoints'
+import { listInboundWebhooks, createInboundWebhook, deleteInboundWebhook, updateInboundWebhook, signInboundWebhook } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
+import { copyText } from '@/utils/clipboard'
 
 const route = useRoute()
 const confirmStore = useConfirmStore()
@@ -528,24 +569,10 @@ const toggleActive = async (row) => {
 
 const openTest = (row) => {
   test.row = row
-  test.secret = ''
   test.body = '{"hello":"orva"}'
   test.error = ''
   test.response = null
   test.open = true
-}
-
-// signBodyHMACHex computes HMAC-SHA256 of body with the given secret in
-// hex. Used for hmac_sha256_hex (raw) and github (sha256= prefix).
-const signBodyHMACHex = async (secret, body) => {
-  const enc = new TextEncoder()
-  const key = await crypto.subtle.importKey(
-    'raw', enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false, ['sign'],
-  )
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(body))
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 const runTest = async () => {
@@ -553,23 +580,17 @@ const runTest = async () => {
   test.response = null
   testing.value = true
   try {
-    const fmt = test.row.signature_format
-    let headerValue
-    if (fmt === 'hmac_sha256_hex') {
-      headerValue = await signBodyHMACHex(test.secret.trim(), test.body)
-    } else if (fmt === 'github') {
-      headerValue = 'sha256=' + (await signBodyHMACHex(test.secret.trim(), test.body))
-    } else {
-      test.error = `Browser test only signs hmac_sha256_hex and github. ` +
-        `For ${fmt}, use the CLI or curl with openssl.`
-      return
-    }
+    // The server signs with the secret it already holds, and knows every
+    // format -- including the timestamped ones (stripe, slack) that need a
+    // second header. The browser then delivers to the real trigger URL, so a
+    // pass here means a provider's request would pass too.
+    const signed = await signInboundWebhook(fnName.value, test.row.id, test.body)
     const url = origin.value + '/webhook/' + test.row.id
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        [test.row.signature_header]: headerValue,
+        ...signed.data.headers,
       },
       body: test.body,
     })
@@ -632,13 +653,20 @@ const sampleCurl = (row) => {
   ].join('\n')
 }
 
+// navigator.clipboard is undefined outside a secure context, and Orva is
+// routinely reached over plain HTTP at a LAN address. This used to call it
+// directly and swallow the throw, so "Copy secret" did nothing and said
+// nothing -- and the plaintext secret is shown exactly once, so the operator
+// lost their only copy and had to delete and re-create the trigger.
 const copy = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyText(text)) {
     confirmStore.notify({ title: 'Copied', message: '', danger: false })
-  } catch (e) {
-    console.warn('clipboard write failed', e)
+    return
   }
+  confirmStore.notify({
+    title: 'Copy failed',
+    message: 'Could not copy to clipboard. Select the value manually:\n\n' + text,
+  })
 }
 
 onMounted(refresh)

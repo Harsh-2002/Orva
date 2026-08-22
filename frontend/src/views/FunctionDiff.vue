@@ -311,6 +311,20 @@
             {{ sideBySide ? 'side-by-side' : 'unified' }}
           </button>
         </header>
+        <!-- Skeleton is a sibling, not a child of the mount node: CodeMirror
+             appends its own DOM into codeMountRef and Vue must not be patching
+             children in the same element. -->
+        <div
+          v-if="editorLoading"
+          class="min-h-[240px] px-4 py-4 space-y-2"
+          aria-busy="true"
+          aria-label="Loading diff viewer"
+        >
+          <div class="h-3 w-1/3 rounded bg-surface-hover animate-pulse" />
+          <div class="h-3 w-2/3 rounded bg-surface-hover animate-pulse" />
+          <div class="h-3 w-1/2 rounded bg-surface-hover animate-pulse" />
+          <div class="h-3 w-3/5 rounded bg-surface-hover animate-pulse" />
+        </div>
         <div
           ref="codeMountRef"
           class="orva-merge"
@@ -342,6 +356,15 @@
           </button>
         </header>
         <div
+          v-if="manifestOpen && editorLoading"
+          class="min-h-[160px] px-4 py-4 space-y-2"
+          aria-busy="true"
+          aria-label="Loading diff viewer"
+        >
+          <div class="h-3 w-1/2 rounded bg-surface-hover animate-pulse" />
+          <div class="h-3 w-1/3 rounded bg-surface-hover animate-pulse" />
+        </div>
+        <div
           v-if="manifestOpen"
           ref="manifestMountRef"
           class="orva-merge"
@@ -367,14 +390,6 @@ import { compareDeployments, listDeployments, listFunctions, getDeployment, roll
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
-
-import { EditorState } from '@codemirror/state'
-import { EditorView, basicSetup } from 'codemirror'
-import { MergeView, unifiedMergeView } from '@codemirror/merge'
-import { javascript } from '@codemirror/lang-javascript'
-import { python } from '@codemirror/lang-python'
-import { json } from '@codemirror/lang-json'
-import { oneDark } from '@codemirror/theme-one-dark'
 
 const route = useRoute()
 const router = useRouter()
@@ -421,17 +436,61 @@ const toggleSideBySide = () => {
 
 const codeMountRef = ref(null)
 const manifestMountRef = ref(null)
+const editorLoading = ref(false)
 let codeView = null
 let manifestView = null
 
+// CodeMirror — state + view + the merge addon + three language modes + oneDark —
+// is by far the heaviest thing this route pulls, and Editor.vue already splits
+// the same library out of its own chunk for the same reason. Statically importing
+// it here put all of it on the critical path of a page an operator opens
+// mid-incident, before the header, version selectors and rollback CTA could
+// paint. It is fetched once, on the first mount that actually has a diff to draw.
+let cm = null
+let cmLoader = null
+const loadCodeMirror = () => {
+  if (cm) return Promise.resolve(cm)
+  if (!cmLoader) {
+    cmLoader = Promise.all([
+      import('@codemirror/state'),
+      import('codemirror'),
+      import('@codemirror/merge'),
+      import('@codemirror/lang-javascript'),
+      import('@codemirror/lang-python'),
+      import('@codemirror/lang-json'),
+      import('@codemirror/theme-one-dark'),
+    ]).then(([state, core, merge, js, py, jsonLang, dark]) => {
+      cm = {
+        EditorState: state.EditorState,
+        EditorView: core.EditorView,
+        basicSetup: core.basicSetup,
+        MergeView: merge.MergeView,
+        unifiedMergeView: merge.unifiedMergeView,
+        javascript: js.javascript,
+        python: py.python,
+        json: jsonLang.json,
+        oneDark: dark.oneDark,
+        // EditorView only exists after the chunk lands, so the theme is
+        // compiled here rather than at module scope.
+        diffTheme: core.EditorView.theme(githubDiffThemeSpec),
+      }
+      return cm
+    }).catch((err) => {
+      // Let the next attempt re-fetch instead of resolving a broken cache.
+      cmLoader = null
+      throw err
+    })
+  }
+  return cmLoader
+}
+
 // Match CodeMirror lang to the function's runtime (handler.js / handler.py).
 // MergeView mounts two read-only sub-editors that share these extensions.
-const langExt = computed(() => {
-  if (fn.value?.runtime?.startsWith('python')) return [python()]
-  return [javascript()]
-})
+// A function, not a computed: the language modes only exist once the chunk has
+// loaded, so this is read at mount time rather than tracked.
+const langExtras = () => (fn.value?.runtime?.startsWith('python') ? [cm.python()] : [cm.javascript()])
 
-const githubDiffTheme = EditorView.theme({
+const githubDiffThemeSpec = {
   // GitHub dark-adapted: soft red for deleted lines (left/side-A)
   '&.cm-merge-a .cm-changedLine': {
     backgroundColor: 'rgba(248, 81, 73, 0.15)',
@@ -484,15 +543,15 @@ const githubDiffTheme = EditorView.theme({
     borderRadius: '2px',
   },
   '.cm-changedLineGutter, .cm-inlineChangedLineGutter': { color: '#3fb950' },
-})
+}
 
 const baseExtensions = (extras) => [
-  basicSetup,
+  cm.basicSetup,
   ...extras,
-  oneDark,
-  githubDiffTheme,
-  EditorState.readOnly.of(true),
-  EditorView.lineWrapping,
+  cm.oneDark,
+  cm.diffTheme,
+  cm.EditorState.readOnly.of(true),
+  cm.EditorView.lineWrapping,
 ]
 
 // Viewport-driven default: side-by-side on >=md, unified on phones
@@ -522,10 +581,11 @@ const setupMediaQuery = () => {
   }
 }
 
+// Callers must have awaited loadCodeMirror() before reaching this.
 const mountMergeView = (mount, before, after, extras) => {
-  if (!mount) return null
+  if (!mount || !cm) return null
   if (sideBySide.value) {
-    return new MergeView({
+    return new cm.MergeView({
       a: { doc: before, extensions: baseExtensions(extras) },
       b: { doc: after, extensions: baseExtensions(extras) },
       parent: mount,
@@ -537,13 +597,13 @@ const mountMergeView = (mount, before, after, extras) => {
   }
   // Unified inline view for small screens. Single editor showing the "after"
   // doc with inline markers for what changed vs "before".
-  return new EditorView({
+  return new cm.EditorView({
     parent: mount,
-    state: EditorState.create({
+    state: cm.EditorState.create({
       doc: after,
       extensions: [
         ...baseExtensions(extras),
-        unifiedMergeView({ original: before, mergeControls: false }),
+        cm.unifiedMergeView({ original: before, mergeControls: false }),
       ],
     }),
   })
@@ -560,27 +620,63 @@ const destroyViews = () => {
   codeView = null
 }
 
+// ensureCodeMirror fetches the chunk if needed, driving the skeleton, and
+// reports whether the caller may go on to mount.
+const ensureCodeMirror = async () => {
+  if (cm) return true
+  editorLoading.value = true
+  try {
+    await loadCodeMirror()
+    return true
+  } catch {
+    if (!errCode.value) {
+      errCode.value = 'EDITOR_UNAVAILABLE'
+      errMessage.value = 'Could not load the diff viewer. Reload the page to try again.'
+    }
+    return false
+  } finally {
+    editorLoading.value = false
+  }
+}
+
 // mountManifestView (re)mounts only the manifest panel. Split out from
 // rebuildViews so collapsing/expanding the manifest doesn't tear down and
 // rebuild the handler diff above it (which would flicker and lose its
 // scroll position). Caller is responsible for the preceding nextTick so
 // the v-if="manifestOpen" mount node exists.
-const mountManifestView = () => {
+const mountManifestView = async () => {
   const manifest = manifestFile.value
   if (!manifest || !manifestOpen.value) return
   if (manifest.before === manifest.after && !manifest.added && !manifest.removed) return
-  manifestView = mountMergeView(manifestMountRef.value, manifest.before || '', manifest.after || '', [json()])
+  if (!(await ensureCodeMirror())) return
+  // The panel can have been collapsed, or the view already mounted by a
+  // concurrent rebuild, while the chunk was in flight.
+  if (!manifestOpen.value || manifestView) return
+  manifestView = mountMergeView(manifestMountRef.value, manifest.before || '', manifest.after || '', [cm.json()])
 }
 
+// Every rebuild takes a sequence number: the chunk fetch is a real await, so a
+// version switch or a layout toggle can land mid-flight, and the superseded run
+// must not mount a second set of editors into the same node.
+let mountSeq = 0
 const rebuildViews = async () => {
+  const seq = ++mountSeq
   await nextTick()
   destroyViews()
   if (!payload.value) return
   const handler = handlerFile.value
+  const manifest = manifestFile.value
+  const needsManifest = !!manifest && manifestOpen.value
+    && (manifest.before !== manifest.after || manifest.added || manifest.removed)
+  // Nothing to draw yet: don't pay for the chunk. Expanding a collapsed
+  // manifest later goes through the manifestOpen watcher, which loads it then.
+  if (!handler && !needsManifest) return
+  if (!(await ensureCodeMirror())) return
+  if (seq !== mountSeq) return
   if (handler) {
-    codeView = mountMergeView(codeMountRef.value, handler.before || '', handler.after || '', langExt.value)
+    codeView = mountMergeView(codeMountRef.value, handler.before || '', handler.after || '', langExtras())
   }
-  mountManifestView()
+  await mountManifestView()
 }
 
 const reload = async () => {
@@ -824,7 +920,7 @@ onMounted(async () => {
 watch(manifestOpen, async (open) => {
   await nextTick()
   destroyManifestView()
-  if (open) mountManifestView()
+  if (open) await mountManifestView()
 })
 
 watch([fromId, toId], reload)
@@ -850,5 +946,9 @@ onUnmounted(() => {
 .orva-merge .cm-scroller::-webkit-scrollbar { display: none; }
 .orva-merge .cm-content { padding: 16px 0; }
 .orva-merge .cm-line { padding: 0 16px; }
+/* Deliberately not a theme token: this is @codemirror/theme-one-dark's own
+   background, and the MergeView gutter sits flush against the two oneDark
+   sub-editors. Pointing it at a palette token would seam the moment the
+   palette moves away from the vendored editor theme. */
 .orva-merge .cm-mergeView { background: #282c34; }
 </style>

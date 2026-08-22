@@ -464,3 +464,63 @@ func computeHMACHex(secret string, body []byte) string {
 	mac.Write(body)
 	return hex.EncodeToString(mac.Sum(nil))
 }
+
+// SignTestRequest returns the headers that make a given body verify against
+// this trigger, computed server-side with the stored secret.
+//
+// The dashboard's test used to ask the operator to paste the plaintext secret
+// back in -- a secret the server already holds and never needs told -- and then
+// sign in the browser. That browser could only produce two of the five formats,
+// so testing a Stripe, Slack or base64 trigger was refused outright with
+// "use the CLI or curl with openssl". Signing belongs where the secret and the
+// format table already live.
+//
+// This is not a privilege escalation: it is reachable only with a write-scoped
+// API key, and anyone holding one can invoke the target function directly.
+func signInboundTest(hook *database.InboundWebhook, body []byte, now int64) (map[string]string, error) {
+	header := hook.SignatureHeader
+	if header == "" {
+		header = database.DefaultSignatureHeader(hook.SignatureFormat)
+	}
+	ts := strconv.FormatInt(now, 10)
+
+	switch hook.SignatureFormat {
+	case "hmac_sha256_hex":
+		return map[string]string{header: computeHMACHex(hook.Secret, body)}, nil
+
+	case "hmac_sha256_base64":
+		mac := hmac.New(sha256.New, []byte(hook.Secret))
+		mac.Write(body)
+		return map[string]string{header: base64.StdEncoding.EncodeToString(mac.Sum(nil))}, nil
+
+	case "github":
+		return map[string]string{header: "sha256=" + computeHMACHex(hook.Secret, body)}, nil
+
+	case "stripe":
+		// Stripe signs "<timestamp>.<body>" and carries the timestamp in the
+		// same header, which is also what the replay window is checked against.
+		mac := hmac.New(sha256.New, []byte(hook.Secret))
+		mac.Write([]byte(ts))
+		mac.Write([]byte("."))
+		mac.Write(body)
+		return map[string]string{
+			header: "t=" + ts + ",v1=" + hex.EncodeToString(mac.Sum(nil)),
+		}, nil
+
+	case "slack":
+		// Slack signs "v0:<timestamp>:<body>" and carries the timestamp in its
+		// own header, so the caller needs both.
+		mac := hmac.New(sha256.New, []byte(hook.Secret))
+		mac.Write([]byte("v0:"))
+		mac.Write([]byte(ts))
+		mac.Write([]byte(":"))
+		mac.Write(body)
+		return map[string]string{
+			header:                      "v0=" + hex.EncodeToString(mac.Sum(nil)),
+			"X-Slack-Request-Timestamp": ts,
+		}, nil
+
+	default:
+		return nil, errors.New("unknown signature_format")
+	}
+}

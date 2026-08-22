@@ -15,6 +15,14 @@
       </Button>
     </div>
 
+    <LoadError
+      v-if="loadError"
+      what="Scheduled jobs"
+      :message="loadError"
+      :on-retry="loadJobs"
+      class="mb-3"
+    />
+
     <div class="bg-background border border-border rounded-lg overflow-x-auto">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
@@ -72,7 +80,7 @@
           </div>
         </li>
         <li
-          v-if="jobs.length === 0"
+          v-if="loaded && !loadError && jobs.length === 0"
           class="px-6 py-12 text-center"
         >
           <p class="text-foreground-muted">
@@ -165,7 +173,7 @@
               </div>
             </td>
           </tr>
-          <tr v-if="jobs.length === 0">
+          <tr v-if="loaded && !loadError && jobs.length === 0">
             <td
               colspan="6"
               class="px-6 py-12 text-center"
@@ -192,8 +200,12 @@
       <div class="space-y-5">
         <!-- Function Selection -->
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Function</label>
+          <label
+            for="cron-function"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2"
+          >Function</label>
           <select
+            id="cron-function"
             v-model="form.function_name"
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
             :disabled="!!editingJob"
@@ -206,20 +218,28 @@
               :key="fn.name"
               :value="fn.name"
             >
-              {{ fn.name }} ({{ fn.runtime }})
+              {{ fn.name }} ({{ runtimeLabel(fn.runtime) }})
             </option>
           </select>
         </div>
 
         <!-- Schedule Type Tabs -->
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2">Schedule Type</label>
-          <div class="flex gap-2 bg-background rounded-lg p-1 border border-border">
+          <span
+            id="cron-schedule-type-label"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2"
+          >Schedule Type</span>
+          <div
+            class="flex gap-2 bg-background rounded-lg p-1 border border-border"
+            role="group"
+            aria-labelledby="cron-schedule-type-label"
+          >
             <button
               v-for="type in ['simple', 'advanced']"
               :key="type"
-              class="flex-1 py-2 px-3 text-sm font-medium rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              class="flex-1 py-2 px-3 text-sm font-medium rounded transition-colors touch-expand-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               :class="scheduleType === type ? 'bg-primary text-primary-foreground shadow-sm' : 'text-foreground-muted hover:text-foreground'"
+              :aria-pressed="scheduleType === type"
               @click="scheduleType = type"
             >
               {{ type === 'simple' ? 'Natural Language' : 'Cron Expression' }}
@@ -232,10 +252,14 @@
           v-if="scheduleType === 'simple'"
           class="space-y-4"
         >
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label class="text-xs font-medium text-foreground-muted block mb-1.5">Frequency</label>
+              <label
+                for="cron-frequency"
+                class="text-xs font-medium text-foreground-muted block mb-1.5"
+              >Frequency</label>
               <select
+                id="cron-frequency"
                 v-model="simpleSchedule.frequency"
                 class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                 @change="updateCronFromSimple"
@@ -259,8 +283,12 @@
             </div>
 
             <div v-if="['hour', 'day', 'week', 'month'].includes(simpleSchedule.frequency)">
-              <label class="text-xs font-medium text-foreground-muted block mb-1.5">At Minute</label>
+              <label
+                for="cron-minute"
+                class="text-xs font-medium text-foreground-muted block mb-1.5"
+              >At Minute</label>
               <input
+                id="cron-minute"
                 v-model.number="simpleSchedule.minute"
                 type="number"
                 min="0"
@@ -271,8 +299,12 @@
             </div>
 
             <div v-if="['day', 'week', 'month'].includes(simpleSchedule.frequency)">
-              <label class="text-xs font-medium text-foreground-muted block mb-1.5">At Hour</label>
+              <label
+                for="cron-hour"
+                class="text-xs font-medium text-foreground-muted block mb-1.5"
+              >At Hour</label>
               <input
+                id="cron-hour"
                 v-model.number="simpleSchedule.hour"
                 type="number"
                 min="0"
@@ -283,8 +315,12 @@
             </div>
 
             <div v-if="simpleSchedule.frequency === 'week'">
-              <label class="text-xs font-medium text-foreground-muted block mb-1.5">Day of Week</label>
+              <label
+                for="cron-day-of-week"
+                class="text-xs font-medium text-foreground-muted block mb-1.5"
+              >Day of Week</label>
               <select
+                id="cron-day-of-week"
                 v-model="simpleSchedule.dayOfWeek"
                 class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                 @change="updateCronFromSimple"
@@ -314,8 +350,12 @@
             </div>
 
             <div v-if="simpleSchedule.frequency === 'month'">
-              <label class="text-xs font-medium text-foreground-muted block mb-1.5">Day of Month</label>
+              <label
+                for="cron-day-of-month"
+                class="text-xs font-medium text-foreground-muted block mb-1.5"
+              >Day of Month</label>
               <input
+                id="cron-day-of-month"
                 v-model.number="simpleSchedule.dayOfMonth"
                 type="number"
                 min="1"
@@ -345,13 +385,21 @@
           class="space-y-3"
         >
           <div>
-            <label class="text-xs font-medium text-foreground-muted block mb-1.5">Cron Expression</label>
+            <label
+              for="cron-expression"
+              class="text-xs font-medium text-foreground-muted block mb-1.5"
+            >Cron Expression</label>
             <input
+              id="cron-expression"
               v-model="form.cron"
               placeholder="* * * * *"
+              aria-describedby="cron-expression-hint"
               class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
             >
-            <p class="text-xs text-foreground-muted mt-1.5">
+            <p
+              id="cron-expression-hint"
+              class="text-xs text-foreground-muted mt-1.5"
+            >
               Format: minute hour day month weekday
             </p>
           </div>
@@ -368,12 +416,17 @@
 
         <!-- Timezone -->
         <div>
-          <label class="block text-xs font-medium text-foreground-muted uppercase tracking-wide mb-1.5">
+          <label
+            for="cron-timezone"
+            class="block text-xs font-medium text-foreground-muted uppercase tracking-wide mb-1.5"
+          >
             Timezone
           </label>
           <select
+            id="cron-timezone"
             v-model="form.timezone"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            aria-describedby="cron-timezone-hint"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
             <option
               v-for="tz in timezoneOptions"
@@ -383,7 +436,10 @@
               {{ tz }}{{ tz === detectedTZ ? '  (your browser)' : '' }}
             </option>
           </select>
-          <div class="text-xs text-foreground-muted mt-1.5">
+          <div
+            id="cron-timezone-hint"
+            class="text-xs text-foreground-muted mt-1.5"
+          >
             The cron expression is interpreted in this zone (e.g.
             <code class="bg-surface px-1 rounded">0 9 * * *</code>
             with timezone
@@ -398,7 +454,7 @@
             id="enabled-toggle"
             v-model="form.enabled"
             type="checkbox"
-            class="w-4 h-4 text-primary bg-background border-border rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            class="w-4 h-4 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
           <label
             for="enabled-toggle"
@@ -434,8 +490,10 @@ import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from '@luc
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Modal from '@/components/common/Modal.vue'
+import LoadError from '@/components/common/LoadError.vue'
 import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions, browserTimezone } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
+import { runtimeLabel } from '@/utils/runtime'
 
 // Detect the operator's browser timezone so new schedules default to
 // it (operators expect "every day at 9 AM" to mean their 9 AM, not
@@ -464,6 +522,8 @@ const timezoneOptions = (() => {
 const confirmStore = useConfirmStore()
 
 const jobs = ref([])
+const loadError = ref('')
+const loaded = ref(false)
 const functions = ref([])
 const showCreateModal = ref(false)
 const editingJob = ref(null)
@@ -488,8 +548,11 @@ const loadJobs = async () => {
   try {
     const res = await listCronSchedules()
     jobs.value = res.data.schedules || []
+    loadError.value = ''
   } catch (e) {
-    console.error('Failed to load cron jobs', e)
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
+  } finally {
+    loaded.value = true
   }
 }
 
@@ -498,7 +561,11 @@ const loadFunctions = async () => {
     const res = await listFunctions()
     functions.value = res.data.functions || []
   } catch (e) {
-    console.error('Failed to load functions', e)
+    confirmStore.notify({
+      title: 'Could not load functions',
+      message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
+      danger: true,
+    })
   }
 }
 
@@ -524,29 +591,43 @@ const updateCronFromSimple = () => {
   }
 }
 
+// A cron field is only describable in words when it is a single in-range
+// integer. Ranges, lists, steps and day names ("1-5", "1,3,5", "*/2", "MON")
+// index nothing in a weekday table and pad to nonsense in a clock reading, so
+// they must fall through to the literal expression instead of being spelled
+// out. `0 9 * * 1-5` used to render "Every undefined at 09:00".
+const plainField = (field, lo, hi) => {
+  if (!/^\d{1,2}$/.test(field)) return false
+  const n = Number(field)
+  return n >= lo && n <= hi
+}
+
 const humanizeCron = (cron) => {
   if (!cron) return 'Invalid expression'
-  
+
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return 'Invalid format (use 5 fields)'
-  
+
   const [min, hour, day, month, dow] = parts
-  
+
   if (cron === '* * * * *') return 'Every minute'
-  if (min !== '*' && hour === '*' && day === '*' && month === '*' && dow === '*') {
+
+  const atTime = `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
+
+  if (plainField(min, 0, 59) && hour === '*' && day === '*' && month === '*' && dow === '*') {
     return `Every hour at minute ${min}`
   }
-  if (min !== '*' && hour !== '*' && day === '*' && month === '*' && dow === '*') {
-    return `Every day at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
+  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && day === '*' && month === '*' && dow === '*') {
+    return `Every day at ${atTime}`
   }
-  if (min !== '*' && hour !== '*' && day === '*' && month === '*' && dow !== '*') {
+  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && day === '*' && month === '*' && plainField(dow, 0, 6)) {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    return `Every ${days[dow]} at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
+    return `Every ${days[Number(dow)]} at ${atTime}`
   }
-  if (min !== '*' && hour !== '*' && day !== '*' && month === '*' && dow === '*') {
-    return `On day ${day} of every month at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
+  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && plainField(day, 1, 31) && month === '*' && dow === '*') {
+    return `On day ${day} of every month at ${atTime}`
   }
-  
+
   return `Custom: ${cron}`
 }
 
@@ -579,8 +660,11 @@ const saveSchedule = async () => {
     await loadJobs()
     closeModal()
   } catch (e) {
-    console.error('Failed to save schedule', e)
-    confirmStore.notify({ title: 'Failed to save schedule', danger: true })
+    confirmStore.notify({
+      title: 'Failed to save schedule',
+      message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
+      danger: true,
+    })
   }
 }
 
@@ -592,6 +676,11 @@ const editSchedule = (job) => {
     timezone: job.timezone || 'UTC',
     enabled: job.enabled
   }
+  // The natural-language controls cannot round-trip an arbitrary expression:
+  // they only build five shapes, and any change to one of them overwrites the
+  // loaded cron. Opening on the expression the job actually runs keeps the
+  // form honest and stops a weekday 9am job silently becoming daily midnight.
+  scheduleType.value = 'advanced'
   showCreateModal.value = true
 }
 
@@ -603,7 +692,11 @@ const toggleSchedule = async (job) => {
     })
     await loadJobs()
   } catch (e) {
-    console.error('Failed to toggle schedule', e)
+    confirmStore.notify({
+      title: job.enabled ? 'Failed to pause schedule' : 'Failed to resume schedule',
+      message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
+      danger: true,
+    })
   }
 }
 
@@ -620,7 +713,11 @@ const deleteSchedule = async (job) => {
     await deleteCronSchedule(job.id, job.function_id)
     await loadJobs()
   } catch (e) {
-    console.error('Failed to delete schedule', e)
+    confirmStore.notify({
+      title: 'Failed to delete schedule',
+      message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
+      danger: true,
+    })
   }
 }
 

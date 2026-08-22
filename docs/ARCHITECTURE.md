@@ -209,7 +209,7 @@ One SQLite file, grouped by subsystem. Core tables:
 | `sessions`           | UI cookie tokens (7-day TTL) |
 | `api_keys`           | bearer tokens for `/api/v1/*` |
 | `functions`          | name, runtime, current version + code_hash, status |
-| `deployments`        | per-build audit trail (queued/building/succeeded/failed; rollback rows are source='rollback') |
+| `deployments`        | per-build audit trail (queued/building/succeeded/failed). One row per deploy; rollback promotes an existing row rather than appending one, and `functions.active_deployment_id` names the row currently serving |
 | `executions` / `execution_requests` / `execution_logs` / `execution_log_entries` | every invocation + its captured request + stderr/stdout |
 | `build_logs`         | stdout/stderr from `npm install` / `pip install` |
 | `function_secrets`   | per-function encrypted env vars (AES-256-GCM) |
