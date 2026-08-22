@@ -493,9 +493,16 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 	fn.CodeHash = targetHash
 	fn.Status = "active"
 	fn.ActiveDeploymentID = targetDeploymentID
+	// Derived from the promoted version's own directory, not restored from the
+	// snapshot -- a snapshot written before run_entrypoint existed carries no
+	// value, and applying that absence points a compiled TypeScript version at
+	// its .ts source, which Node cannot execute. Must match the REST path in
+	// handlers.Rollback; an agent rolling back has to land in the same state an
+	// operator does.
+	fn.RunEntrypoint = builder.RunEntrypointFor(deps.DataDir, fn.ID, targetHash, fn.Entrypoint)
+
 	if targetSnapshot != nil {
 		fn.EnvVars = targetSnapshot.EnvVars
-		fn.RunEntrypoint = targetSnapshot.RunEntrypoint
 		fn.MemoryMB = targetSnapshot.MemoryMB
 		fn.CPUs = targetSnapshot.CPUs
 		fn.TimeoutMS = targetSnapshot.TimeoutMS

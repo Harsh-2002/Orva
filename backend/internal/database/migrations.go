@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -884,7 +885,6 @@ PRAGMA foreign_keys = ON;
 
 	db.collapseRuntimes()
 	db.backfillActiveDeployment()
-	db.backfillAuthoredEntrypoint()
 
 	// One-shot rewrite of every prefix-typed storage ID (fn_, key_,
 	// oat_, etc.) to UUIDv7. Idempotent — guarded by a marker row in
@@ -1030,27 +1030,33 @@ func dropExecutionRequestsFK(db *Database) error {
 // node22/python313 get bumped to the latest major (native/ABI deps may need a
 // redeploy). One-shot and idempotent: on later boots there are no rows to
 // migrate. Best-effort — a failure here is logged, never fatal.
-// backfillAuthoredEntrypoint separates the two meanings functions.entrypoint
-// used to carry.
+// SplitCompiledEntrypoints separates the two meanings functions.entrypoint used
+// to carry, for rows written before run_entrypoint existed.
 //
-// A TypeScript build stamped tsc's output onto the column, so rows written
-// before the split hold "dist/handler.js" where the operator wrote
-// "handler.ts". Move the compiled path to run_entrypoint and put the authored
-// name back, using the same derivation the four scattered read-time heuristics
-// used: take the stem, restore the .ts extension, drop the output directory.
+// A TypeScript build stamped tsc's output onto the column, so those rows hold
+// "dist/handler.js" where the operator wrote "handler.ts". This moves the
+// compiled path to run_entrypoint and restores the authored name.
 //
-// Only rows that actually look compiled are touched. A function whose
-// entrypoint has no directory prefix was never rewritten, and a Python
-// function never goes through tsc at all. If a guess is wrong the next deploy
-// overwrites both columns correctly, so this is safe to be approximate about.
-func (db *Database) backfillAuthoredEntrypoint() {
+// It takes dataDir and checks the version on disk rather than pattern-matching
+// the string, because "a path with a directory and a .js extension" also
+// describes a perfectly ordinary JavaScript function whose operator chose
+// `src/handler.js`. Rewriting one of those would point `entrypoint` at a .ts
+// file that has never existed, and the next deploy would fail validation on a
+// path nobody typed. Evidence, not shape: the authored source has to actually
+// be there.
+//
+// Call it after ReconcileFunctionDirs, so the directories match the ids.
+func (db *Database) SplitCompiledEntrypoints(dataDir string) {
+	if dataDir == "" {
+		return
+	}
 	rows, err := db.read.Query(`
 		SELECT id, entrypoint FROM functions
 		 WHERE run_entrypoint = ''
 		   AND entrypoint LIKE '%/%'
 		   AND entrypoint LIKE '%.js'`)
 	if err != nil {
-		slog.Warn("authored entrypoint backfill query failed", "err", err)
+		slog.Warn("compiled entrypoint split query failed", "err", err)
 		return
 	}
 	type fix struct{ id, authored, run string }
@@ -1062,6 +1068,17 @@ func (db *Database) backfillAuthoredEntrypoint() {
 		}
 		base := filepath.Base(ep)
 		authored := strings.TrimSuffix(base, filepath.Ext(base)) + ".ts"
+
+		// The decisive check: is the TypeScript source actually on disk next to
+		// a tsconfig? If not, this row is a JavaScript function with a nested
+		// entrypoint and must be left exactly as it is.
+		current := filepath.Join(dataDir, "functions", id, "current")
+		if _, err := os.Stat(filepath.Join(current, authored)); err != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(current, "tsconfig.json")); err != nil {
+			continue
+		}
 		fixes = append(fixes, fix{id: id, authored: authored, run: ep})
 	}
 	_ = rows.Close()
@@ -1071,7 +1088,7 @@ func (db *Database) backfillAuthoredEntrypoint() {
 			`UPDATE functions SET entrypoint = ?, run_entrypoint = ? WHERE id = ?`,
 			f.authored, f.run, f.id,
 		); err != nil {
-			slog.Warn("authored entrypoint backfill failed", "fn", f.id, "err", err)
+			slog.Warn("compiled entrypoint split failed", "fn", f.id, "err", err)
 			continue
 		}
 		slog.Info("split compiled entrypoint from authored source",

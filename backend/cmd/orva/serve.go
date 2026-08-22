@@ -106,6 +106,13 @@ func runServe(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Rows written before entrypoint and run_entrypoint were separated hold
+	// tsc's output where the operator wrote handler.ts. Needs the data dir,
+	// because the only safe way to tell a stamped TypeScript row from an
+	// ordinary JavaScript function with a nested entrypoint is to look for the
+	// .ts source on disk. Runs after the id reconcile so the paths resolve.
+	db.SplitCompiledEntrypoints(cfg.Data.Dir)
+
 	// Round-G: fold any pre-existing flat code/ dirs into the new
 	// versions/<hash>/ layout. Idempotent — no-op on subsequent boots.
 	builder.MigrateLegacyCodeDirs(cfg.Data.Dir, db)
