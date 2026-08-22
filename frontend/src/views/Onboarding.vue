@@ -1,6 +1,6 @@
 <template>
   <!-- Single-column setup; safe-area spacing supports fullscreen installs. -->
-  <div class="min-h-screen flex flex-col items-center justify-center bg-background pt-safe pb-safe pl-safe pr-safe px-page py-8 sm:py-12">
+  <div class="min-h-dvh flex flex-col items-center justify-center bg-background pt-safe pb-safe pl-safe pr-safe px-page py-8 sm:py-12">
     <div class="w-full max-w-md space-y-8">
       <!-- Wordmark + lede. Same typographic register as the rest of
            the dashboard: text-xl semibold tracking-tight on the H1,
@@ -55,6 +55,7 @@
                 :type="showPassword ? 'text' : 'password'"
                 required
                 autocomplete="new-password"
+                aria-describedby="onboard-password-requirements"
                 class="w-full bg-background border border-border rounded-md px-3 py-2.5 pr-20 text-base sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors font-mono"
                 placeholder="Minimum 10 characters"
                 :disabled="loading"
@@ -100,28 +101,52 @@
             </button>
           </div>
 
-          <div class="mt-3 grid grid-cols-2 gap-y-1.5 gap-x-3">
+          <!-- Requirements carry a glyph as well as a colour: the dot only ever
+               changed hue, so a red/green-deficient operator could not tell met
+               from unmet on the one screen that gates the whole instance, and
+               the submit button below stays disabled until all five pass with no
+               stated reason. aria-describedby ties the list to the field, and
+               the polite live region announces each requirement as it flips. -->
+          <div
+            id="onboard-password-requirements"
+            class="mt-3 grid grid-cols-2 gap-y-1.5 gap-x-3"
+            aria-live="polite"
+          >
             <div
               v-for="(valid, key) in passwordChecks"
               :key="key"
               class="flex items-center gap-1.5 text-xs transition-colors duration-200"
               :class="valid ? 'text-success' : 'text-foreground-muted'"
             >
-              <div
-                class="w-1.5 h-1.5 rounded-full"
-                :class="valid ? 'bg-success' : 'bg-foreground-muted/40'"
+              <Check
+                v-if="valid"
+                class="w-3 h-3 shrink-0"
+                aria-hidden="true"
               />
-              <span>{{ formatCheckLabel(key) }}</span>
+              <X
+                v-else
+                class="w-3 h-3 shrink-0"
+                aria-hidden="true"
+              />
+              <span>{{ formatCheckLabel(key) }}<span class="sr-only">{{ valid ? ', met' : ', not met' }}</span></span>
             </div>
           </div>
         </div>
 
+        <!-- role="alert" so a failed first-run attempt is announced; the block
+             is conditionally rendered, so the insertion is the announcement.
+             Tokens match Login's equivalent block rather than hand-rolled
+             danger alphas, so the two entry screens agree. -->
         <div
           v-if="error"
-          class="bg-danger/10 border border-danger/30 rounded-md px-4 py-3 flex items-start gap-3"
+          class="bg-danger-tint border border-danger-ring rounded-md px-4 py-3 flex items-start gap-3"
+          role="alert"
         >
-          <AlertCircle class="w-5 h-5 text-danger shrink-0 mt-0.5" />
-          <p class="text-sm text-danger">
+          <AlertCircle
+            class="w-5 h-5 text-danger-fg shrink-0 mt-0.5"
+            aria-hidden="true"
+          />
+          <p class="text-sm text-danger-fg">
             {{ error }}
           </p>
         </div>
@@ -146,7 +171,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertCircle, Eye, EyeOff, Copy } from '@lucide/vue'
+import { AlertCircle, Check, Copy, Eye, EyeOff, X } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import OrvaLogo from '@/components/OrvaLogo.vue'
 import { useAuthStore } from '@/stores/auth'

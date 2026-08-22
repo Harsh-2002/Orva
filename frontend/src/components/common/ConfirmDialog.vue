@@ -34,7 +34,7 @@
             <div
               v-if="!confirm.promptMode"
               class="shrink-0 w-9 h-9 rounded-full flex items-center justify-center"
-              :class="confirm.danger ? 'bg-red-500/15 text-red-400' : 'bg-primary/15 text-primary'"
+              :class="confirm.danger ? 'bg-danger-tint text-danger-fg' : 'bg-primary/15 text-primary'"
             >
               <AlertTriangle
                 v-if="confirm.danger"
@@ -64,7 +64,7 @@
                 v-model="confirm.promptValue"
                 :placeholder="confirm.promptPlaceholder"
                 type="text"
-                class="mt-3 w-full bg-background border border-border rounded-md px-3 py-2 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="mt-3 w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
                 @keydown.enter.stop.prevent="confirm.settle(true)"
               >
             </div>
@@ -145,10 +145,17 @@ watch(
 const onKey = (e) => {
   if (!confirm.visible) return
   if (e.key === 'Escape') confirm.settle(false)
-  // Enter on prompt-mode is handled by the input's @keydown.enter so the
-  // typed value commits cleanly; the global Enter handler only fires for
-  // confirm/notify dialogs without a focused input.
-  if (e.key === 'Enter' && !confirm.promptMode) confirm.settle(true)
+  // There is deliberately no global Enter handler. There used to be one, and it
+  // confirmed the dialog no matter what was focused: the focus trap lands on the
+  // first focusable descendant, which is Cancel, so Enter on Cancel dispatched a
+  // keydown that bubbled to window and settled true. Cancel's own settle(false)
+  // then no-opped, because the store nulls its resolver on the first settle. The
+  // net effect was that Enter on Cancel deleted the function, and that dialog is
+  // the single confirmation behind delete, bulk delete, key revocation, firewall
+  // rule deletion and backup restore.
+  //
+  // Enter needs no handler here: it already activates whichever button has focus,
+  // natively. Prompt mode commits through the input's own @keydown.enter above.
 }
 
 onMounted(() => window.addEventListener('keydown', onKey))

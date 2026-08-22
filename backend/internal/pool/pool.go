@@ -926,7 +926,11 @@ func buildEnv(fn *database.Function) map[string]string {
 	// artifact rather than the raw .ts source. For non-TS deploys this
 	// is just the user-supplied entrypoint (handler.js / handler.py),
 	// matching what the adapter would have defaulted to anyway.
-	if fn.Entrypoint != "" {
+	// The build output when the build moved it (TypeScript), otherwise the file
+	// the operator authored. Only these two differ, and only for tsc.
+	if ep := fn.RunEntrypoint; ep != "" {
+		env["ORVA_ENTRYPOINT"] = ep
+	} else if fn.Entrypoint != "" {
 		env["ORVA_ENTRYPOINT"] = fn.Entrypoint
 	}
 	return env

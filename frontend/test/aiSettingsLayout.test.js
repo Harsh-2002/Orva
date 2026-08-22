@@ -20,8 +20,30 @@ test('wide model menus fill their settings column without changing compact chat 
 test('desktop popovers choose a direction from available viewport space', () => {
   assert.match(popover, /const spaceBelow =/)
   assert.match(popover, /const spaceAbove =/)
-  assert.match(popover, /const opensDown =/)
-  assert.match(popover, /top: `\$\{top\}px`/)
+  assert.match(popover, /spaceAbove > spaceBelow/)
+})
+
+// The panel is anchored by the edge nearest its trigger, and capped to the space
+// on that side.
+//
+// The previous version computed a `top` from the panel's CURRENT height on every
+// call. A menu whose contents arrive asynchronously (the model list) was measured
+// while nearly empty, so the direction and offset were chosen for a panel about
+// 40px tall and the panel then grew somewhere else. Pinning `bottom` when opening
+// upward means the anchor cannot drift while the height changes.
+test('a popover stays anchored to its trigger while its contents load', () => {
+  assert.match(popover, /bottom: `\$\{window\.innerHeight - r\.top \+ gap\}px`/)
+  assert.match(popover, /maxHeight: `\$\{maxHeight\}px`/)
+  // A cap without a scroller is just a clip.
+  assert.match(popover, /class="fixed z-50[^"]*overflow-y-auto/)
+  assert.match(popover, /ResizeObserver/)
+})
+
+// The bottom sheet is a touch affordance. Keying it off width alone turned a
+// narrow desktop window into a phone, which is why the menu appeared to open
+// somewhere unrelated to the control that summoned it.
+test('the bottom sheet is reserved for coarse pointers', () => {
+  assert.match(popover, /matchMedia\('\(max-width: 639px\) and \(pointer: coarse\)'\)/)
 })
 
 test('the agent loop budget stays an internal guardrail', () => {

@@ -434,5 +434,12 @@ export const getInboundWebhook = (fnId, id) =>
 export const updateInboundWebhook = (fnId, id, body) =>
   apiClient.put(`/functions/${encodeURIComponent(fnId)}/inbound-webhooks/${id}`, body)
 
+// Ask the server for the headers that make `body` verify against this trigger.
+// It signs with the stored secret -- the operator is never asked to paste back
+// a secret Orva already has, and every signature format works, not just the two
+// a browser can compute. The secret itself is never returned.
+export const signInboundWebhook = (fnIdOrName, id, body) =>
+  apiClient.post(`/functions/${fnIdOrName}/inbound-webhooks/${id}/sign`, { body })
+
 export const deleteInboundWebhook = (fnId, id) =>
   apiClient.delete(`/functions/${encodeURIComponent(fnId)}/inbound-webhooks/${id}`)

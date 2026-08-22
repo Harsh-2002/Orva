@@ -5,8 +5,8 @@
 #   1. Deploy code A → record code_hash_A + deployment_id_A → invoke → assert "A"
 #   2. Deploy code B (different content) → invoke → assert "B"
 #   3. Rollback to deployment_id_A → invoke → assert "A"
-#   4. Confirm a new deployment row exists with source='rollback',
-#      parent_deployment_id=dep_A
+#   4. Confirm rollback PROMOTED dep_A rather than appending a row:
+#      active_deployment_id == dep_A and the row count is unchanged
 #   5. Rollback forward to deployment_id_B → invoke → assert "B"
 
 set -euo pipefail
@@ -75,21 +75,25 @@ respB=$(invoke_body)
 echo "# 3: rollback to A (deployment_id=$depA)"
 rollResp=$("${CURL[@]}" -X POST "$BASE/api/v1/functions/$fid/rollback" \
     -H "Content-Type: application/json" -d "{\"deployment_id\":\"$depA\"}")
-echo "$rollResp" | jq -e '.status == "succeeded" and .source == "rollback"' >/dev/null \
-    && check "rollback response shape" ok \
-    || check "rollback response shape" fail "got: $rollResp"
-parent=$(echo "$rollResp" | jq -r '.parent_deployment_id')
-[ "$parent" = "$depA" ] && check "rollback parent_deployment_id matches" ok || check "rollback parent_deployment_id" fail "got: $parent"
+# Rollback PROMOTES an existing deployment; it does not append a synthetic
+# "rollback" row. The response is therefore the target deployment itself, and
+# the function's active_deployment_id now points at it.
+echo "$rollResp" | jq -e --arg d "$depA" '.status == "succeeded" and .id == $d' >/dev/null \
+    && check "rollback returns the promoted deployment" ok \
+    || check "rollback returns the promoted deployment" fail "got: $rollResp"
+active=$("${CURL[@]}" "$BASE/api/v1/functions/$fid" | jq -r '.active_deployment_id')
+[ "$active" = "$depA" ] && check "active_deployment_id moved to A" ok || check "active_deployment_id moved to A" fail "got: $active"
 
 # Drain the old worker before invoke so we don't hit a zombie.
 sleep 1
 respAfterRoll=$(invoke_body)
 [ "$(echo "$respAfterRoll" | jq -r '.which')" = "A" ] && check "invoke after rollback returns A" ok || check "invoke after rollback" fail "got: $respAfterRoll"
 
-# 4. Deployments table now has at least 3 rows for this fn.
+# 4. Rolling back must NOT have grown the history. Two deploys were made, so
+#    there are exactly two rows; the old model would show three by now.
 deps=$("${CURL[@]}" "$BASE/api/v1/functions/$fid/deployments?limit=20")
 n=$(echo "$deps" | jq -r '.deployments | length')
-[ "$n" -ge 3 ] && check "deployments table has $n rows (>=3)" ok || check "deployments count" fail "got: $n"
+[ "$n" -eq 2 ] && check "rollback added no new deployment row (n=$n)" ok || check "rollback added no new deployment row" fail "got: $n"
 
 # 5. Roll forward to B
 echo "# 5: rollback forward to B (deployment_id=$depB)"
@@ -100,12 +104,9 @@ respFwd=$(invoke_body)
 [ "$(echo "$respFwd" | jq -r '.which')" = "B" ] && check "roll-forward returns B" ok || check "roll-forward" fail "got: $respFwd"
 
 # 6. Rollback to a no-op (already-active version) should be rejected.
-# Use the most-recent succeeded rollback row whose code_hash == fn.code_hash —
-# i.e. ask the server "what's the active deployment". depB still has the
-# right code_hash but isn't the active *row* (the roll-forward in step 5
-# created a synthetic 'rollback' row that supersedes it). Either way the
-# handler compares hashes, not row IDs, so depB should still trigger the
-# "already active" rejection.
+# After the roll-forward in step 5, depB IS the active row -- there is no
+# synthetic row in between any more -- so rolling onto it again changes
+# nothing and the handler rejects it.
 echo "# 6: rollback to active (no-op) → 400 VALIDATION"
 noop=$(curl -s -i -H "X-Orva-API-Key: $KEY" -H "Content-Type: application/json" \
     -X POST "$BASE/api/v1/functions/$fid/rollback" -d "{\"deployment_id\":\"$depB\"}")

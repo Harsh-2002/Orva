@@ -11,10 +11,10 @@
           aria-hidden="true"
         /> All traces
       </button>
-      <h1 class="text-xl font-semibold text-white tracking-headline">
+      <h1 class="text-xl font-semibold text-white tracking-tight">
         Trace diagnostics
       </h1>
-      <p class="text-sm text-foreground-muted mt-1.5 leading-body">
+      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
         Follow work across functions without leaving the trace.
       </p>
     </header>

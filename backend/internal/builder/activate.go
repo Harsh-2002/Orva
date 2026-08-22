@@ -73,3 +73,30 @@ func ResolveActiveHash(dataDir, fnID string) string {
 	}
 	return hash
 }
+
+// RunEntrypointFor reports the file a version actually executes, resolved from
+// what that version has on disk rather than from what a row remembers.
+//
+// It returns "" when the version runs its authored file directly, matching the
+// convention that an empty run_entrypoint means "same as entrypoint".
+//
+// Rollback needs this because a deployment snapshot written before
+// run_entrypoint existed carries no value, and applying that absence as an
+// empty string points a compiled TypeScript version back at its .ts source —
+// which Node cannot execute, so every invocation of the rolled-back version
+// fails with WORKER_CRASHED. The compiled output is sitting in the version
+// directory either way, so deriving beats remembering.
+func RunEntrypointFor(dataDir, fnID, codeHash, authored string) string {
+	if authored == "" || codeHash == "" {
+		return ""
+	}
+	fnDir, err := FunctionDir(dataDir, fnID)
+	if err != nil {
+		return ""
+	}
+	resolved := resolveCachedEntrypoint(filepath.Join(fnDir, "versions", codeHash), authored)
+	if resolved == authored {
+		return ""
+	}
+	return resolved
+}

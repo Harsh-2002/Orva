@@ -1,4 +1,5 @@
-// Shared highlight.js instance for the chat UI. hljs/lib/core is a singleton
+// Shared highlight.js instance for every surface that renders code: the chat
+// UI and the Docs page. hljs/lib/core is a singleton
 // module, so registering languages here makes them available to every importer
 // (MessagePart's markdown fences, CodeBlock's standalone blocks, tool-call JSON).
 // Centralising the language set + theme import keeps the two consumers in sync
@@ -12,7 +13,11 @@ import bash from 'highlight.js/lib/languages/bash'
 import xml from 'highlight.js/lib/languages/xml'
 import css from 'highlight.js/lib/languages/css'
 import yaml from 'highlight.js/lib/languages/yaml'
-import 'highlight.js/styles/github-dark.css'
+import http from 'highlight.js/lib/languages/http'
+// Token colours come from the dashboard's own theme tokens, not the vendored
+// GitHub palette. See highlight.css for the mapping and why it is scoped the
+// way it is.
+import './highlight.css'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('typescript', typescript)
@@ -22,6 +27,7 @@ hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('xml', xml)
 hljs.registerLanguage('css', css)
 hljs.registerLanguage('yaml', yaml)
+hljs.registerLanguage('http', http)
 
 // Common aliases the model emits in fences but hljs doesn't register by default.
 const ALIASES = { js: 'javascript', ts: 'typescript', py: 'python', sh: 'bash', shell: 'bash', yml: 'yaml', html: 'xml' }

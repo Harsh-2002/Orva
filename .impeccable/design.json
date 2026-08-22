@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-11T08:18:00Z",
+  "generatedAt": "2026-08-22T17:45:00Z",
   "title": "Design System: Orva",
   "extensions": {
     "colorMeta": {
@@ -133,32 +133,120 @@
           "oklch(90% 0.12 144)",
           "oklch(96% 0.05 144)"
         ]
+      },
+      "runtime-node": {
+        "role": "accent",
+        "displayName": "Node Moss",
+        "canonical": "oklch(75% 0.102 138)",
+        "tonalRamp": [
+          "oklch(30% 0.046 138)",
+          "oklch(42% 0.066 138)",
+          "oklch(54% 0.087 138)",
+          "oklch(64% 0.102 138)",
+          "oklch(75% 0.102 138)",
+          "oklch(82% 0.087 138)",
+          "oklch(90% 0.061 138)",
+          "oklch(96% 0.025 138)"
+        ]
+      },
+      "runtime-python": {
+        "role": "accent",
+        "displayName": "Python Slate Blue",
+        "canonical": "oklch(72% 0.078 251)",
+        "tonalRamp": [
+          "oklch(30% 0.035 251)",
+          "oklch(42% 0.051 251)",
+          "oklch(54% 0.066 251)",
+          "oklch(64% 0.078 251)",
+          "oklch(75% 0.078 251)",
+          "oklch(82% 0.066 251)",
+          "oklch(90% 0.047 251)",
+          "oklch(96% 0.019 251)"
+        ]
       }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "Onboarding hero, 404 wordmark. Reserved for product-framing moments." },
-      "headline": { "displayName": "Page Header", "purpose": "Every dashboard view's H1. The single standardised heading style." },
-      "title": { "displayName": "Panel Title", "purpose": "Modal headers, drawer headers, editor panel titles." },
-      "body": { "displayName": "Operator Body", "purpose": "Page subheads, table cells, paragraph copy. The dashboard default." },
-      "label": { "displayName": "Section Caption", "purpose": "Uppercase tracked captions inside cards. Promote to h2/h3 in markup." },
-      "mono": { "displayName": "Operator Mono", "purpose": "Anything an operator compares digit-by-digit. UUIDs, MB, ports, methods." }
+      "display": {
+        "displayName": "Display",
+        "purpose": "Onboarding hero, 404 wordmark. Reserved for product-framing moments."
+      },
+      "headline": {
+        "displayName": "Page Header",
+        "purpose": "Every dashboard view's H1. The single standardised heading style."
+      },
+      "title": {
+        "displayName": "Panel Title",
+        "purpose": "Modal headers, drawer headers, editor panel titles."
+      },
+      "body": {
+        "displayName": "Operator Body",
+        "purpose": "Page subheads, table cells, paragraph copy. The dashboard default."
+      },
+      "label": {
+        "displayName": "Section Caption",
+        "purpose": "Uppercase tracked captions inside cards. Promote to h2/h3 in markup."
+      },
+      "mono": {
+        "displayName": "Operator Mono",
+        "purpose": "Anything an operator compares digit-by-digit. UUIDs, MB, ports, methods."
+      }
     },
     "shadows": [
-      { "name": "cta-glow",       "value": "0 4px 6px -1px rgba(85,63,131,0.20), 0 2px 4px -2px rgba(85,63,131,0.20)", "purpose": "Primary buttons. Hue-matched soft lift." },
-      { "name": "danger-glow",    "value": "0 4px 6px -1px rgba(239,68,68,0.30), 0 2px 4px -2px rgba(239,68,68,0.30)", "purpose": "Destructive buttons. Slightly stronger than CTA glow so the operator pauses." },
-      { "name": "sidebar-active", "value": "0 10px 15px -3px rgba(38,18,87,0.20)", "purpose": "Currently-routed nav item; anchors 'you are here'." },
-      { "name": "modal-drop",     "value": "0 25px 50px -12px rgba(0,0,0,0.50)", "purpose": "Modal containers. Separates dialog from dimmed page." }
+      {
+        "name": "cta-glow",
+        "value": "0 4px 6px -1px rgba(85,63,131,0.20), 0 2px 4px -2px rgba(85,63,131,0.20)",
+        "purpose": "Primary buttons. Hue-matched soft lift."
+      },
+      {
+        "name": "danger-glow",
+        "value": "0 4px 6px -1px rgba(239,68,68,0.30), 0 2px 4px -2px rgba(239,68,68,0.30)",
+        "purpose": "Destructive buttons. Slightly stronger than CTA glow so the operator pauses."
+      },
+      {
+        "name": "sidebar-active",
+        "value": "0 10px 15px -3px rgba(38,18,87,0.20)",
+        "purpose": "Currently-routed nav item; anchors 'you are here'."
+      },
+      {
+        "name": "modal-drop",
+        "value": "0 25px 50px -12px rgba(0,0,0,0.50)",
+        "purpose": "Modal containers. Separates dialog from dimmed page."
+      }
     ],
     "motion": [
-      { "name": "transition-colors", "value": "color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out", "purpose": "Default state-change feel. Used across buttons, links, hover surfaces." },
-      { "name": "fade-150",          "value": "opacity 150ms cubic-bezier(0.16, 1, 0.3, 1)",                                   "purpose": "Modal/drawer/toast enter/leave." },
-      { "name": "fade-120",          "value": "opacity 120ms ease-out",                                                       "purpose": "Sidebar drawer backdrop fade. Short on purpose so rapid open/close clicks don't queue visible animations." }
+      {
+        "name": "transition-colors",
+        "value": "color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out",
+        "purpose": "Default state-change feel. Used across buttons, links, hover surfaces."
+      },
+      {
+        "name": "fade-150",
+        "value": "opacity 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Modal/drawer/toast enter/leave."
+      },
+      {
+        "name": "fade-120",
+        "value": "opacity 120ms ease-out",
+        "purpose": "Sidebar drawer backdrop fade. Short on purpose so rapid open/close clicks don't queue visible animations."
+      }
     ],
     "breakpoints": [
-      { "name": "sm", "value": "640px" },
-      { "name": "md", "value": "768px" },
-      { "name": "lg", "value": "1024px" },
-      { "name": "xl", "value": "1280px" }
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
     ]
   },
   "components": [
@@ -223,15 +311,51 @@
       "No copy uses em dashes."
     ],
     "rules": [
-      { "name": "The One Accent Rule",         "section": "colors",     "body": "Muted violet appears on roughly 5 to 10 percent of any given screen. Primary CTAs, the active sidebar item, the selected filter chip. Anywhere else, ask whether the page actually needs an accent or whether a border + foreground-muted will read more confidently." },
-      { "name": "The Graphite Neutral Rule",   "section": "colors",     "body": "Canvas and elevated surfaces stay neutral graphite. Violet communicates action, selection, and focus; routine text uses soft light gray." },
-      { "name": "The Semantic Status Rule",    "section": "colors",     "body": "Status colour is reserved for status. Use the semantic tokens (success, warning, danger) and their /15 tint backgrounds and /30 borders. Reaching for raw Tailwind palette colours is forbidden." },
-      { "name": "The Operator's Mono Rule",    "section": "typography", "body": "If two characters at the same column should be visually compared (a UUID against another UUID, a memory reading against the limit), they are mono." },
-      { "name": "The No-Em-Dash Rule",         "section": "typography", "body": "Em dashes are forbidden in any user-facing string. Use periods, commas, colons, semicolons, or parentheses." },
-      { "name": "The Heading Hierarchy Rule",  "section": "typography", "body": "Every page has exactly one H1 (the standardised page header). Section captions inside the page must be real H2 / H3 in markup, even when styled as small uppercase tracked labels." },
-      { "name": "The Flat-By-Default Rule",    "section": "elevation",  "body": "Cards, list items, drawers, and inline panels carry no shadow at rest. Depth is read from borders and the background -> surface -> surface-hover ladder." },
-      { "name": "The Earned Blur Rule",        "section": "elevation",  "body": "backdrop-blur exists only on the dimmed background that sits behind a modal or drawer. It is not decoration." },
-      { "name": "The Progressive Disclosure Rule", "section": "components", "body": "Keep decision-ready state visible. Place setup forms, implementation metadata, and advanced detail behind native disclosure controls." }
+      {
+        "name": "The One Accent Rule",
+        "section": "colors",
+        "body": "Muted violet appears on roughly 5 to 10 percent of any given screen. Primary CTAs, the active sidebar item, the selected filter chip. Anywhere else, ask whether the page actually needs an accent or whether a border + foreground-muted will read more confidently."
+      },
+      {
+        "name": "The Graphite Neutral Rule",
+        "section": "colors",
+        "body": "Canvas and elevated surfaces stay neutral graphite. Violet communicates action, selection, and focus; routine text uses soft light gray."
+      },
+      {
+        "name": "The Semantic Status Rule",
+        "section": "colors",
+        "body": "Status colour is reserved for status. Use the semantic tokens (success, warning, danger) and their /15 tint backgrounds and /30 borders. Reaching for raw Tailwind palette colours is forbidden."
+      },
+      {
+        "name": "The Operator's Mono Rule",
+        "section": "typography",
+        "body": "If two characters at the same column should be visually compared (a UUID against another UUID, a memory reading against the limit), they are mono."
+      },
+      {
+        "name": "The No-Em-Dash Rule",
+        "section": "typography",
+        "body": "Em dashes are forbidden in any user-facing string. Use periods, commas, colons, semicolons, or parentheses."
+      },
+      {
+        "name": "The Heading Hierarchy Rule",
+        "section": "typography",
+        "body": "Every page has exactly one H1 (the standardised page header). Section captions inside the page must be real H2 / H3 in markup, even when styled as small uppercase tracked labels."
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "section": "elevation",
+        "body": "Cards, list items, drawers, and inline panels carry no shadow at rest. Depth is read from borders and the background -> surface -> surface-hover ladder."
+      },
+      {
+        "name": "The Earned Blur Rule",
+        "section": "elevation",
+        "body": "backdrop-blur exists only on the dimmed background that sits behind a modal or drawer. It is not decoration."
+      },
+      {
+        "name": "The Progressive Disclosure Rule",
+        "section": "components",
+        "body": "Keep decision-ready state visible. Place setup forms, implementation metadata, and advanced detail behind native disclosure controls."
+      }
     ],
     "dos": [
       "Do keep page heads to one line above one body subhead, both standardised: text-xl font-semibold text-white tracking-tight over text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed.",

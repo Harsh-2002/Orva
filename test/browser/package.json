@@ -1,0 +1,13 @@
+{
+  "name": "orva-browser-harness",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Renders the shipped dashboard in a real browser and asserts geometry the source cannot prove.",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

@@ -26,7 +26,7 @@
          filters appear inline as compact chips. Active filters render
          as removable pills next to the chips. -->
     <div class="flex items-center gap-2 flex-wrap">
-      <div class="relative flex-1 min-w-[280px] max-w-[440px]">
+      <div class="relative flex-1 min-w-0 sm:min-w-[280px] max-w-full sm:max-w-[440px]">
         <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
         <input
           v-model="filters.q"
@@ -70,7 +70,7 @@
 
       <button
         v-if="hasActiveFilter"
-        class="text-xs text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
+        class="touch-expand-xs text-xs text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
         @click="clearFilters"
       >
         Clear
@@ -104,51 +104,76 @@
 
     <div
       v-else
-      class="bg-background border border-border rounded-lg overflow-x-auto"
+      class="bg-background border border-border rounded-lg overflow-x-auto scrollable"
     >
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
           v-for="log in logs"
           :key="log.id"
-          class="px-4 py-3 cursor-pointer transition-colors"
+          class="px-4 py-3 transition-colors"
           :class="selected.has(log.id) ? 'bg-surface/30' : 'hover:bg-surface/50'"
-          @click="openDetail(log)"
         >
-          <div class="flex items-start gap-3">
-            <input
-              :checked="selected.has(log.id)"
-              type="checkbox"
-              class="mt-0.5 w-3.5 h-3.5 rounded border-border bg-background shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              @click.stop
-              @change="toggleOne(log.id)"
+          <div class="flex items-start gap-1">
+            <!-- The box itself stays 14px so the row keeps its density; the
+                 label around it carries the touch target. A bare checkbox here
+                 was a 13px-wide target with no clickable label beside it, since
+                 the card body is the drawer trigger rather than this control's
+                 label. -->
+            <label
+              class="touch-expand-iconbtn -ml-2 flex shrink-0 cursor-pointer items-start justify-center px-2 pt-0.5"
+              :aria-label="`Select invocation ${log.id}`"
             >
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center justify-between gap-2">
-                <span class="font-medium text-white truncate">{{ getFnName(log.function_id) }}</span>
-                <StatusBadge :status="log.status" />
-              </div>
-              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
-                <span>{{ formatTime(log.started_at) }}</span>
-                <span
-                  v-if="log.duration_ms != null"
-                  class="font-mono"
-                >{{ log.duration_ms }}ms</span>
-                <span
-                  v-if="log.status_code != null"
-                  class="font-mono"
-                >HTTP {{ log.status_code }}</span>
-                <span
-                  v-if="log.cold_start"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-info-fg border-info-ring"
-                >cold</span>
-              </div>
-              <div
-                v-if="log.trace_id"
-                class="mt-1 text-[11px] text-foreground-muted font-mono break-all"
+              <input
+                :checked="selected.has(log.id)"
+                type="checkbox"
+                class="mt-0.5 w-3.5 h-3.5 rounded border-border bg-background shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                @change="toggleOne(log.id)"
               >
+            </label>
+            <div class="min-w-0 flex-1">
+              <!-- The card body is the drawer trigger. It has to be a real
+                   button: the @click used to sit on the bare <li>, which put
+                   the detail drawer out of reach of the keyboard entirely. -->
+              <button
+                type="button"
+                class="touch-expand-sm w-full text-left cursor-pointer rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :aria-label="detailLabel(log)"
+                @click="openDetail(log)"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-medium text-white truncate">{{ getFnName(log.function_id) }}</span>
+                  <StatusBadge :status="log.status" />
+                </div>
+                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
+                  <span>{{ formatTime(log.started_at) }}</span>
+                  <span
+                    v-if="log.duration_ms != null"
+                    class="font-mono"
+                  >{{ log.duration_ms }}ms</span>
+                  <span
+                    v-if="log.status_code != null"
+                    class="font-mono"
+                  >HTTP {{ log.status_code }}</span>
+                  <span
+                    v-if="log.cold_start"
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border bg-background font-mono text-info-fg border-info-ring"
+                  >cold</span>
+                </div>
+              </button>
+              <!-- The trace id was inert text on phones while the desktop cell
+                   linked out. Same destination, same affordance, kept outside
+                   the card button so it stays independently operable. -->
+              <button
+                v-if="log.trace_id"
+                type="button"
+                class="touch-expand-xs mt-1 inline-flex items-center gap-1 py-1 text-[11px] text-foreground-muted hover:text-white font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :title="log.trace_id"
+                @click="openTrace(log.trace_id)"
+              >
+                <Network class="w-3 h-3" />
                 trace {{ log.trace_id.substring(0, 11) }}
-              </div>
+              </button>
             </div>
           </div>
         </li>
@@ -163,38 +188,38 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3 w-8">
+            <th class="px-6 py-3 w-8">
               <input
                 ref="selectAllRef"
                 type="checkbox"
                 :checked="allChecked"
                 aria-label="Select all invocations"
-                class="w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 @change="toggleAll"
               >
             </th>
-            <th class="px-4 py-3 font-medium">
+            <th class="px-6 py-3 font-medium">
               Time
             </th>
-            <th class="px-4 py-3 font-medium">
+            <th class="px-6 py-3 font-medium">
               Function
             </th>
-            <th class="px-4 py-3 font-medium">
+            <th class="px-6 py-3 font-medium">
               Status
             </th>
-            <th class="px-4 py-3 font-medium hidden md:table-cell">
+            <th class="px-6 py-3 font-medium hidden md:table-cell">
               Cold
             </th>
-            <th class="px-4 py-3 font-medium hidden lg:table-cell">
+            <th class="px-6 py-3 font-medium hidden lg:table-cell">
               HTTP
             </th>
-            <th class="px-4 py-3 font-medium hidden sm:table-cell">
+            <th class="px-6 py-3 font-medium hidden sm:table-cell">
               Duration
             </th>
-            <th class="px-4 py-3 font-medium hidden lg:table-cell">
+            <th class="px-6 py-3 font-medium hidden lg:table-cell">
               Trace
             </th>
-            <th class="px-4 py-3 font-medium text-right hidden xl:table-cell">
+            <th class="px-6 py-3 font-medium text-right hidden xl:table-cell">
               ID
             </th>
           </tr>
@@ -208,32 +233,56 @@
             @click="openDetail(log)"
           >
             <td
-              class="px-4 py-3 align-middle"
+              class="px-6 py-4 align-middle"
               @click.stop
             >
               <input
                 :checked="selected.has(log.id)"
                 type="checkbox"
                 aria-label="Select invocation"
-                class="w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 @change="toggleOne(log.id)"
               >
             </td>
-            <td class="px-4 py-3 text-foreground">
-              {{ formatTime(log.started_at) }}
+            <td class="px-6 py-4 text-foreground">
+              <!-- Row clicks stay on the <tr> for the mouse, but the drawer
+                   needs a real control to be reachable by keyboard. Rendered
+                   bare, so the desktop cell looks exactly as it did. -->
+              <button
+                type="button"
+                class="touch-expand-sm text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :aria-label="detailLabel(log)"
+                @click.stop="openDetail(log)"
+              >
+                {{ formatTime(log.started_at) }}
+              </button>
+              <!-- The Trace column only exists from lg up, so between sm and
+                   lg the trace id had nowhere to render. Carry it here. -->
+              <button
+                v-if="log.trace_id"
+                type="button"
+                class="touch-expand-xs lg:hidden mt-1 flex items-center gap-1 text-xs text-foreground-muted hover:text-white font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :title="log.trace_id"
+                @click.stop="openTrace(log.trace_id)"
+              >
+                <Network class="w-3 h-3" />
+                {{ log.trace_id.substring(0, 11) }}
+              </button>
             </td>
-            <td class="px-4 py-3 font-medium text-white">
-              <span
-                class="hover:underline"
+            <td class="px-6 py-4 font-medium text-white">
+              <button
+                type="button"
+                class="touch-expand-sm text-left hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :aria-label="`Open function ${getFnName(log.function_id)}`"
                 @click.stop="router.push('/functions/' + getFnName(log.function_id))"
               >
                 {{ getFnName(log.function_id) }}
-              </span>
+              </button>
             </td>
-            <td class="px-4 py-3">
+            <td class="px-6 py-4">
               <StatusBadge :status="log.status" />
             </td>
-            <td class="px-4 py-3 hidden md:table-cell">
+            <td class="px-6 py-4 hidden md:table-cell">
               <span
                 v-if="log.cold_start"
                 class="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-background font-mono text-info-fg border-info-ring"
@@ -245,18 +294,18 @@
                 class="text-foreground-muted text-xs"
               >{{ EMPTY }}</span>
             </td>
-            <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden lg:table-cell">
+            <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden lg:table-cell">
               {{ log.status_code ?? EMPTY }}
             </td>
-            <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden sm:table-cell">
+            <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden sm:table-cell">
               {{ log.duration_ms != null ? log.duration_ms + 'ms' : EMPTY }}
             </td>
-            <td class="px-4 py-3 hidden lg:table-cell">
+            <td class="px-6 py-4 hidden lg:table-cell">
               <button
                 v-if="log.trace_id"
                 class="text-foreground-muted hover:text-white font-mono text-xs underline-offset-2 hover:underline inline-flex items-center gap-1"
                 :title="log.trace_id"
-                @click.stop="router.push('/traces/' + log.trace_id)"
+                @click.stop="openTrace(log.trace_id)"
               >
                 <Network class="w-3 h-3" />
                 {{ log.trace_id.substring(0, 11) }}
@@ -266,7 +315,7 @@
                 class="text-foreground-muted"
               >{{ EMPTY }}</span>
             </td>
-            <td class="px-4 py-3 text-right text-foreground-muted font-mono text-xs hidden xl:table-cell">
+            <td class="px-6 py-4 text-right text-foreground-muted font-mono text-xs hidden xl:table-cell">
               {{ log.id?.substring(0, 12) }}
             </td>
           </tr>
@@ -285,7 +334,7 @@
         class="flex justify-center border-t border-border py-3 bg-surface/30"
       >
         <button
-          class="text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
+          class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
           :disabled="loading"
           @click="loadMore"
         >
@@ -298,15 +347,19 @@
       </div>
     </div>
 
+    <!-- Floating bulk-action bar. The arbitrary bottom value adds
+         env(safe-area-inset-bottom) so the pill clears the iOS home
+         indicator in PWA / fullscreen mode; the inset is 0 on every other
+         device, which puts the pill back on its 1 rem floor. -->
     <transition name="fade">
       <div
         v-if="selected.size"
-        class="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-lg rounded-full pl-4 pr-2 py-2"
+        class="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-lg rounded-full pl-4 pr-2 py-2"
       >
         <span class="text-xs text-white">{{ selected.size }} selected</span>
         <span class="w-px h-4 bg-border" />
         <button
-          class="text-xs text-foreground-muted hover:text-white transition-colors px-2 py-1"
+          class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors px-2 py-1"
           @click="selected = new Set()"
         >
           Clear
@@ -478,7 +531,7 @@
             <div class="pt-1 flex justify-end">
               <button
                 type="button"
-                class="text-[11px] text-foreground-muted hover:text-white px-2 py-1 rounded hover:bg-surface-hover transition-colors"
+                class="touch-expand-xs text-[11px] text-foreground-muted hover:text-white px-2 py-1 rounded hover:bg-surface-hover transition-colors"
                 title="Open the editor with this request prefilled"
                 @click="saveAsFixture"
               >
@@ -529,7 +582,7 @@
             </h3>
             <button
               v-if="stderrText"
-              class="text-xs text-foreground-muted hover:text-white"
+              class="touch-expand-xs text-xs text-foreground-muted hover:text-white"
               @click="copy(stderrText)"
             >
               {{ copied ? 'copied!' : 'copy' }}
@@ -625,7 +678,7 @@ const logLevelClass = (level) => {
     case 'error': return 'text-danger-fg'
     case 'warn':  return 'text-warning-fg'
     case 'debug': return 'text-foreground-muted'
-    default:      return 'text-primary-light'
+    default:      return 'text-info-fg'
   }
 }
 const formatLogTime = (ts) => {
@@ -762,13 +815,19 @@ const suggestFixTooltip = computed(() => {
   return 'Build a paste-ready debug prompt with source + request + stderr'
 })
 
+// Vue resolves to the runtime-only build here, so a `template:` string
+// compiles to nothing: every Stat in the drawer's grid rendered empty.
+// Same markup, expressed as a render function.
 const Stat = {
   props: { label: String, value: [String, Number], mono: Boolean },
-  template: `
-    <div class="bg-surface border border-border rounded p-3">
-      <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">{{ label }}</div>
-      <div class="text-sm text-white" :class="mono && 'font-mono text-xs'">{{ value }}</div>
-    </div>`,
+  setup(p) {
+    return () =>
+      h('div', { class: 'bg-surface border border-border rounded p-3' }, [
+        h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted mb-1' }, p.label),
+        h('div', { class: ['text-sm text-white', p.mono && 'font-mono text-xs'] },
+          p.value == null ? '' : String(p.value)),
+      ])
+  },
 }
 
 // Compact filter chip used in the action bar. Shows the label until
@@ -785,9 +844,12 @@ const FilterChip = defineComponent({
   emits: ['update:modelValue'],
   setup(p, { emit }) {
     const open = ref(false)
+    const triggerRef = ref(null)
     const active = computed(() => p.options.find((o) => o.value === p.modelValue && o.value !== ''))
     const close = () => { open.value = false }
-    const choose = (v) => { emit('update:modelValue', v); close() }
+    // Picking from the menu unmounts it, so hand focus back to the trigger
+    // rather than dropping it on <body>.
+    const choose = (v) => { emit('update:modelValue', v); close(); triggerRef.value?.focus() }
     const clear = (e) => { e.stopPropagation(); emit('update:modelValue', '') }
 
     // Close on outside click. Listener attached on first open + removed
@@ -800,15 +862,25 @@ const FilterChip = defineComponent({
         class: 'fc-root relative',
         onMouseenter: () => { document.addEventListener('mousedown', onDoc) },
         onMouseleave: () => { /* keep listener while open */ },
+        onKeydown: (e) => {
+          if (e.key === 'Escape' && open.value) { close(); triggerRef.value?.focus() }
+        },
       }, [
         // Visual rhythm matches Button variant=chip size=xs (h-7 px-2.5)
         // so this stateful dropdown chip lines up with the flat toggle
         // chips on Jobs.vue / Webhooks.vue. We can't reuse <Button> here
         // because this trigger needs to host a child clear-x and a
-        // dropdown — different shape from a single-action chip.
+        // dropdown — different shape from a single-action chip. Button's
+        // coarse-pointer floor is not inherited with the classes, so
+        // touch-expand-md brings the 28 px target up to 44 px on touch
+        // hardware without moving the desktop height.
         h('button', {
+          ref: triggerRef,
+          type: 'button',
+          'aria-expanded': open.value ? 'true' : 'false',
           class: [
-            'inline-flex items-center gap-1.5 rounded-md border h-7 px-2.5 text-xs transition-colors',
+            'inline-flex items-center gap-1.5 rounded-md border h-7 px-2.5 text-xs transition-colors touch-expand-md',
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
             active.value
               ? 'bg-primary text-primary-foreground border-primary'
               : 'bg-surface text-foreground-muted border-border hover:text-white hover:border-foreground-muted',
@@ -817,11 +889,15 @@ const FilterChip = defineComponent({
         }, [
           h('span', { class: 'text-[10px] uppercase tracking-wider' }, p.label + (active.value ? ':' : '')),
           active.value ? h('span', null, active.value.label) : null,
+          // Mouse-only shortcut: it cannot be a button (this is already one)
+          // and it is not focusable, so it stays hidden from assistive tech.
+          // The keyboard path to the same result is the menu's own reset row.
           active.value
             ? h('span', {
                 class: 'opacity-70 hover:opacity-100 -mr-0.5',
                 onClick: clear,
                 title: 'Clear',
+                'aria-hidden': 'true',
               }, '✕')
             : h(ChevronDown, { class: 'w-3 h-3 opacity-60' }),
         ]),
@@ -829,11 +905,15 @@ const FilterChip = defineComponent({
           ? h('div', {
               class: 'absolute z-30 mt-1 left-0 min-w-[140px] bg-background border border-border rounded-md shadow-xl py-1',
             },
-              p.options.filter(o => o.value !== '').map((o) =>
+              // The empty-value option ("All", "All time") stays in the menu:
+              // it is the only way to clear an active filter without a mouse.
+              p.options.map((o) =>
                 h('button', {
                   key: o.value,
+                  type: 'button',
                   class: [
-                    'w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 transition-colors',
+                    'w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 transition-colors touch-expand-sm',
+                    'focus:outline-none focus-visible:bg-surface-hover focus-visible:text-white',
                     o.value === p.modelValue ? 'text-white' : 'text-foreground-muted hover:text-white hover:bg-surface-hover',
                   ],
                   onClick: () => choose(o.value),
@@ -847,6 +927,13 @@ const FilterChip = defineComponent({
 })
 
 const formatTime = (ts) => (ts ? new Date(ts).toLocaleString() : EMPTY)
+
+// Accessible name for the row trigger: the visible text is just a timestamp,
+// which says nothing about which invocation the drawer would open.
+const detailLabel = (log) =>
+  `Open invocation details for ${getFnName(log.function_id)} at ${formatTime(log.started_at)}`
+
+const openTrace = (traceId) => router.push('/traces/' + traceId)
 
 const formatBytes = (n) => {
   if (n < 1024) return `${n} B`
@@ -872,8 +959,10 @@ const buildParams = (offset) => {
   return p
 }
 
-const fetchLogs = async () => {
-  loading.value = true
+// `silent` is for the live-tail poll: it must not drive the Refresh spinner
+// or disable Load more every five seconds.
+const fetchLogs = async ({ silent = false } = {}) => {
+  if (!silent) loading.value = true
   try {
     const res = await listInvocations(buildParams(0))
     logs.value = res.data.executions || []
@@ -885,7 +974,33 @@ const fetchLogs = async () => {
     // render in place of an endless spinner when we have no rows to show.
     loadError.value = e?.response?.data?.error?.message || e.message || 'Request failed'
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
+  }
+}
+
+// Live tail. The interval used to call fetchLogs, which assigns page 0
+// straight into `logs` — every row the operator had appended with Load more
+// vanished on the next tick. Once they have paged past the first page, merge
+// the fresh page over what we hold instead: rows pushed out of page 0 by
+// newer arrivals keep their place directly below it, so the list stays
+// newest-first. Rows deleted from another session linger until the next
+// explicit refresh, which is much the cheaper of the two wrong answers.
+const pollTick = async () => {
+  if (loading.value) return  // a manual refresh or Load more is mid-flight
+  if (logs.value.length <= PAGE_SIZE) {
+    await fetchLogs({ silent: true })
+    return
+  }
+  try {
+    const res = await listInvocations(buildParams(0))
+    const fresh = res.data.executions || []
+    const freshIds = new Set(fresh.map((l) => l.id))
+    logs.value = [...fresh, ...logs.value.filter((l) => !freshIds.has(l.id))]
+    total.value = res.data.total ?? logs.value.length
+    loadError.value = ''
+  } catch (e) {
+    // A dropped tick is not worth an error state while rows are on screen.
+    console.error('Failed to poll logs:', e)
   }
 }
 
@@ -1162,7 +1277,7 @@ const suggestFix = async () => {
 // interval if onMounted and onActivated both fire on the initial mount.
 const startPolling = () => {
   if (pollTimer) return
-  pollTimer = setInterval(fetchLogs, 5000)
+  pollTimer = setInterval(pollTick, 5000)
 }
 const stopPolling = () => {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }

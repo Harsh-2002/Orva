@@ -25,11 +25,18 @@
   -->
   <button
     :class="[
-      'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 disabled:cursor-not-allowed',
+      // whitespace-nowrap because every size fixes the height. Without it a
+      // label that runs out of room wraps to a second line inside a 38px box
+      // and spills past the border, which is a phone-width failure: the button
+      // is fine on a desktop toolbar and breaks in a narrow drawer or a
+      // two-up mobile action row. Toolbars wrap and their text columns carry
+      // min-w-0, so the button sizes to its label instead of shrinking into it.
+      'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 disabled:cursor-not-allowed',
       sizeClasses,
       variantClasses
     ]"
     :disabled="disabled || loading"
+    :aria-pressed="variant === 'chip' ? active : undefined"
   >
     <svg
       v-if="loading"
@@ -78,16 +85,17 @@ const props = defineProps({
 })
 
 const sizeClasses = computed(() => {
-  // Visible heights stay as-is (xs=28, sm=32, md=40, lg=48). xs and sm
-  // ride below the 44×44 touch-target floor on their own, so we layer a
-  // transparent ::before via touch-expand-* that extends the click region
-  // vertically to 44 px without changing the rendered button bounds. md
-  // and lg are already at-or-above 44 px and don't need expansion.
+  // Visible heights stay dense for mouse users; touch-expand-* raises the
+  // real box to 44 px on coarse pointers only (style.css). Sizes have to be
+  // read against the 95% root, not the nominal scale: h-7=26.6, h-8=30.4,
+  // h-10=38, h-12=45.6 px. Only lg clears 44 on its own, so md — the default,
+  // and the page-header CTA on every view — needs expanding too. It was
+  // previously left out on the assumption that 40 px was already compliant.
   switch (props.size) {
     case 'xs': return 'h-7 px-2.5 text-xs touch-expand-xs'
     case 'sm': return 'h-8 px-3 text-xs touch-expand-sm'
     case 'lg': return 'h-12 px-6 text-base'
-    default:   return 'h-10 px-4 text-sm'
+    default:   return 'h-10 px-4 text-sm touch-expand-md'
   }
 })
 
@@ -96,7 +104,7 @@ const variantClasses = computed(() => {
     case 'secondary':
       return 'bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border shadow-sm'
     case 'danger':
-      return 'bg-danger text-foreground-strong border border-danger hover:bg-danger-fg focus-visible:ring-danger shadow-sm'
+      return 'bg-danger-solid text-foreground-strong border border-danger-solid hover:bg-danger focus-visible:ring-danger shadow-sm'
     case 'ghost':
       return 'bg-transparent text-foreground-muted hover:text-foreground hover:bg-surface-hover'
     case 'chip':

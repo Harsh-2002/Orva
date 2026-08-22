@@ -2,8 +2,10 @@
   <!--
     ReasoningMenu — the brain-icon control in the composer. Picks the reasoning
     effort the request asks the model for: Off / Think / Deep. The brain tints
-    primary whenever reasoning is on, so the current state is legible at a glance
-    without opening the menu.
+    whenever reasoning is on, so the current state is legible at a glance
+    without opening the menu. The tint carries --color-link, not --color-primary:
+    primary is a surface fill, and as a foreground on its own /15 tint it reads
+    at 1.9:1, well under the 4.5:1 the level label needs to be readable at all.
 
     Model-awareness is cosmetic, never a gate: there's no reliable per-model
     capability API, and a custom model like `qwen3.6-27b` reasons without
@@ -13,15 +15,18 @@
     frames actually arrive.
   -->
   <Popover title="Reasoning">
-    <template #trigger="{ toggle }">
+    <template #trigger="{ open, toggle }">
       <button
+        ref="triggerBtn"
         type="button"
         class="touch-expand-sm inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         :class="active
-          ? 'text-primary bg-primary/15 hover:bg-primary/20'
+          ? 'text-link bg-primary/15 hover:bg-primary/20'
           : 'text-foreground-muted hover:text-foreground hover:bg-surface-hover'"
         :title="`Reasoning: ${currentLabel}`"
         aria-label="Reasoning level"
+        aria-haspopup="menu"
+        :aria-expanded="open"
         @click="toggle"
       >
         <Brain class="w-4 h-4 shrink-0" />
@@ -30,7 +35,11 @@
     </template>
 
     <template #default="{ close }">
-      <div class="py-1">
+      <div
+        ref="panelBody"
+        class="py-1"
+        @keydown="(e) => onMenuKeydown(e, close)"
+      >
         <p class="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-label text-foreground-muted">
           Reasoning
         </p>
@@ -47,7 +56,7 @@
           <component
             :is="lv.icon"
             class="w-3.5 h-3.5 shrink-0"
-            :class="store.thinking === lv.v ? 'text-primary' : 'text-foreground-muted'"
+            :class="store.thinking === lv.v ? 'text-link' : 'text-foreground-muted'"
           />
           <span class="flex-1">
             <span class="block">{{ lv.label }}</span>
@@ -55,7 +64,7 @@
           </span>
           <Check
             v-if="store.thinking === lv.v"
-            class="w-3.5 h-3.5 shrink-0 text-primary"
+            class="w-3.5 h-3.5 shrink-0 text-link"
           />
         </button>
         <p
@@ -70,12 +79,19 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Brain, Check, Zap, Sparkles, Ban } from '@lucide/vue'
 import Popover from '@/components/common/Popover.vue'
+import { useMenuFocus } from '@/composables/useMenuFocus'
 import { useAIStore } from '@/stores/ai'
 
 const store = useAIStore()
+
+// Popover teleports its panel out of the composer, so the menu has to take
+// focus itself or a keyboard operator can never reach these three options.
+const triggerBtn = ref(null)
+const panelBody = ref(null)
+const { onMenuKeydown } = useMenuFocus(panelBody, triggerBtn)
 
 const LEVELS = [
   { v: 'off', label: 'Off', hint: 'Answer directly', icon: Ban },

@@ -25,22 +25,29 @@
             <slot />
           </div>
         </div>
+        <!-- Both controls route through Button so they inherit the touch floor
+             and the accent system. They were a raw white pill (the one CTA in
+             the app not using the violet accent) and an unpadded text button
+             about 15px tall, on a toast that is mounted globally and carries the
+             session-refresh action. -->
         <div class="flex flex-col gap-2 shrink-0">
-          <button
+          <Button
             v-if="actionLabel"
-            class="px-3 py-1 rounded text-xs font-medium bg-white text-black hover:bg-foreground-muted transition-colors"
+            size="xs"
+            :loading="actionLoading"
             :disabled="actionLoading"
             @click="$emit('action')"
           >
-            {{ actionLoading ? '…' : actionLabel }}
-          </button>
-          <button
+            {{ actionLabel }}
+          </Button>
+          <Button
             v-if="dismissible"
-            class="text-foreground-muted hover:text-white text-xs"
+            size="xs"
+            variant="ghost"
             @click="$emit('dismiss')"
           >
             Dismiss
-          </button>
+          </Button>
         </div>
       </div>
     </Transition>
@@ -48,6 +55,7 @@
 </template>
 
 <script setup>
+import Button from '@/components/common/Button.vue'
 defineOptions({ name: 'CommonToast' })
 
 defineProps({

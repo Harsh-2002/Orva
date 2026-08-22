@@ -873,10 +873,20 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Request, fn *database.Function, tarballPath, reqID, deployWarning string) {
 	// Always insert a deployments row so clients can observe state.
 	deploymentID := ids.New()
+	// Numbered from the deployment sequence, not from functions.version. That
+	// column is a mutation counter the dashboard's deploy bumps twice per
+	// deploy (once on the config PUT, once on the successful build), which is
+	// why histories used to read v3, v5, v7, v9.
+	nextVersion, err := h.DB.NextDeploymentVersion(fn.ID)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to allocate a version", reqID)
+		removeTempFile(tarballPath)
+		return
+	}
 	dep := &database.Deployment{
 		ID:         deploymentID,
 		FunctionID: fn.ID,
-		Version:    int64(fn.Version + 1),
+		Version:    nextVersion,
 		Status:     "queued",
 		Phase:      "queued",
 	}
@@ -946,6 +956,7 @@ func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Requ
 	fn.CodeHash = result.CodeHash
 	fn.Status = "active"
 	fn.Version++
+	fn.ActiveDeploymentID = deploymentID
 	h.Registry.SetSilent(fn)
 	// See queue.go for rationale — capture the function's full state so
 	// rollback restores env + spawn config alongside the code.
@@ -1025,6 +1036,31 @@ type rollbackRequest struct {
 // no deps to install — only a symlink retarget + DB write + pool drain.
 // Should complete in <50 ms. The per-fn mutex (shared with the queue)
 // serializes this against any deploy in flight.
+// rollbackIsNoOp reports whether restoring targetHash together with
+// targetSnapshot would leave the function exactly as it already is.
+//
+// This used to be `targetHash == fn.CodeHash`, which was wrong in a way that
+// made rollback unusable on the most ordinary history there is. Redeploying
+// unchanged code (a settings tweak, a re-run of CI, a retry) writes a new
+// deployment row with a new version and the SAME code hash. Every historical
+// row on such a function then matched the running hash, so the UI offered
+// Rollback on rows the API refused with "this version is already active" —
+// including rows whose env vars and limits genuinely differed, which is the
+// state rollback exists to restore.
+//
+// Code hash and snapshot are both part of "the same version". A nil snapshot
+// means the row predates snapshotting: nothing else is known, so a matching
+// hash is the whole story and the rollback really would be a no-op.
+func rollbackIsNoOp(targetHash string, target *database.DeploymentSnapshot, fn *database.Function) bool {
+	if targetHash != fn.CodeHash {
+		return false
+	}
+	if target == nil {
+		return true
+	}
+	return target.Equal(database.SnapshotFromFunction(fn))
+}
+
 func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	rawID := r.PathValue("fn_id")
@@ -1075,9 +1111,9 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	// and rollback-by-code-hash (looks up the most recent succeeded
 	// deployment with that hash so we can still restore env + settings).
 	var (
-		targetHash       = req.CodeHash
-		parentDeployment *string
-		targetSnapshot   *database.DeploymentSnapshot
+		targetHash         = req.CodeHash
+		targetDeploymentID string
+		targetSnapshot     *database.DeploymentSnapshot
 	)
 	if req.DeploymentID != "" {
 		dep, err := h.DB.GetDeployment(req.DeploymentID)
@@ -1094,8 +1130,7 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetHash = dep.CodeHash
-		parent := dep.ID
-		parentDeployment = &parent
+		targetDeploymentID = dep.ID
 		targetSnapshot = dep.Snapshot
 	}
 	if targetHash == "" {
@@ -1106,16 +1141,23 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	// succeeded deployment that produced this hash. Best-effort — if no
 	// deployment row carries a snapshot (e.g. legacy data), rollback
 	// degrades to the old behaviour of "code only".
-	if targetSnapshot == nil {
+	if targetDeploymentID == "" || targetSnapshot == nil {
 		if dep, err := h.DB.FindLatestSucceededByHash(fnID, targetHash); err == nil {
-			targetSnapshot = dep.Snapshot
+			if targetDeploymentID == "" {
+				targetDeploymentID = dep.ID
+			}
+			if targetSnapshot == nil {
+				targetSnapshot = dep.Snapshot
+			}
 		}
 	}
 
-	// Refuse rollback to the version already serving — it's a no-op the
-	// caller almost certainly didn't intend.
-	if targetHash == fn.CodeHash {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "this version is already active", reqID)
+	// Refuse rollback only when restoring this deployment would change
+	// nothing at all.
+	if rollbackIsNoOp(targetHash, targetSnapshot, fn) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"this deployment is identical to the running version, in both code and settings, so rolling back would change nothing",
+			reqID)
 		return
 	}
 
@@ -1139,39 +1181,42 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert the new deployment row up-front so the audit trail records
-	// the attempt even if activation fails after this point.
-	depID := ids.New()
-	depRow := &database.Deployment{
-		ID:                 depID,
-		FunctionID:         fnID,
-		Version:            int64(fn.Version) + 1,
-		Status:             "queued",
-		Phase:              "activate",
-		CodeHash:           targetHash,
-		Source:             "rollback",
-		ParentDeploymentID: parentDeployment,
-	}
-	if err := h.DB.InsertDeployment(depRow); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to record rollback", reqID)
+	// Rollback PROMOTES an existing deployment. It used to append a new one
+	// whose content was an old one's, which meant the history grew every time
+	// somebody rolled back, the version they picked never became the live one,
+	// and the list filled with rows nobody had deployed. A deployment is a
+	// version of the function; making one live again is not a new version of
+	// anything, so the only thing that moves is the pointer.
+	//
+	// functions.version stays where it is. It is the monotonic counter that
+	// hands out numbers to NEW deployments, so moving it backwards here would
+	// make the next deploy collide with a number already in the table.
+	if targetDeploymentID == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION",
+			"no recorded deployment for that version, so there is nothing to make live", reqID)
 		return
 	}
 
 	// Atomic symlink retarget.
 	if err := builder.ActivateVersion(h.DataDir, fnID, targetHash); err != nil {
-		_ = h.DB.FinishDeployment(depID, "failed", err.Error(), time.Since(started).Milliseconds())
 		slog.Error("rollback activate failed", "fn", fnID, "hash", targetHash, "err", err)
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to activate version", reqID)
 		return
 	}
 
-	// Update function row: bump version, swap code_hash, mark active,
-	// AND restore the snapshot (env vars + spawn config) that was active
-	// when this code last shipped. Secrets are deliberately not touched —
-	// they rotate independently and should always reflect current values.
-	fn.Version++
+	// Point the function at the promoted deployment and restore the state it
+	// shipped with. Secrets are deliberately untouched: they rotate
+	// independently and should always reflect current values.
+	previousActive := fn.ActiveDeploymentID
 	fn.CodeHash = targetHash
 	fn.Status = "active"
+	fn.ActiveDeploymentID = targetDeploymentID
+	// The file this version actually runs is derived from what the version has
+	// on disk, not from the snapshot. A snapshot written before run_entrypoint
+	// existed carries no value, and trusting that absence points a compiled
+	// TypeScript version back at its .ts source.
+	fn.RunEntrypoint = builder.RunEntrypointFor(h.DataDir, fnID, targetHash, fn.Entrypoint)
+
 	if targetSnapshot != nil {
 		fn.EnvVars = targetSnapshot.EnvVars
 		fn.MemoryMB = targetSnapshot.MemoryMB
@@ -1184,32 +1229,28 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		fn.ConcurrencyPolicy = targetSnapshot.ConcurrencyPolicy
 	}
 	if err := h.Registry.Set(fn); err != nil {
-		// Symlink already retargeted — registry update is the only thing
-		// that didn't stick. Mark the deployment failed so the operator
-		// notices, but the function is still serving the rolled-back code.
-		_ = h.DB.FinishDeployment(depID, "failed", err.Error(), time.Since(started).Milliseconds())
+		// The symlink is already retargeted, so the function is serving the
+		// promoted code either way; only the row did not stick.
+		slog.Error("rollback registry update failed", "fn", fnID, "err", err)
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "rollback applied but registry update failed", reqID)
 		return
 	}
 
-	// Drain warm workers so the next invoke picks up the rolled-back code.
+	// Drain warm workers so the next invoke picks up the promoted code.
 	if h.PoolRefresh != nil {
 		h.PoolRefresh(fnID)
 	}
 
-	// Stamp the new rollback deployment with the same snapshot, so a future
-	// rollback that targets *this* row (a rollback of a rollback) restores
-	// the same env + spawn state.
-	_ = h.DB.SetDeploymentSnapshot(depID, database.SnapshotFromFunction(fn))
-
 	dur := time.Since(started).Milliseconds()
-	_ = h.DB.FinishRollbackDeployment(depID, dur)
-	slog.Info("rollback complete", "fn", fnID, "hash", targetHash[:12], "dur_ms", dur)
+	slog.Info("rollback complete",
+		"fn", fnID, "promoted", targetDeploymentID, "from", previousActive,
+		"hash", targetHash[:12], "dur_ms", dur)
 
-	dep, err := h.DB.GetDeployment(depID)
+	dep, err := h.DB.GetDeployment(targetDeploymentID)
 	if err != nil {
-		// Shouldn't happen — we just inserted. Return the bare ID as a fallback.
-		respond.JSON(w, http.StatusOK, map[string]any{"deployment_id": depID, "status": "succeeded", "code_hash": targetHash})
+		respond.JSON(w, http.StatusOK, map[string]any{
+			"deployment_id": targetDeploymentID, "status": "succeeded", "code_hash": targetHash,
+		})
 		return
 	}
 	respond.JSON(w, http.StatusOK, dep)

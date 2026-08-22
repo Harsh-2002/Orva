@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-background p-4">
+  <div class="min-h-dvh flex items-center justify-center bg-background p-4">
     <div class="w-full max-w-md">
       <!-- Logo & Branding -->
       <div class="text-center mb-8">
@@ -20,6 +20,10 @@
           Sign In
         </h2>
 
+        <!-- The focus ring is white, not primary: it marks where the cursor is
+             rather than accenting the field, and violet-on-card measures 2.06:1,
+             under the 3:1 WCAG 1.4.11 floor for a focus indicator that has
+             replaced the native outline. Onboarding's inputs already do this. -->
         <form
           class="space-y-5"
           @submit.prevent="handleLogin"
@@ -37,7 +41,7 @@
               type="text"
               required
               autocomplete="username"
-              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
+              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors"
               placeholder="Enter your username"
               :disabled="loading"
             >
@@ -56,7 +60,7 @@
               type="password"
               required
               autocomplete="current-password"
-              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
+              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors"
               placeholder="Enter your password"
               :disabled="loading"
             >

@@ -238,17 +238,14 @@ type candidate struct {
 // We skip dependency trees (node_modules, __pycache__, venv) — they bloat
 // the diff with churn that only reflects install determinism.
 //
-// TypeScript heuristic: if fn.Entrypoint was rewritten by the deploy
-// pipeline to "dist/handler.js" (post-tsc), fall back to "handler.ts" so
-// the diff shows the source the operator actually edited, not the
-// compiled output (which drifts on every build).
+// fn.Entrypoint is the file the operator authored, so it is diffed directly.
+// This used to strip a "dist/" prefix and guess "handler.ts", because a
+// TypeScript build overwrote the column with tsc's output; the column now keeps
+// its one meaning and the build path lives in RunEntrypoint.
 func candidateFiles(fn *database.Function) []candidate {
 	switch {
 	case runtimeIsNode(fn.Runtime):
 		ep := fn.Entrypoint
-		if strings.HasPrefix(ep, "dist/") {
-			ep = "handler.ts"
-		}
 		if ep == "" {
 			ep = "handler.js"
 		}

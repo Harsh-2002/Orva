@@ -818,7 +818,7 @@ All rows below were measured against a live instance:
 |---|---|---|---|---|
 | `api-smoke.sh` | 20 status-family checks across system/auth/functions/deploy/invoke/deployments/secrets/keys/routes | **0.45 s** | `=== api-smoke: 20 passed, 0 failed ===` | yes (route dies by FK cascade) |
 | `auth-test.sh` | per-function `auth_mode` none/platform_key/signed (incl. tampered body + stale timestamp) and `rate_limit_per_min` → 429 | **0.80 s** | `auth-test: pass=11 fail=0` | yes |
-| `rollback-test.sh` | deploy A→B, rollback row shape (`source=rollback`, `parent_deployment_id`), code reverts, roll-forward, no-op rollback → 400 | **4.6 s** | `rollback-test  pass=9  fail=0` | yes |
+| `rollback-test.sh` | deploy A→B, rollback promotes (response is the target deployment, `active_deployment_id` moves, **row count does not grow**), code reverts, roll-forward, no-op rollback → 400 | **4.6 s** | `rollback-test  pass=9  fail=0` | yes |
 | `routes-test.sh` | exact route, `/prefix/*` rewriting, reserved-prefix rejection, method filter 405/200, direct invoke coexists | **2.95 s** | `routes-test  pass=6  fail=0` (7 with `hey`) | yes |
 | `secrets-test.sh` | secret round-trip, values visible as env inside the sandbox, redeploy drops a deleted secret | **4.8 s** | `secrets-test  pass=6  fail=0` (8 with `hey`+`sqlite3`) | yes |
 | `egress-test.sh` | `none` blocked → `egress` reaches example.com → back to `none` re-isolates; a hostname blocklist rule genuinely REJECTs and deleting it restores reachability | **11.5 s** | `=== egress-test: 15 passed, 0 failed ===` (19 with `ORVA_CONTAINER`) | yes — `trap cleanup EXIT` |
@@ -828,6 +828,8 @@ All rows below were measured against a live instance:
 | `tracing-test.sh` | http root span + `X-Trace-Id`, F2F parent linkage, W3C `traceparent` honored, replay = fresh trace, outlier + `baseline_p95_ms` | **10.2 s** | ANSI `✓`/`✗` then `PASS: 10` / `FAIL: 0` | yes — trap + pre-run sweep |
 | `sdk-test.sh` | Scoped SDK auth plus Python/Node KV TTL and atomic batches, invoke/stream, jobs, cron, spans, and logs | CI-gated | `sdk-test: PASS=n FAIL=0` | yes |
 | `onboarding-flow.sh` | on a **virgin DB only**: onboard → session cookie → `/auth/me` → session auth → 409 re-onboard → refresh rotates → old token revoked → logout invalidates | **0.03 s** (skip path) · **0.28 s** for all 13 checks on a virgin DB | `skip  (users already exist…)` · on a virgin DB `onboarding-flow  pass=13  fail=0` | leaves its user |
+| `browser/run.mjs` | real-browser UI verification across 19 routes x 3 viewports: every route renders with no console errors, nothing overflows or is silently clipped, every control clears the 44 px touch floor on coarse pointers, accessible names / keyboard reachability / AA contrast / heading order, plus multi-step flows (nav drawer, destructive-dialog keyboard safety). `--destructive` enables the flows that delete data | ~90 s | `N passed, 0 failed`; non-zero exit if any fails | needs a scratch instance for `--destructive` |
+| `container/run.sh` | builds the image, runs it on a **throwaway Docker network** with the privileges nsjail needs (`SYS_ADMIN`, unconfined apparmor/seccomp, delegated cgroupfs, `/dev/net/tun`) and `ORVA_REQUIRE_SANDBOX=1`, then runs the TypeScript-entrypoint + rollback suite and the browser suite against it | ~4 min incl. image build | `n/n passed` per suite; non-zero exit if any fails | yes — `trap cleanup EXIT` removes container, volume and network |
 | `run-all.sh` | umbrella over 11 suites | **49.9 s** | `test/run-all-results.tsv`; exit 1 if any row is `fail` | inherits — **including `atscale.sh`'s 20 permanent functions** |
 | `atscale.sh` | **nothing is asserted** — deploys 20 fns and dumps metrics TSV | exit 2 without `hey` | none | **no — leaves 20 functions forever** |
 | `ceiling.sh` | sustained-load ramp, emits CSV | exit 2 without `hey` | CSV is the product; **exit 0 always** | n/a |
@@ -1247,11 +1249,21 @@ compiled to dist/handler.js
 Build succeeded.
 ```
 
-Post-deploy `GET /api/v1/functions/{id}` reports `entrypoint = dist/handler.js`
-with `runtime = node`. On disk, `<dataDir>/functions/<id>/current/` holds
-`handler.ts`, `tsconfig.json`, `node_modules/typescript`, and `dist/handler.js`.
-Redeploy keeps the rewritten entrypoint — the validator checks the source `.ts`
-(CONTRACT §9, confirmed).
+Post-deploy `GET /api/v1/functions/{id}` reports `entrypoint = handler.ts` —
+the file you wrote — alongside `run_entrypoint = dist/handler.js`, which is what
+the sandbox executes. `runtime = node`. On disk,
+`<dataDir>/functions/<id>/current/` holds `handler.ts`, `tsconfig.json`,
+`node_modules/typescript`, and `dist/handler.js`.
+
+`GET /api/v1/functions/{id}/source` returns the TypeScript you authored, not the
+compiled output, and redeploying works because the validator is checking a path
+that is still there (CONTRACT §9).
+
+Before these were split, `entrypoint` held both meanings: `tsc` stamped
+`dist/handler.js` over `handler.ts`, the editor served compiled JavaScript, and
+re-deploying from the dashboard failed with `entrypoint not found:
+dist/handler.js`. `test/container/rollback_e2e.py` covers the whole round trip
+against a real sandbox.
 
 ### 4.4 Break a deploy, roll back, verify
 
@@ -1283,14 +1295,22 @@ orva --endpoint "$B" --api-key "$K" diff qa-rollback
 # +export default async function handler(event) { return { version: "v1-good" }; }
 ```
 
-A rollback creates a **new** deployment row reusing the old `code_hash` —
-history is append-only. `orva rollback <fn>` with no id means "undo the last
-code change"; `--code-hash` pins a content hash. **Secrets are not versioned**
-and keep current values.
+A rollback **promotes an existing deployment**: it moves the function's
+`active_deployment_id` onto the target and writes no new row, so the history
+stays "the versions you deployed" and exactly one of them is live. It used to
+append a synthetic `source=rollback` row, which meant the newest version was no
+longer the one serving and nothing said which was.
 
-The same ground is covered by `test/rollback-test.sh` (9 checks, 4.6 s), which
-additionally asserts `source=rollback` and `parent_deployment_id` on the row and
-that a no-op rollback returns 400 VALIDATION.
+`orva rollback <fn>` with no id means "undo the last code change";
+`--code-hash` pins a content hash. **Secrets are not versioned** and keep
+current values.
+
+The same ground is covered by `test/rollback-test.sh` (9 checks), which asserts
+the response is the promoted deployment, that `active_deployment_id` moved, that
+the row count did **not** grow, and that a no-op rollback returns 400
+VALIDATION. `test/container/rollback_e2e.py` covers the same model against a
+real sandbox, including rolling onto a deployment recorded before
+`run_entrypoint` existed.
 
 ### 4.5 Secrets
 

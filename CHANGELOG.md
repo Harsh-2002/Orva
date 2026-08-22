@@ -12,7 +12,90 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+
+- **Rolling back promotes an existing deployment instead of appending a new
+  one.** The version history used to grow by one row every time you rolled
+  back, so after a rollback the newest version was not the one serving and
+  there was no way to tell which one was. The deployment list now marks the
+  live version and rollback simply moves that marker; the row count does not
+  change. Editing a function still creates a new version, as before.
+
+- **Deployment version numbers are gapless from 1.** They used to be taken from
+  `functions.version`, which is a mutation counter that the dashboard bumps
+  twice per deploy (once for the settings PUT, once for the build), so a brand
+  new function's first deploy was `v2` and its history read v3, v5, v7. Numbers
+  now come from the deployment sequence itself. **Existing deployment rows keep
+  the numbers they were given** — the sequence continues from the highest one
+  already recorded, so no history is renumbered.
+
+### Fixed
+
+- **Rolling back a TypeScript function no longer breaks it.** `entrypoint`
+  carried two meanings: the file you wrote, and — after a successful `tsc` —
+  the compiler's output. The editor served compiled JavaScript instead of your
+  source, and re-deploying failed with `entrypoint not found: dist/handler.js`.
+  The authored file and the build output are now separate; the build pipeline
+  never overwrites the file you wrote.
+
+  Rolling back onto a deployment recorded *before* this change returned a
+  working `200` but pointed the sandbox at the `.ts` source, which Node cannot
+  execute — every invocation of the rolled-back version failed with
+  `WORKER_CRASHED`. The file a version runs is now derived from what that
+  version has on disk rather than from what its snapshot remembers, so this is
+  correct for deployments made before and after the change. Existing rows are
+  migrated on boot; no action needed.
+
+- **The mobile navigation drawer can be closed again.** The drawer's backdrop
+  and the top bar were on the same stacking level, so the backdrop covered the
+  close button: with the menu open, tapping the X did nothing and the only way
+  out was tapping the dimmed area.
+
+- Accessibility and touch-target fixes: the "Log out" button and the Settings
+  "Docs" link both fell below the 4.5:1 AA contrast floor, one editor syntax
+  colour missed it, and the function-name control in the invocations table was
+  below the 44 px touch floor on tablets.
+
+- **A list that fails to load no longer claims you have nothing.** Jobs,
+  scheduled jobs, API keys, webhooks and activity each caught a failed request,
+  logged it to the browser console and then rendered their empty state, so a
+  server error and an empty account looked identical -- "No API keys yet" was
+  shown as fact when the request had simply failed. Each now shows what could
+  not be loaded, the reason, and a Retry.
+
+- **Editing a KV value no longer changes its type.** The inspect drawer showed a
+  normalised rendering of the stored value but wrote back whatever was in the
+  box, so opening the string `"123"`, changing nothing and pressing Save stored
+  the number `123`; `"true"` became a boolean and a JSON-encoded string became an
+  object. The drawer now shows the value exactly as stored.
+
+- **Testing an inbound webhook no longer asks for the secret**, and works for
+  every signature format. The dashboard used to ask the operator to paste back
+  the plaintext secret -- one Orva already holds -- then sign in the browser,
+  which could only produce 2 of the 5 formats and refused Stripe, Slack and
+  base64 outright. Signing now happens on the server.
+
+- **Cron schedule failures are reported.** Pausing, resuming or deleting a
+  schedule failed silently: the request errored, the row stayed as it was, and
+  nothing was shown.
+
+- **nsjail's own warnings no longer appear in your function's stderr.** Every
+  cold start prepended two lines about the sandbox running as UID 0 with
+  "root-level access to files" to the invocation's logs, and fed them to the
+  dashboard's suggest-a-fix prompt as if the handler had written them. nsjail
+  errors are still kept -- they diagnose a failed spawn.
+
+- **Creating a channel with a name that is taken returns `409`, not `500`.** A
+  name collision is a client error; reporting it as an internal failure told
+  operators the server had broken and told retry logic the request was worth
+  repeating. Every other create already returned `409`.
+
+- The function-name control in the KV browser was below the 44 px touch floor.
+
+- The firewall page's **"Apply now" is now "Refresh policy"**. Adding, editing or
+  deleting a rule already compiles and publishes a new policy generation; the
+  button re-resolves hostname rules to current IPs. Calling it "Apply" implied
+  blocks sat inert until it was pressed.
 
 ## v2026.08.21
 

@@ -50,6 +50,19 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 | `src/utils/rollbackDiff.js` | `describeSnapshotDiff()` — shared settings/env diff lines (Editor, Deployments, FunctionDiff) |
 | `src/templates/index.js` | Built-in function templates (including `ts_hello`, `py_stream_llm`) |
 
+## Shared primitives worth knowing before adding UI
+
+| Component | Rule it encodes |
+|---|---|
+| `components/common/RuntimeTag.vue` | The one place a runtime is drawn. Renders the mark **icon-only** with the word in the accessible name and tooltip: in a dense list the glyph resolves faster than the text, and the set is two items wide, stable, and has marks operators already know. Pass `withLabel` where the operator is *choosing* a runtime rather than recognising one. Icon-only is deliberately **not** applied to status, which keeps its word. |
+| `components/layout/BrandLockup.vue` | One logo + wordmark lockup, used by both the mobile top bar and the drawer header so the two cannot drift apart. |
+| `composables/useMenuFocus.js` | Shared focus handling for menu-style popovers. |
+| `components/common/Button.vue` | `variant` covers primary / secondary / danger / ghost / chip. The `danger` fill uses `--color-danger-solid`, which is darker than `--color-danger`: white on the lighter red measures 3.76:1 and misses AA. Use the lighter red for text, borders and tints; the solid one only behind white text. |
+
+Two colour tokens exist specifically because the brand purple fails contrast as
+text on the near-black background (2.25:1): use **`text-link`** for inline links,
+never `text-primary`, which is for icons and fills.
+
 ## Non-obvious
 
 - Dev proxy: `vite.config.js` proxies `/api` and `/auth` to `http://localhost:8443`. Direct `/fn/`, `/webhook/`, and `/metrics` calls in dev must be made to `:8443` directly — they are not proxied through Vite.

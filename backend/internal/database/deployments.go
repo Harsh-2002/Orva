@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -15,15 +16,20 @@ import (
 // rotate independently of code (key rotation, password changes) and a
 // rollback should not silently revert to a stale credential.
 type DeploymentSnapshot struct {
-	EnvVars           map[string]string `json:"env_vars"`
-	MemoryMB          int64             `json:"memory_mb"`
-	CPUs              float64           `json:"cpus"`
-	TimeoutMS         int64             `json:"timeout_ms"`
-	NetworkMode       string            `json:"network_mode"`
-	AuthMode          string            `json:"auth_mode"`
-	RateLimitPerMin   int               `json:"rate_limit_per_min"`
-	MaxConcurrency    int               `json:"max_concurrency"`
-	ConcurrencyPolicy string            `json:"concurrency_policy"`
+	EnvVars map[string]string `json:"env_vars"`
+	// RunEntrypoint is per-version: a build that compiles emits a different
+	// path than the one the operator authored, and rolling back to a version
+	// has to restore the path THAT build produced. Empty for every function
+	// whose source runs directly.
+	RunEntrypoint     string  `json:"run_entrypoint,omitempty"`
+	MemoryMB          int64   `json:"memory_mb"`
+	CPUs              float64 `json:"cpus"`
+	TimeoutMS         int64   `json:"timeout_ms"`
+	NetworkMode       string  `json:"network_mode"`
+	AuthMode          string  `json:"auth_mode"`
+	RateLimitPerMin   int     `json:"rate_limit_per_min"`
+	MaxConcurrency    int     `json:"max_concurrency"`
+	ConcurrencyPolicy string  `json:"concurrency_policy"`
 }
 
 // SnapshotFromFunction copies the snapshot-relevant fields off a Function
@@ -36,6 +42,7 @@ func SnapshotFromFunction(fn *Function) *DeploymentSnapshot {
 	}
 	return &DeploymentSnapshot{
 		EnvVars:           env,
+		RunEntrypoint:     fn.RunEntrypoint,
 		MemoryMB:          fn.MemoryMB,
 		CPUs:              fn.CPUs,
 		TimeoutMS:         fn.TimeoutMS,
@@ -45,6 +52,64 @@ func SnapshotFromFunction(fn *Function) *DeploymentSnapshot {
 		MaxConcurrency:    fn.MaxConcurrency,
 		ConcurrencyPolicy: fn.ConcurrencyPolicy,
 	}
+}
+
+// NextDeploymentVersion returns the number to give a function's next
+// deployment.
+//
+// Deployment numbers used to come from functions.version, which is a mutation
+// counter: PUT /functions/{id} bumps it whether or not a field changed, and a
+// successful build bumps it again. The dashboard's deploy does both, so every
+// deploy consumed two increments and the history read v3, v5, v7, v9. A version
+// is a property of the deployment sequence, so it comes from that sequence.
+//
+// MAX+1 over the function's own rows: gapless from 1, and unaffected by
+// whatever else touches the function row. Rollback no longer allocates a number
+// at all, since it promotes an existing deployment rather than creating one.
+func (db *Database) NextDeploymentVersion(fnID string) (int64, error) {
+	var next int64
+	err := db.read.QueryRow(
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM deployments WHERE function_id = ?`,
+		fnID,
+	).Scan(&next)
+	if err != nil {
+		return 0, fmt.Errorf("next deployment version: %w", err)
+	}
+	return next, nil
+}
+
+// Equal reports whether two snapshots describe the same effective function
+// state. Rollback uses it to decide whether restoring a deployment would
+// actually change anything, which the code hash alone cannot answer: a
+// redeploy of unchanged code produces a new deployment row carrying the same
+// hash but possibly different settings, and restoring those settings is
+// exactly what rollback is for.
+//
+// A nil snapshot is not equal to a populated one. Legacy rows carry no
+// snapshot at all, and "we do not know what the settings were" must not be
+// mistaken for "the settings match".
+func (s *DeploymentSnapshot) Equal(o *DeploymentSnapshot) bool {
+	if s == nil || o == nil {
+		return s == nil && o == nil
+	}
+	// RunEntrypoint is deliberately not compared. Rollback derives it from the
+	// promoted version's own directory rather than restoring it, so a snapshot
+	// written before the field existed holds "" while the live function holds
+	// the real compiled path -- and comparing them would report a difference on
+	// every legacy row, defeating the no-op guard entirely. Two deployments with
+	// the same code hash have the same version directory and therefore the same
+	// compiled output, so the hash already covers it.
+	if s.MemoryMB != o.MemoryMB ||
+		s.CPUs != o.CPUs ||
+		s.TimeoutMS != o.TimeoutMS ||
+		s.NetworkMode != o.NetworkMode ||
+		s.AuthMode != o.AuthMode ||
+		s.RateLimitPerMin != o.RateLimitPerMin ||
+		s.MaxConcurrency != o.MaxConcurrency ||
+		s.ConcurrencyPolicy != o.ConcurrencyPolicy {
+		return false
+	}
+	return maps.Equal(s.EnvVars, o.EnvVars)
 }
 
 // Deployment is one build attempt for a function — queued, building, or
@@ -220,7 +285,11 @@ func (db *Database) ListDeploymentsForFunction(fnID string, limit int) ([]*Deplo
 		        COALESCE(snapshot, '')
 		 FROM deployments
 		 WHERE function_id = ?
-		 ORDER BY submitted_at DESC LIMIT ?`, fnID, limit,
+		 -- version, not submitted_at: several deployments can share a
+		 -- timestamp to the second (a burst of redeploys, or seeded data), and
+		 -- ordering by time alone shuffled them into a sequence that read as
+		 -- random on the page. Version is the authoritative order.
+		 ORDER BY version DESC, submitted_at DESC LIMIT ?`, fnID, limit,
 	)
 	if err != nil {
 		return nil, err

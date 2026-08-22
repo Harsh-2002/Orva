@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-xl font-semibold text-white tracking-tight">
           Deployments
@@ -15,7 +15,7 @@
           </router-link>
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2 sm:shrink-0">
         <Button
           variant="secondary"
           @click="$router.push(`/functions/${fnName}`)"
@@ -39,14 +39,17 @@
     <!-- Active version banner -->
     <div
       v-if="activeFn"
-      class="border-y border-border py-3 flex items-center gap-3"
+      class="border-y border-border py-3 flex items-start sm:items-center gap-3"
     >
       <CheckCircle2 class="w-4 h-4 text-success-fg shrink-0" />
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="text-sm text-white font-medium">Currently serving</span>
-          <span class="text-xs px-2 py-0.5 rounded bg-success/15 text-success border border-success/30 font-mono">
-            v{{ activeFn.version }}
+          <span
+            v-if="liveVersion"
+            class="text-xs px-2 py-0.5 rounded bg-success-tint text-success-fg border border-success-ring font-mono"
+          >
+            v{{ liveVersion }}
           </span>
           <span
             v-if="activeFn.status !== 'active'"
@@ -55,8 +58,12 @@
             status: {{ activeFn.status }}
           </span>
         </div>
-        <div class="text-xs text-foreground-muted mt-1 font-mono truncate">
-          hash: {{ activeFn.code_hash || EMPTY }} · runtime: {{ activeFn.runtime }} · updated {{ formatTime(activeFn.updated_at) }}
+        <!-- Wraps rather than truncates: on anything narrower than a wide
+             desktop the single clipped line hid runtime and updated-at
+             completely, and a 64-char hash ate the whole row on a phone.
+             Full hash stays available on hover. -->
+        <div class="text-xs text-foreground-muted mt-1 font-mono">
+          hash: <span :title="activeFn.code_hash || ''">{{ activeShortHash }}</span> · runtime: {{ runtimeLabel(activeFn.runtime) }} · updated {{ formatTime(activeFn.updated_at) }}
         </div>
       </div>
     </div>
@@ -75,41 +82,51 @@
         <li
           v-for="d in deployments"
           :key="d.id"
-          class="px-4 py-3 cursor-pointer active:bg-surface-hover/50 transition-colors"
-          :class="isActive(d) ? 'bg-success/5' : ''"
-          @click="open(d)"
+          class="px-4 py-3 transition-colors"
+          :class="isActive(d) ? 'bg-success-tint/40' : ''"
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span
-                  class="font-mono text-xs"
-                  :class="isActive(d) ? 'text-white font-semibold' : 'text-foreground-muted'"
-                >v{{ d.version }}</span>
-                <StatusBadge :status="d.status" />
-                <span
-                  v-if="isActive(d)"
-                  class="px-1.5 py-0.5 rounded text-xs bg-success-tint text-success-fg border border-success-ring"
-                >Active</span>
-              </div>
-              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-foreground-muted">
-                <span>{{ formatTime(d.submitted_at) }}</span>
-                <span
-                  v-if="d.duration_ms != null"
-                  class="font-mono"
-                >{{ d.duration_ms }} ms</span>
-                <span v-if="d.phase">{{ d.phase }}</span>
-              </div>
+              <!-- The card body is the drawer trigger. It has to be a real
+                   button: the @click used to sit on the bare <li>, which put
+                   the drawer out of reach of the keyboard entirely. It cannot
+                   wrap the whole row, because the row carries its own links. -->
+              <button
+                type="button"
+                class="touch-expand-sm w-full text-left cursor-pointer rounded-sm active:bg-surface-hover/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :aria-label="detailLabel(d)"
+                @click="open(d)"
+              >
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span
+                    class="font-mono text-xs"
+                    :class="isActive(d) ? 'text-white font-semibold' : 'text-foreground-muted'"
+                  >v{{ d.version }}</span>
+                  <StatusBadge
+                    v-if="d.status !== 'succeeded'"
+                    :status="d.status"
+                  />
+                  <span
+                    v-if="isActive(d)"
+                    class="px-1.5 py-0.5 rounded text-xs bg-success text-background font-semibold"
+                  >Live</span>
+                </div>
+                <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-foreground-muted">
+                  <span class="font-mono">{{ (d.code_hash || '').slice(0, 10) || EMPTY }}</span>
+                  <span v-if="sameCodeAsLive(d) && !isActive(d)">same code as live</span>
+                  <span>{{ formatTime(d.submitted_at) }}</span>
+                </div>
+              </button>
             </div>
-            <div
-              class="shrink-0 flex items-center gap-1"
-              @click.stop
-            >
+            <div class="shrink-0 flex items-center gap-1">
+              <!-- touch-expand-xs only bites on coarse pointers, so this
+                   matches the 44px floor of the Button beside it without
+                   growing the row for a mouse. -->
               <router-link
                 v-if="canCompare(d)"
                 :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
-                class="text-foreground-muted hover:text-white text-xs flex items-center gap-1 px-2 py-1"
-                title="Compare with active version"
+                class="text-foreground-muted hover:text-white text-xs flex items-center gap-1 px-2 py-1 rounded-sm touch-expand-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :title="`Compare v${d.version} with the live version`"
               >
                 <GitCompare class="w-3 h-3" /> Compare
               </router-link>
@@ -139,20 +156,14 @@
             <th class="px-6 py-3 font-medium">
               Version
             </th>
-            <th class="px-6 py-3 font-medium">
-              Submitted
+            <th class="px-6 py-3 font-medium hidden md:table-cell">
+              Code
             </th>
             <th class="px-6 py-3 font-medium">
               Status
             </th>
-            <th class="px-6 py-3 font-medium hidden md:table-cell">
-              Phase
-            </th>
-            <th class="px-6 py-3 font-medium hidden sm:table-cell">
-              Duration
-            </th>
-            <th class="px-6 py-3 font-medium hidden xl:table-cell">
-              Deployment ID
+            <th class="px-6 py-3 font-medium hidden lg:table-cell">
+              Submitted
             </th>
             <th class="px-6 py-3 font-medium text-right">
               Actions
@@ -164,35 +175,55 @@
             v-for="d in deployments"
             :key="d.id"
             class="hover:bg-surface/50 transition-colors cursor-pointer"
-            :class="isActive(d) ? 'bg-success/5' : ''"
+            :class="isActive(d) ? 'bg-success-tint/40' : ''"
             @click="open(d)"
           >
             <td class="px-6 py-4 font-mono text-xs">
               <div class="flex items-center gap-2">
-                <span
-                  class="text-white"
+                <!-- Row clicks stay on the <tr> for the mouse, but the drawer
+                     needs a real control to be reachable by keyboard. Rendered
+                     bare, so the desktop cell looks exactly as it did. -->
+                <button
+                  type="button"
+                  class="touch-expand-xs text-white text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   :class="isActive(d) ? 'font-semibold' : 'text-foreground-muted'"
-                >v{{ d.version }}</span>
+                  :aria-label="detailLabel(d)"
+                  @click.stop="open(d)"
+                >
+                  {{ 'v' + d.version }}
+                </button>
                 <span
                   v-if="isActive(d)"
-                  class="px-1.5 py-0.5 rounded text-xs bg-success-tint text-success-fg border border-success-ring normal-case"
-                >Active</span>
+                  class="px-1.5 py-0.5 rounded text-xs bg-success text-background font-semibold normal-case"
+                >Live</span>
               </div>
             </td>
-            <td class="px-6 py-4 text-foreground">
-              {{ formatTime(d.submitted_at) }}
+            <td class="px-6 py-4 font-mono text-xs hidden md:table-cell">
+              <span
+                class="text-foreground-muted"
+                :title="d.code_hash || ''"
+              >{{ (d.code_hash || '').slice(0, 10) || EMPTY }}</span>
+              <span
+                v-if="sameCodeAsLive(d) && !isActive(d)"
+                class="ml-2 normal-case text-foreground-muted/70 font-sans"
+              >same as live</span>
             </td>
             <td class="px-6 py-4">
-              <StatusBadge :status="d.status" />
+              <!-- A succeeded deployment is the unremarkable case and there are
+                   usually ten of them, so a green badge on every row competed
+                   with the green that means "this is what is running". Only a
+                   status worth reacting to gets the badge. -->
+              <StatusBadge
+                v-if="d.status !== 'succeeded'"
+                :status="d.status"
+              />
+              <span
+                v-else
+                class="text-xs text-foreground-muted"
+              >succeeded</span>
             </td>
-            <td class="px-6 py-4 text-foreground-muted text-xs hidden md:table-cell">
-              {{ d.phase || EMPTY }}
-            </td>
-            <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden sm:table-cell">
-              {{ d.duration_ms != null ? d.duration_ms + 'ms' : EMPTY }}
-            </td>
-            <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden xl:table-cell">
-              {{ d.id?.substring(0, 14) }}
+            <td class="px-6 py-4 text-foreground hidden lg:table-cell">
+              {{ formatTime(d.submitted_at) }}
             </td>
             <td
               class="px-6 py-4 text-right text-xs"
@@ -202,10 +233,10 @@
                 <router-link
                   v-if="canCompare(d)"
                   :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
-                  class="text-foreground-muted hover:text-white flex items-center gap-1"
-                  title="Compare with active version"
+                  class="touch-expand-xs text-foreground-muted hover:text-white flex items-center gap-1 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  :title="`Compare v${d.version} with the live version, v${liveVersion}`"
                 >
-                  <GitCompare class="w-3 h-3" /> Compare
+                  <GitCompare class="w-3 h-3" /> Compare with live
                 </router-link>
                 <Button
                   v-if="canRollback(d)"
@@ -217,9 +248,9 @@
                   <RotateCcw class="w-3 h-3" /> Rollback
                 </Button>
                 <span
-                  v-if="!canRollback(d) && d.source === 'rollback'"
-                  class="text-foreground-muted/50"
-                >via rollback</span>
+                  v-if="isActive(d)"
+                  class="text-foreground-muted/60"
+                >serving now</span>
                 <span
                   v-else-if="!canCompare(d) && !canRollback(d)"
                   class="text-foreground-muted/30"
@@ -229,7 +260,7 @@
           </tr>
           <tr v-if="!loading && deployments.length === 0">
             <td
-              colspan="7"
+              colspan="5"
               class="px-6 py-8 text-center text-foreground-muted"
             >
               No deployments yet.
@@ -264,10 +295,23 @@
           </span>
         </div>
 
+        <!-- Origin, code hash and deployment id moved here from the table.
+             In a row they were noise on every line; here they are the detail
+             an operator opens the drawer for. -->
         <div class="grid grid-cols-2 gap-3 text-sm">
           <Stat
             label="Version"
             :value="`v${selected.version}`"
+            mono
+          />
+          <Stat
+            label="Code hash"
+            :value="(selected.code_hash || '').slice(0, 12) || EMPTY"
+            mono
+          />
+          <Stat
+            label="Deployment ID"
+            :value="selected.id || EMPTY"
             mono
           />
           <Stat
@@ -324,6 +368,7 @@ import StatusBadge from '@/components/common/StatusBadge.vue'
 import { listDeployments, getDeployment, getDeploymentLogs, listFunctions, rollbackFunction } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
+import { runtimeLabel } from '@/utils/runtime'
 
 const confirmStore = useConfirmStore()
 
@@ -349,6 +394,14 @@ const canRollback = (d) =>
 // activeDeploymentId: the row that's currently serving. Used as the
 // implicit "compare against" target for every Compare link in the list.
 // Null until refresh() lands the deployments + activeFn pair.
+// The version actually serving. functions.version is a monotonic counter for
+// numbering new deployments, so after promoting an older version the two
+// deliberately disagree and only this one is true.
+const liveVersion = computed(() => {
+  const row = deployments.value.find((d) => isActive(d))
+  return row ? row.version : null
+})
+
 const activeDeploymentId = computed(() => {
   const row = deployments.value.find((d) => isActive(d))
   return row?.id || null
@@ -373,34 +426,48 @@ const rollbackTo = async (d) => {
   if (!fnId.value || !d?.id || rollingBack.value) return
   const shortHash = (d.code_hash || '').slice(0, 12)
 
-  let diffMessage = `Code hash ${shortHash}. Current ${activeFn.value ? 'v' + activeFn.value.version : 'version'} stays in history.`
+  // Whether the code itself moves. Redeploying unchanged code writes a new
+  // deployment row with a new version and the same hash, so a row can be a
+  // different version of the same code — in which case rollback restores its
+  // settings and env, and saying "only the code changes" would be backwards.
+  const codeChanges = !!activeFn.value?.code_hash && d.code_hash !== activeFn.value.code_hash
+
+  let diffMessage = `v${d.version} becomes the live version. Code ${shortHash}.`
+  let settingsLines = []
+  let knowSettings = false
   try {
     const fullDep = await getDeployment(d.id)
     const snap = fullDep?.data?.snapshot
     if (snap && activeFn.value) {
-      const lines = describeSnapshotDiff(activeFn.value, snap)
-      if (lines.length) {
-        diffMessage = `Rolling back to v${d.version} (code ${shortHash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
-      } else {
-        diffMessage = `Rolling back to v${d.version} (code ${shortHash}). Settings and env are already identical, so only the code changes.`
-      }
+      knowSettings = true
+      settingsLines = describeSnapshotDiff(activeFn.value, snap)
     }
   } catch {
-    // fall through to default message
+    // Fall through to the generic message; the API is still the authority.
   }
 
-  // Append a copy-pasteable link to the full source diff so the operator
-  // can eyeball the code change before clicking Rollback. The confirm
-  // store only renders plain text — a router-link would be nicer, but a
-  // URL still works as a manual paste.
-  if (activeDeploymentId.value && activeDeploymentId.value !== d.id) {
-    diffMessage += `\n\nFull source diff: ${window.location.origin}/web/functions/${fnName.value}/diff?from=${d.id}&to=${activeDeploymentId.value}`
+  if (knowSettings) {
+    if (settingsLines.length && codeChanges) {
+      diffMessage = `v${d.version} becomes the live version. Code changes to ${shortHash}, and:\n\n${settingsLines.join('\n')}\n\nSecrets keep their current values.`
+    } else if (settingsLines.length) {
+      diffMessage = `v${d.version} becomes the live version. Its code is the same as the version running now, so only settings change:\n\n${settingsLines.join('\n')}\n\nSecrets keep their current values.`
+    } else if (codeChanges) {
+      diffMessage = `v${d.version} becomes the live version. Only the code changes, to ${shortHash}; settings and env already match.`
+    } else {
+      // Nothing at all would move, and the API refuses it. Say so here rather
+      // than sending a request that can only come back as an error.
+      confirmStore.notify({
+        title: `v${d.version} is identical to the live version`,
+        message: `v${d.version} has the same code and the same settings as v${liveVersion.value}, which is serving now, so making it live would change nothing.`,
+      })
+      return
+    }
   }
 
   const ok = await confirmStore.ask({
-    title: `Restore v${d.version}?`,
+    title: `Make v${d.version} live?`,
     message: diffMessage,
-    confirmLabel: 'Rollback',
+    confirmLabel: 'Make live',
   })
   if (!ok) return
   rollingBack.value = true
@@ -420,13 +487,27 @@ const rollbackTo = async (d) => {
   }
 }
 
-// A row is "active" when its version matches the function's current version
-// AND the deployment succeeded. (A failed deploy that came after a succeeded
-// one doesn't take over.)
+// Rollback is append-only: restoring v9 does not make v9 active again, it
+// creates a NEW version whose content is v9's. That is the right model (history
+// stays immutable, and Heroku/Kubernetes behave the same way), but the page
+// used to show only a flat list of version numbers, so an operator who rolled
+// back saw a version they had never deployed become active with nothing
+// explaining where it came from. These three helpers exist to say it out loud.
+
+// sameCodeAsLive marks versions whose code is byte-identical to what is running.
+// Redeploys of unchanged code are common, so a version list can be ten rows of
+// the same code; without this the operator cannot tell which rollback would
+// actually change the handler and which only moves settings.
+const sameCodeAsLive = (d) =>
+  !!d?.code_hash && !!activeFn.value?.code_hash && d.code_hash === activeFn.value.code_hash
+
+// Which deployment is live is a fact the server records, not something to
+// infer. It used to be "version == the function's version", which only worked
+// because rollback appended a row; now rollback promotes an existing
+// deployment and the function's version counter stays where it is.
 const isActive = (d) =>
-  activeFn.value &&
-  d.version === activeFn.value.version &&
-  d.status === 'succeeded'
+  !!activeFn.value?.active_deployment_id &&
+  d.id === activeFn.value.active_deployment_id
 
 const drawerOpen = ref(false)
 const selected = ref(null)
@@ -440,6 +521,20 @@ const drawerTitle = computed(() =>
 const logText = computed(() => logLines.value.join('\n'))
 
 const formatTime = (ts) => (ts ? new Date(ts).toLocaleString() : EMPTY)
+
+// 12 hex chars is what the editor version list, the diff view and the rollback
+// confirm all show; the banner was the only place printing all 64.
+const activeShortHash = computed(() => {
+  const hash = activeFn.value?.code_hash || ''
+  return hash ? hash.slice(0, 12) : EMPTY
+})
+
+// Accessible name for the row trigger, since the visible label is just "v3".
+// Skips the timestamp when there is none rather than reading out EMPTY's dash.
+const detailLabel = (d) => {
+  const when = d.submitted_at ? `, submitted ${formatTime(d.submitted_at)}` : ''
+  return `Open deployment v${d.version}, ${d.status}${when}`
+}
 
 const Stat = {
   props: { label: String, value: [String, Number], mono: Boolean },

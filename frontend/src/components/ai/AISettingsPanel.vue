@@ -65,43 +65,58 @@
         </p>
       </div>
 
-      <div class="divide-y divide-border border-y border-border">
+      <div
+        v-if="store.providers.length"
+        class="divide-y divide-border border-y border-border"
+      >
         <div
           v-for="p in store.providers"
           :key="p.id"
           class="py-1"
         >
-          <div class="flex items-center gap-2 px-3 py-2">
-            <span class="font-mono text-sm text-foreground">{{ p.provider }}</span>
+          <!--
+            The row wraps instead of overflowing: html/body clip overflow-x
+            globally, so a labelled provider pushed the rightmost item — the
+            Remove button — off the edge with no scrollbar, and the provider
+            could not be deleted from a phone at all. Names and labels shrink
+            (min-w-0 + truncate); the chips and the action never do.
+            `active` reads --color-link, not --color-primary: primary as a
+            foreground on its own /15 tint is 2.5:1, under the 4.5:1 this
+            11px chip needs.
+          -->
+          <div class="flex flex-wrap items-center gap-2 px-3 py-2">
+            <span class="min-w-0 truncate font-mono text-sm text-foreground">{{ p.provider }}</span>
             <span
               v-if="p.label"
-              class="text-xs text-foreground-muted"
+              class="min-w-0 truncate text-xs text-foreground-muted"
             >{{ p.label }}</span>
             <span
               v-if="store.selectedProviderId === p.id"
-              class="text-xs uppercase tracking-label rounded px-1.5 py-0.5 bg-primary/15 text-primary-hover"
+              class="shrink-0 text-xs uppercase tracking-label rounded px-1.5 py-0.5 bg-primary/15 text-link"
             >active</span>
             <span
-              class="text-xs uppercase tracking-label rounded px-1.5 py-0.5"
+              class="shrink-0 text-xs uppercase tracking-label rounded px-1.5 py-0.5"
               :class="p.has_key ? 'bg-success-tint text-success-fg' : 'bg-surface-hover text-foreground-muted'"
             >{{ p.has_key ? 'key set' : 'no key' }}</span>
-            <span class="flex-1" />
             <Button
               size="xs"
               variant="ghost"
+              class="ml-auto shrink-0"
               @click="onRemoveProvider(p.id)"
             >
               Remove
             </Button>
           </div>
         </div>
-        <p
-          v-if="!store.providers.length"
-          class="text-xs text-foreground-muted"
-        >
-          No providers configured yet.
-        </p>
       </div>
+      <!-- Outside the divide-y wrapper: with no providers it drew two stray
+           rules around flush-left text. -->
+      <p
+        v-else
+        class="px-3 py-2 text-xs text-foreground-muted"
+      >
+        No providers configured yet.
+      </p>
     </section>
 
     <!-- Add / update provider -->
@@ -194,13 +209,21 @@
             :value="opt.value"
             class="sr-only"
           >
+          <!--
+            The chosen option carries --color-foreground, not --color-primary:
+            violet on the near-black panel is 2.25:1, which is both under the
+            3:1 that WCAG 1.4.11 asks of a state indicator and *dimmer than the
+            unselected ring* — the live approval policy was the hardest of the
+            three rows to read, on the one setting an operator opens this panel
+            to confirm.
+          -->
           <span
             class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors"
-            :class="store.settings.approval_policy === opt.value ? 'border-primary' : 'border-foreground-muted/50'"
+            :class="store.settings.approval_policy === opt.value ? 'border-foreground' : 'border-foreground-muted/50'"
           >
             <span
               v-if="store.settings.approval_policy === opt.value"
-              class="h-2 w-2 rounded-full bg-primary"
+              class="h-2 w-2 rounded-full bg-foreground"
             />
           </span>
           <span class="min-w-0">

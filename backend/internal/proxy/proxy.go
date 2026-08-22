@@ -258,7 +258,7 @@ func (p *Proxy) finalizeStderr(r *http.Request, execID string, raw []byte) []byt
 	}
 	tID := trace.TraceID(r.Context())
 	sID := trace.SpanID(r.Context())
-	return extractStructuredLogs(p.DB, raw, execID, tID, sID)
+	return stripNsjailNoise(extractStructuredLogs(p.DB, raw, execID, tID, sID))
 }
 
 // New creates a new Proxy.

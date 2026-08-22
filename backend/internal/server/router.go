@@ -303,6 +303,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/inbound-webhooks", inboundHandler.Create)
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Get)
 	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Update)
+	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/inbound-webhooks/{id}/sign", inboundHandler.Sign)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/inbound-webhooks/{id}", inboundHandler.Delete)
 
 	// Public trigger endpoint. Path is at the root (NOT under /api/v1)

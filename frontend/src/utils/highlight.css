@@ -1,0 +1,84 @@
+/* Syntax token palette, mapped onto the dashboard's own tokens.
+ *
+ * This replaces highlight.js/styles/github-dark.css, which hard-coded GitHub's
+ * palette (#c9d1d9 body, #ff7b72 keywords, #d2a8ff entities, #a5d6ff strings)
+ * into every code block in the AI chat, the tool-call JSON viewer and Docs. No
+ * theme change reached any of it, and GitHub's entity violet is brighter and
+ * more saturated than --color-primary, so decoration inside a code sample
+ * out-shouted the accent the design system reserves for actions.
+ *
+ * Syntax classes are a categorical axis, not status, so the mapping borrows the
+ * status foregrounds for their hue rather than their meaning: five buckets is
+ * as many as these grammars (js/ts/python/json/bash/xml/css/yaml) need to stay
+ * readable, and every one of them resolves through var(--color-*).
+ *
+ * Selectors are doubled (.hljs-keyword.hljs-keyword) purely to reach 0,2,0
+ * specificity. views/Docs.vue still imports github-dark.css itself, and it is a
+ * lazily-loaded route, so its single-class rules would otherwise win or lose by
+ * whichever stylesheet the bundler injected last. Doubling makes this palette
+ * deterministic without !important, and the doubling can go once that import
+ * does. Bare .hljs-* selectors (not descendants of .hljs) are required because
+ * markdown-it renders a nested fence as <pre><code class="language-x">, with no
+ * .hljs ancestor over the token spans.
+ */
+
+.hljs.hljs {
+  color: var(--color-foreground);
+  background: transparent;
+}
+
+/* Prose in the margins: comments, quotes, doc markers. */
+.hljs-comment.hljs-comment,
+.hljs-quote.hljs-quote {
+  color: var(--color-foreground-muted);
+  font-style: italic;
+}
+
+/* Language skeleton: keywords, operators-as-words, literals, types, directives. */
+.hljs-keyword.hljs-keyword,
+.hljs-selector-tag.hljs-selector-tag,
+.hljs-literal.hljs-literal,
+.hljs-type.hljs-type,
+.hljs-built_in.hljs-built_in,
+.hljs-meta.hljs-meta,
+.hljs-meta-keyword.hljs-meta-keyword,
+.hljs-doctag.hljs-doctag {
+  color: var(--color-link);
+}
+
+/* Data the author typed: strings, patterns, attribute values, additions. */
+.hljs-string.hljs-string,
+.hljs-regexp.hljs-regexp,
+.hljs-meta-string.hljs-meta-string,
+.hljs-addition.hljs-addition,
+.hljs-attr.hljs-attr,
+.hljs-attribute.hljs-attribute,
+.hljs-symbol.hljs-symbol,
+.hljs-bullet.hljs-bullet {
+  color: var(--color-success-fg);
+}
+
+/* Names and numbers: what the eye jumps to when scanning a sample. */
+.hljs-title.hljs-title,
+.hljs-name.hljs-name,
+.hljs-section.hljs-section,
+.hljs-selector-id.hljs-selector-id,
+.hljs-selector-class.hljs-selector-class,
+.hljs-number.hljs-number,
+.hljs-variable.hljs-variable,
+.hljs-template-variable.hljs-template-variable,
+.hljs-property.hljs-property {
+  color: var(--color-warning-fg);
+}
+
+.hljs-deletion.hljs-deletion {
+  color: var(--color-danger-fg);
+}
+
+.hljs-emphasis.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong.hljs-strong {
+  font-weight: 600;
+}

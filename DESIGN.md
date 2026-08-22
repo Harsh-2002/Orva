@@ -16,6 +16,8 @@ colors:
   danger: "#EF4444"
   warning: "#EAB308"
   success: "#22C55E"
+  runtime-node: "#8FBF7F"
+  runtime-python: "#7FA8D4"
 typography:
   display:
     fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
@@ -235,7 +237,7 @@ The dashboard's interactive primitive. Five variants, four sizes.
 - **Chip:** unfilled border at rest; flips to primary fill when active. Filter pill toggles on Jobs/Webhooks/CronJobs status strips.
 - **States:** `:hover` lightens fill by one step; `:focus-visible` shows a 2px primary ring offset by `--color-background`; `:disabled` 50% opacity + not-allowed cursor.
 
-**Sizes:** xs `h-7 px-2.5` (28px), sm `h-8 px-3` (32px), md `h-10 px-4` (40px, default), lg `h-12 px-6` (48px). On coarse pointers, compact controls grow to a real, non-overlapping 44px minimum target.
+**Sizes:** xs `h-7 px-2.5`, sm `h-8 px-3`, md `h-10 px-4` (default), lg `h-12 px-6`. Rendered heights are 26.6 / 30.4 / 38 / 45.6px, not the nominal 28 / 32 / 40 / 48, because the root is scaled to 95% (section 7). Only `lg` clears the 44px touch floor on its own, so xs, sm **and md** carry a `touch-expand-*` that grows the real box on coarse pointers. md was long assumed compliant at a nominal 40px and was not.
 
 ### Filter Chips
 
@@ -273,14 +275,61 @@ The codebase has two: `Badge.vue` (semantic-token-driven, canonical) and `Status
 - **Sizes:** sm `px-2 py-0.5 text-xs`, md `px-2.5 py-1 text-sm`, lg `px-3 py-1.5 text-base`.
 - **Optional dot:** prepends a small filled circle for "live" status indicators.
 
+### Runtime Tags (`components/common/RuntimeTag.vue`)
+
+The only place a function's runtime is drawn. Renders the Python or Node mark at
+`w-3.5 h-3.5` in a desaturated identity tint (`--color-runtime-python`,
+`--color-runtime-node`), with the versioned label ("Python 3.14", "Node.js 24")
+carried in `title` and the accessible name. `withLabel` prints the label inline,
+for pickers where the operator is choosing rather than recognising. An
+unrecognised runtime prints its raw value rather than guessing a logo. See
+section 7 for when a mark may replace a word at all.
+
+The words themselves live in `utils/runtime.js`, not in this component. They
+were previously spelled out here and again in the editor strip, while four other
+places printed the API's raw value, so one function read "Node.js 24" on one
+screen and "node" on the next. `<option>` cannot host a component, so the two
+function-picker selects use `runtimeLabel()` directly -- that is the sanctioned
+text path, and a unit test fails the build if any view interpolates a bare
+`.runtime` again.
+
+### Load Errors (`components/common/LoadError.vue`)
+
+Shown when a list failed to load, above the list it replaces.
+
+Every list view used to `catch (e) { console.error(e) }` and fall through to its
+own empty state, so a failed request and an empty account rendered identically:
+the operator was told "No API keys yet", "No channels yet", "No jobs yet" as
+fact. Absence of data is not evidence of absence, and on the credential and
+egress screens that false negative reads as reassurance.
+
+Empty states are therefore gated on having actually loaded --
+`v-if="loaded && !loadError && rows.length === 0"` -- and the failure gets a
+`role="alert"` band naming what could not be loaded, the server's message, and a
+Retry. A list that does not know what it holds must say so.
+
+### Brand Marks (`components/icons/brand/`)
+
+Single-path Simple Icons geometry, `fill="currentColor"`, `aria-hidden="true"`,
+with a comment naming the source and the nominative use. Never full-colour vendor
+logos: they are used to identify a runtime or an OAuth client, not to decorate,
+and a saturated logo next to a status pill reads as a state.
+
+### Brand Lockup (`components/layout/BrandLockup.vue`)
+
+The mark plus the wordmark at one size, used by both the mobile top bar and the
+sidebar drawer header. Both are on screen on a phone, so any difference between
+them reads as the logo resizing while you navigate. Rendering both from one
+component is what keeps that from recurring.
+
 ### Sidebar Navigation (`components/layout/Sidebar.vue`)
 
 - **Width:** `w-64` mobile drawer, `lg:w-52` (208px) desktop inline.
 - **Background:** `bg-background border-r border-border`. Same as page; only the right border separates it.
-- **Brand block:** `h-16` with the Orva mark + wordmark in `font-mono` (yes, mono — the brand wears its operator's clothes).
+- **Brand block:** `h-16`, rendering `BrandLockup` — the same component the mobile top bar uses, so the mark cannot be one size in the bar and another in the drawer. Wordmark in `font-mono` (yes, mono — the brand wears its operator's clothes).
 - **Items:** Overview, Chat, and Functions stay visible. Lower-frequency routes are grouped under collapsible Automation, Observe, and Connect disclosures; Settings and Docs remain direct links. Rows use `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium` with distinct icons by silhouette.
 - **Active:** `bg-primary text-white shadow-lg shadow-purple-900/20`. Hover: `text-white bg-surface-hover`.
-- **Mobile:** the desktop sidebar transforms into an off-canvas drawer toggled from a `lg:hidden` top bar with a hamburger icon.
+- **Mobile:** the desktop sidebar transforms into an off-canvas drawer toggled from a `lg:hidden` top bar with a hamburger icon. The bar pads its **outer** element with `pt-safe` and puts the 56px row on an inner div, so the status-bar inset adds to the bar instead of eating it; page content clears it with `pt-topbar`, which is the same sum.
 
 ### Modals (`components/common/Modal.vue`) and Confirm Dialogs (`components/common/ConfirmDialog.vue`)
 
@@ -319,14 +368,148 @@ PRODUCT.md names five anti-references. Each is below as a Don't.
 
 The rest of the Don'ts apply across every register:
 
-- **Don't** use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses. Also no `--`. The recent header standardisation pass left ≈16 in template bodies and more in JS-built strings; sweep them.
-- **Don't** reach for raw Tailwind palette colours (`bg-blue-500/70`, `text-emerald-300`, `bg-amber-500/15`, `text-sky-300`) as a substitute for status meaning. The codebase has 125 of these and every one is a pending palette migration.
-- **Don't** hex-code colours inside a Vue component's scoped CSS. `Docs.vue` still carries hex literals (its Python/Node brand-logo SVG stops, which are a legitimate exemption); map any non-brand hex to `var(--color-…)` so a future theme change works. `Firewall.vue` has already been migrated to the semantic status tokens — use it as the reference.
+- **Don't** use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses. Also no `--`. The templates are at zero and `responsive.test.js` now fails the build on a new one. Comments and copyable code samples keep theirs.
+- **Don't** reach for raw Tailwind palette colours (`bg-blue-500/70`, `text-emerald-300`, `bg-amber-500/15`, `text-sky-300`) as a substitute for status meaning. Ten remain, all in `SourceTag.vue`, and they are deliberate: the source pill is a seven-way categorical identity axis, not a status axis, so it does not belong in the success/warning/danger families. Everywhere else uses the semantic tokens. An alpha variant of a token belongs in `color-mix(in srgb, var(--color-…) N%, transparent)`, not a hand-written `rgba()`.
+- **Don't** hex-code colours inside a Vue component's scoped CSS. One remains, `#282c34` in `FunctionDiff.vue`, and it is exempt: it is `@codemirror/theme-one-dark`'s own editor background, and the file imports that theme, so the two have to agree. Everything else maps to `var(--color-…)`. `Firewall.vue` is the reference for the intended mapping.
 - **Don't** use pure `#000` for surfaces or pure `#fff` for routine text. Use the graphite surface ladder and soft-gray foreground tokens; pure white is reserved for saturated action surfaces.
 - **Don't** use `backdrop-blur` decoratively. The three glassmorphic icon chips on Onboarding are the exact pattern PRODUCT.md's Vercel/Railway anti-reference rejects. Blur is reserved for "the page underneath is no longer interactive".
 - **Don't** lay out three or four identical icon-+-heading-+-paragraph cards in a feature grid. That template is the absolute ban "identical card grids" by name; PRODUCT.md flags the same shape under "Vercel / Railway / landing-page onboarding panels".
-- **Don't** size `<button>` targets under 44×44 on coarse pointers. Grow the real box with `min-height` and `min-width`; invisible pseudo-element hit areas can overlap neighboring controls and steal clicks.
+- **Don't** size `<button>` targets under 44×44 on coarse pointers. Grow the real box with `min-height` and `min-width`; invisible pseudo-element hit areas can overlap neighboring controls and steal clicks. The one exemption is WCAG 2.5.5's own: a control sitting inline inside a sentence, where a 44px box would set the line height of running prose. `KVStore.vue`'s inline "Load more" is the example, and it says so in place.
 - **Don't** style section captions as `<div>`s and skip the heading. Screen readers cannot navigate to text-styled divs.
 - **Don't** introduce `border-left-N` or `border-right-N` colored stripes on cards, list items, or alerts. The shared design law explicitly bans side-stripe borders.
 - **Don't** animate layout properties (`width`, `height`, `top`, `padding`). Transforms and opacity only. Use `transition-colors`, `transition-transform`, `transition-opacity`. The codebase has zero `transition-all` today; keep it that way.
 - **Don't** ease with bounce or elastic. Exponential ease-out (ease-out-quart / quint / expo) only.
+
+---
+
+## 7. Responsive & Adaptive
+
+The dashboard had a complete set of adaptive primitives and no written rule for
+applying them, so every view improvised and the phone experience drifted view by
+view. This section is the rule. It describes what the code already does well, and
+makes the parts that were assumed explicit.
+
+### Breakpoints
+
+Tailwind defaults, unmodified. Only three carry meaning here:
+
+| Token | Width | What changes |
+|---|---|---|
+| `sm` | 640px | Mobile card list gives way to the desktop table. |
+| `md` | 768px | Two-pane layouts split (editor, AI rail). |
+| `lg` | 1024px | Sidebar stops being a drawer and becomes inline. |
+
+`xl` (1280px) is for progressive column reveal only. Do not introduce `2xl`.
+Target device classes: phone 375–430, tablet 768–834, laptop 1280–1440, desktop 1920.
+
+### The root is scaled
+
+`html { font-size: 95% }`, so **1rem = 15.2px**. Every rem-based size is 5% under
+its nominal Tailwind value: `h-10` is 38px, not 40; `text-base` is 15.2px, not 16.
+Reason about real pixels whenever a threshold matters. Two rules exist because of
+this scale, and both were broken before it was written down:
+
+- A control is only touch-compliant at `h-11` (41.8px) or above, and only `h-12`
+  (45.6px) clears 44px unaided. Everything smaller carries a `touch-expand-*`,
+  which floors both height **and** width: a `Button` whose slot holds only an
+  icon measured 35px wide while measuring a compliant 44px tall. A control that
+  is natively small and has no clickable label beside it (a bare checkbox in a
+  card whose body is already a button) gets wrapped in a padded `<label>` that
+  carries the target instead, so the box stays dense and the hit area does not.
+- `text-base` does **not** clear iOS Safari's 16px focus-zoom threshold. Do not
+  reach for it to stop the zoom; `style.css` pins form controls to a real 16px
+  under `@media (pointer: coarse)` instead, once, globally.
+
+### The overflow contract
+
+`html, body { overflow-x: hidden }` is deliberate: the document never scrolls
+sideways. The cost is that **an overflowing container is clipped silently, with no
+scrollbar to reveal it.** So every container that can exceed its width must own its
+own scrolling:
+
+```html
+<div class="overflow-x-auto scrollable"> … </div>
+```
+
+Never put `overflow: hidden` on something that holds content. Use it only to clip
+a rounded corner, and only where the content provably fits. A wide table, a code
+block, a fixed-track grid and a long unbroken identifier are all content.
+
+### The list-page contract
+
+Every collection view renders **both** branches, in one bordered card:
+
+```html
+<div class="bg-background border border-border rounded-lg overflow-x-auto">
+  <ul class="sm:hidden divide-y divide-border"> … stacked cards … </ul>
+  <table class="hidden sm:table w-full text-sm text-left"> … </table>
+</div>
+```
+
+Cells are `px-6 py-4`, header cells `px-6 py-3`. The text column is
+`min-w-0 flex-1`, the action cluster `shrink-0`.
+
+**Parity is the rule, not the aspiration.** Any action, badge or identifier
+reachable from the desktop row must be reachable from the mobile card. Hiding a
+column at a breakpoint is progressive disclosure; dropping an action is removing a
+feature from anyone holding a phone. Where the desktop table reveals columns
+across `sm`/`md`/`lg`/`xl`, the mobile card carries that same information in its
+meta rows.
+
+Rows open detail views through a real focusable control. A `@click` on a bare
+`<li>` or `<tr>` is not keyboard-operable and fails WCAG 2.1.1 at Level A.
+
+### Viewport units
+
+`dvh`, never `vh`, for anything sized to the viewport. On mobile browsers `100vh`
+is the *large* viewport, so a `100vh` shell extends behind the retracting URL bar
+and the bottom of every scroll container hides under it. `dvh` also shrinks when
+the on-screen keyboard opens, which is what keeps a focused field visible without
+a `visualViewport` listener.
+
+### Physical edges
+
+Fixed elements against a screen edge pad with the safe-area utilities
+(`pt-safe`, `pb-safe`, `pl-safe`, `pr-safe`, `p-safe`, `pb-composer`). Pad the
+**outer** element and let an inner element carry the fixed height: putting `h-14`
+and `pt-safe` on one box makes the inset eat the row instead of adding to it.
+Content offset from the fixed mobile top bar uses `pt-topbar`, which is that bar's
+height plus the inset, so the two cannot drift apart.
+
+### Data visualisation on small screens
+
+Bars and tracks thicken on phones (`h-2 sm:h-1.5`): a 6px rule is legible on a
+monitor at arm's length and close to invisible in the hand. Fills animate with
+`transform: scaleX()` from `origin-left`, never by animating `width`, which
+relayouts the row on every poll. Any SVG drawn with `preserveAspectRatio="none"`
+must set `vector-effect="non-scaling-stroke"`, or the same line renders at a
+different weight in a narrow card than a wide one. Every chart carries `role="img"`
+and an `aria-label` stating the actual values, because a bar has no text to read.
+
+### Icons and text
+
+Icons resolve faster than words, but only when the reader already knows the mark.
+Choose by what the reader is doing, not by what looks cleaner:
+
+- **Icon alone** when the set is small and stable, the mark is already known, and
+  the label adds nothing: the runtime in a list row (`RuntimeTag`), a row action
+  (`IconButton`). The word moves to `title` and the accessible name; it is never
+  simply deleted.
+- **Icon with text** when the reader is *choosing* rather than recognising (a
+  runtime picker, a settings toggle), or when the concept has no established mark
+  and the icon is only a scanning aid (the activity source pill).
+- **Text alone** for anything with more than a handful of values, for numbers and
+  measurements, and for HTTP methods, which are already their own vocabulary.
+- **Never icon alone for status.** Outcome must survive both colour-blindness and
+  an unfamiliar glyph, so a status carries its word, its token colour, and its
+  shape together. `StatusBadge` is the canonical example and is not to be reduced.
+
+### Enforcement
+
+`frontend/test/responsive.test.js` asserts the mechanical half of this section and
+runs in CI via `npm test`. The half it cannot assert is geometry, which has to be
+measured in a real browser: the source says `h-10`, only a render says 38px. Every
+number in this section was measured that way, across the shipped route set at
+375/390/430/768/820/1280/1920 with `pointer: coarse` emulated on the phone widths. It is there because every rule above was already true in
+at least one view and false in another; a convention nothing checks is a
+convention that decays.

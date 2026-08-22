@@ -1,12 +1,19 @@
 # Build outputs
 /orva
 /orvad
+/build/
 /dist/
 /out/
-/build/
 
-# Local agent / claude session files
+# backend/internal/server/ui_dist/ is deliberately NOT ignored. The UI is
+# embedded via //go:embed and the built snapshot is committed, so `make build`
+# alone reproduces a release artifact (CONTRACT.md section 3). An earlier
+# `internal/server/ui_dist/` entry here was dead -- it was missing the backend/
+# prefix -- and "fixing" the path would have silently broken that invariant.
+
+# Local agent / Claude session files
 .claude/
+.playwright-mcp/
 *.session-transcript.txt
 [0-9][0-9][0-9][0-9]-*-request-interrupted-by-user.txt
 # Dated session-dump transcripts (e.g. 2026-04-23-144458-...txt)
@@ -17,15 +24,15 @@
 *.out
 *.prof
 vendor/
+# `go build ./test/...` drops the rehearsal harness binary at the repo root.
+/migration-rehearsal
 
-# Frontend
-ui/node_modules/
-ui/dist/
-ui/.vite/
-ui/coverage/
+# Node — at any depth. The frontend is frontend/ (which has its own .gitignore
+# for dist/ and logs); test/browser/ installs playwright-core locally.
+node_modules/
 
-# Embedded UI bundle (rebuilt by Dockerfile / `make ui`)
-internal/server/ui_dist/
+# Python
+**/__pycache__/
 
 # Local data + secrets — should never be checked in
 *.db
@@ -33,8 +40,9 @@ internal/server/ui_dist/
 *.db-wal
 *.db-shm
 .admin-key
-data/
-/var/lib/orva/
+/data/
+orva-backup-*
+*.tar.gz
 
 # Test artifacts (point-in-time outputs from running harnesses — regenerable)
 test/*.tsv
@@ -51,8 +59,10 @@ test/kata-bench/kata-clh/
 test/kata-bench/logs/
 test/kata-bench/run.log
 test/kata-bench/summary.md
-test/kata-bench/__pycache__/
-.playwright-mcp/
+
+# Design-tooling artifacts. design.json is the tracked design record; only the
+# regenerable critique snapshots are ignored.
+.impeccable/critique/
 
 # Editor / IDE
 .vscode/
@@ -68,15 +78,3 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
-modelcontextprotocol-sdk-*.tgz
-*.tar.gz
-orva-backup-*
-reddit.md
-**/__pycache__/
-.gstack/
-
-# Design-tooling artifacts (impeccable critique snapshots)
-.impeccable/
-
-# `go build ./test/...` drops the rehearsal harness binary at the repo root.
-/migration-rehearsal

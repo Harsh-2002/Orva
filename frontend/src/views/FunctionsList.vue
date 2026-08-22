@@ -36,14 +36,16 @@
     >
       <!-- Search strip — matches the Logs filter aesthetic. The min-w
            drops to 0 below sm so the search collapses cleanly on phones;
-           from sm up the original 280-440 px range returns. -->
+           from sm up the original 280-440 px range returns. No mobile
+           text-base override: style.css pins every input to 16 px on
+           coarse pointers, which is what actually stops iOS focus-zoom. -->
       <div class="flex items-center gap-2 flex-wrap">
         <div class="relative flex-1 min-w-0 sm:min-w-[280px] max-w-full sm:max-w-[440px]">
           <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
           <input
             v-model="search"
             placeholder="Search by name, runtime, or function id…"
-            class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
         </div>
         <span class="text-[11px] text-foreground-muted shrink-0 tabular-nums">
@@ -54,11 +56,12 @@
       <div class="bg-background border border-border rounded-lg overflow-x-auto">
         <!--
         Mobile (<sm) stacked-row list. Each card carries: name + badges,
-        description (clamped), runtime + resources micro-row, and the
-        same edit/delete actions as the desktop table. Mobile drops the
-        per-row checkbox / bulk-select affordance — bulk delete from a
-        phone is rare and the floating bar's space is better spent on
-        the row content. Bulk-select returns at sm+ via the table.
+        description (clamped), a runtime / resources / function-id
+        micro-row, and the same copy-url / edit / delete actions as the
+        desktop table. The only thing mobile drops is the per-row
+        checkbox — bulk delete from a phone is rare and the floating
+        bar's space is better spent on the row content. Bulk-select
+        returns at sm+ via the table.
       -->
         <ul class="sm:hidden divide-y divide-border">
           <li
@@ -82,6 +85,12 @@
                   >
                     <Lock class="w-3 h-3" /> {{ fn.auth_mode === 'platform_key' ? 'key' : 'signed' }}
                   </span>
+                  <span
+                    v-if="fn.rate_limit_per_min > 0"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-primary/15 text-primary border border-primary/30 tabular-nums"
+                  >
+                    <Gauge class="w-3 h-3" /> {{ fn.rate_limit_per_min }}/m
+                  </span>
                 </div>
                 <p
                   v-if="fn.description"
@@ -89,12 +98,28 @@
                 >
                   {{ fn.description }}
                 </p>
-                <div class="mt-1.5 flex items-center gap-3 text-[11px] text-foreground-muted font-mono">
-                  <span>{{ fn.runtime }}</span>
+                <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted font-mono">
+                  <RuntimeTag :runtime="fn.runtime" />
                   <span>{{ fn.cpus }} CPU / {{ fn.memory_mb }}MB</span>
+                  <!-- /fn/<id> is keyed on the id, so anyone debugging a
+                       failing invoke from a phone needs it on the card,
+                       not only in the desktop table's Function ID column. -->
+                  <span
+                    class="truncate min-w-0 max-w-[16ch]"
+                    :title="fn.id"
+                  >{{ fn.id }}</span>
+                  <!-- Last Update is an xl+ column on desktop, so on a phone
+                       the card is the only place it can appear at all. -->
+                  <span v-if="fn.updated_at">{{ new Date(fn.updated_at).toLocaleDateString() }}</span>
                 </div>
               </div>
               <div class="flex items-center gap-1 shrink-0">
+                <IconButton
+                  :icon="copiedId === fn.id ? Check : Copy"
+                  :title="copiedId === fn.id ? 'Copied!' : 'Copy invoke URL'"
+                  :variant="copiedId === fn.id ? 'primary' : 'default'"
+                  @click="copyUrl(fn)"
+                />
                 <IconButton
                   :icon="Pencil"
                   title="Edit function"
@@ -136,31 +161,32 @@
         <table class="hidden sm:table w-full text-sm text-left">
           <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
             <tr>
-              <th class="px-4 py-3 w-8">
+              <th class="px-6 py-3 w-8">
                 <input
                   type="checkbox"
                   :checked="allChecked"
                   :indeterminate.prop="someChecked && !allChecked"
-                  class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
+                  aria-label="Select all functions"
+                  class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
                   @change="toggleAll"
                 >
               </th>
-              <th class="px-4 py-3 font-medium">
+              <th class="px-6 py-3 font-medium">
                 Name
               </th>
-              <th class="px-4 py-3 font-medium hidden sm:table-cell">
+              <th class="px-6 py-3 font-medium hidden sm:table-cell">
                 Runtime
               </th>
-              <th class="px-4 py-3 font-medium hidden lg:table-cell">
+              <th class="px-6 py-3 font-medium hidden lg:table-cell">
                 Resources
               </th>
-              <th class="px-4 py-3 font-medium hidden md:table-cell">
+              <th class="px-6 py-3 font-medium hidden md:table-cell">
                 Function ID
               </th>
-              <th class="px-4 py-3 font-medium hidden xl:table-cell">
+              <th class="px-6 py-3 font-medium hidden xl:table-cell">
                 Last Update
               </th>
-              <th class="px-4 py-3 font-medium text-right">
+              <th class="px-6 py-3 font-medium text-right">
                 Actions
               </th>
             </tr>
@@ -172,15 +198,16 @@
               class="hover:bg-surface/50 transition-colors"
               :class="{ 'bg-surface/30': selected.has(fn.id) }"
             >
-              <td class="px-4 py-3 align-middle">
+              <td class="px-6 py-4 align-middle">
                 <input
                   :checked="selected.has(fn.id)"
                   type="checkbox"
-                  class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
+                  :aria-label="`Select ${fn.name}`"
+                  class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
                   @change="toggleOne(fn.id)"
                 >
               </td>
-              <td class="px-4 py-3 font-medium text-white">
+              <td class="px-6 py-4 font-medium text-white">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span>{{ fn.name }}</span>
                   <span
@@ -213,15 +240,13 @@
                   {{ fn.description }}
                 </p>
               </td>
-              <td class="px-4 py-3 text-foreground hidden sm:table-cell">
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border border-border bg-background text-foreground-muted font-mono">
-                  {{ fn.runtime }}
-                </span>
+              <td class="px-6 py-4 text-foreground hidden sm:table-cell">
+                <RuntimeTag :runtime="fn.runtime" />
               </td>
-              <td class="px-4 py-3 text-foreground-muted font-mono text-xs hidden lg:table-cell">
+              <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden lg:table-cell">
                 {{ fn.cpus }} CPU / {{ fn.memory_mb }}MB
               </td>
-              <td class="px-4 py-3 hidden md:table-cell align-middle">
+              <td class="px-6 py-4 hidden md:table-cell align-middle">
                 <!--
                 Function ID + Copy URL row.
                 Cell stays compact: ID truncates to a 12-char + ellipsis
@@ -249,10 +274,10 @@
                   />
                 </div>
               </td>
-              <td class="px-4 py-3 text-foreground-muted hidden xl:table-cell">
+              <td class="px-6 py-4 text-foreground-muted hidden xl:table-cell">
                 {{ new Date(fn.updated_at).toLocaleDateString() }}
               </td>
-              <td class="px-4 py-3 text-right">
+              <td class="px-6 py-4 text-right">
                 <div class="inline-flex items-center gap-1">
                   <IconButton
                     :icon="Pencil"
@@ -286,7 +311,7 @@
                     have not been fetched yet.
                   </div>
                   <button
-                    class="text-xs text-foreground hover:text-white underline underline-offset-2"
+                    class="touch-expand-xs text-xs text-foreground hover:text-white underline underline-offset-2"
                     @click="search = ''"
                   >
                     Clear search
@@ -303,7 +328,7 @@
           class="flex justify-center border-t border-border py-3 bg-surface/30"
         >
           <button
-            class="text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
+            class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
             :disabled="loading"
             @click="loadMore"
           >
@@ -356,7 +381,7 @@
         </span>
         <span class="w-px h-4 bg-border" />
         <button
-          class="text-xs text-foreground-muted hover:text-white transition-colors px-2 py-1"
+          class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors px-2 py-1"
           @click="selected = new Set()"
         >
           Clear
@@ -381,6 +406,7 @@ import { useRouter } from 'vue-router'
 import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import RuntimeTag from '@/components/common/RuntimeTag.vue'
 import apiClient from '@/api/client'
 import { listFunctions } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'

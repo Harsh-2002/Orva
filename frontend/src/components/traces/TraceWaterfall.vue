@@ -7,7 +7,7 @@
       <div>
         <h2
           id="waterfall-heading"
-          class="text-h2 text-white"
+          class="text-sm font-semibold text-white tracking-tight"
         >
           Causal waterfall
         </h2>
@@ -15,14 +15,18 @@
           Select a span to inspect it here.
         </p>
       </div>
+      <!-- Swatches are squares rather than dots so the two textured ones read
+           at this size: they carry the same hatch / stripe the bars use, which
+           is what makes the legend teach the second channel instead of only
+           the hue. -->
       <div
         class="flex items-center gap-3 text-xs text-foreground-muted"
         aria-label="Waterfall legend"
       >
-        <span class="inline-flex items-center gap-1.5"><i class="w-2 h-2 rounded-full bg-primary" />Warm</span>
-        <span class="inline-flex items-center gap-1.5"><i class="w-2 h-2 rounded-full bg-info" />Code</span>
-        <span class="inline-flex items-center gap-1.5"><i class="w-2 h-2 rounded-full bg-warning" />Outlier</span>
-        <span class="inline-flex items-center gap-1.5"><i class="w-2 h-2 rounded-full bg-danger" />Error</span>
+        <span class="inline-flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-sm bg-primary" />Warm</span>
+        <span class="inline-flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-sm bg-info" />Code</span>
+        <span class="inline-flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-sm bg-warning bar-stripe" />Outlier</span>
+        <span class="inline-flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-sm bg-danger bar-hatch" />Error</span>
       </div>
     </div>
 
@@ -258,9 +262,17 @@ const barStyle = (row) => {
   const width = Math.max(0.75, Math.min(100 - left, ((row.duration_ms || 0) / total.value) * 100))
   return { left: `${left}%`, width: `${width}%` }
 }
-const barClass = (row) => row.status === 'error'
-  ? 'bg-danger/80'
-  : row.is_outlier ? 'bg-warning/85' : row.type === 'user' ? 'bg-info/80' : 'bg-primary/85'
+// Outcome carries a second visual channel besides hue. The collapsed row never
+// prints row.status — the word only appears once a row is expanded — so a
+// 20-span waterfall scanned for the failure was red-vs-violet or amber-vs-violet
+// and nothing else, which either common colour deficiency collapses (WCAG
+// 1.4.1). Error bars are hatched, outlier bars striped; the textures are defined
+// in the scoped block below and repeated on the legend swatches.
+const barClass = (row) => {
+  if (row.status === 'error') return 'bg-danger/80 bar-hatch'
+  if (row.is_outlier) return 'bg-warning/85 bar-stripe'
+  return row.type === 'user' ? 'bg-info/80' : 'bg-primary/85'
+}
 const indentStyle = (depth) => ({ paddingLeft: `${Math.min(depth, 6) * 0.8}rem` })
 const safeKey = (key) => key.replace(/[^a-zA-Z0-9_-]/g, '-')
 const accessibleStatus = (row) => row.type === 'user'
@@ -281,3 +293,25 @@ const formatLogTime = (ts) => {
 }
 const logLevelClass = (level) => ({ error: 'text-danger-fg', warn: 'text-warning-fg', debug: 'text-foreground-muted' }[level] || 'text-info-fg')
 </script>
+
+<style scoped>
+/* Texture overlays for span outcome (see barClass). Painted with the page
+   background so the cut-out reads on any fill underneath, which keeps the fill
+   itself on its own semantic token. Two different angles and periods so the two
+   textures are told apart by shape, not only by the colour they sit on. */
+.bar-hatch {
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-background) 70%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+.bar-stripe {
+  background-image: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-background) 70%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+}
+</style>

@@ -26,8 +26,12 @@ const props = defineProps({
 const emit = defineEmits(['regenerate', 'edit', 'delete'])
 
 // Shared look for the inline action buttons (revealed on hover / focus).
+// touch-expand-sm because these are always visible on touch (max-md:opacity-100)
+// and padding alone left them ~24px tall: Delete truncates the conversation
+// irreversibly, so it cannot be the smallest target in the view. The icon-only
+// ones add touch-expand-iconbtn for the 44px width they also lack.
 const actionCls =
-  'inline-flex items-center rounded-md px-1.5 py-1 text-[11px] text-foreground-muted opacity-0 transition-[opacity,color,background-color] hover:bg-surface-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background group-hover:opacity-100 max-md:opacity-100'
+  'touch-expand-sm inline-flex items-center rounded-md px-1.5 py-1 text-[11px] text-foreground-muted opacity-0 transition-[opacity,color,background-color] hover:bg-surface-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background group-hover:opacity-100 max-md:opacity-100'
 
 // Plain-text of the message for copy + edit seeding — skip reasoning parts.
 const copyableText = computed(() =>
@@ -138,18 +142,18 @@ function onEditKey(e) {
         </div>
       </template>
       <template v-else>
-        <div class="rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
+        <div class="break-words rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-sm leading-relaxed text-primary-foreground">
           <MessagePart
             v-for="(p, i) in parts"
             :key="`${p.type}-${i}`"
             :part="p"
           />
         </div>
-        <div class="mt-1 flex items-center gap-1">
+        <div class="mt-1 flex items-center gap-2">
           <button
             v-if="editable"
             type="button"
-            :class="actionCls"
+            :class="[actionCls, 'touch-expand-iconbtn']"
             aria-label="Edit and resend"
             title="Edit and resend"
             @click="startEdit"
@@ -159,7 +163,7 @@ function onEditKey(e) {
           <button
             v-if="deletable"
             type="button"
-            :class="actionCls"
+            :class="[actionCls, 'touch-expand-iconbtn']"
             aria-label="Delete from here"
             title="Delete from here"
             @click="emit('delete')"
@@ -181,7 +185,7 @@ function onEditKey(e) {
         :part="p"
         :class="index > 0 ? 'mt-3' : ''"
       />
-      <div class="mt-1.5 flex items-center gap-1">
+      <div class="mt-1.5 flex items-center gap-2">
         <button
           v-if="copyableText"
           type="button"
@@ -207,7 +211,7 @@ function onEditKey(e) {
         <button
           v-if="deletable"
           type="button"
-          :class="actionCls"
+          :class="[actionCls, 'touch-expand-iconbtn']"
           aria-label="Delete from here"
           title="Delete from here"
           @click="emit('delete')"

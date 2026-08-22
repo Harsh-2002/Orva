@@ -112,7 +112,7 @@
         </div>
       </div>
 
-      <div class="doc-table-wrap">
+      <div class="doc-table-wrap scrollable">
         <table class="doc-table">
           <thead>
             <tr>
@@ -244,7 +244,7 @@
         </div>
       </div>
 
-      <div class="doc-table-wrap">
+      <div class="doc-table-wrap scrollable">
         <table class="doc-table">
           <thead>
             <tr>
@@ -292,7 +292,7 @@
 
       <details class="doc-details group">
         <summary class="doc-details-summary">
-          <ChevronRight class="w-3.5 h-3.5 transition-transform group-open:rotate-90 text-foreground-muted" />
+          <ChevronRight class="w-3.5 h-3.5 shrink-0 transition-transform group-open:rotate-90 text-foreground-muted" />
           Signed-invoke recipe (HMAC, opt-in)
         </summary>
         <div class="doc-details-body">
@@ -536,7 +536,7 @@
         </div>
       </div>
 
-      <div class="doc-table-wrap">
+      <div class="doc-table-wrap scrollable">
         <table class="doc-table">
           <thead>
             <tr>
@@ -620,7 +620,7 @@
             <code class="doc-chip">Stateless</code>
             <code class="doc-chip">MCP 2026-07-28</code>
             <p class="mt-1.5 text-foreground-muted">
-              Older clients negotiate down —
+              Older clients negotiate down:
               <code class="doc-chip">server/discover</code> advertises
               2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05.
             </p>
@@ -652,8 +652,8 @@
         <code class="doc-chip">initialize</code> step to perform first, no
         <code class="doc-chip">Mcp-Session-Id</code> is ever issued, and
         <code class="doc-chip">GET /mcp</code> /
-        <code class="doc-chip">DELETE /mcp</code> — the SSE-resume and
-        session-teardown verbs of the older session transport — return
+        <code class="doc-chip">DELETE /mcp</code> (the SSE-resume and
+        session-teardown verbs of the older session transport) return
         <code class="doc-chip">405</code>. Every POST carries its own bearer
         token and is answered on its own; a legacy client that still sends
         <code class="doc-chip">initialize</code> gets a normal reply with its
@@ -661,12 +661,12 @@
         simply never receives a session header. A request that opts into
         2026-07-28 sends the headers
         <code class="doc-chip">Mcp-Protocol-Version</code> and
-        <code class="doc-chip">Mcp-Method</code> — plus
+        <code class="doc-chip">Mcp-Method</code>, plus
         <code class="doc-chip">Mcp-Name</code> for
         <code class="doc-chip">tools/call</code>,
         <code class="doc-chip">resources/read</code> and
-        <code class="doc-chip">prompts/get</code>, which must repeat the name
-        from the body — plus
+        <code class="doc-chip">prompts/get</code> (those three must repeat the
+        name from the body). It also sends
         <code class="doc-chip">io.modelcontextprotocol/protocolVersion</code>
         and
         <code class="doc-chip">io.modelcontextprotocol/clientCapabilities</code>
@@ -697,7 +697,7 @@
         catalog is permission-scoped (a full-permission key lists 73 tools; a
         <code class="doc-chip">read</code>-only key lists 27) and
         channel-specific (a channel token sees only that channel's
-        functions) — a shared cache entry would hand one caller another
+        functions); a shared cache entry would hand one caller another
         caller's tool surface. <code class="doc-chip">ttlMs</code> is
         <code class="doc-chip">0</code> because the catalog changes on any
         deploy, channel edit, or permission change, and statelessness removed
@@ -711,7 +711,7 @@
           <KeyRound class="w-4 h-4 shrink-0 text-foreground-muted" />
           <span
             v-if="!mcpToken"
-            class="text-sm text-foreground-muted truncate"
+            class="text-sm text-foreground-muted sm:truncate"
           >
             Snippets show
             <code class="doc-chip">{{ tokenPlaceholder }}</code>.
@@ -719,7 +719,7 @@
           </span>
           <span
             v-else
-            class="text-sm text-success truncate"
+            class="text-sm text-success sm:truncate"
           >
             Token minted:
             <code class="doc-chip">{{ mcpTokenPrefix }}…</code>
@@ -743,7 +743,7 @@
 
       <details class="doc-details group">
         <summary class="doc-details-summary">
-          <ChevronRight class="w-3.5 h-3.5 transition-transform group-open:rotate-90 text-foreground-muted" />
+          <ChevronRight class="w-3.5 h-3.5 shrink-0 transition-transform group-open:rotate-90 text-foreground-muted" />
           More clients (Cursor, VS Code, Codex CLI, OpenCode, Zed, Windsurf, ChatGPT, manual config)
         </summary>
         <div class="doc-details-body space-y-4">
@@ -779,9 +779,9 @@
         </div>
       </div>
 
-      <div class="ai-prompt-actions">
+      <div class="doc-ai-prompt-actions">
         <button
-          class="ai-copy-btn"
+          class="doc-ai-copy-btn"
           :class="{ copied: promptCopied }"
           @click="onCopyPrompt"
         >
@@ -801,7 +801,7 @@
            with an Expand affordance. The Copy button above works
            either way because it pulls the full string from state. -->
       <div
-        class="prompt-collapse"
+        class="doc-prompt-collapse"
         :class="{ expanded: promptExpanded }"
       >
         <CodeBlock
@@ -810,12 +810,12 @@
         />
         <div
           v-if="!promptExpanded"
-          class="prompt-collapse-fade"
+          class="doc-prompt-collapse-fade"
           aria-hidden="true"
         />
       </div>
       <button
-        class="prompt-expand-btn"
+        class="doc-prompt-expand-btn"
         :aria-expanded="promptExpanded"
         @click="promptExpanded = !promptExpanded"
       >
@@ -902,7 +902,7 @@
         Each span carries a <code class="doc-chip">trigger</code> label so the
         UI can show how the chain started.
       </p>
-      <div class="doc-table-wrap">
+      <div class="doc-table-wrap scrollable">
         <table class="doc-table">
           <thead>
             <tr>
@@ -998,7 +998,7 @@
         lang="json"
       />
 
-      <div class="doc-table-wrap">
+      <div class="doc-table-wrap scrollable">
         <table class="doc-table">
           <thead>
             <tr>
@@ -1102,7 +1102,7 @@
       <h3 class="doc-h3">
         Command index
       </h3>
-      <div class="doc-table-wrap">
+      <div class="doc-table-wrap scrollable">
         <table class="doc-table">
           <thead>
             <tr>
@@ -1227,25 +1227,13 @@ import { useConfirmStore } from '@/stores/confirm'
 
 const confirmStore = useConfirmStore()
 
-// Syntax highlighting — highlight.js core + only the grammars we use.
-// Importing the lite core (vs. the auto-bundle) keeps the Docs chunk small;
-// each registerLanguage adds a few KB.
-import hljs from 'highlight.js/lib/core'
-import python from 'highlight.js/lib/languages/python'
-import javascript from 'highlight.js/lib/languages/javascript'
-import json from 'highlight.js/lib/languages/json'
-import bash from 'highlight.js/lib/languages/bash'
-import http from 'highlight.js/lib/languages/http'
-import 'highlight.js/styles/github-dark.css'
-
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('js', javascript)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('shell', bash)
-hljs.registerLanguage('sh', bash)
-hljs.registerLanguage('http', http)
+// Syntax highlighting comes from the shared instance in utils/highlight, which
+// registers the grammars and maps token colours onto the dashboard's own theme
+// tokens. Docs previously built a second instance and imported the vendored
+// github-dark stylesheet, which made the palette depend on navigation order:
+// hljs/lib/core is a singleton, so whichever route loaded first won, and
+// github-dark's background-carrying rules survived the token sheet either way.
+import hljs from '@/utils/highlight'
 
 const origin = computed(() => window.location.origin)
 
@@ -1387,10 +1375,10 @@ const DeployPipelineDiagram = defineComponent({
     return () =>
       h('figure', { class: 'doc-diagram' }, [
         h('figcaption', { class: 'doc-diagram-cap' }, 'Deploy pipeline'),
-        h('div', { class: 'doc-pipeline' },
+        h('div', { class: 'doc-pipeline scrollable' },
           stages.flatMap((s, i) => {
             const pill = h('div', { key: `s${i}`, class: 'doc-pipeline-stage' }, [
-              h('div', { class: 'doc-pipeline-glyph' }, s.glyph),
+              h('div', { class: 'doc-pipeline-glyph', 'aria-hidden': 'true' }, s.glyph),
               h('div', { class: 'doc-pipeline-label' }, [
                 h('span', { class: 'doc-pipeline-name' }, s.label),
                 h('span', { class: 'doc-pipeline-sub' }, s.sub),
@@ -2063,7 +2051,7 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'curl',
     lang: 'bash',
-    note: 'Talk to MCP directly — no handshake, no session id. Step 1 asks the server what it supports; Step 2 lists the tools. A successful reply is one SSE `message` event; a rejected one is plain JSON with a 4xx.',
+    note: 'Talk to MCP directly: no handshake, no session id. Step 1 asks the server what it supports; Step 2 lists the tools. A successful reply is one SSE `message` event; a rejected one is plain JSON with a 4xx.',
     code: `curl -sN -X POST ${origin.value}/mcp \\
   -H 'Authorization: Bearer ${T.value}' \\
   -H 'Content-Type: application/json' \\
@@ -2233,8 +2221,11 @@ const mcpConfigTabs = computed(() => [
 
 // ── Render-fn components (CodeBlock / TabbedCode / Callout) ─────────
 // These need to live in this SFC because the data they render is
-// computed in this script setup. CSS for them is in the unscoped
-// <style> block at the bottom — small, prefixed, no leak risk.
+// computed in this script setup. Their CSS is in the unscoped <style>
+// block at the bottom because a scoped style's attribute selector never
+// reaches nodes a render function builds. That block is not small, so
+// the containment is namespacing rather than size: see the note on the
+// <style> tag before adding a class.
 
 const CodeBlock = defineComponent({
   name: 'CodeBlock',
@@ -2267,15 +2258,15 @@ const CodeBlock = defineComponent({
     })
 
     return () =>
-      h('div', { class: 'codeblock' }, [
-        h('div', { class: 'codeblock-bar' }, [
-          h('span', { class: 'codeblock-lang' }, props.lang || ''),
-          h('button', { class: 'codeblock-copy', onClick: onCopy, title: 'Copy code' }, [
+      h('div', { class: 'doc-codeblock' }, [
+        h('div', { class: 'doc-codeblock-bar' }, [
+          h('span', { class: 'doc-codeblock-lang' }, props.lang || ''),
+          h('button', { class: 'doc-codeblock-copy', onClick: onCopy, title: 'Copy code' }, [
             copied.value ? h(Check, { class: 'w-3 h-3' }) : h(Copy, { class: 'w-3 h-3' }),
             copied.value ? 'Copied' : 'Copy',
           ]),
         ]),
-        h('pre', { class: 'codeblock-pre' }, [
+        h('pre', { class: 'doc-codeblock-pre scrollable' }, [
           h('code', {
             class: `hljs language-${(props.lang || 'text').toLowerCase()}`,
             innerHTML: highlighted.value,
@@ -2314,17 +2305,17 @@ const TabbedCode = defineComponent({
     }
     return () => {
       const tab = props.tabs.find((t) => t.label === active.value) || props.tabs[0]
-      return h('div', { class: 'tabbed' }, [
-        h('div', { class: 'tabbed-tabs' },
+      return h('div', { class: 'doc-tabbed' }, [
+        h('div', { class: 'doc-tabbed-tabs' },
           props.tabs.map((t) =>
             h('button', {
               key: t.label,
-              class: ['tabbed-tab', { active: t.label === active.value }],
+              class: ['doc-tabbed-tab', { active: t.label === active.value }],
               onClick: () => select(t.label),
             }, t.label)
           )
         ),
-        tab.note ? h('div', { class: 'tabbed-note' }, tab.note) : null,
+        tab.note ? h('div', { class: 'doc-tabbed-note' }, tab.note) : null,
         h(CodeBlock, { code: tab.code, lang: tab.lang }),
       ])
     }
@@ -2339,22 +2330,31 @@ const Callout = defineComponent({
   },
   setup(props, { slots }) {
     return () =>
-      h('div', { class: 'callout' }, [
-        h('div', { class: 'callout-head' }, [
-          props.icon ? h(props.icon, { class: 'callout-icon' }) : null,
+      h('div', { class: 'doc-callout' }, [
+        h('div', { class: 'doc-callout-head' }, [
+          props.icon ? h(props.icon, { class: 'doc-callout-icon' }) : null,
           props.title ? h('span', null, props.title) : null,
         ]),
-        h('div', { class: 'callout-body' }, slots.default?.()),
+        h('div', { class: 'doc-callout-body' }, slots.default?.()),
       ])
   },
 })
 </script>
 
 <style>
-/* Unscoped because CodeBlock / TabbedCode / Callout are render-fn
-   components inside this SFC, and Vue scoped styles don't reach those.
-   All class names are doc-prefixed (.doc-*, .docs-hero-*, .codeblock,
-   .tabbed, .callout) so there's no collision risk.
+/* Unscoped because CodeBlock / TabbedCode / Callout and the four
+   diagrams are render-fn components inside this SFC, and a scoped
+   style's attribute selector never reaches nodes a render function
+   builds.
+
+   This is ~1100 lines of global CSS, and Vue injects an SFC's styles at
+   module-import time and never removes them: once /docs has been opened
+   the whole block stays live for the rest of the session. Namespacing is
+   therefore the only thing keeping it contained — every selector below
+   starts with .doc- or .docs-, and the formerly generic .codeblock /
+   .tabbed / .callout / .prompt-* / .ai-* names were renamed into that
+   prefix so no component elsewhere can inherit them by picking an
+   obvious class name. Keep any new selector inside the prefix.
 
    ── Type system for the Docs page ────────────────────────────────
    Body / prose:    Inter, --font-sans (inherits from body)
@@ -2436,7 +2436,7 @@ const Callout = defineComponent({
 .docs-hero-copy-icon:hover {
   color: var(--color-foreground);
   border-color: var(--color-foreground-muted);
-  background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
+  background: var(--color-surface-hover);
 }
 .docs-hero-copy-icon:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -2444,8 +2444,8 @@ const Callout = defineComponent({
 }
 .docs-hero-copy-icon.copied {
   color: var(--color-success-fg);
-  border-color: rgba(76, 175, 80, 0.45);
-  background: rgba(76, 175, 80, 0.08);
+  border-color: var(--color-success-ring);
+  background: var(--color-success-tint);
 }
 .docs-hero-copy {
   display: inline-flex;
@@ -2463,7 +2463,7 @@ const Callout = defineComponent({
   transition: background-color 120ms, border-color 120ms, color 120ms;
 }
 .docs-hero-copy:hover {
-  background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
+  background: var(--color-surface-hover);
   border-color: var(--color-foreground-muted);
 }
 .docs-hero-copy:focus-visible {
@@ -2471,9 +2471,9 @@ const Callout = defineComponent({
   outline-offset: 2px;
 }
 .docs-hero-copy.copied {
-  border-color: rgba(76, 175, 80, 0.4);
+  border-color: var(--color-success-ring);
   color: var(--color-success-fg);
-  background: rgba(76, 175, 80, 0.08);
+  background: var(--color-success-tint);
 }
 
 .docs-hero-toc {
@@ -2482,7 +2482,7 @@ const Callout = defineComponent({
   align-items: center;
   gap: 0.4rem;
   padding-top: 1rem;
-  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+  border-top: 1px dashed color-mix(in srgb, var(--color-foreground) 5%, transparent);
 }
 .docs-hero-toc-label {
   font-family: var(--font-mono);
@@ -2515,7 +2515,7 @@ const Callout = defineComponent({
 .docs-hero-toc-link.active {
   color: var(--color-foreground);
   border-color: var(--color-primary);
-  background: rgba(85, 63, 131, 0.18);
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 .docs-hero-toc-num {
   font-family: var(--font-mono);
@@ -2525,7 +2525,7 @@ const Callout = defineComponent({
   opacity: 0.7;
 }
 .docs-hero-toc-link.active .docs-hero-toc-num {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--color-foreground);
   opacity: 1;
 }
 
@@ -2541,13 +2541,7 @@ const Callout = defineComponent({
   padding: 1.2rem 1.2rem 1.4rem;
   border: 1px solid var(--color-border);
   border-radius: 0.7rem;
-  background:
-    radial-gradient(
-      ellipse 50% 80% at 100% 0%,
-      rgba(85, 63, 131, 0.06) 0%,
-      transparent 70%
-    ),
-    var(--color-background);
+  background: var(--color-background);
 }
 .doc-diagram-cap {
   font-family: var(--font-mono);
@@ -2564,6 +2558,10 @@ const Callout = defineComponent({
   display: flex;
   align-items: stretch;
   justify-content: center;
+  /* `safe` degrades to flex-start the moment the row overflows. Plain
+     centring pushes the first stage past the left edge, where no
+     amount of scrolling can reach it. */
+  justify-content: safe center;
   gap: 0.4rem;
   overflow-x: auto;
   padding-bottom: 0.4rem;
@@ -2589,8 +2587,8 @@ const Callout = defineComponent({
   width: 1.6rem;
   height: 1.6rem;
   border-radius: 0.4rem;
-  background: rgba(85, 63, 131, 0.18);
-  border: 1px solid rgba(85, 63, 131, 0.45);
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
   color: var(--color-foreground);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -2622,8 +2620,8 @@ const Callout = defineComponent({
   height: 1px;
   background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0.05) 0%,
-    rgba(255, 255, 255, 0.18) 100%
+    color-mix(in srgb, var(--color-foreground) 5%, transparent) 0%,
+    color-mix(in srgb, var(--color-foreground) 18%, transparent) 100%
   );
   position: relative;
 }
@@ -2634,8 +2632,8 @@ const Callout = defineComponent({
   top: 50%;
   width: 0.42rem;
   height: 0.42rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.35);
-  border-right: 1px solid rgba(255, 255, 255, 0.35);
+  border-top: 1px solid color-mix(in srgb, var(--color-foreground) 35%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--color-foreground) 35%, transparent);
   transform: translateY(-50%) rotate(45deg);
 }
 
@@ -2652,14 +2650,23 @@ const Callout = defineComponent({
   font-size: 10px;
   color: var(--color-foreground-muted);
   padding: 0 0 0.2rem;
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+  border-bottom: 1px dashed color-mix(in srgb, var(--color-foreground) 5%, transparent);
 }
 .doc-trace-row {
   display: grid;
-  grid-template-columns: 11rem 1fr 3rem;
+  /* Tighter label/duration columns below sm. At 11rem the bar track
+     collapsed to ~70px on a 375px phone and the waterfall stopped
+     reading as one. */
+  grid-template-columns: 9.5rem 1fr 2.6rem;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.5rem;
   font-family: var(--font-sans);
+}
+@media (min-width: 640px) {
+  .doc-trace-row {
+    grid-template-columns: 11rem 1fr 3rem;
+    gap: 0.7rem;
+  }
 }
 .doc-trace-row.is-child .doc-trace-label,
 .doc-trace-row.is-grand .doc-trace-label {
@@ -2705,7 +2712,7 @@ const Callout = defineComponent({
 .doc-trace-track {
   position: relative;
   height: 10px;
-  background: rgba(255, 255, 255, 0.025);
+  background: color-mix(in srgb, var(--color-foreground) 2.5%, transparent);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -2713,29 +2720,17 @@ const Callout = defineComponent({
   position: absolute;
   top: 1px;
   bottom: 1px;
-  background: linear-gradient(
-    90deg,
-    rgba(85, 63, 131, 0.85) 0%,
-    rgba(85, 63, 131, 0.55) 100%
-  );
+  background: var(--color-primary);
   border-radius: 999px;
-  box-shadow: 0 0 12px rgba(85, 63, 131, 0.25);
 }
+/* Depth, not status: the three tones only say "root / child / grandchild".
+   They reuse the palette's existing accents rather than inventing a fourth
+   and fifth colour, and carry no glow — a sketch bar is not an affordance. */
 .doc-trace-row.is-child .doc-trace-bar {
-  background: linear-gradient(
-    90deg,
-    rgba(96, 165, 250, 0.8) 0%,
-    rgba(96, 165, 250, 0.5) 100%
-  );
-  box-shadow: 0 0 10px rgba(96, 165, 250, 0.25);
+  background: var(--color-info);
 }
 .doc-trace-row.is-grand .doc-trace-bar {
-  background: linear-gradient(
-    90deg,
-    rgba(52, 211, 153, 0.8) 0%,
-    rgba(52, 211, 153, 0.5) 100%
-  );
-  box-shadow: 0 0 10px rgba(52, 211, 153, 0.25);
+  background: var(--color-success);
 }
 .doc-trace-dur {
   font-family: var(--font-mono);
@@ -2748,7 +2743,7 @@ const Callout = defineComponent({
   font-size: 11.5px;
   color: var(--color-foreground-muted);
   padding-top: 0.4rem;
-  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+  border-top: 1px dashed color-mix(in srgb, var(--color-foreground) 5%, transparent);
 }
 
 /* ── Webhook delivery (3-actor swimlane) ──────────────────────────── */
@@ -2795,14 +2790,8 @@ const Callout = defineComponent({
   align-items: stretch;
   justify-content: center;
   padding: 0.85rem 0.7rem;
-  border: 1px dashed rgba(85, 63, 131, 0.45);
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 45%, transparent);
   border-radius: 0.55rem;
-  background:
-    radial-gradient(
-      ellipse 80% 100% at 50% 50%,
-      rgba(85, 63, 131, 0.08) 0%,
-      transparent 70%
-    );
 }
 .doc-webhook-wire-line {
   display: none; /* reserved for future arrow rendering */
@@ -2820,8 +2809,8 @@ const Callout = defineComponent({
   align-self: flex-start;
   padding: 0.15rem 0.55rem;
   border-radius: 0.3rem;
-  background: rgba(85, 63, 131, 0.25);
-  border: 1px solid rgba(85, 63, 131, 0.55);
+  background: color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
   color: var(--color-foreground);
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -2847,7 +2836,7 @@ const Callout = defineComponent({
   font-size: 10.5px;
   color: var(--color-foreground-muted);
   padding-top: 0.2rem;
-  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+  border-top: 1px dashed color-mix(in srgb, var(--color-foreground) 5%, transparent);
 }
 
 /* ── System-prompt collapse ────────────────────────────────────────
@@ -2857,16 +2846,16 @@ const Callout = defineComponent({
    keeps working either way because it reads the full source.
 
    The prompt opens immediately to avoid animating a large layout. */
-.prompt-collapse {
+.doc-prompt-collapse {
   position: relative;
-  max-height: 9.5rem; /* ~5 lines + the codeblock's bar */
+  max-height: 9.5rem; /* ~5 lines + the code block's bar */
   overflow: hidden;
   border-radius: 0.6rem;
 }
-.prompt-collapse.expanded {
-  max-height: 7000px; /* generous; the codeblock rules its own height */
+.doc-prompt-collapse.expanded {
+  max-height: 7000px; /* generous; the code block rules its own height */
 }
-.prompt-collapse-fade {
+.doc-prompt-collapse-fade {
   position: absolute;
   inset: auto 0 0 0;
   height: 4.5rem;
@@ -2878,7 +2867,7 @@ const Callout = defineComponent({
   );
   border-radius: 0 0 0.6rem 0.6rem;
 }
-.prompt-expand-btn {
+.doc-prompt-expand-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -2894,11 +2883,11 @@ const Callout = defineComponent({
   cursor: pointer;
   transition: color 120ms, border-color 120ms, background-color 120ms;
 }
-.prompt-expand-btn:hover {
+.doc-prompt-expand-btn:hover {
   color: var(--color-foreground);
   border-color: var(--color-foreground-muted);
 }
-.prompt-expand-btn:focus-visible {
+.doc-prompt-expand-btn:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
@@ -2917,13 +2906,12 @@ const Callout = defineComponent({
   width: 1.85rem;
   height: 1.85rem;
   border-radius: 0.5rem;
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
+  background: var(--color-primary);
   color: var(--color-primary-foreground);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 6px 18px -8px rgba(85, 63, 131, 0.6);
 }
 .doc-section-title {
   font-family: var(--font-sans);
@@ -2957,8 +2945,18 @@ const Callout = defineComponent({
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   color: var(--color-foreground);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   vertical-align: baseline;
+}
+/* From sm up there is room to hold every token on one line. Below it a
+   long chip (the KV REST path, the Accept header) is wider than the
+   content column, and nowrap would push its tail off-screen unread
+   with no scrollbar to chase it. */
+@media (min-width: 640px) {
+  .doc-chip {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
 }
 .doc-chip.break-all {
   white-space: normal;
@@ -2978,7 +2976,7 @@ const Callout = defineComponent({
   letter-spacing: -0.005em;
   color: var(--color-foreground);
   padding-left: 0.55rem;
-  border-left: 2px solid rgba(85, 63, 131, 0.55);
+  border-left: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
   text-transform: none;
 }
 /* Inside .doc-card the microlabel is the card's "title" — drop the
@@ -2996,7 +2994,7 @@ const Callout = defineComponent({
   position: relative;
   padding: 0.85rem 0.95rem;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.015) 0%, transparent 100%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-foreground) 1.5%, transparent) 0%, transparent 100%),
     var(--color-background);
   border: 1px solid var(--color-border);
   border-radius: 0.6rem;
@@ -3006,7 +3004,7 @@ const Callout = defineComponent({
   transition: border-color 160ms;
 }
 .doc-card:hover {
-  border-color: rgba(85, 63, 131, 0.6);
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
 }
 .doc-card-body {
   font-family: var(--font-sans);
@@ -3043,8 +3041,8 @@ const Callout = defineComponent({
   width: 1.1rem;
   height: 1.1rem;
   border-radius: 999px;
-  background: rgba(85, 63, 131, 0.18);
-  border: 1px solid rgba(85, 63, 131, 0.6);
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 60%, transparent);
   color: var(--color-foreground);
   font-size: 10px;
   font-weight: 700;
@@ -3056,7 +3054,13 @@ const Callout = defineComponent({
   background: var(--color-background);
   border: 1px solid var(--color-border);
   border-radius: 0.6rem;
-  overflow: hidden;
+  /* Scrolls, never hides: the first column of most tables is
+     whitespace-nowrap, which pins a min-content width wider than a
+     phone. `hidden` clipped the right-hand columns with no scrollbar
+     to recover them, because the document suppresses horizontal
+     scroll. A scroll container is still clipped by border-radius, so
+     the rounded corners survive. */
+  overflow-x: auto;
 }
 .doc-table {
   width: 100%;
@@ -3085,7 +3089,7 @@ const Callout = defineComponent({
   border-top: 0;
 }
 .doc-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.015);
+  background: color-mix(in srgb, var(--color-foreground) 1.5%, transparent);
 }
 .doc-table td {
   padding: 0.75rem 1rem;
@@ -3128,8 +3132,8 @@ const Callout = defineComponent({
   padding: 0.65rem 0.85rem;
   background: linear-gradient(
     90deg,
-    rgba(85, 63, 131, 0.10) 0%,
-    rgba(85, 63, 131, 0.02) 70%,
+    color-mix(in srgb, var(--color-primary) 10%, transparent) 0%,
+    color-mix(in srgb, var(--color-primary) 2%, transparent) 70%,
     transparent 100%
   ), var(--color-background);
   /* Single-weight border around the whole callout: the left-edge
@@ -3156,7 +3160,7 @@ const Callout = defineComponent({
 }
 .doc-token-btn:hover {
   background: var(--color-surface-hover);
-  border-color: rgba(85, 63, 131, 0.6);
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
 }
 .doc-token-btn:disabled {
   opacity: 0.5;
@@ -3188,7 +3192,7 @@ const Callout = defineComponent({
   display: none;
 }
 .doc-details-summary:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--color-foreground) 2%, transparent);
 }
 .doc-details[open] > .doc-details-summary {
   border-bottom: 1px solid var(--color-border);
@@ -3198,13 +3202,13 @@ const Callout = defineComponent({
 }
 
 /* ── Code block ──────────────────────────────────────────────────── */
-.codeblock {
+.doc-codeblock {
   background: var(--color-background);
   border: 1px solid var(--color-border);
   border-radius: 0.6rem;
   overflow: hidden;
 }
-.codeblock-bar {
+.doc-codeblock-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3212,7 +3216,7 @@ const Callout = defineComponent({
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
-.codeblock-lang {
+.doc-codeblock-lang {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -3220,7 +3224,7 @@ const Callout = defineComponent({
   text-transform: uppercase;
   color: var(--color-foreground-muted);
 }
-.codeblock-copy {
+.doc-codeblock-copy {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -3234,12 +3238,12 @@ const Callout = defineComponent({
   cursor: pointer;
   transition: color 120ms, border-color 120ms, background 120ms;
 }
-.codeblock-copy:hover {
+.doc-codeblock-copy:hover {
   color: var(--color-foreground);
-  border-color: rgba(85, 63, 131, 0.6);
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
   background: var(--color-surface-hover);
 }
-.codeblock-pre {
+.doc-codeblock-pre {
   margin: 0;
   padding: 0.95rem 1.1rem;
   overflow-x: auto;
@@ -3249,7 +3253,7 @@ const Callout = defineComponent({
   color: var(--color-foreground-muted);
   background: var(--color-background);
 }
-.codeblock-pre code {
+.doc-codeblock-pre code {
   background: transparent !important;
   padding: 0 !important;
   font-family: inherit;
@@ -3258,13 +3262,13 @@ const Callout = defineComponent({
 }
 
 /* ── Tabbed code ─────────────────────────────────────────────────── */
-.tabbed {
+.doc-tabbed {
   background: var(--color-background);
   border: 1px solid var(--color-border);
   border-radius: 0.6rem;
   overflow: hidden;
 }
-.tabbed-tabs {
+.doc-tabbed-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
@@ -3272,7 +3276,7 @@ const Callout = defineComponent({
   border-bottom: 1px solid var(--color-border);
   padding: 0 0.35rem;
 }
-.tabbed-tab {
+.doc-tabbed-tab {
   position: relative;
   background: transparent;
   border: 0;
@@ -3284,14 +3288,14 @@ const Callout = defineComponent({
   cursor: pointer;
   transition: color 120ms;
 }
-.tabbed-tab:hover {
+.doc-tabbed-tab:hover {
   color: var(--color-foreground);
 }
-.tabbed-tab.active {
+.doc-tabbed-tab.active {
   color: var(--color-foreground);
   font-weight: 600;
 }
-.tabbed-tab.active::after {
+.doc-tabbed-tab.active::after {
   content: '';
   position: absolute;
   left: 0.6rem;
@@ -3301,7 +3305,7 @@ const Callout = defineComponent({
   background: var(--color-primary);
   border-radius: 2px 2px 0 0;
 }
-.tabbed-note {
+.doc-tabbed-note {
   padding: 0.65rem 0.95rem;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
@@ -3310,29 +3314,29 @@ const Callout = defineComponent({
   font-size: 12px;
   line-height: 1.55;
 }
-.tabbed > .codeblock {
+.doc-tabbed > .doc-codeblock {
   border: 0;
   border-radius: 0;
 }
 
 /* ── Callout ─────────────────────────────────────────────────────── */
-.callout {
+.doc-callout {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.85rem 1rem;
   background: linear-gradient(
     90deg,
-    rgba(85, 63, 131, 0.08) 0%,
-    rgba(85, 63, 131, 0.01) 60%,
+    color-mix(in srgb, var(--color-primary) 8%, transparent) 0%,
+    color-mix(in srgb, var(--color-primary) 1%, transparent) 60%,
     transparent 100%
   ), var(--color-background);
-  /* Same anti-side-stripe rule as .doc-callout above. The leading
+  /* Same anti-side-stripe rule as .doc-token-bar above. The leading
      gradient tint carries the visual emphasis. */
   border: 1px solid var(--color-border);
   border-radius: 0.6rem;
 }
-.callout-head {
+.doc-callout-head {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -3343,11 +3347,11 @@ const Callout = defineComponent({
   text-transform: uppercase;
   color: var(--color-foreground-muted);
 }
-.callout-icon {
+.doc-callout-icon {
   width: 0.95rem;
   height: 0.95rem;
 }
-.callout-body {
+.doc-callout-body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem 0.4rem;
@@ -3359,13 +3363,13 @@ const Callout = defineComponent({
 }
 
 /* ── "System prompt for AI assistants" — section 02 ──────────────── */
-.ai-prompt-actions {
+.doc-ai-prompt-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
 }
-.ai-copy-btn {
+.doc-ai-copy-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -3378,19 +3382,49 @@ const Callout = defineComponent({
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease;
 }
-.ai-copy-btn:hover {
-  color: white;
+.doc-ai-copy-btn:hover {
+  color: var(--color-foreground);
   border-color: var(--color-foreground-muted);
 }
-.ai-copy-btn.copied {
+.doc-ai-copy-btn.copied {
   color: var(--color-success-fg);
-  border-color: rgba(74, 222, 128, 0.4);
+  border-color: var(--color-success-ring);
+}
+
+/* ── Touch targets ───────────────────────────────────────────────
+   Every control on this page is a bare <button>, <summary> or <a>, so
+   none of them inherit the 44px floor Button.vue bakes in. Coarse
+   pointers only; mouse layout is untouched. The code-block bar sheds
+   vertical padding so the taller copy button costs a few pixels per
+   snippet rather than a full row. */
+@media (pointer: coarse) {
+  .docs-hero-copy-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .docs-hero-toc-link,
+  .doc-token-btn,
+  .doc-prompt-expand-btn,
+  .doc-ai-copy-btn,
+  .doc-details-summary,
+  .doc-codeblock-copy {
+    min-height: 44px;
+  }
+  .doc-tabbed-tab {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .doc-codeblock-bar {
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
+  }
 }
 
 /* ── highlight.js calibration ────────────────────────────────────── */
 /* github-dark.css ships with a default background that fights ours;
-   strip it so .codeblock-pre's bg shows through. */
-.codeblock-pre .hljs {
+   strip it so .doc-codeblock-pre's bg shows through. */
+.doc-codeblock-pre .hljs {
   background: transparent !important;
   color: inherit;
   padding: 0;

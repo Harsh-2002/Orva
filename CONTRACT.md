@@ -156,8 +156,16 @@ hand-maintained view — update it alongside if content changes.)
   the single `executionChildTables` list, used by **both** `DeleteExecution` and
   `PurgeOldExecutions`. Missing two of them is what let retention leave the two
   fastest-growing tables growing.
-- **TypeScript deploys** rewrite the function's `Entrypoint` to `dist/handler.js`
-  after a successful `tsc`; the validator on re-deploy checks the source `.ts`.
+- **`entrypoint` is the file the operator authored and the build pipeline never
+  writes it.** A compiling runtime records its output in `run_entrypoint`
+  instead; empty means "same as `entrypoint`". It used to carry both meanings --
+  `tsc` stamped `dist/handler.js` over `handler.ts` -- so four readers each grew
+  a private heuristic to undo the rewrite, `GetSource` served compiled
+  JavaScript to the editor, and re-deploying failed on a path nobody had typed.
+  **Rollback derives `run_entrypoint` from the promoted version's own directory
+  rather than restoring it from the deployment snapshot**, because a snapshot
+  written before the column existed carries no value, and applying that absence
+  points a compiled version back at its `.ts` source, which Node cannot execute.
 - **nsjail `cmd.Wait()` is centralized in `Spawn`** (via `waitDone`); never call
   `Wait()` on a sandbox `cmd` elsewhere (zombie-nsjail regression).
 - The AI agent's `defaultSystemPrompt` (`backend/internal/ai/manager.go`) is a Go

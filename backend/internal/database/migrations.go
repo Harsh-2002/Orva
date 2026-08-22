@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 )
 
@@ -546,6 +547,31 @@ PRAGMA foreign_keys = ON;
 		// DeploymentSnapshot. Empty for legacy rows; rollback gracefully
 		// degrades to "code only" when absent.
 		"ALTER TABLE deployments ADD COLUMN snapshot TEXT NOT NULL DEFAULT ''",
+		// Which deployment is serving. Rollback used to append a NEW deployment
+		// whose content was an old one's, so the history grew on every rollback
+		// and the version an operator restored was never the version that went
+		// live. "Active" was inferred as version == functions.version, which
+		// only worked because of that appended row.
+		//
+		// With an explicit pointer, rollback promotes an existing deployment
+		// instead of manufacturing one: the list stays "the versions you
+		// deployed", exactly one of them is live, and only a deploy adds a row.
+		// functions.version stays a monotonic counter because new deployments
+		// take their number from it, so it must never move backwards.
+		"ALTER TABLE functions ADD COLUMN active_deployment_id TEXT NOT NULL DEFAULT ''",
+		// What the sandbox executes, as distinct from what the operator wrote.
+		//
+		// These used to be one column. A TypeScript build overwrote
+		// functions.entrypoint with tsc's output path, so the authored
+		// handler.ts was lost from the row and four separate readers grew
+		// private heuristics to guess it back: the validator, the build-cache
+		// resolver, the diff, and (missing it entirely) GetSource, which is why
+		// the editor showed compiled JavaScript for any TS function.
+		//
+		// entrypoint is now the authored file and the build pipeline never
+		// writes it. run_entrypoint is the build output and is empty whenever
+		// the two are the same, which is every non-TypeScript function.
+		"ALTER TABLE functions ADD COLUMN run_entrypoint TEXT NOT NULL DEFAULT ''",
 		// Per-function egress: "none" (default) blocks outbound network;
 		// "egress" enables nsjail --user_net for external API calls.
 		"ALTER TABLE functions ADD COLUMN network_mode TEXT NOT NULL DEFAULT 'none'",
@@ -857,6 +883,8 @@ PRAGMA foreign_keys = ON;
 	}
 
 	db.collapseRuntimes()
+	db.backfillActiveDeployment()
+	db.backfillAuthoredEntrypoint()
 
 	// One-shot rewrite of every prefix-typed storage ID (fn_, key_,
 	// oat_, etc.) to UUIDv7. Idempotent — guarded by a marker row in
@@ -1002,6 +1030,93 @@ func dropExecutionRequestsFK(db *Database) error {
 // node22/python313 get bumped to the latest major (native/ABI deps may need a
 // redeploy). One-shot and idempotent: on later boots there are no rows to
 // migrate. Best-effort — a failure here is logged, never fatal.
+// backfillAuthoredEntrypoint separates the two meanings functions.entrypoint
+// used to carry.
+//
+// A TypeScript build stamped tsc's output onto the column, so rows written
+// before the split hold "dist/handler.js" where the operator wrote
+// "handler.ts". Move the compiled path to run_entrypoint and put the authored
+// name back, using the same derivation the four scattered read-time heuristics
+// used: take the stem, restore the .ts extension, drop the output directory.
+//
+// Only rows that actually look compiled are touched. A function whose
+// entrypoint has no directory prefix was never rewritten, and a Python
+// function never goes through tsc at all. If a guess is wrong the next deploy
+// overwrites both columns correctly, so this is safe to be approximate about.
+func (db *Database) backfillAuthoredEntrypoint() {
+	rows, err := db.read.Query(`
+		SELECT id, entrypoint FROM functions
+		 WHERE run_entrypoint = ''
+		   AND entrypoint LIKE '%/%'
+		   AND entrypoint LIKE '%.js'`)
+	if err != nil {
+		slog.Warn("authored entrypoint backfill query failed", "err", err)
+		return
+	}
+	type fix struct{ id, authored, run string }
+	var fixes []fix
+	for rows.Next() {
+		var id, ep string
+		if err := rows.Scan(&id, &ep); err != nil {
+			continue
+		}
+		base := filepath.Base(ep)
+		authored := strings.TrimSuffix(base, filepath.Ext(base)) + ".ts"
+		fixes = append(fixes, fix{id: id, authored: authored, run: ep})
+	}
+	_ = rows.Close()
+
+	for _, f := range fixes {
+		if _, err := db.write.Exec(
+			`UPDATE functions SET entrypoint = ?, run_entrypoint = ? WHERE id = ?`,
+			f.authored, f.run, f.id,
+		); err != nil {
+			slog.Warn("authored entrypoint backfill failed", "fn", f.id, "err", err)
+			continue
+		}
+		slog.Info("split compiled entrypoint from authored source",
+			"fn", f.id, "authored", f.authored, "run", f.run)
+	}
+}
+
+// backfillActiveDeployment points every existing function at the deployment
+// that is actually serving it.
+//
+// Before the pointer existed, "active" was inferred as
+// deployments.version == functions.version, which only held because rollback
+// appended a row. Rollback now promotes an existing deployment instead, so
+// rows written by the old behaviour need a one-time pointer or the dashboard
+// would show a function with no live version at all.
+//
+// Match on version first, since that is exactly what the old inference used.
+// Fall back to the newest succeeded deployment carrying the function's current
+// code hash, which covers a function whose version counter has since moved on.
+func (db *Database) backfillActiveDeployment() {
+	res, err := db.write.Exec(`
+		UPDATE functions SET active_deployment_id = COALESCE(
+			(SELECT d.id FROM deployments d
+			  WHERE d.function_id = functions.id
+			    AND d.status = 'succeeded'
+			    AND d.version = functions.version
+			  ORDER BY d.submitted_at DESC LIMIT 1),
+			(SELECT d.id FROM deployments d
+			  WHERE d.function_id = functions.id
+			    AND d.status = 'succeeded'
+			    AND d.code_hash = functions.code_hash
+			    AND functions.code_hash != ''
+			  ORDER BY d.version DESC, d.submitted_at DESC LIMIT 1),
+			''
+		)
+		WHERE active_deployment_id = ''`)
+	if err != nil {
+		slog.Warn("active deployment backfill failed", "err", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		slog.Info("backfilled active deployment pointer", "functions", n)
+	}
+}
+
 func (db *Database) collapseRuntimes() {
 	collapse := []struct {
 		to   string

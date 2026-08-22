@@ -1,8 +1,8 @@
 <template>
   <div class="space-y-6">
     <!-- Header: function context + count/size badge + + Set key CTA -->
-    <div class="flex items-start justify-between gap-4">
-      <div>
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+      <div class="min-w-0">
         <h1 class="text-xl font-semibold text-white tracking-tight">
           KV Store
         </h1>
@@ -17,7 +17,7 @@
           with optional TTL.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
         <span class="text-xs text-foreground-muted">
           {{ total }} {{ total === 1 ? 'key' : 'keys' }}
           <span v-if="totalSize > 0">· {{ formatBytes(totalSize) }}</span>
@@ -66,11 +66,18 @@
       </button>
       <span
         v-if="truncated"
-        class="text-xs text-amber-400/80"
+        class="text-xs text-warning-fg"
       >
         Showing {{ rows.length }} of {{ total }}.
+        <!-- Deliberately left as an inline control under 44px. WCAG 2.5.5
+             exempts targets inline in a sentence, and the alternatives are
+             both worse: min-height on an inline-block would set a 44px line
+             inside running prose, and a transparent overflowing hit area is
+             the overlapping-target pattern style.css removed for stealing
+             clicks from neighbouring rows. -->
         <button
-          class="underline hover:text-foreground"
+          type="button"
+          class="underline hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm"
           :disabled="loading"
           @click="refresh({ append: true })"
         >
@@ -87,11 +94,19 @@
         <li
           v-for="row in rows"
           :key="row.key"
-          class="px-4 py-3 cursor-pointer hover:bg-surface-hover transition-colors"
-          @click="openInspect(row)"
+          class="px-4 py-3 hover:bg-surface-hover transition-colors"
         >
           <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0 flex-1">
+            <!-- The row body is a real button, not a click handler on the <li>.
+                 Activity, Invocations and Deployments each adopted this shape so
+                 the detail drawer is reachable by keyboard; KVStore was the one
+                 list view where it was never applied. -->
+            <button
+              type="button"
+              class="min-w-0 flex-1 text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              :aria-label="inspectLabel(row)"
+              @click="openInspect(row)"
+            >
               <div class="font-mono text-xs text-white break-all">
                 {{ row.key }}
               </div>
@@ -106,11 +121,8 @@
                 <span class="font-mono">{{ formatBytes(row.size_bytes) }}</span>
                 <span>{{ formatRelative(row.updated_at) }}</span>
               </div>
-            </div>
-            <div
-              class="shrink-0"
-              @click.stop
-            >
+            </button>
+            <div class="shrink-0">
               <IconButton
                 :icon="Trash2"
                 variant="danger"
@@ -137,22 +149,22 @@
       <table class="hidden sm:table w-full text-sm text-left">
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
-            <th class="px-4 py-3">
+            <th class="px-6 py-3">
               Key
             </th>
-            <th class="px-4 py-3 hidden md:table-cell">
+            <th class="px-6 py-3 hidden md:table-cell">
               Value preview
             </th>
-            <th class="px-4 py-3 w-28 hidden sm:table-cell">
+            <th class="px-6 py-3 w-28 hidden sm:table-cell">
               TTL
             </th>
-            <th class="px-4 py-3 w-20 hidden lg:table-cell">
+            <th class="px-6 py-3 w-20 hidden lg:table-cell">
               Size
             </th>
-            <th class="px-4 py-3 w-28 hidden md:table-cell">
+            <th class="px-6 py-3 w-28 hidden md:table-cell">
               Updated
             </th>
-            <th class="px-4 py-3 w-10 text-right" />
+            <th class="px-6 py-3 w-10 text-right" />
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -162,13 +174,23 @@
             class="hover:bg-surface-hover cursor-pointer transition-colors"
             @click="openInspect(row)"
           >
-            <td class="px-4 py-3 font-mono text-xs text-white truncate max-w-[360px]">
-              {{ row.key }}
+            <td class="px-6 py-4 max-w-[360px]">
+              <!-- Row clicks stay on the <tr> for the mouse; the drawer needs a
+                   real control to be reachable by keyboard. Rendered bare so the
+                   cell looks exactly as it did. -->
+              <button
+                type="button"
+                class="touch-expand-sm block w-full truncate text-left font-mono text-xs text-white rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                :aria-label="inspectLabel(row)"
+                @click.stop="openInspect(row)"
+              >
+                {{ row.key }}
+              </button>
             </td>
-            <td class="px-4 py-3 font-mono text-xs text-foreground-muted truncate max-w-[420px] hidden md:table-cell">
+            <td class="px-6 py-4 font-mono text-xs text-foreground-muted truncate max-w-[420px] hidden md:table-cell">
               {{ valuePreview(row.value) }}
             </td>
-            <td class="px-4 py-3 hidden sm:table-cell">
+            <td class="px-6 py-4 hidden sm:table-cell">
               <span
                 v-if="row.expires_at"
                 class="text-xs"
@@ -181,14 +203,14 @@
                 class="text-foreground-muted text-xs"
               >{{ EMPTY }}</span>
             </td>
-            <td class="px-4 py-3 text-xs font-mono text-foreground-muted hidden lg:table-cell">
+            <td class="px-6 py-4 text-xs font-mono text-foreground-muted hidden lg:table-cell">
               {{ formatBytes(row.size_bytes) }}
             </td>
-            <td class="px-4 py-3 text-xs text-foreground-muted hidden md:table-cell">
+            <td class="px-6 py-4 text-xs text-foreground-muted hidden md:table-cell">
               {{ formatRelative(row.updated_at) }}
             </td>
             <td
-              class="px-4 py-3 text-right"
+              class="px-6 py-4 text-right"
               @click.stop
             >
               <IconButton
@@ -202,7 +224,7 @@
           <tr v-if="!loading && !rows.length">
             <td
               colspan="6"
-              class="px-4 py-12 text-center text-foreground-muted text-sm"
+              class="px-6 py-12 text-center text-foreground-muted text-sm"
             >
               <template v-if="prefix">
                 No keys match
@@ -273,10 +295,14 @@
         <!-- TTL editor (number input). Operator can extend / shorten the
              expiry. Empty string + 0 = "never". -->
         <div>
-          <label class="text-xs uppercase tracking-wider text-foreground-muted">
+          <label
+            for="kv-inspect-ttl"
+            class="text-xs uppercase tracking-wider text-foreground-muted"
+          >
             TTL seconds (0 = never)
           </label>
           <input
+            id="kv-inspect-ttl"
             v-model.number="inspect.ttlSeconds"
             type="number"
             min="0"
@@ -295,13 +321,17 @@
         <!-- Value editor -->
         <div>
           <div class="flex items-center justify-between mb-2">
-            <label class="text-xs uppercase tracking-wider text-foreground-muted">Value (JSON)</label>
+            <label
+              for="kv-inspect-value"
+              class="text-xs uppercase tracking-wider text-foreground-muted"
+            >Value (JSON)</label>
             <span
               v-if="inspect.error"
-              class="text-xs text-red-400"
+              class="text-xs text-danger-fg"
             >{{ inspect.error }}</span>
           </div>
           <textarea
+            id="kv-inspect-value"
             v-model="inspect.text"
             rows="14"
             spellcheck="false"
@@ -350,8 +380,12 @@
     >
       <div class="p-5 space-y-5 text-sm">
         <div>
-          <label class="text-xs uppercase tracking-wider text-foreground-muted">Key</label>
+          <label
+            for="kv-set-key"
+            class="text-xs uppercase tracking-wider text-foreground-muted"
+          >Key</label>
           <input
+            id="kv-set-key"
             v-model="setKey.key"
             placeholder="e.g. user:42"
             class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-white"
@@ -359,10 +393,14 @@
           >
         </div>
         <div>
-          <label class="text-xs uppercase tracking-wider text-foreground-muted">
+          <label
+            for="kv-set-ttl"
+            class="text-xs uppercase tracking-wider text-foreground-muted"
+          >
             TTL seconds (0 = never)
           </label>
           <input
+            id="kv-set-ttl"
             v-model.number="setKey.ttlSeconds"
             type="number"
             min="0"
@@ -379,13 +417,17 @@
         </div>
         <div>
           <div class="flex items-center justify-between mb-2">
-            <label class="text-xs uppercase tracking-wider text-foreground-muted">Value (JSON)</label>
+            <label
+              for="kv-set-value"
+              class="text-xs uppercase tracking-wider text-foreground-muted"
+            >Value (JSON)</label>
             <span
               v-if="setKey.error"
-              class="text-xs text-red-400"
+              class="text-xs text-danger-fg"
             >{{ setKey.error }}</span>
           </div>
           <textarea
+            id="kv-set-value"
             v-model="setKey.text"
             rows="14"
             spellcheck="false"
@@ -479,6 +521,8 @@ const totalSize = computed(() =>
 // nextCursor drives "Load more". The endpoint had no cursor at all, so the
 // only advice this page could offer past 200 keys was "narrow the prefix",
 // which does not help someone with 5000 flat keys.
+const inspectLabel = (row) => `Inspect key ${row.key}`
+
 const nextCursor = ref('')
 
 const refresh = async ({ append = false } = {}) => {
@@ -515,13 +559,16 @@ const onPrefixInput = () => {
 // ── Inspect drawer ─────────────────────────────────────────────────
 const openInspect = (row) => {
   inspect.row = row
-  // SDKs in different runtimes (Python's orva.kv vs the Node SDK)
-  // sometimes double-encode values: a dict written via Python ends up
-  // stored as a JSON string of the dict, so `row.value` arrives as
-  // a string that itself parses as JSON. Detect that and unwrap before
-  // pretty-printing so the textarea shows the real shape, not an
-  // escape-laden one-line string.
-  inspect.text = prettyJSON(row.value)
+  // The textarea shows the value EXACTLY as stored, because Save writes back
+  // whatever is in it. It used to show a normalised rendering (deepParse strips
+  // JSON-string wrapping, so a value double-encoded by the Python SDK displayed
+  // as the dict it contains) -- but that rendering does not round-trip: opening
+  // the string "123", changing nothing and pressing Save stored the number 123,
+  // and "true" became a boolean. The operator inspected a value and silently
+  // changed its type, which a function reading the key then sees.
+  //
+  // The list's preview column still normalises, because a preview never writes.
+  inspect.text = faithfulJSON(row.value)
   inspect.ttlSeconds = row.expires_at ? Math.max(0, Math.floor((new Date(row.expires_at) - Date.now()) / 1000)) : 0
   inspect.ttlTouched = false
   inspect.error = ''
@@ -659,12 +706,12 @@ const deepParse = (v, depth = 3) => {
   }
 }
 
-// prettyJSON renders a value as multi-line indented JSON, after
-// stripping any double-encoding. Used for the drawer textarea.
-const prettyJSON = (v) => {
-  const u = deepParse(v)
+// faithfulJSON renders a value as multi-line indented JSON with no unwrapping,
+// so JSON.parse of the result is the value that came in. This is what the
+// editable drawer shows: what you see is what is stored, and Save round-trips.
+const faithfulJSON = (v) => {
   try {
-    return JSON.stringify(u, null, 2)
+    return JSON.stringify(v, null, 2)
   } catch {
     return String(v)
   }
@@ -723,8 +770,8 @@ const formatTTL = (iso) => {
 const ttlClass = (iso) => {
   if (!iso) return 'text-foreground-muted'
   const ms = new Date(iso).getTime() - Date.now()
-  if (ms <= 60_000) return 'text-red-400'
-  if (ms <= 5 * 60_000) return 'text-amber-400'
+  if (ms <= 60_000) return 'text-danger-fg'
+  if (ms <= 5 * 60_000) return 'text-warning-fg'
   return 'text-foreground-muted'
 }
 

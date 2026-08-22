@@ -24,11 +24,16 @@
     <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 pb-3 border-b border-border">
       <div class="flex items-center gap-2 sm:mr-auto min-w-0 w-full sm:w-auto">
         <FileCode class="w-4 h-4 text-foreground-muted shrink-0" />
+        <label
+          for="fn-name-toolbar"
+          class="sr-only"
+        >Function name</label>
         <input
+          id="fn-name-toolbar"
           v-model="form.name"
           placeholder="my-function"
           :disabled="isEditing"
-          class="bg-transparent border-0 text-base sm:text-sm font-medium text-white placeholder-foreground-muted focus:outline-none px-1 py-1 min-w-0 flex-1 sm:flex-none sm:w-40"
+          class="bg-transparent border-0 text-sm font-medium text-white placeholder-foreground-muted focus:outline-none px-1 py-1 min-w-0 flex-1 sm:flex-none sm:w-40"
         >
         <button
           v-if="!isEditing && !fnId"
@@ -40,7 +45,7 @@
         >
           <Shuffle class="w-3.5 h-3.5" />
         </button>
-        <span class="text-[11px] text-foreground-muted font-medium tracking-tight shrink-0">{{ runtimeShort(form.runtime) }}</span>
+        <span class="text-[11px] text-foreground-muted font-medium tracking-tight shrink-0">{{ runtimeLabel(form.runtime) }}</span>
       </div>
       <!-- Wrapper for the dropdowns + actions on mobile so they sit on
            one row (or wrap among themselves). On sm+ they merge back
@@ -206,7 +211,7 @@
       <span class="text-foreground-muted shrink-0 uppercase tracking-wider text-[10px]">Invoke URL</span>
       <code class="font-mono text-white truncate flex-1 min-w-0">{{ invokeUrl }}</code>
       <button
-        class="px-2 py-1 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors flex items-center gap-1 shrink-0"
+        class="px-2 py-1 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors flex items-center gap-1 shrink-0 touch-expand-sm"
         @click="copyInvokeUrl"
       >
         <Check
@@ -222,7 +227,7 @@
       <router-link
         v-if="isEditing && form.name"
         :to="`/functions/${form.name}/deployments`"
-        class="text-foreground-muted hover:text-white transition-colors px-2"
+        class="text-foreground-muted hover:text-white transition-colors px-2 flex items-center touch-expand-sm"
       >
         Deployments →
       </router-link>
@@ -256,26 +261,45 @@
          test-run results. Collapsible — clicking the header chevron hides
          the panel body. -->
     <div class="mt-3 bg-background border border-border rounded-lg overflow-hidden shrink-0">
-      <div class="h-9 border-b border-border flex items-center px-2 bg-surface">
-        <button
-          v-for="t in terminalTabs"
-          :key="t.id"
-          class="px-3 h-9 text-xs flex items-center gap-1.5 border-b-2 transition-colors"
-          :class="terminalTab === t.id
-            ? 'text-white border-primary'
-            : 'text-foreground-muted border-transparent hover:text-white'"
-          @click="terminalTab = t.id; terminalOpen = true"
+      <div class="terminal-bar h-9 border-b border-border flex items-center px-2 bg-surface">
+        <!-- A real tablist: the strip used to be a run of plain buttons, so
+             screen readers announced two unrelated controls with no "current"
+             state and no link to the panel each one swaps in. The right-hand
+             Run/collapse group is not a tab, hence the inner wrapper rather
+             than role="tablist" on the bar itself. -->
+        <div
+          class="flex items-center self-stretch"
+          role="tablist"
+          aria-label="Console panels"
+          @keydown="onTabKeydown"
         >
-          <component
-            :is="t.icon"
-            class="w-3 h-3"
-          />
-          {{ t.label }}
-          <span
-            v-if="t.badge"
-            class="ml-1 text-[10px] px-1.5 rounded bg-surface-hover text-foreground-muted"
-          >{{ t.badge }}</span>
-        </button>
+          <button
+            v-for="(t, i) in terminalTabs"
+            :id="`terminal-tab-${t.id}`"
+            :key="t.id"
+            :ref="(el) => setTabRef(el, i)"
+            type="button"
+            role="tab"
+            :aria-selected="terminalTab === t.id"
+            :aria-controls="`terminal-panel-${t.id}`"
+            :tabindex="terminalTab === t.id ? 0 : -1"
+            class="terminal-tab px-3 h-9 text-xs flex items-center gap-1.5 border-b-2 transition-colors"
+            :class="terminalTab === t.id
+              ? 'text-white border-link'
+              : 'text-foreground-muted border-transparent hover:text-white'"
+            @click="selectTerminalTab(t.id)"
+          >
+            <component
+              :is="t.icon"
+              class="w-3 h-3"
+            />
+            {{ t.label }}
+            <span
+              v-if="t.badge"
+              class="ml-1 text-[10px] px-1.5 rounded bg-surface-hover text-foreground-muted"
+            >{{ t.badge }}</span>
+          </button>
+        </div>
         <div class="ml-auto flex items-center gap-1">
           <button
             v-if="terminalTab === 'test'"
@@ -295,7 +319,7 @@
             Run
           </button>
           <button
-            class="p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors"
+            class="p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
             :title="terminalOpen ? 'Collapse' : 'Expand'"
             :aria-label="terminalOpen ? 'Collapse terminal' : 'Expand terminal'"
             @click="terminalOpen = !terminalOpen"
@@ -307,13 +331,21 @@
           </button>
         </div>
       </div>
+      <!-- Height steps with the viewport. A flat h-48 (182 px) left a
+           375x667 phone with less room for the code surface than for the
+           console below it. -->
       <div
         v-show="terminalOpen"
-        class="h-48 overflow-y-auto bg-background"
+        class="h-32 sm:h-40 md:h-48 overflow-y-auto bg-background"
       >
-        <!-- Build logs tab -->
+        <!-- Build logs tab. v-show rather than v-if so both panels exist in
+             the DOM and each tab's aria-controls resolves to a real node. -->
         <div
-          v-if="terminalTab === 'build'"
+          v-show="terminalTab === 'build'"
+          id="terminal-panel-build"
+          role="tabpanel"
+          aria-labelledby="terminal-tab-build"
+          tabindex="0"
           class="p-3 font-mono text-xs space-y-0.5"
         >
           <div
@@ -338,14 +370,28 @@
              columns. v0.4 B3: method/path/headers/body controls + saved
              fixtures popover land in the request column. -->
         <div
-          v-else-if="terminalTab === 'test'"
-          class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] h-full"
+          v-show="terminalTab === 'test'"
+          id="terminal-panel-test"
+          role="tabpanel"
+          aria-labelledby="terminal-tab-test"
+          class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] min-h-full md:h-full"
         >
-          <!-- Request column -->
-          <div class="flex flex-col min-h-0 border-b md:border-b-0 md:border-r border-border">
+          <!--
+            Request column. Below md the two columns stack inside the
+            console body, so they need a real floor: with h-full on the
+            grid the payload textarea (flex-1) absorbed the whole shortfall
+            and collapsed to about two lines. min-h-full on the grid lets
+            the body scroll instead.
+          -->
+          <div class="flex flex-col min-h-[15rem] md:min-h-0 border-b md:border-b-0 md:border-r border-border">
             <!-- Method + path + Saved popover sit on the column header. -->
-            <div class="h-7 px-2 flex items-center gap-1.5 bg-surface/60 border-b border-border shrink-0">
+            <div class="request-bar h-7 px-2 flex items-center gap-1.5 bg-surface/60 border-b border-border shrink-0">
+              <label
+                for="test-method"
+                class="sr-only"
+              >Request method</label>
               <select
+                id="test-method"
                 v-model="testMethod"
                 :disabled="!canTest"
                 class="text-[11px] font-mono bg-background border border-border rounded px-1.5 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -358,14 +404,22 @@
                   {{ m }}
                 </option>
               </select>
+              <label
+                for="test-path"
+                class="sr-only"
+              >Request path</label>
               <input
+                id="test-path"
                 v-model="testPath"
                 :disabled="!canTest"
                 spellcheck="false"
                 placeholder="/"
                 class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
               >
-              <div class="relative shrink-0">
+              <div
+                ref="savedPopoverRef"
+                class="relative shrink-0"
+              >
                 <button
                   type="button"
                   class="text-[11px] font-medium text-foreground-muted hover:text-white px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1"
@@ -398,26 +452,40 @@
                     v-else
                     class="max-h-56 overflow-y-auto"
                   >
+                    <!--
+                      The row is a real button, not a click handler on the
+                      <li>: loading a fixture was previously unreachable by
+                      keyboard while the destructive Delete next to it was
+                      not. Delete is a sibling of the row button, never a
+                      child, so the two hit areas stay disjoint.
+                    -->
                     <li
                       v-for="fx in fixtures"
                       :key="fx.id"
-                      class="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-surface-hover cursor-pointer group"
-                      @click="loadFixture(fx)"
+                      class="flex items-center pr-3 text-xs hover:bg-surface-hover focus-within:bg-surface-hover group"
                     >
-                      <span class="font-mono text-[10px] text-foreground-muted shrink-0">{{ fx.method }}</span>
-                      <span class="truncate flex-1 text-foreground">{{ fx.name }}</span>
+                      <button
+                        type="button"
+                        class="flex items-center gap-2 flex-1 min-w-0 pl-3 pr-2 py-1.5 text-left touch-expand-sm"
+                        @click="loadFixture(fx)"
+                      >
+                        <span class="font-mono text-[10px] text-foreground-muted shrink-0">{{ fx.method }}</span>
+                        <span class="truncate flex-1 text-foreground">{{ fx.name }}</span>
+                      </button>
                       <!--
                         Below lg the delete affordance is permanently
                         visible (touch devices have no hover state).
-                        From lg up it fades in on row hover so the
-                        fixtures list stays calm at rest on desktop.
+                        From lg up it fades in on row hover, or on keyboard
+                        focus anywhere in the row, so the fixtures list
+                        stays calm at rest on desktop without hiding a
+                        control the operator has just tabbed to.
                       -->
                       <button
                         type="button"
-                        class="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 text-foreground-muted hover:text-red-400 transition-opacity"
+                        class="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 text-foreground-muted hover:text-danger-fg transition-opacity shrink-0 touch-expand-iconbtn inline-flex items-center justify-center"
                         :title="`Delete ${fx.name}`"
                         :aria-label="`Delete ${fx.name}`"
-                        @click.stop="removeFixture(fx)"
+                        @click="removeFixture(fx)"
                       >
                         <Trash2 class="w-3 h-3" />
                       </button>
@@ -465,14 +533,24 @@
                   :key="idx"
                   class="flex items-center gap-1.5"
                 >
+                  <label
+                    :for="`test-header-name-${idx}`"
+                    class="sr-only"
+                  >Header {{ idx + 1 }} name</label>
                   <input
+                    :id="`test-header-name-${idx}`"
                     v-model="header.name"
                     :disabled="!canTest"
                     spellcheck="false"
                     placeholder="Header name"
                     class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
                   >
+                  <label
+                    :for="`test-header-value-${idx}`"
+                    class="sr-only"
+                  >Header {{ idx + 1 }} value</label>
                   <input
+                    :id="`test-header-value-${idx}`"
                     v-model="header.value"
                     :disabled="!canTest"
                     spellcheck="false"
@@ -481,7 +559,7 @@
                   >
                   <button
                     type="button"
-                    class="text-foreground-muted hover:text-red-400 p-0.5 transition-colors"
+                    class="text-foreground-muted hover:text-danger-fg p-0.5 transition-colors"
                     title="Remove header"
                     aria-label="Remove header"
                     @click="removeHeaderRow(idx)"
@@ -507,7 +585,7 @@
               </span>
               <span
                 v-if="!canTest"
-                class="text-[10px] text-amber-400/80"
+                class="text-[10px] text-warning-fg/80"
               >Deploy first</span>
               <span
                 v-else
@@ -524,15 +602,15 @@
           </div>
 
           <!-- Response + logs column -->
-          <div class="flex flex-col min-h-0">
+          <div class="flex flex-col min-h-[9rem] md:min-h-0">
             <div class="h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
               <span
                 class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5"
-                :class="error ? 'text-red-400' : output ? 'text-success' : 'text-foreground-muted'"
+                :class="error ? 'text-danger-fg' : output ? 'text-success-fg' : 'text-foreground-muted'"
               >
                 <span
                   class="w-1.5 h-1.5 rounded-full"
-                  :class="error ? 'bg-red-400' : output ? 'bg-success' : 'bg-foreground-muted/40'"
+                  :class="error ? 'bg-danger-fg' : output ? 'bg-success-fg' : 'bg-foreground-muted/40'"
                 />
                 {{ error ? 'Error' : output ? 'Response' : 'Idle' }}
               </span>
@@ -565,7 +643,7 @@
               <pre
                 v-if="output || error"
                 class="px-3 py-2.5 font-mono text-xs whitespace-pre-wrap break-all leading-relaxed"
-                :class="error ? 'text-red-200' : 'text-foreground'"
+                :class="error ? 'text-danger-fg' : 'text-foreground'"
               >{{ output || error }}</pre>
               <div
                 v-else
@@ -608,8 +686,12 @@
     >
       <div class="space-y-4">
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Description</label>
+          <label
+            for="fn-description"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Description</label>
           <textarea
+            id="fn-description"
             v-model="form.description"
             rows="2"
             placeholder="One-line summary of what this function does. Surfaces in MCP tool catalogs and the agent channel picker."
@@ -617,28 +699,47 @@
           />
         </div>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5 flex items-center justify-between">
+          <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5 flex items-center justify-between">
             <span>Runtime</span>
             <span
               v-if="autoDetected && !runtimeManuallySet"
-              class="text-[10px] normal-case tracking-normal text-success/80"
+              class="text-[10px] normal-case tracking-normal text-success-fg"
             >auto-detected</span>
-          </label>
-          <div class="grid grid-cols-2 gap-2">
+          </div>
+          <div
+            class="grid grid-cols-2 gap-2"
+            role="group"
+            aria-label="Runtime"
+          >
             <button
               v-for="rt in runtimes"
               :key="rt.id"
-              class="px-2 py-2 rounded border text-xs font-medium transition-colors duration-150 flex items-center justify-center"
-              :class="form.runtime === rt.id ? 'bg-white text-black border-white' : 'bg-surface-hover text-foreground-muted border-border hover:border-foreground-muted'"
+              type="button"
+              class="px-2 py-2 rounded border text-xs font-medium transition-colors duration-150 flex items-center justify-center gap-1.5 touch-expand-sm"
+              :class="form.runtime === rt.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-surface-hover text-foreground-muted border-border hover:border-foreground-muted'"
+              :aria-pressed="form.runtime === rt.id"
               @click="setRuntimeManual(rt.id)"
             >
+              <!-- Mark AND word here: the operator is choosing a runtime, not
+                   recognising one they already picked, so the label carries the
+                   pinned version. RuntimeTag renders icon-only in list rows,
+                   where the row gives the context this button does not. -->
+              <component
+                :is="rt.id === 'python' ? PythonIcon : NodeIcon"
+                class="w-3.5 h-3.5 shrink-0"
+                aria-hidden="true"
+              />
               {{ rt.label }}
             </button>
           </div>
         </div>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">Template</label>
+          <label
+            for="fn-template"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >Template</label>
           <select
+            id="fn-template"
             v-model="templateId"
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
             @change="applyTemplate"
@@ -683,7 +784,9 @@
         </div>
 
         <div class="border-t border-border pt-4 space-y-2">
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block">Concurrency</label>
+          <h3 class="text-xs font-medium text-foreground-muted uppercase tracking-wide block">
+            Concurrency
+          </h3>
           <div class="grid grid-cols-2 gap-3">
             <div>
               <Input
@@ -694,8 +797,12 @@
               />
             </div>
             <div>
-              <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">When at cap</label>
+              <label
+                for="fn-concurrency-policy"
+                class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+              >When at cap</label>
               <select
+                id="fn-concurrency-policy"
                 v-model="form.concurrency_policy"
                 :disabled="!form.max_concurrency"
                 class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white disabled:opacity-50"
@@ -736,10 +843,14 @@
         </div>
 
         <div class="border-t border-border pt-4 space-y-2">
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide flex items-center gap-2">
+          <label
+            for="fn-auth-mode"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide flex items-center gap-2"
+          >
             <Lock class="w-3.5 h-3.5" /> Invoke gate
           </label>
           <select
+            id="fn-auth-mode"
             v-model="form.auth_mode"
             class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
@@ -763,7 +874,9 @@
         </div>
 
         <div class="border-t border-border pt-4 space-y-2">
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block">Rate limit</label>
+          <h3 class="text-xs font-medium text-foreground-muted uppercase tracking-wide block">
+            Rate limit
+          </h3>
           <Input
             v-model.number="form.rate_limit_per_min"
             label="Requests per minute, per IP (0 = unlimited)"
@@ -778,13 +891,13 @@
         </div>
 
         <div class="border-t border-border pt-4 space-y-3">
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide flex items-center gap-2">
+          <h3 class="text-xs font-medium text-foreground-muted uppercase tracking-wide flex items-center gap-2">
             <Globe class="w-3.5 h-3.5" /> Custom routes
             <span
               v-if="routesLoading"
               class="text-[10px] normal-case tracking-normal text-foreground-muted"
             >loading…</span>
-          </label>
+          </h3>
 
           <p
             v-if="!fnId"
@@ -818,7 +931,7 @@
                 class="text-[10px] font-mono text-foreground-muted"
               >{{ r.methods }}</span>
               <button
-                class="shrink-0 w-6 h-6 flex items-center justify-center rounded text-foreground-muted hover:text-red-400 hover:bg-surface transition-colors"
+                class="shrink-0 w-6 h-6 flex items-center justify-center rounded text-foreground-muted hover:text-danger-fg hover:bg-surface transition-colors"
                 title="Remove route"
                 :aria-label="`Remove route ${r.path}`"
                 @click="removeRoute(r.path)"
@@ -835,6 +948,7 @@
             <div class="flex items-center gap-2">
               <input
                 v-model="newRoute.path"
+                aria-label="Route path"
                 placeholder="/path or /prefix/*"
                 class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
               >
@@ -844,16 +958,17 @@
                 title="Comma-separated methods or * for any (default *)"
                 class="w-20 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
               >
-              <button
-                class="shrink-0 px-3 py-1.5 rounded-md bg-white text-black text-xs font-medium hover:bg-white/90 transition-colors"
+              <Button
+                class="shrink-0"
+                size="sm"
                 @click="saveNewRoute"
               >
                 Add
-              </button>
+              </Button>
             </div>
             <p
               v-if="newRouteCollision"
-              class="text-[11px] text-amber-400 leading-snug"
+              class="text-[11px] text-warning-fg leading-snug"
             >
               ⚠ <span class="font-mono">{{ newRouteCollision.path }}</span> already
               maps to function <span class="font-mono">{{ newRouteCollision.currentFunctionId.slice(0, 8) }}…</span>;
@@ -861,7 +976,7 @@
             </p>
             <p
               v-if="routesError"
-              class="text-[11px] text-red-400 leading-snug"
+              class="text-[11px] text-danger-fg leading-snug"
             >
               {{ routesError }}
             </p>
@@ -899,16 +1014,18 @@
         >
           <input
             v-model="pair.key"
+            :aria-label="`Environment variable ${i + 1} name`"
             placeholder="KEY"
             class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
           <input
             v-model="pair.value"
+            :aria-label="pair.key ? `Value for ${pair.key}` : `Environment variable ${i + 1} value`"
             placeholder="VALUE"
             class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
           <button
-            class="shrink-0 w-7 h-7 flex items-center justify-center rounded text-foreground-muted hover:text-red-400 hover:bg-surface transition-colors"
+            class="shrink-0 w-7 h-7 flex items-center justify-center rounded text-foreground-muted hover:text-danger-fg hover:bg-surface transition-colors"
             title="Remove"
             :aria-label="`Remove environment variable ${pair.key || idx + 1}`"
             @click="removeEnvVar(idx)"
@@ -948,6 +1065,7 @@
         </div>
         <textarea
           v-model="dependencyText"
+          aria-label="Dependencies, one package per line"
           class="w-full bg-surface-hover border border-border rounded-md text-xs font-mono p-3 text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white resize-none min-h-[200px]"
           placeholder="One package per line. e.g. requests==2.31.0"
         />
@@ -984,7 +1102,7 @@
         >
           <span class="text-foreground-muted font-mono">{{ sec.name }}</span>
           <button
-            class="text-foreground-muted hover:text-red-400 transition-colors"
+            class="text-foreground-muted hover:text-danger-fg transition-colors"
             :aria-label="`Delete secret ${sec.name}`"
             @click="removeSecret(sec.id)"
           >
@@ -997,14 +1115,14 @@
         <div
           v-for="(sec, idx) in pendingSecrets"
           :key="'pending-' + idx"
-          class="flex items-center justify-between text-xs px-3 py-2 rounded border border-amber-500/30 bg-amber-500/5"
+          class="flex items-center justify-between text-xs px-3 py-2 rounded border border-warning-ring bg-warning-tint"
         >
           <div class="flex items-center gap-2 min-w-0">
             <span class="text-foreground-muted font-mono">{{ sec.name }}</span>
-            <span class="text-[10px] uppercase tracking-wider text-amber-400/80">pending</span>
+            <span class="text-[10px] uppercase tracking-wider text-warning-fg/80">pending</span>
           </div>
           <button
-            class="text-foreground-muted hover:text-red-400 transition-colors"
+            class="text-foreground-muted hover:text-danger-fg transition-colors"
             :aria-label="`Remove pending secret ${sec.name}`"
             @click="removePendingSecret(idx)"
           >
@@ -1015,11 +1133,13 @@
         <div class="border-t border-border pt-3 space-y-2">
           <input
             v-model="secretForm.name"
+            aria-label="Secret name"
             placeholder="SECRET_NAME"
             class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
           >
           <input
             v-model="secretForm.value"
+            aria-label="Secret value"
             placeholder="SECRET_VALUE"
             type="password"
             class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
@@ -1059,7 +1179,7 @@
             <span class="font-mono text-foreground-muted shrink-0">v{{ v.version }}</span>
             <span
               v-if="v.is_active"
-              class="px-1.5 py-0.5 rounded text-[10px] bg-success/15 text-success border border-success/30 shrink-0"
+              class="px-1.5 py-0.5 rounded text-[10px] bg-success-tint text-success-fg border border-success-ring shrink-0"
             >Active</span>
             <span
               class="font-mono text-foreground-muted truncate"
@@ -1116,7 +1236,7 @@
         <ul class="space-y-1 pl-4 list-disc marker:text-foreground-muted/50">
           <li><span class="text-white font-mono">event.body</span> is the raw request body (string or parsed JSON).</li>
           <li>Return <span class="text-white font-mono">{ statusCode, headers, body }</span>.</li>
-          <li>Add packages via the <span class="text-white">Deps</span> panel (installed at build time.</li>
+          <li>Add packages via the <span class="text-white">Deps</span> panel (installed at build time).</li>
         </ul>
         <router-link
           to="/docs"
@@ -1146,11 +1266,15 @@
     >
       <div class="space-y-4">
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5">
+          <label
+            for="deploy-fn-name"
+            class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+          >
             Function name
           </label>
           <div class="relative">
             <input
+              id="deploy-fn-name"
               ref="firstDeployNameInput"
               v-model="form.name"
               placeholder="my-function"
@@ -1172,21 +1296,36 @@
           </p>
         </div>
         <div>
-          <label class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5 flex items-center justify-between">
+          <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5 flex items-center justify-between">
             <span>Runtime</span>
             <span
               v-if="autoDetected && !runtimeManuallySet"
-              class="text-[10px] normal-case tracking-normal text-success/80"
+              class="text-[10px] normal-case tracking-normal text-success-fg"
             >auto-detected</span>
-          </label>
-          <div class="grid grid-cols-2 gap-2">
+          </div>
+          <div
+            class="grid grid-cols-2 gap-2"
+            role="group"
+            aria-label="Runtime"
+          >
             <button
               v-for="rt in runtimes"
               :key="rt.id"
-              class="px-2 py-2 rounded border text-xs font-medium transition-colors duration-150 flex items-center justify-center"
-              :class="form.runtime === rt.id ? 'bg-white text-black border-white' : 'bg-surface-hover text-foreground-muted border-border hover:border-foreground-muted'"
+              type="button"
+              class="px-2 py-2 rounded border text-xs font-medium transition-colors duration-150 flex items-center justify-center gap-1.5 touch-expand-sm"
+              :class="form.runtime === rt.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-surface-hover text-foreground-muted border-border hover:border-foreground-muted'"
+              :aria-pressed="form.runtime === rt.id"
               @click="setRuntimeManual(rt.id)"
             >
+              <!-- Mark AND word here: the operator is choosing a runtime, not
+                   recognising one they already picked, so the label carries the
+                   pinned version. RuntimeTag renders icon-only in list rows,
+                   where the row gives the context this button does not. -->
+              <component
+                :is="rt.id === 'python' ? PythonIcon : NodeIcon"
+                class="w-3.5 h-3.5 shrink-0"
+                aria-hidden="true"
+              />
               {{ rt.label }}
             </button>
           </div>
@@ -1226,12 +1365,14 @@
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, h, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, h, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
+import PythonIcon from '@/components/icons/brand/PythonIcon.vue'
+import NodeIcon from '@/components/icons/brand/NodeIcon.vue'
 
 // CodeMirror is the largest single contributor to the Editor chunk
 // (~400 KB raw out of the 654 KB total before this split). The route
@@ -1270,6 +1411,7 @@ import apiClient from '@/api/client'
 import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import { generateFunctionName } from '@/utils/funName'
+import { runtimeLabel } from '@/utils/runtime'
 import { templates, defaultCode, categoryOrder } from '@/templates'
 import { rollbackFunction, listFixtures, updateFixture, deleteFixture, invokeFunctionFull, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
 import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
@@ -1318,39 +1460,74 @@ const navMenu = (to) => {
   router.push(to)
 }
 
-// Click-outside listener: closes whichever menu is open if the click
-// landed outside both dropdown roots. Esc keydown does the same on the
-// global key handler. Mounted once via onMounted below.
+// Click-outside listener: closes whichever overlay is open if the press
+// landed outside its root. Esc keydown does the same on the global key
+// handler. Mounted once via onMounted below.
+//
+// pointerdown, not mousedown: the saved-fixtures popover used to rely on
+// @mouseleave alone, an event a touch device never fires, so once opened on
+// a phone the only ways out were picking a fixture or deleting one. Both
+// menu roots wrap their trigger AND their dropdown, so a press on a menu
+// item is "inside" and the item's click still lands.
 const onDocClick = (e) => {
-  if (!menus.value.config && !menus.value.bindings) return
-  const inConfig = configMenuRef.value?.contains(e.target)
-  const inBindings = bindingsMenuRef.value?.contains(e.target)
-  if (!inConfig && !inBindings) closeMenus()
+  if (menus.value.config || menus.value.bindings) {
+    const inConfig = configMenuRef.value?.contains(e.target)
+    const inBindings = bindingsMenuRef.value?.contains(e.target)
+    if (!inConfig && !inBindings) closeMenus()
+  }
+  if (savedPopoverOpen.value && !savedPopoverRef.value?.contains(e.target)) {
+    savedPopoverOpen.value = false
+  }
 }
 const onDocKey = (e) => {
-  if (e.key === 'Escape' && (menus.value.config || menus.value.bindings)) closeMenus()
+  if (e.key !== 'Escape') return
+  if (menus.value.config || menus.value.bindings) closeMenus()
+  if (savedPopoverOpen.value) savedPopoverOpen.value = false
 }
 
 // Bottom terminal: two tabs only — Build (deploy progress) and Test
 // (payload + response + function logs all in one place). The terminal
 // auto-switches: Build during a deploy, Test when the user runs the
 // function. No need to click between three different surfaces.
-const terminalOpen = ref(true)
+//
+// The console starts collapsed below md. At 375x667 the open panel plus the
+// wrapped toolbar leaves the code surface smaller than the log pane under
+// it, which inverts what the operator came to the page to do. Desktop keeps
+// it open, where the build log is the first thing wanted after a deploy.
+// Evaluated once at setup: a mid-session viewport change should not yank the
+// panel out from under someone who has already opened or closed it, and
+// every deploy/invoke path opens it explicitly anyway.
+const terminalOpen = ref(
+  typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches,
+)
 const terminalTab = ref('build')
 const terminalTabs = computed(() => [
   { id: 'build', label: 'Build', icon: Terminal, badge: buildLogs.value.length || null },
   { id: 'test',  label: 'Test',  icon: Play,     badge: invokeLogs.value.length || null },
 ])
-
-// Pretty runtime label for the editor strip. Orva exposes two generic
-// runtimes — "node" → "Node.js 24", "python" → "Python 3.14" — where the
-// concrete version is a display detail. Unknown ids fall back to the raw value.
-const runtimeShort = (rt) => {
-  if (!rt) return ''
-  if (rt === 'node') return 'Node.js 24'
-  if (rt === 'python') return 'Python 3.14'
-  return rt
+const selectTerminalTab = (id) => {
+  terminalTab.value = id
+  terminalOpen.value = true
 }
+// Roving tabindex for the console tablist: only the selected tab sits in the
+// tab order, and Left/Right/Home/End move selection and focus together, which
+// is what a screen-reader user expects once the strip announces as tabs.
+const tabRefs = []
+const setTabRef = (el, i) => { tabRefs[i] = el }
+const onTabKeydown = (e) => {
+  const ids = terminalTabs.value.map((t) => t.id)
+  const cur = ids.indexOf(terminalTab.value)
+  let next
+  if (e.key === 'ArrowRight') next = (cur + 1) % ids.length
+  else if (e.key === 'ArrowLeft') next = (cur - 1 + ids.length) % ids.length
+  else if (e.key === 'Home') next = 0
+  else if (e.key === 'End') next = ids.length - 1
+  else return
+  e.preventDefault()
+  selectTerminalTab(ids[next])
+  nextTick(() => tabRefs[next]?.focus())
+}
+
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
 const code = ref('')
@@ -1381,6 +1558,7 @@ const headersOpen = ref(false)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 const fixtures = ref([])
 const savedPopoverOpen = ref(false)
+const savedPopoverRef = ref(null)
 const headerCount = computed(() => testHeaders.value.filter((h) => h.name && h.name.trim()).length)
 const deploying = ref(false)
 const invoking = ref(false)
@@ -1473,11 +1651,38 @@ const isNodeRuntime   = (rt) => rt === 'node'
 const templateExtras = ref({})
 const templateEntrypoint = ref('')
 
+// The name this buffer deploys under.
+//
+// A template's entrypoint wins while one is selected, then the entrypoint of the
+// function actually open, and only then a guess from the runtime. That middle
+// case used to be missing: reopening a TypeScript function and pressing Deploy
+// posted handler.js, so tsc never ran and the build died looking for output it
+// had not been asked to produce.
+const loadedEntrypoint = ref('')
+
 const fileName = computed(() => {
   if (templateEntrypoint.value) return templateEntrypoint.value
+  if (loadedEntrypoint.value) return loadedEntrypoint.value
   if (isPythonRuntime(form.value.runtime)) return 'handler.py'
   if (isNodeRuntime(form.value.runtime))   return 'handler.js'
   return 'handler.js'
+})
+
+// A .ts entrypoint needs a tsconfig in the tarball or the builder does not run
+// tsc at all. A template supplies one; a reopened function has to carry its own,
+// and the compiler options are not something to make the operator retype.
+const TS_CONFIG = JSON.stringify({
+  compilerOptions: {
+    target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext',
+    outDir: 'dist', rootDir: '.', strict: true, esModuleInterop: true,
+    skipLibCheck: true,
+  },
+}, null, 2)
+
+const deployExtras = computed(() => {
+  if (Object.keys(templateExtras.value).length) return templateExtras.value
+  if (fileName.value.endsWith('.ts')) return { 'tsconfig.json': TS_CONFIG }
+  return {}
 })
 
 const handlerHint = computed(() => {
@@ -1806,6 +2011,10 @@ const loadRouteData = async () => {
       form.value.name = fn.name
       form.value.description = fn.description || ''
       form.value.runtime = fn.runtime
+      // The file the operator authored. Without it the editor re-deployed every
+      // function as handler.js, which silently dropped a TypeScript function's
+      // .ts source on the next save.
+      loadedEntrypoint.value = fn.entrypoint || ''
       form.value.memory_mb = fn.memory_mb
       form.value.cpus = fn.cpus
       form.value.network_mode = fn.network_mode || 'none'
@@ -1908,13 +2117,13 @@ const onDeployShortcut = () => {
 
 onMounted(() => {
   window.addEventListener('focus', onWindowFocus)
-  document.addEventListener('mousedown', onDocClick)
+  document.addEventListener('pointerdown', onDocClick)
   document.addEventListener('keydown', onDocKey)
   window.addEventListener('orva:deploy', onDeployShortcut)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('focus', onWindowFocus)
-  document.removeEventListener('mousedown', onDocClick)
+  document.removeEventListener('pointerdown', onDocClick)
   document.removeEventListener('keydown', onDocKey)
   window.removeEventListener('orva:deploy', onDeployShortcut)
 })
@@ -2114,8 +2323,8 @@ const runDeploy = async () => {
       code: code.value,
       filename: fileName.value,
       dependencies: dependencyText.value || '',
-      ...(Object.keys(templateExtras.value).length
-        ? { extras: templateExtras.value }
+      ...(Object.keys(deployExtras.value).length
+        ? { extras: deployExtras.value }
         : {}),
     })
 
@@ -2503,13 +2712,6 @@ const rollbackToVersion = async (v) => {
     // fall through to default message
   }
 
-  // Surface a deep-link to the side-by-side source diff so the operator
-  // can review code changes before confirming. The confirm store renders
-  // plain text — the URL stays copy-pasteable even without rich content.
-  if (activeVersionDeploymentId.value && activeVersionDeploymentId.value !== v.deployment_id && route.params.name) {
-    diffMessage += `\n\nFull source diff: ${window.location.origin}/web/functions/${route.params.name}/diff?from=${v.deployment_id}&to=${activeVersionDeploymentId.value}`
-  }
-
   const ok = await confirmStore.ask({
     title: `Restore v${v.version}?`,
     message: diffMessage,
@@ -2531,6 +2733,10 @@ const rollbackToVersion = async (v) => {
       // Re-hydrate the form too — rollback restores env_vars,
       // memory, network_mode, etc. from the deployment snapshot.
       form.value.runtime = fn.runtime
+      // The file the operator authored. Without it the editor re-deployed every
+      // function as handler.js, which silently dropped a TypeScript function's
+      // .ts source on the next save.
+      loadedEntrypoint.value = fn.entrypoint || ''
       form.value.memory_mb = fn.memory_mb
       form.value.cpus = fn.cpus
       form.value.network_mode = fn.network_mode || 'none'
@@ -2656,14 +2862,18 @@ const resetForm = async () => {
 
 <style scoped>
 /* Compact panel-trigger button used in the editor's top action bar.
-   Visible height ~28 px keeps the toolbar dense for desktop operators;
-   the ::before pseudo extends the click region vertically to 44 px so
-   the WCAG 2.5.5 touch-target floor is met on phone-portrait without
-   reflowing the toolbar. Vertical-only expansion (no horizontal) so
-   adjacent buttons in the wrapping row don't get overlapping hit
-   regions; the gap-2 between siblings stays unambiguous. */
+   Visible height ~28 px keeps the toolbar dense for desktop operators; on
+   coarse pointers the real box grows to the WCAG 2.5.5 floor (see the
+   media query at the bottom of this block).
+
+   This used to be a ::before overlay inset -8px vertically. That is the
+   exact pattern style.css removed: the toolbar is flex-wrap, so when
+   "Deploy New Version" pushes the row past a phone's width the buttons
+   wrap onto two rows separated by gap-2 (7.6 px) and each row-2 overlay
+   covered the row-1 buttons above it — winning the hit test on paint
+   order and swallowing taps meant for Config. Grow the box, never the
+   shadow of it. */
 .panel-btn {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
@@ -2676,12 +2886,6 @@ const resetForm = async () => {
   font-weight: 500;
   white-space: nowrap;
   transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
-}
-.panel-btn::before {
-  content: '';
-  position: absolute;
-  inset-inline: 0;
-  inset-block: -8px;
 }
 .panel-btn:hover {
   color: var(--color-foreground);
@@ -2732,8 +2936,8 @@ const resetForm = async () => {
   gap: 0.3rem;
   padding: 0.2rem 0.55rem;
   border-radius: 0.3rem;
-  border: 1px solid rgba(85, 63, 131, 0.55);
-  background: rgba(85, 63, 131, 0.18);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
   color: var(--color-foreground);
   font-size: 11px;
   font-weight: 500;
@@ -2741,13 +2945,42 @@ const resetForm = async () => {
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 .run-btn:hover:not(:disabled) {
-  background: rgba(85, 63, 131, 0.32);
+  background: color-mix(in srgb, var(--color-primary) 32%, transparent);
   border-color: var(--color-primary);
   color: white;
 }
 .run-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Coarse-pointer floors for the controls this view styles itself. The
+   touch-expand-* helpers cover everything that goes through Button /
+   IconButton; these five are scoped-CSS controls that never see them.
+   .terminal-bar and .terminal-tab need `height` reset as well as a
+   min-height because Tailwind's h-9 is a hard height that a min- alone
+   cannot lift. Desktop (fine pointers) is untouched. */
+@media (pointer: coarse) {
+  .panel-btn {
+    min-height: 44px;
+  }
+  .run-btn {
+    min-height: 44px;
+  }
+  .terminal-bar {
+    height: auto;
+    min-height: 44px;
+  }
+  .terminal-tab {
+    height: 44px;
+  }
+  /* The method select inside this bar inherits the global 44 px form-control
+     floor, which overflowed a hard h-7 (26.6 px) row and painted over the
+     headers section below it. */
+  .request-bar {
+    height: auto;
+    min-height: 44px;
+  }
 }
 .run-spinner {
   width: 0.65rem;

@@ -315,8 +315,15 @@ func deployInline(ctx context.Context, deps Deps, in DeployInlineInput) (*mcpsdk
 	}
 
 	deploymentID := ids.New()
+	// Same rule as the REST path: the number comes from the deployment
+	// sequence, not from the function's mutation counter.
+	nextVersion, err := deps.DB.NextDeploymentVersion(fn.ID)
+	if err != nil {
+		_ = os.Remove(tarPath)
+		return nil, DeployInlineOutput{}, fmt.Errorf("failed to allocate a version: %w", err)
+	}
 	dep := &database.Deployment{
-		ID: deploymentID, FunctionID: fn.ID, Version: int64(fn.Version + 1),
+		ID: deploymentID, FunctionID: fn.ID, Version: nextVersion,
 		Status: "queued", Phase: "queued",
 	}
 	if err := deps.DB.InsertDeployment(dep); err != nil {
@@ -422,9 +429,9 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 	started := time.Now()
 
 	var (
-		targetHash       = in.CodeHash
-		parentDeployment *string
-		targetSnapshot   *database.DeploymentSnapshot
+		targetHash         = in.CodeHash
+		targetDeploymentID string
+		targetSnapshot     *database.DeploymentSnapshot
 	)
 	if in.DeploymentID != "" {
 		dep, err := deps.DB.GetDeployment(in.DeploymentID)
@@ -438,20 +445,30 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 			return nil, RollbackFunctionOutput{}, errors.New("cannot roll back to a non-succeeded deployment")
 		}
 		targetHash = dep.CodeHash
-		parent := dep.ID
-		parentDeployment = &parent
+		targetDeploymentID = dep.ID
 		targetSnapshot = dep.Snapshot
 	}
 	if targetHash == "" {
 		return nil, RollbackFunctionOutput{}, errors.New("target deployment has no recorded code_hash")
 	}
-	if targetSnapshot == nil {
+	if targetDeploymentID == "" || targetSnapshot == nil {
 		if dep, err := deps.DB.FindLatestSucceededByHash(fn.ID, targetHash); err == nil {
-			targetSnapshot = dep.Snapshot
+			if targetDeploymentID == "" {
+				targetDeploymentID = dep.ID
+			}
+			if targetSnapshot == nil {
+				targetSnapshot = dep.Snapshot
+			}
 		}
 	}
-	if targetHash == fn.CodeHash {
-		return nil, RollbackFunctionOutput{}, errors.New("this version is already active")
+	// Same rule as the REST handler: a matching code hash is not by itself a
+	// no-op, because rollback restores the deployment's settings and env too.
+	// Redeploying unchanged code writes a new row with the same hash, so
+	// comparing hashes alone refused every rollback on such a function.
+	if targetHash == fn.CodeHash &&
+		(targetSnapshot == nil || targetSnapshot.Equal(database.SnapshotFromFunction(fn))) {
+		return nil, RollbackFunctionOutput{}, errors.New(
+			"this deployment is identical to the running version, in both code and settings, so rolling back would change nothing")
 	}
 
 	versionDir := filepath.Join(deps.DataDir, "functions", fn.ID, "versions", targetHash)
@@ -459,26 +476,26 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 		return nil, RollbackFunctionOutput{}, fmt.Errorf("version %s has been garbage-collected", short12(targetHash))
 	}
 
-	depID := ids.New()
-	depRow := &database.Deployment{
-		ID: depID, FunctionID: fn.ID, Version: int64(fn.Version) + 1,
-		Status: "queued", Phase: "activate", CodeHash: targetHash,
-		Source: "rollback", ParentDeploymentID: parentDeployment,
-	}
-	if err := deps.DB.InsertDeployment(depRow); err != nil {
-		return nil, RollbackFunctionOutput{}, err
+	// Promote an existing deployment, matching the REST handler. Appending a
+	// new deployment whose content was an old one's made the history grow on
+	// every rollback and meant the version an operator restored never became
+	// the live one. functions.version stays put: it is the counter that numbers
+	// NEW deployments, so moving it backwards would collide.
+	if targetDeploymentID == "" {
+		return nil, RollbackFunctionOutput{}, errors.New(
+			"no recorded deployment for that version, so there is nothing to make live")
 	}
 
 	if err := builder.ActivateVersion(deps.DataDir, fn.ID, targetHash); err != nil {
-		_ = deps.DB.FinishDeployment(depID, "failed", err.Error(), time.Since(started).Milliseconds())
 		return nil, RollbackFunctionOutput{}, fmt.Errorf("failed to activate version: %w", err)
 	}
 
-	fn.Version++
 	fn.CodeHash = targetHash
 	fn.Status = "active"
+	fn.ActiveDeploymentID = targetDeploymentID
 	if targetSnapshot != nil {
 		fn.EnvVars = targetSnapshot.EnvVars
+		fn.RunEntrypoint = targetSnapshot.RunEntrypoint
 		fn.MemoryMB = targetSnapshot.MemoryMB
 		fn.CPUs = targetSnapshot.CPUs
 		fn.TimeoutMS = targetSnapshot.TimeoutMS
@@ -489,7 +506,6 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 		fn.ConcurrencyPolicy = targetSnapshot.ConcurrencyPolicy
 	}
 	if err := deps.Registry.Set(fn); err != nil {
-		_ = deps.DB.FinishDeployment(depID, "failed", err.Error(), time.Since(started).Milliseconds())
 		return nil, RollbackFunctionOutput{}, fmt.Errorf("rollback applied but registry update failed: %w", err)
 	}
 
@@ -497,14 +513,10 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 		deps.PoolMgr.RefreshForDeploy(fn.ID)
 	}
 
-	_ = deps.DB.SetDeploymentSnapshot(depID, database.SnapshotFromFunction(fn))
-	dur := time.Since(started).Milliseconds()
-	_ = deps.DB.FinishRollbackDeployment(depID, dur)
-
 	return nil, RollbackFunctionOutput{
-		DeploymentID: depID,
+		DeploymentID: targetDeploymentID,
 		CodeHash:     targetHash,
-		DurationMS:   dur,
+		DurationMS:   time.Since(started).Milliseconds(),
 	}, nil
 }
 
