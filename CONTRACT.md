@@ -167,8 +167,13 @@ never been executed.
 - **Ship on `vYYYY.MM.DD` tag** (zero-padded). `release.yml`'s `gate` job confirms
   `CI` already concluded `success` for that exact commit (a status lookup, not a
   re-run), then builds + publishes. It refuses to build on missing/red CI.
-- Releases resolve GitHub's "latest": if you delete an old release by hand, **publish
-  the new one first** or "latest" 404s.
+- **One published release at a time.** The previous releases are deleted after a new
+  one ships. Installers resolve GitHub's "latest", so **publish first, delete after** —
+  the reverse order 404s every install and upgrade in the gap. Keep the **tags**
+  (CHANGELOG and the release flow reference `git log <tag>..HEAD`); delete only the
+  releases. Nothing in the docs may pin to a superseded version, and `artifacts`'
+  CLI-upgrade leg skipping for want of a previous release is expected, not a
+  regression.
 - **Build-time identity** — `version.Version/Commit/BuildTime` via `-X` ldflags flow
   **Makefile → Dockerfile → release.yml**. Go silently ignores unknown `-X` targets,
   so renaming the `version` package or its vars must be done in **all three** or the

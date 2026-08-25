@@ -107,10 +107,23 @@ sandbox skip fails the gate. Local Docker runs may still skip when their host fo
 namespaces. Use the same environment flag on a provisioned target node when validating the
 kernel boundary manually.
 
-Releases accumulate; `install.sh`/`install-cli.sh` always resolve GitHub's "latest", which is
-the newest published release. If you ever delete an old release by hand, publish the new one
-**first** — deleting the current release before its replacement is live opens a window where
-"latest" resolves to 404. The flow:
+**One published release at a time.** After a tag ships, the previous releases are deleted, so
+the Releases page holds exactly the current version. `install.sh` / `install-cli.sh` resolve
+GitHub's "latest", so the order is not optional: **publish the new release first, then delete
+the old ones.** Deleting the current release before its replacement is live opens a window
+where "latest" resolves to 404 and every install and upgrade fails.
+
+Two consequences worth knowing. Nothing may pin to a superseded version — an
+`ORVA_VERSION=` example in the docs 404s the moment its release is pruned, so pins name the
+current release only. And `CI`'s `artifacts` suite has a CLI-upgrade-round-trip leg that
+upgrades *from the previous release*; with only one release published it skips cleanly, so a
+skip there is expected rather than a regression.
+
+Git **tags are kept** even when their release is deleted: `CHANGELOG.md` and the release flow
+below both reference ranges like `git log v2026.08.21..HEAD`, and those break if the tag goes.
+Delete the release, not the tag.
+
+The flow:
 
 0. **Update `CHANGELOG.md`** — move `## Unreleased` under the new `vYYYY.MM.DD`
    heading. Breaking changes and upgrade steps must be written there before the

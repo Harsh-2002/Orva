@@ -1996,7 +1996,8 @@ flow. *A real regression instead shows* a checksum mismatch, a 404 on an
 asset, `orva.service did not become active`, a `wait_for_health` timeout, or
 `✗` lines from `smoke-flow.sh`.
 *Action:* `gh run rerun <id> --failed` (a fresh runner gets a fresh IP), or
-locally `ORVA_VERSION=v2026.08.05 bash test/install/run-distro.sh <distro>`.
+locally `ORVA_VERSION=v2026.08.25 bash test/install/run-distro.sh <distro>` —
+use the current release, since only that one is published.
 
 > Correction to a widely-held belief: `arch` and `alpine321` are **not**
 > `continue-on-error` legs. `grep -n continue-on-error .github/workflows/*.yml`
