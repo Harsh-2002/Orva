@@ -65,12 +65,12 @@ anywhere that can reach the API. It cannot reach another function's KV, cannot
 authenticate to operator APIs, and cannot create or change a cron schedule —
 that requires a live execution of the function.
 
-**To remediate, redeploy the function without the dependency.** Redeploying
-retires all of that function's warm workers, and each worker's credential dies
-with its process, so a copy taken beforehand stops working. Credentials also
-expire when a worker is recycled — idle timeout, or its use limit — and when
-orvad restarts, because the signing key is random per process. Restarting the
-server invalidates every credential for every function at once.
+**To remediate, remove the dependency, redeploy, and then restart orvad.** The
+restart is the part that invalidates the credential: the signing key is random
+per process, so every credential for every function dies with it. Redeploying
+alone does **not** rotate the credential — it is derived from the function's ID,
+which does not change — so a copy taken beforehand keeps working against the
+new code until the server restarts.
 
 Then check that function's Schedules page for anything you did not create
 (schedules added by the SDK carry a name and are badged as such) and its KV

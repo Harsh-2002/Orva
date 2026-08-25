@@ -443,7 +443,7 @@
             <button
               type="button"
               class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 touch-expand-xs"
-              :disabled="revokingId === app.id"
+              :disabled="busyApp === app.id || busyApp === app.client_id"
               @click="revokeApp(app)"
             >
               <Trash2 class="w-3.5 h-3.5" />
@@ -452,7 +452,7 @@
             <button
               type="button"
               class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 touch-expand-xs"
-              :disabled="revokingId === app.client_id"
+              :disabled="busyApp === app.id || busyApp === app.client_id"
               @click="removeApp(app)"
             >
               <Ban class="w-3.5 h-3.5" />
@@ -832,7 +832,10 @@ onMounted(() => {
 const connectedApps = ref([])
 const connectedAppsLoading = ref(false)
 const connectedAppsError = ref('')
-const revokingId = ref('')
+// One busy marker for both controls on a row. Keying each on its own field
+// meant neither disabled the other, so Revoke and Remove could race and the
+// loser surfaced "no such connected app".
+const busyApp = ref('')
 
 const fetchConnectedApps = async () => {
   connectedAppsLoading.value = true
@@ -858,14 +861,14 @@ const revokeApp = async (app) => {
     danger: true,
   })
   if (!ok) return
-  revokingId.value = app.id
+  busyApp.value = app.id
   try {
     await revokeConnectedApp(app.id)
     await fetchConnectedApps()
   } catch (err) {
     connectedAppsError.value = err?.response?.data?.error?.message || err?.message || 'failed to revoke'
   } finally {
-    revokingId.value = ''
+    busyApp.value = ''
   }
 }
 
@@ -877,21 +880,22 @@ const removeApp = async (app) => {
   const ok = await confirmStore.ask({
     title: `Remove ${app.client_name}?`,
     message:
-      `${app.client_name} loses access immediately and cannot connect again ` +
-      'without you approving it on the consent screen. Revoking instead ends ' +
-      'this connection but lets the app reconnect on its own.',
+      `${app.client_name} loses access immediately, for this whole instance, ` +
+      'and cannot connect again without you approving it on the consent ' +
+      'screen. Revoking instead ends this connection but lets the app ' +
+      'reconnect on its own.',
     confirmLabel: 'Remove',
     danger: true,
   })
   if (!ok) return
-  revokingId.value = app.client_id
+  busyApp.value = app.client_id
   try {
     await removeOAuthApplication(app.client_id)
     await fetchConnectedApps()
   } catch (err) {
     connectedAppsError.value = err?.response?.data?.error?.message || err?.message || 'failed to remove application'
   } finally {
-    revokingId.value = ''
+    busyApp.value = ''
   }
 }
 

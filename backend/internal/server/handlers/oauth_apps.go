@@ -86,9 +86,19 @@ func userFromSessionCookie(db *database.Database, r *http.Request) (*database.Us
 // Client Registration, so an application whose grant you revoke can ask for
 // another; this is how an operator says it is finished.
 //
-// Ownership is checked the way Revoke checks it -- the caller must hold a
-// grant issued to this client. Without that predicate any signed-in operator
-// could retire a client id they merely guessed.
+// The effect is instance-wide, and that is the intended meaning: a registered
+// application is a property of the instance, not of one operator's session, so
+// "this application is finished" retires it for everybody. That differs from
+// Revoke, whose user_id predicate scopes the effect to the caller's own grant
+// -- do not read this as the same check.
+//
+// The guard here therefore scopes WHO MAY ASK, not what is affected: the
+// caller must have held a grant from this client, so a signed-in operator
+// cannot retire a client id they merely guessed. On a single-operator
+// instance, which is what Orva is today, the two are the same thing. If Orva
+// ever grows real multi-user accounts this needs revisiting alongside the
+// user_id invariant documented on RevokeOAuthAccessTokenByID, because one
+// operator would then be able to disconnect an application another depends on.
 func (h *OAuthAppsHandler) RemoveApplication(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	user, ok := userFromSessionCookie(h.DB, r)

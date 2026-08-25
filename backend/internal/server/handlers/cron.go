@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -345,15 +346,29 @@ func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
 	//
 	// The cap is on this path only. Schedules an operator creates from the
 	// dashboard are not limited; a function declaring its own is.
-	if existing, err := h.DB.ListCronSchedulesForFunction(fnID); err == nil {
-		fresh := true
+	existing, listErr := h.DB.ListCronSchedulesForFunction(fnID)
+	if listErr != nil {
+		// Fail open rather than fail a deploy over a read, but say so: the cap
+		// is a guard rail, and a guard rail that silently stops applying is
+		// worse than one that was never there.
+		slog.Warn("could not count existing schedules; SDK schedule cap not applied",
+			"fn", fnID, "err", listErr)
+	} else {
+		declared, fresh := 0, true
 		for _, e := range existing {
+			// Only rows the SDK declared count against the cap. Operator
+			// schedules carry no name -- counting them would lock a function
+			// out of its FIRST self-declared schedule on a function that
+			// happens to have a busy Schedules page.
+			if e.Name == "" {
+				continue
+			}
+			declared++
 			if e.Name == req.Name {
 				fresh = false
-				break
 			}
 		}
-		if fresh && len(existing) >= maxSDKSchedulesPerFunction {
+		if fresh && declared >= maxSDKSchedulesPerFunction {
 			respond.Error(w, http.StatusBadRequest, "VALIDATION",
 				fmt.Sprintf("a function may declare at most %d schedules; delete one before adding another",
 					maxSDKSchedulesPerFunction), reqID)

@@ -491,7 +491,7 @@ func (db *Database) UserHasGrantForClient(userID int64, clientID string) (bool, 
 // the operator consenting again at /oauth/authorize. Say that, not "it can
 // never connect again", which would be false.
 //
-// Soft revoke, not DELETE: the four checks read revoked_at, and the grants list
+// Soft revoke, not DELETE: those three checks read revoked_at, and the grants list
 // LEFT JOINs oauth_clients for a friendly label, so removing the row would
 // blank the history it is meant to explain.
 func (db *Database) RevokeOAuthClient(clientID string) error {

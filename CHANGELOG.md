@@ -87,8 +87,10 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   Every route behind those prefixes checked the credential again for itself, so
   nothing was reachable without one — but that made it a convention each
   handler had to remember rather than a property of the gate, and the next
-  route added would have been open. No behaviour changes for any existing
-  caller.
+  route added would have been open. Every existing caller is unaffected: the
+  status, code and message of the rejection are unchanged, and the SDKs always
+  send the credential. (The rejection is now emitted by the gate rather than a
+  handler, so it no longer echoes an `X-Request-ID` you supplied.)
 
 - **Revoking an API key from the AI assistant or an MCP client now actually
   revokes it.** The dashboard and CLI evicted the key from the authentication

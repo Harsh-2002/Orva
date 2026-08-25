@@ -236,3 +236,38 @@ func TestSDKScheduleCountIsCapped(t *testing.T) {
 		t.Errorf("stored %d schedules, want %d", len(rows), maxSDKSchedulesPerFunction)
 	}
 }
+
+// The cap counts what the SDK declared, not what is on the Schedules page. An
+// earlier version counted every row, so a function whose operator had already
+// created 25 schedules by hand was refused its FIRST self-declared one --
+// with a message saying it had declared too many, having declared none.
+func TestTheScheduleCapIgnoresOperatorCreatedRows(t *testing.T) {
+	db := newTestDB(t)
+	insertSDKTestFunction(t, db, "fn-cron-mixed", "cron-mixed")
+	auth := sdkauth.New([]byte("process-secret"))
+	h := &CronHandler{DB: db, SDKAuth: auth}
+	defer auth.BindExecution("exec-1", "fn-cron-mixed", "t", "s", time.Now())()
+
+	// Operator schedules: created in the dashboard, so no name.
+	for i := 0; i < maxSDKSchedulesPerFunction+5; i++ {
+		if err := db.InsertCronSchedule(&database.CronSchedule{
+			ID:         fmt.Sprintf("cron_op_%d", i),
+			FunctionID: "fn-cron-mixed", CronExpr: "0 4 * * *",
+			Timezone: "UTC", Enabled: true, Payload: "{}",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
+		bytes.NewBufferString(`{"name":"first-declared","schedule":"0 3 * * *"}`))
+	req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-mixed"))
+	req.Header.Set("X-Orva-Execution-Id", "exec-1")
+	w := httptest.NewRecorder()
+	h.UpsertInternal(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status=%d, want 200: this function has declared no schedules of its own; body=%s",
+			w.Code, w.Body.String())
+	}
+}

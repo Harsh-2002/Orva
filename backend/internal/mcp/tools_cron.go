@@ -20,12 +20,17 @@ type CronView struct {
 	ID           string `json:"id"`
 	FunctionID   string `json:"function_id"`
 	FunctionName string `json:"function_name,omitempty"`
-	CronExpr     string `json:"cron_expr"`
-	Enabled      bool   `json:"enabled"`
-	LastRunAt    string `json:"last_run_at,omitempty"`
-	NextRunAt    string `json:"next_run_at,omitempty"`
-	LastStatus   string `json:"last_status,omitempty"`
-	LastError    string `json:"last_error,omitempty"`
+	// Name is set when the function declared this schedule for itself via
+	// crons.upsert; the dashboard cannot set one. Present so an agent asked
+	// "did anything schedule itself here that I did not create?" can answer
+	// it -- the same question the dashboard's SDK badge answers.
+	Name       string `json:"name,omitempty"`
+	CronExpr   string `json:"cron_expr"`
+	Enabled    bool   `json:"enabled"`
+	LastRunAt  string `json:"last_run_at,omitempty"`
+	NextRunAt  string `json:"next_run_at,omitempty"`
+	LastStatus string `json:"last_status,omitempty"`
+	LastError  string `json:"last_error,omitempty"`
 	// Payload is the JSON object delivered as the invoke body when the
 	// schedule fires. Declared as map[string]any (rather than `any`) so
 	// the SDK emits a JSON Schema {type: "object"} that strict Zod v4
@@ -41,6 +46,7 @@ func toCronView(s *database.CronSchedule, fnName string) CronView {
 		ID:           s.ID,
 		FunctionID:   s.FunctionID,
 		FunctionName: fnName,
+		Name:         s.Name,
 		CronExpr:     s.CronExpr,
 		Enabled:      s.Enabled,
 		LastStatus:   s.LastStatus,

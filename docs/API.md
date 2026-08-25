@@ -86,6 +86,7 @@ Invalidates the session.
 - `DELETE /api/v1/auth/sessions/{prefix}` — revoke a session by token prefix.
 - `GET /api/v1/oauth/connected-apps` — list authorized OAuth clients.
 - `DELETE /api/v1/oauth/connected-apps/{id}` — revoke a connected client.
+- `DELETE /api/v1/oauth/clients/{client_id}` — retire the application itself (instance-wide): revokes its grants, drops pending authorization codes, and blocks re-authorization without fresh consent.
 
 ## Functions
 

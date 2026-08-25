@@ -12,7 +12,8 @@ import (
 // is the scheduler quietly firing nothing at all, logged once at Warn.
 //
 // There were no tests over these read paths at all when `name` was added. This
-// exercises each of them against a real row.
+// exercises all five against a real row. Keep it exhaustive: an uncovered path
+// is one whose arity error nobody sees until production.
 func TestEveryCronReadPathScansARow(t *testing.T) {
 	db := newTestDB(t)
 	fn := insertTestFunction(t, db, "cron-reader")
@@ -61,6 +62,19 @@ func TestEveryCronReadPathScansARow(t *testing.T) {
 		// them. It did not select the column at all.
 		if rows[0].Name != "nightly-sweep" {
 			t.Errorf("name = %q: an SDK-created schedule is indistinguishable from one the operator made", rows[0].Name)
+		}
+	})
+
+	t.Run("ListAllCronSchedules", func(t *testing.T) {
+		// recomputeNextRunOnBoot reads through this one, and swallows its
+		// error with a single slog.Warn -- so a mismatch here means every
+		// schedule silently loses its next-run time across a restart.
+		rows, err := db.ListAllCronSchedules()
+		if err != nil {
+			t.Fatalf("the boot recompute query failed: %v", err)
+		}
+		if len(rows) != 1 || rows[0].Name != "nightly-sweep" {
+			t.Fatalf("rows=%d names=%v", len(rows), namesOf(rows))
 		}
 	})
 
