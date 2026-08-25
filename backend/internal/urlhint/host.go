@@ -27,8 +27,33 @@ import (
 // localhost loopback in tests and dev.
 func BaseURL(r *http.Request) string {
 	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if IsHTTPS(r) {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
+}
+
+// IsHTTPS reports whether the request reached Orva over TLS, either
+// directly or through a proxy that said so.
+//
+// The header is a list, not a value. A single proxy sends
+// "X-Forwarded-Proto: https", but chained ones append -- Cloudflare in
+// front of nginx sends "https, http", meaning the client spoke https to
+// the first hop. Comparing the whole header against "https" reads that
+// as plaintext, which is how an instance behind two proxies served
+// http:// OAuth issuer URLs over a TLS connection and dropped Secure
+// from its session cookie. The first entry is the client's scheme.
+//
+// Only ever upgrades: a client that sets the header itself can claim
+// https it does not have, which costs it its own session, and can never
+// use it to strip Secure from someone else's.
+func IsHTTPS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
 }

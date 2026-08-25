@@ -31,6 +31,39 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
 
 ### Fixed
 
+- **`docker compose up -d` no longer locks you out of the dashboard on a LAN
+  address.** The shipped `docker-compose.yml` set `ORVA_SECURE_COOKIES=true`
+  while publishing plain HTTP on port 3000. A browser will not store a `Secure`
+  cookie over `http://` on anything but `localhost`, so signing in from
+  `http://<your-lan-ip>:3000` appeared to succeed and then bounced straight back
+  to the login screen. The setting predates Orva learning to detect the scheme
+  on its own and is now left unset: put a TLS proxy in front and the `Secure`
+  flag is applied automatically. **If you copied that line into your own compose
+  file and reach Orva over plain HTTP, remove it.**
+
+- **Session cookies keep the `Secure` flag behind chained proxies.** Orva
+  compared the whole `X-Forwarded-Proto` header against `https`, but a chained
+  proxy sends a list — Cloudflare in front of nginx sends `https, http`. Orva
+  read that as plaintext, so an instance behind two proxies dropped `Secure`
+  from its session cookie and advertised its OAuth issuer and MCP `invoke_url`
+  as `http://` over a TLS connection, which strict OAuth clients reject. The
+  first entry in the list is now the one that counts.
+
+- **Logging out clears the cookie with the attributes it was set with.** The
+  clearing cookie was written out as its own copy of the same eight-line
+  literal and had drifted from the three that set it, carrying neither `Secure`
+  nor `SameSite`. All four now go through one place.
+
+- **A `tsconfig.json` can no longer point a build outside its own directory.**
+  `compilerOptions.outDir` was taken verbatim from the uploaded tarball and
+  joined onto the function's version directory, so a value like `../../..`
+  walked the lookup out of the function's tree — and the path it selected was
+  stored as the file the sandbox executes. The build now refuses a traversing
+  or absolute `outDir` and falls back to `dist`, and both the build and
+  build-cache paths resolve entrypoints through a directory handle that cannot
+  be escaped, including by a symlink. Rollback likewise refuses a version
+  identifier that is not a content hash.
+
 - **Rolling back a TypeScript function no longer breaks it.** `entrypoint`
   carried two meanings: the file you wrote, and — after a successful `tsc` —
   the compiler's output. The editor served compiled JavaScript instead of your

@@ -90,6 +90,15 @@ func RunEntrypointFor(dataDir, fnID, codeHash, authored string) string {
 	if authored == "" || codeHash == "" {
 		return ""
 	}
+	// codeHash becomes a path component here exactly as it does in
+	// ActivateVersion, which rejects a non-digest so a traversal value can
+	// never reach the symlink target. This function names a version
+	// directory the same way from a hash a caller supplies, so it needs the
+	// same guard: without it "../../.." resolves the lookup against a
+	// directory outside the function's tree.
+	if !isHexHash(codeHash) {
+		return ""
+	}
 	fnDir, err := FunctionDir(dataDir, fnID)
 	if err != nil {
 		return ""

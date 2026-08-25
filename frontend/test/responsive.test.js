@@ -26,16 +26,56 @@ function walk(dir, out = []) {
 const files = walk(SRC)
 const rel = (f) => f.slice(SRC.length)
 
+/**
+ * Strip HTML comments, repeating until the text stops changing.
+ *
+ * One pass is not enough: removing a comment splices the text on either side
+ * of it together, and that seam can spell a whole comment the left-to-right
+ * pass has already scanned past. `A<!-<!--Q-->-- B -->C` reduces to
+ * `A<!--- B -->C` -- live comment markup still sitting in what this function
+ * calls "comments stripped". A second pass clears it.
+ *
+ * Nothing here is attacker-supplied; the input is this repo's own .vue files,
+ * and the assertions below only ever read the result as text. The cost of the
+ * gap is a bogus failure, never a missed one. Each pass strictly shortens the
+ * string, so this terminates.
+ */
+function stripComments(tpl) {
+  for (;;) {
+    const next = tpl.replace(/<!--[\s\S]*?-->/g, '')
+    if (next === tpl) return next
+    tpl = next
+  }
+}
+
 /** Template section with HTML comments stripped, i.e. what actually renders. */
 function template(src) {
   const i = src.indexOf('<template')
   if (i < 0) return ''
   const j = src.lastIndexOf('</template>')
-  return src.slice(i, j < 0 ? undefined : j).replace(/<!--[\s\S]*?-->/g, '')
+  return stripComments(src.slice(i, j < 0 ? undefined : j))
 }
 
 const sources = files.map((f) => ({ file: rel(f), src: readFileSync(f, 'utf8') }))
 const templates = sources.map((s) => ({ ...s, tpl: template(s.src) }))
+
+test('comment stripping repeats until the text stops changing', () => {
+  // The case that makes one pass insufficient: removing the inner comment
+  // splices `A<!-` onto `-- B -->C`, spelling a whole new comment that a
+  // single pass has already moved past. What this helper returns is treated
+  // downstream as "what actually renders", so leaving live comment markup in
+  // it is the failure.
+  assert.equal(stripComments('A<!-<!--Q-->-- B -->C'), 'AC')
+  assert.equal(stripComments('<div><!-- a --></div>'), '<div></div>')
+  // A nested opener is consumed by the outer match; the orphaned closer that
+  // survives is text, not markup.
+  assert.equal(stripComments('<!--<!--x-->-->'), '-->')
+  // An opener with no closer is not a comment; both a single pass and this
+  // one leave it alone, and the loop reaches that fixed point rather than
+  // spinning on it.
+  assert.equal(stripComments('<!--unterminated'), '<!--unterminated')
+  assert.equal(stripComments('<!<!--x-->-- >'), '<!-- >')
+})
 
 test('arbitrary grid tracks are separated by underscores, not commas', () => {
   // grid-template-columns is space-separated. A comma at the top level is a
