@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -186,5 +187,52 @@ func TestCronUpsertRequiresALiveExecution(t *testing.T) {
 				t.Errorf("a schedule was written anyway: %d rows", len(rows))
 			}
 		})
+	}
+}
+
+// Upsert is keyed by (function, name), so distinct names multiply without
+// bound, and nothing validates the interval -- "* * * * *" is accepted. A
+// runaway loop, or one compromised execution, could fill the scheduler with
+// once-a-minute work against its own function.
+func TestSDKScheduleCountIsCapped(t *testing.T) {
+	db := newTestDB(t)
+	insertSDKTestFunction(t, db, "fn-cron-many", "cron-many")
+	auth := sdkauth.New([]byte("process-secret"))
+	h := &CronHandler{DB: db, SDKAuth: auth}
+	defer auth.BindExecution("exec-1", "fn-cron-many", "t", "s", time.Now())()
+
+	upsert := func(name string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
+			bytes.NewBufferString(`{"name":"`+name+`","schedule":"* * * * *"}`))
+		req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-many"))
+		req.Header.Set("X-Orva-Execution-Id", "exec-1")
+		w := httptest.NewRecorder()
+		h.UpsertInternal(w, req)
+		return w.Code
+	}
+
+	for i := 0; i < maxSDKSchedulesPerFunction; i++ {
+		if code := upsert(fmt.Sprintf("job-%d", i)); code != http.StatusOK {
+			t.Fatalf("schedule %d was rejected with %d, below the cap", i, code)
+		}
+	}
+	if code := upsert("one-too-many"); code != http.StatusBadRequest {
+		t.Errorf("schedule %d returned %d, want 400: the cap is not enforced",
+			maxSDKSchedulesPerFunction+1, code)
+	}
+
+	// Updating one that already exists is not a new schedule and must still
+	// work at the cap -- otherwise a function pinned at the limit can no
+	// longer re-declare its own jobs on deploy.
+	if code := upsert("job-0"); code != http.StatusOK {
+		t.Errorf("re-declaring an existing schedule at the cap returned %d, want 200", code)
+	}
+
+	rows, err := db.ListCronSchedulesForFunction("fn-cron-many")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != maxSDKSchedulesPerFunction {
+		t.Errorf("stored %d schedules, want %d", len(rows), maxSDKSchedulesPerFunction)
 	}
 }

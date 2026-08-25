@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -249,6 +250,12 @@ type upsertInternalRequest struct {
 	Payload  any    `json:"payload,omitempty"`
 }
 
+// maxSDKSchedulesPerFunction bounds how many distinct named schedules one
+// function may declare for itself. Generous for any real use -- the pattern is
+// a handful of named jobs -- and low enough that a runaway or hostile loop
+// cannot fill the scheduler.
+const maxSDKSchedulesPerFunction = 25
+
 // UpsertInternal handles POST /api/v1/_internal/crons. SDK-only path
 // guarded by X-Orva-Internal-Token; the function being scheduled is the
 // signed caller's own function, so the SDK doesn't need to send its UUID.
@@ -331,6 +338,29 @@ func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
 		next := sched.Next(time.Now().In(loc)).UTC()
 		row.NextRunAt = &next
 	}
+	// Upsert is keyed by (function, name), so distinct names multiply without
+	// bound, and nothing validates the interval either -- "* * * * *" is
+	// accepted. One compromised execution could otherwise register hundreds of
+	// once-a-minute schedules against its own function and leave them running.
+	//
+	// The cap is on this path only. Schedules an operator creates from the
+	// dashboard are not limited; a function declaring its own is.
+	if existing, err := h.DB.ListCronSchedulesForFunction(fnID); err == nil {
+		fresh := true
+		for _, e := range existing {
+			if e.Name == req.Name {
+				fresh = false
+				break
+			}
+		}
+		if fresh && len(existing) >= maxSDKSchedulesPerFunction {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				fmt.Sprintf("a function may declare at most %d schedules; delete one before adding another",
+					maxSDKSchedulesPerFunction), reqID)
+			return
+		}
+	}
+
 	id, err := h.DB.UpsertCronScheduleByName(row)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL",

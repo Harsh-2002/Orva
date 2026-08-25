@@ -36,6 +36,18 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
 
 ### Added
 
+- **Schedules a function declared for itself are marked in the dashboard.**
+  The Schedules page now shows an **SDK** badge on any schedule created through
+  `crons.upsert()`, with the declared name in its tooltip. The dashboard has no
+  name field, so a named schedule is one the function's own code registered —
+  which is what makes an entry you did not expect visible as one. The `name` is
+  also now returned by the cron API, where it had been stored but never read
+  back.
+
+- **A function may declare at most 25 schedules for itself.** Upsert is keyed
+  by name, so distinct names multiplied without bound and nothing rejected
+  `* * * * *`. Schedules you create in the dashboard are not capped.
+
 - **You can remove a connected application, not just revoke its grant.**
   Settings → Connected applications gains a **Remove** control beside Revoke.
   Revoke ends the current connection; the application can reconnect on its own,
