@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -157,8 +158,28 @@ func registerKeyTools(rc *regCtx) {
 			if !in.Confirm {
 				return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true")
 			}
+			// Read the hash before the row goes away -- it is what the auth
+			// cache is keyed on, and that cache has no TTL. Without this the
+			// deleted key goes on authenticating every /api/v1/* request for
+			// the life of the process. /mcp reads the database directly and
+			// so rejects it at once, which makes the gap worse rather than
+			// better: the key looks revoked from the AI sidebar the operator
+			// revoked it in, and still opens the REST API.
+			var keyHash string
+			if k, err := deps.DB.GetAPIKeyByID(in.KeyID); err == nil && k != nil {
+				keyHash = k.KeyHash
+			}
 			if err := deps.DB.DeleteAPIKey(in.KeyID); err != nil {
 				return nil, DeletedOutput{}, err
+			}
+			if keyHash == "" {
+				// The row was gone or unreadable before we deleted it, so
+				// there is no hash to evict. Say so rather than reporting a
+				// revocation that may not have taken effect.
+				slog.Warn("api key deleted without evicting the auth cache: hash unavailable",
+					"key_id", in.KeyID)
+			} else if deps.InvalidateKey != nil {
+				deps.InvalidateKey(keyHash)
 			}
 			return nil, DeletedOutput{DeletedID: in.KeyID}, nil
 		},

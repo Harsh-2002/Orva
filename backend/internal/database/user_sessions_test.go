@@ -30,8 +30,20 @@ func TestDeleteUserSessionsExcept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if revoked != 2 {
-		t.Errorf("revoked = %d, want 2", revoked)
+	if len(revoked) != 2 {
+		t.Fatalf("revoked = %d sessions, want 2", len(revoked))
+	}
+	// The tokens themselves, not just a count: the caller has to evict each
+	// one from the auth middleware's memo, and a count cannot do that.
+	want := map[string]bool{tokens[1]: true, tokens[2]: true}
+	for _, tok := range revoked {
+		if !want[tok] {
+			t.Errorf("revoked an unexpected token %q", tok)
+		}
+		delete(want, tok)
+	}
+	for tok := range want {
+		t.Errorf("token %q was revoked but not returned, so nothing can evict its memo", tok)
 	}
 
 	remaining, err := db.ListSessionsForUser(user.ID)

@@ -31,6 +31,30 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
 
 ### Fixed
 
+- **Revoking an API key from the AI assistant or an MCP client now actually
+  revokes it.** The dashboard and CLI evicted the key from the authentication
+  cache; the MCP tool deleted the database row and stopped there. Because
+  `/mcp` and `/fn/` read credentials straight from the database, the key
+  stopped working on exactly the surface it was revoked from — while it kept
+  full access to the REST API, including minting new keys, reading secrets and
+  downloading a backup, until the server restarted. The revocation looked
+  confirmed and was not. **If you have revoked a key through the AI sidebar or
+  an MCP client, restart Orva** — that key may still be live. Keys revoked from
+  the dashboard or `orva keys revoke` were never affected.
+
+- **Logging out, revoking a device, and changing your password now take effect
+  immediately.** All three deleted the session row but left the session in the
+  authentication cache, so the cookie kept working for up to 30 seconds
+  afterwards — with no permission check, meaning full operator access on every
+  API route. For a password change that is the entire window the change exists
+  to close.
+
+- **A cached API key is now re-checked against the database at least every 30
+  seconds.** The cache had no expiry, so anything that revoked a key without
+  evicting it stayed stale until the process restarted. Sessions were already
+  re-checked on this interval; keys now match. This is the backstop, not the
+  fix — every revocation path evicts directly.
+
 - **`docker compose up -d` no longer locks you out of the dashboard on a LAN
   address.** The shipped `docker-compose.yml` set `ORVA_SECURE_COOKIES=true`
   while publishing plain HTTP on port 3000. A browser will not store a `Secure`

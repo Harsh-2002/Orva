@@ -23,13 +23,28 @@ type sessionCacheEntry struct {
 
 const sessionCacheTTL = 30 * time.Second
 
+// keyCacheEntry memos a successful API-key lookup, on the same short TTL as
+// sessionCacheEntry above and for the same reason -- plus one more.
+//
+// Evicting a revoked key is a duty each delete call site has to remember, and
+// the MCP tool forgot for long enough to ship: a key revoked from the AI
+// sidebar went on authenticating every /api/v1/* request until the process
+// restarted, because nothing here ever dropped it. Both call sites evict now,
+// but the next one added inherits the same trap. A TTL is what makes that a
+// thirty-second bug rather than an unbounded one.
+type keyCacheEntry struct {
+	key        *database.APIKey
+	validUntil time.Time
+}
+
+const keyCacheTTL = 30 * time.Second
+
 // authMiddleware validates API key authentication and permission checks.
 // Uses an in-memory cache to avoid hitting SQLite on every request. keyCache is
-// owned by the Router and shared so the keys handler can evict an entry the
-// instant a key is deleted — otherwise a revoked key would keep authenticating
-// until process restart (it is only otherwise dropped on expiry).
-func authMiddleware(db *database.Database, keyCache *sync.Map, sdkAuth *sdkauth.Authenticator, next http.Handler) http.Handler {
-	var sessionCache sync.Map // token -> sessionCacheEntry
+// owned by the Router and shared so every path that revokes a key can evict its
+// entry immediately; the TTL on those entries is the backstop for the one that
+// forgets.
+func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, sdkAuth *sdkauth.Authenticator, next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth on public endpoints: health, UI, root redirect, auth routes.
@@ -146,9 +161,15 @@ func authMiddleware(db *database.Database, keyCache *sync.Map, sdkAuth *sdkauth.
 
 		// Check in-memory cache first.
 		var key *database.APIKey
+		keyNow := time.Now()
 		if cached, ok := keyCache.Load(keyHash); ok {
-			key = cached.(*database.APIKey)
-		} else {
+			if entry := cached.(keyCacheEntry); keyNow.Before(entry.validUntil) {
+				key = entry.key
+			} else {
+				keyCache.Delete(keyHash)
+			}
+		}
+		if key == nil {
 			var err error
 			key, err = db.GetAPIKeyByHash(keyHash)
 			if err != nil {
@@ -159,7 +180,7 @@ func authMiddleware(db *database.Database, keyCache *sync.Map, sdkAuth *sdkauth.
 				}
 				return
 			}
-			keyCache.Store(keyHash, key)
+			keyCache.Store(keyHash, keyCacheEntry{key: key, validUntil: keyNow.Add(keyCacheTTL)})
 		}
 
 		// Check expiry.

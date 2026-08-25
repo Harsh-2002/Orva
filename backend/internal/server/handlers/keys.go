@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -152,7 +153,8 @@ func (h *KeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Capture the key's hash BEFORE deleting so we can evict it from the auth
-	// cache — otherwise a revoked key keeps working until process restart.
+	// cache — otherwise a revoked key keeps working until its cache entry
+	// ages out.
 	var keyHash string
 	if k, err := h.DB.GetAPIKeyByID(keyID); err == nil && k != nil {
 		keyHash = k.KeyHash
@@ -163,7 +165,13 @@ func (h *KeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.InvalidateKey != nil && keyHash != "" {
+	if keyHash == "" {
+		// No hash means no eviction, and this still answers 200. Say so:
+		// a revocation that reports success without taking full effect is
+		// the one thing an operator must not have to guess about.
+		slog.Warn("api key deleted without evicting the auth cache: hash unavailable",
+			"key_id", keyID)
+	} else if h.InvalidateKey != nil {
 		h.InvalidateKey(keyHash)
 	}
 
