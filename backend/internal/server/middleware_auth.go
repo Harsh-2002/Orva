@@ -71,13 +71,31 @@ func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, sdk
 			return
 		}
 		// Internal SDK endpoints authenticate with a process-signed,
-		// function-scoped credential rather than an API key. The handlers
-		// enforce route-specific scope. Strip the legacy caller header: the
-		// verified claim is carried only in the request actor context, while
-		// each handler verifies the signed credential independently.
+		// function-scoped credential rather than an API key. Handlers still
+		// enforce route-specific scope (which function's namespace, whether a
+		// live execution is required); the gate enforces that there is a
+		// verified caller at all.
+		//
+		// It did not used to. The Verify error was discarded here and every
+		// request under these two prefixes reached its handler regardless,
+		// which made "requests under /api/v1/_internal/ are authenticated" a
+		// convention re-derived by hand in each handler rather than a property
+		// of the gate. Every route behind them happened to re-verify, so
+		// nothing was exploitable -- but the next one added would have been
+		// open unless its author remembered, and that is the same shape as the
+		// revocation bug that prompted this audit: a security property held by
+		// repetition instead of by construction.
+		//
+		// Strip the legacy caller header: the verified claim travels in the
+		// request actor context, never in a header a caller could set.
 		if strings.HasPrefix(r.URL.Path, "/api/v1/_kv/") ||
 			strings.HasPrefix(r.URL.Path, "/api/v1/_internal/") {
-			caller, _ := sdkAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+			caller, err := sdkAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+			if err != nil {
+				writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
+					"missing or invalid SDK credential", RequestID(r.Context()))
+				return
+			}
 			r.Header.Del("X-Orva-Caller-Function")
 			actor := &Actor{Source: "sdk", Type: "scoped_token", ID: caller, Label: caller}
 			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))

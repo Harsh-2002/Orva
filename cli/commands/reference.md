@@ -188,7 +188,7 @@ Surface, as of v0.7:
 - **`invoke(name, payload, {timeoutMs})`** — synchronous F2F call with `{statusCode, headers, body}` envelope. 8-deep call cap.
 - **`invokeStream(name, payload, {timeoutMs})`** — same, but yields `Uint8Array` chunks via `for await`.
 - **`jobs.enqueue(name, payload, {idempotencyKey, maxAttempts, scheduledAt})`** — durable background queue with built-in dedup.
-- **`crons.upsert(name, schedule, {payload, timezone, enabled})`** — declare a cron schedule from the function body itself.
+- **`crons.upsert(name, schedule, {payload, timezone, enabled})`** — declare a cron schedule from the function body itself. Must be called from **inside** your handler and awaited; calling it at module scope returns `403 SDK_SCOPE_VIOLATION`. A function may declare at most 25 schedules.
 - **`trace.span(name, fn, attrs?)`** — wrap a code block as a child span; durations land in the trace waterfall.
 - **`log.{debug,info,warn,error}(msg, fields?)`** — structured logs surfaced in the dashboard Logs lane.
 - **`context`** — frozen view of `functionId`, `executionId`, `traceId`, `spanId`, `callDepth`, `timeoutMs`, `memoryMb`, `sdkVersion`. `timeoutMs` is the function's configured timeout (from `ORVA_TIMEOUT_MS`), also reachable as `getRemainingTimeInMillis()` / `get_remaining_time_in_millis()` on the handler's context argument.
@@ -983,6 +983,7 @@ surface (used by the dashboard, also callable from the CLI):
 |---|---|---|
 | `/api/v1/oauth/connected-apps` | GET | List active OAuth grants for the calling user |
 | `/api/v1/oauth/connected-apps/{id}` | DELETE | Revoke a grant (idempotent — re-revoke returns 404) |
+| `/api/v1/oauth/clients/{client_id}` | DELETE | Retire the application itself: revokes its grants, drops its pending authorization codes, and blocks re-authorization without fresh consent. Instance-wide |
 | `/api/v1/auth/sessions` | GET | List the calling user's active browser sessions (token returned as 16-char prefix only) |
 | `/api/v1/auth/sessions/{prefix}` | DELETE | Revoke another session by prefix; calling session refuses unless `?allow_self=1` |
 

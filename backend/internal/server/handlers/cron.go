@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -249,6 +251,12 @@ type upsertInternalRequest struct {
 	Payload  any    `json:"payload,omitempty"`
 }
 
+// maxSDKSchedulesPerFunction bounds how many distinct named schedules one
+// function may declare for itself. Generous for any real use -- the pattern is
+// a handful of named jobs -- and low enough that a runaway or hostile loop
+// cannot fill the scheduler.
+const maxSDKSchedulesPerFunction = 25
+
 // UpsertInternal handles POST /api/v1/_internal/crons. SDK-only path
 // guarded by X-Orva-Internal-Token; the function being scheduled is the
 // signed caller's own function, so the SDK doesn't need to send its UUID.
@@ -258,6 +266,25 @@ func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
 	if authErr != nil {
 		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
 			"missing or invalid SDK credential", reqID)
+		return
+	}
+
+	// A signature alone is not enough here, unlike KV.
+	//
+	// A schedule is a standing invocation that nothing in internal/scheduler
+	// checks auth_mode for, and it is a database row — so it outlives the
+	// process-random signing key that authorised it. Restarting orvad
+	// invalidates every other use of a leaked ORVA_INTERNAL_TOKEN and does not
+	// touch a schedule that token planted. That asymmetry, not symmetry with
+	// the other SDK surfaces, is why this one gets the gate: it is the only
+	// capability here that a restart cannot clean up.
+	//
+	// OwnsExecution rather than TraceContext: cron needs no trace context, and
+	// this fails closed on a missing header for free, because BindExecution
+	// refuses to store under an empty execution ID so the lookup always misses.
+	if !h.SDKAuth.OwnsExecution(r.Header.Get("X-Orva-Execution-Id"), fnID) {
+		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+			"crons.upsert must be called from inside your handler, not at module scope", reqID)
 		return
 	}
 
@@ -312,6 +339,43 @@ func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
 		next := sched.Next(time.Now().In(loc)).UTC()
 		row.NextRunAt = &next
 	}
+	// Upsert is keyed by (function, name), so distinct names multiply without
+	// bound, and nothing validates the interval either -- "* * * * *" is
+	// accepted. One compromised execution could otherwise register hundreds of
+	// once-a-minute schedules against its own function and leave them running.
+	//
+	// The cap is on this path only. Schedules an operator creates from the
+	// dashboard are not limited; a function declaring its own is.
+	existing, listErr := h.DB.ListCronSchedulesForFunction(fnID)
+	if listErr != nil {
+		// Fail open rather than fail a deploy over a read, but say so: the cap
+		// is a guard rail, and a guard rail that silently stops applying is
+		// worse than one that was never there.
+		slog.Warn("could not count existing schedules; SDK schedule cap not applied",
+			"fn", fnID, "err", listErr)
+	} else {
+		declared, fresh := 0, true
+		for _, e := range existing {
+			// Only rows the SDK declared count against the cap. Operator
+			// schedules carry no name -- counting them would lock a function
+			// out of its FIRST self-declared schedule on a function that
+			// happens to have a busy Schedules page.
+			if e.Name == "" {
+				continue
+			}
+			declared++
+			if e.Name == req.Name {
+				fresh = false
+			}
+		}
+		if fresh && declared >= maxSDKSchedulesPerFunction {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION",
+				fmt.Sprintf("a function may declare at most %d schedules; delete one before adding another",
+					maxSDKSchedulesPerFunction), reqID)
+			return
+		}
+	}
+
 	id, err := h.DB.UpsertCronScheduleByName(row)
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL",

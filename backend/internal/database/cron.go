@@ -170,9 +170,9 @@ func (db *Database) GetCronSchedule(id string) (*CronSchedule, error) {
 	var last, next sql.NullTime
 	var lastStatus, lastErr sql.NullString
 	err := db.read.QueryRow(`
-		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, name, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules WHERE id = ?`, id,
-	).Scan(&s.ID, &s.FunctionID, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt)
+	).Scan(&s.ID, &s.FunctionID, &s.Name, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (db *Database) GetCronSchedule(id string) (*CronSchedule, error) {
 // function, newest first.
 func (db *Database) ListCronSchedulesForFunction(functionID string) ([]*CronSchedule, error) {
 	rows, err := db.read.Query(`
-		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, name, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules WHERE function_id = ? ORDER BY created_at DESC`, functionID)
 	if err != nil {
 		return nil, err
@@ -207,7 +207,7 @@ func (db *Database) ListCronSchedulesForFunction(functionID string) ([]*CronSche
 // the dashboard.
 func (db *Database) ListAllCronSchedules() ([]*CronSchedule, error) {
 	rows, err := db.read.Query(`
-		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, name, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -229,7 +229,7 @@ type CronScheduleWithFunction struct {
 // query per row.
 func (db *Database) ListAllCronSchedulesWithFunction() ([]*CronScheduleWithFunction, error) {
 	rows, err := db.read.Query(`
-		SELECT c.id, c.function_id, c.cron_expr, c.timezone, c.enabled, c.last_run_at, c.next_run_at, c.last_status, c.last_error, c.payload, c.created_at, c.updated_at,
+		SELECT c.id, c.function_id, c.name, c.cron_expr, c.timezone, c.enabled, c.last_run_at, c.next_run_at, c.last_status, c.last_error, c.payload, c.created_at, c.updated_at,
 		       COALESCE(f.name, '')
 		FROM cron_schedules c
 		LEFT JOIN functions f ON f.id = c.function_id
@@ -246,7 +246,7 @@ func (db *Database) ListAllCronSchedulesWithFunction() ([]*CronScheduleWithFunct
 		var last, next sql.NullTime
 		var lastStatus, lastErr sql.NullString
 		var fnName string
-		if err := rows.Scan(&s.ID, &s.FunctionID, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt, &fnName); err != nil {
+		if err := rows.Scan(&s.ID, &s.FunctionID, &s.Name, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt, &fnName); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
@@ -272,7 +272,7 @@ func (db *Database) DueCronSchedules(now time.Time, limit int) ([]*CronSchedule,
 		limit = 50
 	}
 	rows, err := db.read.Query(`
-		SELECT id, function_id, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
+		SELECT id, function_id, name, cron_expr, timezone, enabled, last_run_at, next_run_at, last_status, last_error, payload, created_at, updated_at
 		FROM cron_schedules
 		WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
 		ORDER BY next_run_at ASC
@@ -318,6 +318,11 @@ func (db *Database) DeleteCronSchedule(id string) error {
 
 // ── helpers ────────────────────────────────────────────────────────
 
+// scanCronRows is shared by every list path, so its column list and each
+// caller's SELECT move together. Adding a column here and missing one SELECT
+// still compiles and then fails at runtime -- and one of those callers is
+// DueCronSchedules, where the failure is the scheduler quietly firing nothing
+// at all.
 func scanCronRows(rows *sql.Rows) ([]*CronSchedule, error) {
 	var out []*CronSchedule
 	for rows.Next() {
@@ -325,7 +330,7 @@ func scanCronRows(rows *sql.Rows) ([]*CronSchedule, error) {
 		var enabled int
 		var last, next sql.NullTime
 		var lastStatus, lastErr sql.NullString
-		if err := rows.Scan(&s.ID, &s.FunctionID, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.FunctionID, &s.Name, &s.CronExpr, &s.Timezone, &enabled, &last, &next, &lastStatus, &lastErr, &s.Payload, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1

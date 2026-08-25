@@ -36,6 +36,13 @@
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-medium text-foreground truncate">{{ job.function_name }}</span>
                 <span
+                  v-if="job.name"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-surface-subtle text-foreground-muted border-border"
+                  :title="`Declared by the function itself as &quot;${job.name}&quot;, not created here`"
+                >
+                  SDK
+                </span>
+                <span
                   class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border"
                   :class="job.enabled ? 'bg-success-tint text-success-fg border-success-ring' : 'bg-warning-tint text-warning-fg border-warning-ring'"
                 >
@@ -121,8 +128,20 @@
             :key="job.id"
             class="hover:bg-surface-hover transition-colors"
           >
-            <td class="px-6 py-4 font-medium text-foreground max-w-[16rem] truncate">
-              {{ job.function_name }}
+            <td class="px-6 py-4 font-medium text-foreground max-w-[16rem]">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="truncate">{{ job.function_name }}</span>
+                <!-- A schedule with a name was declared by the function's own
+                     code; the dashboard cannot set one. That is what makes an
+                     unexpected entry here visible as one. -->
+                <span
+                  v-if="job.name"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-surface-subtle text-foreground-muted border-border shrink-0"
+                  :title="`Declared by the function itself as &quot;${job.name}&quot;, not created here`"
+                >
+                  SDK
+                </span>
+              </div>
             </td>
             <td class="px-6 py-4">
               <div class="flex flex-col gap-1">

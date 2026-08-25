@@ -12,6 +12,55 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
 
 ## Unreleased
 
+### Breaking
+
+- **`crons.upsert()` must be called from inside your handler.** It now requires
+  a live execution of the function it is scheduling, and returns
+  `403 SDK_SCOPE_VIOLATION` otherwise. Calling it at module scope — outside the
+  handler function, where it ran once per cold start — no longer works, and
+  neither does calling it after your handler has returned without awaiting it.
+  The documented form, `await orva.crons.upsert(...)` inside the handler, is
+  unaffected.
+
+  **Why:** a schedule is the one thing an SDK credential can create that
+  outlives the credential. Every other use of a leaked `ORVA_INTERNAL_TOKEN`
+  stops working when Orva restarts, because the signing key is random per
+  process; a cron row does not, and cron-fired invocations do not consult the
+  function's `auth_mode`. Requiring a live execution means a copy of the token
+  taken off the box cannot plant one.
+
+  **Upgrade:** if a deploy starts logging `SDK_SCOPE_VIOLATION`, move the
+  `crons.upsert` call inside your handler and `await` it. Registration is
+  idempotent by `(function, name)`, so calling it on every invocation is fine —
+  and is what the documentation already shows.
+
+### Added
+
+- **Schedules a function declared for itself are marked in the dashboard.**
+  The Schedules page now shows an **SDK** badge on any schedule created through
+  `crons.upsert()`, with the declared name in its tooltip. The dashboard has no
+  name field, so a named schedule is one the function's own code registered —
+  which is what makes an entry you did not expect visible as one. The `name` is
+  also now returned by the cron API, where it had been stored but never read
+  back.
+
+- **A function may declare at most 25 schedules for itself.** Upsert is keyed
+  by name, so distinct names multiplied without bound and nothing rejected
+  `* * * * *`. Schedules you create in the dashboard are not capped.
+
+- **You can remove a connected application, not just revoke its grant.**
+  Settings → Connected applications gains a **Remove** control beside Revoke.
+  Revoke ends the current connection; the application can reconnect on its own,
+  because Orva accepts dynamic client registration. Remove retires the
+  registration itself — its grants stop working at once (including on `/mcp`,
+  where they previously kept working until the access token expired), its
+  pending authorization codes are discarded, and it cannot connect again
+  without you approving it on the consent screen.
+
+  The plumbing for this was already in place and unreachable: the column, the
+  read path and three checks in the authorization flow all existed, and nothing
+  ever set the flag.
+
 ### Changed
 
 - **Rolling back promotes an existing deployment instead of appending a new
@@ -30,6 +79,18 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   already recorded, so no history is renumbered.
 
 ### Fixed
+
+- **Requests to the internal SDK endpoints are now authenticated by the gate.**
+  Everything under `/api/v1/_kv/` and `/api/v1/_internal/` authenticates with
+  the process-signed worker credential rather than an API key, and the
+  middleware discarded the verification error and called the handler anyway.
+  Every route behind those prefixes checked the credential again for itself, so
+  nothing was reachable without one — but that made it a convention each
+  handler had to remember rather than a property of the gate, and the next
+  route added would have been open. Every existing caller is unaffected: the
+  status, code and message of the rejection are unchanged, and the SDKs always
+  send the credential. (The rejection is now emitted by the gate rather than a
+  handler, so it no longer echoes an `X-Request-ID` you supplied.)
 
 - **Revoking an API key from the AI assistant or an MCP client now actually
   revokes it.** The dashboard and CLI evicted the key from the authentication

@@ -174,6 +174,10 @@ export const deleteApiKey = (id) => apiClient.delete(`/keys/${id}`)
 export const listConnectedApps = () => apiClient.get('/oauth/connected-apps')
 
 export const revokeConnectedApp = (id) => apiClient.delete(`/oauth/connected-apps/${id}`)
+// Retires the application itself, not one grant. Registration is open (RFC 7591
+// dynamic client registration), so a revoked grant can be requested again; this
+// is how an operator says the application is finished.
+export const removeOAuthApplication = (clientId) => apiClient.delete(`/oauth/clients/${clientId}`)
 
 // Active sessions (operator's own browser logins)
 export const listSessions = () => apiClient.get('/auth/sessions')
