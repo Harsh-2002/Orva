@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -209,17 +210,28 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 // deploys this means returning "<outDir>/<stem>.js" if the compiled file
 // exists; otherwise we trust the function row's original entrypoint.
 func resolveCachedEntrypoint(versionDir, original string) string {
-	tsConfig := filepath.Join(versionDir, "tsconfig.json")
-	if _, err := os.Stat(tsConfig); err != nil {
+	// Both halves of the path built below are operator input: `original` is
+	// the function row's entrypoint, and outDir is a field in the
+	// tsconfig.json that shipped in the uploaded tarball. Open the version
+	// directory as a root so no join can leave it however those are spelled,
+	// and so the returned value — which becomes run_entrypoint, and with it
+	// the file the sandbox executes — is contained by construction.
+	root, err := os.OpenRoot(versionDir)
+	if err != nil {
 		return original
 	}
-	outDir := readTSConfigOutDir(tsConfig)
+	defer root.Close()
+
+	if _, err := root.Stat("tsconfig.json"); err != nil {
+		return original
+	}
+	outDir := readTSConfigOutDir(root)
 	// `original` may already be the post-compile path
 	// (`dist/handler.js`) on the second build of a function — strip the
 	// outDir prefix so we don't end up with `dist/dist/handler.js`.
 	stem := tsSourceStem(original, outDir)
 	candidate := filepath.Join(outDir, stem+".js")
-	if _, err := os.Stat(filepath.Join(versionDir, candidate)); err == nil {
+	if _, err := root.Stat(candidate); err == nil {
 		return candidate
 	}
 	return original
@@ -701,8 +713,19 @@ func withRegistryEnv(stepEnv map[string]string) map[string]string {
 // (`<outDir>/<stem>.js`); when no tsconfig.json is present it returns the
 // original entrypoint unchanged so existing .js-only deploys are untouched.
 func (b *Builder) maybeCompileTypeScript(ctx context.Context, fnID, codeDir, entrypoint string) (string, error) {
-	tsConfigPath := filepath.Join(codeDir, "tsconfig.json")
-	if _, err := os.Stat(tsConfigPath); os.IsNotExist(err) {
+	// The code directory is read through a root for the same reason
+	// resolveCachedEntrypoint does it: outDir below comes out of the
+	// operator's tsconfig.json, and the compiled path derived from it is
+	// persisted as run_entrypoint.
+	root, err := os.OpenRoot(codeDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return entrypoint, nil
+		}
+		return entrypoint, fmt.Errorf("open code dir: %w", err)
+	}
+	defer root.Close()
+	if _, err := root.Stat("tsconfig.json"); errors.Is(err, fs.ErrNotExist) {
 		return entrypoint, nil
 	}
 
@@ -751,14 +774,13 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, fnID, codeDir, ent
 		return entrypoint, fmt.Errorf("tsc failed: %w\n%s", runErr, strings.TrimSpace(string(out)))
 	}
 
-	outDir := readTSConfigOutDir(tsConfigPath)
+	outDir := readTSConfigOutDir(root)
 	// On a re-deploy `entrypoint` may already carry the `dist/` prefix
 	// from the previous build's persisted entrypoint — strip it so we
 	// don't double-nest the outDir.
 	stem := tsSourceStem(entrypoint, outDir)
 	resolved := filepath.Join(outDir, stem+".js")
-	compiled := filepath.Join(codeDir, resolved)
-	if _, err := os.Stat(compiled); err != nil {
+	if _, err := root.Stat(resolved); err != nil {
 		return entrypoint, fmt.Errorf("tsc succeeded but compiled entrypoint not found at %s: %w", resolved, err)
 	}
 	// Successful tsc runs silently — surface a single line into build_logs
@@ -810,16 +832,19 @@ func verifyTypeScriptDeclared(pkgJSONPath string) error {
 	return fmt.Errorf("tsconfig.json present but typescript not in package.json — add \"typescript\": \"^5.4\" to your dependencies")
 }
 
-// readTSConfigOutDir extracts compilerOptions.outDir from a tsconfig.json,
-// falling back to "dist" when the file is missing the field, has comments
-// (the TS spec allows JSON-with-comments), or is otherwise unparseable. We
-// deliberately don't pull in a JSON-with-comments parser — operators who
-// need a non-default outDir can supply a comment-free tsconfig, and the
-// fallback is safe (the post-compile stat() will fail loudly if outDir
-// actually differs from `dist`).
-func readTSConfigOutDir(tsConfigPath string) string {
+// readTSConfigOutDir extracts compilerOptions.outDir from the tsconfig.json
+// at the root of a code directory, falling back to "dist" when the file is
+// missing the field, has comments (the TS spec allows JSON-with-comments), or
+// is otherwise unparseable. We deliberately don't pull in a
+// JSON-with-comments parser — operators who need a non-default outDir can
+// supply a comment-free tsconfig, and the fallback is safe (the post-compile
+// stat() will fail loudly if outDir actually differs from `dist`).
+//
+// It reads through an *os.Root rather than a path so the caller cannot hand
+// it a tsconfig from outside the directory it is meant to be describing.
+func readTSConfigOutDir(root *os.Root) string {
 	const fallback = "dist"
-	raw, err := os.ReadFile(tsConfigPath)
+	raw, err := root.ReadFile("tsconfig.json")
 	if err != nil {
 		return fallback
 	}
@@ -835,12 +860,32 @@ func readTSConfigOutDir(tsConfigPath string) string {
 	if out == "" {
 		return fallback
 	}
-	// Strip a leading "./" so filepath.Join produces a clean relative path.
-	out = strings.TrimPrefix(out, "./")
-	if out == "" {
+	// Clean normalises the spellings operators actually write -- "./dist" and
+	// "dist/" both become "dist", and "./" becomes "." -- so the strip prefix
+	// tsSourceStem builds from this matches what filepath.Join later produces.
+	clean := filepath.Clean(filepath.FromSlash(out))
+
+	// outDir is not configuration. It is a field in a JSON file that arrived
+	// in the uploaded tarball, so it is exactly as trustworthy as the handler
+	// source sitting next to it — and every caller joins it onto a
+	// server-owned directory. "../../.." here walks that join out of the
+	// version tree. os.Root already stops the resulting stat from landing
+	// outside, so this is the second line rather than the only one; what it
+	// buys is a named refusal instead of a confusing "compiled entrypoint not
+	// found" for a path the operator never wrote.
+	//
+	// Deliberately NOT safepath.Validate: that is the gate for a path naming a
+	// *file*, and it rejects "." on exactly those grounds. outDir is a
+	// directory, and "." is both legal TypeScript and meaningful -- it emits
+	// beside the sources. Refusing it sent the sandbox back to handler.ts,
+	// which Node cannot execute.
+	escapes := clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator))
+	if filepath.IsAbs(clean) || escapes || (len(out) >= 2 && out[1] == ':') {
+		slog.Warn("ignoring tsconfig outDir that leaves the code directory",
+			"out_dir", out)
 		return fallback
 	}
-	return out
+	return clean
 }
 
 // logLines pipes a captured stdout/stderr blob into the Builder's Logger

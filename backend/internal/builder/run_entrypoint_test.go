@@ -15,7 +15,7 @@ import (
 // remembers, so the run entrypoint is derived from disk.
 func TestRunEntrypointForDerivesFromTheVersionOnDisk(t *testing.T) {
 	dataDir := t.TempDir()
-	const fnID, hash = "01a02abf-351c-76ae-937a-90016387aaf1", "abc123"
+	const fnID, hash = "01a02abf-351c-76ae-937a-90016387aaf1", "3f786850e387550fdab836ed7e6dc881de23001b1bd4e88e08c1a9b5a2b1c0d9"
 
 	version := filepath.Join(dataDir, "functions", fnID, "versions", hash)
 	if err := os.MkdirAll(filepath.Join(version, "dist"), 0o755); err != nil {
@@ -40,7 +40,7 @@ func TestRunEntrypointForDerivesFromTheVersionOnDisk(t *testing.T) {
 // nothing, so it must not be handed a dist/ path that does not exist.
 func TestRunEntrypointForIsEmptyWhenNothingWasCompiled(t *testing.T) {
 	dataDir := t.TempDir()
-	const fnID, hash = "01a02abf-351c-76ae-937a-90016387aaf2", "def456"
+	const fnID, hash = "01a02abf-351c-76ae-937a-90016387aaf2", "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d"
 
 	version := filepath.Join(dataDir, "functions", fnID, "versions", hash)
 	if err := os.MkdirAll(version, 0o755); err != nil {
@@ -59,7 +59,7 @@ func TestRunEntrypointForIsEmptyWhenNothingWasCompiled(t *testing.T) {
 // produce a path to a file that is not there.
 func TestRunEntrypointForIgnoresAMissingBuildOutput(t *testing.T) {
 	dataDir := t.TempDir()
-	const fnID, hash = "01a02abf-351c-76ae-937a-90016387aaf3", "ghi789"
+	const fnID, hash = "01a02abf-351c-76ae-937a-90016387aaf3", "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6"
 
 	version := filepath.Join(dataDir, "functions", fnID, "versions", hash)
 	if err := os.MkdirAll(version, 0o755); err != nil {

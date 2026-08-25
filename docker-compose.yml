@@ -52,7 +52,12 @@ services:
     environment:
       ORVA_WRITE_TIMEOUT_SEC: "90"
       ORVA_SESSION_DAYS: "30"
-      ORVA_SECURE_COOKIES: "true"
+      # ORVA_SECURE_COOKIES is deliberately not set. This file publishes plain
+      # HTTP on 3000, and a Secure cookie is not stored over http:// on
+      # anything but localhost -- forcing it here logs out every operator who
+      # reaches the dashboard by LAN address. Orva marks the cookie Secure on
+      # its own once it can see TLS or an X-Forwarded-Proto from a proxy, so
+      # set this only where neither is visible. See docs/CONFIG.md.
 
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8443/api/v1/system/health"]

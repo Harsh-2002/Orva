@@ -397,7 +397,7 @@ Agent channels:
 // the OAuth 2.1 flow.
 func PRMHandler(w http.ResponseWriter, r *http.Request) {
 	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if urlhint.IsHTTPS(r) {
 		scheme = "https"
 	}
 	host := r.Host

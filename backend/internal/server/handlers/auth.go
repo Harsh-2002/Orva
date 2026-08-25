@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 	"log/slog"
 	"slices"
 	"strings"
@@ -59,13 +60,27 @@ func (h *AuthHandler) secureCookie(r *http.Request) bool {
 	if h.SecureCookies {
 		return true
 	}
-	if r != nil && r.TLS != nil {
-		return true
-	}
-	if r != nil && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		return true
-	}
-	return false
+	return urlhint.IsHTTPS(r)
+}
+
+// setSessionCookie writes the session cookie, and is the only place that
+// decides its attributes.
+//
+// It exists because the same eight-line http.Cookie literal was written out
+// four times -- onboard, login, refresh, and the logout clear -- and the
+// logout copy had already drifted, omitting both SameSite and Secure. A
+// cookie policy spread across four literals is a policy that changes in three
+// of them.
+func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.secureCookie(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	})
 }
 
 // instanceInUse reports whether anyone has actually set this instance up,
@@ -206,15 +221,7 @@ func (h *AuthHandler) Onboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_token",
-		Value:    session.Token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.secureCookie(r),
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   h.sessionMaxAge(),
-	})
+	h.setSessionCookie(w, r, session.Token, h.sessionMaxAge())
 
 	respond.JSON(w, http.StatusOK, map[string]any{
 		"user": user,
@@ -258,15 +265,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_token",
-		Value:    session.Token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.secureCookie(r),
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   h.sessionMaxAge(),
-	})
+	h.setSessionCookie(w, r, session.Token, h.sessionMaxAge())
 
 	respond.JSON(w, http.StatusOK, map[string]any{
 		"user": user,
@@ -327,15 +326,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Best-effort revoke of the old token.
 	_ = h.DB.DeleteSession(cookie.Value)
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_token",
-		Value:    newSession.Token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.secureCookie(r),
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   h.sessionMaxAge(),
-	})
+	h.setSessionCookie(w, r, newSession.Token, h.sessionMaxAge())
 	respond.JSON(w, http.StatusOK, map[string]any{
 		"expires_at": newSession.ExpiresAt,
 		"user": map[string]any{
@@ -496,13 +487,9 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		h.DB.DeleteSession(cookie.Value)
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_token",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		MaxAge:   -1,
-	})
+	// Cleared through the same helper so the attributes match the cookie
+	// being replaced.
+	h.setSessionCookie(w, r, "", -1)
 
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }

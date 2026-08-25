@@ -13,6 +13,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/oauth"
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 )
 
 // permSet is a re-export of auth.PermSet kept for compatibility with
@@ -41,7 +42,7 @@ func extractToken(r *http.Request) string {
 // resolves a distinct credential type — see package auth's doc comment.
 const (
 	tokenPrefixChannel = "orva_chn_"
-	tokenPrefixOAuth     = "orva_oat_" // OAuth access token plaintext
+	tokenPrefixOAuth   = "orva_oat_" // OAuth access token plaintext
 	// API keys are everything else starting with "orva_". OAuth refresh
 	// token plaintexts (`orva_ort_`) never reach /mcp directly — they
 	// only flow through the OAuth /token endpoint.
@@ -197,7 +198,7 @@ func audienceMatches(tokenResource string, r *http.Request) bool {
 		return false
 	}
 	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if urlhint.IsHTTPS(r) {
 		scheme = "https"
 	}
 	if !strings.EqualFold(tu.Scheme, scheme) {

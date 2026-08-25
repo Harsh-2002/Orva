@@ -117,14 +117,36 @@ func TestReadTSConfigOutDir(t *testing.T) {
 		{"empty string", `{"compilerOptions":{"outDir":""}}`, "dist"},
 		{"unparseable", `not json`, "dist"},
 		{"nested out", `{"compilerOptions":{"outDir":"build/js"}}`, "build/js"},
+		// outDir ships in the operator's tarball, so it is user input, and
+		// every caller joins it onto a server-owned directory. A traversing
+		// or absolute value is refused outright rather than repaired.
+		{"parent traversal", `{"compilerOptions":{"outDir":"../escape"}}`, "dist"},
+		{"deep traversal", `{"compilerOptions":{"outDir":"../../../../tmp/evil"}}`, "dist"},
+		{"absolute", `{"compilerOptions":{"outDir":"/tmp/evil"}}`, "dist"},
+		{"traversal mid-path", `{"compilerOptions":{"outDir":"build/../../escape"}}`, "dist"},
+		{"drive letter", `{"compilerOptions":{"outDir":"C:\\evil"}}`, "dist"},
+		// "." is legal TypeScript -- emit beside the sources -- and must
+		// survive. It reads as an escape to a validator written for file
+		// paths, and rejecting it silently retargets the sandbox at the .ts
+		// source that Node cannot execute.
+		{"dot means beside the sources", `{"compilerOptions":{"outDir":"."}}`, "."},
+		{"dot slash", `{"compilerOptions":{"outDir":"./"}}`, "."},
+		{"trailing slash", `{"compilerOptions":{"outDir":"dist/"}}`, "dist"},
+		// A directory whose name merely starts with dots is not a traversal.
+		{"dotted name", `{"compilerOptions":{"outDir":"..build"}}`, "..build"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := filepath.Join(t.TempDir(), "tsconfig.json")
-			if err := os.WriteFile(f, []byte(tc.body), 0644); err != nil {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte(tc.body), 0644); err != nil {
 				t.Fatal(err)
 			}
-			if got := readTSConfigOutDir(f); got != tc.want {
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			if got := readTSConfigOutDir(root); got != tc.want {
 				t.Errorf("readTSConfigOutDir(%s) = %q, want %q", tc.name, got, tc.want)
 			}
 		})

@@ -26,16 +26,69 @@ function walk(dir, out = []) {
 const files = walk(SRC)
 const rel = (f) => f.slice(SRC.length)
 
+/**
+ * Strip HTML comments the way a parser does: scan left to right, and after a
+ * comment closes, resume from the character after its `-->` in the ORIGINAL
+ * text.
+ *
+ * A `replace(/<!--[\s\S]*?-->/g, '')` gets this almost right, but joins the
+ * text on either side of what it removed, and that seam can spell an opener
+ * that was never in the source: `A<!-<!--Q-->-- B -->C` becomes
+ * `A<!--- B -->C`. Running the replace to a fixed point to mop that up is
+ * worse, not better -- the second pass then deletes `B`, and `B` is live
+ * markup that was never inside a comment. On
+ * `<div>A<!-<!--Q-->-- <div class="h-screen">LIVE</div> -->C</div>` the
+ * fixed-point version hides a real `h-screen` violation, which is the one
+ * direction a suite that exists to stop mistakes shipping must not fail in.
+ *
+ * Scanning positions in the original never re-reads a seam, so neither
+ * happens. An opener with no closer is left as text: HTML would swallow the
+ * rest of the document, which here would hide far more than it revealed.
+ */
+function stripComments(tpl) {
+  let out = ''
+  let i = 0
+  for (;;) {
+    const open = tpl.indexOf('<!--', i)
+    if (open < 0) return out + tpl.slice(i)
+    const close = tpl.indexOf('-->', open + 4)
+    if (close < 0) return out + tpl.slice(i)
+    out += tpl.slice(i, open)
+    i = close + 3
+  }
+}
+
 /** Template section with HTML comments stripped, i.e. what actually renders. */
 function template(src) {
   const i = src.indexOf('<template')
   if (i < 0) return ''
   const j = src.lastIndexOf('</template>')
-  return src.slice(i, j < 0 ? undefined : j).replace(/<!--[\s\S]*?-->/g, '')
+  return stripComments(src.slice(i, j < 0 ? undefined : j))
 }
 
 const sources = files.map((f) => ({ file: rel(f), src: readFileSync(f, 'utf8') }))
 const templates = sources.map((s) => ({ ...s, tpl: template(s.src) }))
+
+test('comment stripping never eats markup that was not in a comment', () => {
+  assert.equal(stripComments('<div><!-- a --></div>'), '<div></div>')
+
+  // The seam. Removing the inner comment butts `A<!-` against `-- B -->C`,
+  // spelling an opener the source never contained. Scanning the original means
+  // the run after `-->` is never re-read, so `B` survives -- and `B` is the
+  // whole point: make it a real violation and the difference is a test that
+  // catches it versus one that reports nothing.
+  assert.equal(stripComments('A<!-<!--Q-->-- B -->C'), 'A<!--- B -->C')
+  const seam = '<div>A<!-<!--Q-->-- <div class="h-screen">LIVE</div> -->C</div>'
+  assert.ok(stripComments(seam).includes('h-screen'),
+    'a seam-formed comment must not swallow live markup: that turns a violation into a silent pass')
+
+  // HTML has no nested comments -- the first `-->` closes -- so the orphaned
+  // closer is text.
+  assert.equal(stripComments('<!--<!--x-->-->'), '-->')
+  // An opener with no closer is left alone rather than swallowing the rest.
+  assert.equal(stripComments('<!--unterminated'), '<!--unterminated')
+  assert.equal(stripComments('<!<!--x-->-- >'), '<!-- >')
+})
 
 test('arbitrary grid tracks are separated by underscores, not commas', () => {
   // grid-template-columns is space-separated. A comma at the top level is a

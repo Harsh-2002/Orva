@@ -75,12 +75,21 @@ nothing read it, so setting it silently did nothing.
 environment:
   ORVA_WRITE_TIMEOUT_SEC: "90"    # headroom above your longest function timeout
   ORVA_SESSION_DAYS: "30"         # single-operator instance
-  ORVA_SECURE_COOKIES: "true"     # only if neither TLS nor X-Forwarded-Proto reaches Orva
 ```
 
-Orva does not terminate TLS. Run a reverse proxy (nginx, Caddy, Traefik)
-in front and set `ORVA_SECURE_COOKIES=true` only if your proxy forwards neither TLS nor `X-Forwarded-Proto: https` — Orva sets the flag automatically when it can see the real scheme. See
-[DEPLOYMENT.md](DEPLOYMENT.md) for proxy config examples.
+Orva does not terminate TLS. Run a reverse proxy (nginx, Caddy, Traefik) in
+front; it sets the `Secure` flag on session cookies by itself once it can see
+either TLS or an `X-Forwarded-Proto: https` from the proxy.
+
+Caddy, Traefik and cloudflared send that header without being asked. **nginx
+does not** — a bare `proxy_pass` forwards no `X-Forwarded-*` at all, so you must
+add `proxy_set_header X-Forwarded-Proto $scheme;` yourself. The example in
+[DEPLOYMENT.md](DEPLOYMENT.md) includes it.
+
+`ORVA_SECURE_COOKIES=true` is the override for the setup where neither reaches
+Orva. **Do not set it on a plain-HTTP instance** — a browser will not store a
+`Secure` cookie over `http://` on anything but `localhost`, so signing in from a
+LAN address bounces straight back to the login screen.
 
 ---
 
