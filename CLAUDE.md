@@ -1,8 +1,18 @@
 # Orva
 
-Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node.js 24), Python (3.14), or TypeScript functions — two generic runtimes, `node` and `python`, latest-stable only; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, MCP server, and an in-product AI chat assistant (the **AI** sidebar section) that operates the instance end-to-end via in-process tool calling (BYO provider keys, embedded Bifrost gateway).
+Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node.js 24), Python (3.14), or TypeScript functions — two generic runtimes, `node` and `python`, latest-stable only; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, MCP server, and an in-product AI chat assistant (the **Chat** sidebar item, route `/web/ai`) that operates the instance end-to-end via in-process tool calling (BYO provider keys, embedded Bifrost gateway).
 
 > **Operational contract:** read [`CONTRACT.md`](CONTRACT.md) **before proposing changes** — the canonical commands, build/CI invariants, ports, and must-not-break rules. Each directory's `CLAUDE.md` (mirrored as `AGENTS.md` so Codex/opencode read it too) covers how that subsystem works.
+>
+> **Docs ship with the code that changed them.** If your change alters anything an
+> operator or a function author can observe, update the affected docs **in the same
+> commit** — [`CONTRACT.md` §6a](CONTRACT.md) has the table of what to touch for what.
+> This is not tidiness: a 2026-08-25 audit of every document against the source found
+> 181 defects, 81 factually wrong, including a handler contract whose two headline
+> examples produced an HTTP 500 and a silently wrong answer. It accumulated one
+> un-updated commit at a time. Note that `frontend/src/utils/aiPrompts.js` counts as
+> documentation — it is the prompt the in-product assistant generates code from, so a
+> stale claim there ships as broken code rather than a stale sentence.
 
 @CONTRACT.md
 
@@ -74,10 +84,17 @@ Dockerfile        Multi-stage image (dev and production — single file)
 publishes. All verification lives in one consolidated `CI` workflow (`.github/workflows/ci.yml`):
 workflow lint, shellcheck, go vet/test/build, UI lint/build, dependency audit, a running-container
 smoke test, plus the full E2E suites (source API/sandbox, CLI cross-build/installers, bare-metal
-server installers, native runtime) all run on PRs and every push to `main`. Docs-only changes skip
-only the fast lint/go/ui/docker jobs (path-filtered internally); the source/CLI/installer/sandbox
-jobs always run on every `main` push. `CI` also owns exact downloaded installer/asset validation
-after publication (its `artifacts` suite).
+server installers, native runtime).
+
+**A green PR is not a green `main`.** Jobs are path-filtered on pull requests, so a PR that
+touches no `cli/` or installer files never runs the CLI matrix, the six server installers or
+the native-engine job — they run on the `main` push instead. The same asymmetry applies to
+CodeQL: PR #51 reported **0** results and the `main` scan of the identical tree opened four
+alerts, because default setup analyses PRs diff-informed and never re-evaluated a file the PR
+had not touched. Watch the merge commit, not just the PR. `main` pushes run everything.
+
+`CI` also owns exact downloaded installer/asset validation after publication (its `artifacts`
+suite).
 
 There are exactly two workflows, and no others should be added without good reason:
 `ci.yml` (all testing and validation) and `release.yml` (build and publish). Old releases,

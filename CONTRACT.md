@@ -105,6 +105,52 @@ hand-maintained view — update it alongside if content changes.)
   harness CI-gated or not; trust that table.
 - **How to actually do it:** [`docs/TESTING.md`](docs/TESTING.md) — bring-up, what each
   testing layer can and cannot prove, expected output per journey, and triage.
+- **Docs move with the change** — see §6a. A change that alters documented
+  behaviour is not done until the docs say the new thing.
+
+## 6a. Documentation is part of the change, not a follow-up
+
+**If your change alters anything an operator or function author can observe,
+update the docs in the same commit.** Not the next PR, not a cleanup pass — the
+same commit, so the two can never be separately reviewable and separately
+forgotten.
+
+This rule exists because it was missing. An audit on 2026-08-25 compared every
+document against the source and found **181 defects, 81 of them factually
+wrong** — including a handler contract that described `event.body` as parsed
+JSON when it has always been a raw string, which made the two headline examples
+in the canonical reference produce an HTTP 500 (Python) and a silently wrong
+answer (Node). None of it was one careless commit. All of it was code moving
+and docs not.
+
+**What to update, by what you touched:**
+
+| You changed | Update |
+|---|---|
+| an HTTP route, its request/response shape, or its status codes | `docs/API.md` **and** `docs/reference.md` |
+| the handler contract, event shape, or an SDK method | `docs/reference.md`, `docs/RUNTIMES.md`, `frontend/src/views/Docs.vue`, **and** `frontend/src/utils/aiPrompts.js` |
+| a CLI command, flag, or output shape | `docs/CLI.md` + the command's own help string |
+| an env var or a default | `docs/CONFIG.md` |
+| an error code or its meaning | `docs/ERRORS.md` |
+| a sandbox boundary, credential, or revocation path | `docs/SECURITY.md` |
+| an operational procedure, or anything an operator recovers with | `docs/OPERATIONS.md`, `docs/DEPLOYMENT.md` |
+| an MCP tool's name, arguments, or description | `docs/reference.md` (the tool descriptions are themselves documentation) |
+| how a subsystem works | that directory's `CLAUDE.md` |
+| anything an operator must do differently after upgrading | `CHANGELOG.md` — **Breaking** or **Upgrade notes** (§7) |
+
+**Two traps specific to this repo:**
+
+- **`frontend/src/utils/aiPrompts.js` is documentation that executes.** It is the
+  prompt handed to the in-product AI assistant, so a stale claim there is not a
+  stale sentence — it is generated code that does not run. It duplicates the
+  handler contract in `docs/reference.md`; both must change together.
+- **`docs/reference.md` has three embedded copies** (§4) and a separate
+  hand-maintained rendered page at `frontend/src/views/Docs.vue`. Edit the
+  canonical file, run `make docs-embed`, and update `Docs.vue` by hand.
+
+**Verify, do not assume.** A doc example is a claim about behaviour: run it. The
+audit's worst findings were all in examples that read perfectly well and had
+never been executed.
 
 ## 7. CI / release model
 

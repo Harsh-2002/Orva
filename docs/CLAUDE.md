@@ -1,6 +1,16 @@
 # docs/
 
-Human-maintained reference documentation. Keep these in sync when changing API shapes, config keys, runtime behavior, or operational procedures.
+Human-maintained reference documentation. **Update it in the same commit as the
+code that changed it** — [`CONTRACT.md` §6a](../CONTRACT.md) is the rule and the
+table of what to touch for what.
+
+An audit on 2026-08-25 checked every document in this directory against the
+source and found 181 defects, 81 of them factually wrong. The worst were not
+obscure: the canonical reference described `event.body` as parsed JSON when it
+has always been a raw string, so both of its headline examples were broken — the
+Python one returned HTTP 500, the Node one silently returned the wrong answer.
+Nothing had ever run them. **Treat a doc example as a claim about behaviour and
+execute it.**
 
 | File | Contents |
 |---|---|
@@ -32,3 +42,20 @@ Human-maintained reference documentation. Keep these in sync when changing API s
 - Backup/restore or vacuum changes → update `OPERATIONS.md`
 - Security boundary change → update `SECURITY.md`
 - New container-runtime evaluation → add `<NAME>.md` (mirror `KATA.md` / `GVISOR.md`) + update `SUPPORT.md` and the README runtime-support table
+- Handler contract / event shape / SDK method change → update `reference.md`,
+  `RUNTIMES.md`, **`frontend/src/views/Docs.vue`** (hand-maintained rendered
+  page) **and `frontend/src/utils/aiPrompts.js`** (the prompt the in-product
+  assistant generates code from — a stale claim there ships as broken code, not
+  as a stale sentence). All four carry the same contract and drift apart
+  silently.
+- Anything an operator must do differently after upgrading → `CHANGELOG.md`,
+  under **Breaking** or **Upgrade notes**
+
+## Two things that make docs here drift silently
+
+1. **`reference.md` has three embedded copies.** Edit the canonical file, then
+   run `make docs-embed`. Never edit a copy — the next embed overwrites it.
+2. **Four files carry the handler contract** (`reference.md`, `RUNTIMES.md`,
+   `Docs.vue`, `aiPrompts.js`). Before the 2026-08-25 audit they disagreed with
+   each other and three of the four were wrong; `RUNTIMES.md` was the one that
+   was right. If you change one, grep the other three.

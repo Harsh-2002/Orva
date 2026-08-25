@@ -88,7 +88,7 @@
             <code class="doc-chip">query</code><span class="text-foreground-muted text-xs"> (Node only)</span>
             <p class="mt-1.5 text-foreground-muted">
               <code class="doc-chip">body</code> is always the raw request body
-              as a string — parse it yourself.
+              as a string. Parse it yourself.
             </p>
           </div>
         </div>

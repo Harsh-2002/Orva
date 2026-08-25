@@ -129,27 +129,37 @@ either stopped or guaranteed not to be deploying / GC'ing.
 | path | importance | grows |
 |---|---|---|
 | `/var/lib/orva/orva.db` (+ `-wal`, `-shm`) | **critical** — users, functions, secrets, executions | slowly |
-| `/var/lib/orva/.admin-key` | recovery key | static |
+| `/var/lib/orva/.admin-key` | recovery key — the only persisted plaintext copy | static |
+| `/var/lib/orva/.master.key` | **critical** — the AES-256-GCM key every function secret is encrypted with | static |
 | `/var/lib/orva/functions/*/versions/<hash>/` | rollback targets | bounded by `versions_to_keep` |
 | `/var/lib/orva/functions/*/current` (symlink) | active version pointer | static |
-| `/var/lib/orva/rootfs/` | ~600 MB of language base images | static; rebuilt on first boot if missing |
+| `/var/lib/orva/rootfs/` | ~600 MB of language base images | static; re-seeded by the Docker entrypoint on an empty volume, or by `install.sh` on bare metal |
 
-A backup of the DB + version archives is sufficient to recover
-everything. The rootfs trees are reproducible from the official Docker
-images — orvad's entrypoint regenerates them if the volume is empty.
+**A backup of the database and version archives alone is not sufficient.**
+Secrets are stored encrypted; `.master.key` is the only copy of the key that
+decrypts them, and it lives beside the database rather than inside it. Restore
+without it and every secret is unrecoverable ciphertext — the functions come
+back and then fail at runtime on a missing credential. Back up `.master.key`
+and `.admin-key` together with `orva.db`, and treat them with the same care as
+the database itself.
+
+The rootfs trees are the one thing you can safely omit: the Docker entrypoint
+copies them out of the image when the volume is empty, and `scripts/install.sh`
+downloads them for a bare-metal install. Neither rebuilds them on an existing
+install that has lost them — re-run the installer, or recreate the container.
 
 ## Log rotation
 
 Orvad writes to stdout. Three sources:
 
-1. **HTTP request logs** — one line per request via `slog` (JSON if
-   you set `log.format=json`).
+1. **HTTP request logs** — one line per request via `slog`, always JSON.
+   The format is fixed; there is no knob to change it.
 2. **Function execution logs** — stored in SQLite (`execution_logs`
    table), not on disk.
 3. **Build logs** — same, in `build_logs`.
 
 Execution history is pruned automatically: `system_config.execution_retention_days`
-(default 30; `0` disables it) is applied at startup and every 24 hours, removing
+(default 30; `0` disables it) is first applied one hour after startup, then every 24 hours, removing
 old `executions` rows together with their logs, captured requests, structured log
 entries and user spans. See [CONFIG.md](CONFIG.md).
 
@@ -237,8 +247,8 @@ Retry logic at the caller (or the SDK) handles it.
   large tarballs. Default Orva cap is 6 MB for invoke bodies (an
   over-limit body now returns `413 PAYLOAD_TOO_LARGE`, including chunked
   uploads that carry no `Content-Length`); the
-  deploy endpoint accepts up to `system_config.max_code_size_bytes`
-  (50 MB).
+  deploy endpoint accepts up to 50 MB, a compile-time constant
+  (`builder.DefaultMaxCodeSize`) with no config key.
 - **Read timeout**: must exceed the longest function `timeout_ms`. SSE
   streams need a long read timeout (≥ 5 min recommended).
 - **`X-Forwarded-For`**: Orva **ignores** this header unless you set
@@ -275,10 +285,12 @@ Three integration points:
 
 1. **`GET /api/v1/system/metrics`** — Prometheus text format. Scrape
    from your existing Prometheus.
-2. **`GET /api/v1/system/health`** — single-line health probe for
-   load balancers (`200 {"status":"ok"}`).
-3. **Structured logs** — set `log.format=json` and ship to your log
-   aggregator (Loki, Elasticsearch, datadog, whatever).
+2. **`GET /api/v1/system/health`** — health probe for load balancers.
+   `200` + `{"status":"healthy", …}` when up; `503` +
+   `{"status":"degraded"}` when the database ping fails. Match on
+   `healthy`, not `ok`.
+3. **Structured logs** — orvad only ever emits JSON, so ship stdout
+   straight to your aggregator (Loki, Elasticsearch, Datadog, whatever).
 
 The dashboard's live metrics tiles + invocation log are an alternative
 to Prometheus for small deployments.

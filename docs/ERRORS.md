@@ -48,7 +48,7 @@ OOM it should not.
 | `VERSION_NOT_FOUND` | 404 | deployment row not in DB (e.g. `orva diff` with a bad `--from`/`--to`) | no |
 | `VERSION_GCD` | 410 | rollback / diff target's version tree was pruned by the GC; `details.available_hashes` lists survivors | no — pick a still-archived hash |
 | `METHOD_NOT_ALLOWED` | 405 | method not in the route's allowed list | no |
-| `NOT_ACTIVE` | 409 | function status is `error` or `inactive` | no — redeploy or activate |
+| `NOT_ACTIVE` | 409 / 503 | function status is `error` or `inactive` | no — redeploy or activate |
 | `PAYLOAD_TOO_LARGE` | 413 | body exceeds `cfg.Server.MaxBodyBytes` (default 6 MB). Two paths: a `Content-Length` above the cap is refused up front; a **chunked** body with no `Content-Length` is refused when the read hits the cap. The chunked case used to be silently truncated and handed to the function with a 200. | no — send `Content-Length`, split the upload, or raise the cap |
 | `CHECKPOINT_BUSY` | 409 | `POST /system/vacuum` could not checkpoint the WAL because another connection holds a read lock. Previously the checkpoint's busy result was discarded and VACUUM ran against a stale WAL. | yes — retry shortly |
 | `CONFLICT` | 409 | `PUT /functions/{id}` renaming onto a name that already exists. Used to surface as a 500. | no — pick another name |
@@ -95,10 +95,10 @@ Round F is **additive**:
 
 ## Implementation
 
-Wire-level mapping lives in `internal/server/handlers/errmap.go` (`invokeError`, `deployError`). Sentinel errors are defined alongside the code that raises them:
+Wire-level mapping lives in `backend/internal/server/handlers/errmap.go` (`invokeError`, `deployError`). Sentinel errors are defined alongside the code that raises them:
 
-- `internal/pool/pool.go`: `ErrManagerClosed`, `ErrPoolAtCapacity`, `ErrMemoryExhausted`
-- `internal/sandbox/limiter.go`: `ErrTooManyRequests`
+- `backend/internal/pool/pool.go`: `ErrManagerClosed`, `ErrPoolAtCapacity`, `ErrMemoryExhausted`
+- `backend/internal/sandbox/limiter.go`: `ErrTooManyRequests`
 - `internal/sandbox/worker.go`: `ErrWorkerExited`
 - `internal/sandbox/sandbox.go`: `ErrEgressPolicyMissing`
 - `internal/firewall/policy.go`: `ErrPolicyUnavailable`
