@@ -18,8 +18,8 @@ import (
 // Revoking an API key through the AI assistant or an MCP client left it
 // working on the whole REST API.
 //
-// authMiddleware caches keys by hash in a sync.Map with no TTL, so a key stops
-// authenticating only once something evicts it. The REST delete handler always
+// authMiddleware memoises keys by hash, so a key stops authenticating only
+// once something evicts that memo. The REST delete handler always
 // did that; the MCP tool called DeleteAPIKey and nothing else, because the
 // eviction was a second copy of the idea rather than the same one. /mcp
 // resolves credentials from the database directly, so the key died on exactly
@@ -144,12 +144,23 @@ func TestAStaleKeyCacheEntryExpiresOnItsOwn(t *testing.T) {
 			"if this fails the test is no longer measuring the TTL", got)
 	}
 
-	// Age the entry past its TTL rather than sleeping for it.
+	// The stamp has to be a real bound, not merely present. An earlier version
+	// of this test only rewound validUntil by hand, which exercised the
+	// comparison and nothing else -- it passed with keyCacheTTL set to eleven
+	// years, while the changelog promised thirty seconds.
+	if keyCacheTTL > time.Minute {
+		t.Fatalf("keyCacheTTL = %s: the backstop is only a backstop if it is short", keyCacheTTL)
+	}
 	cached, ok := r.keyCache.Load(orphanHash)
 	if !ok {
 		t.Fatal("no cache entry to age")
 	}
 	entry := cached.(keyCacheEntry)
+	if d := time.Until(entry.validUntil); d > keyCacheTTL {
+		t.Errorf("entry is valid for %s, longer than keyCacheTTL (%s)", d, keyCacheTTL)
+	}
+
+	// Age it past the stamp rather than sleeping for it.
 	entry.validUntil = time.Now().Add(-time.Second)
 	r.keyCache.Store(orphanHash, entry)
 
@@ -168,6 +179,10 @@ func TestAStaleKeyCacheEntryExpiresOnItsOwn(t *testing.T) {
 // own logout is full operator access on every /api/v1/* route until the memo
 // ages out. For the password-change purge that is precisely the window the
 // purge exists to close.
+// sessionPrefixLenForTest mirrors handlers.sessionTokenPrefixLen, which is
+// unexported. The revoke-device route addresses a session by that prefix.
+const sessionPrefixLenForTest = 16
+
 func TestEndingASessionStopsTheCookieImmediately(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -202,6 +217,37 @@ func TestEndingASessionStopsTheCookieImmediately(t *testing.T) {
 				r.ServeHTTP(w, req)
 				if w.Code != http.StatusOK {
 					t.Fatalf("change-password returned %d: %s", w.Code, w.Body.String())
+				}
+			},
+		},
+		{
+			name: "revoke a device",
+			end: func(t *testing.T, r *Router, token string, userID int64) {
+				// The handler refuses to revoke its own caller, so a second
+				// session does the revoking.
+				caller, err := r.db.CreateSession(userID, time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prefix := token[:sessionPrefixLenForTest]
+				req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/sessions/"+prefix, nil)
+				req.AddCookie(&http.Cookie{Name: "session_token", Value: caller.Token})
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				if w.Code != http.StatusOK {
+					t.Fatalf("revoke session returned %d: %s", w.Code, w.Body.String())
+				}
+			},
+		},
+		{
+			name: "refresh revokes the token it replaces",
+			end: func(t *testing.T, r *Router, token string, _ int64) {
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+				req.AddCookie(&http.Cookie{Name: "session_token", Value: token})
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				if w.Code != http.StatusOK {
+					t.Fatalf("refresh returned %d: %s", w.Code, w.Body.String())
 				}
 			},
 		},

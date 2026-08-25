@@ -188,7 +188,11 @@ func (db *Database) DeleteSessionByPrefix(prefix string, userID int64) (string, 
 		}
 		matches = append(matches, t)
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return "", err
+	}
 	switch len(matches) {
 	case 0:
 		return "", sql.ErrNoRows
@@ -222,23 +226,27 @@ func (db *Database) DeleteSession(token string) error {
 // middleware memoises validated sessions by token, so a stolen cookie goes on
 // working until its memo ages out unless the caller evicts these.
 func (db *Database) DeleteUserSessionsExcept(userID int64, keepToken string) ([]string, error) {
-	rows, err := db.read.Query(
-		"SELECT token FROM sessions WHERE user_id = ? AND token != ?", userID, keepToken)
+	// DELETE ... RETURNING rather than SELECT-then-DELETE: the read pool and
+	// the write pool are different connections, so a session created between
+	// the two statements would be deleted without ever being returned, and its
+	// memo would then survive the revocation this call exists to perform.
+	rows, err := db.write.Query(
+		"DELETE FROM sessions WHERE user_id = ? AND token != ? RETURNING token", userID, keepToken)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var revoked []string
 	for rows.Next() {
 		var t string
 		if err := rows.Scan(&t); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		revoked = append(revoked, t)
 	}
-	rows.Close()
-	if _, err := db.write.Exec(
-		"DELETE FROM sessions WHERE user_id = ? AND token != ?", userID, keepToken); err != nil {
+	// A scan that stops on a driver error would otherwise hand back a partial
+	// list of a complete delete -- some sessions revoked, their memos kept.
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return revoked, nil

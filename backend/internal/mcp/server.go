@@ -70,7 +70,7 @@ type Deps struct {
 
 	// InvalidateKey evicts a key (by its hash) from the auth middleware's
 	// in-memory cache, so revoking one here stops it authenticating on
-	// /api/v1/* immediately rather than at the next process restart. It is
+	// /api/v1/* at once rather than whenever its entry ages out. It is
 	// the same callback the REST key handler holds; both must have it,
 	// because a revocation only half the surfaces honour is worse than none
 	// at all -- it reports success. Optional; nil is a no-op.

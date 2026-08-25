@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -159,27 +160,33 @@ func registerKeyTools(rc *regCtx) {
 				return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true")
 			}
 			// Read the hash before the row goes away -- it is what the auth
-			// cache is keyed on, and that cache has no TTL. Without this the
-			// deleted key goes on authenticating every /api/v1/* request for
-			// the life of the process. /mcp reads the database directly and
+			// cache is keyed on. Without this the deleted key goes on
+			// authenticating /api/v1/* requests until its entry ages out,
+			// which is a backstop and not a revocation. /mcp reads the
+			// database directly and
 			// so rejects it at once, which makes the gap worse rather than
 			// better: the key looks revoked from the AI sidebar the operator
 			// revoked it in, and still opens the REST API.
 			var keyHash string
-			if k, err := deps.DB.GetAPIKeyByID(in.KeyID); err == nil && k != nil {
+			k, lookupErr := deps.DB.GetAPIKeyByID(in.KeyID)
+			if lookupErr == nil && k != nil {
 				keyHash = k.KeyHash
 			}
 			if err := deps.DB.DeleteAPIKey(in.KeyID); err != nil {
 				return nil, DeletedOutput{}, err
 			}
-			if keyHash == "" {
-				// The row was gone or unreadable before we deleted it, so
-				// there is no hash to evict. Say so rather than reporting a
-				// revocation that may not have taken effect.
-				slog.Warn("api key deleted without evicting the auth cache: hash unavailable",
-					"key_id", in.KeyID)
-			} else if deps.InvalidateKey != nil {
+			// An id that never existed is not worth a warning -- nothing was
+			// cached and nothing is at risk. A hash we could not read, or an
+			// invalidator that was never wired, both are.
+			switch {
+			case keyHash != "" && deps.InvalidateKey != nil:
 				deps.InvalidateKey(keyHash)
+			case keyHash != "":
+				slog.Warn("api key deleted but no cache invalidator is wired: it keeps authenticating until its entry ages out",
+					"key_id", in.KeyID)
+			case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
+				slog.Warn("api key deleted without evicting the auth cache: could not read its hash first",
+					"key_id", in.KeyID, "err", lookupErr)
 			}
 			return nil, DeletedOutput{DeletedID: in.KeyID}, nil
 		},

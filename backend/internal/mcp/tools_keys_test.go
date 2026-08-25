@@ -22,8 +22,9 @@ func keysTestDB(t *testing.T) *database.Database {
 	return db
 }
 
-// The auth middleware caches API keys by hash in a sync.Map with no TTL, so a
-// revoked key is only actually revoked once something evicts it. The REST
+// The auth middleware memoises API keys by hash, so a revoked key is only
+// actually revoked once something evicts that memo; the entry's TTL bounds the
+// damage of forgetting but does not do the job. The REST
 // handler has always done that. This tool did not, so a key revoked through
 // the AI sidebar or an MCP client went on authenticating every /api/v1/*
 // request for the life of the process.

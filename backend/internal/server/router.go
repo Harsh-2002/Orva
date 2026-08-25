@@ -388,11 +388,12 @@ func (r *Router) setupRoutes() {
 
 	// API Key management routes.
 	//
-	// One closure, held by every surface that can revoke a key. keyCache has
-	// no TTL, so a revocation that skips this eviction is not slow -- it never
-	// happens, and the key keeps authenticating until the process restarts.
-	// MCP's delete tool shipped without it for exactly as long as it was a
-	// second copy of the idea rather than the same one.
+	// One closure, held by every surface that can revoke a key. The TTL on a
+	// cache entry bounds a missed eviction; it does not perform one, and a key
+	// that keeps working for another thirty seconds after you revoked it is
+	// still a key that kept working. MCP's delete tool shipped without this
+	// for exactly as long as it was a second copy of the idea rather than the
+	// same one.
 	invalidateKey := func(keyHash string) { r.keyCache.Delete(keyHash) }
 	keyHandler := &handlers.KeyHandler{
 		DB:            r.db,

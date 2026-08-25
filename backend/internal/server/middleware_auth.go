@@ -16,7 +16,12 @@ import (
 
 // sessionCacheEntry is a short-TTL memo of a successful session lookup so
 // the UI dashboard doesn't hammer SQLite with GetSessionUser on every poll.
-// TTL is short enough that logout propagates without explicit invalidation.
+// The TTL bounds a stale entry; it does NOT make eviction unnecessary. An
+// earlier version of this comment claimed it did, and on the strength of that
+// sessionCache was declared inside this function where no handler could reach
+// it -- so logout, revoke-device and the password-change purge each deleted a
+// row and left the cookie working. The Router owns the map now and every one
+// of those paths evicts.
 type sessionCacheEntry struct {
 	validUntil time.Time // re-check DB after this
 }

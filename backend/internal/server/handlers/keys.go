@@ -3,8 +3,10 @@ package handlers
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -156,7 +158,8 @@ func (h *KeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// cache — otherwise a revoked key keeps working until its cache entry
 	// ages out.
 	var keyHash string
-	if k, err := h.DB.GetAPIKeyByID(keyID); err == nil && k != nil {
+	k, lookupErr := h.DB.GetAPIKeyByID(keyID)
+	if lookupErr == nil && k != nil {
 		keyHash = k.KeyHash
 	}
 
@@ -165,17 +168,33 @@ func (h *KeyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if keyHash == "" {
-		// No hash means no eviction, and this still answers 200. Say so:
-		// a revocation that reports success without taking full effect is
-		// the one thing an operator must not have to guess about.
-		slog.Warn("api key deleted without evicting the auth cache: hash unavailable",
-			"key_id", keyID)
-	} else if h.InvalidateKey != nil {
-		h.InvalidateKey(keyHash)
-	}
+	warnIfNotEvicted(keyID, keyHash, lookupErr, h.InvalidateKey)
 
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": keyID})
+}
+
+// warnIfNotEvicted reports the cases where a delete answers success without
+// the cache eviction that makes it a revocation.
+//
+// The two are told apart deliberately. A lookup that found no row means the id
+// never existed: nothing was cached, nothing is at risk, and warning about it
+// would cry wolf on the commonest case there is -- a typo, a stale id, a
+// double delete, an agent guessing. A lookup that failed for any other reason
+// means a real key may have been deleted with its entry left behind.
+//
+// The third case is the one that produced this whole change: a hash in hand
+// and no invalidator wired. That used to pass silently.
+func warnIfNotEvicted(keyID, keyHash string, lookupErr error, invalidate func(string)) {
+	switch {
+	case keyHash != "" && invalidate != nil:
+		invalidate(keyHash)
+	case keyHash != "":
+		slog.Warn("api key deleted but no cache invalidator is wired: it keeps authenticating until its entry ages out",
+			"key_id", keyID)
+	case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
+		slog.Warn("api key deleted without evicting the auth cache: could not read its hash first",
+			"key_id", keyID, "err", lookupErr)
+	}
 }
 
 // extractKeyID extracts the key ID from path /api/v1/keys/{key_id}.
