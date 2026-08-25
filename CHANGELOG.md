@@ -8,9 +8,19 @@ section of every release between your current version and the one you are
 upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
-the commit messages; `git log v2026.08.05..HEAD` is the full record.
+the commit messages; `git log v2026.08.21..HEAD` is the full record.
 
 ## Unreleased
+
+Nothing yet.
+
+## v2026.08.25
+
+Three things in this release need an operator's attention rather than just a
+read: `crons.upsert` is now handler-scoped (**Breaking**, below), an API key you
+revoked through the AI assistant may still be live until you restart, and if you
+copied `ORVA_SECURE_COOKIES=true` out of the old `docker-compose.yml` onto a
+plain-HTTP instance, remove it.
 
 ### Breaking
 
@@ -33,6 +43,22 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   `crons.upsert` call inside your handler and `await` it. Registration is
   idempotent by `(function, name)`, so calling it on every invocation is fine —
   and is what the documentation already shows.
+
+### Upgrade notes
+
+- **Restart Orva after upgrading if you have ever revoked an API key through
+  the AI assistant or an MCP client.** Those revocations deleted the key but
+  left it in the authentication cache, so it may still be working on the REST
+  API right now. A restart clears the cache; the fix below stops it recurring.
+  Keys revoked from the dashboard or `orva keys revoke` were never affected.
+
+- **If you copied `ORVA_SECURE_COOKIES=true` from the old `docker-compose.yml`
+  into your own compose file, and you reach Orva over plain HTTP, remove it.**
+  It is why signing in from a LAN address bounces you back to the login screen.
+  The shipped compose file no longer sets it.
+
+- Nothing else to do. No migration, no configuration change, no re-issued
+  credentials.
 
 ### Added
 
@@ -221,6 +247,30 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   deleting a rule already compiles and publishes a new policy generation; the
   button re-resolves hostname rules to current IPs. Calling it "Apply" implied
   blocks sat inert until it was pressed.
+
+### Verified
+
+Beyond CI's gate (`test/e2e/run.py` with `ORVA_REQUIRE_SANDBOX=1` on amd64 and
+arm64, the server and CLI installers, native systemd, docker smoke, CodeQL):
+
+- **Every regression test in this release was run against the unfixed code and
+  shown to fail first.** That is not a formality here — five tests written for
+  these fixes passed against the code they were meant to pin, and were rebuilt
+  until they failed: a traversal at the wrong depth, an escape planted one
+  directory off, a cache TTL that still passed with the timeout set to eleven
+  years, a route table every handler already rejected, and two session
+  revocation paths that could be neutered with the suite staying green. Two
+  tests that legitimately pass both ways are labelled in-file as controls.
+- **`go test -race`** on `server`, `handlers`, `database` and `mcp` after each
+  change, locally.
+- **The migration surface is untouched.** Nothing in this release adds,
+  alters or reads a migration; the OAuth work reuses columns that already
+  exist on every installed instance.
+
+Not run for this release: `test/atscale.sh` and the migration rehearsal. Neither
+is implicated — no pool, scheduler-capacity or migration behaviour changed — but
+CONTRACT §6 lists them as beyond CI, so their absence is stated rather than
+implied.
 
 ## v2026.08.21
 
