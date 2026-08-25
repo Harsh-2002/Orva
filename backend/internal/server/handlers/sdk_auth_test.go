@@ -114,8 +114,11 @@ func TestCronUpsertUsesSignedCallerScope(t *testing.T) {
 	insertSDKTestFunction(t, db, "fn-cron-other", "cron-other")
 	auth := sdkauth.New([]byte("process-secret"))
 	h := &CronHandler{DB: db, SDKAuth: auth}
+	release := auth.BindExecution("exec-1", "fn-cron-owner", "trace-1", "span-1", time.Now())
+	defer release()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons", bytes.NewBufferString(`{"name":"nightly","schedule":"0 3 * * *"}`))
 	req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-owner"))
+	req.Header.Set("X-Orva-Execution-Id", "exec-1")
 	req.Header.Set("X-Orva-Function-Id", "fn-cron-other")
 	w := httptest.NewRecorder()
 	h.UpsertInternal(w, req)
@@ -129,5 +132,59 @@ func TestCronUpsertUsesSignedCallerScope(t *testing.T) {
 	otherRows, err := db.ListCronSchedulesForFunction("fn-cron-other")
 	if err != nil || len(otherRows) != 0 {
 		t.Fatalf("other schedules=%d err=%v", len(otherRows), err)
+	}
+}
+
+// A signed credential is not enough to plant a schedule. Every other use of a
+// leaked ORVA_INTERNAL_TOKEN dies when orvad restarts and the process-random
+// signing key is regenerated; a cron row does not, and nothing in the
+// scheduler consults the function's auth_mode. So this one surface requires
+// the caller to be inside a live execution of the function it is scheduling,
+// which a copy of the token taken off the box cannot be.
+//
+// It also rules out module-scope crons.upsert, where the adapters leave
+// ORVA_EXECUTION_ID unset -- undocumented, and already wrong, since it
+// re-registered on every cold spawn.
+func TestCronUpsertRequiresALiveExecution(t *testing.T) {
+	db := newTestDB(t)
+	insertSDKTestFunction(t, db, "fn-cron-owner", "cron-owner")
+	auth := sdkauth.New([]byte("process-secret"))
+	h := &CronHandler{DB: db, SDKAuth: auth}
+
+	cases := []struct {
+		name        string
+		executionID string
+		bind        string // function to bind exec-1 to, "" for no binding
+	}{
+		{"no execution header at all", "", ""},
+		{"an execution id that is not live", "exec-stale", ""},
+		{"a live execution belonging to another function", "exec-1", "fn-cron-other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.bind != "" {
+				defer auth.BindExecution("exec-1", tc.bind, "t", "s", time.Now())()
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
+				bytes.NewBufferString(`{"name":"planted","schedule":"* * * * *"}`))
+			req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-owner"))
+			if tc.executionID != "" {
+				req.Header.Set("X-Orva-Execution-Id", tc.executionID)
+			}
+			w := httptest.NewRecorder()
+			h.UpsertInternal(w, req)
+
+			if w.Code != http.StatusForbidden {
+				t.Errorf("status=%d, want 403: a token replayed outside a live execution must not plant a schedule; body=%s",
+					w.Code, w.Body.String())
+			}
+			rows, err := db.ListCronSchedulesForFunction("fn-cron-owner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 0 {
+				t.Errorf("a schedule was written anyway: %d rows", len(rows))
+			}
+		})
 	}
 }

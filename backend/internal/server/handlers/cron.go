@@ -261,6 +261,25 @@ func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A signature alone is not enough here, unlike KV.
+	//
+	// A schedule is a standing invocation that nothing in internal/scheduler
+	// checks auth_mode for, and it is a database row — so it outlives the
+	// process-random signing key that authorised it. Restarting orvad
+	// invalidates every other use of a leaked ORVA_INTERNAL_TOKEN and does not
+	// touch a schedule that token planted. That asymmetry, not symmetry with
+	// the other SDK surfaces, is why this one gets the gate: it is the only
+	// capability here that a restart cannot clean up.
+	//
+	// OwnsExecution rather than TraceContext: cron needs no trace context, and
+	// this fails closed on a missing header for free, because BindExecution
+	// refuses to store under an empty execution ID so the lookup always misses.
+	if !h.SDKAuth.OwnsExecution(r.Header.Get("X-Orva-Execution-Id"), fnID) {
+		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+			"crons.upsert must be called from inside your handler, not at module scope", reqID)
+		return
+	}
+
 	body, err := readBoundedBody(r.Body, 1<<20)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)

@@ -54,6 +54,54 @@ enqueue work for another function, but the caller recorded in traces and jobs
 always comes from the signed claim. The SDK credential cannot authenticate to
 operator APIs.
 
+### What an exfiltrated SDK credential can do
+
+Your function's own code holds this credential. It is `ORVA_INTERNAL_TOKEN` in
+the sandbox environment by design, because the SDK needs it — so a compromised
+third-party dependency can read it and send it off the box.
+
+Such a copy can read and write **that one function's** KV namespace from
+anywhere that can reach the API. It cannot reach another function's KV, cannot
+authenticate to operator APIs, and cannot create or change a cron schedule —
+that requires a live execution of the function.
+
+**To remediate, redeploy the function without the dependency.** Redeploying
+retires all of that function's warm workers, and each worker's credential dies
+with its process, so a copy taken beforehand stops working. Credentials also
+expire when a worker is recycled — idle timeout, or its use limit — and when
+orvad restarts, because the signing key is random per process. Restarting the
+server invalidates every credential for every function at once.
+
+Then check that function's Schedules page for anything you did not create
+(schedules added by the SDK carry a name and are badged as such) and its KV
+namespace for keys you do not recognise.
+
+## Credential classes and what revocation reaches
+
+Orva has three independent credential classes. Each has its own lifetime and
+its own place to revoke it:
+
+| Class | Grants | Revoke at |
+|---|---|---|
+| **API keys** | full instance management | Settings → API Keys |
+| **Channel tokens** | MCP only, invoke only, over a named set of functions — and they bypass those functions' `auth_mode` by design | Channels page |
+| **OAuth grants** | issued to a connected application (claude.ai, ChatGPT) through the consent screen | Settings → Connected applications |
+
+**Deleting an API key does not revoke channel tokens or OAuth grants created
+with it, and that is deliberate.** They are separate credentials somebody
+consented to, not delegations of the key — the same model GitHub and Google
+use. Minting a channel requires `admin`, so only a top-privilege key could have
+created one in the first place. Cascading would also be unable to help on any
+instance that upgraded into the feature, since existing rows record no
+minting key.
+
+Channel-token expiry is optional: a channel created without one never expires.
+
+If you believe an API key was compromised, delete the key **and** review the
+Channels page and Settings → Connected applications, removing anything you do
+not recognise. Revoking a key takes effect at once on every surface; you do not
+need to restart.
+
 ## What reaches user code from the request
 
 Your handler receives the inbound HTTP request as `event.headers`. Orva's own
