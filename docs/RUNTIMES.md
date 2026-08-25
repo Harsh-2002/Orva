@@ -22,19 +22,22 @@ single argument:
   "path": "/health",
   "headers": {
     "content-type": "application/json",
-    "x-orva-execution-id": "exec_abc123",
+    "x-orva-execution-id": "019df200-7b00-7e00-9c00-aab1cd2e3f41",
     "x-orva-function-id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
     ...
   },
   "body": "<raw request body as string>",
-  "query": {"q": "search"}
+  "query": {"q": "search"}          // Node only — see below
 }
 ```
 
 - `path` is everything after `/fn/<id>` (or the matched custom route
   prefix). For a request to `POST /fn/xyz/health`, `event.path === "/health"`.
-- `body` is the raw request body. JSON callers should `JSON.parse`
-  it themselves.
+- `body` is the raw request body, always a string, whatever the
+  `Content-Type`. Parse it yourself — the platform never does.
+- `query` is present **only on Node**, where the adapter parses it out of
+  `path` (last value wins on repeats). Python handlers get no `query` key and
+  should split `event["path"]` on `?` themselves.
 - Headers are normalized to lowercase keys.
 
 The adapter also passes `event.rawPath` and `event.httpMethod` aliases

@@ -84,8 +84,12 @@
             <code class="doc-chip">method</code>
             <code class="doc-chip">path</code>
             <code class="doc-chip">headers</code>
-            <code class="doc-chip">query</code>
             <code class="doc-chip">body</code>
+            <code class="doc-chip">query</code><span class="text-foreground-muted text-xs"> (Node only)</span>
+            <p class="mt-1.5 text-foreground-muted">
+              <code class="doc-chip">body</code> is always the raw request body
+              as a string — parse it yourself.
+            </p>
           </div>
         </div>
         <div class="doc-card">
@@ -1494,8 +1498,13 @@ const handlerTabs = computed(() => [
   {
     label: 'Python',
     lang: 'python',
-    code: `def handler(event):
-    body = event.get("body") or {}
+    code: `import json
+
+
+def handler(event):
+    # event["body"] is the raw request body, as a string. Always parse it.
+    raw = event.get("body") or ""
+    body = json.loads(raw) if raw else {}
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "application/json"},
@@ -1506,7 +1515,8 @@ const handlerTabs = computed(() => [
     label: 'Node.js',
     lang: 'js',
     code: `exports.handler = async (event) => {
-  const body = event.body || {};
+  // event.body is the raw request body, as a string. Always parse it.
+  const body = event.body ? JSON.parse(event.body) : {};
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -1696,7 +1706,8 @@ def handler(event):
 
 exports.handler = async (event) => {
   try {
-    const result = await invoke('resize-image', { url: event.body.url })
+    const { url } = JSON.parse(event.body || '{}')
+    const result = await invoke('resize-image', { url })
     return { statusCode: 200, body: result.body }
   } catch (e) {
     if (e instanceof OrvaError) {
@@ -1733,7 +1744,7 @@ def handler(event):
 exports.handler = async (event) => {
   const jobId = await jobs.enqueue(
     'send-welcome-email',
-    { to: event.body.email },
+    { to: JSON.parse(event.body || '{}').email },
     { maxAttempts: 3 }
   )
   return { statusCode: 202, body: jobId }

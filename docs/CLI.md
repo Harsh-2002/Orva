@@ -26,7 +26,7 @@ Pin a specific version:
 
 ```bash
 curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | \
-    ORVA_VERSION=v2026.05.06 sh
+    ORVA_VERSION=v2026.08.21 sh
 ```
 
 ### Windows (PowerShell)
@@ -152,8 +152,8 @@ side entirely for fully scripted runs. Combine with `-o json` for
 structured piping:
 
 ```bash
-orva functions list -o json | jq -r '.[].name'
-orva logs greeter -o json | jq '.[] | select(.status=="error")'
+orva functions list -o json | jq -r '.functions[].name'
+orva logs greeter -o json | jq '.executions[] | select(.status=="error")'
 ```
 
 Non-2xx HTTP responses and local errors always set a non-zero exit code,
@@ -213,7 +213,7 @@ ORVA_CONFIG=~/.orva/staging.yaml orva functions list
 ```
 
 `orva login --test` verifies the credentials against an authenticated
-endpoint (`/api/v1/auth/me`) before writing them to disk, so a typo'd,
+endpoint (`/api/v1/runtimes`) before writing them to disk, so a typo'd,
 revoked, or expired key fails loudly instead of saving a broken config. A
 valid key that lacks the `read` permission is still accepted — the server
 authenticated it, it just cannot read:
@@ -268,7 +268,8 @@ orva invoke greeter -X GET -H 'X-Trace: 1' -H 'Accept: application/json'
 orva invoke --route /webhooks/stripe --body @event.json
 
 # Stream the response chunk-by-chunk as it arrives (generators,
-# long-lived handlers). No client timeout while streaming.
+# long-lived handlers). No total cap while streaming, but a 45s idle
+# deadline: a handler that emits nothing for 45s is cancelled client-side.
 orva invoke chat --body @prompt.json --stream
 
 # Print the status line + response headers to stderr for debugging.
@@ -361,7 +362,7 @@ orva jobs enqueue --fn send-welcome \
     --idempotency-window 86400
 
 orva jobs list --status failed
-orva jobs retry job_…
+orva jobs retry <job-uuid>
 ```
 
 ### Backup + restore
@@ -455,7 +456,7 @@ orva keys create --name ci-deploy --permissions invoke,write
 # Auto-expiring key (0 = never).
 orva keys create --name temp-agent --permissions invoke --expires-in-days 30
 orva keys list
-orva keys revoke key_…                    # prompts; pass --yes to skip
+orva keys revoke <key-uuid>                    # prompts; pass --yes to skip
 ```
 
 ### Channels (curated MCP toolboxes)
@@ -474,7 +475,8 @@ orva channels create customer-support \
     --description "Tools the support agent can use" \
     --functions lookup-user,refund,resend-receipt
 
-orva channels show customer-support      # prints the bearer token to share
+orva channels show customer-support      # prefix only; the token is shown
+                                         # once at create, and again on rotate
 orva channels rotate customer-support    # invalidates the old token
 ```
 
@@ -494,29 +496,29 @@ orva activity --follow --source mcp       # MCP-only firehose
 ```bash
 orva system health        # version, uptime, sandbox stats
 orva system metrics       # JSON snapshot used by the dashboard
-orva system db-stats      # on-disk breakdown
-orva system storage       # storage / VACUUM breakdown
+orva system storage       # on-disk breakdown (orva.db, WAL, functions/, total)
+orva system db-stats      # SQLite page detail — free pages a VACUUM would reclaim
 orva system vacuum        # compact orva.db (briefly blocks writes)
 ```
 
 ### Deployment history + rollback
 
-Every deploy or rollback creates a deployment record (status,
+Every deploy creates a deployment record (status,
 content-addressed `code_hash`, append-only build log).
 
 ```bash
 # Audit what shipped when.
 orva deployments list greeter
-orva deployments get dep_01J…
+orva deployments get 019df210-…-deadbeef0001
 
 # Read or live-stream a build log.
-orva deployments logs dep_01J…
-orva deployments logs dep_01J… --follow
+orva deployments logs 019df210-…-deadbeef0001
+orva deployments logs 019df210-…-deadbeef0001 --follow
 
 # Roll back. Bare form undoes the last code change; or pin a deployment
 # id / content hash. Prompts for confirmation — pass --yes to skip.
 orva rollback greeter
-orva rollback greeter dep_01J…
+orva rollback greeter 019df210-…-deadbeef0001
 orva rollback greeter --code-hash 9f8e7d…
 ```
 
@@ -620,9 +622,9 @@ orva pool set --fn greeter --idle-ttl 300
 ### Background jobs + webhook deliveries
 
 ```bash
-orva jobs get job_…                       # inspect one job
-orva webhooks deliveries sub_… -o json    # delivery history for a subscription
-orva webhooks retry del_…                 # retry a failed delivery
+orva jobs get <job-uuid>                       # inspect one job
+orva webhooks deliveries <subscription-uuid> -o json    # delivery history for a subscription
+orva webhooks retry <delivery-uuid>                 # retry a failed delivery
 ```
 
 ### AI assistant (`orva chat`)
@@ -780,12 +782,12 @@ in CI, pin a version with the installer so reproducible builds stay
 reproducible:
 
 ```bash
-ORVA_VERSION=v2026.05.15 \
+ORVA_VERSION=v2026.08.21 \
   curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh
 ```
 
 **Match server + CLI versions.** Mismatched binaries usually work, but
-new commands (like the v0.6 `orva backup`) require both sides up to
+new commands (like `orva backup`) require both sides up to
 date. Confirm with:
 
 ```bash
@@ -896,11 +898,17 @@ have `orva serve` or `orva setup`. Those live in the
 server binary at `/opt/orva/bin/orva` after a `scripts/install.sh`
 deployment.
 
-If you've installed both on the same Linux box, the standalone CLI at
-`/usr/local/bin/orva` takes precedence (because PATH usually puts
-`/usr/local/bin` first). Both binaries expose the same CLI surface for
-talking to a remote server, so behavior is identical from the user's
-perspective; the slim CLI is just smaller.
+If you've installed both on the same Linux box they compete for the same path
+rather than ordering themselves: the server installer symlinks
+`/usr/local/bin/orva` at `/opt/orva/bin/orva`, and the CLI installer writes a
+real binary there. **Whichever ran last owns the path** — there is no PATH
+precedence between them.
+
+That matters only for the server-only subcommands: both binaries expose the
+same surface for talking to a remote server, so day-to-day behaviour is
+identical, but `serve` and `setup` exist only on the full server binary. Run
+`orva --help` if you are unsure which one you have — the slim CLI does not list
+them. The slim build is just smaller.
 
 | | Slim CLI (`/usr/local/bin/orva`) | Server binary (`/opt/orva/bin/orva`) |
 |---|---|---|
