@@ -169,31 +169,40 @@ func (db *Database) ListSessionsForUser(userID int64) ([]*Session, error) {
 // session belonging to a different user). Returns ErrAmbiguousPrefix
 // if more than one row matches — should never happen with 16 hex
 // chars (~64 bits of entropy) but the loop is cheap insurance.
-func (db *Database) DeleteSessionByPrefix(prefix string, userID int64) error {
+// It returns the full token it deleted. Deleting the row is only half of a
+// revocation -- the auth middleware memoises validated sessions by token, so
+// the caller has to evict that entry too, and it cannot do so from a prefix.
+func (db *Database) DeleteSessionByPrefix(prefix string, userID int64) (string, error) {
 	rows, err := db.read.Query(`
 		SELECT token FROM sessions
 		WHERE user_id = ? AND token LIKE ? || '%'`, userID, prefix)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var matches []string
 	for rows.Next() {
 		var t string
 		if err := rows.Scan(&t); err != nil {
 			rows.Close()
-			return err
+			return "", err
 		}
 		matches = append(matches, t)
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return "", err
+	}
 	switch len(matches) {
 	case 0:
-		return sql.ErrNoRows
+		return "", sql.ErrNoRows
 	case 1:
-		_, err := db.write.Exec("DELETE FROM sessions WHERE token = ?", matches[0])
-		return err
+		if _, err := db.write.Exec("DELETE FROM sessions WHERE token = ?", matches[0]); err != nil {
+			return "", err
+		}
+		return matches[0], nil
 	default:
-		return ErrAmbiguousSessionPrefix
+		return "", ErrAmbiguousSessionPrefix
 	}
 }
 
@@ -210,16 +219,37 @@ func (db *Database) DeleteSession(token string) error {
 // DeleteUserSessionsExcept revokes every session for the user except the one
 // identified by keepToken (pass "" to revoke all). Used after a password change
 // so a compromised credential's stolen sessions are invalidated immediately
-// while the operator performing the change stays logged in. Returns the number
-// of sessions revoked.
-func (db *Database) DeleteUserSessionsExcept(userID int64, keepToken string) (int64, error) {
-	res, err := db.write.Exec(
-		"DELETE FROM sessions WHERE user_id = ? AND token != ?", userID, keepToken)
+// while the operator performing the change stays logged in.
+//
+// Returns the tokens it revoked. "Immediately" is the whole point of this
+// call, and deleting the rows does not achieve it on its own: the auth
+// middleware memoises validated sessions by token, so a stolen cookie goes on
+// working until its memo ages out unless the caller evicts these.
+func (db *Database) DeleteUserSessionsExcept(userID int64, keepToken string) ([]string, error) {
+	// DELETE ... RETURNING rather than SELECT-then-DELETE: the read pool and
+	// the write pool are different connections, so a session created between
+	// the two statements would be deleted without ever being returned, and its
+	// memo would then survive the revocation this call exists to perform.
+	rows, err := db.write.Query(
+		"DELETE FROM sessions WHERE user_id = ? AND token != ? RETURNING token", userID, keepToken)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	n, _ := res.RowsAffected()
-	return n, nil
+	defer rows.Close()
+	var revoked []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		revoked = append(revoked, t)
+	}
+	// A scan that stops on a driver error would otherwise hand back a partial
+	// list of a complete delete -- some sessions revoked, their memos kept.
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return revoked, nil
 }
 
 // ErrWrongPassword is returned by UpdateUserPassword when the supplied

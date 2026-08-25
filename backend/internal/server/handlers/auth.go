@@ -29,11 +29,35 @@ type AuthHandler struct {
 	SecureCookies     bool // set when Orva is behind an HTTPS reverse proxy
 	SessionMaxAgeSecs int  // 0 → default 7 days
 
+	// InvalidateSession evicts a session token from the auth middleware's
+	// memo. Deleting the sessions row is only half a revocation: the
+	// middleware answers from that memo for up to sessionCacheTTL, and the
+	// session branch performs no permission check, so the window is full
+	// operator access on every /api/v1/* route. Optional; nil is a no-op.
+	InvalidateSession func(token string)
+
 	// loginLimiter throttles login attempts per client IP. Lazily built so
 	// existing tests that construct AuthHandler with zero-value fields keep
 	// working (mirrors InvokeHandler's rateLimiter pattern).
 	loginLimiterOnce sync.Once
 	loginLimiter     *rateLimiter
+}
+
+// revokeSession deletes a session and evicts its memo. Every path that ends a
+// session goes through here so none of them can do only the first half.
+func (h *AuthHandler) revokeSession(token string) {
+	if token == "" {
+		return
+	}
+	_ = h.DB.DeleteSession(token)
+	h.forgetSession(token)
+}
+
+// forgetSession evicts a token whose row some other call already removed.
+func (h *AuthHandler) forgetSession(token string) {
+	if h.InvalidateSession != nil && token != "" {
+		h.InvalidateSession(token)
+	}
 }
 
 func (h *AuthHandler) sessionMaxAge() int {
@@ -324,7 +348,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort revoke of the old token.
-	_ = h.DB.DeleteSession(cookie.Value)
+	h.revokeSession(cookie.Value)
 
 	h.setSessionCookie(w, r, newSession.Token, h.sessionMaxAge())
 	respond.JSON(w, http.StatusOK, map[string]any{
@@ -382,12 +406,18 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	// (cookie.Value) is kept so the operator making the change stays logged in.
 	// Best-effort: a revocation failure must not fail the (already-committed)
 	// password change.
-	if _, err := h.DB.DeleteUserSessionsExcept(user.ID, cookie.Value); err != nil {
+	revoked, err := h.DB.DeleteUserSessionsExcept(user.ID, cookie.Value)
+	if err != nil {
 		respond.JSON(w, http.StatusOK, map[string]string{
 			"status":  "password_changed",
 			"warning": "password updated but other sessions could not be revoked",
 		})
 		return
+	}
+	// Evicting these is what makes the revocation immediate, which is the
+	// entire point of doing it on a password change.
+	for _, token := range revoked {
+		h.forgetSession(token)
 	}
 
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "password_changed"})
@@ -468,7 +498,8 @@ func (h *AuthHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
 			"refusing to revoke the calling session — use POST /auth/logout instead", "")
 		return
 	}
-	if err := h.DB.DeleteSessionByPrefix(prefix, user.ID); err != nil {
+	revokedToken, err := h.DB.DeleteSessionByPrefix(prefix, user.ID)
+	if err != nil {
 		if err == database.ErrAmbiguousSessionPrefix {
 			respond.Error(w, http.StatusBadRequest, "AMBIGUOUS_PREFIX", "prefix matches multiple sessions", "")
 			return
@@ -477,6 +508,7 @@ func (h *AuthHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "no such session", "")
 		return
 	}
+	h.forgetSession(revokedToken)
 	respond.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -484,7 +516,7 @@ func (h *AuthHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_token")
 	if err == nil {
-		h.DB.DeleteSession(cookie.Value)
+		h.revokeSession(cookie.Value)
 	}
 
 	// Cleared through the same helper so the attributes match the cookie

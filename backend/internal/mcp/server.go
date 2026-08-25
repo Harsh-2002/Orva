@@ -67,6 +67,14 @@ type Deps struct {
 	// AllowedOrigins is ORVA_CORS_ORIGINS. Empty, or ["*"], means any origin —
 	// the default. Narrowing it also narrows /mcp.
 	AllowedOrigins []string
+
+	// InvalidateKey evicts a key (by its hash) from the auth middleware's
+	// in-memory cache, so revoking one here stops it authenticating on
+	// /api/v1/* at once rather than whenever its entry ages out. It is
+	// the same callback the REST key handler holds; both must have it,
+	// because a revocation only half the surfaces honour is worse than none
+	// at all -- it reports success. Optional; nil is a no-op.
+	InvalidateKey func(keyHash string)
 }
 
 // operatorServerCache holds one immutable server per permission surface. Orva

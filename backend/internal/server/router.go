@@ -43,7 +43,12 @@ type Router struct {
 
 	ai *aipkg.Manager // in-product AI chat assistant (lazily-built LLM gateway)
 
-	keyCache sync.Map // shared API-key cache (keyHash -> *database.APIKey); evicted on key delete
+	keyCache sync.Map // shared API-key cache (keyHash -> keyCacheEntry); evicted on key delete
+	// sessionCache (token -> sessionCacheEntry) is owned here for the same
+	// reason keyCache is: logout, revoke-device and the password-change purge
+	// all have to evict, and a cache declared inside the middleware is
+	// unreachable from any of them.
+	sessionCache sync.Map
 
 	startTime time.Time
 }
@@ -342,6 +347,7 @@ func (r *Router) setupRoutes() {
 		DB:                r.db,
 		SecureCookies:     r.cfg.Security.SecureCookies,
 		SessionMaxAgeSecs: r.cfg.Security.SessionDays * 24 * 60 * 60,
+		InvalidateSession: func(token string) { r.sessionCache.Delete(token) },
 	}
 	r.mux.HandleFunc("GET /api/v1/auth/status", authHandler.Status)
 	r.mux.HandleFunc("POST /api/v1/auth/onboard", authHandler.Onboard)
@@ -381,11 +387,17 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/v1/syscalls", syscallHandler.List)
 
 	// API Key management routes.
+	//
+	// One closure, held by every surface that can revoke a key. The TTL on a
+	// cache entry bounds a missed eviction; it does not perform one, and a key
+	// that keeps working for another thirty seconds after you revoked it is
+	// still a key that kept working. MCP's delete tool shipped without this
+	// for exactly as long as it was a second copy of the idea rather than the
+	// same one.
+	invalidateKey := func(keyHash string) { r.keyCache.Delete(keyHash) }
 	keyHandler := &handlers.KeyHandler{
-		DB: r.db,
-		// Evict the deleted key from the shared auth cache so revocation is
-		// immediate (otherwise a cached key keeps authenticating).
-		InvalidateKey: func(keyHash string) { r.keyCache.Delete(keyHash) },
+		DB:            r.db,
+		InvalidateKey: invalidateKey,
 	}
 	r.mux.HandleFunc("POST /api/v1/keys", keyHandler.Create)
 	r.mux.HandleFunc("GET /api/v1/keys", keyHandler.List)
@@ -455,6 +467,7 @@ func (r *Router) setupRoutes() {
 		Version:        version.Version,
 		NsjailBin:      r.cfg.Sandbox.NsjailBin,
 		AllowedOrigins: r.cfg.Security.CORSOrigins,
+		InvalidateKey:  invalidateKey,
 	}
 	mcpHandler := orvampc.NewHandler(mcpDeps)
 	r.mux.Handle("/mcp", mcpHandler)
@@ -559,7 +572,7 @@ func (r *Router) buildMiddlewareChain() {
 	// Build chain from inside out: Handler -> Logger -> RequestID -> Auth -> BodySize -> CORS
 	chain := loggerMiddleware(r.db, r.eventHub, r.mux)
 	chain = requestIDMiddleware(chain)
-	chain = authMiddleware(r.db, &r.keyCache, r.sdkAuth, chain)
+	chain = authMiddleware(r.db, &r.keyCache, &r.sessionCache, r.sdkAuth, chain)
 	chain = bodySizeMiddleware(maxBody, chain)
 	chain = corsMiddleware(origins, chain)
 
