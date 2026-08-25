@@ -36,13 +36,19 @@ func BaseURL(r *http.Request) string {
 // IsHTTPS reports whether the request reached Orva over TLS, either
 // directly or through a proxy that said so.
 //
-// The header is a list, not a value. A single proxy sends
-// "X-Forwarded-Proto: https", but chained ones append -- Cloudflare in
-// front of nginx sends "https, http", meaning the client spoke https to
-// the first hop. Comparing the whole header against "https" reads that
-// as plaintext, which is how an instance behind two proxies served
-// http:// OAuth issuer URLs over a TLS connection and dropped Secure
-// from its session cookie. The first entry is the client's scheme.
+// The header is a list, not a value. One proxy sends
+// "X-Forwarded-Proto: https"; a chain that appends rather than replaces
+// sends "https, http" -- HAProxy's `add-header`, Envoy and several
+// ingress controllers do this, as does any nginx configured
+// "$http_x_forwarded_proto, $scheme". (Plain nginx replaces, so the
+// common Cloudflare-in-front case yields a single value either way.)
+// Comparing the whole header against "https" reads an appended list as
+// plaintext, which costs such an instance the Secure flag on its session
+// cookie and gets it http:// OAuth issuer URLs over a TLS connection.
+//
+// Per RFC 7239 the leftmost element is the hop closest to the client, so
+// the first entry is the scheme the client actually spoke. The last is
+// the proxy-to-Orva hop, which is the plaintext one.
 //
 // Only ever upgrades: a client that sets the header itself can claim
 // https it does not have, which costs it its own session, and can never

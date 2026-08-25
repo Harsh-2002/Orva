@@ -4,11 +4,13 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
-// sessionCookie runs one request through fn and returns the session_token
-// cookie it wrote.
+// sessionCookie returns the session_token cookie a handler wrote, failing the
+// test if it wrote none.
 func sessionCookie(t *testing.T, w *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	for _, c := range w.Result().Cookies() {
@@ -41,6 +43,12 @@ func TestSessionCookieSecureFollowsTheRequestScheme(t *testing.T) {
 		{"behind an https proxy", false, false, "https", true},
 		{"proxy header cased oddly", false, false, "HTTPS", true},
 		{"proxy reports http", false, false, "http", false},
+		// The header is a list once more than one proxy touches it. Without
+		// these the whole table passes against a whole-header compare, which
+		// is the thing this is here to pin.
+		{"chained proxies", false, false, "https, http", true},
+		{"chained, no space", false, false, "https,http", true},
+		{"chained from plaintext", false, false, "http, http", false},
 		{"env override on plain http", true, false, "", true},
 		{"override wins over an http proxy header", true, false, "http", true},
 	}
@@ -102,5 +110,60 @@ func TestLogoutClearsWithTheAttributesItSet(t *testing.T) {
 	}
 	if !c.HttpOnly {
 		t.Error("HttpOnly = false")
+	}
+}
+
+// The three handlers that hand out a session must actually go through the
+// helper. Testing setSessionCookie alone would pass while one of them quietly
+// re-inlined its own http.Cookie literal -- which is how the logout copy came
+// to be missing two attributes in the first place.
+func TestSessionHandlersAllRouteThroughTheHelper(t *testing.T) {
+	db := newTestDB(t)
+	h := &AuthHandler{DB: db}
+
+	user, err := db.CreateUser("operator", "correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := db.CreateSession(user.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Every one of these arrives over TLS, so every one must set Secure.
+	login := httptest.NewRequest(http.MethodPost, "/auth/login",
+		strings.NewReader(`{"username":"operator","password":"correct-horse-battery"}`))
+	refresh := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+	refresh.AddCookie(&http.Cookie{Name: "session_token", Value: sess.Token})
+	logout := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+
+	for _, tc := range []struct {
+		name string
+		run  func(w http.ResponseWriter)
+	}{
+		{"Login", func(w http.ResponseWriter) { h.Login(w, login) }},
+		{"Refresh", func(w http.ResponseWriter) { h.Refresh(w, refresh) }},
+		{"Logout", func(w http.ResponseWriter) { h.Logout(w, logout) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, r := range []*http.Request{login, refresh, logout} {
+				r.TLS = &tls.ConnectionState{}
+			}
+			w := httptest.NewRecorder()
+			tc.run(w)
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s returned %d: %s", tc.name, w.Code, w.Body.String())
+			}
+			c := sessionCookie(t, w)
+			if !c.Secure {
+				t.Errorf("%s wrote a cookie without Secure over TLS", tc.name)
+			}
+			if c.SameSite != http.SameSiteLaxMode {
+				t.Errorf("%s wrote SameSite = %v, want Lax", tc.name, c.SameSite)
+			}
+			if !c.HttpOnly {
+				t.Errorf("%s wrote a cookie without HttpOnly", tc.name)
+			}
+		})
 	}
 }

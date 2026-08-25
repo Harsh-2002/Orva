@@ -41,13 +41,15 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   flag is applied automatically. **If you copied that line into your own compose
   file and reach Orva over plain HTTP, remove it.**
 
-- **Session cookies keep the `Secure` flag behind chained proxies.** Orva
-  compared the whole `X-Forwarded-Proto` header against `https`, but a chained
-  proxy sends a list — Cloudflare in front of nginx sends `https, http`. Orva
-  read that as plaintext, so an instance behind two proxies dropped `Secure`
-  from its session cookie and advertised its OAuth issuer and MCP `invoke_url`
-  as `http://` over a TLS connection, which strict OAuth clients reject. The
-  first entry in the list is now the one that counts.
+- **Session cookies keep the `Secure` flag behind a proxy chain that appends to
+  `X-Forwarded-Proto`.** Orva compared the whole header against `https`, but a
+  chain that appends rather than replaces sends a list — `https, http` — and
+  Orva read that as plaintext. Such an instance dropped `Secure` from its
+  session cookie and advertised its OAuth issuer and MCP `invoke_url` as
+  `http://` over a TLS connection, which strict OAuth clients reject. The
+  leftmost entry, which is the scheme the client actually spoke, is now the one
+  that counts. Affects HAProxy `add-header`, Envoy, and ingress controllers with
+  append semantics; plain nginx and Caddy replace the header and were never hit.
 
 - **Logging out clears the cookie with the attributes it was set with.** The
   clearing cookie was written out as its own copy of the same eight-line
@@ -61,8 +63,10 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   stored as the file the sandbox executes. The build now refuses a traversing
   or absolute `outDir` and falls back to `dist`, and both the build and
   build-cache paths resolve entrypoints through a directory handle that cannot
-  be escaped, including by a symlink. Rollback likewise refuses a version
-  identifier that is not a content hash.
+  be escaped. Rollback likewise refuses a version identifier that is not a
+  content hash. (The handle also closes the symlink spelling of the same
+  escape; archive extraction already refused link entries, so that half is
+  depth rather than a hole that was open.)
 
 - **Rolling back a TypeScript function no longer breaks it.** `entrypoint`
   carried two meanings: the file you wrote, and — after a successful `tsc` —

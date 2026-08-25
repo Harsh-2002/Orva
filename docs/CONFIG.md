@@ -79,9 +79,12 @@ environment:
 
 Orva does not terminate TLS. Run a reverse proxy (nginx, Caddy, Traefik) in
 front; it sets the `Secure` flag on session cookies by itself once it can see
-either TLS or an `X-Forwarded-Proto: https` from the proxy, which nginx, Caddy,
-Traefik and cloudflared all send by default. See [DEPLOYMENT.md](DEPLOYMENT.md)
-for proxy config examples.
+either TLS or an `X-Forwarded-Proto: https` from the proxy.
+
+Caddy, Traefik and cloudflared send that header without being asked. **nginx
+does not** — a bare `proxy_pass` forwards no `X-Forwarded-*` at all, so you must
+add `proxy_set_header X-Forwarded-Proto $scheme;` yourself. The example in
+[DEPLOYMENT.md](DEPLOYMENT.md) includes it.
 
 `ORVA_SECURE_COOKIES=true` is the override for the setup where neither reaches
 Orva. **Do not set it on a plain-HTTP instance** — a browser will not store a

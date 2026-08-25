@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
@@ -861,23 +860,32 @@ func readTSConfigOutDir(root *os.Root) string {
 	if out == "" {
 		return fallback
 	}
-	// Strip a leading "./" so filepath.Join produces a clean relative path.
-	out = strings.TrimPrefix(out, "./")
-	if out == "" {
-		return fallback
-	}
+	// Clean normalises the spellings operators actually write -- "./dist" and
+	// "dist/" both become "dist", and "./" becomes "." -- so the strip prefix
+	// tsSourceStem builds from this matches what filepath.Join later produces.
+	clean := filepath.Clean(filepath.FromSlash(out))
+
 	// outDir is not configuration. It is a field in a JSON file that arrived
 	// in the uploaded tarball, so it is exactly as trustworthy as the handler
 	// source sitting next to it — and every caller joins it onto a
 	// server-owned directory. "../../.." here walks that join out of the
-	// version tree and into the data directory. No real project means it, so
-	// refuse it rather than quietly repairing it into something else.
-	if err := safepath.Validate(out); err != nil {
-		slog.Warn("ignoring tsconfig outDir that escapes the code directory",
-			"out_dir", out, "err", err)
+	// version tree. os.Root already stops the resulting stat from landing
+	// outside, so this is the second line rather than the only one; what it
+	// buys is a named refusal instead of a confusing "compiled entrypoint not
+	// found" for a path the operator never wrote.
+	//
+	// Deliberately NOT safepath.Validate: that is the gate for a path naming a
+	// *file*, and it rejects "." on exactly those grounds. outDir is a
+	// directory, and "." is both legal TypeScript and meaningful -- it emits
+	// beside the sources. Refusing it sent the sandbox back to handler.ts,
+	// which Node cannot execute.
+	escapes := clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator))
+	if filepath.IsAbs(clean) || escapes || (len(out) >= 2 && out[1] == ':') {
+		slog.Warn("ignoring tsconfig outDir that leaves the code directory",
+			"out_dir", out)
 		return fallback
 	}
-	return out
+	return clean
 }
 
 // logLines pipes a captured stdout/stderr blob into the Builder's Logger

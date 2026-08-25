@@ -63,6 +63,10 @@ func TestResolveCachedEntrypointRefusesATraversingOutDir(t *testing.T) {
 // Same escape, spelled as a symlink instead of a traversal. os.Stat follows the
 // link and reports the target, so "dist" pointing anywhere on the box used to
 // be enough; os.Root refuses a link that leaves its root.
+//
+// Depth rather than a hole that was open: extractTarGz refuses every link entry,
+// so a deploy archive cannot currently plant this. It is pinned because the
+// containment here should not depend on that refusal continuing to hold.
 func TestResolveCachedEntrypointRefusesAnOutDirSymlinkedOutOfTheTree(t *testing.T) {
 	base := t.TempDir()
 	version := tsVersionDir(t, base, map[string]string{
@@ -168,5 +172,55 @@ func TestRunEntrypointForAcceptsOnlyASha256Digest(t *testing.T) {
 				t.Errorf("RunEntrypointFor(hash=%q) = %q, want empty", hash, got)
 			}
 		})
+	}
+}
+
+// A tsconfig that emits beside its sources must keep working. "." is legal
+// TypeScript and the shape a small single-file function naturally takes, but it
+// reads as an escape to a validator written for paths that name a file. An
+// earlier draft of the containment guard above rejected it, and the damage did
+// not show up here -- it showed up two layers down, where a resolved entrypoint
+// equal to the authored one means "nothing was compiled". The sandbox was then
+// pointed back at handler.ts, which Node cannot execute.
+func TestResolveCachedEntrypointHandlesAnOutDirBesideTheSources(t *testing.T) {
+	for _, outDir := range []string{".", "./"} {
+		t.Run(outDir, func(t *testing.T) {
+			base := t.TempDir()
+			version := tsVersionDir(t, base, map[string]string{
+				"handler.ts":    "export async function handler() {}",
+				"handler.js":    "exports.handler = async () => {}",
+				"tsconfig.json": `{"compilerOptions":{"outDir":"` + outDir + `"}}`,
+			})
+			if got := resolveCachedEntrypoint(version, "handler.ts"); got != "handler.js" {
+				t.Errorf("resolveCachedEntrypoint = %q, want handler.js: outDir %q emits beside the sources", got, outDir)
+			}
+		})
+	}
+}
+
+// The same shape through the rollback path, which is where the cost was paid:
+// an empty result means "run the authored file", so a refused outDir does not
+// fail loudly, it quietly hands Node a .ts file.
+func TestRunEntrypointForHandlesAnOutDirBesideTheSources(t *testing.T) {
+	dataDir := t.TempDir()
+	const fnID = "01a02abf-351c-76ae-937a-90016387aaf4"
+	const hash = "3f786850e387550fdab836ed7e6dc881de23001b1bd4e88e08c1a9b5a2b1c0d9"
+
+	version := filepath.Join(dataDir, "functions", fnID, "versions", hash)
+	if err := os.MkdirAll(version, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for rel, body := range map[string]string{
+		"handler.ts":    "export async function handler() {}",
+		"handler.js":    "exports.handler = async () => {}",
+		"tsconfig.json": `{"compilerOptions":{"outDir":"."}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(version, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := RunEntrypointFor(dataDir, fnID, hash, "handler.ts"); got != "handler.js" {
+		t.Errorf("RunEntrypointFor = %q, want handler.js: an empty result points the sandbox back at the .ts source", got)
 	}
 }

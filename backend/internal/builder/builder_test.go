@@ -124,7 +124,16 @@ func TestReadTSConfigOutDir(t *testing.T) {
 		{"deep traversal", `{"compilerOptions":{"outDir":"../../../../tmp/evil"}}`, "dist"},
 		{"absolute", `{"compilerOptions":{"outDir":"/tmp/evil"}}`, "dist"},
 		{"traversal mid-path", `{"compilerOptions":{"outDir":"build/../../escape"}}`, "dist"},
-		{"dot", `{"compilerOptions":{"outDir":"."}}`, "dist"},
+		{"drive letter", `{"compilerOptions":{"outDir":"C:\\evil"}}`, "dist"},
+		// "." is legal TypeScript -- emit beside the sources -- and must
+		// survive. It reads as an escape to a validator written for file
+		// paths, and rejecting it silently retargets the sandbox at the .ts
+		// source that Node cannot execute.
+		{"dot means beside the sources", `{"compilerOptions":{"outDir":"."}}`, "."},
+		{"dot slash", `{"compilerOptions":{"outDir":"./"}}`, "."},
+		{"trailing slash", `{"compilerOptions":{"outDir":"dist/"}}`, "dist"},
+		// A directory whose name merely starts with dots is not a traversal.
+		{"dotted name", `{"compilerOptions":{"outDir":"..build"}}`, "..build"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
