@@ -170,12 +170,22 @@ func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Re
 		permSet[p] = true
 	}
 
-	// Pull the friendly client name. Best-effort — if the join fails,
-	// we still authenticate (the row is valid), just with the raw
-	// client_id as the actor label.
+	// This lookup used to be purely cosmetic -- a friendly actor label -- and
+	// it read straight past RevokedAt. Removing an application therefore left
+	// its live access tokens working here for the rest of their lifetime, on
+	// the one surface those tokens are for.
+	//
+	// The error path stays fail-open, deliberately: the token row itself is
+	// valid, so a transient read failure must not lock out a legitimate
+	// client. Only a positively-revoked client is rejected.
 	label := row.ClientID
-	if c, cerr := db.GetOAuthClientByID(row.ClientID); cerr == nil && c.ClientName != "" {
-		label = c.ClientName
+	if c, cerr := db.GetOAuthClientByID(row.ClientID); cerr == nil && c != nil {
+		if c.RevokedAt != nil {
+			return nil, false
+		}
+		if c.ClientName != "" {
+			label = c.ClientName
+		}
 	}
 	return &auth.Principal{
 		Kind:    auth.KindOAuth,

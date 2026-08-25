@@ -364,6 +364,9 @@ func (r *Router) setupRoutes() {
 	oauthAppsHandler := &handlers.OAuthAppsHandler{DB: r.db}
 	r.mux.HandleFunc("GET /api/v1/oauth/connected-apps", oauthAppsHandler.List)
 	r.mux.HandleFunc("DELETE /api/v1/oauth/connected-apps/{id}", oauthAppsHandler.Revoke)
+	// Retires the application itself, not just one grant — an open Dynamic
+	// Client Registration endpoint means a revoked grant can be re-requested.
+	r.mux.HandleFunc("DELETE /api/v1/oauth/clients/{client_id}", oauthAppsHandler.RemoveApplication)
 
 	// Agent channels: a named bundle of N functions + a static bearer
 	// token. Presenting the token at /mcp exposes ONLY those functions

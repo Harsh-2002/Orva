@@ -439,15 +439,26 @@
               </span>
             </div>
           </div>
-          <button
-            type="button"
-            class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 shrink-0 self-center touch-expand-xs"
-            :disabled="revokingId === app.id"
-            @click="revokeApp(app)"
-          >
-            <Trash2 class="w-3.5 h-3.5" />
-            Revoke
-          </button>
+          <div class="flex items-center gap-3 shrink-0 self-center">
+            <button
+              type="button"
+              class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 touch-expand-xs"
+              :disabled="revokingId === app.id"
+              @click="revokeApp(app)"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+              Revoke
+            </button>
+            <button
+              type="button"
+              class="text-xs text-foreground-muted hover:text-danger-fg transition-colors flex items-center gap-1 touch-expand-xs"
+              :disabled="revokingId === app.client_id"
+              @click="removeApp(app)"
+            >
+              <Ban class="w-3.5 h-3.5" />
+              Remove
+            </button>
+          </div>
         </li>
       </ul>
     </section>
@@ -624,6 +635,7 @@ import {
   Plug,
   Monitor,
   Trash2,
+  Ban,
   Info,
   Copy,
   MessagesSquare,
@@ -640,6 +652,7 @@ import {
   runVacuum,
   listConnectedApps,
   revokeConnectedApp,
+  removeOAuthApplication,
   listSessions,
   revokeSession,
 } from '@/api/endpoints'
@@ -851,6 +864,32 @@ const revokeApp = async (app) => {
     await fetchConnectedApps()
   } catch (err) {
     connectedAppsError.value = err?.response?.data?.error?.message || err?.message || 'failed to revoke'
+  } finally {
+    revokingId.value = ''
+  }
+}
+
+// Revoke ends one grant; Remove retires the application. The distinction is
+// load-bearing because /oauth/register is open dynamic client registration —
+// an application whose grant you revoke can request another one, so revoking
+// alone is not "make this stop".
+const removeApp = async (app) => {
+  const ok = await confirmStore.ask({
+    title: `Remove ${app.client_name}?`,
+    message:
+      `${app.client_name} loses access immediately and cannot connect again ` +
+      'without you approving it on the consent screen. Revoking instead ends ' +
+      'this connection but lets the app reconnect on its own.',
+    confirmLabel: 'Remove',
+    danger: true,
+  })
+  if (!ok) return
+  revokingId.value = app.client_id
+  try {
+    await removeOAuthApplication(app.client_id)
+    await fetchConnectedApps()
+  } catch (err) {
+    connectedAppsError.value = err?.response?.data?.error?.message || err?.message || 'failed to remove application'
   } finally {
     revokingId.value = ''
   }

@@ -34,6 +34,21 @@ the commit messages; `git log v2026.08.05..HEAD` is the full record.
   idempotent by `(function, name)`, so calling it on every invocation is fine —
   and is what the documentation already shows.
 
+### Added
+
+- **You can remove a connected application, not just revoke its grant.**
+  Settings → Connected applications gains a **Remove** control beside Revoke.
+  Revoke ends the current connection; the application can reconnect on its own,
+  because Orva accepts dynamic client registration. Remove retires the
+  registration itself — its grants stop working at once (including on `/mcp`,
+  where they previously kept working until the access token expired), its
+  pending authorization codes are discarded, and it cannot connect again
+  without you approving it on the consent screen.
+
+  The plumbing for this was already in place and unreachable: the column, the
+  read path and three checks in the authorization flow all existed, and nothing
+  ever set the flag.
+
 ### Changed
 
 - **Rolling back promotes an existing deployment instead of appending a new

@@ -77,3 +77,52 @@ func userFromSessionCookie(db *database.Database, r *http.Request) (*database.Us
 	}
 	return user, true
 }
+
+// RemoveApplication retires a registered OAuth application entirely: its
+// grants, its pending authorization codes, and its ability to be authorized
+// again without the operator consenting afresh.
+//
+// Distinct from Revoke, which ends one grant. /oauth/register is open Dynamic
+// Client Registration, so an application whose grant you revoke can ask for
+// another; this is how an operator says it is finished.
+//
+// Ownership is checked the way Revoke checks it -- the caller must hold a
+// grant issued to this client. Without that predicate any signed-in operator
+// could retire a client id they merely guessed.
+func (h *OAuthAppsHandler) RemoveApplication(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	user, ok := userFromSessionCookie(h.DB, r)
+	if !ok {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "session required", reqID)
+		return
+	}
+	clientID := r.PathValue("client_id")
+	if clientID == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "client_id required", reqID)
+		return
+	}
+
+	// Ownership is "has this user ever held a grant from this client", not
+	// "does one still work". Revoking a grant is the step most operators take
+	// first, and it is what removes the app from the active list -- gating on
+	// that list would 404 exactly the person who came back for this button.
+	owned, err := h.DB.UserHasGrantForClient(user.ID, clientID)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to look up connected apps", reqID)
+		return
+	}
+	if !owned {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "no such connected app", reqID)
+		return
+	}
+
+	if err := h.DB.RevokeOAuthClient(clientID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			respond.Error(w, http.StatusNotFound, "NOT_FOUND", "no such connected app", reqID)
+			return
+		}
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to remove application", reqID)
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]any{"status": "removed", "client_id": clientID})
+}

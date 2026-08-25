@@ -15,18 +15,18 @@ import (
 // have a NULL ClientSecretHash and rely on PKCE; confidential clients
 // authenticate at /oauth/token with their secret.
 type OAuthClient struct {
-	ID                       string     `json:"-"`
-	ClientID                 string     `json:"client_id"`
-	ClientSecretHash         string     `json:"-"`
-	ClientName               string     `json:"client_name"`
-	ClientURI                string     `json:"client_uri,omitempty"`
-	RedirectURIs             string     `json:"-"` // JSON array on disk; use RedirectURIList()
-	GrantTypes               string     `json:"-"`
-	ResponseTypes            string     `json:"-"`
-	TokenEndpointAuthMethod  string     `json:"token_endpoint_auth_method"`
-	Scope                    string     `json:"scope"`
-	CreatedAt                time.Time  `json:"created_at"`
-	RevokedAt                *time.Time `json:"revoked_at,omitempty"`
+	ID                      string     `json:"-"`
+	ClientID                string     `json:"client_id"`
+	ClientSecretHash        string     `json:"-"`
+	ClientName              string     `json:"client_name"`
+	ClientURI               string     `json:"client_uri,omitempty"`
+	RedirectURIs            string     `json:"-"` // JSON array on disk; use RedirectURIList()
+	GrantTypes              string     `json:"-"`
+	ResponseTypes           string     `json:"-"`
+	TokenEndpointAuthMethod string     `json:"token_endpoint_auth_method"`
+	Scope                   string     `json:"scope"`
+	CreatedAt               time.Time  `json:"created_at"`
+	RevokedAt               *time.Time `json:"revoked_at,omitempty"`
 }
 
 // RedirectURIList parses the JSON-encoded redirect_uris column. Returns
@@ -111,7 +111,7 @@ func (db *Database) GetOAuthClientByID(clientID string) (*OAuthClient, error) {
 // We store the SHA256 hash of the plaintext code, not the code itself,
 // to mirror api_keys's at-rest hashing posture.
 type OAuthAuthorizationCode struct {
-	CodeHash            string     // SHA256 of plaintext
+	CodeHash            string // SHA256 of plaintext
 	ClientID            string
 	UserID              int64
 	RedirectURI         string
@@ -191,17 +191,17 @@ func (db *Database) SweepExpiredOAuthCodes() (int64, error) {
 // used on /oauth/token to mint a fresh pair (and rotate the refresh per
 // OAuth 2.1 §4.3.1).
 type OAuthAccessToken struct {
-	ID                string
-	AccessTokenHash   string
-	RefreshTokenHash  string
-	ClientID          string
-	UserID            int64
-	Scope             string
-	Resource          string
-	IssuedAt          time.Time
-	AccessExpiresAt   time.Time
-	RefreshExpiresAt  *time.Time
-	RevokedAt         *time.Time
+	ID               string
+	AccessTokenHash  string
+	RefreshTokenHash string
+	ClientID         string
+	UserID           int64
+	Scope            string
+	Resource         string
+	IssuedAt         time.Time
+	AccessExpiresAt  time.Time
+	RefreshExpiresAt *time.Time
+	RevokedAt        *time.Time
 }
 
 // ScopesList parses the space-separated scope string per RFC 6749 §3.3.
@@ -453,6 +453,85 @@ func (db *Database) RevokeOAuthAccessTokenByID(id string, userID int64) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// UserHasGrantForClient reports whether this user has ever held a grant issued
+// to this client, revoked or not.
+//
+// Deliberately not "does the user have an ACTIVE grant". The operator sequence
+// that motivates removing an application is: revoke the grant, watch the
+// application reconnect on its own, come back for the stronger control. An
+// ownership check that reads the active-grants list would answer 404 at that
+// third step, because the second step is what removed the evidence.
+func (db *Database) UserHasGrantForClient(userID int64, clientID string) (bool, error) {
+	var n int
+	err := db.read.QueryRow(`
+		SELECT COUNT(*) FROM oauth_access_tokens
+		WHERE user_id = ? AND client_id = ?`, userID, clientID).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// RevokeOAuthClient retires a registered OAuth application: the client itself,
+// every live grant it holds, and any authorization code it has not yet
+// exchanged.
+//
+// oauth_clients.revoked_at has been declared, loaded and enforced at three
+// points in the authorization flow since the OAuth work landed, and nothing
+// ever wrote it -- the column, the read path and the checks were all built and
+// the setter was never added, so an operator could revoke a grant but never the
+// application holding it.
+//
+// What this does and does not stop. /oauth/register is open Dynamic Client
+// Registration, so the application can register a fresh client_id whenever it
+// likes; retiring this one does not make the software unable to ask. What it
+// stops is silent re-entry -- a new registration cannot mint a token without
+// the operator consenting again at /oauth/authorize. Say that, not "it can
+// never connect again", which would be false.
+//
+// Soft revoke, not DELETE: the four checks read revoked_at, and the grants list
+// LEFT JOINs oauth_clients for a friendly label, so removing the row would
+// blank the history it is meant to explain.
+func (db *Database) RevokeOAuthClient(clientID string) error {
+	tx, err := db.write.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(`
+		UPDATE oauth_clients
+		SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP)
+		WHERE client_id = ?`, clientID)
+	if err != nil {
+		return err
+	}
+	// Unknown client id reads as "nothing to revoke", matching
+	// RevokeOAuthAccessTokenByID so the handler can answer 404.
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+
+	// Null the refresh hash as well as stamping revoked_at: that is what
+	// RotateOAuthRefreshToken does, and it stops a stored refresh token from
+	// even matching a row.
+	if _, err := tx.Exec(`
+		UPDATE oauth_access_tokens
+		SET refresh_token_hash = NULL, revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP)
+		WHERE client_id = ? AND revoked_at IS NULL`, clientID); err != nil {
+		return err
+	}
+
+	// An unexchanged code is a grant waiting to happen.
+	if _, err := tx.Exec(`
+		DELETE FROM oauth_authorization_codes
+		WHERE client_id = ? AND used_at IS NULL`, clientID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // SweepExpiredOAuthTokens removes access-token rows whose access_expires_at
