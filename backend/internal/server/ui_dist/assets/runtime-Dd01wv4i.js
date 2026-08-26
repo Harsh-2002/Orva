@@ -1,1 +1,0 @@
-var e=e=>(e||``).toLowerCase().startsWith(`python`),t=e=>{let t=(e||``).toLowerCase();return t.startsWith(`node`)||t.startsWith(`javascript`)||t.startsWith(`typescript`)},n=n=>e(n)?`Python 3.14`:t(n)?`Node.js 24`:n||``;export{e as n,n as r,t};

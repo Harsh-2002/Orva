@@ -303,25 +303,37 @@ diff -r -x __pycache__ backend/runtimes/python backend/cmd/orva/adapters/python
 # and present on any host that has run the python adapter) is a false positive.
 ```
 
-**Trap 3 — `ui_dist`, and `make clean` breaking the build.**
-`backend/internal/server/ui_dist/` is **tracked** and is *not* matched by
-`.gitignore` (the pattern is root-anchored). `make clean` does
-`rm -rf backend/internal/server/ui_dist`, which deletes tracked files and makes
-the next build fail hard:
+**Trap 3 — a stale `ui_dist` after a frontend change.**
+`backend/internal/server/ui_dist/` is a **build artifact and is not committed**
+— not one file. `//go:embed all:ui_dist` is a compile error on an absent
+directory, so a bare `go build` on a fresh clone fails:
 
 ```
-$ rm -rf backend/internal/server/ui_dist && go build -o /dev/null ./backend/cmd/orva
+$ go build -o /dev/null ./backend/cmd/orva
 backend/internal/server/ui.go:10:12: pattern all:ui_dist: no matching files found
 ```
 
-So `make clean` must always be followed by `make embed` or `make build-all`.
+That is why `make build`, `make test` and `make lint` build the UI when the
+directory is empty. **Building the server needs Node 24**; the alternative is a
+release binary. A clean tree to a working binary took 6.5 s on the survey host
+(2.4 s on the second run, where the guard leaves a populated `ui_dist` alone).
+
+The trap that remains: the guard checks *presence*, not freshness, so a
+**frontend change you have not re-embedded still ships the previous build**.
+Deciding it from timestamps would put an npm build in front of every `go test`,
+which is worse. So after touching `frontend/`, run `make build-all` (or
+`make embed` then `make build`).
+
 Staleness check that does not touch git:
 
 ```bash
 (cd frontend && npm install && npm run build) && diff -rq frontend/dist backend/internal/server/ui_dist
 ```
 
-Empty output means the snapshot is current. It was current at survey time.
+Empty output means the snapshot is current.
+
+`make clean` is safe now. It used to delete tracked files and break the next
+build outright; the directory it removes is regenerable.
 
 **Trap 4 — the stale `orva:e2e` image.** §2.4, option 3.
 
@@ -2203,7 +2215,7 @@ A regression in `env.py` is invisible to CI.
 | `go` vuln | `go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...` | a new advisory reddens CI with zero code change |
 | `ui` | `cd frontend && npm audit --audit-level=moderate && npm run lint && npm run build` | CI uses **`npm ci`** (lockfile-strict); `make ui` uses `npm install` and may rewrite the lockfile. `npm audit` is the classic green-locally-red-in-CI leg |
 | `docker` | `docker build -t orva:ci . && docker run -d -p 127.0.0.1:18443:8443 …` then poll health | CI uses `no-cache: true, pull: true`. Neither passes `--build-arg VERSION`, so both report `dev`/`unknown` — only `release.yml` stamps identity. The first 2–3 health curls fail with `Empty reply`; the 30× loop is required |
-| `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` embeds the **committed** `ui_dist`, so the E2E job serves the committed UI snapshot |
+| `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` builds the UI from source (the job installs Node 24 for exactly this), so the E2E job serves a freshly built dashboard |
 | `cli-unit` | `go vet ./cli/... ./internal/...` && `go test ./cli/commands/ -count=1` | CI adds `-v` |
 | `cli-cross-build` | `bash test/cli/build-matrix.sh && bash test/cli/command-tree.sh` | the qemu-aarch64 `--version` leg is a `warn`, never a failure, and is skipped without qemu |
 | `install-matrix` | `ORVA_BROWSER_LEG=0 bash test/install/run-distro.sh ubuntu24` | verified: exit 0, ~4 min, host port **19449** |
@@ -2351,7 +2363,7 @@ carries both flags for that reason.
 | run `native-engine.sh` on a machine you use | installs over `/opt/orva`, regenerates the service unit, restarts it |
 | run `loadtest.sh` anywhere | kills whatever holds 8443 and deletes `~/.orva/orva.db*` |
 | `make cli` after `make build` | overwrites the server binary at the same path |
-| `make clean` without `make embed` | deletes tracked `ui_dist/` and breaks the build |
+| a frontend change without `make embed` | `ui_dist/` is not rebuilt on freshness, only on absence, so the previous UI ships |
 | trust `sandbox.runtime == "ok"` | it is a bare `os.Stat` |
 | trust a green `run.py` in isolated mode without `--rebuild` | the image may be months old |
 | compare `$?` to 1 for the `exit $FAIL` suites | the code is the failure *count* |

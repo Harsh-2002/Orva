@@ -13,7 +13,12 @@ npm run lint         # eslint check
 npm run lint:fix     # eslint auto-fix
 ```
 
-After `npm run build`, run `make embed` from the repo root to copy `dist/` into `backend/internal/server/ui_dist/` so it gets embedded in the Go binary.
+After `npm run build`, run `make embed` from the repo root to copy `dist/` into
+`backend/internal/server/ui_dist/` so it gets embedded in the Go binary. That
+directory is a build artifact and is **not committed**; `make build` will build
+the UI for you when it is empty, but it will not rebuild one that is already
+there, so `make embed` (or `make build-all`) is what picks up a frontend
+change.
 
 ## Stack
 

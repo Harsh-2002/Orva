@@ -169,7 +169,13 @@ Go silently ignores unknown `-X` targets, so renaming the version package or any
 - **Full server and slim CLI are separate binaries with one command library** — the Linux
   server build includes `serve` / `setup` plus every client command; `make cli`
   builds the smaller cross-platform client without server packages.
-- **UI is embedded** in the Go binary via `//go:embed ui_dist`; `make build` alone reuses the last embedded snapshot. Run `make build-all` (or `make embed` first) to pick up frontend changes.
+- **UI is embedded** in the Go binary via `//go:embed ui_dist`, and the built
+  assets are **not committed** — not one file. `make build` builds the UI when
+  `ui_dist/` is empty, so a fresh clone works; it does **not** rebuild when the
+  directory is already populated, because deciding that from timestamps would
+  put an npm build in front of every `go test`. **Run `make build-all` (or
+  `make embed` first) after changing the frontend.** Building the server
+  therefore needs Node 24; the alternative is a release binary.
 - **nsjail required on Linux** for sandbox invocations; the server starts without it but every invocation fails until it is installed.
 - **Egress policy is per-sandbox and fail-closed** — `internal/firewall` compiles the `egress_blocklist` table into an nsjail NSTUN config generation; every `network_mode: egress` spawn passes it as `--config` (which MUST be argv[0..1]) and refuses to start without one. No host firewall table is ever created.
 - **Docs single source:** `docs/reference.md` is the canonical Orva reference markdown. `make docs-embed` ships copies to `backend/internal/mcp/reference.md` (embedded by the `get_orva_docs` MCP tool), `frontend/public/docs.md` (served at `/web/docs.md` — it is a Vite `public/` asset so it lives under the UI base path — and read by the dashboard's Copy as Markdown button), and `cli/commands/reference.md` (embedded into the CLI, served by `orva docs`). All three consumers serve identical bytes.

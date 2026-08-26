@@ -394,6 +394,15 @@ jobs:
         with:
           python-version: "3.14"
 
+      # The dashboard is not committed, so the server binary cannot be
+      # compiled without building it first: //go:embed all:ui_dist is a
+      # compile error on an absent directory. `make build` runs the Vite
+      # build itself when ui_dist is empty, which is why this job needs Node.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: ""
+
       - name: Test E2E harness
         run: python3 -m unittest discover -s test/e2e/unit -p 'test_*.py'
 

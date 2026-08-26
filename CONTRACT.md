@@ -52,10 +52,19 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
 - **`adapters-embed` must run before any bare `go build`.** It copies `runtimes/`
   into `backend/cmd/orva/adapters/` for `//go:embed`. `make build` does it; a raw
   `go build ./backend/cmd/orva` does **not**.
-- **The UI is embedded via `//go:embed ui_dist`.** `make build` reuses the **last
-  embedded snapshot**. To pick up frontend changes you must run `make build-all`
-  (or `make embed` first) — `ui_dist/` is committed, so a stale snapshot ships
-  silently otherwise.
+- **The UI is embedded via `//go:embed ui_dist`, and `ui_dist/` is NOT
+  committed.** `//go:embed` is a compile error on an absent directory, so
+  `make build` / `make test` / `make lint` build the UI when it is missing —
+  a fresh clone works, and building the server needs Node 24. They do not
+  rebuild an already-populated `ui_dist`, so **run `make build-all` (or
+  `make embed` first) after a frontend change**; that is the one remaining way
+  to ship a stale dashboard.
+  The assets used to be committed, on the argument that `make build` alone
+  reproduced a release artifact. It never did — `release.yml`, the `Dockerfile`
+  and `ci.yml` each run the Vite build and overwrite the directory, so the
+  committed copy reached no shipped binary. It only ever let `make build` serve
+  a plausible-looking stale UI, silently, and put ~70 files of hashed-asset
+  churn in every frontend diff.
 
 ## 4. Docs single source
 
