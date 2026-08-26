@@ -182,8 +182,8 @@ nsjail's namespace API works exactly like on bare metal.
 docker info --format '{{json .Runtimes}}' | jq 'keys' | grep -q kata
 
 # Functional smoke (3-stage gate: health → deploy → invoke).
-RUNTIME=kata     bash test/install/kata-flow.sh ghcr.io/harsh-2002/orva:v2026.05.12
-RUNTIME=kata-clh bash test/install/kata-flow.sh ghcr.io/harsh-2002/orva:v2026.05.12
+RUNTIME=kata     bash test/install/kata-flow.sh ghcr.io/harsh-2002/orva:latest
+RUNTIME=kata-clh bash test/install/kata-flow.sh ghcr.io/harsh-2002/orva:latest
 cat test/install/logs/kata-*-result.txt
 
 # Extended functional pass (egress, secrets) per runtime.

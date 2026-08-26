@@ -108,7 +108,9 @@ namespaces. Use the same environment flag on a provisioned target node when vali
 kernel boundary manually.
 
 **One published release at a time.** After a tag ships, the previous releases are deleted, so
-the Releases page holds exactly the current version. `install.sh` / `install-cli.sh` resolve
+the Releases page holds exactly the current version — but **only once `artifacts` has
+finished**, never while it is running. That suite's CLI-upgrade leg resolves the previous
+release and pulls its assets; pruning mid-run 404s it, which is how v2026.08.26's run went red. `install.sh` / `install-cli.sh` resolve
 GitHub's "latest", so the order is not optional: **publish the new release first, then delete
 the old ones.** Deleting the current release before its replacement is live opens a window
 where "latest" resolves to 404 and every install and upgrade fails.

@@ -217,7 +217,7 @@ The server binary stamps three values at link time and exposes them at `GET /api
 | `version`    | git tag (release) or `git describe` (dev)       | `v2026.05.15` |
 | `commit`     | short git SHA at build time                     | `1be3399` |
 | `build_time` | wall-clock RFC3339 UTC at link time             | `2026-05-15T14:20:34Z` |
-| `image`      | derived: `ghcr.io/harsh-2002/orva:` + version   | `ghcr.io/harsh-2002/orva:v2026.05.15` |
+| `image`      | derived: `ghcr.io/harsh-2002/orva:` + version   | `ghcr.io/harsh-2002/orva:v2026.08.26` |
 
 Override at build time:
 

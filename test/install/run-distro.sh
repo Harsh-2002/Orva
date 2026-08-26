@@ -28,7 +28,7 @@ Available distros:
 $(awk -F '\t' '/^[^#]/ {printf "  - %s\n", $1}' "$DISTROS_TSV")
 
 Env vars (optional):
-  ORVA_VERSION=v2026.05.06    pin a specific release tag (default: latest)
+  ORVA_VERSION=vYYYY.MM.DD    pin a release tag (default: latest; only the current release is published)
   ORVA_KEEP_CONTAINER=1       skip teardown (for debugging)
   PORT_OFFSET=20              host port = 19443 + index in distros.tsv
 EOF
