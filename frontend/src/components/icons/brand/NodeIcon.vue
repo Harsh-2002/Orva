@@ -1,18 +1,19 @@
 <!--
-  Node.js brand glyph (the hexagon). Single-path, currentColor —
-  inherits the parent's text-color class. Path data from Simple Icons
-  (https://simpleicons.org), CC0-licensed; used nominatively to
+  Node.js brand mark, in the official brand green (#5FA04E). Geometry is
+  Simple Icons (https://simpleicons.org), CC0-licensed, used nominatively to
   identify a function's runtime.
 
-  Pairs with PythonIcon: a hexagon against two snakes reads as two
-  different things at 14 px even before colour arrives, which is the
-  point of using marks here instead of the words NODE and PYTHON.
+  It used to be a currentColor path tinted with --color-runtime-node, which is
+  a desaturated approximation of this green. Pairs with PythonIcon: a green
+  hexagon against a blue-and-yellow pair of snakes separates at 14 px on both
+  colour and silhouette, which is the point of using marks here rather than the
+  words NODE and PYTHON.
 -->
 <template>
   <svg
     xmlns="http://www.w3.org/2000/svg"
     viewBox="0 0 24 24"
-    fill="currentColor"
+    fill="#5FA04E"
     aria-hidden="true"
   >
     <path d="M11.998 24c-.321 0-.641-.084-.922-.247l-2.936-1.737c-.438-.245-.224-.332-.08-.383.585-.203.703-.25 1.328-.604.065-.037.151-.023.218.017l2.256 1.339c.082.045.197.045.272 0l8.795-5.076c.082-.047.134-.141.134-.238V6.921c0-.099-.053-.192-.137-.242l-8.791-5.072c-.081-.047-.189-.047-.271 0L3.075 6.68c-.085.049-.139.145-.139.241v10.15c0 .097.054.189.139.235l2.409 1.392c1.307.654 2.108-.116 2.108-.89V7.787c0-.142.114-.253.256-.253h1.115c.139 0 .255.112.255.253v10.021c0 1.745-.95 2.745-2.604 2.745-.508 0-.909 0-2.026-.551L2.28 18.675c-.57-.329-.922-.945-.922-1.604V6.921c0-.659.353-1.275.922-1.603l8.795-5.082c.557-.315 1.296-.315 1.848 0l8.794 5.082c.57.329.924.944.924 1.603v10.15c0 .659-.354 1.273-.924 1.604l-8.794 5.078c-.28.163-.599.247-.925.247zm7.101-10.007c0-1.9-1.284-2.406-3.987-2.763-2.731-.361-3.009-.548-3.009-1.187 0-.528.235-1.233 2.258-1.233 1.807 0 2.473.389 2.747 1.607.024.115.129.199.247.199h1.141c.071 0 .138-.031.186-.081.048-.054.074-.123.067-.196-.177-2.098-1.571-3.076-4.388-3.076-2.508 0-4.004 1.058-4.004 2.833 0 1.925 1.488 2.457 3.895 2.695 2.88.282 3.103.703 3.103 1.269 0 .983-.789 1.402-2.642 1.402-2.327 0-2.839-.584-3.011-1.742-.02-.124-.126-.215-.253-.215h-1.137c-.141 0-.254.112-.254.253 0 1.482.806 3.248 4.655 3.248 2.779 0 4.377-1.097 4.377-3.014z" />

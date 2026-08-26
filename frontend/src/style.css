@@ -4,16 +4,36 @@
   --font-sans: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
-  /* Neutral graphite canvas. Violet is reserved for action and selection. */
-  --color-background: #0B0D10;
-  --color-surface: #15181D;
-  --color-surface-hover: #23272E;
-  --color-border: #343A44;
+  /* Neutral canvas, warm. Violet is reserved for action and selection.
 
-  --color-foreground: #F4F6F8;
-  /* Pure white is reserved for text on saturated brand surfaces. */
+     Every surface below keeps the exact OKLCH lightness and chroma it had as
+     cool graphite and rotates hue to 80. Nothing about the relative structure
+     moved; only temperature did. The reason is the day theme: pairing a warm
+     paper with a cool graphite would swing the largest surface on screen
+     through 167 degrees of hue on every toggle, which reads as two products
+     rather than two themes. Day is hue 88, so the swing is now zero. */
+  --color-background: #0E0D09;
+  --color-surface: #1B1712;
+  --color-surface-hover: #2B261F;
+  --color-border: #3F392E;
+
+  --color-foreground: #F7F6F3;
+  /* The strongest reading colour available on the canvas. NOT "white": in the
+     day theme this is a near-black. Text sitting on a saturated brand fill
+     (a primary or danger button) wants --color-primary-foreground instead,
+     which stays white in both themes because the fill is dark in both. */
   --color-foreground-strong: #FFFFFF;
-  --color-foreground-muted: #ADB4BE;
+  --color-foreground-muted: #B9B2A8;
+
+  /* Focus ring. Was a literal `ring-white` on every input in the app, which is
+     invisible on a light field: a WCAG 2.4.7 failure the day theme would have
+     introduced silently across every form. */
+  --color-focus-ring: #FFFFFF;
+
+  /* Modal/drawer scrim. Was a literal bg-black/60. Over a near-black page a
+     60% black barely registers; over paper it is violent, so the day value is
+     lighter and the token is what makes that expressible. */
+  --color-scrim: rgba(0, 0, 0, 0.6);
 
   --color-primary: #553F83;
   --color-primary-foreground: #FFFFFF;
@@ -22,14 +42,21 @@
      contrast on the near-black background. Used for markdown links in chat. */
   --color-link: #8b7bd8;
 
-  --color-secondary: #282E36;
-  --color-secondary-foreground: #F4F6F8;
-  --color-secondary-hover: #353D47;
+  --color-secondary: #322D24;
+  --color-secondary-foreground: #F7F6F3;
+  --color-secondary-hover: #423B30;
 
   --color-danger: #ef4444;
   --color-success: #22c55e;
   --color-warning: #eab308;
   --color-info: #38bdf8;          /* sky-400-ish, info / neutral-blue role */
+
+  /* Text on a SOLID status fill. The mirror of --color-primary-foreground: the
+     status colours are light in both themes, so their label is near-black in
+     both. It exists because the deployments "Live" chip used text-background,
+     which means "the canvas colour" and therefore flipped to near-white on the
+     day page: white on #22c55e is 2.13:1. This is 8.45:1 in both themes. */
+  --color-status-foreground: #0E0D09;
 
   /* Semantic status tints + foregrounds, surfaced as Tailwind utilities
      (bg-success-tint, text-success-fg, border-success-ring, etc.).
@@ -66,6 +93,20 @@
      Desaturated toward the graphite surface so the runtime mark identifies
      without competing. Tokens rather than raw palette classes so a theme can
      move them, and so "which blue is the Python one" has one answer. */
+  /* Activity source identity. Seven categories, not a status axis: a request
+     arriving over MCP is not "worse" than one over the web, so these
+     deliberately sit outside the success/warning/danger families. DESIGN.md
+     granted the raw Tailwind palette here as the one sanctioned exception, but
+     those values were all -300 foregrounds over -900 borders, i.e. light-on-dark
+     by construction, so they had nowhere to go in a day theme. Tokens instead:
+     the exception is now expressible rather than merely tolerated. */
+  --color-source-web:     #a5b4fc;
+  --color-source-api:     #7dd3fc;
+  --color-source-mcp:     #c4b5fd;
+  --color-source-sdk:     #5eead4;
+  --color-source-webhook: #fcd34d;
+  --color-source-cron:    #6ee7b7;
+
   --color-runtime-node:   #8fbf7f;
   --color-runtime-python: #7fa8d4;
 
@@ -112,6 +153,103 @@
   --leading-body: 1.55;
 }
 
+/* The select chevron, day. See the note on the night rule above: the stroke is
+   inside a data URI, so the whole URI is what changes. */
+:root[data-theme='day'] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235D5B57' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+/* ==========================================================================
+   Day theme
+   ==========================================================================
+
+   @theme above is the night defaults and compiles to `:root,:host`. This block
+   is `:root[data-theme='day']`, which outranks it on specificity, so source
+   order does not matter. Every Tailwind colour utility resolves through
+   var(--color-*) at use time, and every /NN alpha compiles to color-mix over
+   the same variable, so re-declaring the names here flips the entire app with
+   no markup change.
+
+   THE TOWARD-MID RULE. Elevation always moves toward mid-grey: night surfaces
+   lighten as they rise, day surfaces DARKEN. `surface` being darker than
+   `background` in day is not a mistake, it is what keeps every existing
+   bg-surface/NN alpha reading as a lift rather than inverting into a hole.
+
+   Both themes are warm. Night is hue 80, day is hue 88, so the toggle does not
+   swing the largest surface on screen through 167 degrees of hue. Night keeps
+   its exact former lightness and chroma per token; only temperature moved.
+
+   Tokens deliberately absent here, because they are already correct in both:
+     - the eight rgba() status tint/ring values. Composited over the day page
+       they carry the new -fg values at 4.94 to 5.86:1, all clearing AA.
+     - --color-primary and --color-primary-foreground. White on #553F83 is
+       8.66:1 whatever is behind the button.
+     - --color-danger-solid. White on it is 5.62:1; that is a fill fact, not a
+       page fact.
+
+   Every ratio in the comments below was measured, not estimated.
+   ========================================================================== */
+
+:root[data-theme='day'] {
+  color-scheme: light;
+
+  --color-background: #F8F7F4;
+  --color-surface: #EFEDE8;
+  --color-surface-hover: #E2DED6;
+  --color-border: #B9B6AF;
+
+  --color-foreground: #191713;        /* 16.71:1 on background */
+  --color-foreground-strong: #0B0A08; /* 18.47:1 */
+  --color-foreground-muted: #5D5B57;  /* 6.32:1, worst case 5.05 on surface-hover */
+
+  --color-focus-ring: #191713;
+  --color-scrim: rgba(0, 0, 0, 0.5);
+
+  /* The link justification inverts. --color-link exists because #553F83 fails
+     AA on near-black. On paper the opposite is true: #8b7bd8 measures 3.31:1
+     and FAILS, while #553F83 measures 8.08:1 and passes. So day lifts the link
+     toward the darker violet rather than the lighter one. */
+  --color-link: #684D9E;              /* 6.23:1 on background, 5.71 on surface */
+  --color-primary-hover: #45336B;     /* hovers AWAY from the page, i.e. darker */
+
+  --color-secondary: #EBE8E2;
+  --color-secondary-foreground: #191713;
+  --color-secondary-hover: #E6E3DC;
+
+  /* Light-on-dark chips become dark-on-light. #fbbf24 is 1.7:1 on paper and
+     #4ade80 is 1.8:1, so these are re-authored rather than rotated, into one
+     OKLCH lightness band so they still read as a family. */
+  --color-success-fg: #177245;        /* 4.94:1 on its own tint */
+  --color-warning-fg: #854D0E;        /* 5.86:1 */
+  --color-danger-fg:  #B91C1C;        /* 4.99:1 */
+  --color-info-fg:    #0369A1;        /* 4.96:1 */
+
+  /* Same hues, dropped in lightness until the label clears AA on the deepest
+     surface it sits on. Worst case 4.55 (node) and 4.53 (python) on
+     surface-hover. The marks themselves keep their vendor colours. */
+  /* Source identity, day. Same six hues stepped down until the label clears AA
+     on the deepest surface it sits on. Amber needed one step further than the
+     rest (#92400e rather than a -700) because amber has no readable-on-paper
+     lightness that still reads amber, which is the same wall the status warning
+     token hits. Worst case across the set is 4.68 on surface-hover. */
+  --color-source-web:     #4338CA;
+  --color-source-api:     #0369A1;
+  --color-source-mcp:     #6D28D9;
+  --color-source-sdk:     #0F766E;
+  --color-source-webhook: #92400E;
+  --color-source-cron:    #047857;
+
+  --color-runtime-node:   #356F1C;
+  --color-runtime-python: #2D659C;
+}
+
+/* The night default has to be declared somewhere a selector can reach; @theme
+   emits custom properties but not this. */
+:root {
+  color-scheme: dark;
+}
+
+
 html {
   /* Pull the rem base to 95 % of the browser default (16 px → 15.2 px).
      Because every Tailwind spacing and typography utility is rem-relative,
@@ -146,6 +284,17 @@ body {
   -moz-osx-font-smoothing: grayscale;
   font-kerning: normal;
   font-feature-settings: 'ss01', 'cv11';
+}
+
+/* Selection.
+
+   Was `selection:bg-white selection:text-black` hardcoded on the <body> tag in
+   index.html, which is a white highlight on a white page in the day theme, i.e.
+   an invisible selection. Inverting the two canvas tokens gives the same effect
+   in both themes without naming a colour: 18.0:1 night, 18.5:1 day. */
+::selection {
+  background-color: var(--color-foreground-strong);
+  color: var(--color-background);
 }
 
 /* Belt-and-braces: never let the body scroll horizontally. Tables and code
@@ -189,7 +338,13 @@ select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A3A3B3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  /* Two data URIs, one per theme, rather than one hardcoded grey.
+     A CSS custom property cannot reach inside a data URI, so the stroke
+     colour has to be baked in and the whole URI swapped. Masking the
+     element and filling with currentColor looks like the tidier fix and
+     is not: mask-image applies to the element, so it would clip the
+     select's own text away along with everything else. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23B9B2A8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 0.75rem;

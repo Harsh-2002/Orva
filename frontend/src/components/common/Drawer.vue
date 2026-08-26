@@ -41,13 +41,13 @@
             @keydown.esc="close"
           >
             <header class="px-5 py-3 border-b border-border flex items-center justify-between shrink-0">
-              <div class="text-sm font-medium text-white truncate">
+              <div class="text-sm font-medium text-foreground-strong truncate">
                 <slot name="title">
                   {{ title }}
                 </slot>
               </div>
               <button
-                class="text-foreground-muted hover:text-white transition-colors touch-expand-iconbtn -mr-1"
+                class="text-foreground-muted hover:text-foreground-strong transition-colors touch-expand-iconbtn -mr-1"
                 aria-label="Close"
                 @click="close"
               >

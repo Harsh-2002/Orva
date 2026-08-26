@@ -8,6 +8,7 @@
 //   node run.mjs --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
 //   node run.mjs --url ... --api-key ... --destructive     # include delete flows
 //   node run.mjs --url ... --suite responsive,touch-targets
+//   node run.mjs --url ... --theme day                     # one theme, not both
 //
 // Exit codes:  0 all checks passed   1 at least one failed   2 could not start
 //
@@ -37,12 +38,32 @@ const ONLY = (arg('suite', process.env.ORVA_SUITE || '') || '').split(',').filte
 const DESTRUCTIVE = process.argv.includes('--destructive') || process.env.ORVA_DESTRUCTIVE === '1'
 const FULL = process.argv.includes('--full') || process.env.ORVA_FULL_MATRIX === '1'
 const SHOT_DIR = arg('shots', process.env.ORVA_SHOT_DIR || '')
+// Both themes by default. A single-theme run is a partial answer now that the
+// theme is the operator's choice: the day palette is a different set of colour
+// values against the same markup, so a night-only pass proves nothing about it.
+const THEME = arg('theme', process.env.ORVA_THEME || 'both')
 const JSON_OUT = arg('json', process.env.ORVA_JSON_OUT || '')
 
 const wanted = (m) => !ONLY.length || ONLY.includes(m.meta.id)
 const pageSuites = PAGE_SUITES.filter(wanted)
 const flowSuites = FLOW_SUITES.filter(wanted)
 const VIEWPORTS = FULL ? [...CORE_VIEWPORTS, ...EXTRA_VIEWPORTS] : CORE_VIEWPORTS
+const THEMES = THEME === 'both' ? ['night', 'day'] : [THEME]
+
+if (THEMES.some((t) => t !== 'night' && t !== 'day')) {
+  console.error(`\ncannot start: --theme must be night, day or both (got "${THEME}")`)
+  process.exit(2)
+}
+
+// Every check reports where it happened, and with two themes the theme is part
+// of "where". Prefixing here keeps it out of every suite: a suite states the
+// rule, the runner states the conditions.
+const themed = (r, theme) => ({
+  pass: (s, w, n) => r.pass(s, `${theme} ${w}`, n),
+  fail: (s, w, n, d) => r.fail(s, `${theme} ${w}`, n, d),
+  skip: (s, w, n, d) => r.skip(s, `${theme} ${w}`, n, d),
+  record: (s, w, n, f) => r.record(s, `${theme} ${w}`, n, f),
+})
 
 function die(msg, code = 2) {
   console.error(`\ncannot start: ${msg}`)
@@ -73,7 +94,7 @@ console.log(`  browser   ${exe}`)
 console.log(`  user      ${auth.username}`)
 console.log(`  suites    ${[...pageSuites, ...flowSuites].map((s) => s.meta.id).join(', ')}`)
 console.log(`  matrix    ${routes.length} routes x ${VIEWPORTS.length} viewports` +
-            `${DESTRUCTIVE ? ' (+ destructive flows)' : ''}`)
+            ` x ${THEMES.join('/')}${DESTRUCTIVE ? ' (+ destructive flows)' : ''}`)
 
 const report = new Report()
 const browser = await chromium.launch({
@@ -82,13 +103,24 @@ const browser = await chromium.launch({
 })
 
 try {
+ for (const theme of THEMES) {
+  const themeReport = themed(report, theme)
   for (const viewport of VIEWPORTS) {
     const context = await browser.newContext({
       viewport: { width: viewport.w, height: viewport.h },
       hasTouch: viewport.touch,
       isMobile: viewport.touch,
       deviceScaleFactor: 1,
+      // Set the OS preference to match, so a page that follows the system and
+      // one that was told explicitly both land on the theme under test. Without
+      // it a headless Chromium reports light and every "night" run is a lie.
+      colorScheme: theme === 'day' ? 'light' : 'dark',
     })
+    // The dashboard resolves the theme before first paint from this key, so it
+    // has to exist before the document runs, not after the page settles.
+    await context.addInitScript((t) => {
+      try { window.localStorage.setItem('orva:theme', t) } catch { /* private mode */ }
+    }, theme)
     await context.addCookies([{
       name: 'session_token',
       value: auth.cookie,
@@ -108,7 +140,7 @@ try {
         await page.goto(`${BASE}/web${route.path}`, { waitUntil: 'networkidle', timeout: 30000 })
         await page.waitForTimeout(600)
       } catch (e) {
-        report.fail('smoke', where, 'route loads', String(e).slice(0, 160))
+        themeReport.fail('smoke', where, 'route loads', String(e).slice(0, 160))
         continue
       }
 
@@ -119,14 +151,18 @@ try {
       for (const suite of pageSuites) {
         if (forgiving && suite.meta.id !== 'smoke') continue
         try {
-          await suite.onPage({ page, route, viewport, errors: forgiving ? [] : errors, report })
+          await suite.onPage({
+            page, route, viewport, theme,
+            errors: forgiving ? [] : errors,
+            report: themeReport,
+          })
         } catch (e) {
-          report.fail(suite.meta.id, where, 'suite ran', `threw: ${String(e).slice(0, 160)}`)
+          themeReport.fail(suite.meta.id, where, 'suite ran', `threw: ${String(e).slice(0, 160)}`)
         }
       }
 
       if (SHOT_DIR) {
-        await page.screenshot({ path: join(SHOT_DIR, `${viewport.name}__${route.name}.png`) })
+        await page.screenshot({ path: join(SHOT_DIR, `${theme}__${viewport.name}__${route.name}.png`) })
       }
     }
 
@@ -135,20 +171,24 @@ try {
     if (viewport.name === 'laptop') {
       for (const suite of flowSuites) {
         try {
-          await suite.run({ context, base: BASE, report, destructive: DESTRUCTIVE, apiKey: API_KEY })
+          await suite.run({
+            context, base: BASE, report: themeReport, theme,
+            destructive: DESTRUCTIVE, apiKey: API_KEY,
+          })
         } catch (e) {
           // Keep enough of the message to see WHY. Playwright puts the
           // actionable reason -- "<div ...> intercepts pointer events" -- near
           // the end of its call log, so truncating to a couple of hundred
           // characters throws away the only line that identifies the defect and
           // leaves a bare "Timeout exceeded" to guess at.
-          report.fail(suite.meta.id, 'laptop', 'suite ran', `threw: ${String(e).slice(0, 1200)}`)
+          themeReport.fail(suite.meta.id, 'laptop', 'suite ran', `threw: ${String(e).slice(0, 1200)}`)
         }
       }
     }
 
     await context.close()
   }
+ }
 } finally {
   await browser.close()
 }

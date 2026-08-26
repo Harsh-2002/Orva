@@ -38,13 +38,16 @@ const props = defineProps({
   source: { type: String, default: '' },
 })
 
+// Tokens, not raw palette classes. The border is the same hue at 30% rather
+// than a separate -900 step, so it re-anchors against whichever canvas is
+// behind it instead of assuming a dark one.
 const SOURCES = {
-  web: { icon: Globe, cls: 'text-indigo-300 border-indigo-900/40' },
-  api: { icon: Terminal, cls: 'text-sky-300 border-sky-900/40' },
-  mcp: { icon: Plug, cls: 'text-violet-300 border-violet-900/40' },
-  sdk: { icon: Package, cls: 'text-teal-300 border-teal-900/40' },
-  webhook: { icon: Webhook, cls: 'text-amber-300 border-amber-900/40' },
-  cron: { icon: Clock, cls: 'text-emerald-300 border-emerald-900/40' },
+  web: { icon: Globe, cls: 'text-source-web border-source-web/30' },
+  api: { icon: Terminal, cls: 'text-source-api border-source-api/30' },
+  mcp: { icon: Plug, cls: 'text-source-mcp border-source-mcp/30' },
+  sdk: { icon: Package, cls: 'text-source-sdk border-source-sdk/30' },
+  webhook: { icon: Webhook, cls: 'text-source-webhook border-source-webhook/30' },
+  cron: { icon: Clock, cls: 'text-source-cron border-source-cron/30' },
   internal: { icon: Cog, cls: 'text-foreground-muted border-border' },
 }
 

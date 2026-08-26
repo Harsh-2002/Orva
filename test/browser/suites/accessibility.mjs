@@ -48,12 +48,23 @@ const PROBE = () => {
       const txt = by.split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ').trim()
       if (txt) return txt
     }
-    if (el.id) {
-      const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
-      if (lab && lab.textContent.trim()) return lab.textContent.trim()
+    // A <label> names its control by its own *text alternative*, not by its
+    // text content, so an aria-label on the label counts and wins over the
+    // text inside it. Missing that reported every card-view row checkbox on
+    // /invocations as unnamed: the control is a bare box, the wrapping label
+    // carries `aria-label="Select invocation <id>"`, and Chrome's own AX tree
+    // resolves exactly that string.
+    const labelName = (lab) => {
+      if (!lab) return ''
+      const a = lab.getAttribute('aria-label')
+      return (a && a.trim()) || lab.textContent.trim()
     }
-    const wrapping = el.closest('label')
-    if (wrapping && wrapping.textContent.trim()) return wrapping.textContent.trim()
+    if (el.id) {
+      const named = labelName(document.querySelector(`label[for="${CSS.escape(el.id)}"]`))
+      if (named) return named
+    }
+    const wrapping = labelName(el.closest('label'))
+    if (wrapping) return wrapping
     // placeholder is a real name source for text inputs per HTML-AAM, ranked
     // below label and above title. It is weak labelling -- it disappears the
     // moment the field has a value -- but "weak name" is a different finding
@@ -139,12 +150,65 @@ const PROBE = () => {
     })
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
   }
-  const parse = (s) => {
-    const m = /rgba?\(([^)]+)\)/.exec(s)
-    if (!m) return null
-    const p = m[1].split(',').map((x) => parseFloat(x))
-    return { rgb: [p[0], p[1], p[2]], a: p.length > 3 ? p[3] : 1 }
+  // Colour arrives in whatever form the engine computed, and that is not always
+  // rgb(). Tailwind v4 compiles every `/NN` alpha to color-mix(in oklab, ...),
+  // which Chrome serialises as oklab(). A parser that understands only rgb()
+  // returns null for those and the caller skips the element -- so the check
+  // silently exempted exactly the faded text it exists to catch. Two of the
+  // theme's real AA failures were invisible to this suite for that reason.
+  const enc = (v) => {
+    const s = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055
+    return Math.max(0, Math.min(255, s * 255))
   }
+  const fromOklab = (L, a, b) => {
+    const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    const s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    return [
+      enc(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+      enc(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+      enc(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+    ]
+  }
+  const parse = (str) => {
+    if (!str) return null
+    const s = str.trim()
+    if (s === 'transparent') return { rgb: [0, 0, 0], a: 0 }
+    const fn = /^([a-z-]+)\((.*)\)$/i.exec(s)
+    if (!fn) return null
+    const kind = fn[1].toLowerCase()
+    const [head, tailRaw] = fn[2].split('/')
+    const pct = (x) => (String(x).trim().endsWith('%') ? parseFloat(x) / 100 : parseFloat(x))
+    const v = (head.match(/-?[\d.]+%?/g) || []).map(pct)
+    const a = tailRaw === undefined ? 1 : pct(tailRaw)
+    if (kind === 'rgb' || kind === 'rgba') {
+      return { rgb: [v[0], v[1], v[2]], a: v.length > 3 ? v[3] : a }
+    }
+    if (kind === 'oklab') return { rgb: fromOklab(v[0], v[1], v[2]), a }
+    if (kind === 'oklch') {
+      const h = ((v[2] || 0) * Math.PI) / 180
+      return { rgb: fromOklab(v[0], (v[1] || 0) * Math.cos(h), (v[1] || 0) * Math.sin(h)), a }
+    }
+    if (kind === 'color') {
+      // color(srgb r g b [/ a]) -- drop the colourspace keyword, keep the three.
+      const c = (head.replace(/^\s*[a-z0-9-]+/i, '').match(/-?[\d.]+/g) || []).map(Number)
+      return { rgb: c.slice(0, 3).map((x) => Math.max(0, Math.min(1, x)) * 255), a }
+    }
+    return null
+  }
+
+  // What the page paints when nothing above an element is opaque. Reading it
+  // from the document rather than hardcoding one theme's near-black: the same
+  // constant cannot be right for a canvas that is #0E0D09 at night and #F8F7F4
+  // by day, and being wrong here inverts every ratio computed through it.
+  const CANVAS = (() => {
+    for (const n of [document.body, document.documentElement]) {
+      const c = n && parse(getComputedStyle(n).backgroundColor)
+      if (c && c.a >= 0.999) return c.rgb
+    }
+    return [255, 255, 255]
+  })()
+
   // Walk up for the first opaque background, compositing any translucent
   // layers on the way, which is what the eye actually sees.
   const bgOf = (el) => {
@@ -153,9 +217,8 @@ const PROBE = () => {
       const c = parse(getComputedStyle(n).backgroundColor)
       if (c && c.a > 0) { stack.push(c); if (c.a >= 0.999) break }
     }
-    if (!stack.length) return [11, 13, 16]
-    let out = stack[stack.length - 1].rgb
-    for (let i = stack.length - 2; i >= 0; i--) {
+    let out = stack.length && stack[stack.length - 1].a >= 0.999 ? stack.pop().rgb : CANVAS
+    for (let i = stack.length - 1; i >= 0; i--) {
       const { rgb, a } = stack[i]
       out = out.map((v, k) => rgb[k] * a + v * (1 - a))
     }
@@ -179,7 +242,12 @@ const PROBE = () => {
     // AA: 3:1 for large text (>=24px, or >=18.66px bold), else 4.5:1.
     const large = size >= 24 || (bold && size >= 18.66)
     const need = large ? 3 : 4.5
-    const got = ratio(fg.rgb, bgOf(el))
+    // Translucent text is what the eye sees composited, not what the token
+    // says. `text-foreground-muted/40` is a real pattern here and measuring it
+    // at full strength reports a ratio nobody can read.
+    const bg = bgOf(el)
+    const seenFg = fg.a >= 0.999 ? fg.rgb : fg.rgb.map((v, k) => v * fg.a + bg[k] * (1 - fg.a))
+    const got = ratio(seenFg, bg)
     if (got + 0.05 < need) {
       const key = `${describe(el)}|${s.color}`
       if (seen.has(key)) continue
@@ -205,10 +273,12 @@ const PROBE = () => {
 }
 
 export async function onPage({ page, route, viewport, report }) {
-  // These are viewport-independent, so run them once per route on the widest
-  // viewport rather than three times with the same answer.
-  if (viewport.name !== 'laptop') return
-  const where = route.name
+  // Most of these are viewport-independent, but the page is not: below sm the
+  // list views render an entirely different subtree (cards, not a table) and
+  // the sidebar becomes a drawer. Running only on laptop never measured any of
+  // it. Two viewports cover both branches without paying for all seven.
+  if (viewport.name !== 'laptop' && viewport.name !== 'phone') return
+  const where = `${viewport.name} ${route.name}`
   const r = await page.evaluate(PROBE)
 
   report.record('accessibility', where, 'interactive elements have an accessible name (4.1.2)',

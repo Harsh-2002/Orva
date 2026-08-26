@@ -3,7 +3,7 @@
     <transition name="fade">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-40 flex items-stretch sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-sm pt-safe pb-safe pl-safe pr-safe p-2 sm:p-4"
+        class="fixed inset-0 z-40 flex items-stretch sm:items-center justify-center overflow-y-auto bg-scrim backdrop-blur-sm pt-safe pb-safe pl-safe pr-safe p-2 sm:p-4"
         @click.self="close"
       >
         <!--
@@ -35,13 +35,13 @@
               />
               <h3
                 :id="titleId"
-                class="text-sm font-semibold text-white tracking-tight truncate"
+                class="text-sm font-semibold text-foreground-strong tracking-tight truncate"
               >
                 {{ title }}
               </h3>
             </div>
             <button
-              class="p-1.5 -mr-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors touch-expand-iconbtn shrink-0"
+              class="p-1.5 -mr-1.5 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn shrink-0"
               :aria-label="`Close ${title}`"
               @click="close"
             >

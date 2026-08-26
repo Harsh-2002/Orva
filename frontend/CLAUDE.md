@@ -50,6 +50,37 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 | `src/utils/rollbackDiff.js` | `describeSnapshotDiff()` — shared settings/env diff lines (Editor, Deployments, FunctionDiff) |
 | `src/templates/index.js` | Built-in function templates (including `ts_hello`, `py_stream_llm`) |
 
+## Theming
+
+Two themes, night and day, both warm neutrals. `@theme` in `src/style.css` is the
+night default; `:root[data-theme='day']` overrides the same token names and wins
+on specificity. Every colour utility resolves through `var(--color-*)`, so
+re-declaring tokens flips the app without touching markup.
+
+- **A new colour token needs a value in BOTH blocks**, or an entry on the shared
+  list in `test/themeContrast.test.js` with a reason. The test fails the build
+  otherwise, and it parses each block separately so a second theme cannot pass
+  vacuously against the first one's values.
+- **Never `text-white`, `ring-white`, `border-white` or `bg-black`.** Use
+  `text-foreground-strong`, `ring-focus-ring`, `border-focus-ring`, `bg-scrim`.
+  A white focus ring is invisible on a day-theme field.
+- **`--color-foreground-strong` is not white.** It is "maximum contrast against
+  the canvas" and becomes near-black in day. Text on a saturated brand fill wants
+  `--color-primary-foreground`, which stays white in both, and a label on a solid
+  *status* fill wants `--color-status-foreground`, which stays near-black in both
+  because those fills are light in both. `text-background` on a fill is the same
+  mistake wearing a third name: it put the "Live" chip at 2.13:1 by day.
+- **Do not fade a muted token with alpha.** `text-foreground-muted/40` measures
+  1.85:1 in day and 2.38:1 at night; the token is already the muted step. This
+  includes `placeholder-foreground-muted/NN`, which is the same rule spelled
+  differently and is why it outlived the first sweep. Both are banned at source
+  by `test/responsive.test.js`.
+- Theme resolution is an inline script in `index.html`, above the stylesheet,
+  because the app bundle is deferred and would otherwise flash night first.
+  `composables/useTheme.js` owns the preference (`localStorage['orva:theme']`,
+  absent = follow the OS) and the `theme-color` meta swap.
+- The **code editor stays dark in both themes** and sits on a mat in day.
+
 ## Shared primitives worth knowing before adding UI
 
 | Component | Rule it encodes |
@@ -59,9 +90,13 @@ After `npm run build`, run `make embed` from the repo root to copy `dist/` into 
 | `composables/useMenuFocus.js` | Shared focus handling for menu-style popovers. |
 | `components/common/Button.vue` | `variant` covers primary / secondary / danger / ghost / chip. The `danger` fill uses `--color-danger-solid`, which is darker than `--color-danger`: white on the lighter red measures 3.76:1 and misses AA. Use the lighter red for text, borders and tints; the solid one only behind white text. |
 
-Two colour tokens exist specifically because the brand purple fails contrast as
-text on the near-black background (2.25:1): use **`text-link`** for inline links,
-never `text-primary`, which is for icons and fills.
+**`text-link` for inline links, never `text-primary`**, which is for icons and
+fills. The token exists because the brand violet fails as text on the night
+canvas (2.25:1). That reasoning *inverts* by day: `#553F83` measures 8.08:1 on
+paper and passes, while the night link value `#8b7bd8` measures 3.31:1 and fails.
+So `--color-link` is lighter than the brand at night and darker by day, meeting
+the same legibility floor from opposite sides. Use the token; do not re-derive
+which violet is correct.
 
 ## Non-obvious
 

@@ -119,7 +119,7 @@ function onEditKey(e) {
           role="textbox"
           aria-multiline="true"
           aria-label="Edit message"
-          class="max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-surface px-3.5 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors focus:border-white focus:ring-1 focus:ring-white"
+          class="max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-surface px-3.5 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors focus:border-focus-ring focus:ring-1 focus:ring-focus-ring"
           @input="onEditInput"
           @keydown="onEditKey"
         />

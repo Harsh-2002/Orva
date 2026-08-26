@@ -7,7 +7,7 @@
          followed by a separate alert banner. -->
     <div class="flex items-center justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Channels
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -37,7 +37,7 @@
           </div>
         </div>
         <button
-          class="text-foreground-muted hover:text-white transition-colors"
+          class="text-foreground-muted hover:text-foreground-strong transition-colors"
           title="Dismiss"
           aria-label="Dismiss channel token"
           @click="createdToken = ''"
@@ -46,9 +46,9 @@
         </button>
       </div>
       <div class="flex items-center gap-2">
-        <code class="flex-1 font-mono text-sm text-white break-all bg-surface px-3 py-2 rounded border border-border">{{ createdToken }}</code>
+        <code class="flex-1 font-mono text-sm text-foreground-strong break-all bg-surface px-3 py-2 rounded border border-border">{{ createdToken }}</code>
         <button
-          class="px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5 text-xs"
+          class="px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5 text-xs"
           @click="copyCreated"
         >
           <Check
@@ -74,7 +74,7 @@
       v-if="creating"
       class="bg-background border border-border rounded-lg p-5 space-y-4"
     >
-      <div class="text-sm font-semibold text-white">
+      <div class="text-sm font-semibold text-foreground-strong">
         New channel
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -192,7 +192,7 @@
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-white truncate">{{ c.name }}</span>
+                <span class="font-medium text-foreground-strong truncate">{{ c.name }}</span>
                 <span class="inline-flex items-center gap-1 text-[11px] text-foreground-muted">
                   <Boxes class="w-3 h-3" /> {{ c.function_count }}
                 </span>
@@ -294,7 +294,7 @@
             class="hover:bg-surface/50 transition-colors"
           >
             <td class="px-6 py-4">
-              <div class="font-medium text-white">
+              <div class="font-medium text-foreground-strong">
                 {{ c.name }}
               </div>
               <div
@@ -368,7 +368,7 @@
                 Could not load channels: {{ loadError }}
               </template>
               <template v-else>
-                No channels yet. Click <span class="text-white">New channel</span> to bundle functions for an agent.
+                No channels yet. Click <span class="text-foreground-strong">New channel</span> to bundle functions for an agent.
               </template>
             </td>
           </tr>

@@ -2,12 +2,12 @@
 name: Orva
 description: Self-hosted Function-as-a-Service for homelab operators and on-prem teams.
 colors:
-  background: "#0B0D10"
-  surface: "#15181D"
-  surface-hover: "#23272E"
-  border: "#343A44"
-  foreground: "#F4F6F8"
-  foreground-muted: "#ADB4BE"
+  background: "#0E0D09"
+  surface: "#1B1712"
+  surface-hover: "#2B261F"
+  border: "#3F392E"
+  foreground: "#F7F6F3"
+  foreground-muted: "#B9B2A8"
   primary: "#553F83"
   primary-hover: "#684D9E"
   primary-foreground: "#FFFFFF"
@@ -173,9 +173,77 @@ A single muted violet accent sits on neutral graphite-black surfaces with cool l
 
 **The One Accent Rule.** Muted violet appears on roughly 5 to 10 percent of any given screen. Primary CTAs, the active sidebar item, the selected filter chip. Anywhere else, ask whether the page actually needs an accent or whether a border + foreground-muted will read more confidently. Restraint is the point.
 
-**The Graphite Neutral Rule.** Canvas and elevated surfaces stay neutral graphite. Violet communicates action, selection, and focus only. Primary text is soft gray; pure white is reserved for saturated action surfaces.
+**The Neutral Canvas Rule.** Canvas and elevated surfaces stay neutral: a warm near-black at night, warm paper by day, both at chroma under 0.015. Violet communicates action, selection, and focus only. Primary text is a soft off-white or a soft near-black depending on the theme; pure white is reserved for text on saturated action surfaces. This was the Graphite Neutral Rule when there was one theme and it was cool; the discipline is unchanged, only the temperature moved.
 
 **The Semantic Status Rule.** Status colour is reserved for status. Use the semantic tokens (`success`, `warning`, `danger`) and their `/15` tint backgrounds and `/30` borders. Reaching for `bg-emerald-500/40` or `text-sky-300` is forbidden, even when it looks "right" in isolation: that path forks the palette across views and a future theme change becomes a 125-site rewrite.
+
+**The Two-Theme Rule.** Every colour token needs a value in both blocks, or it is
+on the shared list with a reason. `frontend/test/themeContrast.test.js` fails the
+build otherwise, and it parses each block separately: an earlier version matched
+the first `--color-background:` in the file with a non-global regex, so a second
+theme appended below would have left it asserting the night values twice and
+passing while claiming to cover both.
+
+**The Toward-Mid Rule.** Elevation always moves toward mid-grey. Night surfaces
+lighten as they rise, day surfaces darken. `--color-surface` being *darker* than
+`--color-background` in day is not a mistake: it is what keeps every existing
+`bg-surface/NN` reading as a lift instead of inverting into a hole.
+
+**The One Temperature Rule.** Both themes are warm, hue 80 at night and 88 by day.
+Night was cool graphite and was rotated at identical lightness and chroma, purely
+so the toggle would not swing the largest surface on screen through 167 degrees
+of hue. Two temperatures read as two products.
+
+## 2b. Theming
+
+Tailwind v4 CSS-first. `@theme` in `frontend/src/style.css` is the night default
+and compiles to `:root,:host`; `:root[data-theme='day']` overrides the same names
+and outranks it on specificity. Every colour utility resolves through
+`var(--color-*)` at use time and every `/NN` alpha compiles to `color-mix` over
+the same variable, so re-declaring the tokens flips the whole app with no markup
+change.
+
+- **Resolution happens before paint**, in an inline script in `index.html` above
+  the stylesheet. The app bundle is a module script and therefore deferred, so
+  resolving in Vue would paint night first and correct itself: a black flash on
+  every load for anyone who chose day.
+- **`data-theme` is always concrete**, `day` or `night`, never `system`. CSS only
+  ever matches one of two states. The tri-state lives in `data-theme-pref`.
+- **Preference is `localStorage['orva:theme']`**, absent meaning follow the OS.
+  Same shape and namespace as the one UI preference that predates theming,
+  `orva:diff:sideBySide`.
+- **`--color-foreground-strong` is not "white".** It means maximum contrast
+  against the canvas and flips to near-black in day. Text sitting on a saturated
+  brand fill wants `--color-primary-foreground`, which stays white in both
+  because the fill is dark in both. Conflating the two put the danger button's
+  label at 3.52:1.
+- **`--color-status-foreground` is the mirror of `--color-primary-foreground`.**
+  The status colours are light in both themes, so a label on a *solid* status
+  fill is near-black in both. The deployments "Live" chip used `text-background`,
+  which means "the canvas colour" and therefore flipped to near-white by day:
+  white on `#22c55e` is **2.13:1**. Solid status fills are rare here -- every
+  other status surface is the documented tint/fg/ring trio -- but a solid fill
+  needs a foreground that does not follow the canvas.
+- **Do not fade a muted token with alpha.** `text-foreground-muted/40` measured
+  2.38 at night and 1.85 by day; `/60` measured 3.95 and 2.63. All four are under
+  AA, and the night numbers were already failing before any of this. The token is
+  already the muted step; there is nothing left to spend.
+  **Placeholders are where this hid longest.** `placeholder-foreground-muted/50`
+  and `/60` survived the sweep that removed every `text-foreground-muted/NN`,
+  because the class name is spelled differently. Measured on the real pages:
+  `/60` is 3.95:1 at night and 2.64:1 by day, `/50` is 3.09 and 2.19. Placeholder
+  text has no text node, so no contrast walk over the DOM will ever see it --
+  `frontend/test/responsive.test.js` bans the alpha at source instead.
+- **`useTheme()`** (`composables/useTheme.js`) owns the preference, the live
+  response to an OS change while following the system, and the `theme-color`
+  meta swap. The control lives in Settings under Appearance.
+
+The code editor is dark in both themes and sits on a mat in day, so it reads as
+a mounted instrument rather than a hole in the paper. CodeMirror's theme is bound
+at construction in both `CodeEditor.vue` and `FunctionDiff.vue`, and
+`EditorView.theme()` throws on the `&light`/`&dark` markers, so making it follow
+the theme is a real piece of work rather than a token swap. It was scoped out
+deliberately.
 
 ## 3. Typography
 
@@ -212,10 +280,18 @@ Glassmorphism is rare and earned. The only legitimate use is `backdrop-blur-sm` 
 
 ### Shadow Vocabulary
 
-**This section described shadows the codebase does not have.** There is no
-hue-matched shadow anywhere in `frontend/src` — `grep -rn 'shadow-\['` returns
-nothing, and no CTA, danger or sidebar-active glow was ever implemented. What
-actually ships:
+**This section used to claim the codebase had no shadows. It has 22.** The
+grep it rested on, `grep -rn 'shadow-\['`, only matches Tailwind's
+arbitrary-value bracket syntax and therefore missed every one of them, including
+the hue-matched `shadow-black/30` it specifically denied existed. Corrected
+count: 7 `shadow-xl`, 7 `shadow-lg`, 6 `shadow-sm`, 1 `shadow-black/30`, 1
+`shadow-none`. Six of those sit at rest on cards and buttons, which the
+Flat-By-Default Rule below forbids.
+
+They went unnoticed because Tailwind's shadows are black-alpha and nearly
+invisible on a near-black canvas. On the day theme they all appear at once. Treat
+that as the open question it is rather than a settled vocabulary. What was
+intended:
 
 - **Modal / drawer lift** — the only shadow in the system, separating a dialog
   from the dimmed page beneath it.
@@ -273,7 +349,7 @@ Two parallel conventions exist in the codebase; document both honestly.
 - **Style:** `bg-background border border-border rounded-md px-3 py-2 text-sm`. Sits one step deeper than the surface, so the eye reads "this is where you type".
 - **Label:** `text-xs font-medium text-foreground-muted uppercase tracking-wide` above the field. Required indicator is a single `*` in danger color.
 - **Association:** every label uses `for` with a stable input `id`; hint and error text are connected with `aria-describedby`, and errors set `aria-invalid`.
-- **Focus:** `focus:ring-1 focus:ring-white focus:border-white`. The ring is white, not primary — it's a "cursor's-here" marker, not an accent.
+- **Focus:** `focus:ring-1 focus:ring-focus-ring focus:border-focus-ring`. The ring is `--color-focus-ring`, not primary: it's a "cursor's-here" marker, not an accent. It was a literal `ring-white` on every input, which is invisible on a day-theme field, so the token exists to let the ring be near-white at night and near-black by day. Never reach for `ring-white` again; a test fails the build on it.
 - **Optional leading icon** (Lucide): `pl-9`, icon at `absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted`.
 - **Error:** error string in `text-xs text-danger` directly below the field.
 - **Hint:** otherwise `text-xs text-foreground-muted` directly below.
@@ -290,9 +366,11 @@ The codebase has two: `Badge.vue` (semantic-token-driven, canonical) and `Status
 ### Runtime Tags (`components/common/RuntimeTag.vue`)
 
 The only place a function's runtime is drawn. Renders the Python or Node mark at
-`w-3.5 h-3.5` in a desaturated identity tint (`--color-runtime-python`,
-`--color-runtime-node`), with the versioned label ("Python 3.14", "Node.js 24")
-carried in `title` and the accessible name. `withLabel` prints the label inline,
+`w-3.5 h-3.5` in the vendor's own colours (see Brand Marks), with the label
+beside it in a desaturated identity tint (`--color-runtime-python`,
+`--color-runtime-node`) so the word never competes with the mark. The versioned
+label ("Python 3.14", "Node.js 24") is carried in `title` and the accessible
+name. `withLabel` prints the label inline,
 for pickers where the operator is choosing rather than recognising. An
 unrecognised runtime prints its raw value rather than guessing a logo. See
 section 7 for when a mark may replace a word at all.
@@ -322,10 +400,24 @@ Retry. A list that does not know what it holds must say so.
 
 ### Brand Marks (`components/icons/brand/`)
 
-Single-path Simple Icons geometry, `fill="currentColor"`, `aria-hidden="true"`,
-with a comment naming the source and the nominative use. Never full-colour vendor
-logos: they are used to identify a runtime or an OAuth client, not to decorate,
-and a saturated logo next to a status pill reads as a state.
+Simple Icons geometry, `aria-hidden="true"`, with a comment naming the source and
+the nominative use.
+
+**Runtime marks carry their official colours. Every other vendor mark stays
+`currentColor`.**
+
+The two runtime marks are the exception because identification is the whole job,
+and for Python it does not survive monochrome. That mark is two interlocking
+snakes; strip the colour split and at `w-3.5` it is an unidentifiable blob. It
+shipped that way, tinted a flat `--color-runtime-python`, and it read as a smudge
+rather than a logo. Python is now `#3776AB` / `#FFD43B` across two paths, Node is
+`#5FA04E`. Both clear WCAG 1.4.11's 3:1 non-text floor on every surface they sit
+on; the tightest is Python's blue on `--color-surface-hover` at 3.10.
+
+Everything else, connector and OAuth-client marks included, stays
+`fill="currentColor"`. The original rule's reasoning still holds for those: a
+saturated logo next to a status pill reads as a state, and a connector list is a
+list of choices, not a set of things to tell apart at a glance.
 
 ### Brand Lockup (`components/layout/BrandLockup.vue`)
 
@@ -359,7 +451,7 @@ A side panel for inspector-style content (invocation request panel, activity row
 
 ### Do
 
-- **Do** keep page heads to one line above one body subhead, both standardised: `<h1 class="text-xl font-semibold text-white tracking-tight">` over `<p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">`. Every dashboard view follows this; do not invent variants.
+- **Do** keep page heads to one line above one body subhead, both standardised: `<h1 class="text-xl font-semibold text-foreground-strong tracking-tight">` over `<p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">`. Every dashboard view follows this; do not invent variants.
 - **Do** route every status colour through `Badge.vue`'s variant system (`success / warning / error / info`). Status pills owned by `success/20` tints, status borders by `success/30`. Anything else forks the palette.
 - **Do** use JetBrains Mono for any number or identifier the operator might want to compare against another. CPU cores, MB readings, latency, IDs, paths, ports, HTTP methods.
 - **Do** promote section captions inside cards to real `<h2>` / `<h3>` while keeping the `text-xs font-bold uppercase tracking-wider` styling. Visual identity intact, semantics restored.
@@ -381,7 +473,7 @@ PRODUCT.md names five anti-references. Each is below as a Don't.
 The rest of the Don'ts apply across every register:
 
 - **Don't** use em dashes in any user-facing string. Subheads, alerts, empty-state copy, toast messages: rewrite with periods, commas, colons, semicolons, or parentheses. Also no `--`. The templates are at zero and `responsive.test.js` now fails the build on a new one. Comments and copyable code samples keep theirs.
-- **Don't** reach for raw Tailwind palette colours (`bg-blue-500/70`, `text-emerald-300`, `bg-amber-500/15`, `text-sky-300`) as a substitute for status meaning. Ten remain, all in `SourceTag.vue`, and they are deliberate: the source pill is a seven-way categorical identity axis, not a status axis, so it does not belong in the success/warning/danger families. Everywhere else uses the semantic tokens. An alpha variant of a token belongs in `color-mix(in srgb, var(--color-…) N%, transparent)`, not a hand-written `rgba()`.
+- **Don't** reach for raw Tailwind palette colours (`bg-blue-500/70`, `text-emerald-300`, `bg-amber-500/15`, `text-sky-300`) as a substitute for status meaning. **Zero remain in components.** `SourceTag.vue` used to hold twelve (not the ten this line claimed) and `utils/connectorIcons.js` five more that went unmentioned; the SourceTag six are now `--color-source-*` tokens with a value in each theme, because every one of them was a `-300` foreground over a `-900` border, i.e. light-on-dark by construction and unable to follow a day theme. The categorical-axis reasoning still holds: a request over MCP is not "worse" than one over the web, so these stay outside the success/warning/danger families. It is now expressible in tokens rather than tolerated as an exception. An alpha variant of a token belongs in `color-mix(in srgb, var(--color-…) N%, transparent)`, not a hand-written `rgba()`.
 - **Don't** hex-code colours inside a Vue component's scoped CSS. One remains, `#282c34` in `FunctionDiff.vue`, and it is exempt: it is `@codemirror/theme-one-dark`'s own editor background, and the file imports that theme, so the two have to agree. Everything else maps to `var(--color-…)`. `Firewall.vue` is the reference for the intended mapping.
 - **Don't** use pure `#000` for surfaces or pure `#fff` for routine text. Use the graphite surface ladder and soft-gray foreground tokens; pure white is reserved for saturated action surfaces.
 - **Don't** use `backdrop-blur` decoratively. The three glassmorphic icon chips on Onboarding are the exact pattern PRODUCT.md's Vercel/Railway anti-reference rejects. Blur is reserved for "the page underneath is no longer interactive".

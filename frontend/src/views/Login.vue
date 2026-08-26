@@ -41,7 +41,7 @@
               type="text"
               required
               autocomplete="username"
-              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors"
+              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring transition-colors"
               placeholder="Enter your username"
               :disabled="loading"
             >
@@ -60,7 +60,7 @@
               type="password"
               required
               autocomplete="current-password"
-              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors"
+              class="w-full bg-background border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring transition-colors"
               placeholder="Enter your password"
               :disabled="loading"
             >

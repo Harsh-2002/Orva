@@ -13,7 +13,7 @@
     counter-shape at a glance, small enough to sit inside the 56 px bar with
     real breathing room above and below.
   -->
-  <div class="flex items-center gap-2.5 text-white font-mono">
+  <div class="flex items-center gap-2.5 text-foreground-strong font-mono">
     <OrvaLogo class="w-7 h-7 shrink-0" />
     <span class="font-bold tracking-tight text-base leading-none">Orva</span>
   </div>

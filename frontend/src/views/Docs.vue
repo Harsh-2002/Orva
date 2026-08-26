@@ -444,7 +444,7 @@
             the
             <router-link
               to="/cron"
-              class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
+              class="text-foreground hover:text-foreground-strong underline decoration-dotted underline-offset-4"
             >
               Schedules page
             </router-link>
@@ -489,7 +489,7 @@
             URLs from the
             <router-link
               to="/webhooks"
-              class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
+              class="text-foreground hover:text-foreground-strong underline decoration-dotted underline-offset-4"
             >
               Webhooks page
             </router-link>; Orva delivers signed POSTs to
@@ -1093,7 +1093,7 @@
         for <code class="doc-chip">endpoint</code> + <code class="doc-chip">api_key</code>.
         Generate a key from <router-link
           to="/api-keys"
-          class="text-foreground hover:text-white underline decoration-dotted underline-offset-4"
+          class="text-foreground hover:text-foreground-strong underline decoration-dotted underline-offset-4"
         >
           Keys
         </router-link> in the dashboard, then:

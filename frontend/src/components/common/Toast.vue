@@ -17,7 +17,7 @@
         <div class="flex-1 min-w-0">
           <div
             v-if="title"
-            class="text-sm font-medium text-white mb-0.5"
+            class="text-sm font-medium text-foreground-strong mb-0.5"
           >
             {{ title }}
           </div>

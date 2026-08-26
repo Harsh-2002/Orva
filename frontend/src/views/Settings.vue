@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-8">
     <div>
-      <h1 class="text-xl font-semibold text-white tracking-tight">
+      <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
         Settings
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -14,7 +14,7 @@
          Sourced from /api/v1/system/health (one-shot at page mount;
          these values don't change while the binary is running). -->
     <details class="group border-b border-border pb-6">
-      <summary class="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+      <summary class="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
         <Info class="w-4 h-4 text-foreground-muted" />
         Build info
         <span class="ml-auto text-xs font-normal text-foreground-muted group-open:hidden">{{ buildInfo?.version || EMPTY }}</span>
@@ -23,35 +23,35 @@
         <dt class="text-foreground-muted">
           Version
         </dt>
-        <dd class="font-mono text-white">
+        <dd class="font-mono text-foreground-strong">
           {{ buildInfo?.version || EMPTY }}
         </dd>
 
         <dt class="text-foreground-muted">
           Commit
         </dt>
-        <dd class="font-mono text-white">
+        <dd class="font-mono text-foreground-strong">
           {{ buildInfo?.commit && buildInfo.commit !== 'unknown' ? buildInfo.commit : 'dev build' }}
         </dd>
 
         <dt class="text-foreground-muted">
           Built
         </dt>
-        <dd class="font-mono text-white">
+        <dd class="font-mono text-foreground-strong">
           {{ formatBuildTime(buildInfo?.buildTime) }}
         </dd>
 
         <dt class="text-foreground-muted">
           Image
         </dt>
-        <dd class="font-mono text-white flex items-center gap-2 min-w-0">
+        <dd class="font-mono text-foreground-strong flex items-center gap-2 min-w-0">
           <span class="truncate">{{ buildInfo?.image || EMPTY }}</span>
           <!-- p-1 around a 13px icon lands at 21x21 on a phone. touch-expand-*
                grows the real box on coarse pointers only; a button centres its
                own content, so the glyph stays put. -->
           <button
             v-if="buildInfo?.image"
-            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-white transition-colors shrink-0 touch-expand-iconbtn"
+            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors shrink-0 touch-expand-iconbtn"
             title="Copy image reference"
             aria-label="Copy image reference"
             @click="copyImage"
@@ -66,6 +66,53 @@
       </dl>
     </details>
 
+    <!-- Appearance card. Theme is the operator's choice and follows the OS by
+         default. Placed first among the configurable cards because it is the
+         one setting that changes every other screen. -->
+    <section class="space-y-4 border-b border-border pb-8">
+      <div>
+        <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
+          <Sun class="w-4 h-4 text-foreground-muted" />
+          Appearance
+        </h2>
+        <p class="text-xs text-foreground-muted leading-snug mt-1.5 max-w-prose">
+          Follows your system by default. The code editor stays dark in both themes.
+        </p>
+      </div>
+
+      <fieldset>
+        <legend class="sr-only">
+          Theme
+        </legend>
+        <div
+          class="inline-flex rounded-md border border-border bg-background p-1 gap-1"
+          role="radiogroup"
+          aria-label="Theme"
+        >
+          <button
+            v-for="opt in THEME_OPTIONS"
+            :key="String(opt.value)"
+            type="button"
+            role="radio"
+            :aria-checked="themePref === opt.value"
+            :tabindex="themePref === opt.value ? 0 : -1"
+            class="touch-expand-sm inline-flex items-center gap-1.5 rounded px-3 h-8 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            :class="themePref === opt.value
+              ? 'bg-surface-hover text-foreground-strong'
+              : 'text-foreground-muted hover:text-foreground hover:bg-surface-hover'"
+            @click="setTheme(opt.value)"
+            @keydown="onThemeKey($event, opt.value)"
+          >
+            <component
+              :is="opt.icon"
+              class="w-3.5 h-3.5 shrink-0"
+            />
+            {{ opt.label }}
+          </button>
+        </div>
+      </fieldset>
+    </section>
+
     <!-- AI assistant card. Centralized configuration for the in-product AI
          chat: BYO providers + encrypted keys + base URL, and the assistant's
          defaults (approval policy, tool steps). Provider/model selection is
@@ -76,7 +123,7 @@
       class="scroll-mt-6 space-y-4 border-b border-border pb-8"
     >
       <div>
-        <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+        <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
           <MessagesSquare class="w-4 h-4 text-foreground-muted" />
           AI assistant
         </h2>
@@ -90,7 +137,7 @@
     <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <HardDrive class="w-4 h-4 text-foreground-muted" />
             Storage
           </h2>
@@ -167,14 +214,14 @@
               <span class="w-2 h-2 rounded-sm bg-info" />
               orva.db
             </span>
-            <span class="font-mono text-white">{{ formatBytes(storage.db_bytes) }}</span>
+            <span class="font-mono text-foreground-strong">{{ formatBytes(storage.db_bytes) }}</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="flex items-center gap-2 text-foreground-muted">
               <span class="w-2 h-2 rounded-sm bg-success" />
               functions/
             </span>
-            <span class="font-mono text-white">{{ formatBytes(storage.functions_bytes) }}</span>
+            <span class="font-mono text-foreground-strong">{{ formatBytes(storage.functions_bytes) }}</span>
           </div>
           <div
             v-if="storage.wal_bytes > 0"
@@ -184,11 +231,11 @@
               <span class="w-2 h-2 rounded-sm bg-warning" />
               orva.db-wal
             </span>
-            <span class="font-mono text-white">{{ formatBytes(storage.wal_bytes) }}</span>
+            <span class="font-mono text-foreground-strong">{{ formatBytes(storage.wal_bytes) }}</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-foreground-muted">total</span>
-            <span class="font-mono text-white font-semibold">{{ formatBytes(storage.total_bytes) }}</span>
+            <span class="font-mono text-foreground-strong font-semibold">{{ formatBytes(storage.total_bytes) }}</span>
           </div>
         </div>
 
@@ -230,7 +277,7 @@
     <!-- Account card — change password + logout. -->
     <section class="space-y-4 border-b border-border pb-8">
       <div>
-        <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+        <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
           <KeyRound class="w-4 h-4 text-foreground-muted" />
           Account
         </h2>
@@ -258,7 +305,7 @@
               type="password"
               autocomplete="current-password"
               aria-describedby="pw-error"
-              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
           </div>
@@ -273,7 +320,7 @@
               type="password"
               autocomplete="new-password"
               aria-describedby="pw-error"
-              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
           </div>
@@ -288,7 +335,7 @@
               type="password"
               autocomplete="new-password"
               aria-describedby="pw-error"
-              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-white placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
           </div>
@@ -342,7 +389,7 @@
     <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <Plug class="w-4 h-4 text-foreground-muted" />
             Connected applications
           </h2>
@@ -412,7 +459,7 @@
             :class="iconForClient(app.client_name).accent"
           />
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-medium text-white truncate">
+            <div class="text-sm font-medium text-foreground-strong truncate">
               {{ app.client_name }}
             </div>
             <div class="text-xs text-foreground-muted mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -469,7 +516,7 @@
     <section class="space-y-4 border-b border-border pb-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <Monitor class="w-4 h-4 text-foreground-muted" />
             Active sessions
           </h2>
@@ -512,7 +559,7 @@
             :class="s.current ? 'text-success-fg' : 'text-foreground-muted'"
           />
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-medium text-white flex items-center gap-2 flex-wrap">
+            <div class="text-sm font-medium text-foreground-strong flex items-center gap-2 flex-wrap">
               <span v-if="s.current">This session</span>
               <span
                 v-else
@@ -548,7 +595,7 @@
     <section class="space-y-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 class="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <DatabaseBackup class="w-4 h-4 text-foreground-muted" />
             Backup &amp; Restore
           </h2>
@@ -639,6 +686,8 @@ import {
   Info,
   Copy,
   MessagesSquare,
+  Sun,
+  Moon,
 } from '@lucide/vue'
 import AISettingsPanel from '@/components/ai/AISettingsPanel.vue'
 import Button from '@/components/common/Button.vue'
@@ -658,11 +707,36 @@ import {
 } from '@/api/endpoints'
 import { formatRelative } from '@/utils/time'
 import { iconForClient } from '@/utils/connectorIcons'
+import { useTheme } from '@/composables/useTheme'
 
 const confirmStore = useConfirmStore()
 const auth = useAuthStore()
 const router = useRouter()
 const systemStore = useSystemStore()
+
+// Theme. `null` follows the OS; 'day' / 'night' override it. Monitor is already
+// imported for the sessions card, so the System option reuses that mark rather
+// than introducing a second glyph for "your computer".
+const { pref: themePref, setTheme } = useTheme()
+const THEME_OPTIONS = [
+  { value: null, label: 'System', icon: Monitor },
+  { value: 'day', label: 'Day', icon: Sun },
+  { value: 'night', label: 'Night', icon: Moon },
+]
+
+// Arrow keys move between radios, which is what a radiogroup owes a keyboard
+// user: Tab enters the group once and lands on the checked option.
+function onThemeKey(event, value) {
+  const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp']
+  if (!keys.includes(event.key)) return
+  event.preventDefault()
+  const i = THEME_OPTIONS.findIndex((o) => o.value === value)
+  const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+  const next = THEME_OPTIONS[(i + step + THEME_OPTIONS.length) % THEME_OPTIONS.length]
+  setTheme(next.value)
+  const group = event.currentTarget.parentElement
+  group?.children[THEME_OPTIONS.indexOf(next)]?.focus()
+}
 
 // Build info card — sourced from /api/v1/system/health via the system
 // store's seed(). The store may or may not have run by the time this

@@ -2,7 +2,7 @@
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Invocations
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -27,12 +27,12 @@
          as removable pills next to the chips. -->
     <div class="flex items-center gap-2 flex-wrap">
       <div class="relative flex-1 min-w-0 sm:min-w-[280px] max-w-full sm:max-w-[440px]">
-        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
+        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
         <input
           v-model="filters.q"
           placeholder="Search errors, container ids…"
           aria-label="Search invocations by error or container id"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           @input="onSearchInput"
         >
       </div>
@@ -53,7 +53,7 @@
       <select
         v-model="filters.fnId"
         aria-label="Filter by function"
-        class="bg-background border border-border rounded-md pl-2.5 pr-2 py-1.5 text-xs text-foreground-muted hover:text-white focus:outline-none focus:border-white max-w-[180px]"
+        class="bg-background border border-border rounded-md pl-2.5 pr-2 py-1.5 text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus:border-focus-ring max-w-[180px]"
         @change="onFilterChange"
       >
         <option value="">
@@ -70,7 +70,7 @@
 
       <button
         v-if="hasActiveFilter"
-        class="touch-expand-xs text-xs text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
+        class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong px-2 py-1.5 transition-colors"
         @click="clearFilters"
       >
         Clear
@@ -142,7 +142,7 @@
                 @click="openDetail(log)"
               >
                 <div class="flex items-center justify-between gap-2">
-                  <span class="font-medium text-white truncate">{{ getFnName(log.function_id) }}</span>
+                  <span class="font-medium text-foreground-strong truncate">{{ getFnName(log.function_id) }}</span>
                   <StatusBadge :status="log.status" />
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
@@ -167,7 +167,7 @@
               <button
                 v-if="log.trace_id"
                 type="button"
-                class="touch-expand-xs mt-1 inline-flex items-center gap-1 py-1 text-[11px] text-foreground-muted hover:text-white font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-xs mt-1 inline-flex items-center gap-1 py-1 text-[11px] text-foreground-muted hover:text-foreground-strong font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :title="log.trace_id"
                 @click="openTrace(log.trace_id)"
               >
@@ -261,7 +261,7 @@
               <button
                 v-if="log.trace_id"
                 type="button"
-                class="touch-expand-xs lg:hidden mt-1 flex items-center gap-1 text-xs text-foreground-muted hover:text-white font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-xs lg:hidden mt-1 flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground-strong font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :title="log.trace_id"
                 @click.stop="openTrace(log.trace_id)"
               >
@@ -269,7 +269,7 @@
                 {{ log.trace_id.substring(0, 11) }}
               </button>
             </td>
-            <td class="px-6 py-4 font-medium text-white">
+            <td class="px-6 py-4 font-medium text-foreground-strong">
               <button
                 type="button"
                 class="touch-expand-sm text-left hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -303,7 +303,7 @@
             <td class="px-6 py-4 hidden lg:table-cell">
               <button
                 v-if="log.trace_id"
-                class="text-foreground-muted hover:text-white font-mono text-xs underline-offset-2 hover:underline inline-flex items-center gap-1"
+                class="text-foreground-muted hover:text-foreground-strong font-mono text-xs underline-offset-2 hover:underline inline-flex items-center gap-1"
                 :title="log.trace_id"
                 @click.stop="openTrace(log.trace_id)"
               >
@@ -334,7 +334,7 @@
         class="flex justify-center border-t border-border py-3 bg-surface/30"
       >
         <button
-          class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
+          class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5"
           :disabled="loading"
           @click="loadMore"
         >
@@ -356,10 +356,10 @@
         v-if="selected.size"
         class="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-lg rounded-full pl-4 pr-2 py-2"
       >
-        <span class="text-xs text-white">{{ selected.size }} selected</span>
+        <span class="text-xs text-foreground-strong">{{ selected.size }} selected</span>
         <span class="w-px h-4 bg-border" />
         <button
-          class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors px-2 py-1"
+          class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong transition-colors px-2 py-1"
           @click="selected = new Set()"
         >
           Clear
@@ -436,7 +436,7 @@
           <!-- v0.4 A3 — small breadcrumb if this row is itself a replay. -->
           <span
             v-if="drawerRow.replay_of"
-            class="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs border bg-background font-mono text-foreground-muted hover:text-white cursor-pointer"
+            class="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs border bg-background font-mono text-foreground-muted hover:text-foreground-strong cursor-pointer"
             title="Open the original execution"
             @click="openDetail({ id: drawerRow.replay_of, function_id: drawerRow.function_id, status: 'success', started_at: drawerRow.started_at })"
           >
@@ -492,7 +492,7 @@
           </h3>
           <div class="bg-surface border border-border rounded p-3 space-y-3">
             <div class="flex items-center gap-2 font-mono text-xs">
-              <span class="px-2 py-0.5 rounded bg-background text-white border border-border">{{ requestData.method }}</span>
+              <span class="px-2 py-0.5 rounded bg-background text-foreground-strong border border-border">{{ requestData.method }}</span>
               <span class="text-foreground-muted truncate">{{ requestData.path }}</span>
             </div>
             <div v-if="requestData.headers && Object.keys(requestData.headers).length">
@@ -531,7 +531,7 @@
             <div class="pt-1 flex justify-end">
               <button
                 type="button"
-                class="touch-expand-xs text-[11px] text-foreground-muted hover:text-white px-2 py-1 rounded hover:bg-surface-hover transition-colors"
+                class="touch-expand-xs text-[11px] text-foreground-muted hover:text-foreground-strong px-2 py-1 rounded hover:bg-surface-hover transition-colors"
                 title="Open the editor with this request prefilled"
                 @click="saveAsFixture"
               >
@@ -563,7 +563,7 @@
               >
                 {{ entry.level }}
               </span>
-              <span class="text-white truncate">{{ entry.message }}</span>
+              <span class="text-foreground-strong truncate">{{ entry.message }}</span>
               <code
                 v-if="entry.fields"
                 class="text-[10px] text-foreground-muted truncate"
@@ -578,11 +578,11 @@
         <div>
           <div class="flex items-center justify-between mb-2">
             <h3 class="text-xs uppercase tracking-wider text-foreground-muted">
-              Stderr <span class="text-[10px] normal-case text-foreground-muted/70">(stdout is the response body, not stored)</span>
+              Stderr <span class="text-[10px] normal-case text-foreground-muted">(stdout is the response body, not stored)</span>
             </h3>
             <button
               v-if="stderrText"
-              class="touch-expand-xs text-xs text-foreground-muted hover:text-white"
+              class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong"
               @click="copy(stderrText)"
             >
               {{ copied ? 'copied!' : 'copy' }}
@@ -824,7 +824,7 @@ const Stat = {
     return () =>
       h('div', { class: 'bg-surface border border-border rounded p-3' }, [
         h('div', { class: 'text-[10px] uppercase tracking-wider text-foreground-muted mb-1' }, p.label),
-        h('div', { class: ['text-sm text-white', p.mono && 'font-mono text-xs'] },
+        h('div', { class: ['text-sm text-foreground-strong', p.mono && 'font-mono text-xs'] },
           p.value == null ? '' : String(p.value)),
       ])
   },
@@ -883,7 +883,7 @@ const FilterChip = defineComponent({
             'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
             active.value
               ? 'bg-primary text-primary-foreground border-primary'
-              : 'bg-surface text-foreground-muted border-border hover:text-white hover:border-foreground-muted',
+              : 'bg-surface text-foreground-muted border-border hover:text-foreground-strong hover:border-foreground-muted',
           ],
           onClick: () => { open.value = !open.value },
         }, [
@@ -913,8 +913,8 @@ const FilterChip = defineComponent({
                   type: 'button',
                   class: [
                     'w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 transition-colors touch-expand-sm',
-                    'focus:outline-none focus-visible:bg-surface-hover focus-visible:text-white',
-                    o.value === p.modelValue ? 'text-white' : 'text-foreground-muted hover:text-white hover:bg-surface-hover',
+                    'focus:outline-none focus-visible:bg-surface-hover focus-visible:text-foreground-strong',
+                    o.value === p.modelValue ? 'text-foreground-strong' : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover',
                   ],
                   onClick: () => choose(o.value),
                 }, [

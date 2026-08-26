@@ -3,7 +3,7 @@
     <!-- Page header — matches Functions / Schedules style. -->
     <div class="flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Jobs
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -71,7 +71,7 @@
           <label class="text-xs uppercase tracking-wider text-foreground-muted">Function</label>
           <select
             v-model="enqueue.fnId"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
           >
             <option
               v-for="f in functions"
@@ -88,7 +88,7 @@
             v-model="enqueue.payload"
             rows="6"
             spellcheck="false"
-            class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-foreground-strong font-mono focus:outline-none focus:border-focus-ring"
             placeholder="{&quot;hello&quot;:&quot;world&quot;}"
           />
         </div>
@@ -109,7 +109,7 @@
           <input
             v-model="enqueue.scheduledAt"
             type="datetime-local"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
           >
         </div>
         <div
@@ -161,7 +161,7 @@
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
-              <div class="font-medium text-white truncate">
+              <div class="font-medium text-foreground-strong truncate">
                 {{ job.function_name || job.function_id }}
               </div>
               <div class="text-[10px] text-foreground-muted font-mono break-all">
@@ -267,7 +267,7 @@
             :key="job.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-6 py-4 font-medium text-white">
+            <td class="px-6 py-4 font-medium text-foreground-strong">
               <div class="flex flex-col">
                 <span>{{ job.function_name || job.function_id }}</span>
                 <span class="text-[10px] text-foreground-muted font-mono">{{ job.id }}</span>

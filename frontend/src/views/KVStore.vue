@@ -3,14 +3,14 @@
     <!-- Header: function context + count/size badge + + Set key CTA -->
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div class="min-w-0">
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           KV Store
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           JSON state for
           <router-link
             :to="`/functions/${fnName}`"
-            class="text-white underline"
+            class="text-foreground-strong underline"
           >
             {{ fnName }}
           </router-link>
@@ -48,18 +48,18 @@
          the actual operator workflow. -->
     <div class="flex items-center gap-2 flex-wrap">
       <div class="relative flex-1 min-w-[260px] max-w-[420px]">
-        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
+        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
         <input
           v-model="prefix"
           aria-label="Search keys by prefix"
           placeholder="Search by key prefix… (e.g. user:)"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           @input="onPrefixInput"
         >
       </div>
       <button
         v-if="prefix"
-        class="text-xs text-foreground-muted hover:text-white px-2 py-1.5 transition-colors"
+        class="text-xs text-foreground-muted hover:text-foreground-strong px-2 py-1.5 transition-colors"
         @click="prefix = ''; refresh()"
       >
         Clear
@@ -107,7 +107,7 @@
               :aria-label="inspectLabel(row)"
               @click="openInspect(row)"
             >
-              <div class="font-mono text-xs text-white break-all">
+              <div class="font-mono text-xs text-foreground-strong break-all">
                 {{ row.key }}
               </div>
               <div class="mt-1 font-mono text-xs text-foreground-muted break-all">
@@ -180,7 +180,7 @@
                    cell looks exactly as it did. -->
               <button
                 type="button"
-                class="touch-expand-sm block w-full truncate text-left font-mono text-xs text-white rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm block w-full truncate text-left font-mono text-xs text-foreground-strong rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :aria-label="inspectLabel(row)"
                 @click.stop="openInspect(row)"
               >
@@ -259,7 +259,7 @@
             <div class="text-xs uppercase tracking-wider text-foreground-muted mb-1">
               Key
             </div>
-            <div class="text-xs text-white font-mono break-all">
+            <div class="text-xs text-foreground-strong font-mono break-all">
               {{ inspect.row.key }}
             </div>
           </div>
@@ -268,7 +268,7 @@
               TTL
             </div>
             <div
-              class="text-xs text-white font-mono"
+              class="text-xs text-foreground-strong font-mono"
               :class="ttlClass(inspect.row.expires_at)"
             >
               {{ inspect.row.expires_at ? formatTTL(inspect.row.expires_at) : 'Never' }}
@@ -278,7 +278,7 @@
             <div class="text-xs uppercase tracking-wider text-foreground-muted mb-1">
               Updated
             </div>
-            <div class="text-xs text-white font-mono truncate">
+            <div class="text-xs text-foreground-strong font-mono truncate">
               {{ formatFullTime(inspect.row.updated_at) }}
             </div>
           </div>
@@ -286,7 +286,7 @@
             <div class="text-xs uppercase tracking-wider text-foreground-muted mb-1">
               Size
             </div>
-            <div class="text-xs text-white font-mono">
+            <div class="text-xs text-foreground-strong font-mono">
               {{ formatBytes(inspect.row.size_bytes) }}
             </div>
           </div>
@@ -307,7 +307,7 @@
             type="number"
             min="0"
             max="31536000"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong font-mono focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             @input="inspect.ttlTouched = true"
           >
           <p
@@ -335,7 +335,7 @@
             v-model="inspect.text"
             rows="14"
             spellcheck="false"
-            class="w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono leading-relaxed focus:outline-none focus:border-white whitespace-pre overflow-x-auto"
+            class="w-full bg-surface border border-border rounded p-3 text-xs text-foreground-strong font-mono leading-relaxed focus:outline-none focus:border-focus-ring whitespace-pre overflow-x-auto"
           />
         </div>
       </div>
@@ -388,7 +388,7 @@
             id="kv-set-key"
             v-model="setKey.key"
             placeholder="e.g. user:42"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong font-mono focus:outline-none focus:border-focus-ring"
             spellcheck="false"
           >
         </div>
@@ -405,7 +405,7 @@
             type="number"
             min="0"
             max="31536000"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong font-mono focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             @input="setKey.ttlTouched = true"
           >
           <p
@@ -432,7 +432,7 @@
             rows="14"
             spellcheck="false"
             placeholder="{&quot;hello&quot;: &quot;world&quot;}"
-            class="w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono leading-relaxed focus:outline-none focus:border-white whitespace-pre overflow-x-auto"
+            class="w-full bg-surface border border-border rounded p-3 text-xs text-foreground-strong font-mono leading-relaxed focus:outline-none focus:border-focus-ring whitespace-pre overflow-x-auto"
           />
         </div>
       </div>

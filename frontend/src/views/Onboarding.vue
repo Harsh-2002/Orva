@@ -8,9 +8,9 @@
       <div class="space-y-3">
         <div class="flex items-center gap-3">
           <OrvaLogo class="w-9 h-9" />
-          <span class="text-2xl font-semibold tracking-tight text-white">Orva</span>
+          <span class="text-2xl font-semibold tracking-tight text-foreground-strong">Orva</span>
         </div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Set up admin access
         </h1>
         <p class="text-sm text-foreground-muted leading-relaxed">
@@ -36,7 +36,7 @@
             type="text"
             required
             autocomplete="username"
-            class="w-full bg-background border border-border rounded-md px-3 py-2.5 text-base sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors"
+            class="w-full bg-background border border-border rounded-md px-3 py-2.5 text-base sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring transition-colors"
             placeholder="orva"
             :disabled="loading"
           >
@@ -56,7 +56,7 @@
                 required
                 autocomplete="new-password"
                 aria-describedby="onboard-password-requirements"
-                class="w-full bg-background border border-border rounded-md px-3 py-2.5 pr-20 text-base sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors font-mono"
+                class="w-full bg-background border border-border rounded-md px-3 py-2.5 pr-20 text-base sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring transition-colors font-mono"
                 placeholder="Minimum 10 characters"
                 :disabled="loading"
               >

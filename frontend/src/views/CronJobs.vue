@@ -2,7 +2,7 @@
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Scheduled Jobs
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -59,7 +59,7 @@
               </div>
               <div class="mt-0.5 text-[11px] text-foreground-muted">
                 {{ humanizeCron(job.cron_expression) }}
-                <span class="text-foreground-muted/70">· {{ job.timezone || 'UTC' }}</span>
+                <span class="text-foreground-muted">· {{ job.timezone || 'UTC' }}</span>
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
                 <span>last {{ job.last_run_at ? formatDate(job.last_run_at) : EMPTY }}</span>
@@ -148,7 +148,7 @@
                 <span class="text-foreground font-mono text-xs break-all">{{ job.cron_expression }}</span>
                 <span class="text-foreground-muted text-[10px]">
                   {{ humanizeCron(job.cron_expression) }}
-                  <span class="text-foreground-muted/70">· {{ job.timezone || 'UTC' }}</span>
+                  <span class="text-foreground-muted">· {{ job.timezone || 'UTC' }}</span>
                 </span>
               </div>
             </td>
@@ -226,7 +226,7 @@
           <select
             id="cron-function"
             v-model="form.function_name"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             :disabled="!!editingJob"
           >
             <option value="">
@@ -280,7 +280,7 @@
               <select
                 id="cron-frequency"
                 v-model="simpleSchedule.frequency"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
                 @change="updateCronFromSimple"
               >
                 <option value="minute">
@@ -312,7 +312,7 @@
                 type="number"
                 min="0"
                 max="59"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
                 @input="updateCronFromSimple"
               >
             </div>
@@ -328,7 +328,7 @@
                 type="number"
                 min="0"
                 max="23"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
                 @input="updateCronFromSimple"
               >
             </div>
@@ -341,7 +341,7 @@
               <select
                 id="cron-day-of-week"
                 v-model="simpleSchedule.dayOfWeek"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
                 @change="updateCronFromSimple"
               >
                 <option value="0">
@@ -379,7 +379,7 @@
                 type="number"
                 min="1"
                 max="31"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
                 @input="updateCronFromSimple"
               >
             </div>
@@ -413,7 +413,7 @@
               v-model="form.cron"
               placeholder="* * * * *"
               aria-describedby="cron-expression-hint"
-              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+              class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             >
             <p
               id="cron-expression-hint"
@@ -445,7 +445,7 @@
             id="cron-timezone"
             v-model="form.timezone"
             aria-describedby="cron-timezone-hint"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
             <option
               v-for="tz in timezoneOptions"

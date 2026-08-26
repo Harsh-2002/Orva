@@ -15,7 +15,33 @@ before it.
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- **The dashboard has a day theme, and the theme is now your choice.** It
+  follows your operating system by default and remembers an explicit choice per
+  browser; the control is in Settings, under Appearance. Both palettes are warm
+  neutrals at the same hue, so switching changes the lightness of the interface
+  and nothing else about its temperature. The code editor stays dark in both,
+  the way a terminal does, and sits on a mat in day so it reads as an instrument
+  rather than a hole in the page.
+
+  Nothing to do on upgrade. An instance that has never had a theme chosen
+  follows the operating system, which for most operators means it looks exactly
+  as it did.
+
+### Fixed
+
+- **Placeholder text is legible again.** In nine views the placeholder was the
+  muted text token faded further with alpha, which put it at 3.09:1 against the
+  field at its worst, under the 4.5:1 floor. It is the token's own value now:
+  8.49:1 at night, 5.79:1 by day. This one was real before the day theme
+  existed, on every Orva ever shipped.
+
+A known deviation that is **not** fixed and is not new: form-control borders are
+1.70:1 against the night canvas and 1.89:1 against the day one, both under WCAG
+1.4.11's 3:1 floor for a component boundary. Raising that token redraws the grid
+of the whole interface, so it is a design decision to take deliberately rather
+than a contrast patch to slip into a release.
 
 ## v2026.08.26
 

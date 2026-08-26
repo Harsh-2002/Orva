@@ -48,7 +48,7 @@
           :key="lv.v"
           type="button"
           class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:bg-surface-hover"
-          :class="store.thinking === lv.v ? 'text-white bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
+          :class="store.thinking === lv.v ? 'text-foreground-strong bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
           role="menuitemradio"
           :aria-checked="store.thinking === lv.v"
           @click="pick(lv.v, close)"

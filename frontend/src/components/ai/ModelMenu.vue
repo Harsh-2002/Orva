@@ -16,8 +16,8 @@
         type="button"
         class="inline-flex items-center gap-1.5 transition-colors focus-visible:outline-none"
         :class="wide
-          ? 'h-10 w-full justify-between rounded-md border border-border bg-background px-3 text-sm text-foreground hover:bg-surface-hover focus-visible:border-white focus-visible:ring-1 focus-visible:ring-white'
-          : 'touch-expand-sm h-8 max-w-[180px] rounded-lg px-2.5 text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface'"
+          ? 'h-10 w-full justify-between rounded-md border border-border bg-background px-3 text-sm text-foreground hover:bg-surface-hover focus-visible:border-focus-ring focus-visible:ring-1 focus-visible:ring-focus-ring'
+          : 'touch-expand-sm h-8 max-w-[min(24rem,48vw)] rounded-lg px-2.5 text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface'"
         :title="store.selectedModel || 'Select model'"
         aria-label="Select model"
         aria-haspopup="menu"
@@ -25,7 +25,10 @@
         @click="onToggle(open, toggle)"
       >
         <Cpu class="w-3.5 h-3.5 shrink-0" />
-        <span class="truncate font-mono">{{ store.selectedModel || 'No model' }}</span>
+        <!-- flex-1 + text-left, or the wide variant's justify-between leaves the
+             label floating in the middle of the field while the compact variant
+             left-aligns it. Same component, two different reading positions. -->
+        <span class="min-w-0 flex-1 truncate text-left font-mono">{{ store.selectedModel || 'No model' }}</span>
         <ChevronDown class="w-3 h-3 shrink-0 opacity-70" />
       </button>
     </template>
@@ -46,7 +49,7 @@
             :key="p.id"
             type="button"
             class="flex w-full items-center gap-2.5 px-3 py-1.5 touch-expand-sm text-left text-sm transition-colors focus-visible:outline-none focus-visible:bg-surface-hover"
-            :class="store.selectedProviderId === p.id ? 'text-white bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
+            :class="store.selectedProviderId === p.id ? 'text-foreground-strong bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
             role="menuitemradio"
             :aria-checked="store.selectedProviderId === p.id"
             @click="store.selectProvider(p.id)"
@@ -84,7 +87,7 @@
               type="text"
               aria-label="Search models"
               placeholder="Search models…"
-              class="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-2.5 text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:border-white focus:outline-none focus:ring-1 focus:ring-white"
+              class="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-2.5 text-sm text-foreground placeholder-foreground-muted transition-colors duration-200 focus:border-focus-ring focus:outline-none focus:ring-1 focus:ring-focus-ring"
             >
           </div>
         </div>
@@ -119,7 +122,7 @@
               type="text"
               aria-label="Model id"
               placeholder="e.g. claude-sonnet-5"
-              class="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-sm text-foreground placeholder-foreground-muted/50 focus:border-white focus:outline-none"
+              class="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-sm text-foreground placeholder-foreground-muted focus:border-focus-ring focus:outline-none"
             >
             <button
               type="submit"
@@ -142,11 +145,15 @@
           :key="m.id"
           type="button"
           class="flex w-full items-center gap-2.5 px-3 py-1.5 touch-expand-sm text-left text-sm font-mono transition-colors focus-visible:outline-none focus-visible:bg-surface-hover"
-          :class="store.selectedModel === m.id ? 'text-white bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
+          :class="store.selectedModel === m.id ? 'text-foreground-strong bg-primary/15' : 'text-foreground hover:bg-surface-hover'"
           role="menuitemradio"
           :aria-checked="store.selectedModel === m.id"
+          :title="m.id"
           @click="pick(m.id, close)"
         >
+          <!-- title as well as truncate: the panel is wide enough for every id
+               this provider currently reports, but provider catalogues grow and
+               a truncated id is not one an operator can act on. -->
           <span class="flex-1 truncate">{{ m.id }}</span>
           <Check
             v-if="store.selectedModel === m.id"

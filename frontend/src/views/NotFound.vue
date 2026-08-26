@@ -22,7 +22,7 @@
 
       <div class="flex flex-wrap gap-3">
         <button
-          class="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-white text-black text-sm font-medium hover:bg-white/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-foreground-strong text-background text-sm font-medium hover:bg-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           @click="goHome"
         >
           <ArrowLeft class="w-4 h-4" />

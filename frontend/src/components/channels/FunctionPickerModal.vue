@@ -3,7 +3,7 @@
        chrome as Settings's confirm modal so the dashboard feels
        coherent regardless of which page launched a modal. -->
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim backdrop-blur-sm"
     @click.self="$emit('close')"
   >
     <div class="w-full max-w-2xl bg-background border border-border rounded-lg shadow-lg flex flex-col max-h-[80vh]">
@@ -12,7 +12,7 @@
            get surprised by tool names. -->
       <div class="px-5 py-4 border-b border-border flex items-start justify-between gap-3">
         <div>
-          <div class="text-sm font-semibold text-white">
+          <div class="text-sm font-semibold text-foreground-strong">
             Pick functions
           </div>
           <div class="text-xs text-foreground-muted mt-0.5 max-w-prose leading-relaxed">
@@ -20,7 +20,7 @@
           </div>
         </div>
         <button
-          class="text-foreground-muted hover:text-white transition-colors"
+          class="text-foreground-muted hover:text-foreground-strong transition-colors"
           title="Dismiss"
           aria-label="Close function picker"
           @click="$emit('close')"
@@ -83,7 +83,7 @@
               @click.stop="toggle(fn.id)"
             >
             <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium text-white truncate">
+              <div class="text-sm font-medium text-foreground-strong truncate">
                 {{ fn.name }}
               </div>
               <div

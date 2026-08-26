@@ -12,7 +12,7 @@
     than a sentence about it could.
   -->
   <div class="text-center">
-    <h2 class="text-lg font-semibold tracking-tight text-white">
+    <h2 class="text-lg font-semibold tracking-tight text-foreground-strong">
       {{ greeting }}
     </h2>
 

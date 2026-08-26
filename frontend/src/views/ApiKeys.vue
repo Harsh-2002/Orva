@@ -2,7 +2,7 @@
   <div class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           API Keys
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -32,7 +32,7 @@
           </div>
         </div>
         <button
-          class="inline-flex items-center justify-center shrink-0 rounded text-foreground-muted hover:text-white transition-colors touch-expand-iconbtn"
+          class="inline-flex items-center justify-center shrink-0 rounded text-foreground-muted hover:text-foreground-strong transition-colors touch-expand-iconbtn"
           title="Dismiss"
           aria-label="Dismiss API key"
           @click="createdKey = ''"
@@ -41,9 +41,9 @@
         </button>
       </div>
       <div class="flex items-center gap-2">
-        <code class="flex-1 font-mono text-sm text-white break-all bg-surface px-3 py-2 rounded border border-border">{{ createdKey }}</code>
+        <code class="flex-1 font-mono text-sm text-foreground-strong break-all bg-surface px-3 py-2 rounded border border-border">{{ createdKey }}</code>
         <button
-          class="shrink-0 px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5 text-xs touch-expand-sm"
+          class="shrink-0 px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5 text-xs touch-expand-sm"
           @click="copyCreated"
         >
           <Check
@@ -64,7 +64,7 @@
       v-if="creating"
       class="bg-background border border-border rounded-lg p-5 space-y-4"
     >
-      <div class="text-sm font-semibold text-white">
+      <div class="text-sm font-semibold text-foreground-strong">
         New API Key
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -77,7 +77,7 @@
             id="api-key-name"
             v-model="newKey.name"
             placeholder="e.g. ci-deployer"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-focus-ring"
           >
         </div>
         <div>
@@ -88,7 +88,7 @@
           <select
             id="api-key-expiry"
             v-model="newKey.expiresInDays"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-focus-ring"
           >
             <option :value="0">
               Never
@@ -179,7 +179,7 @@
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-white truncate">{{ key.name || 'Unnamed' }}</span>
+                <span class="font-medium text-foreground-strong truncate">{{ key.name || 'Unnamed' }}</span>
                 <code
                   v-if="key.prefix"
                   class="text-[11px] font-mono text-foreground-muted bg-surface px-1.5 py-0.5 rounded"
@@ -262,7 +262,7 @@
             :key="key.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-6 py-4 text-white font-medium">
+            <td class="px-6 py-4 text-foreground-strong font-medium">
               {{ key.name || 'Unnamed' }}
             </td>
             <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden sm:table-cell">

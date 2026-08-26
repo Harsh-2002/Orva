@@ -24,7 +24,7 @@
           :disabled="disabled"
           :placeholder="placeholder"
           aria-label="Message the assistant"
-          class="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 pb-1.5 text-sm text-foreground placeholder-foreground-muted/60 focus:outline-none disabled:cursor-not-allowed"
+          class="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 pb-1.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none disabled:cursor-not-allowed"
           @input="autogrow"
           @keydown="onKey"
         />

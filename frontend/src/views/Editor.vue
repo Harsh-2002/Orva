@@ -33,12 +33,12 @@
           v-model="form.name"
           placeholder="my-function"
           :disabled="isEditing"
-          class="bg-transparent border-0 text-sm font-medium text-white placeholder-foreground-muted focus:outline-none px-1 py-1 min-w-0 flex-1 sm:flex-none sm:w-40"
+          class="bg-transparent border-0 text-sm font-medium text-foreground-strong placeholder-foreground-muted focus:outline-none px-1 py-1 min-w-0 flex-1 sm:flex-none sm:w-40"
         >
         <button
           v-if="!isEditing && !fnId"
           type="button"
-          class="p-1 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors shrink-0 touch-expand-iconbtn"
+          class="p-1 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 touch-expand-iconbtn"
           title="Re-roll a fresh name"
           aria-label="Re-roll a fresh name"
           @click="rerollName"
@@ -80,7 +80,7 @@
             >
               <Settings2 class="w-3.5 h-3.5" />
               <span class="flex-1 text-left">Settings</span>
-              <span class="text-[10px] text-foreground-muted">runtime · limits</span>
+              <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">runtime · limits</span>
             </button>
             <button
               class="menu-item"
@@ -101,7 +101,7 @@
             >
               <Package class="w-3.5 h-3.5" />
               <span class="flex-1 text-left">Deps</span>
-              <span class="text-[10px] text-foreground-muted">package · requirements</span>
+              <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">package · requirements</span>
             </button>
             <button
               class="menu-item"
@@ -157,8 +157,8 @@
               @click="navMenu({ name: 'function-kv', params: { name: form.name } })"
             >
               <Database class="w-3.5 h-3.5" />
-              <span class="flex-1 text-left">KV store</span>
-              <span class="text-[10px] text-foreground-muted">per-function state</span>
+              <span class="flex-1 text-left truncate whitespace-nowrap">KV store</span>
+              <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">per-function state</span>
             </button>
             <button
               v-if="isEditing"
@@ -167,8 +167,8 @@
               @click="navMenu({ name: 'function-inbound-webhooks', params: { name: form.name } })"
             >
               <Webhook class="w-3.5 h-3.5" />
-              <span class="flex-1 text-left">Inbound webhooks</span>
-              <span class="text-[10px] text-foreground-muted">signed POST</span>
+              <span class="flex-1 text-left truncate whitespace-nowrap">Webhooks</span>
+              <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">signed POST</span>
             </button>
             <button
               class="menu-item"
@@ -176,8 +176,8 @@
               @click="openMenuItem('docs')"
             >
               <BookOpen class="w-3.5 h-3.5" />
-              <span class="flex-1 text-left">Docs</span>
-              <span class="text-[10px] text-foreground-muted">handler reference</span>
+              <span class="flex-1 text-left truncate whitespace-nowrap">Docs</span>
+              <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">handler reference</span>
             </button>
           </div>
         </div>
@@ -209,9 +209,9 @@
       class="flex items-center gap-2 px-2 py-1.5 mt-2 border border-border bg-surface rounded text-xs"
     >
       <span class="text-foreground-muted shrink-0 uppercase tracking-wider text-[10px]">Invoke URL</span>
-      <code class="font-mono text-white truncate flex-1 min-w-0">{{ invokeUrl }}</code>
+      <code class="font-mono text-foreground-strong truncate flex-1 min-w-0">{{ invokeUrl }}</code>
       <button
-        class="px-2 py-1 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors flex items-center gap-1 shrink-0 touch-expand-sm"
+        class="px-2 py-1 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors flex items-center gap-1 shrink-0 touch-expand-sm"
         @click="copyInvokeUrl"
       >
         <Check
@@ -227,7 +227,7 @@
       <router-link
         v-if="isEditing && form.name"
         :to="`/functions/${form.name}/deployments`"
-        class="text-foreground-muted hover:text-white transition-colors px-2 flex items-center touch-expand-sm"
+        class="text-foreground-muted hover:text-foreground-strong transition-colors px-2 flex items-center touch-expand-sm"
       >
         Deployments →
       </router-link>
@@ -240,7 +240,7 @@
       <div class="h-9 border-b border-border flex items-center justify-between px-4 bg-surface shrink-0">
         <div class="text-xs font-mono text-foreground-muted flex items-center gap-2">
           <FileCode class="w-3 h-3" />
-          <span class="text-white">{{ fileName }}</span>
+          <span class="text-foreground-strong">{{ fileName }}</span>
           <span
             v-if="templateId"
             class="text-foreground-muted"
@@ -250,11 +250,18 @@
           {{ code.length }} chars
         </div>
       </div>
-      <CodeEditor
-        v-model="code"
-        :language="form.runtime"
-        class="flex-1 min-h-0"
-      />
+      <!-- The editor is always dark, in both themes. On paper that reads as a
+           hole punched in the page unless it is framed, so it sits on a mat:
+           a thin surface border with the instrument mounted inside it. In night
+           the mat is nearly invisible against the canvas, which is correct,
+           because there the editor already IS the page. -->
+      <div class="orva-editor-mat flex-1 min-h-0 flex">
+        <CodeEditor
+          v-model="code"
+          :language="form.runtime"
+          class="flex-1 min-h-0"
+        />
+      </div>
     </div>
 
     <!-- Bottom terminal: VS Code-style. Tabs across build, output, and
@@ -285,8 +292,8 @@
             :tabindex="terminalTab === t.id ? 0 : -1"
             class="terminal-tab px-3 h-9 text-xs flex items-center gap-1.5 border-b-2 transition-colors"
             :class="terminalTab === t.id
-              ? 'text-white border-link'
-              : 'text-foreground-muted border-transparent hover:text-white'"
+              ? 'text-foreground-strong border-link'
+              : 'text-foreground-muted border-transparent hover:text-foreground-strong'"
             @click="selectTerminalTab(t.id)"
           >
             <component
@@ -319,7 +326,7 @@
             Run
           </button>
           <button
-            class="p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
+            class="p-1.5 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
             :title="terminalOpen ? 'Collapse' : 'Expand'"
             :aria-label="terminalOpen ? 'Collapse terminal' : 'Expand terminal'"
             @click="terminalOpen = !terminalOpen"
@@ -422,7 +429,7 @@
               >
                 <button
                   type="button"
-                  class="text-[11px] font-medium text-foreground-muted hover:text-white px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1"
+                  class="text-[11px] font-medium text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1"
                   :disabled="!fnId"
                   :title="fnId ? 'Saved fixtures for this function' : 'Deploy first'"
                   @click="toggleSavedPopover"
@@ -439,7 +446,7 @@
                   class="absolute right-0 top-full mt-1 z-30 w-64 bg-surface border border-border rounded shadow-lg overflow-hidden"
                   @mouseleave="savedPopoverOpen = false"
                 >
-                  <div class="px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-foreground-muted/80 border-b border-border bg-surface/60">
+                  <div class="px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-foreground-muted border-b border-border bg-surface/60">
                     Saved fixtures
                   </div>
                   <div
@@ -494,7 +501,7 @@
                   <div class="border-t border-border px-2 py-1.5 bg-surface/50">
                     <button
                       type="button"
-                      class="text-[11px] text-foreground hover:text-white w-full text-left px-1.5 py-1 rounded hover:bg-surface-hover transition-colors disabled:opacity-50"
+                      class="text-[11px] text-foreground hover:text-foreground-strong w-full text-left px-1.5 py-1 rounded hover:bg-surface-hover transition-colors disabled:opacity-50"
                       :disabled="!canTest"
                       @click="saveCurrentAsFixture"
                     >
@@ -509,14 +516,14 @@
             <div class="border-b border-border shrink-0">
               <button
                 type="button"
-                class="w-full h-6 px-3 flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-white bg-surface/30 transition-colors"
+                class="w-full h-6 px-3 flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-foreground-strong bg-surface/30 transition-colors"
                 @click="headersOpen = !headersOpen"
               >
                 <span>
                   Headers
                   <span
                     v-if="headerCount"
-                    class="ml-1 text-foreground-muted/80 normal-case tracking-normal"
+                    class="ml-1 text-foreground-muted normal-case tracking-normal"
                   >· {{ headerCount }}</span>
                 </span>
                 <ChevronDown
@@ -569,7 +576,7 @@
                 </div>
                 <button
                   type="button"
-                  class="text-[11px] text-foreground-muted hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-surface-hover"
+                  class="text-[11px] text-foreground-muted hover:text-foreground-strong transition-colors px-1.5 py-0.5 rounded hover:bg-surface-hover"
                   :disabled="!canTest"
                   @click="addHeaderRow"
                 >
@@ -589,14 +596,14 @@
               >Deploy first</span>
               <span
                 v-else
-                class="text-[10px] text-foreground-muted/70 font-mono"
+                class="text-[10px] text-foreground-muted font-mono"
               >{{ testPayload.length }} chars</span>
             </div>
             <textarea
               v-model="testPayload"
               :disabled="!canTest"
               spellcheck="false"
-              class="flex-1 w-full min-h-0 bg-background text-xs font-mono p-3 text-foreground focus:outline-none resize-none disabled:opacity-50 placeholder:text-foreground-muted/50"
+              class="flex-1 w-full min-h-0 bg-background text-xs font-mono p-3 text-foreground focus:outline-none resize-none disabled:opacity-50 placeholder:text-foreground-muted"
               placeholder="{}"
             />
           </div>
@@ -623,7 +630,7 @@
                 <button
                   v-if="lastRunFailed"
                   type="button"
-                  class="text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-white px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1 disabled:opacity-50"
+                  class="text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1 disabled:opacity-50"
                   :disabled="suggestingFix"
                   title="Build a paste-ready debug prompt with source + request + stderr"
                   @click="suggestFix"
@@ -633,7 +640,7 @@
                 </button>
                 <span
                   v-if="duration"
-                  class="text-[10px] text-foreground-muted/80 font-mono"
+                  class="text-[10px] text-foreground-muted font-mono"
                 >{{ status }} · {{ duration }}ms</span>
               </div>
             </div>
@@ -649,7 +656,7 @@
                 v-else
                 class="px-3 py-3 text-xs text-foreground-muted italic"
               >
-                Hit <span class="not-italic text-white">Run</span> to invoke this function with the request payload.
+                Hit <span class="not-italic text-foreground-strong">Run</span> to invoke this function with the request payload.
               </div>
 
               <!-- Function stdout/stderr — only when present, with its own
@@ -658,7 +665,7 @@
                 v-if="invokeLogs.length"
                 class="border-t border-border"
               >
-                <div class="h-6 px-3 flex items-center text-[10px] uppercase tracking-[0.14em] text-foreground-muted/80 bg-surface/30">
+                <div class="h-6 px-3 flex items-center text-[10px] uppercase tracking-[0.14em] text-foreground-muted bg-surface/30">
                   Function logs · {{ invokeLogs.length }}
                 </div>
                 <div class="px-3 py-2 font-mono text-xs space-y-0.5">
@@ -695,7 +702,7 @@
             v-model="form.description"
             rows="2"
             placeholder="One-line summary of what this function does. Surfaces in MCP tool catalogs and the agent channel picker."
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white resize-y"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring resize-y"
           />
         </div>
         <div>
@@ -741,7 +748,7 @@
           <select
             id="fn-template"
             v-model="templateId"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             @change="applyTemplate"
           >
             <option value="">
@@ -805,7 +812,7 @@
                 id="fn-concurrency-policy"
                 v-model="form.concurrency_policy"
                 :disabled="!form.max_concurrency"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white disabled:opacity-50"
+                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring disabled:opacity-50"
               >
                 <option value="queue">
                   Queue requests
@@ -828,10 +835,10 @@
               type="checkbox"
               true-value="egress"
               false-value="none"
-              class="mt-0.5 w-4 h-4 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-white"
+              class="mt-0.5 w-4 h-4 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-focus-ring"
             >
             <div class="min-w-0">
-              <div class="text-sm font-medium text-white flex items-center gap-2">
+              <div class="text-sm font-medium text-foreground-strong flex items-center gap-2">
                 <Globe class="w-4 h-4 text-foreground-muted" /> Allow outbound network
               </div>
               <div class="text-xs text-foreground-muted mt-1 leading-snug">
@@ -852,7 +859,7 @@
           <select
             id="fn-auth-mode"
             v-model="form.auth_mode"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
             <option value="none">
               Public, anyone can invoke
@@ -867,8 +874,8 @@
           <p class="text-[11px] text-foreground-muted leading-snug">
             Public is the default, matches Cloudflare Workers and Vercel
             Functions. For end-user auth (JWT, session cookies), keep this on
-            <span class="text-white">Public</span> and verify inside your
-            handler. <span class="text-white">Signed</span> mode reads its key
+            <span class="text-foreground-strong">Public</span> and verify inside your
+            handler. <span class="text-foreground-strong">Signed</span> mode reads its key
             from the function secret <span class="font-mono">ORVA_SIGNING_SECRET</span>.
           </p>
         </div>
@@ -950,13 +957,13 @@
                 v-model="newRoute.path"
                 aria-label="Route path"
                 placeholder="/path or /prefix/*"
-                class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
               >
               <input
                 v-model="newRoute.methods"
                 placeholder="*"
                 title="Comma-separated methods or * for any (default *)"
-                class="w-20 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="w-20 bg-background border border-border rounded-md px-2 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
               >
               <Button
                 class="shrink-0"
@@ -1016,13 +1023,13 @@
             v-model="pair.key"
             :aria-label="`Environment variable ${i + 1} name`"
             placeholder="KEY"
-            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
           <input
             v-model="pair.value"
             :aria-label="pair.key ? `Value for ${pair.key}` : `Environment variable ${i + 1} value`"
             placeholder="VALUE"
-            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="flex-1 min-w-0 bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
           <button
             class="shrink-0 w-7 h-7 flex items-center justify-center rounded text-foreground-muted hover:text-danger-fg hover:bg-surface transition-colors"
@@ -1034,13 +1041,13 @@
           </button>
         </div>
         <button
-          class="text-xs text-foreground-muted hover:text-white transition-colors"
+          class="text-xs text-foreground-muted hover:text-foreground-strong transition-colors"
           @click="addEnvVar"
         >
           + Add variable
         </button>
         <p class="text-[11px] text-foreground-muted pt-2 border-t border-border">
-          Plaintext at deploy time. Use <span class="text-white">Secrets</span> for sensitive values.
+          Plaintext at deploy time. Use <span class="text-foreground-strong">Secrets</span> for sensitive values.
         </p>
       </div>
       <template #footer>
@@ -1066,7 +1073,7 @@
         <textarea
           v-model="dependencyText"
           aria-label="Dependencies, one package per line"
-          class="w-full bg-surface-hover border border-border rounded-md text-xs font-mono p-3 text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white resize-none min-h-[200px]"
+          class="w-full bg-surface-hover border border-border rounded-md text-xs font-mono p-3 text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring resize-none min-h-[200px]"
           placeholder="One package per line. e.g. requests==2.31.0"
         />
       </div>
@@ -1135,14 +1142,14 @@
             v-model="secretForm.name"
             aria-label="Secret name"
             placeholder="SECRET_NAME"
-            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
           <input
             v-model="secretForm.value"
             aria-label="Secret value"
             placeholder="SECRET_VALUE"
             type="password"
-            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
           <Button
             class="w-full"
@@ -1195,7 +1202,7 @@
             <router-link
               v-if="activeVersionDeploymentId"
               :to="{ name: 'function-diff', params: { name: route.params.name }, query: { from: v.deployment_id, to: activeVersionDeploymentId } }"
-              class="text-foreground-muted hover:text-white flex items-center gap-1"
+              class="text-foreground-muted hover:text-foreground-strong flex items-center gap-1"
               title="Compare with active version"
               @click="modals.versions = false"
             >
@@ -1203,7 +1210,7 @@
             </router-link>
             <button
               :disabled="rollingBack"
-              class="text-foreground-muted hover:text-white disabled:opacity-50 flex items-center gap-1"
+              class="text-foreground-muted hover:text-foreground-strong disabled:opacity-50 flex items-center gap-1"
               @click="rollbackToVersion(v)"
             >
               <RotateCcw class="w-3 h-3" /> Rollback
@@ -1229,18 +1236,18 @@
     >
       <div class="space-y-3 text-xs text-foreground-muted">
         <p>
-          Export a single <code class="font-mono text-white">handler(event)</code> that returns an
+          Export a single <code class="font-mono text-foreground-strong">handler(event)</code> that returns an
           HTTP-shaped object. Orva injects env vars and secrets at spawn time.
         </p>
-        <pre class="bg-surface border border-border rounded p-3 font-mono text-[12px] text-white overflow-x-auto whitespace-pre">{{ handlerHint }}</pre>
-        <ul class="space-y-1 pl-4 list-disc marker:text-foreground-muted/50">
-          <li><span class="text-white font-mono">event.body</span> is the raw request body (string or parsed JSON).</li>
-          <li>Return <span class="text-white font-mono">{ statusCode, headers, body }</span>.</li>
-          <li>Add packages via the <span class="text-white">Deps</span> panel (installed at build time).</li>
+        <pre class="bg-surface border border-border rounded p-3 font-mono text-[12px] text-foreground-strong overflow-x-auto whitespace-pre">{{ handlerHint }}</pre>
+        <ul class="space-y-1 pl-4 list-disc marker:text-foreground-muted">
+          <li><span class="text-foreground-strong font-mono">event.body</span> is the raw request body (string or parsed JSON).</li>
+          <li>Return <span class="text-foreground-strong font-mono">{ statusCode, headers, body }</span>.</li>
+          <li>Add packages via the <span class="text-foreground-strong">Deps</span> panel (installed at build time).</li>
         </ul>
         <router-link
           to="/docs"
-          class="inline-flex items-center gap-1 text-foreground-muted hover:text-white transition-colors"
+          class="inline-flex items-center gap-1 text-foreground-muted hover:text-foreground-strong transition-colors"
           @click="modals.docs = false"
         >
           Open full docs in this UI →
@@ -1278,12 +1285,12 @@
               ref="firstDeployNameInput"
               v-model="form.name"
               placeholder="my-function"
-              class="w-full bg-background border border-border rounded-md pl-3 pr-10 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+              class="w-full bg-background border border-border rounded-md pl-3 pr-10 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
               @keydown.enter="confirmFirstDeploy"
             >
             <button
               type="button"
-              class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors"
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors"
               title="Re-roll a fresh name"
               aria-label="Generate another function name"
               @click="rerollName"
@@ -1394,7 +1401,7 @@ const CodeEditorSkeleton = {
       'aria-busy': 'true',
       'aria-label': 'Loading code editor',
     }, [
-      h('div', { class: 'p-4 space-y-2 w-full font-mono text-xs text-foreground-muted/40' }, [
+      h('div', { class: 'p-4 space-y-2 w-full font-mono text-xs text-foreground-muted' }, [
         h('div', { class: 'h-3 w-1/3 bg-surface-hover rounded animate-pulse' }),
         h('div', { class: 'h-3 w-2/3 bg-surface-hover rounded animate-pulse' }),
         h('div', { class: 'h-3 w-1/2 bg-surface-hover rounded animate-pulse' }),
@@ -2947,7 +2954,7 @@ const resetForm = async () => {
 .run-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-primary) 32%, transparent);
   border-color: var(--color-primary);
-  color: white;
+  color: var(--color-foreground-strong);
 }
 .run-btn:disabled {
   opacity: 0.4;
@@ -2994,4 +3001,15 @@ const resetForm = async () => {
   to { transform: rotate(360deg); }
 }
 
+
+/* The mat around the always-dark code surface. Padding only in day, where the
+   contrast between paper and editor is what needs softening; in night the mat
+   collapses to nothing because there is nothing to soften. */
+.orva-editor-mat {
+  background: var(--color-surface);
+}
+:root[data-theme='day'] .orva-editor-mat {
+  padding: 8px;
+  border-top: 1px solid var(--color-border);
+}
 </style>
