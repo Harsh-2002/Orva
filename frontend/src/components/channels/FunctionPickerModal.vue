@@ -20,7 +20,7 @@
           </div>
         </div>
         <button
-          class="text-foreground-muted hover:text-foreground-strong transition-colors"
+          class="touch-expand-iconbtn inline-flex items-center justify-center rounded text-foreground-muted hover:text-foreground-strong transition-colors"
           title="Dismiss"
           aria-label="Close function picker"
           @click="$emit('close')"

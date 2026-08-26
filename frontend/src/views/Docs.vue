@@ -2435,8 +2435,8 @@ const Callout = defineComponent({
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.2rem;
-  height: 2.2rem;
+  width: 30.4px;
+  height: 30.4px;
   border-radius: 0.45rem;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
@@ -2458,34 +2458,6 @@ const Callout = defineComponent({
   border-color: var(--color-success-ring);
   background: var(--color-success-tint);
 }
-.docs-hero-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.55rem 0.9rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-foreground);
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 120ms, border-color 120ms, color 120ms;
-}
-.docs-hero-copy:hover {
-  background: var(--color-surface-hover);
-  border-color: var(--color-foreground-muted);
-}
-.docs-hero-copy:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-.docs-hero-copy.copied {
-  border-color: var(--color-success-ring);
-  color: var(--color-success-fg);
-  background: var(--color-success-tint);
-}
 
 .docs-hero-toc {
   display: flex;
@@ -2505,6 +2477,11 @@ const Callout = defineComponent({
   margin-right: 0.3rem;
 }
 .docs-hero-toc-link {
+  /* Ladder: 30.4px. Was hand-tuned padding, which is why the eight
+     controls in this file landed on eight different heights. */
+  min-height: 30.4px;
+  display: inline-flex;
+  align-items: center;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -2879,6 +2856,11 @@ const Callout = defineComponent({
   border-radius: 0 0 0.6rem 0.6rem;
 }
 .doc-prompt-expand-btn {
+  /* Ladder: 30.4px. Was hand-tuned padding, which is why the eight
+     controls in this file landed on eight different heights. */
+  height: 30.4px;
+  display: inline-flex;
+  align-items: center;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -3155,6 +3137,11 @@ const Callout = defineComponent({
   border-radius: 0.6rem;
 }
 .doc-token-btn {
+  /* Ladder: 30.4px. Was hand-tuned padding, which is why the eight
+     controls in this file landed on eight different heights. */
+  height: 30.4px;
+  display: inline-flex;
+  align-items: center;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -3186,6 +3173,11 @@ const Callout = defineComponent({
   overflow: hidden;
 }
 .doc-details-summary {
+  /* Ladder: 38.0px. Was hand-tuned padding, which is why the eight
+     controls in this file landed on eight different heights. */
+  min-height: 38.0px;
+  display: inline-flex;
+  align-items: center;
   list-style: none;
   display: flex;
   align-items: center;
@@ -3236,6 +3228,11 @@ const Callout = defineComponent({
   color: var(--color-foreground-muted);
 }
 .doc-codeblock-copy {
+  /* Ladder: 26.6px. Was hand-tuned padding, which is why the eight
+     controls in this file landed on eight different heights. */
+  height: 26.6px;
+  display: inline-flex;
+  align-items: center;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -3288,6 +3285,11 @@ const Callout = defineComponent({
   padding: 0 0.35rem;
 }
 .doc-tabbed-tab {
+  /* Ladder: 38.0px. Was hand-tuned padding, which is why the eight
+     controls in this file landed on eight different heights. */
+  min-height: 38.0px;
+  display: inline-flex;
+  align-items: center;
   position: relative;
   background: transparent;
   border: 0;
@@ -3381,6 +3383,11 @@ const Callout = defineComponent({
   gap: 0.75rem;
 }
 .doc-ai-copy-btn {
+  /* Ladder: 30.4px. Was hand-tuned padding, which is why the eight
+     controls in this file landed on eight different heights. */
+  height: 30.4px;
+  display: inline-flex;
+  align-items: center;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;

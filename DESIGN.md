@@ -245,6 +245,41 @@ at construction in both `CodeEditor.vue` and `FunctionDiff.vue`, and
 the theme is a real piece of work rather than a token swap. It was scoped out
 deliberately.
 
+## 2c. The control ladder
+
+Every control lands on one of five rungs on a fine pointer, and one of four on a
+coarse one. The two ladders map 1:1; a phone is not a dense desktop toolbar, so
+having two is right, but having two that do not correspond is not.
+
+| Rung | Fine | Coarse | Where |
+|---|---|---|---|
+| text | 22.8 | — | an inline text action inside a row |
+| xs | 26.6 | 32 | filter chips, dense table actions |
+| sm | 30.4 | 36 | compact toolbars |
+| md | 38.0 | 40 | the default, and every form field |
+| lg | 45.6 | — | onboarding, hero CTAs |
+| row | — | 44 | a full-width stacked list row |
+
+`Button.vue` and `IconButton.vue` are the ladder. Reaching past them is what
+produced **at least twenty distinct heights** on a fine pointer, including six
+different squares for the same icon-only job and about forty controls that
+declared no height at all and rendered at ink height — 15.2px for a text
+action, 13.3px for a label wrapping a checkbox, on the one pointer type with no
+touch floor to rescue them.
+
+**The floor is not the size.** `touch-expand-*` marks a control as
+participating in the system: it sets a minimum at the tier's rung on each
+pointer type and nothing else. A control that declares its own height keeps it.
+The rule lives in `@layer base` for exactly that reason — written bare it would
+outrank a utility, and a floor that silently overrides the size a component
+chose is not a floor.
+
+**Two documented exceptions**, both in `Firewall.vue`: the `role="switch"`
+track, whose 36x20 *is* the switch, and the x inside a DNS chip, which would
+inflate the 17.25px chip around it. Both reach a real 44px target on touch.
+`test/browser/suites/control-scale.mjs` measures the rest and names any control
+that drifts.
+
 ## 3. Typography
 
 **Display + Body Font:** Inter (300 / 400 / 500 / 600 weights), with `ui-sans-serif, system-ui, sans-serif` as the fallback stack.

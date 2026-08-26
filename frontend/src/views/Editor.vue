@@ -268,7 +268,7 @@
          test-run results. Collapsible — clicking the header chevron hides
          the panel body. -->
     <div class="mt-3 bg-background border border-border rounded-lg overflow-hidden shrink-0">
-      <div class="terminal-bar h-9 border-b border-border flex items-center px-2 bg-surface">
+      <div class="terminal-bar h-10 border-b border-border flex items-center px-2 bg-surface">
         <!-- A real tablist: the strip used to be a run of plain buttons, so
              screen readers announced two unrelated controls with no "current"
              state and no link to the panel each one swaps in. The right-hand
@@ -290,7 +290,7 @@
             :aria-selected="terminalTab === t.id"
             :aria-controls="`terminal-panel-${t.id}`"
             :tabindex="terminalTab === t.id ? 0 : -1"
-            class="terminal-tab px-3 h-9 text-xs flex items-center gap-1.5 border-b-2 transition-colors"
+            class="terminal-tab px-3 h-10 text-xs flex items-center gap-1.5 border-b-2 transition-colors"
             :class="terminalTab === t.id
               ? 'text-foreground-strong border-link'
               : 'text-foreground-muted border-transparent hover:text-foreground-strong'"
@@ -343,7 +343,7 @@
            console below it. -->
       <div
         v-show="terminalOpen"
-        class="h-32 sm:h-40 md:h-48 overflow-y-auto bg-background"
+        class="h-64 sm:h-56 md:h-48 overflow-y-auto bg-background"
       >
         <!-- Build logs tab. v-show rather than v-if so both panels exist in
              the DOM and each tab's aria-controls resolves to a real node. -->
@@ -381,7 +381,7 @@
           id="terminal-panel-test"
           role="tabpanel"
           aria-labelledby="terminal-tab-test"
-          class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] min-h-full md:h-full"
+          class="test-panel grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] min-h-full md:h-full"
         >
           <!--
             Request column. Below md the two columns stack inside the
@@ -389,8 +389,13 @@
             grid the payload textarea (flex-1) absorbed the whole shortfall
             and collapsed to about two lines. min-h-full on the grid lets
             the body scroll instead.
+
+            The console body is h-64 below sm rather than h-32, because the
+            stacked pair has a ~340px floor and was being scrolled inside a
+            121.6px window -- you ran a request and then scrolled past a
+            full-height payload box to find out what happened.
           -->
-          <div class="flex flex-col min-h-[15rem] md:min-h-0 border-b md:border-b-0 md:border-r border-border">
+          <div class="flex flex-col min-h-[13rem] md:min-h-0 border-b md:border-b-0 md:border-r border-border">
             <!-- Method + path + Saved popover sit on the column header. -->
             <div class="request-bar h-7 px-2 flex items-center gap-1.5 bg-surface/60 border-b border-border shrink-0">
               <label
@@ -429,7 +434,7 @@
               >
                 <button
                   type="button"
-                  class="text-[11px] font-medium text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1"
+                  class="touch-expand-xs text-[11px] font-medium text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1"
                   :disabled="!fnId"
                   :title="fnId ? 'Saved fixtures for this function' : 'Deploy first'"
                   @click="toggleSavedPopover"
@@ -501,7 +506,7 @@
                   <div class="border-t border-border px-2 py-1.5 bg-surface/50">
                     <button
                       type="button"
-                      class="text-[11px] text-foreground hover:text-foreground-strong w-full text-left px-1.5 py-1 rounded hover:bg-surface-hover transition-colors disabled:opacity-50"
+                      class="touch-expand-xs text-[11px] text-foreground hover:text-foreground-strong w-full text-left px-1.5 py-1 rounded hover:bg-surface-hover transition-colors disabled:opacity-50"
                       :disabled="!canTest"
                       @click="saveCurrentAsFixture"
                     >
@@ -566,7 +571,7 @@
                   >
                   <button
                     type="button"
-                    class="text-foreground-muted hover:text-danger-fg p-0.5 transition-colors"
+                    class="touch-expand-iconbtn inline-flex items-center justify-center rounded text-foreground-muted hover:text-danger-fg p-0.5 transition-colors"
                     title="Remove header"
                     aria-label="Remove header"
                     @click="removeHeaderRow(idx)"
@@ -576,7 +581,7 @@
                 </div>
                 <button
                   type="button"
-                  class="text-[11px] text-foreground-muted hover:text-foreground-strong transition-colors px-1.5 py-0.5 rounded hover:bg-surface-hover"
+                  class="touch-expand-xs inline-flex items-center text-[11px] text-foreground-muted hover:text-foreground-strong transition-colors px-1.5 py-0.5 rounded hover:bg-surface-hover"
                   :disabled="!canTest"
                   @click="addHeaderRow"
                 >
@@ -610,7 +615,7 @@
 
           <!-- Response + logs column -->
           <div class="flex flex-col min-h-[9rem] md:min-h-0">
-            <div class="h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
+            <div class="response-bar h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
               <span
                 class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5"
                 :class="error ? 'text-danger-fg' : output ? 'text-success-fg' : 'text-foreground-muted'"
@@ -630,7 +635,7 @@
                 <button
                   v-if="lastRunFailed"
                   type="button"
-                  class="text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1 disabled:opacity-50"
+                  class="touch-expand-xs text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1 disabled:opacity-50"
                   :disabled="suggestingFix"
                   title="Build a paste-ready debug prompt with source + request + stderr"
                   @click="suggestFix"
@@ -2987,6 +2992,36 @@ const resetForm = async () => {
   .request-bar {
     height: auto;
     min-height: 44px;
+  }
+
+  /* The response side had the identical hard h-7 and never got this reset, so
+     its status row stayed locked at 26.6 px while everything inside it grew.
+     Same bug, other half of the panel. */
+  .response-bar {
+    height: auto;
+    min-height: 44px;
+  }
+
+  /* The panel is drawn as a dense desktop instrument: 24 font declarations,
+     three sizes, every one under 12 px. On a touch device the global form
+     floor lifts ONLY its inputs to 16 px / 44 px, so a 16 px method selector
+     ends up beside a 10 px section label -- a six-pixel type range and 44 px
+     rows fighting 22 px ones, in one panel. That reads as broken, and it is
+     the panel's own scale that is wrong for the device rather than the
+     inputs. Lift the panel's floor to the app's ordinary register so the
+     inputs stop being aliens in it. */
+  .test-panel .text-\[10px\] {
+    font-size: 12px;
+  }
+  .test-panel .text-\[11px\],
+  .test-panel .text-xs {
+    font-size: 13px;
+  }
+
+  /* Hard sub-heads inside the panel, same reason as .request-bar. */
+  .test-panel .h-6 {
+    height: auto;
+    min-height: 32px;
   }
 }
 .run-spinner {

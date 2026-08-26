@@ -140,7 +140,7 @@
           <select
             id="ai-provider"
             v-model="form.provider"
-            class="mt-1.5 w-full bg-background border border-border rounded-md text-sm px-3 py-2 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+            class="mt-1.5 h-10 w-full bg-background border border-border rounded-md text-sm px-3 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
             <option
               v-for="opt in PROVIDERS"

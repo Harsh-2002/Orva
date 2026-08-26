@@ -40,13 +40,13 @@
                 {{ title }}
               </h3>
             </div>
-            <button
-              class="p-1.5 -mr-1.5 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn shrink-0"
-              :aria-label="`Close ${title}`"
+            <IconButton
+              :icon="X"
+              icon-size="md"
+              :title="`Close ${title}`"
+              class="-mr-1.5 shrink-0"
               @click="close"
-            >
-              <X class="w-4 h-4" />
-            </button>
+            />
           </header>
           <div class="p-5 overflow-y-auto scrollable flex-1 max-h-[calc(100dvh-9rem)] sm:max-h-[70vh]">
             <slot />
@@ -68,6 +68,7 @@ defineOptions({ name: 'CommonModal' })
 
 import { computed, ref, toRef, onMounted, onUnmounted } from 'vue'
 import { X } from '@lucide/vue'
+import IconButton from './IconButton.vue'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 
 const props = defineProps({

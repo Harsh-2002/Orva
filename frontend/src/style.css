@@ -465,6 +465,40 @@ select::-ms-expand {
   position: relative;
 }
 
+/* A floor on a FINE pointer too, which these classes never had.
+   ------------------------------------------------------------
+   About forty controls across the app declare no height, no min-height and no
+   vertical padding, so on a desktop they render at ink height: a text action
+   is 15.2px, an icon-only button is 15.2px square, and a label wrapping a
+   checkbox is 13.3px. They looked like text rather than controls, they were
+   the smallest targets in the product on the one pointer with no touch floor
+   to rescue them, and they sat in rows beside 26.6px and 38px buttons.
+
+   This is a floor, not a size: a control that declares its own height keeps
+   it. `min-height` alone cannot lift a Tailwind `h-*`, which is exactly the
+   behaviour wanted here -- it only bites on the controls that declared
+   nothing. 22.8px is the text tier, the shortest rung on the ladder.
+
+   It lives in @layer base deliberately. Unlayered CSS outranks anything in
+   @layer utilities regardless of specificity, so writing this rule bare made
+   it beat an explicit `min-h-8` on a component -- a floor that silently
+   overrode the size a component had chosen is not a floor. In base, a utility
+   wins and the floor only speaks when nothing else does. */
+@layer base {
+  @media (pointer: fine) {
+    .touch-expand-xs,
+    .touch-expand-sm,
+    .touch-expand-md {
+      min-height: 22.8px;
+    }
+
+    .touch-expand-iconbtn {
+      min-height: 26.6px;
+      min-width: 26.6px;
+    }
+  }
+}
+
 @media (pointer: coarse) {
   .touch-expand-xs      { min-height: 32px; min-width: 44px; }
   .touch-expand-sm      { min-height: 36px; min-width: 44px; }

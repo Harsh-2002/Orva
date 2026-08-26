@@ -27,9 +27,10 @@ import * as smoke from './suites/smoke.mjs'
 import * as responsive from './suites/responsive.mjs'
 import * as touchTargets from './suites/touch-targets.mjs'
 import * as accessibility from './suites/accessibility.mjs'
+import * as controlScale from './suites/control-scale.mjs'
 import * as journeys from './suites/journeys.mjs'
 
-const PAGE_SUITES = [smoke, responsive, touchTargets, accessibility]
+const PAGE_SUITES = [smoke, responsive, touchTargets, controlScale, accessibility]
 const FLOW_SUITES = [journeys]
 
 const BASE = arg('url', process.env.ORVA_URL || 'http://127.0.0.1:8443').replace(/\/$/, '')

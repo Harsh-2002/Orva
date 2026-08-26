@@ -41,8 +41,29 @@ clear iOS's 16px focus-zoom threshold. Neither is visible in the class name.
 | `smoke` | every route renders, no console errors, no failed requests |
 | `responsive` | nothing overflows the viewport; nothing is clipped without a scroll affordance |
 | `touch-targets` | every control clears 44×44 where the pointer is coarse |
+| `control-scale` | every control lands on the size ladder, on both pointer types |
 | `accessibility` | accessible names, keyboard reachability, AA contrast, heading order, duplicate ids |
 | `journeys` | real multi-step flows (nav drawer, destructive-dialog keyboard safety) |
+
+`control-scale` is the one that was missing while the app grew to **at least
+twenty distinct button heights** on a fine pointer against `Button.vue`'s four.
+The drift is invisible from source — a control's real height is padding plus a
+line box plus whatever a scoped rule did, resolved against a root scaled to 95%,
+and about forty controls declared no height at all and rendered at ink: 15.2px
+for a text action, 13.3px for a label wrapping a checkbox. Two ladders, because
+a phone is not a dense desktop toolbar, and they map 1:1:
+
+```
+fine     text 22.8 | xs 26.6 | sm 30.4 | md 38.0 | lg 45.6
+coarse              xs 32    | sm 36   | md 40   | row 44
+```
+
+It skips what is not a ladder item: an `<a>` in running prose (giving it a box
+would set the paragraph's line height, which is also why WCAG 2.5.5 exempts an
+inline target), and any control whose label runs to more than one line or whose
+children are stacked blocks — a card body that happens to be a button is sized
+by its content. Two controls are exempt by name, each with its reason in the
+file.
 
 Layout suites run per viewport. Flow suites run once, on the widest viewport,
 because they drive interactions rather than measure layout. The accessibility

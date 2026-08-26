@@ -150,7 +150,7 @@
               have not been fetched yet.
             </div>
             <button
-              class="text-xs text-foreground hover:text-foreground-strong underline underline-offset-2"
+              class="touch-expand-xs text-xs text-foreground hover:text-foreground-strong underline underline-offset-2"
               @click="search = ''"
             >
               Clear search

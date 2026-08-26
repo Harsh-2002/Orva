@@ -118,7 +118,7 @@
             :key="item.path"
             :to="item.path"
             :class="[
-              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+              'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
               isActive(item.path)
                 ? 'text-foreground-strong bg-primary/15'
                 : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'

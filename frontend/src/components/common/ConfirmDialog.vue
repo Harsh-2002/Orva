@@ -64,7 +64,7 @@
                 v-model="confirm.promptValue"
                 :placeholder="confirm.promptPlaceholder"
                 type="text"
-                class="mt-3 w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder-foreground-muted transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+                class="mt-3 w-full h-10 bg-background border border-border rounded-md px-3 text-sm text-foreground placeholder-foreground-muted transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
                 @keydown.enter.stop.prevent="confirm.settle(true)"
               >
             </div>

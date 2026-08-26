@@ -76,7 +76,7 @@
 
       <!-- Detailed policy state stays available without competing with status. -->
       <details class="group">
-        <summary class="cursor-pointer text-xs text-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <summary class="touch-expand-sm inline-flex items-center cursor-pointer text-xs text-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           Policy details
         </summary>
         <div class="policy-meta mt-2">
@@ -1312,6 +1312,8 @@ const RuleCard = defineComponent({
    switch itself inflating: padding would have stretched the pill, and the
    ::before overlay style.css removed used to cover the card beside it. On a
    fine pointer the button hugs the track, so the box is unchanged at 36x20. */
+/* A role="switch" track, not a button on the ladder: 36x20 is the switch
+   geometry itself. Lifted to 44x44 on coarse pointers below. */
 .rule-toggle {
   flex-shrink: 0;
   display: inline-flex;
@@ -1521,6 +1523,10 @@ const RuleCard = defineComponent({
   border-color: var(--color-border);
   background: color-mix(in srgb, var(--color-foreground) 2%, transparent);
 }
+/* Off the control ladder on purpose: this x sits INSIDE a chip whose own
+   content box is 17.25px, so giving it the 22.8px text rung would inflate the
+   chip around it. The coarse-pointer block below lifts it to a real 44px
+   target, which is where it matters. */
 .dns-chip-x {
   margin-left: 0.15rem;
   width: 16px;

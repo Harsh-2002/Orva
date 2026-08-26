@@ -53,7 +53,7 @@
       <select
         v-model="filters.fnId"
         aria-label="Filter by function"
-        class="bg-background border border-border rounded-md pl-2.5 pr-2 py-1.5 text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus:border-focus-ring max-w-[180px]"
+        class="h-7 bg-background border border-border rounded-md pl-2.5 pr-2 text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus:border-focus-ring max-w-[180px]"
         @change="onFilterChange"
       >
         <option value="">
@@ -313,7 +313,7 @@
             <td class="px-6 py-4 hidden lg:table-cell">
               <button
                 v-if="log.trace_id"
-                class="text-foreground-muted hover:text-foreground-strong font-mono text-xs underline-offset-2 hover:underline inline-flex items-center gap-1"
+                class="touch-expand-xs text-foreground-muted hover:text-foreground-strong font-mono text-xs underline-offset-2 hover:underline inline-flex items-center gap-1"
                 :title="log.trace_id"
                 @click.stop="openTrace(log.trace_id)"
               >

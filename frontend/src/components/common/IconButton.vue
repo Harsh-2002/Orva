@@ -15,9 +15,15 @@
       success — muted → success    (Retry)
 
     Layout note: the button is square so a strip of three never
-    misaligns vertically. Padding is computed so the icon sits with
-    1px of breathing room on every side at the standard 14px (w-3.5)
-    icon size @lucide/vue ships.
+    misaligns vertically. There is no padding -- the box is h-7 w-7 and the
+    glyph is centred in it by flex. (This comment used to describe a computed
+    padding that has never been in the class list, and called w-3.5 "14px"; at
+    the 95% root it is 13.3px, leaving 6.65px a side.)
+
+    `iconSize` exists because a dialog header wants a 15.2px glyph in the same
+    26.6px box, and the only way to get one used to be to hand-roll the whole
+    button -- which is how the Modal and Drawer close buttons ended up 11.4px
+    apart doing identical work.
   -->
   <button
     type="button"
@@ -25,7 +31,8 @@
     :disabled="disabled"
     :aria-label="title"
     :class="[
-      'inline-flex items-center justify-center h-7 w-7 rounded-md transition-colors touch-expand-iconbtn',
+      'inline-flex items-center justify-center rounded-md transition-colors touch-expand-iconbtn',
+      size === 'md' ? 'h-8 w-8' : 'h-7 w-7',
       'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
       'disabled:opacity-40 disabled:cursor-not-allowed',
       variantClasses,
@@ -33,7 +40,7 @@
   >
     <component
       :is="icon"
-      class="w-3.5 h-3.5"
+      :class="iconSize === 'md' ? 'w-4 h-4' : 'w-3.5 h-3.5'"
     />
   </button>
 </template>
@@ -53,6 +60,23 @@ const props = defineProps({
     validator: (v) => ['default', 'danger', 'success', 'primary'].includes(v),
   },
   disabled: Boolean,
+  // 'sm' is the dense default (13.3px glyph, for table and toolbar strips).
+  // 'md' is 15.2px, for a dialog header where the close control reads as
+  // chrome rather than as a row action.
+  iconSize: {
+    type: String,
+    default: 'sm',
+    validator: (v) => ['sm', 'md'].includes(v),
+  },
+  // Box size. 'sm' (26.6px) is the dense default for table and toolbar strips.
+  // 'md' (30.4px) matches Button size="sm", so an icon-only control can sit in
+  // a row of small text buttons without being the odd one out -- which is what
+  // the chat header and the composer toolbar were hand-rolling.
+  size: {
+    type: String,
+    default: 'sm',
+    validator: (v) => ['sm', 'md'].includes(v),
+  },
 })
 
 const variantClasses = computed(() => {

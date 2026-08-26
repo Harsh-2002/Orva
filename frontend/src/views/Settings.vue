@@ -14,7 +14,7 @@
          Sourced from /api/v1/system/health (one-shot at page mount;
          these values don't change while the binary is running). -->
     <details class="group border-b border-border pb-6">
-      <summary class="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+      <summary class="touch-expand-sm flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
         <Info class="w-4 h-4 text-foreground-muted" />
         Build info
         <span class="ml-auto text-xs font-normal text-foreground-muted group-open:hidden">{{ buildInfo?.version || EMPTY }}</span>

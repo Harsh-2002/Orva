@@ -3,7 +3,7 @@
     <header>
       <button
         type="button"
-        class="min-h-11 inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground-strong rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        class="touch-expand-sm inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-foreground-muted hover:text-foreground-strong rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         @click="router.push('/traces')"
       >
         <ArrowLeft
@@ -46,7 +46,7 @@
           <code class="bg-surface text-foreground-strong px-2 py-1 rounded font-mono text-xs break-all">{{ trace.trace_id }}</code>
           <button
             type="button"
-            class="min-h-11 min-w-11 inline-flex items-center justify-center rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="touch-expand-iconbtn inline-flex h-7 w-7 items-center justify-center rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label="Copy trace ID"
             @click="copyID"
           >

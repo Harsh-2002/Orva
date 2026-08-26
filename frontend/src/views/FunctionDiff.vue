@@ -252,7 +252,7 @@
             </span>
           </h2>
           <button
-            class="text-foreground-muted hover:text-foreground-strong"
+            class="touch-expand-iconbtn inline-flex items-center justify-center rounded text-foreground-muted hover:text-foreground-strong"
             :aria-label="metaOpen ? 'Collapse settings diff' : 'Expand settings diff'"
             @click="metaOpen = !metaOpen"
           >
@@ -345,7 +345,7 @@
             </span>
           </h2>
           <button
-            class="text-foreground-muted hover:text-foreground-strong"
+            class="touch-expand-iconbtn inline-flex items-center justify-center rounded text-foreground-muted hover:text-foreground-strong"
             :aria-label="manifestOpen ? 'Collapse manifest diff' : 'Expand manifest diff'"
             @click="manifestOpen = !manifestOpen"
           >

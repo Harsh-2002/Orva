@@ -37,7 +37,7 @@
       >
         <button
           type="button"
-          class="group w-full min-h-11 px-3 sm:px-4 py-2.5 text-left hover:bg-surface/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary transition-colors"
+          class="group w-full min-h-[44px] px-3 sm:px-4 py-2.5 text-left hover:bg-surface/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary transition-colors"
           :aria-expanded="selectedKey === row.key"
           :aria-controls="`span-detail-${safeKey(row.key)}`"
           :data-span-key="row.key"
@@ -133,7 +133,7 @@
             <button
               v-if="row.execution_id"
               type="button"
-              class="min-h-11 inline-flex items-center gap-2 rounded-md px-3 text-xs text-foreground border border-border hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              class="touch-expand-sm inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs text-foreground border border-border hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               @click="$emit('open-invocation', row.execution_id)"
             >
               Open invocation <ExternalLink
@@ -153,7 +153,7 @@
             v-if="row.attributes"
             class="mt-3 text-xs"
           >
-            <summary class="min-h-11 inline-flex items-center cursor-pointer text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
+            <summary class="touch-expand-sm min-h-6 inline-flex items-center cursor-pointer text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
               Structured attributes
             </summary>
             <pre class="mt-1 overflow-x-auto rounded bg-background p-3 text-foreground whitespace-pre-wrap">{{ prettyJSON(row.attributes) }}</pre>
@@ -173,7 +173,7 @@
         >
           <button
             type="button"
-            class="min-h-11 px-3 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="touch-expand-xs h-7 px-2.5 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :class="logScope === 'all' ? 'bg-primary text-primary-foreground border-primary' : 'bg-surface text-foreground-muted border-border'"
             :aria-pressed="logScope === 'all'"
             @click="logScope = 'all'"
@@ -182,7 +182,7 @@
           </button>
           <button
             type="button"
-            class="min-h-11 px-3 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+            class="touch-expand-xs h-7 px-2.5 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
             :class="logScope === 'selected' ? 'bg-primary text-primary-foreground border-primary' : 'bg-surface text-foreground-muted border-border'"
             :disabled="!selectedRow"
             :aria-pressed="logScope === 'selected'"
@@ -221,7 +221,7 @@
             v-if="entry.fields"
             class="mt-1"
           >
-            <summary class="min-h-11 inline-flex items-center cursor-pointer text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
+            <summary class="touch-expand-sm min-h-6 inline-flex items-center cursor-pointer text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
               Fields
             </summary>
             <pre class="overflow-x-auto rounded bg-background p-3 text-foreground whitespace-pre-wrap">{{ prettyJSON(entry.fields) }}</pre>
