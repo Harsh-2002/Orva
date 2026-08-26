@@ -34,7 +34,7 @@ func TestKVScopedCredentialRejectsCrossNamespaceAndCallerSpoof(t *testing.T) {
 	cross := httptest.NewRequest(http.MethodPut, "/api/v1/_kv/fn-sdk-b/key", bytes.NewBufferString(`{"value":1}`))
 	cross.SetPathValue("fn_id", "fn-sdk-b")
 	cross.SetPathValue("key", "key")
-	cross.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-sdk-a"))
+	cross.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-sdk-a"))
 	cross.Header.Set("X-Orva-Caller-Function", "fn-sdk-b")
 	crossResult := httptest.NewRecorder()
 	h.Put(crossResult, cross)
@@ -45,7 +45,7 @@ func TestKVScopedCredentialRejectsCrossNamespaceAndCallerSpoof(t *testing.T) {
 	spoof := httptest.NewRequest(http.MethodPut, "/api/v1/_kv/fn-sdk-a/key", bytes.NewBufferString(`{"value":1}`))
 	spoof.SetPathValue("fn_id", "fn-sdk-a")
 	spoof.SetPathValue("key", "key")
-	spoof.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-sdk-a"))
+	spoof.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-sdk-a"))
 	spoof.Header.Set("X-Orva-Caller-Function", "fn-sdk-b")
 	spoofResult := httptest.NewRecorder()
 	h.Put(spoofResult, spoof)
@@ -70,7 +70,7 @@ func TestJobAttributionUsesSignedCaller(t *testing.T) {
 	h := &JobsHandler{DB: db, SDKAuth: auth}
 	body := bytes.NewBufferString(`{"function_name":"job-target","payload":{}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", body)
-	req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-job-caller"))
+	req.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-job-caller"))
 	req.Header.Set("X-Orva-Caller-Function", "fn-spoof")
 	req.Header.Set("X-Orva-Execution-Id", "exec-job")
 	req.Header.Set("X-Orva-Trace-Id", "trace-spoof")
@@ -98,7 +98,7 @@ func TestUserSpanMustBelongToSignedCaller(t *testing.T) {
 	defer release()
 	h := &SpansHandler{DB: newTestDB(t), SDKAuth: auth}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/spans", bytes.NewBufferString(`{"name":"work","duration_ms":1}`))
-	req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-other"))
+	req.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-other"))
 	req.Header.Set("X-Orva-Trace-Id", "trace")
 	req.Header.Set("X-Orva-Span-Id", "span")
 	req.Header.Set("X-Orva-Execution-Id", "exec-owned")
@@ -118,7 +118,7 @@ func TestCronUpsertUsesSignedCallerScope(t *testing.T) {
 	release := auth.BindExecution("exec-1", "fn-cron-owner", "trace-1", "span-1", time.Now())
 	defer release()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons", bytes.NewBufferString(`{"name":"nightly","schedule":"0 3 * * *"}`))
-	req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-owner"))
+	req.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-cron-owner"))
 	req.Header.Set("X-Orva-Execution-Id", "exec-1")
 	req.Header.Set("X-Orva-Function-Id", "fn-cron-other")
 	w := httptest.NewRecorder()
@@ -168,7 +168,7 @@ func TestCronUpsertRequiresALiveExecution(t *testing.T) {
 			}
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
 				bytes.NewBufferString(`{"name":"planted","schedule":"* * * * *"}`))
-			req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-owner"))
+			req.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-cron-owner"))
 			if tc.executionID != "" {
 				req.Header.Set("X-Orva-Execution-Id", tc.executionID)
 			}
@@ -204,7 +204,7 @@ func TestSDKScheduleCountIsCapped(t *testing.T) {
 	upsert := func(name string) int {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
 			bytes.NewBufferString(`{"name":"`+name+`","schedule":"* * * * *"}`))
-		req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-many"))
+		req.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-cron-many"))
 		req.Header.Set("X-Orva-Execution-Id", "exec-1")
 		w := httptest.NewRecorder()
 		h.UpsertInternal(w, req)
@@ -261,7 +261,7 @@ func TestTheScheduleCapIgnoresOperatorCreatedRows(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
 		bytes.NewBufferString(`{"name":"first-declared","schedule":"0 3 * * *"}`))
-	req.Header.Set("X-Orva-Internal-Token", auth.Mint("fn-cron-mixed"))
+	req.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-cron-mixed"))
 	req.Header.Set("X-Orva-Execution-Id", "exec-1")
 	w := httptest.NewRecorder()
 	h.UpsertInternal(w, req)
@@ -270,4 +270,13 @@ func TestTheScheduleCapIgnoresOperatorCreatedRows(t *testing.T) {
 		t.Errorf("status=%d, want 200: this function has declared no schedules of its own; body=%s",
 			w.Code, w.Body.String())
 	}
+}
+
+// mintLive returns a credential whose worker is treated as alive for the rest
+// of the test. Mint now hands back a release that expires the credential when
+// the worker process dies; a test that never spawns one has nothing to release,
+// and dropping the release keeps the credential valid for the test's duration.
+func mintLive(a *sdkauth.Authenticator, functionID string) string {
+	token, _ := a.Mint(functionID)
+	return token
 }

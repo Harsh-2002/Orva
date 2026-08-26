@@ -172,6 +172,16 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		w.dead.Store(true)
 		close(w.waitDone)
 
+		// The worker is genuinely gone now, so anything scoped to its
+		// lifetime can be torn down. This is the only place that is true for
+		// every exit path, which is why the SDK-credential release is wired
+		// here rather than to Kill or to the pool's retire path: those two
+		// express an intention to stop the worker, and a busy one keeps
+		// serving until it drains. Releasing there would 401 a live request.
+		if cfg.OnExit != nil {
+			cfg.OnExit()
+		}
+
 		// Reclaim the cgroup HERE, not at Kill time. nsjail is SIGKILLed, so
 		// it never runs its own cleanup and the NSJAIL.<pid> directory it
 		// created is left behind; but rmdir on a cgroup fails with EBUSY

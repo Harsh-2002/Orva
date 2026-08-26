@@ -49,6 +49,15 @@ type ExecConfig struct {
 	// both function config env_vars and decrypted secrets at invoke time.
 	Env map[string]string
 
+	// OnExit runs once, after this worker's process has been reaped. It is
+	// invoked from the single goroutine that owns cmd.Wait() (see worker.go),
+	// so it observes every exit path -- clean quit, SIGKILL, child crash,
+	// context cancel -- and never fires while the process is still alive.
+	//
+	// Used to release the worker's SDK credential. It must be cheap and must
+	// not block: it runs inline in the reaper, ahead of the cgroup reclaim.
+	OnExit func()
+
 	// Seccomp policy (Kafel string). Empty means no seccomp filter.
 	SeccompPolicy string
 

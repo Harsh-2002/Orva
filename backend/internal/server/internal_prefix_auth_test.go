@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 )
 
 // Everything under /api/v1/_kv/ and /api/v1/_internal/ authenticates with the
@@ -68,7 +70,7 @@ func TestEveryInternalPrefixRouteRejectsABadCredential(t *testing.T) {
 // would pass against a gate that rejected everything.
 func TestAValidSDKCredentialPassesTheInternalPrefixGate(t *testing.T) {
 	tc := newTestServer(t)
-	token := tc.srv.router.sdkAuth.Mint("fn_x")
+	token := mintLive(tc.srv.router.sdkAuth, "fn_x")
 	if token == "" {
 		t.Fatal("could not mint an SDK credential")
 	}
@@ -124,9 +126,15 @@ func TestTheGateRejectsBeforeTheHandlerRuns(t *testing.T) {
 	spy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true })
 	gate := authMiddleware(r.db, &r.keyCache, &r.sessionCache, r.sdkAuth, spy)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/_kv/fn_x/k", nil)
-	req.Header.Set("X-Orva-Internal-Token", r.sdkAuth.Mint("fn_x"))
+	req.Header.Set("X-Orva-Internal-Token", mintLive(r.sdkAuth, "fn_x"))
 	gate.ServeHTTP(httptest.NewRecorder(), req)
 	if !reached {
 		t.Error("a valid SDK credential was rejected at the gate")
 	}
+}
+
+// mintLive: see the note on the identical helper in the handlers package.
+func mintLive(a *sdkauth.Authenticator, functionID string) string {
+	token, _ := a.Mint(functionID)
+	return token
 }

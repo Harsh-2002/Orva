@@ -15,7 +15,22 @@ before it.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+- **Redeploying a function now invalidates a leaked SDK credential.** The
+  `ORVA_INTERNAL_TOKEN` your function's code holds was derived from the
+  function's ID alone, so it was identical across deploys: if a compromised
+  dependency copied it, removing that dependency and redeploying re-issued the
+  same token, and only restarting Orva cleared it. The documented remediation
+  therefore looked like it worked and did not.
+
+  Each credential now also names the worker process it was issued to, and dies
+  when that process does. Redeploying retires a function's warm workers, so it
+  is a real remediation. Credentials still expire on restart, and on ordinary
+  worker recycling (idle timeout, use limit).
+
+  Nothing to do on upgrade: credentials are minted at spawn and every worker is
+  replaced when you restart into the new version.
 
 ## v2026.08.25
 

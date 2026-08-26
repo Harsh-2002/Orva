@@ -62,9 +62,15 @@ type SandboxTemplate struct {
 	// RefreshForDeploy so the next spawn picks up the new values.
 	SecretsLookup func(fnID string) map[string]string
 
-	// SDKToken mints a process-scoped credential bound to the worker's
+	// SDKToken mints a credential bound to one worker process, and returns
+	// the release that invalidates it when that worker dies. The release MUST
+	// run on every path after a successful mint -- including the spawn error
+	// paths below, where the worker the credential was minted for never came
+	// into existence.
+	//
+	// Previously bound to the worker's
 	// function ID. User code can read it, but cannot alter the signed caller.
-	SDKToken func(functionID string) string
+	SDKToken func(functionID string) (token string, release func())
 
 	// APIBaseURL is the base URL the adapter uses when making outbound
 	// calls to Orva's own internal endpoints (KV / F2F / jobs).
@@ -805,9 +811,12 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			// KV / F2F / jobs endpoints. Empty when running outside the
 			// server (tests) so user code can probe presence to decide
 			// whether to fall back.
+			releaseSDKToken := func() {}
 			if m.tmpl.SDKToken != nil {
-				env["ORVA_INTERNAL_TOKEN"] = m.tmpl.SDKToken(fn.ID)
+				token, release := m.tmpl.SDKToken(fn.ID)
+				env["ORVA_INTERNAL_TOKEN"] = token
 				env["ORVA_API_BASE"] = m.tmpl.APIBaseURL
+				releaseSDKToken = release
 			}
 			// Resolve the egress policy for this spawn. Read off m (not the
 			// local tmpl copy) so a late SetEgressPolicy is visible to pools
@@ -821,7 +830,8 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				if getPolicy := m.tmpl.EgressPolicy; getPolicy != nil {
 					p, g, perr := getPolicy()
 					if perr != nil {
-						return nil, perr // fail closed: no policy, no worker
+						releaseSDKToken() // no worker will ever hold this
+						return nil, perr  // fail closed: no policy, no worker
 					}
 					policyPath, policyGen = p, g
 				}
@@ -855,11 +865,21 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				NsjailBin:        tmpl.NsjailBin,
 				RootfsDir:        tmpl.RootfsDir,
 				Timeout:          time.Duration(fn.TimeoutMS) * time.Millisecond,
+				// Released once this worker's process is reaped, whichever way
+				// it dies. That is what expires the credential on redeploy:
+				// RefreshForDeploy retires the function's workers, and each
+				// one's credential dies with its process.
+				OnExit: releaseSDKToken,
 			})
-			if err == nil && m.tmpl.Metrics != nil {
+			if err != nil {
+				// No process, so nothing will ever call OnExit for it.
+				releaseSDKToken()
+				return nil, err
+			}
+			if m.tmpl.Metrics != nil {
 				m.tmpl.Metrics.RecordSpawnDuration(time.Since(start))
 			}
-			return w, err
+			return w, nil
 		},
 	}
 	p.dynamicMax.Store(int64(initialMax))
