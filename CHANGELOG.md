@@ -9,11 +9,19 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.08.25..HEAD` is the range for
+pruned with their releases — so `git log v2026.08.26..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
 ## Unreleased
+
+Nothing yet.
+
+## v2026.08.26
+
+One security fix, and a documentation correction large enough to matter on its
+own. Nothing here asks anything of an operator: no migration, no configuration
+change, no re-issued credentials.
 
 ### Fixed
 
@@ -31,6 +39,49 @@ before it.
 
   Nothing to do on upgrade: credentials are minted at spawn and every worker is
   replaced when you restart into the new version.
+
+- **The documentation now matches the code.** An audit compared every document
+  against the source and found 181 defects, 81 of them factually wrong. The
+  ones you were most likely to hit:
+
+  - The handler contract described `event.body` as parsed JSON. It has always
+    been a raw string, so both headline examples in the reference were broken —
+    the Python one returned HTTP 500, the Node one silently answered the wrong
+    thing. Corrected, and the examples were executed rather than read.
+  - The in-product AI assistant was prompted with an API that partly does not
+    exist (`event.path_params`, an `x-orva-base64` response flag,
+    `jobs.enqueue(delay_seconds=…)`, `auth_mode: "public"`), so it generated
+    handlers that could not run.
+  - `RUNTIMES.md` said dependency installs run on the host. They run inside
+    nsjail.
+  - The recovery procedure for a lost admin key deleted your accounts and
+    recovered nothing.
+  - The backup procedure omitted `.master.key`, without which restored secrets
+    are undecryptable ciphertext.
+  - `docker compose up -d` could not work from the downloaded compose file, and
+    the README never mentioned Compose publishes on port 3000.
+
+  Documentation is now part of a change rather than a follow-up: `CONTRACT.md`
+  §6a requires docs to move in the same commit as the code, with a table of
+  what to update for what.
+
+### Verified
+
+Beyond CI's gate (`test/e2e/run.py` with `ORVA_REQUIRE_SANDBOX=1` on amd64 and
+arm64, the server and CLI installers, native systemd, docker smoke, CodeQL):
+
+- **Every regression test was run against the unfixed code and shown to fail
+  first.** For the credential fix that meant three separate proofs: removing
+  the reaper hook leaves a credential valid five seconds after its worker died,
+  removing the release from the spawn error path leaves one valid for a worker
+  that never started, and removing the nonce check fails four `sdkauth` cases.
+- **The reaper path was exercised locally** against a real spawned-and-killed
+  worker, rather than relying on the sandbox E2E alone.
+- **`go test -race`** on `sdkauth`, `pool`, `sandbox` and `server`.
+
+Not run: `test/atscale.sh` and the migration rehearsal. Neither is implicated —
+no pool sizing, scheduler or migration behaviour changed — but CONTRACT §6 lists
+them as beyond CI, so their absence is stated rather than implied.
 
 ## v2026.08.25
 
