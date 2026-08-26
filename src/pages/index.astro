@@ -1,1049 +1,723 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import Shot from '../components/Shot.astro';
+import Brand from '../components/Brand.astro';
 
-const base = import.meta.env.BASE_URL;
-const baseTrim = base.replace(/\/$/, '');
+import systemOverview from '../assets/system-overview.png';
+import functionEditor from '../assets/function-editor.png';
+import functionConfig from '../assets/function-config.png';
+import invocations from '../assets/invocations.png';
+import deployments from '../assets/deployments.png';
+import aiChat from '../assets/ai-chat.png';
 
-const capabilities: [string, string][] = [
-  ['Multi-runtime', 'Node.js 24, Python 3.14, and TypeScript — two generic runtimes, latest-stable only.'],
-  [
-    'nsjail isolation',
-    'Five overlapping Linux kernel boundaries per call — user NS, mount NS, cgroup v2, seccomp, network NS.',
-  ],
-  [
-    'Warm pools',
-    'Idle workers stay resident between invocations. Pool size configurable per function; back-to-back calls skip spawn entirely.',
-  ],
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const repo = 'https://github.com/Harsh-2002/Orva';
+
+// This page answers "what is this and why would I run it". It is not the
+// documentation, and operational detail does not belong here: no config
+// caveats, no API reference, no troubleshooting. A reader who has not decided
+// yet should never meet a gotcha, and a reader who has decided is one click
+// from /docs/, where every one of those details lives.
+//
+// Every claim below is derived from main, not from the previous copy on this
+// page. The old page was written against pre-audit docs and inherited errors
+// that the repository had already corrected, plus several it invented: a
+// handler signature that does not exist, a licence that was never MIT, a
+// compose port map that would have sent a reader to a dead port, and a
+// --cap-add that had been deliberately removed upstream.
+
+// Five layers, exactly as SECURITY.md's own diagram enumerates them. Network is
+// deliberately NOT in this list: it is the one boundary that is a per-function
+// setting rather than an invariant, so it is described on its own below.
+const layers = [
+  {
+    n: '01',
+    t: 'User namespace',
+    d: 'Root inside the sandbox is not root on the host. The capability set is dropped before your code gets to run.',
+  },
+  {
+    n: '02',
+    t: 'Read-only root',
+    d: 'The language runtime is mounted read-only, and nothing else on the host is visible from inside at all.',
+  },
+  {
+    n: '03',
+    t: 'Private filesystem',
+    d: 'Your code is read-only. Scratch space is private to the sandbox and wiped the moment the worker exits, so nothing survives a call by accident.',
+  },
+  {
+    n: '04',
+    t: 'cgroup v2',
+    d: "Memory, CPU and process limits are set per sandbox. A runaway handler spends its own budget, never the host's.",
+  },
+  {
+    n: '05',
+    t: 'seccomp allowlist',
+    d: 'About <span class="num">150</span> syscalls are blocked outright, by the kernel, rather than by a check Orva performs and could get wrong.',
+  },
+];
+
+const capabilities = [
   [
     'KV store',
-    'Per-function SQLite-backed KV with optional TTL. kv.put / kv.get / kv.list — browsable from the dashboard.',
+    'Per-function key/value storage with optional expiry, in the same SQLite file as everything else. There is no Redis to run alongside it.',
   ],
+  ['Function to function', 'Call one function from another directly, without the request leaving the box.'],
+  ['Streaming', 'Send a response as it is produced instead of buffering the whole thing first.'],
+  ['Background jobs', 'Move slow work off the request path and answer the caller immediately.'],
+  ['Cron schedules', 'Run a function on a schedule, declared in code or set from the dashboard.'],
+  ['Webhooks', 'Take signed deliveries from other systems, with verification handled for you.'],
+  ['Traces', 'Follow one request across every function it touched, with timings and outliers marked.'],
+  ['Invocation logs', "Each execution's request, response and log lines, kept for as long as you choose."],
+  ['Activity feed', 'A running record of everything that touched the instance, and who did it.'],
+  ['Deployments', 'Every version kept, with a diff against what is live and rollback in one click.'],
+  ['Warm pools', 'Idle workers scaled to real demand, so the common path skips the cold start entirely.'],
   [
-    'Background jobs',
-    'jobs.enqueue(name, payload). Persisted queue with configurable retries and exponential backoff.',
+    'Egress control',
+    'Outbound network is off until a function asks for it, and the policy lives with the sandbox.',
   ],
-  [
-    'Cron schedules',
-    'Fire any function on a cron expression. Dashboard shows last run, next run, current status.',
-  ],
-  [
-    'Function-to-function',
-    'invoke("name", payload) calls another function via the warm pool as a child span in the same trace.',
-  ],
-  [
-    'Distributed tracing',
-    'HTTP, F2F calls, and background jobs share one trace_id. Waterfall view in dashboard; zero code changes.',
-  ],
-  [
-    'Custom routes',
-    'Map a path like /webhooks/stripe to a function so callers use a clean URL instead of a UUID.',
-  ],
-  [
-    'Secrets',
-    'Encrypted per-function secrets injected as env vars at sandbox spawn time. Never logged, never plaintext on disk.',
-  ],
-  [
-    'Inbound webhooks',
-    'Signed external trigger endpoints — GitHub, Stripe, Slack, and generic HMAC — fanning into a function.',
-  ],
-  ['Rollback', 'Every deploy is content-hashed and archived. Roll back to any prior version in one click.'],
+  ['API keys', 'Scoped keys you can hand to CI or to a person, and revoke one at a time.'],
   [
     'MCP server',
-    '72 tools at /mcp. Claude Code, Cursor, and any OAuth MCP client can deploy and manage functions from chat.',
+    '<span class="num">73</span> tools over Model Context Protocol, so an agent can operate the instance the way you would.',
   ],
-  [
-    'Built-in AI assistant',
-    'In-product agentic chat that operates the instance end-to-end through the same tools — bring your own provider key, approve writes inline.',
-  ],
-  [
-    '21 templates',
-    'Stripe webhooks, GitHub events, JWT auth, OAuth, CSV→JSON, URL shortener — pickable in the editor.',
-  ],
-];
-
-const layers: [string, string][] = [
-  [
-    'User namespace',
-    'UID 0 inside the sandbox maps to UID 65534 (nobody) on the host. All 64 Linux capability bits cleared — verified via /proc/self/status. The function cannot escalate to host root.',
-  ],
-  [
-    'Mount namespace + chroot',
-    "/code is a read-only bind mount of the function's versioned directory. /tmp is a private tmpfs wiped after each worker exits. No host filesystem visible.",
-  ],
-  [
-    'cgroup v2',
-    'Hard limits per function: memory.max, cpu.max, pids.max. The host refuses new spawns past 80% total memory reservation.',
-  ],
-  [
-    'Seccomp (Kafel policy)',
-    '~150 syscalls blocked: mount, unshare, bpf, kexec_load, init_module, ptrace, and more. Blocked attempts log and kill the process — never silently fail.',
-  ],
-  [
-    'Network namespace',
-    'Default network_mode: none — loopback only, no inbound possible. Functions opt in to network_mode: egress for outbound HTTPS via an nftables allowlist.',
-  ],
-];
-
-const compareRows: [string, string, string, string][] = [
-  ['Kernel', 'Shared with host', 'Separate per VM', 'Shared with host'],
-  [
-    'Isolation primitive',
-    'Linux namespaces + seccomp + cgroup v2',
-    'Hardware virtualisation (KVM)',
-    'Linux namespaces + cgroup',
-  ],
-  [
-    'Syscall surface',
-    '~150 syscalls blocked via Kafel policy',
-    'Near-zero (hardware boundary)',
-    'Unfiltered by default',
-  ],
-  ['Capability drop', 'All 64 Linux caps cleared', 'N/A (separate kernel)', 'Partial (Docker defaults)'],
-  ['Cold start', '~50–200 ms', '~125 ms (Firecracker MicroVM)', 'N/A'],
-  ['Memory / worker', '~30 MB', '~5 MB per MicroVM', 'Varies'],
-  [
-    'Suited for',
-    'Homelabs, internal tools, trusted code',
-    'Multi-tenant cloud, untrusted code',
-    'General app containers',
-  ],
-];
-
-const shots: [string, string, string][] = [
-  ['system-overview-dashboard', 'System overview', 'Live metrics, warm pools, response-time percentiles'],
-  ['functions-list', 'Functions', 'Every deployed handler, runtime, resources, last deploy date'],
-  ['function-editor', 'Editor', 'Write and deploy code directly in the browser'],
-  ['distributed-traces', 'Traces', 'Automatic causal waterfall across HTTP, F2F, and background jobs'],
-  ['activity-live-feed', 'Activity', 'Live feed of every API call, CLI command, and webhook delivery'],
-  ['invocation-logs', 'Invocation logs', 'Every execution with request, response, duration, trace link'],
-  ['built-in-docs', 'Docs', 'Full reference always at /web/docs — no tab-switching'],
-  ['firewall-and-dns', 'Firewall & DNS', 'Per-function egress rules, custom resolvers, blocklist'],
-  ['settings-oauth', 'Settings', 'Storage, account, and OAuth-connected apps'],
+  ['AI assistant', 'An assistant inside the dashboard driving those same tools, on your own provider keys.'],
 ];
 ---
 
-<Layout title="Orva — self-hosted serverless runtime">
-  <!-- ── Masthead ─────────────────────────────────────── -->
-  <header class="masthead">
-    <div class="inner mast-inner">
-      <a class="brand" href="#top" aria-label="Orva — home">
-        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="currentColor"></rect>
-          <text
-            x="16"
-            y="21"
-            font-family="Inter, system-ui, sans-serif"
-            font-size="13"
-            font-weight="700"
-            fill="#fff"
-            text-anchor="middle"
-            letter-spacing="-0.5">f(x)</text
-          >
-        </svg>
-        <span class="brand-name">Orva</span>
-      </a>
-      <nav class="nav-primary" aria-label="Primary">
-        <a href="#capabilities">Capabilities</a>
-        <a href="#isolation">Isolation</a>
-        <a href="#dashboard">Dashboard</a>
-        <a href="#install">Install</a>
-        <a class="nav-ext" href="https://github.com/Harsh-2002/Orva" target="_blank" rel="noopener">
-          GitHub <span aria-hidden="true">↗</span>
-        </a>
-      </nav>
-    </div>
-  </header>
-
-  <!-- ── Hero ─────────────────────────────────────────── -->
-  <section class="hero" id="top">
-    <div class="inner hero-inner">
-      <div class="hero-meta">
-        <span class="hero-meta-build">self-hosted · MIT</span>
+<Layout
+  title="Orva, self-hosted functions in a kernel sandbox"
+  description="Self-hosted functions that run in a kernel sandbox. Node, Python and TypeScript on your own hardware, with five enforced boundaries per call. No control plane, no external database, no telemetry."
+>
+  <!-- 1. Hero ------------------------------------------------------------- -->
+  <section class="section hero">
+    <div class="container">
+      <Brand />
+      <h1 class="display hero__h">Functions that run in a kernel sandbox.</h1>
+      <p class="lead hero__p">
+        Orva deploys JavaScript, TypeScript and Python onto your own hardware and puts five kernel-enforced
+        boundaries between each call and the host. Cold start is
+        <span class="num">~50 to 500 ms</span>. A warm hit is <span class="num">~2 to 15 ms</span>
+        and costs about <span class="num">18 MB</span> of resident memory.
+      </p>
+      <div class="hero__cta">
+        <a class="btn btn--primary" href="#install">Get started</a>
+        <a class="btn btn--secondary" href={`${base}/docs/`}>Read the docs</a>
       </div>
 
-      <h1>
-        Functions on<br />
-        <span class="h1-em">your own metal.</span>
-      </h1>
-
-      <p class="hero-lede">
-        Node, Python, and TypeScript. Five kernel-enforced boundaries per call. Self-hosted, with no external
-        database, control plane, or services to run.
-      </p>
-
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="#install">Install — 30 seconds</a>
-        <a class="btn btn-ghost" href="https://github.com/Harsh-2002/Orva" target="_blank" rel="noopener">
-          github.com/Harsh-2002/Orva <span aria-hidden="true">↗</span>
-        </a>
+      <div class="hero__shot">
+        <Shot
+          src={systemOverview}
+          alt="The Orva dashboard showing platform health, response time percentiles, host machine capacity, build activity and per-function warm pools."
+          eager
+        />
       </div>
     </div>
   </section>
 
-  <!-- ── 01 / Capabilities ────────────────────────────── -->
-  <section class="sec" id="capabilities">
-    <div class="inner">
-      <header class="sec-head">
-        <span class="num">01</span>
-        <span class="slash">/</span>
-        <span class="label">Capabilities</span>
-        <span class="bar"></span>
-        <span class="count">15 items</span>
-      </header>
+  <!-- 2. What it is -------------------------------------------------------- -->
+  <section class="section">
+    <div class="container prose stack">
+      <h2 class="eyebrow">What it is</h2>
+      <p class="lead">
+        A self-hosted function runtime for a homelab or a single on-premises box. You write a handler, Orva
+        builds it, spawns it inside an <a class="link" href="https://github.com/google/nsjail">nsjail</a>
+        sandbox and serves it over HTTP.
+      </p>
+      <p class="muted">
+        There is no control plane to run, no external database and no telemetry. State lives in one SQLite
+        file and a directory of function versions. It ships with a dashboard, a CLI, an MCP server and an AI
+        assistant that operates the instance through the same API you do.
+      </p>
+    </div>
+  </section>
 
-      <h2>Fifteen things.<br />One container.</h2>
-      <p class="sec-sub">
-        Everything an operator needs to run untrusted code — observed, reversible, no external dependencies,
-        no add-on services.
+  <!-- 3. Write ------------------------------------------------------------- -->
+  <section class="section" id="write">
+    <div class="container">
+      <h2 class="eyebrow">Write</h2>
+      <h3 class="sec__h">A handler, and nothing else to learn.</h3>
+      <p class="lead prose sec__p">
+        There are two runtimes, <span class="num">node</span> and <span class="num">python</span>, both
+        latest-stable. TypeScript is a first-class path on <span class="num">node</span>: it compiles at build
+        time and runs as JavaScript, so it is not a third runtime to operate.
       </p>
 
-      <dl class="caps">
+      <div class="two">
+        <CodeBlock
+          label="handler.js"
+          lang="js"
+          code={`exports.handler = async (event) => {
+  // event.body is a raw string. Always parse it.
+  const body = event.body ? JSON.parse(event.body) : {}
+
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { hello: body.name || 'world' },
+  }
+}`}
+        />
+        <CodeBlock
+          label="handler.py"
+          lang="python"
+          code={`import json
+
+
+def handler(event):
+    # event["body"] is a raw string. Always parse it.
+    raw = event.get("body") or ""
+    body = json.loads(raw) if raw else {}
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": {"hello": body.get("name", "world")},
+    }`}
+        />
+      </div>
+
+      <h3 class="sec__h sec__h--sub">The SDK is already there.</h3>
+      <p class="lead prose sec__p">
+        Storage, function-to-function calls, background jobs and schedules, importable from any handler.
+        Nothing to install, nothing to wire up.
+      </p>
+
+      <div class="two">
+        <CodeBlock
+          label="KV, Node.js"
+          lang="js"
+          code={`const { kv } = require('orva')
+
+exports.handler = async (event) => {
+  await kv.put('user:42', { name: 'Ada' }, { ttlSeconds: 3600 })
+  const user = await kv.get('user:42', null)
+
+  return { statusCode: 200, body: JSON.stringify(user) }
+}`}
+        />
+        <CodeBlock
+          label="KV, Python"
+          lang="python"
+          code={`from orva import kv
+
+
+def handler(event):
+    # Python KV is synchronous.
+    kv.put("user:42", {"name": "Ada"}, ttl_seconds=3600)
+    user = kv.get("user:42", None)
+
+    return {"statusCode": 200, "body": user}`}
+        />
+      </div>
+
+      <div class="sec__shot">
+        <Shot
+          src={functionEditor}
+          alt="The Orva function editor showing a Python handler that imports kv from the orva SDK, with a build and test panel below."
+          caption="Write it, build it and test it without leaving the browser."
+        />
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Isolation --------------------------------------------------------- -->
+  <section class="section" id="isolation">
+    <div class="container">
+      <h2 class="eyebrow">Isolation</h2>
+      <h3 class="sec__h">Five layers, all enforced by the kernel.</h3>
+      <p class="lead prose sec__p">
+        Orva configures the boundaries and trusts the kernel to hold them. The gaps between these layers are
+        not enforced by Orva code.
+      </p>
+
+      <dl class="specs">
         {
-          capabilities.map(([name, desc]) => (
-            <div class="cap">
-              <dt>{name}</dt>
-              <dd>{desc}</dd>
+          layers.map((l) => (
+            <div class="spec">
+              <dt class="spec__i">{l.n}</dt>
+              <dt class="spec__t">{l.t}</dt>
+              <dd class="spec__d" set:html={l.d} />
             </div>
           ))
         }
       </dl>
+
+      <p class="muted prose sec__note">
+        Network is the one boundary that is a setting rather than an invariant.
+        <span class="num">none</span>, the default, is an isolated network namespace with loopback only. <span
+          class="num">egress</span
+        > opts a function into outbound traffic through a userspace network stack, where the blocklist is compiled
+        into that sandbox's own configuration. No host firewall table is ever created.
+      </p>
+
+      <div class="sec__shot">
+        <Shot
+          src={functionConfig}
+          alt="The Orva function configuration dialog showing runtime, memory, CPU, concurrency, the outbound network toggle and the invoke gate."
+          caption="Outbound network is off until a function opts in."
+        />
+      </div>
     </div>
   </section>
 
-  <!-- ── 02 / Isolation ───────────────────────────────── -->
-  <section class="sec" id="isolation">
-    <div class="inner">
-      <header class="sec-head">
-        <span class="num">02</span>
-        <span class="slash">/</span>
-        <span class="label">Isolation</span>
-        <span class="bar"></span>
-        <span class="count">5 layers</span>
-      </header>
+  <!-- 5. Operate ----------------------------------------------------------- -->
+  <section class="section" id="operate">
+    <div class="container">
+      <h2 class="eyebrow">Operate</h2>
+      <h3 class="sec__h">What you get with it.</h3>
 
-      <h2>Five overlapping<br />kernel boundaries.</h2>
-      <p class="sec-sub">
-        Each layer is enforced by the kernel, not by Orva. Orva configures the boundaries; the kernel holds
-        them.
-      </p>
-
-      <ol class="layers">
+      <dl class="specs specs--tight">
         {
-          layers.map(([title, body], i) => (
-            <li class="layer">
-              <span class="layer-num">{String(i + 1).padStart(2, '0')}</span>
-              <div class="layer-body">
-                <h3>{title}</h3>
-                <p>{body}</p>
-              </div>
-            </li>
+          capabilities.map(([t, d], i) => (
+            <div class="spec">
+              <dt class="spec__i">{String(i + 1).padStart(2, '0')}</dt>
+              <dt class="spec__t">{t}</dt>
+              <dd class="spec__d" set:html={d} />
+            </div>
           ))
         }
+      </dl>
+
+      <div class="two two--shots">
+        <Shot
+          src={invocations}
+          alt="The Orva invocations view listing executions with function name, status, cold-start flag, HTTP code, duration and trace ID."
+          caption="Every execution, with its trace."
+        />
+        <Shot
+          src={deployments}
+          alt="The Orva deployments view showing version history for a function with the live version marked and rollback available per version."
+          caption="Every version kept, with rollback."
+        />
+      </div>
+
+      <div class="sec__shot">
+        <Shot
+          src={aiChat}
+          alt="The Orva chat assistant answering a question about warm pool usage per function by calling the system metrics tool."
+          caption="The assistant drives the same tools the API exposes."
+        />
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. What it isn't ----------------------------------------------------- -->
+  <section class="section" id="limits">
+    <div class="container">
+      <h2 class="eyebrow">What it is not</h2>
+      <h3 class="sec__h">The honest boundary.</h3>
+
+      <dl class="specs">
+        <div class="spec">
+          <dt class="spec__i">01</dt>
+          <dt class="spec__t">Not multi-tenant</dt>
+          <dd class="spec__d">
+            Orva is single-tenant by design. Every function on an instance shares one host and one trust
+            boundary. It is not built to run code from people you do not trust.
+          </dd>
+        </div>
+        <div class="spec">
+          <dt class="spec__i">02</dt>
+          <dt class="spec__t">Not a defence against kernel zero-days</dt>
+          <dd class="spec__d">
+            No seccomp filter is bulletproof. The threat model is explicit that a kernel-level zero-day, and
+            side-channel attacks generally, are out of scope.
+          </dd>
+        </div>
+        <div class="spec">
+          <dt class="spec__i">03</dt>
+          <dt class="spec__t">Not a managed platform</dt>
+          <dd class="spec__d">
+            There is no hosted control plane, no SLA and no one on call but you. That is the point, and it is
+            also the cost.
+          </dd>
+        </div>
+        <div class="spec">
+          <dt class="spec__i">04</dt>
+          <dt class="spec__t">Not a horizontal cluster</dt>
+          <dd class="spec__d">
+            One node, one SQLite file. Measured on a 2-CPU, 12 GB host it sustains roughly
+            <span class="num">880 req/s</span> under heavy concurrency, and sheds the excess rather than falling
+            over.
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- 7. Install ----------------------------------------------------------- -->
+  <section class="section" id="install">
+    <div class="container">
+      <h2 class="eyebrow">Install</h2>
+      <h3 class="sec__h">However you already run things.</h3>
+      <p class="lead prose sec__p">
+        One container, one volume, one port. The image carries the sandbox runtime with it, so there is
+        nothing to install on the host alongside it.
+      </p>
+
+      <ol class="ways">
+        <li class="way">
+          <span class="way__i">01</span>
+          <div class="way__label">
+            <h4 class="way__h">Compose</h4>
+            <p class="way__d">
+              The short path. Dashboard on <span class="num">localhost:3000</span>.
+            </p>
+          </div>
+          <div class="way__code">
+            <CodeBlock
+              label="bash"
+              code={`$ curl -fsSL ${'https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml'} -o docker-compose.yml
+$ docker compose up -d
+# http://localhost:3000`}
+            />
+          </div>
+        </li>
+
+        <li class="way">
+          <span class="way__i">02</span>
+          <div class="way__label">
+            <h4 class="way__h">Docker</h4>
+            <p class="way__d">The same image, without a Compose file.</p>
+          </div>
+          <div class="way__code">
+            <CodeBlock
+              label="bash"
+              code={`$ docker run -d --name orva -p 8443:8443 \\
+    --pid host --cgroupns host \\
+    --cap-add SYS_ADMIN \\
+    --security-opt seccomp=unconfined \\
+    --security-opt apparmor=unconfined \\
+    --security-opt systempaths=unconfined \\
+    --device /dev/net/tun \\
+    -v orva-data:/var/lib/orva \\
+    -v /sys/fs/cgroup:/sys/fs/cgroup:rw \\
+    ghcr.io/harsh-2002/orva:latest`}
+            />
+          </div>
+        </li>
+
+        <li class="way">
+          <span class="way__i">03</span>
+          <div class="way__label">
+            <h4 class="way__h">Bare metal</h4>
+            <p class="way__d">A service, from a checksum-verified download.</p>
+          </div>
+          <div class="way__code">
+            <CodeBlock
+              label="bash"
+              code={`$ curl -fsSL ${'https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh'} | sh`}
+            />
+          </div>
+        </li>
+
+        <li class="way">
+          <span class="way__i">04</span>
+          <div class="way__label">
+            <h4 class="way__h">CLI only</h4>
+            <p class="way__d">Just the client, for an instance you already run.</p>
+          </div>
+          <!-- One block per platform. A single block would have put a shell
+               command and a PowerShell command behind one Copy button, and
+               whichever you are on, you would get both. -->
+          <div class="way__code way__code--split">
+            <CodeBlock
+              label="macOS, Linux"
+              code={`$ curl -fsSL ${'https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh'} | sh`}
+            />
+            <CodeBlock
+              label="Windows"
+              code={`$ irm ${'https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.ps1'} | iex`}
+            />
+          </div>
+        </li>
       </ol>
 
-      <div class="compare-wrap">
-        <table class="compare">
-          <thead>
-            <tr>
-              <th scope="col"></th>
-              <th scope="col">Orva (nsjail)</th>
-              <th scope="col">Firecracker / VMs</th>
-              <th scope="col">Plain Docker</th>
-            </tr>
-          </thead>
-          <tbody>
-            {
-              compareRows.map(([k, a, b, c]) => (
-                <tr>
-                  <th scope="row">{k}</th>
-                  <td class="hl">{a}</td>
-                  <td>{b}</td>
-                  <td>{c}</td>
-                </tr>
-              ))
-            }
-          </tbody>
-        </table>
+      <div class="closing">
+        <h3 class="sec__h">Deploy something.</h3>
+        <p class="lead prose">
+          Point the CLI at your instance once, then it is three lines to a live endpoint.
+        </p>
+        <div class="closing__code">
+          <CodeBlock
+            label="bash"
+            code={`$ orva deploy ./hello --name hello --runtime python
+$ orva invoke hello --body '{"name":"Ada"}'
+{"hello":"Ada"}`}
+          />
+        </div>
+        <div class="hero__cta">
+          <a class="btn btn--primary" href={`${base}/docs/`}>Read the docs</a>
+          <a class="btn btn--secondary" href={repo}>View source</a>
+        </div>
+        <p class="muted prose closing__note">
+          Configuration, the full SDK surface, the security model and the things worth knowing before your
+          first deploy are all in the
+          <a class="link" href={`${base}/docs/`}>documentation</a>.
+        </p>
       </div>
 
-      <p class="sec-foot">
-        Full threat model and self-verification recipe:&nbsp;
-        <a
-          href="https://github.com/Harsh-2002/Orva/blob/main/docs/SECURITY.md"
-          target="_blank"
-          rel="noopener"
-        >
-          docs/SECURITY.md
-        </a>. Verified end-to-end under Kata Containers 3.30 (QEMU + Cloud Hypervisor); the nsjail boundary
-        holds unchanged with a real Linux kernel underneath.
-      </p>
-    </div>
-  </section>
+      <!-- Where the licence, the source and the invitation to contribute live,
+           now that the page has no footer to put them in. -->
+      <div class="oss">
+        <h2 class="eyebrow">Open source</h2>
+        <h3 class="sec__h">Apache 2.0, and yours to change.</h3>
+        <p class="lead prose sec__p">
+          The runtime, the dashboard, the CLI and the MCP server are one repository. Read it, fork it, run it
+          for as long as you like without asking anyone. Issues and pull requests are welcome, and so is
+          telling us where the documentation is wrong.
+        </p>
 
-  <!-- ── 03 / Dashboard ───────────────────────────────── -->
-  <section class="sec" id="dashboard">
-    <div class="inner">
-      <header class="sec-head">
-        <span class="num">03</span>
-        <span class="slash">/</span>
-        <span class="label">Dashboard</span>
-        <span class="bar"></span>
-        <span class="count">9 views</span>
-      </header>
-
-      <h2>Everything the operator needs.<br />Nothing they don't.</h2>
-      <p class="sec-sub">Click any screenshot for full size.</p>
-
-      <div class="shots">
-        {
-          shots.map(([file, title, desc]) => {
-            const src = `${baseTrim}/screenshots/${file}.jpeg`;
-            const cap = `${title} — ${desc}`;
-            return (
-              <figure class="shot">
-                <div
-                  class="shot-thumb"
-                  role="button"
-                  tabindex="0"
-                  data-lightbox={src}
-                  data-caption={cap}
-                  aria-label={`View ${title} full size`}
-                >
-                  <img src={src} alt={title} loading="lazy" decoding="async" width="800" height="500" />
-                </div>
-                <figcaption>
-                  <strong>{title}</strong>
-                  <span>{desc}</span>
-                </figcaption>
-              </figure>
-            );
-          })
-        }
-      </div>
-    </div>
-  </section>
-
-  <!-- ── 04 / Install ─────────────────────────────────── -->
-  <section class="sec" id="install">
-    <div class="inner">
-      <header class="sec-head">
-        <span class="num">04</span>
-        <span class="slash">/</span>
-        <span class="label">Install</span>
-        <span class="bar"></span>
-        <span class="count">4 paths</span>
-      </header>
-
-      <h2>Four ways in.<br />Pick the one you trust.</h2>
-
-      <div class="install-stack">
-        <article class="install-opt">
-          <header>
-            <span class="opt-letter" aria-hidden="true">A</span>
-            <div>
-              <h3>Docker</h3>
-              <p>The fast path. One command, a persistent volume, exposes <code>:8443</code>.</p>
-            </div>
-          </header>
-          <div class="code">
-            <div class="code-bar">
-              <span>shell</span>
-              <button class="copy" data-copy="#install-docker">Copy</button>
-            </div>
-            <pre
-              id="install-docker"><code>{`docker run -d \\
-  --name orva \\
-  -p 8443:8443 \\
-  --pid host --cgroupns host \\
-  --cap-add SYS_ADMIN --cap-add NET_ADMIN \\
-  --security-opt seccomp=unconfined \\
-  --security-opt apparmor=unconfined \\
-  --security-opt systempaths=unconfined \\
-  --device /dev/net/tun \\
-  -v orva-data:/var/lib/orva \\
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \\
-  ghcr.io/harsh-2002/orva:latest`}</code></pre>
+        <dl class="specs oss__list">
+          <div class="spec">
+            <dt class="spec__i">01</dt>
+            <dt class="spec__t">Read the source</dt>
+            <dd class="spec__d">
+              Go, Vue and one SQLite file. <a class="link" href={repo}>Harsh-2002/Orva</a>
+            </dd>
           </div>
-        </article>
-
-        <article class="install-opt">
-          <header>
-            <span class="opt-letter" aria-hidden="true">B</span>
-            <div>
-              <h3>Docker Compose</h3>
-              <p>Pin a tag, declare the volume, keep your <code>compose.yml</code> in version control.</p>
-            </div>
-          </header>
-          <div class="code">
-            <div class="code-bar">
-              <span>compose.yml</span>
-              <button class="copy" data-copy="#install-compose">Copy</button>
-            </div>
-            <pre
-              id="install-compose"><code>{`services:
-  orva:
-    image: ghcr.io/harsh-2002/orva:latest
-    restart: unless-stopped
-    ports:
-      - "8443:8443"
-    pid: host
-    cgroup: host
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
-    security_opt:
-      - seccomp=unconfined
-      - apparmor=unconfined
-      - systempaths=unconfined
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    volumes:
-      - orva-data:/var/lib/orva
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-
-volumes:
-  orva-data:`}</code></pre>
+          <div class="spec">
+            <dt class="spec__i">02</dt>
+            <dt class="spec__t">Report something</dt>
+            <dd class="spec__d">
+              A bug, a rough edge, or a number on this page that is wrong.
+              <a class="link" href={`${repo}/issues`}>Open an issue</a>
+            </dd>
           </div>
-        </article>
-
-        <article class="install-opt">
-          <header>
-            <span class="opt-letter" aria-hidden="true">C</span>
-            <div>
-              <h3>Bare-metal</h3>
-              <p>
-                No Docker. The universal installer lays down the server, a service user, a systemd unit, and
-                native nsjail — then starts it.
-              </p>
-            </div>
-          </header>
-          <div class="code">
-            <div class="code-bar">
-              <span>shell</span>
-              <button class="copy" data-copy="#install-bare">Copy</button>
-            </div>
-            <pre
-              id="install-bare"><code>{`curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh -s -- --bare-metal`}</code></pre>
+          <div class="spec">
+            <dt class="spec__i">03</dt>
+            <dt class="spec__t">Licence</dt>
+            <dd class="spec__d">
+              Apache 2.0, patent grant included.
+              <a class="link" href={`${repo}/blob/main/LICENSE`}>Read it</a>
+            </dd>
           </div>
-        </article>
+        </dl>
 
-        <article class="install-opt">
-          <header>
-            <span class="opt-letter" aria-hidden="true">D</span>
-            <div>
-              <h3>Standalone CLI</h3>
-              <p>
-                Just the client — drive a remote Orva from your laptop or CI. No server, no root, no daemon.
-              </p>
-            </div>
-          </header>
-          <div class="code">
-            <div class="code-bar">
-              <span>shell</span>
-              <button class="copy" data-copy="#install-cli">Copy</button>
-            </div>
-            <pre
-              id="install-cli"><code>{`curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh`}</code></pre>
-          </div>
-        </article>
-      </div>
-
-      <p class="sec-foot">
-        Can't decide? Drop the <code>--bare-metal</code> flag and the installer auto-detects your host — Docker
-        when it's present, bare-metal otherwise.
-      </p>
-    </div>
-  </section>
-
-  <!-- ── 05 / Runtimes ────────────────────────────────── -->
-  <section class="sec" id="runtimes">
-    <div class="inner">
-      <header class="sec-head">
-        <span class="num">05</span>
-        <span class="slash">/</span>
-        <span class="label">Runtimes</span>
-        <span class="bar"></span>
-        <span class="count">3 languages</span>
-      </header>
-
-      <h2>Write a function.<br />Get a URL.</h2>
-      <p class="sec-sub">
-        Every handler is a default export. <code>kv</code>, <code>invoke</code>, and <code>jobs</code> are pre-installed
-        — no <code>npm install</code>, no <code>pip install</code>.
-      </p>
-
-      <div class="install-stack">
-        <article class="install-opt">
-          <header>
-            <span class="opt-letter" aria-hidden="true">A</span>
-            <div>
-              <h3>Node.js <span class="opt-meta">24</span></h3>
-              <p>
-                Default export an async handler. <code>ctx.kv</code> backed by per-function SQLite; no install needed.
-              </p>
-            </div>
-          </header>
-          <div class="code">
-            <div class="code-bar">
-              <span>handler.js</span>
-              <button class="copy" data-copy="#rt-node">Copy</button>
-            </div>
-            <pre
-              id="rt-node"><code>{`export default async function (req, ctx) {
-  const seen = (await ctx.kv.get('count')) ?? 0;
-  await ctx.kv.put('count', seen + 1);
-  return { ok: true, seen: seen + 1 };
-}`}</code></pre>
-          </div>
-        </article>
-
-        <article class="install-opt">
-          <header>
-            <span class="opt-letter" aria-hidden="true">B</span>
-            <div>
-              <h3>Python <span class="opt-meta">3.14</span></h3>
-              <p>
-                Plain <code>async def handler(req, ctx)</code>. Async SDK on <code>ctx</code> — no FastAPI, no boilerplate.
-              </p>
-            </div>
-          </header>
-          <div class="code">
-            <div class="code-bar">
-              <span>handler.py</span>
-              <button class="copy" data-copy="#rt-py">Copy</button>
-            </div>
-            <pre
-              id="rt-py"><code>{`async def handler(req, ctx):
-    seen = await ctx.kv.get('count') or 0
-    await ctx.kv.put('count', seen + 1)
-    return {'ok': True, 'seen': seen + 1}`}</code></pre>
-          </div>
-        </article>
-
-        <article class="install-opt">
-          <header>
-            <span class="opt-letter" aria-hidden="true">C</span>
-            <div>
-              <h3>TypeScript <span class="opt-meta">native</span></h3>
-              <p>
-                Types ship with the runtime — <code>import type &#123; OrvaHandler &#125; from 'orva'</code> and
-                you're set.
-              </p>
-            </div>
-          </header>
-          <div class="code">
-            <div class="code-bar">
-              <span>handler.ts</span>
-              <button class="copy" data-copy="#rt-ts">Copy</button>
-            </div>
-            <pre
-              id="rt-ts"><code>{`import type { OrvaHandler } from 'orva';
-
-const handler: OrvaHandler = async (req, ctx) => {
-  await ctx.jobs.enqueue('thumbnail', { url: req.body.url });
-  return { queued: true };
-};
-export default handler;`}</code></pre>
-          </div>
-        </article>
-      </div>
-
-      <p class="sec-foot">
-        Full SDK surface on <code>ctx</code>: <code>kv</code>, <code>invoke</code>, <code>jobs</code>,
-        <code>logger</code>, <code>trace</code>, <code>secrets</code>. Reference docs ship in-product at <code
-          >/web/docs</code
-        >.
-      </p>
-    </div>
-  </section>
-
-  <!-- ── Closing ──────────────────────────────────────── -->
-  <section class="sec close">
-    <div class="inner">
-      <p class="overline overline-block">— Last word</p>
-      <h2>No moving parts.<br />Boring on purpose.</h2>
-      <p class="hero-lede close-lede">
-        No control plane. No telemetry. No vendor account. Your hardware, your code, your kernel boundaries.
-      </p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="#install">Install</a>
-        <a class="btn btn-ghost" href="https://github.com/Harsh-2002/Orva" target="_blank" rel="noopener">
-          Star on GitHub <span aria-hidden="true">↗</span>
-        </a>
+        <div class="hero__cta">
+          <a class="btn btn--secondary" href={repo}>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+              ></path>
+            </svg>
+            View on GitHub
+          </a>
+          <a class="btn btn--secondary" href={`${repo}/blob/main/CHANGELOG.md`}>Changelog</a>
+        </div>
       </div>
     </div>
   </section>
 </Layout>
 
 <style>
-  /* Anchor targets (e.g. "Install — 30 seconds" → #install) clear the
-     fixed masthead instead of landing hidden behind it. */
-  .hero[id],
-  .sec[id] {
-    scroll-margin-top: 96px;
-  }
-  @media (max-width: 480px) {
-    .hero[id],
-    .sec[id] {
-      scroll-margin-top: 80px;
-    }
-  }
-
-  /* ── Masthead ─────────────────────────────────────────── */
-  .masthead {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 50;
-    background: transparent;
-    transform: translate3d(0, 0, 0);
-    transition: transform 320ms cubic-bezier(0.22, 0.8, 0.2, 1);
-    will-change: transform;
-  }
-  .masthead.is-hidden {
-    transform: translate3d(0, -100%, 0);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .masthead {
-      transition: none;
-    }
-  }
-  .mast-inner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 72px;
-  }
-  @media (max-width: 480px) {
-    .mast-inner {
-      height: 64px;
-    }
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 12px;
-    color: var(--brand);
-    transition: transform 200ms ease;
-  }
-  .brand:active {
-    transform: scale(0.97);
-  }
-  .brand-mark {
-    width: 34px;
-    height: 34px;
-    display: block;
-    flex-shrink: 0;
-  }
-  .brand-name {
-    font-family: var(--sans);
-    font-size: 1.375rem;
-    font-weight: 600;
-    letter-spacing: -0.025em;
-    color: var(--fg);
-    line-height: 1;
-  }
-  @media (max-width: 480px) {
-    .brand {
-      gap: 10px;
-    }
-    .brand-mark {
-      width: 30px;
-      height: 30px;
-    }
-    .brand-name {
-      font-size: 1.1875rem;
-    }
-  }
-
-  .nav-primary {
-    display: flex;
-    align-items: center;
-    gap: 28px;
-    font-size: 0.8125rem;
-    font-family: var(--mono);
-    letter-spacing: -0.005em;
-  }
-  .nav-primary a {
-    color: var(--muted);
-    transition: color 120ms;
-  }
-  .nav-primary a:hover {
-    color: var(--fg);
-  }
-  .nav-primary .nav-ext {
-    color: var(--accent-hi);
-  }
-  .nav-primary .nav-ext:hover {
-    color: var(--fg);
-  }
-
-  @media (max-width: 720px) {
-    .nav-primary {
-      gap: 16px;
-      font-size: 0.75rem;
-    }
-    .nav-primary a:not(.nav-ext) {
-      display: none;
-    }
-  }
-
-  /* ── Hero ─────────────────────────────────────────────── */
   .hero {
-    padding: clamp(80px, 13vw, 150px) 0 clamp(72px, 11vw, 120px);
-    border-top: none;
-  }
-  .hero-inner {
-    max-width: var(--max);
+    padding-top: var(--v-6);
   }
 
-  .hero-meta {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 36px;
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-  }
-  .hero-meta-build {
-    color: var(--subtle);
-  }
-  @media (max-width: 480px) {
-    .hero-meta {
-      flex-wrap: wrap;
-      gap: 10px;
-    }
+  .hero__h {
+    max-width: 16ch;
+    margin-top: var(--v-6);
   }
 
-  .hero h1 {
-    margin-bottom: 30px;
-  }
-  .h1-em {
-    color: var(--muted);
+  .hero__p {
+    max-width: 54ch;
+    margin-top: var(--v-2);
   }
 
-  .hero-lede {
-    font-size: clamp(1.0625rem, 1.6vw, 1.25rem);
-    max-width: 56ch;
-    color: var(--muted);
-    line-height: 1.55;
-  }
-
-  .hero-actions {
+  .hero__cta {
     display: flex;
     flex-wrap: wrap;
-    gap: 14px;
-    margin-top: 40px;
-    margin-bottom: 56px;
+    gap: var(--v-1);
+    margin-top: var(--v-3);
   }
 
-  /* ── 01 · Capabilities ────────────────────────────────── */
-  .caps {
-    border-top: 1px solid var(--border);
+  .hero__shot {
+    margin-top: var(--v-6);
   }
-  .cap {
+
+  .sec__h {
+    margin-top: var(--v-1);
+    max-width: 20ch;
+  }
+
+  .sec__h--sub {
+    margin-top: var(--v-8);
+  }
+
+  .sec__p {
+    margin-top: var(--v-2);
+  }
+
+  .sec__note {
+    margin-top: var(--v-2);
+    font-size: var(--t-small);
+  }
+
+  /* Supporting shots run 18 of 24 columns, centred. The hero keeps the full
+     24, because it is the hero.
+
+     This is rhythm rather than economy: five identical full-bleed slabs read as
+     a gallery, and a gallery is the shape you choose before you know what the
+     images are. It also lowers the page by about 600px and gives the captures'
+     own busy wallpaper less of the viewport to shout from. */
+  .sec__shot {
+    margin-top: var(--v-4);
+    max-width: calc(18 * var(--pitch) - var(--g));
+    margin-inline: auto;
+  }
+
+  .two {
     display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 28px;
-    padding: 22px 8px;
-    border-bottom: 1px solid var(--border);
-    transition: background 120ms;
+    /* minmax(0, ...) or a long line inside a scrolling <pre> sizes this track
+       to its max-content and drags the whole page wider. */
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--v-2);
+    margin-top: var(--v-3);
   }
-  .cap:hover {
-    background: var(--surface);
-  }
-  .cap dt {
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--fg);
-    letter-spacing: -0.005em;
-  }
-  .cap dd {
-    color: var(--muted);
-    font-size: 0.9375rem;
-    line-height: 1.55;
-  }
-  @media (max-width: 760px) {
-    .cap {
-      grid-template-columns: 1fr;
-      gap: 6px;
-      padding: 18px 4px;
+
+  @media (min-width: 64rem) {
+    .two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
-  /* ── 02 · Isolation ───────────────────────────────────── */
-  .layers {
-    list-style: none;
-    border-top: 1px solid var(--border);
-    margin-bottom: clamp(56px, 8vw, 88px);
-  }
-  .layer {
-    display: grid;
-    grid-template-columns: 88px 1fr;
-    gap: 32px;
-    padding: 28px 8px;
-    border-bottom: 1px solid var(--border);
-    transition: background 120ms;
-  }
-  .layer:hover {
-    background: var(--surface);
-  }
-  .layer-num {
-    font-family: var(--mono);
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--accent-hi);
-    letter-spacing: 0.1em;
-    padding-top: 4px;
-  }
-  .layer-body h3 {
-    margin-bottom: 10px;
-    font-size: 1.0625rem;
-  }
-  .layer-body p {
-    color: var(--muted);
-    font-size: 0.9375rem;
-    line-height: 1.65;
-    max-width: 78ch;
-  }
-  @media (max-width: 560px) {
-    .layer {
-      grid-template-columns: 1fr;
-      gap: 8px;
-      padding: 22px 4px;
-    }
+  .two--shots {
+    margin-top: var(--v-4);
   }
 
-  .compare-wrap {
-    overflow-x: auto;
+  .specs {
+    margin-top: var(--v-3);
+    border-bottom: 1px solid var(--bd-hair);
   }
-  .compare {
-    width: 100%;
-    border-collapse: collapse;
-    font-family: var(--mono);
-    font-size: 0.8125rem;
-    border: 1px solid var(--border);
-    min-width: 720px;
-  }
-  .compare thead th {
-    text-align: left;
-    padding: 12px 14px;
-    font-weight: 500;
-    color: var(--fg);
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-    letter-spacing: 0.1em;
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-  }
-  .compare thead th:last-child {
-    border-right: none;
-  }
-  .compare tbody th {
-    text-align: left;
-    padding: 12px 14px;
-    font-weight: 500;
-    color: var(--fg);
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-    width: 200px;
-    letter-spacing: 0.08em;
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-  }
-  .compare tbody td {
-    padding: 12px 14px;
-    color: var(--muted);
-    border-bottom: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-    vertical-align: top;
-    line-height: 1.55;
-  }
-  .compare tbody td:last-child {
-    border-right: none;
-  }
-  .compare tbody tr:last-child th,
-  .compare tbody tr:last-child td {
+
+  .specs :global(.spec:last-child) {
     border-bottom: none;
   }
-  .compare tbody td.hl {
-    color: var(--fg);
-  }
-  .compare tbody tr:hover td {
-    background: var(--surface);
-  }
-  .compare tbody tr:hover th {
-    background: var(--surface);
+
+  /* Rows, not a 2x2 of cards.
+
+     As a grid the four panels were equal-height boxes holding code blocks of
+     125px to 301px, bottom-aligned by margin-top:auto. Measured, the dead space
+     above each snippet came out at 144px, 11px, 55px and 11px. Nothing was
+     broken; it just looked it, because the boxes were forced to agree on a
+     height while their contents could not.
+
+     Rows drop the constraint. Each one is as tall as its own command, and what
+     repeats is the structure: index, label, code, hairline. That is the same
+     rhythm as the isolation and capability lists further up, so the install
+     section stops being the one part of the page built out of cards. */
+  .ways {
+    margin-top: var(--v-3);
+    border-bottom: 1px solid var(--bd-hair);
   }
 
-  /* ── 03 · Dashboard ───────────────────────────────────── */
-  .shots {
+  .way {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 18px;
-  }
-  .shot {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .shot-thumb {
-    aspect-ratio: 16 / 10;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--surface);
-    cursor: pointer;
-    position: relative;
-    transition:
-      border-color 140ms,
-      transform 200ms ease;
-  }
-  .shot-thumb:hover {
-    border-color: var(--border-hi);
-  }
-  .shot-thumb:active {
-    transform: scale(0.99);
-  }
-  .shot-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: transform 280ms ease;
-  }
-  .shot-thumb:hover img {
-    transform: scale(1.025);
-  }
-  .shot-thumb::after {
-    content: '⤢';
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 26px;
-    height: 26px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    color: var(--fg);
-    background: color-mix(in oklab, var(--bg-deep) 80%, transparent);
-    border: 1px solid var(--border-hi);
-    font-family: var(--mono);
-    opacity: 0;
-    transition: opacity 160ms;
-  }
-  .shot-thumb:hover::after,
-  .shot-thumb:focus-visible::after {
-    opacity: 1;
-  }
-  .shot figcaption {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding-top: 2px;
-  }
-  .shot strong {
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--fg);
-  }
-  .shot span {
-    font-size: 0.8125rem;
-    color: var(--subtle);
-    line-height: 1.5;
-  }
-
-  @media (max-width: 940px) {
-    .shots {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-  @media (max-width: 560px) {
-    .shots {
-      grid-template-columns: 1fr;
-      gap: 16px;
-    }
-  }
-
-  /* ── 04 · Install ─────────────────────────────────────── */
-  .install-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 36px;
-  }
-  .install-opt header {
-    display: grid;
-    grid-template-columns: 56px 1fr;
-    gap: 18px;
-    margin-bottom: 18px;
+    grid-template-columns: repeat(24, minmax(0, 1fr));
+    column-gap: var(--g);
     align-items: start;
+    padding-block: var(--v-2);
+    border-top: 1px solid var(--bd-hair);
   }
-  .opt-letter {
+
+  .way__i {
+    grid-column: span 2;
     font-family: var(--mono);
-    font-size: 1rem;
-    font-weight: 500;
-    color: var(--accent-hi);
-    border: 1px solid var(--border-hi);
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    font-size: var(--t-micro);
+    letter-spacing: 0;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+    /* Nudged onto the heading's baseline rather than the row's top edge. */
+    padding-top: 0.35em;
   }
-  .install-opt h3 {
-    margin-bottom: 6px;
+
+  .way__label {
+    grid-column: span 6;
+    padding-top: 0.1em;
   }
-  .install-opt p {
-    color: var(--muted);
-    font-size: 0.9375rem;
-    line-height: 1.55;
-    max-width: 64ch;
+
+  .way__h {
+    font-size: var(--t-body);
+    font-weight: 600;
   }
-  .opt-meta {
-    margin-left: 8px;
-    font-family: var(--mono);
-    font-size: 0.6875rem;
-    font-weight: 500;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--accent-hi);
-    padding: 2px 8px;
-    border: 1px solid var(--border-hi);
-    vertical-align: middle;
+
+  .way__d {
+    margin-top: var(--v-0);
+    font-size: var(--t-small);
+    color: var(--ink-2);
+    max-width: 30ch;
   }
-  @media (max-width: 560px) {
-    .install-opt header {
-      grid-template-columns: 1fr;
-      gap: 12px;
+
+  .way__code {
+    grid-column: span 16;
+    min-width: 0;
+  }
+
+  .way__code--split {
+    display: grid;
+    gap: var(--v-1);
+  }
+
+  @media (max-width: 63.99rem) {
+    .way {
+      grid-template-columns: 2.5rem minmax(0, 1fr);
+      row-gap: var(--v-1);
     }
-    .install-opt h3 {
-      line-height: 1.6;
+    .way__i {
+      grid-column: 1;
+      grid-row: 1;
     }
-    .opt-meta {
-      margin-left: 0;
-      display: inline-block;
-      margin-top: 6px;
+    .way__label {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .way__code {
+      grid-column: 1 / -1;
+      grid-row: 2;
     }
   }
 
-  /* ── Closing ──────────────────────────────────────────── */
-  .close {
-    padding: clamp(90px, 13vw, 150px) 0 clamp(120px, 16vw, 200px);
+  .closing {
+    margin-top: var(--v-8);
+    padding-top: var(--v-6);
+    border-top: 1px solid var(--bd-hair);
   }
-  .close .overline-block {
-    display: block;
-    margin-bottom: 28px;
+
+  .closing__code {
+    margin-top: var(--v-3);
+    max-width: calc(16 * var(--pitch) - var(--g));
   }
-  .close h2 {
-    margin-bottom: 22px;
-    max-width: 14ch;
+
+  .closing .hero__cta {
+    margin-top: var(--v-3);
   }
-  .close-lede {
-    max-width: 54ch;
+
+  .closing__note {
+    margin-top: var(--v-2);
+    font-size: var(--t-small);
+  }
+
+  .oss {
+    margin-top: var(--v-8);
+    padding-top: var(--v-6);
+    border-top: 1px solid var(--bd-hair);
+  }
+
+  .oss__list {
+    margin-top: var(--v-3);
+  }
+
+  .oss .hero__cta {
+    margin-top: var(--v-3);
   }
 </style>

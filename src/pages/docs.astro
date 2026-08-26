@@ -1,0 +1,827 @@
+---
+import Layout from '../layouts/Layout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import Brand from '../components/Brand.astro';
+
+const repo = 'https://github.com/Harsh-2002/Orva';
+
+// Every example here is taken from main and is meant to run as written. The
+// previous version of this site shipped three handler samples that could not:
+// a signature that does not exist, a ctx object that is never passed, and an
+// event.body treated as parsed JSON when it has always been a raw string.
+const toc = [
+  { id: 'start', label: 'Getting started' },
+  { id: 'handler', label: 'Handler contract' },
+  { id: 'invoke', label: 'Invoking' },
+  { id: 'config', label: 'Function settings' },
+  { id: 'sdk', label: 'The SDK' },
+  { id: 'cli', label: 'CLI' },
+  { id: 'server', label: 'Server config' },
+  { id: 'security', label: 'Security model' },
+  { id: 'mcp', label: 'MCP' },
+  { id: 'trouble', label: 'Troubleshooting' },
+];
+---
+
+<Layout
+  title="Orva documentation"
+  description="How to deploy, invoke, configure and operate Orva: the handler contract, the sandbox SDK, the CLI, server configuration, the security model and the MCP server."
+>
+  <header class="docs-head">
+    <Brand href={import.meta.env.BASE_URL} />
+    <h1>Documentation</h1>
+    <p class="lead">
+      Orva runs JavaScript, TypeScript and Python functions inside nsjail sandboxes on hardware you own, and
+      serves them over HTTP. This page is enough to deploy something and operate it. The exhaustive reference
+      is in the repository.
+    </p>
+  </header>
+
+  <div class="docs">
+    <aside class="toc" aria-label="On this page">
+      <div class="toc__in">
+        <h2 class="eyebrow">On this page</h2>
+        <nav>
+          {
+            toc.map((t) => (
+              <a href={`#${t.id}`} data-toc-link={t.id}>
+                {t.label}
+              </a>
+            ))
+          }
+        </nav>
+        <p class="toc__note faint">
+          The canonical reference lives in the repository and ships inside the binary. Run
+          <span class="num">orva docs</span>, or read
+          <a class="link" href={`${repo}/blob/main/docs/reference.md`}>reference.md</a>.
+        </p>
+      </div>
+    </aside>
+
+    <article class="body">
+      <!-- Getting started -->
+      <section id="start">
+        <h2>Getting started</h2>
+        <p>
+          Docker Compose is the shortest path. It publishes the dashboard on host port
+          <span class="num">3000</span>, which maps to <span class="num">8443</span> inside the container.
+        </p>
+        <CodeBlock
+          label="bash"
+          code={`$ curl -fsSL ${'https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml'} -o docker-compose.yml
+$ docker compose up -d
+# http://localhost:3000`}
+        />
+        <div class="note">
+          <p>
+            <strong>nsjail is required on Linux.</strong> The server starts without it, but every invocation fails
+            until it is installed at
+            <span class="num">/usr/local/bin/nsjail</span>. That path is hardcoded: PATH is never consulted
+            and there is no environment override. The Docker image ships it.
+          </p>
+        </div>
+        <p>
+          State is a single directory, <span class="num">/var/lib/orva</span>: one SQLite database in WAL mode
+          and a tree of function versions. There is no external database, no control plane and no telemetry.
+        </p>
+      </section>
+
+      <!-- Handler -->
+      <section id="handler">
+        <h2>Handler contract</h2>
+        <p>
+          There are two runtimes, <span class="num">node</span> and
+          <span class="num">python</span>, both latest-stable only. TypeScript is a first-class path on <span
+            class="num">node</span
+          >: it compiles at build time and runs as JavaScript.
+        </p>
+
+        <h3>Node.js</h3>
+        <CodeBlock
+          label="handler.js"
+          lang="js"
+          code={`exports.handler = async (event) => {
+  const body = event.body ? JSON.parse(event.body) : {}
+
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { hello: body.name || 'world' },
+  }
+}`}
+        />
+
+        <h3>Python</h3>
+        <CodeBlock
+          label="handler.py"
+          lang="python"
+          code={`import json
+
+
+def handler(event):
+    raw = event.get("body") or ""
+    body = json.loads(raw) if raw else {}
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": {"hello": body.get("name", "world")},
+    }`}
+        />
+
+        <div class="note note--warn">
+          <p>
+            <strong>The body is always a raw string.</strong> The platform never parses it, whatever the <span
+              class="num">Content-Type</span
+            >. Call
+            <span class="num">JSON.parse</span> or <span class="num">json.loads</span> yourself, and guard the empty
+            case. Treating it as an already-parsed object is the single most common way a first handler returns
+            a 500.
+          </p>
+        </div>
+
+        <h3>Event and response</h3>
+        <p>
+          The event carries <span class="num">method</span>, <span class="num">path</span>,
+          <span class="num">headers</span> and <span class="num">body</span>. Node additionally gets <span
+            class="num">query</span
+          >, because its adapter parses it out of the path; Python handlers split <span class="num"
+            >event["path"]</span
+          > themselves.
+        </p>
+        <p>
+          Return <span class="num">{'{ statusCode, headers, body }'}</span>. A non-string body is JSON-encoded
+          by the adapter. Environment variables and secrets arrive in
+          <span class="num">process.env</span> and <span class="num">os.environ</span>.
+        </p>
+      </section>
+
+      <!-- Invoke -->
+      <section id="invoke">
+        <h2>Invoking</h2>
+        <p>
+          Every function answers at <span class="num">/fn/&lt;function_id&gt;</span>. Friendlier paths are
+          attached separately as custom routes, from the dashboard, the API, the
+          <span class="num">set_route</span> MCP tool or
+          <span class="num">orva routes set</span>.
+        </p>
+        <CodeBlock
+          label="bash"
+          code={`$ curl -X POST https://orva.example.com/fn/<function_id> \\
+    -H 'Content-Type: application/json' \\
+    -d '{"name": "Orva"}'`}
+        />
+        <p>
+          These prefixes are reserved and cannot be claimed by a custom route:
+          <span class="num">/api/ /auth/ /fn/ /mcp/ /web/ /webhook/ /_orva/</span>.
+        </p>
+      </section>
+
+      <!-- Config -->
+      <section id="config">
+        <h2>Function settings</h2>
+        <p>
+          Each function carries its own runtime, resource budget and network posture. The first five of these
+          are <strong>spawn-scoped</strong>: a warm worker's environment is fixed when it spawns, so changing
+          them takes effect on the next cold start rather than immediately.
+        </p>
+
+        <dl class="deflist">
+          <div>
+            <dt><span class="num">runtime</span></dt>
+            <dd><span class="num">node</span> or <span class="num">python</span>.</dd>
+          </div>
+          <div>
+            <dt><span class="num">memory_mb</span> / <span class="num">cpus</span></dt>
+            <dd>Enforced by cgroup v2 on the sandbox, not advisory.</dd>
+          </div>
+          <div>
+            <dt><span class="num">timeout_ms</span></dt>
+            <dd>
+              Also surfaced to the handler as
+              <span class="num">getRemainingTimeInMillis()</span> and
+              <span class="num">get_remaining_time_in_millis()</span>.
+            </dd>
+          </div>
+          <div>
+            <dt><span class="num">network_mode</span></dt>
+            <dd>
+              <span class="num">none</span> by default: an isolated network namespace with loopback only. <span
+                class="num">egress</span
+              > opts into outbound traffic and adds roughly 5 ms to a cold start. Without it, any outbound call
+              fails
+              <span class="num">ENETUNREACH</span>.
+            </dd>
+          </div>
+          <div>
+            <dt><span class="num">auth_mode</span></dt>
+            <dd>
+              <span class="num">public</span> is the default and matches Cloudflare Workers and Vercel Functions.
+              <span class="num">signed</span> reads its key from the function secret <span class="num"
+                >ORVA_SIGNING_SECRET</span
+              >.
+            </dd>
+          </div>
+          <div>
+            <dt><span class="num">max_concurrency</span></dt>
+            <dd>
+              Caps in-flight invocations per function, so a runaway handler cannot exhaust whatever it calls
+              downstream. <span class="num">0</span> means unlimited.
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <!-- SDK -->
+      <section id="sdk">
+        <h2>The SDK</h2>
+        <p>
+          The <span class="num">orva</span> package is preinstalled in every sandbox. There is nothing to add to
+          a manifest and no network call to fetch it. Note that anything reaching outside the sandbox still needs
+          <span class="num">network_mode: egress</span>.
+        </p>
+
+        <h3>KV</h3>
+        <p>
+          A per-function JSON namespace on SQLite, with optional TTL. Batches are atomic: a validation or
+          storage failure rolls the whole batch back. The Node SDK is promise-based; <strong
+            >the Python SDK is synchronous</strong
+          >.
+        </p>
+        <CodeBlock
+          label="Node.js"
+          lang="js"
+          code={`const { kv } = require('orva')
+
+exports.handler = async (event) => {
+  // Omit ttlSeconds to keep expiry, 0 clears it.
+  await kv.put('user:42', { name: 'Ada', tier: 'pro' }, { ttlSeconds: 3600 })
+
+  const user = await kv.get('user:42', null)
+  const pages = await kv.list({ prefix: 'page:', limit: 50 })
+  await kv.delete('user:42')
+
+  return { statusCode: 200, body: JSON.stringify(user) }
+}`}
+        />
+        <CodeBlock
+          label="Python"
+          lang="python"
+          code={`from orva import kv
+
+
+def handler(event):
+    kv.put("user:42", {"name": "Ada", "tier": "pro"}, ttl_seconds=3600)
+
+    user = kv.get("user:42", None)
+    pages = kv.list(prefix="page:", limit=50)
+    kv.delete("user:42")
+
+    return {"statusCode": 200, "body": user}`}
+        />
+
+        <h3>Function to function</h3>
+        <p>
+          <span class="num">invoke()</span> calls another function on the same instance, with call-depth limits
+          so a cycle cannot spend the host.
+          <span class="num">invoke_stream()</span> streams the response through instead of buffering it.
+        </p>
+
+        <h3>Background jobs</h3>
+        <p>
+          <span class="num">jobs.enqueue()</span> moves work off the request path. Pass an idempotency key so a
+          retry does not run it twice.
+        </p>
+
+        <h3>Logs and spans</h3>
+        <p>
+          <span class="num">log</span> writes structured lines that land in the invocation log, and <span
+            class="num">trace</span
+          > opens custom spans that appear in the trace view. The import is <span class="num">log</span>, not <span
+            class="num">logger</span
+          >.
+        </p>
+        <CodeBlock
+          label="Python"
+          lang="python"
+          code={`from orva import trace, log
+
+
+def handler(event):
+    with trace.span("fetch-user"):
+        log.info("looking up", user_id=42)
+
+    return {"statusCode": 200, "body": "ok"}`}
+        />
+
+        <h3>Webhooks</h3>
+        <p>
+          Deliveries are signed, and each runtime ships a verification helper. The
+          <span class="num">x-orva-*</span> header namespace is server-set and stripped from inbound requests, so
+          a caller cannot forge one.
+        </p>
+      </section>
+
+      <!-- CLI -->
+      <section id="cli">
+        <h2>CLI</h2>
+        <p>
+          A single static binary with no CGO, so it runs on a bare Alpine image. It reads
+          <span class="num">~/.orva/config.yaml</span> for its endpoint and API key.
+        </p>
+        <CodeBlock
+          label="bash"
+          code={`# Key on stdin: the command line is visible via ps.
+$ printf %s "$ORVA_KEY" | orva login --endpoint https://orva.example.com --api-key -
+
+$ orva system health
+$ orva deploy ./my-fn --name my-fn --runtime node
+$ orva invoke my-fn --body '{"hello":"world"}'
+$ orva logs my-fn --follow`}
+        />
+        <p>
+          Beyond those, the surface covers <span class="num">functions</span>,
+          <span class="num">deployments</span>, <span class="num">rollback</span>,
+          <span class="num">diff</span>, <span class="num">kv</span>,
+          <span class="num">secrets</span>, <span class="num">cron</span>,
+          <span class="num">jobs</span>, <span class="num">keys</span>,
+          <span class="num">traces</span>, <span class="num">executions</span>,
+          <span class="num">activity</span>, <span class="num">pool</span>,
+          <span class="num">routes</span>, <span class="num">channels</span>,
+          <span class="num">firewall</span>, <span class="num">dns</span>,
+          <span class="num">backup</span>, <span class="num">chat</span> and
+          <span class="num">upgrade</span>. Run <span class="num">orva docs</span> for the full reference, which
+          is embedded in the binary.
+        </p>
+      </section>
+
+      <!-- Server config -->
+      <section id="server">
+        <h2>Server config</h2>
+        <p>The server is configured by environment variables only. There is no server config file.</p>
+        <dl class="deflist">
+          <div>
+            <dt><span class="num">ORVA_PORT</span></dt>
+            <dd>
+              Default <span class="num">8443</span>. Plain HTTP, no TLS. Put a reverse proxy in front of it
+              for TLS.
+            </dd>
+          </div>
+          <div>
+            <dt><span class="num">ORVA_HOST</span></dt>
+            <dd>
+              Default <span class="num">0.0.0.0</span>. Set <span class="num">127.0.0.1</span> to listen on loopback
+              only, which is the recommendation behind a proxy.
+            </dd>
+          </div>
+          <div>
+            <dt><span class="num">ORVA_DATA_DIR</span></dt>
+            <dd>
+              <span class="num">/var/lib/orva</span> under Docker,
+              <span class="num">~/.orva</span> in development.
+            </dd>
+          </div>
+          <div>
+            <dt><span class="num">ORVA_TRUSTED_PROXY</span></dt>
+            <dd>
+              Default <span class="num">false</span>. Turn it on only when a proxy in front of Orva actually
+              sets <span class="num">X-Forwarded-For</span>, because it makes Orva trust that header.
+            </dd>
+          </div>
+          <div>
+            <dt><span class="num">ORVA_LOG_LEVEL</span></dt>
+            <dd>
+              <span class="num">debug</span>, <span class="num">info</span> (default),
+              <span class="num">warn</span> or <span class="num">error</span>.
+            </dd>
+          </div>
+        </dl>
+        <p>
+          The full table, including body limits, retention, session lifetime and the seccomp policy switch, is
+          in
+          <a class="link" href={`${repo}/blob/main/docs/CONFIG.md`}>CONFIG.md</a>.
+        </p>
+      </section>
+
+      <!-- Security -->
+      <section id="security">
+        <h2>Security model</h2>
+        <p>Between a handler and the host kernel there are five layers:</p>
+        <CodeBlock
+          label="what is between user code and the host"
+          copy={false}
+          code={`host kernel
+  └─ docker container "orva"
+      └─ orvad (Go server)
+          └─ nsjail process         unshare(CLONE_NEWUSER) drops effective caps
+              └─ user namespace
+                  ├─ chroot to runtime rootfs      read-only
+                  ├─ /code bind-mount              read-only, function-private
+                  ├─ tmpfs /tmp                    private, wiped on worker exit
+                  ├─ cgroup v2                     memory + CPU + pids
+                  ├─ seccomp filter                ~150 syscalls blocked
+                  └─ user code (node / python)`}
+        />
+        <p>
+          The gaps between those layers are enforced by the Linux kernel, not by Orva code. Orva configures
+          the boundaries and trusts the kernel to hold them.
+        </p>
+
+        <h3>What is explicitly out of scope</h3>
+        <p>
+          Kernel-level zero-days and side-channel attacks. No seccomp filter is bulletproof, and the threat
+          model says so rather than implying otherwise. Orva is also
+          <strong>single-tenant</strong>: every function on an instance shares one host and one trust
+          boundary, so it is not built to run code from people you do not trust.
+        </p>
+
+        <h3>Egress</h3>
+        <p>
+          Egress policy is per sandbox and fail-closed. The blocklist compiles into that sandbox's own network
+          configuration, which the spawn refuses to start without. No host firewall table is ever created, so
+          nothing Orva does can outlive the process that needed it.
+        </p>
+
+        <h3>Credentials</h3>
+        <p>
+          The SDK credential handed to a sandbox is bound to that worker and to a single spawn. It is released
+          when the sandbox is reaped, so a redeploy genuinely invalidates a leaked copy rather than merely
+          appearing to.
+          <a class="link" href={`${repo}/blob/main/docs/SECURITY.md`}>SECURITY.md</a> sets out each credential class
+          and exactly what revoking it reaches.
+        </p>
+      </section>
+
+      <!-- MCP -->
+      <section id="mcp">
+        <h2>MCP</h2>
+        <p>
+          Orva exposes <span class="num">73</span> tools over Model Context Protocol, so an agent can operate the
+          instance the same way you do. A read-only key reaches
+          <span class="num">28</span> of them. Authentication is OAuth 2.1 or a static bearer token.
+        </p>
+        <CodeBlock
+          label="Claude Code"
+          code={`$ claude mcp add --transport http orva https://orva.example.com/mcp/ \\
+    --header "Authorization: Bearer $ORVA_KEY"`}
+        />
+        <p>
+          Config snippets for Cursor, VS Code, Codex CLI, OpenCode, Zed, Windsurf, Claude Desktop and ChatGPT
+          are in the reference. Agent channels let you bundle a set of functions and expose them as tools in
+          their own right.
+        </p>
+      </section>
+
+      <!-- Troubleshooting -->
+      <section id="trouble">
+        <h2>Troubleshooting</h2>
+        <dl class="deflist">
+          <div>
+            <dt>Every invocation fails, the server is up</dt>
+            <dd>
+              nsjail is missing. It must exist at
+              <span class="num">/usr/local/bin/nsjail</span>; that path is hardcoded and PATH is not
+              consulted.
+            </dd>
+          </div>
+          <div>
+            <dt>An outbound call fails with ENETUNREACH</dt>
+            <dd>
+              The function is on <span class="num">network_mode: none</span>, which is the default. Turn on
+              "Allow outbound network" in its configuration.
+            </dd>
+          </div>
+          <div>
+            <dt>The handler returns 500 on a valid JSON POST</dt>
+            <dd>
+              <span class="num">event.body</span> is a raw string and has to be parsed. It is never an object, whatever
+              the <span class="num">Content-Type</span> says.
+            </dd>
+          </div>
+          <div>
+            <dt>A config change did not take effect</dt>
+            <dd>
+              Runtime, memory, CPU, timeout and network mode are baked in when a worker spawns. A warm worker
+              keeps the old environment until it is replaced.
+            </dd>
+          </div>
+          <div>
+            <dt>Sandboxes will not start under Docker</dt>
+            <dd>
+              On the default runc runtime the container needs
+              <span class="num">--pid host</span>, <span class="num">--cgroupns host</span> and
+              <span class="num">--cap-add SYS_ADMIN</span>, plus a writable cgroup mount, to construct
+              sandboxes at all.
+            </dd>
+          </div>
+        </dl>
+      </section>
+    </article>
+  </div>
+</Layout>
+
+<script>
+  // Scroll spy for the table of contents.
+  //
+  // The rule is "the section you are currently reading", which is the LAST
+  // section whose start has passed an activation line, not the first section
+  // intersecting the viewport. Those differ constantly: a long section keeps
+  // its heading far above the fold while the next one is still off screen, and
+  // a first-intersecting check flips forward the instant the next heading peeks
+  // in from the bottom, so the highlight runs ahead of the reader.
+  const links = new Map<string, HTMLAnchorElement>();
+  document.querySelectorAll<HTMLAnchorElement>('[data-toc-link]').forEach((a) => {
+    links.set(a.dataset.tocLink!, a);
+  });
+
+  const sections = [...document.querySelectorAll<HTMLElement>('.body section[id]')];
+
+  if (sections.length && links.size) {
+    let current: string | null = null;
+
+    const setActive = (id: string | null) => {
+      if (id === current) return;
+      current = id;
+      links.forEach((a, key) => {
+        if (key === id) a.setAttribute('aria-current', 'location');
+        else a.removeAttribute('aria-current');
+      });
+    };
+
+    const offsetTop = (el: HTMLElement) => el.getBoundingClientRect().top + window.scrollY;
+
+    const compute = () => {
+      // The activation line sits below the top edge, so a section counts as
+      // reached once it is comfortably on screen rather than at first pixel.
+      const line = window.scrollY + window.innerHeight * 0.25;
+
+      // At the end of the document the last section wins outright. Without this
+      // a short final section can never cross the line, and the highlight
+      // sticks on the second-to-last entry however far you scroll.
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) {
+        setActive(sections[sections.length - 1].id);
+        return;
+      }
+
+      let active: string | null = null;
+      for (const sec of sections) {
+        if (offsetTop(sec) <= line) active = sec.id;
+        else break;
+      }
+      setActive(active ?? sections[0].id);
+    };
+
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        compute();
+        ticking = false;
+      });
+    };
+
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    compute();
+  }
+
+  // Deep links on section headings.
+  //
+  // Added here rather than in the markup because it is an enhancement, not the
+  // navigation: the contents list already reaches every section without it, so
+  // nothing is lost when this does not run.
+  document.querySelectorAll<HTMLElement>('.body section[id] > h2').forEach((h) => {
+    const id = h.parentElement!.id;
+    const a = document.createElement('a');
+    a.className = 'anchor';
+    a.href = '#' + id;
+    a.setAttribute('aria-label', `Link to ${h.textContent!.trim()}`);
+    a.textContent = '#';
+    h.appendChild(a);
+  });
+</script>
+
+<style>
+  .docs-head {
+    max-width: var(--max);
+    margin-inline: auto;
+    padding: var(--v-6) var(--pad) 0;
+  }
+
+  .docs-head h1 {
+    font-size: var(--t-h2);
+    margin-top: var(--v-3);
+  }
+
+  .docs-head .lead {
+    margin-top: var(--v-1);
+    max-width: 62ch;
+  }
+
+  .docs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--v-4);
+    max-width: var(--max);
+    margin-inline: auto;
+    padding: var(--v-4) var(--pad) var(--v-8);
+  }
+
+  @media (min-width: 64rem) {
+    .docs {
+      /* 6 columns of table of contents, 16 of prose, 2 of air. */
+      grid-template-columns:
+        calc(6 * var(--pitch) - var(--g))
+        minmax(0, 1fr);
+      gap: var(--pitch);
+    }
+  }
+
+  .toc__in {
+    position: sticky;
+    top: var(--v-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--v-0);
+  }
+
+  .toc nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--v-0);
+    margin-top: var(--v-1);
+  }
+
+  /* Table-of-contents entries are navigation targets, not prose links, so the
+     WCAG 2.5.8 inline-link exception does not cover them. */
+  .toc nav a {
+    display: flex;
+    align-items: center;
+    min-height: 26px;
+    /* The shortest entry is "CLI", which sets about 22px wide. */
+    min-width: 24px;
+    font-size: var(--t-small);
+    color: var(--ink-2);
+    transition: color var(--dur) var(--ease);
+  }
+
+  .toc nav a:hover {
+    color: var(--ink);
+  }
+
+  /* Active section. Colour and weight, not a left stripe: DESIGN.md bans the
+     side-stripe callout, and a bar here would be the only vertical rule on the
+     page. */
+  .toc nav a[aria-current='location'] {
+    color: var(--ink);
+  }
+
+  /* Weight only where it cannot reflow.
+     Desktop: the nav is a column flex container, so every link already
+     stretches to the full sidebar width and going bold changes the text inside
+     a box whose size is fixed. Nothing moves.
+     Mobile: the nav is a wrapping row, where a bold label is a wider box and
+     can rewrap the whole list mid-scroll. There the active state is carried by
+     colour alone. */
+  @media (min-width: 64rem) {
+    .toc nav a[aria-current='location'] {
+      font-weight: 600;
+    }
+  }
+
+  .toc__note {
+    font-size: var(--t-micro);
+    line-height: 1.5;
+    margin-top: var(--v-2);
+    padding-top: var(--v-1);
+    border-top: 1px solid var(--bd-hair);
+  }
+
+  /* Below lg the table of contents is a plain block above the prose rather than
+     a collapsed accordion. Ten links do not need a disclosure widget, and a
+     sticky sidebar on a phone is a sticky sidebar covering the phone. */
+  @media (max-width: 63.99rem) {
+    .toc__in {
+      position: static;
+    }
+    .toc nav {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: var(--v-0) var(--v-2);
+    }
+    .toc__note {
+      display: none;
+    }
+  }
+
+  .body {
+    max-width: 68ch;
+  }
+
+  .body section:first-of-type {
+    margin-top: 0;
+  }
+
+  .body section {
+    margin-top: var(--v-6);
+    padding-top: var(--v-3);
+    border-top: 1px solid var(--bd-hair);
+    scroll-margin-top: var(--v-3);
+  }
+
+  .body h2 {
+    font-size: var(--t-h3);
+  }
+
+  /* Visible on hover, and always visible once focused, so it is reachable by
+     keyboard rather than being a pointer-only affordance. */
+  .body :global(.anchor) {
+    /* A '#' glyph is about 8px wide. The box has to carry the target size,
+       because 2.5.8 measures both dimensions and the inline-link exception
+       does not cover a standalone affordance like this one. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+    margin-inline-start: 0.2em;
+    color: var(--ink-4);
+    font-weight: 400;
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+  }
+
+  .body h2:hover :global(.anchor),
+  .body :global(.anchor:focus-visible) {
+    opacity: 1;
+  }
+
+  /* A pointer-only reveal is useless on touch, where there is no hover, so
+     there it simply stays visible. */
+  @media (pointer: coarse) {
+    .body :global(.anchor) {
+      opacity: 1;
+    }
+  }
+
+  .body h3 {
+    font-size: var(--t-h4);
+    margin-top: var(--v-3);
+  }
+
+  .body p {
+    margin-top: var(--v-1);
+    color: var(--ink-2);
+  }
+
+  .body :global(.code) {
+    margin-top: var(--v-2);
+  }
+
+  .note {
+    margin-top: var(--v-2);
+    padding: var(--v-1) var(--v);
+    background: var(--s1);
+    border: 1px solid var(--bd);
+    border-radius: var(--r);
+  }
+
+  /* No left stripe: DESIGN.md bans the side-stripe callout. A note is a box
+     with a border, and the warning variant differs by the weight of that
+     border rather than by a decorative bar or a colour wash. */
+  .note--warn {
+    border-color: var(--bd-strong);
+  }
+
+  .note p {
+    margin-top: 0;
+    font-size: var(--t-small);
+  }
+
+  .deflist {
+    margin-top: var(--v-2);
+  }
+
+  .deflist > div {
+    padding-block: var(--v-1);
+    border-top: 1px solid var(--bd-hair);
+  }
+
+  .deflist > div:last-child {
+    border-bottom: 1px solid var(--bd-hair);
+  }
+
+  .deflist dt {
+    font-weight: 600;
+    font-size: var(--t-small);
+    color: var(--ink);
+  }
+
+  .deflist dd {
+    margin: var(--v-0) 0 0;
+    font-size: var(--t-small);
+    color: var(--ink-2);
+  }
+</style>

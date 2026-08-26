@@ -4,12 +4,15 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "node scripts/check-claims.mjs && astro build",
     "preview": "astro preview",
     "check": "astro check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "npm run check && npm run format:check"
+    "lint": "npm run check && npm run eslint && npm run format:check",
+    "check:claims": "node scripts/check-claims.mjs",
+    "eslint": "eslint .",
+    "serve": "astro preview --port 3000 --host 0.0.0.0 --allowed-hosts dev.ctl.qzz.io"
   },
   "dependencies": {
     "astro": "^5.7.0"
@@ -17,9 +20,20 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@astrojs/sitemap": "^3.7.2",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.8.0",
+    "eslint": "^10.9.1",
+    "eslint-plugin-astro": "^3.1.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "globals": "^17.11.0",
     "prettier": "^3.8.3",
     "prettier-plugin-astro": "^0.14.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.68.0"
+  },
+  "overrides": {
+    "eslint-plugin-jsx-a11y": {
+      "eslint": "$eslint"
+    }
   }
 }

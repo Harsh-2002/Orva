@@ -1,146 +1,512 @@
-/* ── Design tokens ─────────────────────────────────────── */
+/* ==========================================================================
+   Orva landing. Cursor's method, Orva's values.
+
+   Everything here reduces to four declarations, in this order of importance:
+
+     1. html { font-size }        one step, one breakpoint. The only responsive
+                                  type rule on the site.
+     2. * { letter-spacing }      the whole tracking curve, continuously, in one
+                                  line. See THE TRACKING RULE below.
+     3. --pitch                   24-column arithmetic. Every horizontal
+                                  measurement derives from it.
+     4. --v                       the vertical unit. Every gap derives from it.
+
+   Light and dark are re-authored twins, never an inversion. Every token is
+   independently chosen and matched to its twin in OKLCH lightness delta, not in
+   hex arithmetic.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Fonts. Self-hosted, relative URLs.
+
+   The relative path is load-bearing. This site deploys under base '/Orva', so a
+   public/-rooted url('/fonts/x.woff2') resolves in dev and 404s in production.
+   Referenced from src/, Vite rewrites and fingerprints it correctly for both.
+   -------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../fonts/inter.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('../fonts/jetbrains-mono.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* --------------------------------------------------------------------------
+   1b. Metric-matched fallback
+
+   font-display: swap paints in a fallback face first and re-paints when the
+   real one arrives. If the two occupy different space, everything below the
+   swapped text jumps. Measured at 412px: the hero CTA sat 44px lower once Inter
+   loaded, and it is above the fold, so it counted in full.
+
+   This face makes the fallback occupy Inter's box exactly. All four numbers are
+   measured in the browser, not copied from a blog post:
+
+     size-adjust       a body-copy string in Inter over the same string in the
+                       local fallback at weight 400: 6259 / 5835 = 107.3%
+     ascent-override   Inter's ascent, 0.969em, divided by size-adjust
+     descent-override  Inter's descent, 0.241em, divided by size-adjust
+     line-gap-override Inter ships none
+
+   The local() faces are all Arial-metric clones, so whichever one the host has
+   resolves to the same box. If it has none the rule does not match at all and
+   the stack falls through to the unadjusted system font, which is exactly the
+   behaviour without this block.
+
+   JetBrains Mono needs no equivalent: measured against the system monospace it
+   came out at 99.64%, a third of a percent, which cannot move a line.
+   -------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Inter Fallback';
+  src: local('Arial'), local('Liberation Sans'), local('Helvetica');
+  size-adjust: 107.3%;
+  ascent-override: 90.31%;
+  descent-override: 22.46%;
+  line-gap-override: 0%;
+}
+
+/* --------------------------------------------------------------------------
+   2. Tokens. :root is LIGHT. [data-theme='dark'] is DARK.
+   -------------------------------------------------------------------------- */
+
 :root {
-  --bg: #0e0d17;
-  --bg-deep: #090813;
-  --surface: #16152a;
-  --surface-2: #1c1a33;
-  --hover: #211f3d;
-  --border: #2a2843;
-  --border-hi: #3c3a5a;
-  --fg: #f0edfa;
-  --muted: #b7b4cf;
-  --subtle: #7e7b9a;
-  --faint: #50506e;
-  --accent: #8a6bc8;
-  --accent-hi: #b394e8;
-  --brand: #7c3aed;
-  --green: #4ade80;
+  /* --- Surfaces -----------------------------------------------------------
+     THE TOWARD-MID RULE: elevation always moves toward mid-gray. Light
+     surfaces darken as they rise; dark surfaces lighten. Never the reverse.
+     One rule, both themes, opposite directions.
 
-  --sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
+     BOTH ladders are warm (hue 88 light, 80 dark), not just the light one.
+     Warming only the light theme would flip the hue of the largest surface on
+     screen every time someone touches the toggle, and users toggle back to
+     back: two temperatures reads as two brands. Cursor gets away with warm
+     paper precisely because their dark theme is warm as well.
 
-  --max: 1240px;
-  --pad: clamp(24px, 4vw, 56px);
+     The earlier objection to warming dark was that the product canvas is
+     #0E0D0A and the screenshots would clash. They do not: every capture is
+     matted by its own wallpaper, so the app canvas never touches the page.
+
+     Chroma is deliberately tiny (0.0040 light, 0.0055 dark). This is a warm
+     neutral, not a colour. It should read as paper and as ink, never as beige
+     and never as brown.
+     --------------------------------------------------------------------- */
+  --page: #f8f7f4; /* oklch(97.6% .0040 88) */
+  --s1: #f4f2ee; /* oklch(96.1% .0056 88) */
+  --s2: #efede8; /* oklch(94.6% .0072 88) */
+  --s3: #eae8e2; /* oklch(93.1% .0088 88) */
+  --s4: #e6e3dc; /* oklch(91.6% .0104 88) */
+  --s5: #e2ded6; /* oklch(90.1% .0120 88) -- NOT a text surface, see below */
+
+  /* --- Ink ----------------------------------------------------------------
+     Authored by OKLCH lightness fraction from page toward ink (100/75/62/45%),
+     not by sRGB alpha. sRGB interpolation would give 9.34 in dark and 6.30 in
+     light for the same nominal percentage; the perceptual fraction gives 9.31
+     and 8.63, which is what "the same rung" is supposed to mean.
+
+     Light --ink is #15181D, which is dark --s2. The ink in light mode IS the
+     graphite of dark mode. That is the thesis, not a coincidence.
+     --------------------------------------------------------------------- */
+  --ink: #191713; /* 16.71:1 on page */
+  --ink-2: #494743; /*  8.65:1 */
+  --ink-3: #5d5b57; /*  6.32:1, worst case 5.05 on --s5 */
+  --ink-4: #8b8885; /*  3.29:1 -- NON-TEXT ONLY. Never set this on a <p>. */
+
+  /* --- Borders ------------------------------------------------------------
+     Ink alpha, not a fixed hex, so a border re-anchors per surface and per
+     theme automatically. The product's own #343A44 measures as 18% ink over
+     #0E0D0A, so the product is already on this ladder; it just does not know
+     it. Light alphas run higher than dark at the same rung because an equal
+     alpha does NOT produce equal visual weight: a 46-unit RGB step near black
+     is a far larger lightness jump than the same step near white. These rungs
+     are calibrated to identical OKLCH delta-L, so contrast matches its twin
+     within 0.13 at every rung.
+     --------------------------------------------------------------------- */
+  --bd-ink: 25 23 19;
+  --bd-hair: rgb(var(--bd-ink) / 12%);
+  --bd-subtle: rgb(var(--bd-ink) / 21%);
+  --bd: rgb(var(--bd-ink) / 28%);
+  --bd-strong: rgb(var(--bd-ink) / 43%);
+  --bd-ink-strong: rgb(var(--bd-ink) / 72%);
+
+  /* --- Accent -------------------------------------------------------------
+     The FILL is identical in both themes. The CTA is the brand's one moment of
+     recognition and #553F83 works as a fill on either page (white on it is
+     8.66:1 regardless of what surrounds it).
+
+     The LINK cannot be identical. #553F83 is below AA on near-black, and on the
+     light page it measures a comfortable 8.15:1 but reads as near-black at
+     16px: the reader loses the colour cue and is left with the underline alone.
+     That is a legibility failure, not a contrast failure, and contrast testing
+     will not catch it. So each theme pushes the accent only as far as its own
+     legibility demands and no further: dark needs L >= 62 to clear 4.5:1 on
+     near-black and lands at 63.8; light needs L <= 52 and lands at 48.7. Both
+     sit as close to the brand's L 42.5 as their theme permits, from opposite
+     sides.
+     --------------------------------------------------------------------- */
+  --accent: #553f83;
+  --accent-fg: #ffffff;
+  --accent-hover: #45336b; /* light hovers DARKER: away from the page */
+  --link: #684d9e; /* 6.29:1 on page */
+
+  /* --- Status -------------------------------------------------------------
+     THE PAINTABLE STATUS RULE: the base is a generator, not a paint. Draw with
+     -fg, fill with -tint, stroke with -ring. Never set background:var(--success)
+     or color:var(--danger).
+
+     Concretely: as bare dots on the light page the bases measure success 2.14,
+     warning 1.80, info 2.02, all below the 3:1 non-text floor. The -fg values
+     pass in both themes. One rule, both themes, no theme-conditional logic.
+
+     Light values are authored into a single OKLCH lightness band (47.6 to 50.5)
+     so they read as a set. Warning at #854D0E reads brown-olive rather than
+     amber; that is unavoidable, because amber has no readable-on-white
+     lightness that still reads amber, and amber-on-white is the classic
+     accessibility failure.
+     --------------------------------------------------------------------- */
+  --success-fg: #177245;
+  --success-tint: #d7f0e3;
+  --success-ring: #b7e9cb;
+  --warning-fg: #854d0e;
+  --warning-tint: #f5eed6;
+  --warning-ring: #f3e3b1;
+  --danger-fg: #b91c1c;
+  --danger-tint: #f6dddf;
+  --danger-ring: #f5c2c3;
+  --info-fg: #0369a1;
+  --info-tint: #daeffa;
+  --info-ring: #bee6f9;
+
+  /* --- Grid ---------------------------------------------------------------
+     24 columns. --max is 1238px, not the product's 1240, because 1238 is the
+     only value near 1240 that yields an integer column at a 10px gutter across
+     24 columns: (1238 - 23*10) / 24 = 42.0 exactly. The 2px is imperceptible;
+     the arithmetic being exact is what makes THE COLUMN ARITHMETIC RULE
+     possible, and that rule is worth more than the 2px.
+     --------------------------------------------------------------------- */
+  --g: 0.625rem; /* 10px gutter */
+  --col: 2.625rem; /* 42px column */
+  --pitch: 3.25rem; /* 52px = col + gutter */
+  --max: 77.375rem; /* 1238px = 24*pitch - g */
+  --pad: clamp(1.25rem, 4.5vw, 2.5rem);
+
+  /* --- Vertical ---------------------------------------------------------- */
+  --v: 1.4rem; /* 22.4px at 16, 21px at 15 */
+  --v-0: calc(var(--v) * 0.25);
+  --v-1: calc(var(--v) * 0.5);
+  --v-2: var(--v);
+  --v-3: calc(var(--v) * 1.5);
+  --v-4: calc(var(--v) * 2);
+  --v-6: calc(var(--v) * 3);
+  --v-8: calc(var(--v) * 4);
+  --v-sec: clamp(calc(var(--v) * 2.5), 9vw, calc(var(--v) * 5));
+
+  /* --- Type scale ---------------------------------------------------------
+     --t-display carries the ONLY type clamp() on the site. Justification: no
+     root-size step can cover a 4.3x viewport range (375 to 1600) and a hero
+     must. Everything from --t-h1 down rides the single root lever instead.
+
+     Computed: 41.3px at 375, 47.1 at 480, 56.1 at 640, 63.3 at 768, caps at
+     67.5 around 838, then steps to 72 at exactly 1024 when the root lever
+     fires and the whole page moves up 6.7% together on one line.
+     --------------------------------------------------------------------- */
+  --t-display: clamp(2.625rem, 1.35rem + 5.6vw, 4.5rem);
+  --t-h1: 3.25rem; /* 52 */
+  --t-h2: 2.25rem; /* 36 */
+  --t-h3: 1.625rem; /* 26 */
+  --t-h4: 1.375rem; /* 22 */
+  --t-body-lg: 1.125rem; /* 18 -- the tracking curve's zero crossing */
+  --t-body: 1rem; /* 16 */
+  --t-small: 0.875rem; /* 14 */
+  --t-micro: 0.75rem; /* 12 */
+  --t-mono: 0.875rem; /* 14 */
+  --t-code: 0.8125rem; /* 13 */
+  --t-mark: 1.0625rem; /* 17 -- the wordmark */
+
+  --sans: 'Inter', 'Inter Fallback', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* --- Radius, motion -----------------------------------------------------
+     6px is the product's dominant radius, not Cursor's universal 4. Orva's
+     system already answered this question and its answer is 6.
+     --------------------------------------------------------------------- */
+  --r: 6px;
+  --r-sm: 4px;
+  --r-frame: 10px;
+  --dur: 140ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  color-scheme: light;
 }
 
-@supports (color: oklch(0% 0 0)) {
-  :root {
-    --bg: oklch(12.5% 0.03 280);
-    --bg-deep: oklch(8.5% 0.025 280);
-    --surface: oklch(16.5% 0.038 280);
-    --surface-2: oklch(20% 0.042 280);
-    --hover: oklch(22.5% 0.045 280);
-    --border: oklch(27.5% 0.045 280);
-    --border-hi: oklch(38% 0.05 280);
-    --fg: oklch(95.5% 0.012 290);
-    --muted: oklch(78% 0.018 285);
-    --subtle: oklch(58% 0.022 285);
-    --faint: oklch(40% 0.025 285);
-    --accent: oklch(57% 0.135 295);
-    --accent-hi: oklch(72% 0.13 295);
-    --brand: oklch(53% 0.255 295);
-    --green: oklch(78% 0.18 145);
-  }
+[data-theme='dark'] {
+  /* page, s2 and s5 are byte-identical to the product's --color-background,
+     --color-surface and --color-surface-hover. s1, s3 and s4 are OKLCH
+     interpolations filling the ladder out to a consistent cadence.
+
+     Dark steps run ~2.2 L, light ~1.5 L, a ratio of 1.47. That asymmetry is
+     deliberate: near-black needs larger lightness steps to separate at all.
+     Chroma also rises as the dark ladder rises and as the light ladder falls,
+     because a surface with more ink in it carries more of the ink's hue. */
+  --page: #0e0d0a; /* oklch(15.8% .0055 80) */
+  --s1: #13110e; /* oklch(18.0% .0067 80) */
+  --s2: #181612; /* oklch(20.2% .0079 80) */
+  --s3: #1e1b17; /* oklch(22.4% .0091 80) */
+  --s4: #23201b; /* oklch(24.6% .0103 80) */
+  --s5: #292520; /* oklch(26.8% .0115 80) */
+
+  --ink: #f6f6f3; /* 17.95:1 on page */
+  --ink-2: #b5b4b1; /*  9.37:1 */
+  --ink-3: #949390; /*  6.33:1, worst case 4.95 on --s5 */
+  --ink-4: #6b6a67; /*  3.59:1 -- NON-TEXT ONLY */
+
+  --bd-ink: 246 246 243;
+  --bd-hair: rgb(var(--bd-ink) / 8%);
+  --bd-subtle: rgb(var(--bd-ink) / 14%);
+  --bd: rgb(var(--bd-ink) / 20%);
+  --bd-strong: rgb(var(--bd-ink) / 32%);
+  --bd-ink-strong: rgb(var(--bd-ink) / 60%);
+
+  --accent-hover: #684d9e; /* dark hovers LIGHTER: away from the page */
+  --link: #8b7bd8; /* 5.49:1 on page. Fails on --s5, which is why --s5
+                             is not a text surface. */
+
+  --success-fg: #4ade80;
+  --success-tint: #0e291c;
+  --success-ring: #124427;
+  --warning-fg: #fbbf24;
+  --warning-tint: #2c260f;
+  --warning-ring: #4e3f0e;
+  --danger-fg: #f87171;
+  --danger-tint: #2d1518;
+  --danger-ring: #4f1e20;
+  --info-fg: #7dd3fc;
+  --info-tint: #122733;
+  --info-ring: #184256;
+
+  color-scheme: dark;
 }
 
-/* ── Reset ──────────────────────────────────────────────── */
+/* --------------------------------------------------------------------------
+   3. Reset
+   -------------------------------------------------------------------------- */
+
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+
+  /* ------------------------------------------------------------------------
+     THE TRACKING RULE. This one declaration is the entire optical-sizing
+     curve, at every size, continuously.
+
+     Cursor's per-size tracking table, converted from em to absolute px of
+     tracking, is a straight line in font-size. A least-squares fit of their
+     seven published points is 0.7206px - 0.03966em. Rounded to 0.72 - 0.04 it
+     reproduces 72px, 36px and 16px EXACTLY and is within 0.0024em everywhere
+     else. The line crosses zero at 18px, which is what makes --t-body-lg the
+     neutral point of the whole system.
+
+     The mechanism: for every property except font-size itself, `em` resolves
+     against the element's OWN computed font-size. So declaring this on * gives
+     each element its own correct tracking automatically, including inside a
+     clamp() whose value is never known at author time: a fluid hero at 41.25px
+     gets -0.0225em and the same element at 72px gets -0.0300em, with no
+     breakpoints and no per-token values to drift.
+
+     It must be on * rather than :root. An INHERITED letter-spacing computes to
+     an absolute px length at the declaring element and is passed down as that
+     length; it does not recompute per child. On :root every element on the page
+     would inherit the root's tracking.
+     --------------------------------------------------------------------- */
+  letter-spacing: calc(0.72px - 0.04em);
+}
+
+* {
   margin: 0;
-  padding: 0;
 }
+
 html {
+  /* The canvas, not just the page.
+
+     body's background does propagate to the canvas when html has none, but
+     relying on that leaves the browser's own surfaces guessing. Declared here
+     it covers the rubber-band overscroll area on iOS and macOS, which is the
+     strip that sits directly against the browser's toolbar: without it you
+     pull the page down in dark mode and a band of white appears between the
+     toolbar and the content. */
+  background: var(--page);
+
+  /* The scrollbar is browser chrome sitting inside our page, so it gets the
+     palette too. color-scheme alone would give it a neutral grey gutter next
+     to a warm page. Same approach the product takes in its own style.css. */
+  scrollbar-color: var(--bd-strong) transparent;
+
+  /* ------------------------------------------------------------------------
+     THE ROOT LEVER. The only responsive type rule on the site.
+
+     64rem (Tailwind lg) rather than Cursor's 900px: DESIGN.md explicitly
+     disciplines the breakpoint list, and a landing page that invents a fourth
+     breakpoint to satisfy one lever teaches the next person the wrong lesson.
+     lg is already the point at which Orva's layout stops being one column.
+
+     The narrative: the phone keeps the operator's density (15px, near the
+     product's own 15.2px), and the desktop opens up to a reader's 16px. Density
+     is a virtue for someone living in the tool for eight hours, not for a
+     stranger reading marketing copy at arm's length.
+     --------------------------------------------------------------------- */
+  font-size: 93.75%; /* 15px */
   -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
   scroll-behavior: smooth;
-  -webkit-tap-highlight-color: transparent;
+  /* No sticky header to clear, so an anchor only needs breathing room. */
+  scroll-padding-top: var(--v-3);
 }
+
+@media (min-width: 64rem) {
+  html {
+    font-size: 100%; /* 16px */
+  }
+}
+
 body {
-  background-color: var(--bg);
-  color: var(--fg);
+  /* Sticky footer. On a short page (the 404, chiefly) the footer would
+     otherwise sit wherever the content ended, with a band of empty page below
+     it, which reads as a broken layout rather than a short one. */
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+
+  background: var(--page);
+  color: var(--ink);
   font-family: var(--sans);
-  font-size: 16px;
+  font-size: var(--t-body);
+  font-weight: 400;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: 'ss01', 'cv11';
-  overflow-x: hidden;
-  /* iOS notch / Android nav-bar safe areas */
-  padding-left: env(safe-area-inset-left, 0);
-  padding-right: env(safe-area-inset-right, 0);
+  text-rendering: optimizeLegibility;
 }
 
-/* ── Cursor spotlight + film grain ─────────────────────────
-   Two viewport-fixed background layers on <body>:
-     1. SVG fractal noise tile (always on, very low opacity)
-     2. Radial purple glow that follows the pointer via --cx/--cy
-   The noise gets blended over the glow with `overlay`, so the grain
-   intensifies where the spotlight brightens the surface — feels
-   tactile under the cursor, near-invisible elsewhere.
-   --cx/--cy default off-screen; JS sets them on hover-capable,
-   non-reduced-motion devices only. */
-body {
-  background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
-    radial-gradient(
-      640px circle at var(--cx, -9999px) var(--cy, -9999px),
-      rgba(179, 148, 232, 0.09),
-      rgba(179, 148, 232, 0.025) 34%,
-      transparent 60%
-    );
-  background-blend-mode: overlay, normal;
-  background-attachment: fixed, fixed;
-  background-repeat: repeat, no-repeat;
-  background-size:
-    220px 220px,
-    auto;
+main {
+  flex: 1 0 auto;
 }
-@supports (color: oklch(0% 0 0)) {
-  body {
-    background-image:
-      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
-      radial-gradient(
-        640px circle at var(--cx, -9999px) var(--cy, -9999px),
-        oklch(72% 0.13 295 / 0.09),
-        oklch(72% 0.13 295 / 0.025) 34%,
-        transparent 60%
-      );
-  }
-}
+
 img,
-svg {
+svg,
+video,
+canvas {
   display: block;
   max-width: 100%;
+  height: auto;
 }
+
+button,
+input,
+select,
+textarea {
+  /* font: inherit only. NOT letter-spacing: inherit -- a type selector beats
+     the universal one, so it would override the tracking rule and make every
+     control inherit its parent's already-computed px value instead of deriving
+     its own from its own font-size. That is the same mistake as declaring the
+     rule on :root, arriving through a different door. */
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
 a {
   color: inherit;
   text-decoration: none;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
 }
-button {
-  font-family: inherit;
-  cursor: pointer;
-  background: none;
-  border: none;
-  color: inherit;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+
+ul,
+ol {
+  list-style: none;
+  padding: 0;
 }
+
+/* Mono resets its tracking to zero. A fixed-advance face already has even
+   colour, so an optical correction derived from a proportional face's
+   sidebearings is not just unnecessary, it actively breaks the grid. */
 code,
 pre,
 kbd,
 samp {
   font-family: var(--mono);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  /* Ligatures off. JetBrains Mono renders => as a single arrow glyph, which is
+     pleasant in an editor where the reader already knows the syntax and wrong
+     on a page whose job is to show someone the syntax for the first time. The
+     code is here to be read and copied, not styled. */
+  font-variant-ligatures: none;
+  font-feature-settings:
+    'calt' 0,
+    'liga' 0;
 }
-input,
-textarea,
-select,
-button {
-  font: inherit;
+
+/* --------------------------------------------------------------------------
+   4. Focus
+
+   --ink, not the accent. #553F83 measures 2.25:1 on #0E0D0A and simply cannot
+   function as a visible focus ring. The product already knows this; its input
+   ring is white for exactly this reason.
+
+   The offset is load-bearing rather than decorative: --ink on the violet fill
+   is 2.05:1 in light mode, so the ring has to sit outside the button where it
+   is ink-on-page. ch scales with the element's type size, so a small link gets
+   a tight offset and a hero button a generous one, from one declaration.
+   -------------------------------------------------------------------------- */
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 0.3ch;
+  border-radius: 2px;
 }
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* --------------------------------------------------------------------------
+   5. Theme switching
+
+   A 140ms cross-fade of an entire page reads as a rendering bug, not as
+   polish. Suppress every transition for the one frame in which the swap
+   happens; the toggle removes this class after a double rAF.
+   -------------------------------------------------------------------------- */
+
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -148,243 +514,585 @@ button {
   *,
   *::before,
   *::after {
-    transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
-::selection {
-  background: var(--accent);
-  color: var(--fg);
-}
-:focus-visible {
-  outline: 2px solid var(--accent-hi);
-  outline-offset: 2px;
-}
+/* --------------------------------------------------------------------------
+   6. Layout
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--border-hi);
-}
+   THE COLUMN ARITHMETIC RULE: every horizontal measurement on this page is
+   calc(N * var(--pitch) - var(--g)). No bare px widths, no percentages, no
+   max-w-prose. Spans: 6 cols = 302px, 8 = 406, 10 = 510, 12 = 614, 14 = 718,
+   16 = 822, 24 = 1238.
+   -------------------------------------------------------------------------- */
 
-/* ── Inner container ────────────────────────────────────── */
-.inner {
+.container {
+  width: 100%;
   max-width: var(--max);
-  margin: 0 auto;
-  padding: 0 var(--pad);
+  margin-inline: auto;
+  padding-inline: var(--pad);
 }
 
-/* ── Type ───────────────────────────────────────────────── */
-.overline {
-  font-family: var(--mono);
-  font-size: 0.75rem;
+.grid {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  column-gap: var(--g);
+  width: 100%;
+  max-width: var(--max);
+  margin-inline: auto;
+  padding-inline: var(--pad);
+}
+
+/* Below lg the grid collapses to spans of 24 or 12. At 375px, 24 columns of
+   about 9px is not a layout, it is a ruler. */
+@media (max-width: 47.99rem) {
+  .grid > * {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+.section {
+  padding-block: var(--v-sec);
+  border-top: 1px solid var(--bd-hair);
+}
+
+/* One page background for the entire document. Sections are separated by a
+   full-bleed hairline and --v-sec of air, never by a change of fill. That is
+   Orva's border-driven depth, and it is also what makes a stateless opaque
+   header possible. */
+.section:first-of-type {
+  border-top: none;
+}
+
+/* --------------------------------------------------------------------------
+   7. Type
+   -------------------------------------------------------------------------- */
+
+/* THE WEIGHT RULE: weight decreases as size increases.
+
+   Rejected, Cursor's 400 everywhere: Inter 400 at 72px reads as fashion-
+   minimal, which fights "operator software", and decisively it would render
+   every headline on this page LIGHTER than the wordmark, which is JetBrains
+   Mono 500.
+
+   Rejected, the product's 600 everywhere: DESIGN.md prescribes 600 at Display
+   clamp(30px, 4vw, 36px) and it was never authored above 36px. At 52 to 72px
+   with -0.025 to -0.030em of tracking, Inter 600 clots; the counters close and
+   it reads shouty-SaaS. The prescription does not transfer up the scale.
+
+   600 survives intact where it was actually validated: <strong>, <dt> terms,
+   button labels, and everything at or below 20px. */
+
+h1,
+h2,
+h3,
+h4,
+.display {
   font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent-hi);
+  line-height: 1.1;
+  text-wrap: balance;
 }
 
+.display {
+  font-size: var(--t-display);
+  line-height: 1.02;
+}
 h1 {
-  font-size: clamp(2.5rem, 7.2vw, 5.5rem);
-  font-weight: 500;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  color: var(--fg);
+  font-size: var(--t-h1);
+  line-height: 1.06;
 }
-
 h2 {
-  font-size: clamp(1.875rem, 4vw, 2.875rem);
-  font-weight: 500;
-  letter-spacing: -0.03em;
-  line-height: 1.05;
-  color: var(--fg);
+  font-size: var(--t-h2);
+  line-height: 1.08;
 }
-
 h3 {
-  font-size: 1.0625rem;
+  font-size: var(--t-h3);
+  line-height: 1.18;
+}
+h4 {
+  font-size: var(--t-h4);
+  line-height: 1.28;
+}
+
+p,
+dd,
+li {
+  text-wrap: pretty;
+}
+
+.lead {
+  font-size: var(--t-body-lg);
+  line-height: 1.52;
+  color: var(--ink-2);
+}
+
+.prose {
+  max-width: 62ch;
+}
+
+.muted {
+  color: var(--ink-2);
+}
+.faint {
+  color: var(--ink-3);
+}
+
+strong,
+b {
   font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--fg);
+  color: var(--ink);
 }
 
-p {
-  color: var(--muted);
-}
-strong {
-  color: var(--fg);
-  font-weight: 600;
-}
+/* THE OPERATOR'S MONO RULE, doing marketing work.
 
-/* ── Section scaffolding ────────────────────────────────── */
-.sec {
-  padding: clamp(80px, 11vw, 130px) 0;
-  border-top: 1px solid var(--border);
-}
-
-.sec-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 36px;
+   Hero metric tiles are banned, so the numbers live in prose instead: mono 500
+   at --ink inside Inter 400 at --ink-2. The register shift IS the emphasis, and
+   it is more convincing than a tile because the number arrives with its
+   sentence still attached to it. */
+.num {
   font-family: var(--mono);
-  font-size: 0.75rem;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  font-size: 0.94em;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: var(--t-micro);
+  font-weight: 500;
+  line-height: 1.35;
   text-transform: uppercase;
-}
-.sec-head .num {
-  color: var(--accent-hi);
-}
-.sec-head .slash {
-  color: var(--faint);
-}
-.sec-head .label {
-  color: var(--muted);
-}
-.sec-head .bar {
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-  margin: 0 4px;
-}
-.sec-head .count {
-  color: var(--subtle);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
 }
 
-.sec h2 {
-  margin-bottom: 22px;
-  max-width: 18ch;
-}
-.sec-sub {
-  max-width: 64ch;
-  color: var(--muted);
-  font-size: 1.0625rem;
-  line-height: 1.55;
-  margin-bottom: clamp(44px, 6vw, 64px);
-}
-.sec-foot {
-  margin-top: 36px;
-  color: var(--subtle);
-  font-size: 0.875rem;
-  line-height: 1.7;
-  max-width: 64ch;
-}
-.sec-foot a {
-  color: var(--accent-hi);
-  border-bottom: 1px solid var(--border-hi);
-  transition:
-    color 120ms,
-    border-color 120ms;
-}
-.sec-foot a:hover {
-  color: var(--fg);
-  border-color: var(--fg);
+/* THE DRAWN-NOT-FILLED RULE, in its most common form.
+
+   Violet is FILLED exactly once per viewport (the primary CTA) and DRAWN AS
+   TEXT everywhere else. It is never a border, never a background tint, never a
+   divider, never an eyebrow, never a bullet. Budget for the page: roughly 3
+   fills and 10 to 15 inline links across about 7000px. Cursor's own page runs
+   11 accent instances across 8200px, so this is the same density with one extra
+   affordance. */
+.link {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  text-decoration-color: color-mix(in oklab, var(--link) 40%, transparent);
+  transition: text-decoration-color var(--dur) var(--ease);
 }
 
-/* ── Buttons ────────────────────────────────────────────── */
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* --------------------------------------------------------------------------
+   8. Buttons
+
+   Padding is optically corrected: top is tighter than bottom, because Inter's
+   cap-height sits above the em-box centre and the box has no way to know that.
+   The two differ by 0.07em, about 1.12px at 16px. Both themes, both sizes.
+
+   Motion is colour only. No transform on hover anywhere on this site, which
+   means no arrow nudge, the single most common landing-page micro-interaction.
+   -------------------------------------------------------------------------- */
+
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 46px;
-  padding: 0 22px;
-  border: 1px solid;
-  font-size: 0.875rem;
+  gap: 0.3em;
+  font-size: var(--t-body);
   font-weight: 500;
-  font-family: var(--sans);
-  letter-spacing: -0.005em;
-  transition:
-    background 140ms,
-    border-color 140ms,
-    color 140ms;
   line-height: 1;
+  padding: 0.84em 1.35em 0.91em;
+  border-radius: var(--r);
+  border: 1px solid transparent;
   white-space: nowrap;
-}
-.btn-primary {
-  background: var(--fg);
-  color: #0a0913;
-  border-color: var(--fg);
-}
-.btn-primary:hover {
-  background: var(--accent-hi);
-  border-color: var(--accent-hi);
-  color: #0a0913;
-}
-.btn-ghost {
-  background: transparent;
-  color: var(--muted);
-  border-color: var(--border-hi);
-}
-.btn-ghost:hover {
-  background: var(--surface);
-  color: var(--fg);
-  border-color: var(--fg);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
 }
 
-/* ── Code blocks ────────────────────────────────────────── */
-.code {
-  background: #0a0913;
-  border: 1px solid var(--border);
-  font-family: var(--mono);
-  font-size: 0.8125rem;
+.btn:active {
+  transform: translateY(0.5px);
 }
-.code-bar {
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn--secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--bd);
+}
+
+.btn--secondary:hover {
+  background: var(--s1);
+  border-color: var(--bd-strong);
+}
+
+.btn--sm {
+  font-size: var(--t-small);
+  padding: 0.68em 1.05em 0.75em;
+}
+
+/* --------------------------------------------------------------------------
+   9. Cards
+
+   Permitted in exactly two places on this site: the install panels and the
+   code-bearing blocks. The -0.1rem top correction is the same optical
+   adjustment as the button padding, for the same reason.
+
+   No shadow. No hover lift. If a card is a link, its only hover is a border.
+   -------------------------------------------------------------------------- */
+
+.card {
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: calc(var(--v) - 0.1rem) var(--v) var(--v);
+}
+
+/* --------------------------------------------------------------------------
+   10. Code
+
+   MONOCHROME. Three tokens, no hue.
+
+   A code block is the single largest source of unmanaged colour on a developer
+   landing page. A rainbow-highlighted docker run line forks the palette across
+   a surface the design system does not govern, which is precisely the "reaching
+   for text-sky-300 because it looks right in isolation" that the Semantic
+   Status Rule exists to forbid. A monochrome block is also the only kind that
+   can be authored once and be correct in both themes.
+
+   Scanning is served by weight and value instead of hue, which is what the
+   Graphite Neutral Rule already says about everything else on the page.
+   -------------------------------------------------------------------------- */
+
+.code {
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.code__bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
-  color: var(--subtle);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-.code pre {
-  padding: 18px 14px;
-  overflow-x: auto;
-  color: var(--fg);
-  line-height: 1.7;
-}
-.copy {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--subtle);
-  padding: 4px 9px;
-  border: 1px solid var(--border);
-  transition:
-    color 120ms,
-    border-color 120ms;
-}
-.copy:hover {
-  color: var(--fg);
-  border-color: var(--border-hi);
-}
-.copy.copied {
-  color: var(--green);
-  border-color: var(--green);
+  gap: var(--v-1);
+  height: calc(var(--v) * 1.5);
+  padding-inline: calc(var(--v) * 0.75);
+  background: var(--s5);
+  border-bottom: 1px solid var(--bd-hair);
 }
 
-/* inline code */
-p code,
-li code,
-td code,
-dd code,
-.sec-foot code,
-.lede code {
-  font-size: 0.85em;
-  color: var(--fg);
-  padding: 1px 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+.code__label {
+  font-family: var(--mono);
+  font-size: var(--t-micro);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3); /* 4.85 dark / 4.67 light on --s5 */
+}
+
+.code__copy {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: var(--t-micro);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  border: 1px solid var(--bd-hair);
+  border-radius: var(--r-sm);
+  /* Shorter than it is wide. The horizontal padding sets the chip's presence;
+     the vertical padding only has to clear a 12px cap height. line-height has
+     to be reset too: without it the chip inherits body's 1.6, which adds 7px of
+     leading inside a box holding exactly one short line.
+
+     min-height is the floor, not decoration. Trimming the leading alone took
+     the box to 21px, and WCAG 2.5.8 wants 24px in both dimensions for a target
+     that is not a link inside a sentence. 24 is still meaningfully shorter than
+     the 28 it started at. */
+  line-height: 1;
+  min-height: 24px;
+  padding: 0.35em 0.7em;
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease);
+}
+
+/* On a touch device the bar itself grows, and the button grows with it.
+   A pseudo-element hit area was tried first and does not survive here: .code
+   sets overflow:hidden to clip its own corners, so anything the button extends
+   past the bar is clipped away and the extra area is not tappable. Verified by
+   hit-testing elementFromPoint, not by measuring the box. */
+@media (pointer: coarse) {
+  .code__bar {
+    height: auto;
+    min-height: 48px;
+  }
+
+  .code__copy {
+    min-height: 40px;
+    padding-inline: 1em;
+  }
+}
+
+.code__copy:hover {
+  color: var(--ink);
+  border-color: var(--bd);
+  background: var(--s2);
+}
+
+/* It has to feel like a button before it feels like it worked. */
+.code__copy:active {
+  transform: translateY(0.5px);
+}
+
+/* Confirmation is monochrome, not green.
+   
+   The Semantic Status Rule reserves the status hues for actual status, and a
+   transient "that worked" is not one: nothing is healthy or unhealthy
+   afterwards. Green here was also the only hue anywhere on a page whose code
+   blocks are deliberately colourless, so it read as a UI kit leaking through.
+   
+   The meaning is carried by the word, which changes to "Copied". The colour
+   only has to say "this changed", and --ink on --s4 says that at 13.97:1 in
+   light and 14.99:1 in dark, which is far past anything the green managed. */
+.code__copy[data-copied='true'],
+.code__copy[data-failed='true'] {
+  color: var(--ink);
+  background: var(--s4);
+  border-color: var(--bd-strong);
+}
+
+.code pre {
+  /* overflow-x, never overflow:hidden. The product's overflow contract: a
+     scrollable region must actually be reachable. */
+  overflow-x: auto;
+  padding: var(--v) calc(var(--v) * 0.75);
+  font-size: var(--t-code);
+  line-height: 1.7;
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.code pre code {
+  font-size: inherit;
+}
+
+/* Shell commands wrap at the box, the way a terminal does. Soft breaks only:
+   the copied text is byte-identical to the authored text. */
+.code--wrap pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The three monochrome tokens. */
+.tok-k {
+  color: var(--ink);
+  font-weight: 600;
+} /* keywords, commands */
+.tok-s {
+  color: var(--ink-2);
+} /* strings, literals */
+.tok-c {
+  color: var(--ink-3);
+} /* comments, the $ prompt */
+
+/* --------------------------------------------------------------------------
+   11. The screenshot
+
+   The captures arrive as real Safari windows on a monochrome wallpaper, so
+   they carry their own chrome and their own edge. Adding a second, synthetic
+   window frame around a photograph of a window frame would be a mockup of a
+   mockup, so this component adds nothing but a corner radius and a shadow.
+
+   The wallpaper also solves, for free, the problem a mat was going to solve.
+   The risk in light mode was a near-black artifact on a near-white page: the
+   maximum possible contrast, a hole punched in paper. These images resolve to
+   high-contrast monochrome at their edges, so they meet a white page and a
+   graphite page equally well and need no mount.
+
+   aspect-ratio is declared rather than inferred so the box reserves its exact
+   height before the image decodes. The old site declared 1.6 against an
+   intrinsic 1.529 and silently cropped 4.4% off every screenshot.
+   -------------------------------------------------------------------------- */
+
+.shot {
+  position: relative;
+  aspect-ratio: 3164 / 2070;
+  border-radius: var(--r-frame);
+  overflow: hidden;
+}
+
+.shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Depth, twinned honestly: light gets a shadow, dark gets a top highlight.
+   Both say "an object catching light from above". A shadow on near-black is
+   invisible; a highlight is the dark-mode dialect of the same sentence.
+
+   This is the only shadow on the site. It is Flat-By-Default's own functional
+   carve-out: the artifact has to read as an OBJECT rather than a REGION, and
+   there is no border-and-fill way to say that about a photograph. */
+:root:not([data-theme='dark']) .shot {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.05),
+    0 12px 32px -10px oklch(0% 0 0 / 0.16);
+}
+
+[data-theme='dark'] .shot {
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06);
+}
+
+.shot-caption {
+  font-family: var(--mono);
+  font-size: var(--t-micro);
+  letter-spacing: 0;
+  color: var(--ink-3);
+  margin-top: var(--v-1);
+}
+
+/* --------------------------------------------------------------------------
+   12. The spec list
+
+   This is the answer to DESIGN.md's ban on "identical icon + heading +
+   paragraph card grids", and it satisfies the ban rather than dodging it.
+
+   The ban exists because identical cards are a TEMPLATE: a shape chosen BEFORE
+   the content. A ruled spec list is chosen BY the content, which here is 15
+   items of unequal weight at one line each. It also lets a reader scan all 15
+   in a single screen instead of scrolling past 15 boxes, which is a real
+   usability win rather than a compliance move, and it is the datasheet voice
+   the product asks for: willing to show facts without dressing them up.
+   -------------------------------------------------------------------------- */
+
+.spec {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  column-gap: var(--g);
+  border-top: 1px solid var(--bd-hair);
+  padding-block: var(--v-1);
+  align-items: baseline;
+}
+
+.spec__i {
+  grid-column: span 2;
+  font-family: var(--mono);
+  font-size: var(--t-micro);
+  letter-spacing: 0;
+  /* --ink-3, not --ink-4. These ordinals read as decoration, but they are
+     rendered text, so 1.4.3 applies to them exactly as it does to a paragraph;
+     "it is only a label" is not a category the success criterion has. --ink-4
+     measured 3.26 light and 3.59 dark here, which is the non-text floor, not
+     the text one. At 12px mono against a 600-weight term this is still clearly
+     the subordinate element. */
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.spec__t {
+  grid-column: span 6;
+  font-size: var(--t-small);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.spec__d {
+  grid-column: span 14;
+  /* Capped independently of the column span. Fourteen columns is 718px, which
+     at 16px Inter is about 90 characters: comfortably past the point where the
+     eye loses the line return. The span sets where the column sits, the ch cap
+     sets how far the text runs inside it. */
+  max-width: 68ch;
+  font-size: var(--t-body);
+  color: var(--ink-2);
+}
+
+@media (max-width: 47.99rem) {
+  .spec {
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    row-gap: var(--v-0);
+  }
+  .spec__i {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .spec__t {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .spec__d {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   13. Utility
+   -------------------------------------------------------------------------- */
+
+/* fixed, not absolute. An absolutely positioned skip link is placed against
+   the document, so it is only actually on screen when the page happens to be
+   scrolled to the top. Fixed puts it in the viewport wherever focus finds it. */
+.skip {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--s2);
+  color: var(--ink);
+  padding: var(--v-1) var(--v);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+}
+
+.skip:focus {
+  left: var(--pad);
+  top: var(--v-1);
+}
+
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.stack > * + * {
+  margin-top: var(--v-2);
+}
+.stack-1 > * + * {
+  margin-top: var(--v-1);
+}
+.stack-3 > * + * {
+  margin-top: var(--v-3);
 }

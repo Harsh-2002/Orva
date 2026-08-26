@@ -1,0 +1,76 @@
+---
+import ThemeToggle from './ThemeToggle.astro';
+
+// What is left of the footer.
+//
+// The three-column sitemap went first, then the minimal one-line version, and
+// now this. Everything a footer usually carries already has a better home: the
+// licence, the source and the invitation to contribute are a real section at
+// the end of the landing page, the docs link is a CTA in the hero and again at
+// the close, and "no telemetry" is a claim the page makes in its own words
+// rather than a slogan in small print.
+//
+// Two things genuinely have nowhere else to be on a page with no header: a way
+// back to the top, and the theme control on the viewports where the corner dock
+// is not rendered.
+---
+
+<footer class="ft">
+  <div class="ft__in">
+    <a class="ft__top" href="#top">Back to top</a>
+    <div class="ft__theme"><ThemeToggle labels /></div>
+  </div>
+</footer>
+
+<style>
+  .ft {
+    border-top: 1px solid var(--bd-hair);
+  }
+
+  .ft__in {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--v-2);
+    max-width: var(--max);
+    margin-inline: auto;
+    /* Extra bottom room so the corner dock never sits on top of the link. */
+    padding: var(--v-2) var(--pad) calc(var(--v-3) + env(safe-area-inset-bottom));
+    font-size: var(--t-small);
+  }
+
+  .ft__top {
+    color: var(--ink-2);
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    transition: color var(--dur) var(--ease);
+  }
+
+  .ft__top:hover {
+    color: var(--ink);
+  }
+
+  /* Above md the corner dock owns the theme control and this is not rendered. */
+  @media (min-width: 48rem) {
+    .ft__theme {
+      display: none;
+    }
+  }
+
+  @media (max-width: 47.99rem) {
+    .ft__in {
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--v-1);
+    }
+    .ft__top {
+      order: 2;
+      justify-content: center;
+    }
+    .ft__theme {
+      order: 1;
+    }
+  }
+</style>

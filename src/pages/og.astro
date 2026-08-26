@@ -1,0 +1,97 @@
+---
+import Layout from '../layouts/Layout.astro';
+import OrvaMark from '../components/OrvaMark.astro';
+
+// The social card, rendered as a page so it can be re-shot from the real
+// stylesheet and the real fonts rather than hand-drawn in an image editor.
+//
+// The previous public/og.png was left over from the old design: its background
+// was #0e0d17, a violet that no longer exists anywhere in this site. Anyone
+// sharing the link got a preview that did not match the page it opened.
+//
+// To regenerate: serve the site, screenshot this page at exactly 1200x630,
+// and save over public/og.png.
+---
+
+<Layout title="Orva social card" noindex>
+  <div class="og">
+    <div class="og__top">
+      <OrvaMark size={44} />
+      <span class="og__word">Orva</span>
+    </div>
+
+    <h1 class="og__h">Functions that run in a kernel sandbox.</h1>
+
+    <p class="og__sub">Self-hosted, on your own hardware. Five kernel-enforced boundaries per call.</p>
+
+    <div class="og__foot">
+      <span class="num">node</span>
+      <span class="og__dot">·</span>
+      <span class="num">python</span>
+      <span class="og__dot">·</span>
+      <span class="num">typescript</span>
+      <span class="og__spacer"></span>
+      <span>Apache 2.0</span>
+    </div>
+  </div>
+</Layout>
+
+<style>
+  .og {
+    width: 1200px;
+    height: 630px;
+    padding: 72px 80px;
+    display: flex;
+    flex-direction: column;
+    background: var(--page);
+    overflow: hidden;
+  }
+
+  .og__top {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .og__word {
+    font-family: var(--mono);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .og__h {
+    margin-top: auto;
+    font-size: 76px;
+    font-weight: 500;
+    line-height: 1.02;
+    max-width: 17ch;
+  }
+
+  .og__sub {
+    margin-top: 24px;
+    font-size: 25px;
+    line-height: 1.4;
+    color: var(--ink-2);
+    max-width: 40ch;
+  }
+
+  .og__foot {
+    margin-top: auto;
+    padding-top: 28px;
+    border-top: 1px solid var(--bd);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 19px;
+    color: var(--ink-3);
+  }
+
+  .og__spacer {
+    margin-inline-start: auto;
+  }
+
+  .og__dot {
+    color: var(--ink-4);
+  }
+</style>

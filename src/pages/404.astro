@@ -1,0 +1,57 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Brand from '../components/Brand.astro';
+
+// GitHub Pages serves this for any path it cannot resolve under the site root.
+// Without it a mistyped or dead link lands on GitHub's own generic 404, which
+// is off-brand and, worse, gives the reader no route back into the docs.
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<Layout
+  title="Not found"
+  description="That page does not exist. Orva is a self-hosted function runtime that runs your code in a kernel sandbox."
+>
+  <section class="nf">
+    <div class="container">
+      <Brand href={`${base}/`} />
+      <p class="eyebrow nf__code">404</p>
+      <h1>That page does not exist.</h1>
+      <p class="lead prose">
+        The link may be stale, or the page may have moved. Everything on this site is reachable from these
+        two.
+      </p>
+      <div class="nf__cta">
+        <a class="btn btn--primary" href={`${base}/`}>Home</a>
+        <a class="btn btn--secondary" href={`${base}/docs/`}>Documentation</a>
+      </div>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  .nf {
+    padding-block: var(--v-8) var(--v-6);
+  }
+
+  .nf__code {
+    margin-top: var(--v-6);
+  }
+
+  .nf h1 {
+    font-size: var(--t-h2);
+    margin-top: var(--v-1);
+    max-width: 18ch;
+  }
+
+  .nf .lead {
+    margin-top: var(--v-2);
+  }
+
+  .nf__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--v-1);
+    margin-top: var(--v-3);
+  }
+</style>

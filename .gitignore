@@ -4,3 +4,11 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Left over from main-branch checkouts in the same working tree. They are not
+# part of the site and must never land on this branch.
+build/
+test/
+frontend/
+.impeccable/
+.playwright-mcp/

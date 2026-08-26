@@ -1,5 +1,7 @@
 ---
 import '../styles/global.css';
+import ThemeDock from '../components/ThemeDock.astro';
+import Footer from '../components/Footer.astro';
 
 const base = import.meta.env.BASE_URL;
 const baseTrim = base.replace(/\/$/, '');
@@ -7,10 +9,12 @@ const baseTrim = base.replace(/\/$/, '');
 interface Props {
   title: string;
   description?: string;
+  noindex?: boolean;
 }
 const {
   title,
-  description = 'Self-hosted serverless runtime. Functions on your own metal — five kernel-enforced boundaries per call. Node, Python, TypeScript. No external database, control plane, or services to run.',
+  noindex = false,
+  description = 'Self-hosted functions that run in a kernel sandbox. Node, Python and TypeScript on your own hardware, with five enforced boundaries per call. No control plane, no external database, no telemetry.',
 } = Astro.props;
 
 const site = Astro.site ?? new URL('https://harsh-2002.github.io/');
@@ -44,7 +48,10 @@ const ldJson = {
       applicationCategory: 'DeveloperApplication',
       applicationSubCategory: 'Serverless Runtime',
       operatingSystem: 'Linux',
-      license: 'https://opensource.org/licenses/MIT',
+      // Apache-2.0. The repository LICENSE has always been Apache 2.0; this
+      // field said MIT, and unlike the prose on the page it is machine-readable
+      // and gets indexed as a fact about the project.
+      license: 'https://www.apache.org/licenses/LICENSE-2.0',
       author: { '@id': `${canonical}#person` },
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
       programmingLanguage: ['JavaScript', 'TypeScript', 'Python'],
@@ -59,32 +66,77 @@ const ldJson = {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <!--
+      Theme resolution, before anything paints. is:inline keeps Astro from
+      hoisting or bundling this: it has to execute synchronously, in the head,
+      or the page paints in the wrong theme and then corrects itself.
+    -->
+    <script is:inline>
+      (function () {
+        const r = document.documentElement;
+        try {
+          const p = localStorage.getItem('orva-theme') || 'system';
+          r.dataset.themePref = p;
+          r.dataset.theme =
+            p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+              ? 'dark'
+              : 'light';
+        } catch {
+          // localStorage throws outright in some privacy modes. Dark is the
+          // safer default to paint: a flash to light hurts more at night.
+          r.dataset.theme = 'dark';
+          r.dataset.themePref = 'system';
+        }
+      })();
+    </script>
+
     <meta name="description" content={description} />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0E0D17" />
+
+    <!--
+      color-scheme is what makes native scrollbars, form controls and the UA's
+      own canvas correct during load and after a toggle. The meta covers the
+      window before CSS arrives; the CSS property covers the override case.
+    -->
+    <meta name="color-scheme" content="light dark" />
+
+    <!--
+      Two media-scoped theme-color tags for the pre-JS and system case. They are
+      WRONG the moment a user overrides to light on a system-dark phone, so the
+      toggle swaps them for a single unscoped tag whenever the preference is not
+      'system', and restores the pair when it returns to System.
+    -->
+    <meta name="theme-color" content="#F8F7F4" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0E0D0A" media="(prefers-color-scheme: dark)" />
+
     <meta name="generator" content={Astro.generator} />
-    <meta
-      name="keywords"
-      content="self-hosted, serverless, runtime, function-as-a-service, faas, nsjail, sandbox, kata containers, node.js, python, typescript, homelab, docker, kubernetes alternative"
-    />
     <meta name="author" content="Harsh" />
     <meta
       name="robots"
-      content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1"
+      content={noindex
+        ? 'noindex, nofollow'
+        : 'index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1'}
     />
 
-    <!-- iOS Safari -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Orva" />
     <meta name="format-detection" content="telephone=no" />
-    <!-- Android Chrome -->
-    <meta name="mobile-web-app-capable" content="yes" />
 
-    <!-- Canonical -->
+    <!--
+      No *-web-app-capable here, deliberately. Those two declare standalone
+      launch, and a reader who adds a docs site to their home screen then gets
+      it with no back button and no address bar: every outbound link, and there
+      are several to GitHub, becomes a dead end.
+
+      It also mattered for the toolbar colour specifically. In standalone mode
+      iOS takes its status bar from apple-mobile-web-app-status-bar-style
+      rather than from theme-color, and with no such tag it defaults to dark
+      text on white, which is wrong the moment the page is in dark mode. Not
+      declaring standalone removes the whole failure mode instead of patching
+      it with a third tag that can drift from the other two.
+    -->
+
     <link rel="canonical" href={canonical} />
 
-    <!-- OpenGraph -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
@@ -94,281 +146,186 @@ const ldJson = {
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Orva — self-hosted serverless runtime" />
+    <meta property="og:image:alt" content="Orva, self-hosted functions in a kernel sandbox" />
 
-    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
-    <meta name="twitter:image:alt" content="Orva — self-hosted serverless runtime" />
 
     <title>{title}</title>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
 
     <link rel="icon" type="image/svg+xml" href={`${baseTrim}/favicon.svg`} />
     <link rel="apple-touch-icon" href={`${baseTrim}/favicon.svg`} />
 
-    <!-- Structured data (schema.org) -->
-    <script type="application/ld+json" set:html={JSON.stringify(ldJson)} />
+    <script type="application/ld+json" set:html={JSON.stringify(ldJson)} is:inline />
   </head>
 
   <body>
-    <slot />
+    <span id="top" aria-hidden="true"></span>
+    <a class="skip" href="#main">Skip to content</a>
 
-    <!-- Lightbox overlay -->
-    <div id="lightbox" aria-hidden="true">
-      <button id="lightbox-close" aria-label="Close">×</button>
-      <figure>
-        <img id="lightbox-img" alt="" />
-        <figcaption id="lightbox-cap"></figcaption>
-      </figure>
-    </div>
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+
+    <Footer />
+    <ThemeDock />
 
     <script>
+      // ----------------------------------------------------------------------
+      // Theme
+      // ----------------------------------------------------------------------
+      const root = document.documentElement;
+      const KEY = 'orva-theme';
+      const mq = matchMedia('(prefers-color-scheme: dark)');
+
+      const resolve = (pref: string) =>
+        pref === 'dark' || (pref === 'system' && mq.matches) ? 'dark' : 'light';
+
+      function syncThemeColor(pref: string, theme: string) {
+        const head = document.head;
+        head.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.remove());
+
+        const add = (content: string, media?: string) => {
+          const m = document.createElement('meta');
+          m.name = 'theme-color';
+          m.content = content;
+          if (media) m.media = media;
+          head.appendChild(m);
+        };
+
+        if (pref === 'system') {
+          // Let the OS decide, the same way the server-rendered pair does.
+          add('#F8F7F4', '(prefers-color-scheme: light)');
+          add('#0E0D0A', '(prefers-color-scheme: dark)');
+        } else {
+          // An explicit choice must win over the OS, so the tag cannot be
+          // media-scoped: a scoped light tag on a system-dark phone loses.
+          add(theme === 'dark' ? '#0E0D0A' : '#F8F7F4');
+        }
+      }
+
+      function apply(pref: string, animate = true) {
+        const theme = resolve(pref);
+        if (animate) {
+          // A 140ms cross-fade of an entire page reads as a rendering fault.
+          // Kill every transition for the single frame of the swap.
+          root.classList.add('theme-switching');
+          requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('theme-switching')));
+        }
+        root.dataset.themePref = pref;
+        root.dataset.theme = theme;
+        syncThemeColor(pref, theme);
+
+        document.querySelectorAll<HTMLElement>('[data-theme-opt]').forEach((b) => {
+          const on = b.dataset.themeOpt === pref;
+          b.setAttribute('aria-checked', String(on));
+          b.tabIndex = on ? 0 : -1;
+        });
+      }
+
+      document.querySelectorAll<HTMLElement>('[data-theme-opt]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const pref = btn.dataset.themeOpt!;
+          try {
+            localStorage.setItem(KEY, pref);
+          } catch {
+            /* private mode: the choice just does not persist */
+          }
+          apply(pref);
+        });
+      });
+
+      // Arrow-key navigation within each radiogroup.
+      document.querySelectorAll<HTMLElement>('[data-theme-group]').forEach((group) => {
+        group.addEventListener('keydown', (e) => {
+          const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'];
+          if (!keys.includes(e.key)) return;
+          e.preventDefault();
+          const opts = [...group.querySelectorAll<HTMLElement>('[data-theme-opt]')];
+          const i = opts.findIndex((o) => o.getAttribute('aria-checked') === 'true');
+          const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
+          const next = opts[(i + d + opts.length) % opts.length];
+          next.click();
+          next.focus();
+        });
+      });
+
+      // A System user's page follows the OS live, with no reload.
+      mq.addEventListener('change', () => {
+        if ((root.dataset.themePref || 'system') === 'system') apply('system');
+      });
+
+      apply(root.dataset.themePref || 'system', false);
+
+      // ----------------------------------------------------------------------
       // Copy buttons
-      document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const sel = btn.getAttribute('data-copy');
-          if (!sel) return;
-          const target = document.querySelector(sel) as HTMLElement | null;
-          if (!target) return;
-          const text = target.innerText.trim();
+      // ----------------------------------------------------------------------
+      // navigator.clipboard exists only in a secure context: https, or
+      // localhost. It is undefined on a plain-http LAN origin, which is exactly
+      // how this site gets reviewed before it ships, and how it would be served
+      // by anyone running Orva on their own box without TLS in front of it.
+      //
+      // So there is a fallback, and every path reports back. The original
+      // version called writeText unconditionally and swallowed the TypeError,
+      // which meant the button did nothing at all and said nothing about it.
+      async function writeClipboard(text: string): Promise<boolean> {
+        if (navigator.clipboard && window.isSecureContext) {
           try {
             await navigator.clipboard.writeText(text);
+            return true;
           } catch {
-            const ta = document.createElement('textarea');
-            ta.value = text;
-            ta.style.position = 'fixed';
-            ta.style.opacity = '0';
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            ta.remove();
+            /* fall through to the selection path below */
           }
-          const original = btn.textContent;
-          btn.textContent = 'Copied';
-          btn.classList.add('copied');
-          setTimeout(() => {
-            btn.textContent = original || 'Copy';
-            btn.classList.remove('copied');
-          }, 1400);
-        });
-      });
+        }
+        // execCommand is deprecated and is still the only thing that works on
+        // an insecure origin. It needs a real, focusable, on-screen element:
+        // display:none or visibility:hidden will not select.
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;opacity:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, ta.value.length);
+          const ok = document.execCommand('copy');
+          ta.remove();
+          return ok;
+        } catch {
+          return false;
+        }
+      }
 
-      // Lightbox
-      const lb = document.getElementById('lightbox')!;
-      const lbImg = document.getElementById('lightbox-img') as HTMLImageElement;
-      const lbCap = document.getElementById('lightbox-cap')!;
-      const lbClose = document.getElementById('lightbox-close')!;
-      let lbLast: HTMLElement | null = null;
+      document.querySelectorAll<HTMLElement>('[data-copy]').forEach((btn) => {
+        const original = btn.textContent || 'Copy';
+        let timer: ReturnType<typeof setTimeout> | undefined;
 
-      const openLb = (trigger: HTMLElement) => {
-        const src = trigger.getAttribute('data-lightbox') || '';
-        const cap = trigger.getAttribute('data-caption') || '';
-        lbImg.src = src;
-        lbCap.textContent = cap;
-        lb.setAttribute('aria-hidden', 'false');
-        lbLast = trigger;
-        lbClose.focus();
-        document.body.style.overflow = 'hidden';
-      };
-      const closeLb = () => {
-        lb.setAttribute('aria-hidden', 'true');
-        lbImg.src = '';
-        document.body.style.overflow = '';
-        lbLast?.focus();
-      };
+        btn.addEventListener('click', async () => {
+          const block = btn.closest('.code')?.querySelector('pre');
+          if (!block) return;
 
-      document.querySelectorAll<HTMLElement>('[data-lightbox]').forEach((el) => {
-        el.addEventListener('click', () => openLb(el));
-        el.addEventListener('keydown', (e: KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openLb(el);
-          }
-        });
-      });
-      lbClose.addEventListener('click', closeLb);
-      lb.addEventListener('click', (e) => {
-        if (e.target === lb) closeLb();
-      });
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && lb.getAttribute('aria-hidden') === 'false') closeLb();
-      });
+          const ok = await writeClipboard(block.innerText.trim());
 
-      // Auto-hide masthead: slides up on scroll-down past a threshold,
-      // slides back in on scroll-up or at the top of the page. rAF-throttled.
-      {
-        const masthead = document.querySelector<HTMLElement>('.masthead');
-        if (masthead) {
-          let lastY = window.scrollY;
-          let scrollTicking = false;
-          const SHOW_BELOW = 80;
-          const DELTA = 6;
-          const onScroll = () => {
-            const y = window.scrollY;
-            const delta = y - lastY;
-            if (y < SHOW_BELOW) {
-              masthead.classList.remove('is-hidden');
-            } else if (delta > DELTA) {
-              masthead.classList.add('is-hidden');
-            } else if (delta < -DELTA) {
-              masthead.classList.remove('is-hidden');
-            }
-            lastY = y;
-            scrollTicking = false;
-          };
-          window.addEventListener(
-            'scroll',
+          clearTimeout(timer);
+          btn.dataset.copied = ok ? 'true' : 'false';
+          btn.dataset.failed = ok ? 'false' : 'true';
+          btn.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+          // Announce it, because a sighted user sees the label change and a
+          // screen-reader user otherwise gets nothing at all.
+          btn.setAttribute('aria-live', 'polite');
+
+          timer = setTimeout(
             () => {
-              if (!scrollTicking) {
-                scrollTicking = true;
-                requestAnimationFrame(onScroll);
-              }
+              btn.dataset.copied = 'false';
+              btn.dataset.failed = 'false';
+              btn.textContent = original;
             },
-            { passive: true }
+            ok ? 1400 : 2600
           );
-        }
-      }
-
-      // Smooth-scroll for anchor links with sticky-nav offset
-      document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]').forEach((link) => {
-        link.addEventListener('click', (e) => {
-          const href = link.getAttribute('href');
-          if (!href || href === '#') return;
-          const target = document.querySelector(href);
-          if (!target) return;
-          e.preventDefault();
-          const top = (target as HTMLElement).getBoundingClientRect().top + window.scrollY - 24;
-          window.scrollTo({ top, behavior: 'smooth' });
         });
       });
-
-      // Cursor spotlight — eased lerp toward target pointer position.
-      // Lower `ease` = slower / dreamier trail; 0.10 lands at ~99% in ~500ms.
-      // The first pointermove snaps the spotlight in (no zoom-in from -9999px),
-      // then rAF interpolates each subsequent target.
-      const supportsHover = matchMedia('(hover: hover) and (pointer: fine)').matches;
-      const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (supportsHover && !reduceMotion) {
-        let targetX = 0;
-        let targetY = 0;
-        let currentX = -1;
-        let currentY = -1;
-        let rafId = 0;
-        const ease = 0.1;
-        const tick = () => {
-          const dx = targetX - currentX;
-          const dy = targetY - currentY;
-          currentX += dx * ease;
-          currentY += dy * ease;
-          document.body.style.setProperty('--cx', currentX.toFixed(1) + 'px');
-          document.body.style.setProperty('--cy', currentY.toFixed(1) + 'px');
-          if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) {
-            rafId = requestAnimationFrame(tick);
-          } else {
-            // Snap to final on convergence so the value matches the cursor exactly.
-            document.body.style.setProperty('--cx', targetX + 'px');
-            document.body.style.setProperty('--cy', targetY + 'px');
-            rafId = 0;
-          }
-        };
-        document.addEventListener(
-          'pointermove',
-          (e: PointerEvent) => {
-            targetX = e.clientX;
-            targetY = e.clientY;
-            if (currentX < 0) {
-              // First move — seed at cursor position so we don't trail in from off-screen.
-              currentX = e.clientX;
-              currentY = e.clientY;
-            }
-            if (!rafId) rafId = requestAnimationFrame(tick);
-          },
-          { passive: true }
-        );
-      }
     </script>
-
-    <style is:global>
-      #lightbox {
-        position: fixed;
-        inset: 0;
-        z-index: 100;
-        background: color-mix(in oklab, var(--bg-deep) 70%, transparent);
-        backdrop-filter: blur(14px) saturate(140%);
-        -webkit-backdrop-filter: blur(14px) saturate(140%);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        padding: clamp(20px, 4vw, 56px);
-      }
-      #lightbox[aria-hidden='false'] {
-        display: flex;
-      }
-      #lightbox figure {
-        max-width: 1280px;
-        width: 100%;
-        background: transparent;
-        border: none;
-        padding: 0;
-      }
-      #lightbox img {
-        width: 100%;
-        max-height: 78vh;
-        object-fit: contain;
-        border: none;
-        border-radius: 24px;
-        display: block;
-        background: transparent;
-      }
-      #lightbox figcaption {
-        margin-top: 18px;
-        color: var(--fg);
-        font-size: 0.875rem;
-        text-align: center;
-        font-family: var(--mono);
-        letter-spacing: 0.02em;
-        line-height: 1.55;
-      }
-      #lightbox-close {
-        position: absolute;
-        top: clamp(14px, 2vw, 24px);
-        right: clamp(14px, 2vw, 24px);
-        font-size: 22px;
-        color: var(--muted);
-        width: 40px;
-        height: 40px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: transparent;
-        border: none;
-        line-height: 1;
-        font-family: var(--mono);
-        transition:
-          color 120ms,
-          transform 120ms;
-      }
-      #lightbox-close:hover {
-        color: var(--fg);
-      }
-      #lightbox-close:active {
-        transform: scale(0.92);
-      }
-      @media (max-width: 560px) {
-        #lightbox img {
-          border-radius: 12px;
-          max-height: 70vh;
-        }
-      }
-    </style>
   </body>
 </html>

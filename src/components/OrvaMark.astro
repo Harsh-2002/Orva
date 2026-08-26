@@ -1,0 +1,37 @@
+---
+// The official mark, matching main:frontend/src/components/OrvaLogo.vue exactly:
+// a rounded square in the brand primary with f(x) set in Inter 700.
+//
+// The fill is #553F83, which is what actually ships. main's standalone
+// favicon.svg hardcodes #7C3AED (Tailwind violet-600) instead, so the browser
+// tab and the in-app mark are currently two different violets. This site uses
+// the one the product renders, verified against the pixels in the screenshots.
+interface Props {
+  size?: number;
+  class?: string;
+}
+const { size = 28, class: cls = '' } = Astro.props;
+---
+
+<svg
+  class={cls}
+  width={size}
+  height={size}
+  viewBox="0 0 32 32"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+  aria-hidden="true"
+  focusable="false"
+>
+  <rect width="32" height="32" rx="8" fill="#553F83"></rect>
+  <text
+    x="16"
+    y="21"
+    font-family="Inter, system-ui, sans-serif"
+    font-size="13"
+    font-weight="700"
+    fill="#FFFFFF"
+    text-anchor="middle"
+    letter-spacing="-0.5">f(x)</text
+  >
+</svg>

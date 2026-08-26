@@ -1,0 +1,39 @@
+---
+import { highlight } from '../utils/highlight';
+
+interface Props {
+  label: string;
+  lang?: string;
+  code: string;
+  copy?: boolean;
+}
+const { label, lang = 'bash', code, copy = true } = Astro.props;
+const html = highlight(code, lang);
+
+// Shell commands wrap; source code scrolls.
+//
+// A long install URL that clips at the right edge with an overlay scrollbar
+// looks like a broken command, and the reader has no affordance telling them
+// there is more. A terminal wraps, so wrapping is the familiar reading model
+// for a command. Source code is the opposite case: its structure is carried by
+// indentation, lines are short by construction, and soft-wrapping a function
+// body makes it harder to read rather than easier.
+//
+// pre-wrap only adds SOFT breaks, so the copy button and a manual selection
+// both still yield the exact original text, newlines included.
+const wrap = lang === 'bash';
+---
+
+<div class:list={['code', wrap && 'code--wrap']}>
+  <div class="code__bar">
+    <span class="code__label">{label}</span>
+    {
+      copy && (
+        <button class="code__copy" type="button" data-copy aria-label={`Copy ${label}`}>
+          Copy
+        </button>
+      )
+    }
+  </div>
+  <pre><code set:html={html} /></pre>
+</div>

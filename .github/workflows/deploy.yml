@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint (type-check + format)
+      - name: Lint (types, eslint, format)
         run: npm run lint
 
       - name: Build Astro site

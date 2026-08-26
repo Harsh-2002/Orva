@@ -1,0 +1,43 @@
+---
+import ThemeToggle from './ThemeToggle.astro';
+
+// The theme control has no header to live in, so on desktop it docks to the
+// corner: reachable from any scroll position without being page chrome, and the
+// only fixed UI on the site.
+//
+// Below md it is not rendered at all, and the footer carries the control
+// instead. A fixed corner element on a phone will sooner or later sit on top of
+// something you wanted to tap; measured at 360px it covered a code block's Copy
+// button. Default is System, so a phone already follows the reader's OS, and
+// the cost of putting the override in the footer there is close to zero.
+---
+
+<div class="dock">
+  <ThemeToggle />
+</div>
+
+<style>
+  .dock {
+    display: none;
+    position: fixed;
+    z-index: 40;
+    right: max(var(--v-2), env(safe-area-inset-right));
+    bottom: max(var(--v-2), env(safe-area-inset-bottom));
+    /* The page shows through the toggle's own translucent track otherwise,
+       and this thing sits over prose and over screenshots. */
+    background: var(--page);
+    border-radius: calc(var(--r) + 2px);
+  }
+
+  @media (min-width: 48rem) {
+    .dock {
+      display: block;
+    }
+  }
+
+  @media print {
+    .dock {
+      display: none !important;
+    }
+  }
+</style>

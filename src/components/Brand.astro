@@ -1,0 +1,46 @@
+---
+import OrvaMark from './OrvaMark.astro';
+
+// The mark plus the wordmark, matching main's BrandLockup: mono, bold,
+// tracking-tight. This sits in the content flow at the top of a page rather
+// than in a fixed bar. There is no header on this site, so the brand is the
+// first line of the document, the way a masthead sits on a page rather than
+// hovering above it.
+interface Props {
+  href?: string;
+}
+const { href } = Astro.props;
+const Tag = href ? 'a' : 'div';
+---
+
+<Tag class="brand" href={href}>
+  <OrvaMark size={26} />
+  <span class="brand__word">Orva</span>
+</Tag>
+
+<style>
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--ink);
+  }
+
+  .brand__word {
+    font-family: var(--mono);
+    font-size: var(--t-mark);
+    font-weight: 700;
+    /* JetBrains Mono's 600/1000 advance reads loose at this size, so the
+       wordmark is the one mono string that takes negative tracking. */
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+
+  a.brand {
+    transition: opacity var(--dur) var(--ease);
+  }
+
+  a.brand:hover {
+    opacity: 0.72;
+  }
+</style>

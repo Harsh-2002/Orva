@@ -1,0 +1,136 @@
+---
+// Three-segment System / Light / Dark control.
+//
+// Rejected: a two-state sun/moon with long-press for System. System has to be
+// discoverable and reversible, and a hidden gesture fails both tests.
+// Rejected: a single cycling button. Both the current state and the available
+// states must be visible; a user who wants Light should not have to click twice
+// with no preview of where they are going.
+//
+// Icon-only is sanctioned by DESIGN.md's own rule, which permits it when the
+// set is small and stable and the marks are already known. In the mobile sheet
+// the same component renders with visible text labels instead.
+interface Props {
+  labels?: boolean;
+  class?: string;
+}
+const { labels = false, class: cls = '' } = Astro.props;
+
+const opts = [
+  { id: 'system', label: 'System' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+];
+---
+
+<div
+  class:list={['tt', labels && 'tt--labels', cls]}
+  role="radiogroup"
+  aria-label="Colour theme"
+  data-theme-group
+>
+  {
+    opts.map((o) => (
+      <button
+        type="button"
+        role="radio"
+        aria-checked="false"
+        aria-label={labels ? undefined : o.label}
+        title={labels ? undefined : o.label}
+        tabindex="-1"
+        class="tt__opt"
+        data-theme-opt={o.id}
+      >
+        <svg
+          class="tt__icon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          {o.id === 'system' && (
+            <>
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8M12 17v4" />
+            </>
+          )}
+          {o.id === 'light' && (
+            <>
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </>
+          )}
+          {o.id === 'dark' && <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />}
+        </svg>
+        {labels && <span class="tt__label">{o.label}</span>}
+      </button>
+    ))
+  }
+</div>
+
+<style>
+  .tt {
+    display: inline-flex;
+    align-items: center;
+    background: var(--s1);
+    border: 1px solid var(--bd-hair);
+    border-radius: var(--r);
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .tt__opt {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5em;
+    width: 32px;
+    height: 26px;
+    border-radius: var(--r-sm);
+    color: var(--ink-3);
+    transition:
+      background-color var(--dur) var(--ease),
+      color var(--dur) var(--ease);
+  }
+
+  .tt__opt:hover {
+    color: var(--ink);
+  }
+
+  /* --s5 doing its legitimate job. It is not a text surface, but the icon on it
+     is --ink, which clears 13.3:1 in both themes. */
+  .tt__opt[aria-checked='true'] {
+    background: var(--s5);
+    color: var(--ink);
+  }
+
+  .tt__icon {
+    flex: none;
+  }
+
+  /* Coarse pointers get real targets, per the product's touch discipline. */
+  @media (pointer: coarse) {
+    .tt__opt {
+      min-width: 44px;
+      height: 44px;
+    }
+  }
+
+  .tt--labels {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    width: 100%;
+  }
+
+  .tt--labels .tt__opt {
+    width: auto;
+    height: 44px;
+    font-size: var(--t-small);
+    font-weight: 600;
+  }
+</style>

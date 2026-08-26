@@ -1,0 +1,35 @@
+---
+import { Image } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
+
+interface Props {
+  src: ImageMetadata;
+  alt: string;
+  caption?: string;
+  eager?: boolean;
+}
+const { src, alt, caption, eager = false } = Astro.props;
+---
+
+<figure class="shot-fig">
+  <div class="shot">
+    <Image
+      src={src}
+      alt={alt}
+      widths={[760, 1240, 2480]}
+      sizes="(min-width: 64rem) 1238px, 100vw"
+      format="webp"
+      quality={82}
+      loading={eager ? 'eager' : 'lazy'}
+      decoding={eager ? 'sync' : 'async'}
+      fetchpriority={eager ? 'high' : 'auto'}
+    />
+  </div>
+  {caption && <figcaption class="shot-caption">{caption}</figcaption>}
+</figure>
+
+<style>
+  .shot-fig {
+    margin: 0;
+  }
+</style>
