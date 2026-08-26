@@ -72,7 +72,7 @@ Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)
 ## Features
 
 - **Two runtimes** — `node` (Node.js 24, also runs TypeScript) and `python` (Python 3.14).
-- **Real isolation** — every call runs in a fresh nsjail sandbox: user namespace, chroot, cgroup v2 limits, and a seccomp syscall allowlist. → [Security](docs/SECURITY.md)
+- **Real isolation** — every function runs in its own nsjail sandbox: user namespace, chroot, cgroup v2 limits, and a seccomp syscall allowlist. → [Security](docs/SECURITY.md)
 - **Warm pools** — idle workers stay resident per function, so repeat calls skip cold start.
 - **Built-in primitives** — per-function KV store, background jobs (retries + backoff), cron schedules, function-to-function calls, encrypted secrets, custom routes, and signed inbound webhooks.
 - **Distributed tracing** — every HTTP → F2F → job chain shares one trace, with a waterfall view and zero code changes.
@@ -85,7 +85,7 @@ Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)
 ## Write a function
 
 The `orva` SDK is preinstalled in every sandbox — KV, function-to-function invoke, and
-background jobs with no setup:
+background jobs, with nothing to install:
 
 ```js
 // Node — Python uses the same shape: from orva import kv, invoke, jobs
@@ -99,6 +99,10 @@ exports.handler = async (event) => {
 }
 ```
 
+The SDK reaches Orva over HTTP, and `network_mode` defaults to `none` — so set
+the function's network mode to **egress** or every SDK call fails with
+`ENETUNREACH`. The editor warns you at deploy time when it spots the import.
+
 Handler contract, event shape, and streaming: [docs/RUNTIMES.md](docs/RUNTIMES.md).
 
 ---
@@ -111,6 +115,9 @@ Handler contract, event shape, and streaming: [docs/RUNTIMES.md](docs/RUNTIMES.m
 curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
+
+Compose publishes on **http://localhost:3000** (it maps `3000:8443`), not
+`:8443` like the `docker run` above.
 
 **Bare-metal / VM** — systemd or OpenRC, no Docker (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, Alpine, Arch, openSUSE):
 
@@ -175,11 +182,14 @@ Defaults work out of the box. Common knobs: `ORVA_PORT` (8443), `ORVA_DATA_DIR`
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | System design, request + deploy lifecycle |
 | [SECURITY](docs/SECURITY.md) | Threat model, sandbox isolation, verification recipe |
 | [RUNTIMES](docs/RUNTIMES.md) | Handler contract, event shape, streaming |
+| [Reference](docs/reference.md) | The canonical single-page reference — also served at `/web/docs.md` and by `orva docs` |
 | [API](docs/API.md) | Full REST API reference |
 | [CLI](docs/CLI.md) | Config precedence, command reference, workflows |
 | [CONFIG](docs/CONFIG.md) | All configuration knobs |
 | [DEPLOYMENT](docs/DEPLOYMENT.md) | TLS, reverse proxy, backups, upgrades |
 | [OPERATIONS](docs/OPERATIONS.md) | Monitoring, troubleshooting, common errors |
+| [ERRORS](docs/ERRORS.md) | Error-code catalogue: slug → HTTP status → what to do |
+| [TRACING](docs/TRACING.md) | Causal trace model, propagation, W3C interop |
 | [SUPPORT](docs/SUPPORT.md) | Distro / kernel / container-runtime matrix |
 | [CAPACITY](docs/CAPACITY.md) | Throughput numbers + benchmark methodology |
 | [CONTRIBUTING](docs/CONTRIBUTING.md) | Dev setup, build from source, tests |

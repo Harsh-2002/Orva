@@ -19,7 +19,7 @@ Error envelope (every 4xx/5xx):
   "error": {
     "code": "POOL_AT_CAPACITY",
     "message": "function pool at capacity for 019df200-7b00-7e00-9c00-aab1cd2e3f40",
-    "request_id": "req_abc",
+    "request_id": "019df210-7b00-7e00-9c00-aab1cd2e3f42",
     "hint": "inspect pool limiting_reason; raise max_warm only for operator_max",
     "retry_after_s": 5,
     "details": {"function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40", "current": 16, "limit": 16}
@@ -74,7 +74,9 @@ Returns `{"has_user": bool}` so the UI knows whether to route to
 `/onboarding` or `/login`.
 
 ### `POST /api/v1/auth/refresh`
-Rotates the cookie's expiry forward by 7 days.
+Mints a **new** session token, sets it as the cookie, and revokes the old
+one — the previous cookie value stops working immediately. The lifetime is
+`ORVA_SESSION_DAYS` (default 7).
 
 ### `POST /api/v1/auth/logout`
 Invalidates the session.
@@ -135,7 +137,7 @@ Partial update. Whitelisted fields: `name`, `description`, `entrypoint`,
 blocks function-to-function `orva.invoke()` calls, which previously ran an
 inactive function anyway.
 
-`auth_mode` accepts `public` | `platform_key` | `signed` and governs how
+`auth_mode` accepts `none` | `platform_key` | `signed` and governs how
 `POST /fn/<id>` is authorized. Under `platform_key` the caller must present a
 key carrying the **`invoke`** permission (or a session cookie); a key scoped
 to `read`/`write` only gets 403. `concurrency_policy` accepts `reject` | `queue`
@@ -179,8 +181,18 @@ Roll back to a prior version.
 {"deployment_id": "019df210-1234-7000-8000-deadbeef0001"}    // or {"code_hash": "abc..."}
 ```
 
-Returns 200 with a synthetic deployment row of `source: "rollback"`.
-Returns 410 `VERSION_GCD` if the target version was pruned by the GC.
+Rollback **promotes an existing deployment** — it does not append a new one,
+so the version history does not grow and the deployment count is unchanged.
+`active_deployment_id` moves to the target, the `current` symlink is
+retargeted, and `run_entrypoint` is re-derived from the promoted version's own
+directory rather than restored from its snapshot (a snapshot written before
+that column existed carries no value, and applying that absence points a
+compiled TypeScript version back at its `.ts` source). Returns 200 with the
+**promoted** deployment record.
+
+Returns 410 `VERSION_GCD` if the target version was pruned by the GC, and 400
+if the target is not a succeeded deployment of this function, or if it is
+already active.
 
 ### `GET /api/v1/functions/{id}/source`
 Returns the function's current code + dependencies as JSON. Used by
@@ -479,8 +491,11 @@ Cascade — removes the channel and every junction row.
 ## System
 
 ### `GET /api/v1/system/health`
-`{"status": "ok"}` when orvad is up. Used by Docker HEALTHCHECK and
-load balancers.
+Returns 200 and `{"status": "healthy", ...}` when orvad is up, alongside
+`version`, `commit`, `build_time`, `image`, `uptime_seconds`, and `database`,
+`sandbox`, `host` and `writer` sub-objects. Returns **503** with
+`{"status": "degraded"}` when the 2-second database ping fails. Used by Docker
+HEALTHCHECK and load balancers — match on `healthy`, not `ok`.
 
 ### `GET /api/v1/system/metrics`
 Prometheus text format.

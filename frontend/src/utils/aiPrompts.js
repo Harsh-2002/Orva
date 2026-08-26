@@ -33,19 +33,19 @@ Event:
   event.method  → "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | …
   event.path    → "/path?query=string"
   event.headers → { "header-name": "value", ... }   (lowercase keys, comma-joined dups)
-  event.query   → { "key": "value", ... }           (parsed from ?…; repeats become arrays)
-  event.body    → string OR parsed JSON value, depending on Content-Type:
-                    - application/json            → parsed dict / array
-                    - application/x-www-form-urlencoded → parsed dict
-                    - multipart/form-data         → { fields: {...}, files: [{name, filename, contentType, data: <bytes>}] }
-                    - everything else             → raw string (or bytes for binary)
+  event.query   → { "key": "value", ... }   NODE ONLY — parsed from ?…, last value wins on repeats.
+                  Python handlers get no query key; split event["path"] on "?" yourself.
+  event.body    → ALWAYS the raw request body, as a string, whatever the Content-Type.
+                  The platform NEVER parses it. Call JSON.parse(event.body) /
+                  json.loads(event["body"]) yourself and guard the empty-body case.
+                  There is no form-urlencoded or multipart parsing.
 
 Return:
   { "statusCode": 200,
     "headers":    { "Content-Type": "application/json", ... },
     "body":       <string OR any JSON-serialisable value> }
 
-Non-string bodies are JSON-encoded by the adapter. To return binary (image, PDF), set Content-Type to the right MIME and return base64 in body with header { "x-orva-base64": "1" }.
+Non-string bodies are JSON-encoded by the adapter. There is no base64 response flag: to return binary, set the right Content-Type and return the bytes as the body.
 
 Other accepted handler styles (use the default unless the user asks):
 - AWS Lambda:        handler(event, context)
@@ -132,39 +132,40 @@ Uses the scoped internal SDK endpoint and dispatches through the warm pool; the 
     }
 
 ## orva.jobs — durable background queue with retries
-Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff (1m, 2m, 4m, 8m, …) up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
+Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff in SECONDS (attempt 1 → 2s, 2 → 4s, 3 → 8s, …), capped at 1h, up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
 
   Python:
     from orva import jobs
-    job_id = jobs.enqueue(
+    job = jobs.enqueue(
         "send-welcome-email",
         {"to": "user@x.com", "tpl": "welcome"},
-        delay_seconds=10,    # optional, default 0
-        max_attempts=3,      # optional, default 3
+        max_attempts=3,                          # optional, default 3
+        scheduled_at="2026-01-01T03:00:00Z",     # optional RFC3339; omit to run now
     )
+    job_id = job["id"]    # returns {"id": ..., "replayed": bool}
 
   Node:
     const { jobs } = require('orva')
-    const jobId = await jobs.enqueue(
+    const { id: jobId } = await jobs.enqueue(   // returns { id, replayed }
       'send-welcome-email',
       { to: 'user@x.com', tpl: 'welcome' },
-      { delaySeconds: 10, maxAttempts: 3 }
+      { maxAttempts: 3, scheduledAt: '2026-01-01T03:00:00Z' }   // scheduledAt optional
     )
 
-The worker function receives the payload as event.body (parsed dict). Job-fired invocations arrive with header x-orva-trigger: "job" and x-orva-job-id: "job_..." — branch on those when the same function handles both HTTP and queue work.
+The worker function receives the payload as event.body — a raw JSON string, like every other request, so parse it. Job-fired invocations arrive with header x-orva-trigger: "job" and x-orva-job-id: "<uuid>" — branch on those when the same function handles both HTTP and queue work.
 
 Idempotency rule: jobs CAN run more than once on retry. Make worker handlers idempotent (check kv for a "done" marker keyed on payload, or use the job id).
 </orva_sdk>
 
 <schedules>
 Wire any function to a cron expression from the Schedules page or:
-  POST /api/v1/functions/<name>/cron   { "expression": "*/5 * * * *", "timezone": "UTC", "enabled": true }
+  POST /api/v1/functions/<id>/cron   { "cron_expr": "*/5 * * * *", "timezone": "UTC", "enabled": true }
 
 Standard 5-field cron with shorthands: @hourly, @daily, @weekly, @monthly, @yearly. Plus the usual */N, ranges (1-5), and lists (1,15,30). Timezone defaults to the orvad process timezone; pass an IANA name to override per schedule.
 
 Cron-fired invocations arrive with these event headers — branch on them for dry-run / real-run logic, or to tag log lines:
   x-orva-trigger: "cron"
-  x-orva-cron-id: "cron_..."
+  x-orva-cron-id: "<uuid>"
 
 The scheduler is in-process (no external service), drift < 1s, survives restart, hot-reloads on edit. Failed cron runs emit a cron.failed webhook.
 </schedules>
@@ -192,8 +193,8 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 
 <sandbox_limits>
 - Defaults (configurable per function): 128 MB memory, 0.5 CPU, 30 s timeout, 6 MB max payload, max 10 MB total response.
-- Filesystem: read-only EXCEPT /code (your code) and /tmp (writable, ephemeral, cleared between cold starts).
-- NO subprocess execution (subprocess / child_process disabled). NO raw sockets. NO listening ports — the platform owns the HTTP server.
+- Filesystem: read-only, INCLUDING /code (your own code is mounted read-only). /tmp is the only writable path — ephemeral, cleared between cold starts.
+- NO raw sockets. NO listening ports — the platform owns the HTTP server. Subprocesses are permitted by the default seccomp policy but there is no shell or package manager in the sandbox, so treat them as unavailable.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
 - orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with \`network_mode: "none"\` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set \`network_mode: "egress"\` at create time (or update later) — the editor's deploy step will warn you when the import meets \`none\`.
 - When egress IS enabled, the operator can further restrict it with the sandbox egress policy + DNS settings (Egress page): blocked destinations are refused per sandbox, so a connection can come back as ECONNREFUSED. Assume best-effort; handle failures.
@@ -201,8 +202,8 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 </sandbox_limits>
 
 <auth_modes>
-Configure auth_mode on the function record (editor Settings modal or PUT /api/v1/functions/<name>):
-- "public" (default) — anyone with the URL can invoke. If the function needs user auth, verify a JWT IN the handler.
+Configure auth_mode on the function record (editor Settings modal or PUT /api/v1/functions/<id>). The only accepted values are "none", "platform_key" and "signed" — there is NO "public", and sending it fails validation:
+- "none" (default) — anyone with the URL can invoke. If the function needs user auth, verify a JWT IN the handler.
 - "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. The key must carry the "invoke" permission; a key scoped to read/write only gets 403. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API Keys page.
 - "signed" — caller signs the request with HMAC-SHA256 over "<unix-timestamp>.<raw_body>" using ORVA_SIGNING_SECRET (a function secret). Headers: X-Orva-Timestamp, X-Orva-Signature: sha256=<hex>. ±5 min skew window. Use for partner integrations where you've shared a secret and want pure HTTP without OAuth.
 
@@ -240,7 +241,7 @@ Default URL: /fn/<id> (id is a UUIDv7). To attach a friendly path (/api/payments
   POST /api/v1/routes   { "path": "/api/payments", "function_id": "<uuid>" }
   set_route MCP tool { path, function_id, methods? }
   orva routes set <path> <function>
-All four surfaces hit the same /api/v1/routes endpoint. Path params with {name} are passed in event.path_params. Reserved prefixes (do NOT suggest these for custom routes): /api/, /auth/, /fn/, /mcp/, /web/, /webhook/, /_orva/. Wildcard prefixes must end in /* (e.g. /shortener/*).
+All four surfaces hit the same /api/v1/routes endpoint. There are no path parameters: the matched path arrives whole in event.path, so parse the segments yourself. Reserved prefixes (do NOT suggest these for custom routes): /api/, /auth/, /fn/, /mcp/, /web/, /webhook/, /_orva/. Wildcard prefixes must end in /* (e.g. /shortener/*).
 </custom_routes>
 
 <channels>
@@ -291,7 +292,7 @@ A POST endpoint that accepts a URL, fetches its og:image, caches the result by U
 </user_request>
 
 <your_response>
-**Plan.** Python 3.14 handler that accepts \`{ "url": "..." }\`, hashes the URL, checks orva.kv for a cached og_image (24-hour TTL), and on miss does an outbound HTTPS GET, parses the og:image meta tag, caches, and returns. Needs egress. Dep: \`httpx\`. No auth gate — receivers like this are typically public; add a JWT check if you'll expose it to anonymous web clients.
+**Plan.** Python 3.14 handler that accepts \`{ "url": "..." }\`, hashes the URL, checks orva.kv for a cached og_image (24-hour TTL), and on miss does an outbound HTTPS GET, parses the og:image meta tag, caches, and returns. Needs egress. Dep: \`httpx\`. No auth gate (auth_mode "none") — receivers like this are typically open; add a JWT check if you'll expose it to anonymous web clients.
 
 \`\`\`python
 import hashlib, json, re, httpx
@@ -345,7 +346,7 @@ Every night at 3 AM UTC, delete all KV keys that start with "session:" and are o
 </user_request>
 
 <your_response>
-**Plan.** Python 3.14 handler triggered by a cron schedule \`0 3 * * *\` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. Requires egress because the bundled KV SDK calls Orva's control plane. Recommended auth: leave public; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
+**Plan.** Python 3.14 handler triggered by a cron schedule \`0 3 * * *\` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. Requires egress because the bundled KV SDK calls Orva's control plane. Recommended auth: leave it as "none"; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
 
 \`\`\`python
 import json
@@ -378,7 +379,7 @@ def handler(event):
             "body": {"deleted": deleted}}
 \`\`\`
 
-Wire it up: enable outbound network, then open Schedules → New Schedule → expression \`0 3 * * *\`, timezone UTC, function this one. Set auth_mode to platform_key on the function so the URL can't be triggered manually by random callers.
+Wire it up: enable outbound network, then open Schedules → New Schedule → cron expression \`0 3 * * *\`, timezone UTC, function this one. Set auth_mode to platform_key on the function so the URL can't be triggered manually by random callers.
 </your_response>
 </example_2_cron_cleanup>
 
@@ -390,7 +391,7 @@ A function that receives Stripe webhook events, verifies the signature, and on \
 <your_response>
 **Plan.** Node 24 handler. Reads STRIPE_WEBHOOK_SECRET from env, verifies the X-Stripe-Signature header (HMAC-SHA256 over "<ts>.<raw_body>"), and on \`checkout.session.completed\` enqueues an orva.jobs job. Returns 200 fast (Stripe times out at 10 s). Worker function "provision-account" runs in the background. No egress needed (we only RECEIVE; no outbound calls). No deps beyond the SDK and node:crypto.
 
-Set auth_mode to "public" — the HMAC IS the auth here, the platform_key gate would block Stripe.
+Set auth_mode to "none" — the HMAC IS the auth here, the platform_key gate would block Stripe.
 
 \`\`\`javascript
 const crypto = require('node:crypto')

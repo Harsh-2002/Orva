@@ -3,12 +3,21 @@
 What to do when something goes wrong. Each section: symptom →
 diagnosis → fix.
 
+> **On `sqlite3`.** The runtime image does not ship it, so
+> `docker exec orva sqlite3 …` fails with `sqlite3: not found`. Run the SQL
+> below from the host against the database inside the volume — for a Compose
+> install that is
+> `docker volume inspect orva-data` to find the mountpoint — or install
+> `sqlite3` in the container yourself for a one-off. Stop orvad first for
+> anything that writes: it holds the database open in WAL mode.
+
 ## Quick health check
 
 ```bash
 # Is orvad responding?
 curl -fsS http://localhost:8443/api/v1/system/health
-# {"status":"ok"}
+# {"status":"healthy", "version": …, "database": …, "sandbox": …}
+# 503 + {"status":"degraded"} if the database ping fails
 
 # What does it think the world looks like?
 KEY=$(docker exec orva cat /var/lib/orva/.admin-key)
@@ -49,7 +58,9 @@ Full catalog in [ERRORS.md](ERRORS.md). The ones operators see most:
 
 ```bash
 docker stats orva --no-stream
-docker exec orva ps -ef | wc -l   # nsjail process count
+pgrep -c nsjail   # from the HOST: the container runs with pid: host,
+                  # so `docker exec orva ps -ef` lists every process on the
+                  # box, not just Orva's
 ```
 
 If total workers (`idle + busy + spawning`) exceeds `effective_max`, capture
@@ -177,7 +188,7 @@ If the `<hash>` you're trying to roll back to isn't there, it's gone.
 **Prevent.** Raise `system_config.versions_to_keep`:
 
 ```sql
-docker exec orva sqlite3 /var/lib/orva/orva.db \
+sqlite3 /var/lib/orva/orva.db \
   "UPDATE system_config SET value='10' WHERE key='versions_to_keep'"
 ```
 
@@ -198,11 +209,12 @@ The version archive is the usual culprit — Python deps are heavy.
 
 ```bash
 # Lower retention
-docker exec orva sqlite3 /var/lib/orva/orva.db \
+sqlite3 /var/lib/orva/orva.db \
   "UPDATE system_config SET value='3' WHERE key='versions_to_keep'"
 
-# Force a GC pass (bounce orvad — GC runs at startup)
-docker restart orva
+# The GC runs on a ticker (gc_interval_seconds, default 300) and does NOT run
+# at startup, so restarting does not force a pass — it delays the next one by
+# a full interval. Lower the interval and wait, or just wait.
 ```
 
 Or move the data dir to a bigger volume.
@@ -230,18 +242,22 @@ devtools → Application → localStorage → delete `orva.hasUser`.
 docker exec orva cat /var/lib/orva/.admin-key
 ```
 
-Still there if the volume is intact (mode 0600). If genuinely lost
-(file deleted, no backup):
+Still there if the volume is intact (mode 0600) — the keyfile is the only
+persisted plaintext copy, and Orva re-inserts its database row from it on boot
+if the row ever goes missing.
 
-```sql
--- inspect users
-docker exec orva sqlite3 /var/lib/orva/orva.db "SELECT id, username FROM users"
+**If the keyfile is genuinely gone**, the plaintext is unrecoverable: the
+database stores only its SHA-256. Sign in to the dashboard with your operator
+account and mint a fresh key from Settings → API Keys (or
+`POST /api/v1/keys`). Deleting the keyfile alone does **not** make Orva
+generate a new one — it regenerates only when the database has no keys at all.
 
--- reset admin user's password (you need to know SHA-256 hashing)
--- easier path: nuke users + sessions, re-onboard:
-docker exec orva sqlite3 /var/lib/orva/orva.db "DELETE FROM users; DELETE FROM sessions"
-# refresh dashboard → routes to /onboarding
-```
+> **Do not delete the `users` and `sessions` rows to force re-onboarding.** An
+> older version of this page suggested it; it destroys your accounts and does
+> not recover anything. `POST /api/v1/auth/onboard` refuses with `401` once the
+> instance shows any sign of use (operator-minted keys or deployed functions),
+> so you end up with no user, no session, and no way back in short of restoring
+> a backup.
 
 ## Upgrading from an nftables-based build
 
@@ -251,7 +267,8 @@ migration step, no service reconfiguration, and no leftover state on a normal
 upgrade.
 
 The one exception applies to the **currently published release**, not to some
-older pre-release: `v2026.08.05` is the last nftables-based build, and on
+older build: `v2026.08.05` was the last nftables-based one. Its release and
+tag have since been pruned, so it is no longer installable, and on
 bare-metal systemd it created `table inet orva_firewall` while running. A clean
 `systemctl stop` (which the installer performs on upgrade) removes it. If that
 daemon was instead SIGKILLed, OOM-killed, or lost to a hard reboot, the table
@@ -373,11 +390,11 @@ systemctl cat orva | grep RestartForceExitStatus
 docker logs orva --tail 200 -f
 
 # function stderr
-docker exec orva sqlite3 /var/lib/orva/orva.db \
+sqlite3 /var/lib/orva/orva.db \
   "SELECT execution_id, stderr FROM execution_logs ORDER BY rowid DESC LIMIT 5"
 
 # build logs
-docker exec orva sqlite3 /var/lib/orva/orva.db \
+sqlite3 /var/lib/orva/orva.db \
   "SELECT seq, stream, line FROM build_logs WHERE deployment_id='019df210-1234-7000-8000-deadbeef0001' ORDER BY seq"
 ```
 

@@ -117,8 +117,8 @@ sandbox: `/fn/{id}`, custom routes, and inbound webhooks.
 | `Proxy-Authorization` | **no** — dropped |
 | `Cookie` | yes, **minus `session_token`**; your own cookies survive |
 | `Authorization` | yes, **unless** it carries an `orva_`-prefixed credential |
-| any `X-Orva-*` header | **no** — the whole namespace is dropped |
-| everything else | yes, including `X-Orva-Timestamp` / `X-Orva-Signature` |
+| any `X-Orva-*` header | **no** — the whole namespace is dropped, including `X-Orva-Timestamp` and `X-Orva-Signature`. The server sets the ones a handler needs (`x-orva-trigger`, `x-orva-execution-id`, …) itself, afterwards, so a caller cannot forge one |
+| everything else | yes |
 
 `session_token` is the dashboard session: `Path=/`, full control-plane
 authority, and accepted as invoke auth. The dashboard's own Test/Invoke button
@@ -300,8 +300,12 @@ Configured at `internal/sandbox/sandbox.go:154-160`:
   which prevents persistent compromise of the deployment artifact.
 - `/tmp` is a fresh tmpfs per spawn — wiped when the worker exits or is
   reaped. Functions can write here freely; nothing escapes.
-- No other host paths are visible. The procfs, sysfs, and cgroup
-  filesystems are masked by the chroot.
+- No other host paths are visible. sysfs and the host cgroup tree are absent
+  from the chroot. `/proc` is **not** absent: nsjail mounts a fresh, read-only
+  procfs scoped to the sandbox's own PID namespace, so a handler can read
+  `/proc/self/*` and see its own processes — and nothing outside them. That is
+  deliberate; language runtimes need it. Anything a handler learns there is
+  about itself, not about the host.
 
 ## Capability dropping
 

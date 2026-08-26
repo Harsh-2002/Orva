@@ -27,8 +27,13 @@ HTTP-shaped response. The adapter handles serialization and headers.
 ### Handler — Python
 
 ```python
+import json
+
+
 def handler(event):
-    body = event.get("body") or {}
+    # event["body"] is the raw request body, as a string. Always parse it.
+    raw = event.get("body") or ""
+    body = json.loads(raw) if raw else {}
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "application/json"},
@@ -40,7 +45,8 @@ def handler(event):
 
 ```js
 exports.handler = async (event) => {
-  const body = event.body || {};
+  // event.body is the raw request body, as a string. Always parse it.
+  const body = event.body ? JSON.parse(event.body) : {};
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -49,7 +55,11 @@ exports.handler = async (event) => {
 };
 ```
 
-**Event shape:** `method`, `path`, `headers`, `query`, `body`.
+**Event shape:** `method`, `path`, `headers`, `body` — plus `query` on Node
+only (its adapter parses it out of `path`; Python handlers split
+`event["path"]` themselves). **`body` is always the raw request body as a
+string** — the platform never parses it, whatever the `Content-Type`, so
+`json.loads` / `JSON.parse` it yourself and guard the empty case.
 
 **Response:** `{ statusCode, headers, body }`. Non-string bodies are
 JSON-encoded by the adapter.
@@ -296,12 +306,12 @@ def handler(event):
     # Fire-and-forget. Returns the job id immediately; the function
     # body runs later via the scheduler. max_attempts retries with
     # exponential backoff on 5xx / exception.
-    job_id = jobs.enqueue(
+    019df210-7b00-7e00-9c00-aab1cd2e3f43 = jobs.enqueue(
         "send-welcome-email",
         {"to": event["body"]["email"]},
         max_attempts=3,
     )
-    return {"statusCode": 202, "body": job_id}
+    return {"statusCode": 202, "body": 019df210-7b00-7e00-9c00-aab1cd2e3f43}
 ```
 
 ### Jobs — Node.js
@@ -531,7 +541,7 @@ curl -X POST {{ORIGIN}}/api/v1/functions/<function_id>/cron \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{
-    "cron_expr": "0 9 * * *",
+    "019df210-7b00-7e00-9c00-aab1cd2e3f44": "0 9 * * *",
     "enabled":   true,
     "payload":   {"task": "daily-summary"}
   }'
@@ -539,20 +549,20 @@ curl -X POST {{ORIGIN}}/api/v1/functions/<function_id>/cron \
 
 ### Cron — Toggle / edit
 
-> PUT accepts any subset of {cron_expr, enabled, payload}; omitted fields keep their previous value. next_run_at is recomputed on expr changes.
+> PUT accepts any subset of {019df210-7b00-7e00-9c00-aab1cd2e3f44, enabled, payload}; omitted fields keep their previous value. next_run_at is recomputed on expr changes.
 
 ```bash
 # pause
-curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<cron_id> \
+curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e00-9c00-aab1cd2e3f44> \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{"enabled": false}'
 
 # change schedule
-curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<cron_id> \
+curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e00-9c00-aab1cd2e3f44> \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
-  -d '{"cron_expr": "*/15 * * * *"}'
+  -d '{"019df210-7b00-7e00-9c00-aab1cd2e3f44": "*/15 * * * *"}'
 ```
 
 ### Cron — List & delete
@@ -565,7 +575,7 @@ curl {{ORIGIN}}/api/v1/cron \
   -H 'X-Orva-API-Key: <YOUR_KEY>'
 
 # delete one
-curl -X DELETE {{ORIGIN}}/api/v1/functions/<function_id>/cron/<cron_id> \
+curl -X DELETE {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e00-9c00-aab1cd2e3f44> \
   -H 'X-Orva-API-Key: <YOUR_KEY>'
 ```
 
@@ -1104,19 +1114,19 @@ Event:
   event.method  → "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | …
   event.path    → "/path?query=string"
   event.headers → { "header-name": "value", ... }   (lowercase keys, comma-joined dups)
-  event.query   → { "key": "value", ... }           (parsed from ?…; repeats become arrays)
-  event.body    → string OR parsed JSON value, depending on Content-Type:
-                    - application/json            → parsed dict / array
-                    - application/x-www-form-urlencoded → parsed dict
-                    - multipart/form-data         → { fields: {...}, files: [{name, filename, contentType, data: <bytes>}] }
-                    - everything else             → raw string (or bytes for binary)
+  event.query   → { "key": "value", ... }   NODE ONLY — parsed from ?…, last value wins on repeats.
+                  Python handlers get no query key; split event["path"] on "?" yourself.
+  event.body    → ALWAYS the raw request body, as a string, whatever the Content-Type.
+                  The platform NEVER parses it. Call JSON.parse(event.body) /
+                  json.loads(event["body"]) yourself and guard the empty-body case.
+                  There is no form-urlencoded or multipart parsing.
 
 Return:
   { "statusCode": 200,
     "headers":    { "Content-Type": "application/json", ... },
     "body":       <string OR any JSON-serialisable value> }
 
-Non-string bodies are JSON-encoded by the adapter. To return binary (image, PDF), set Content-Type to the right MIME and return base64 in body with header { "x-orva-base64": "1" }.
+Non-string bodies are JSON-encoded by the adapter. There is no base64 response flag: to return binary, set the right Content-Type and return the bytes as the body.
 
 Other accepted handler styles (use the default unless the user asks):
 - AWS Lambda:        handler(event, context)
@@ -1203,23 +1213,24 @@ Uses the scoped internal SDK endpoint and dispatches through the warm pool; the 
     }
 
 ## orva.jobs — durable background queue with retries
-Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff (1m, 2m, 4m, 8m, …) up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
+Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff in SECONDS (attempt 1 → 2s, 2 → 4s, 3 → 8s, …), capped at 1h, up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
 
   Python:
     from orva import jobs
-    job_id = jobs.enqueue(
+    019df210-7b00-7e00-9c00-aab1cd2e3f43 = jobs.enqueue(
         "send-welcome-email",
         {"to": "user@x.com", "tpl": "welcome"},
-        delay_seconds=10,    # optional, default 0
-        max_attempts=3,      # optional, default 3
+        max_attempts=3,                          # optional, default 3
+        scheduled_at="2026-01-01T03:00:00Z",     # optional RFC3339; omit to run now
     )
+    # returns {"id": ..., "replayed": bool}
 
   Node:
     const { jobs } = require('orva')
     const jobId = await jobs.enqueue(
       'send-welcome-email',
       { to: 'user@x.com', tpl: 'welcome' },
-      { delaySeconds: 10, maxAttempts: 3 }
+      { maxAttempts: 3, scheduledAt: '2026-01-01T03:00:00Z' }   // returns { id, replayed }
     )
 
 The worker function receives the payload as event.body (parsed dict). Job-fired invocations arrive with header x-orva-trigger: "job" and x-orva-job-id: "job_..." — branch on those when the same function handles both HTTP and queue work.
@@ -1229,7 +1240,7 @@ Idempotency rule: jobs CAN run more than once on retry. Make worker handlers ide
 
 <schedules>
 Wire any function to a cron expression from the Schedules page or:
-  POST /api/v1/functions/<name>/cron   { "expression": "*/5 * * * *", "timezone": "UTC", "enabled": true }
+  POST /api/v1/functions/<id>/cron   { "019df210-7b00-7e00-9c00-aab1cd2e3f44": "*/5 * * * *", "timezone": "UTC", "enabled": true }
 
 Standard 5-field cron with shorthands: @hourly, @daily, @weekly, @monthly, @yearly. Plus the usual */N, ranges (1-5), and lists (1,15,30). Timezone defaults to the orvad process timezone; pass an IANA name to override per schedule.
 
@@ -1263,8 +1274,8 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 
 <sandbox_limits>
 - Defaults (configurable per function): 64 MB memory, 0.5 CPU, 30 s timeout, 6 MB max payload, max 10 MB total response. The supplied Compose file overrides new-function memory to 128 MB.
-- Filesystem: read-only EXCEPT /code (your code) and /tmp (writable, ephemeral, cleared between cold starts).
-- NO subprocess execution (subprocess / child_process disabled). NO raw sockets. NO listening ports — the platform owns the HTTP server.
+- Filesystem: read-only, INCLUDING /code (your own code is mounted read-only). /tmp is the only writable path — ephemeral, cleared between cold starts.
+- NO raw sockets. NO listening ports — the platform owns the HTTP server. Subprocesses are permitted by the default seccomp policy, but the sandbox ships no shell and no package manager, so treat them as unavailable.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
 - orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — the editor's deploy step will warn you when the import meets `none`.
 - When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
@@ -1273,7 +1284,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 
 <auth_modes>
 Configure auth_mode on the function record (editor Settings modal or PUT /api/v1/functions/<name>):
-- "public" (default) — anyone with the URL can invoke. If the function needs user auth, verify a JWT IN the handler.
+- "none" (default) — anyone with the URL can invoke. If the function needs user auth, verify a JWT IN the handler. (The accepted values are "none", "platform_key" and "signed"; there is no "public".)
 - "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. The key must carry the "invoke" permission; a key scoped to read/write only gets 403. Keys minted from the CLI, the bootstrap flow and OAuth carry it; the dashboard's key form now has a permission selector (default invoke+read), so a dashboard key can be minted without it. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API Keys page.
 - "signed" — caller signs the request with HMAC-SHA256 over "<unix-timestamp>.<raw_body>" using ORVA_SIGNING_SECRET (a function secret). Headers: X-Orva-Timestamp, X-Orva-Signature: sha256=<hex>. ±5 min skew window. Use for partner integrations where you've shared a secret and want pure HTTP without OAuth.
 
@@ -1309,7 +1320,7 @@ Pattern:
 <custom_routes>
 Default URL: /fn/<id> (the function id is a UUIDv7). To attach a friendly path (/api/payments, /webhooks/stripe, /v1/users/{id}), the operator configures a route via the dashboard or:
   POST /api/v1/routes   { "path": "/api/payments", "function_id": "<uuid>" }
-Path params with {name} are passed in event.path_params. Reserved prefixes (do NOT suggest these for custom routes): /api/, /auth/, /fn/, /mcp/, /web/, /webhook/, /_orva/.
+There are no path parameters: the matched path arrives whole in event.path, so parse the segments yourself. Reserved prefixes (do NOT suggest these for custom routes): /api/, /auth/, /fn/, /mcp/, /web/, /webhook/, /_orva/.
 </custom_routes>
 
 <production_patterns>
@@ -1651,7 +1662,7 @@ a unified-diff in the terminal.
   "error": {
     "code": "VALIDATION",
     "message": "name must be lowercase and dash-separated",
-    "request_id": "req_abc123"
+    "request_id": "019df210-7b00-7e00-9c00-aab1cd2e3f42"
   }
 }
 ```
@@ -1745,7 +1756,7 @@ orva invoke resize-image --body '{"url":"https://example.com/cat.jpg"}'
 orva logs resize-image
 
 # Single execution, with stdout/stderr:
-orva logs resize-image --exec-id exec_abc123
+orva logs resize-image --exec-id 019df210-7b00-7e00-9c00-aab1cd2e3f41
 
 # Live tail — SSE stream, Ctrl-C to stop:
 orva logs resize-image --follow
@@ -1775,14 +1786,14 @@ orva secrets delete resize-image S3_BUCKET
 # Cron — fire a function on a schedule:
 orva cron create --fn daily-report --expr '0 9 * * *' --tz Asia/Kolkata
 orva cron list
-orva cron update <cron_id> --enabled false   # pause
-orva cron delete <cron_id>
+orva cron update <019df210-7b00-7e00-9c00-aab1cd2e3f44> --enabled false   # pause
+orva cron delete <019df210-7b00-7e00-9c00-aab1cd2e3f44>
 
 # Jobs — fire-and-forget background queue:
 orva jobs enqueue --fn send-email --data '{"to":"a@b.c"}'
 orva jobs list --status pending
-orva jobs retry  <job_id>
-orva jobs delete <job_id>
+orva jobs retry  <019df210-7b00-7e00-9c00-aab1cd2e3f43>
+orva jobs delete <019df210-7b00-7e00-9c00-aab1cd2e3f43>
 
 # Outbound webhooks (system events):
 orva webhooks create --name slack-alerts --url https://hooks.slack.com/... --events deployment.failed,job.failed

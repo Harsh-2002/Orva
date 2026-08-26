@@ -26,7 +26,10 @@ Requires:
 
 - **Go 1.26+** (the embedded AI gateway requires it)
 - **Node 24+**
-- **nsjail** on PATH — build it from source (clone google/nsjail and run
+- **nsjail** at exactly `/usr/local/bin/nsjail` — the path is hardcoded
+  (`config/defaults.go`, pinned by `config_test.go`) and `PATH` is never
+  consulted, so installing it elsewhere does not work. Build it from source
+  (clone google/nsjail and run
   `make`; needs `libprotobuf-dev`, `libnl-route-3-dev`, `bison`, `flex`),
   or let `scripts/install.sh` fetch the prebuilt release binary. The Docker
   image already ships it at `/usr/local/bin/nsjail`.
@@ -48,7 +51,7 @@ backend/
   cmd/orva/         CLI entry (cobra). `orva serve` is the daemon.
   internal/
     builder/        deploy pipeline: extract + install deps + atomic publish
-    config/         YAML + env config loader
+    config/         environment-variable config loader (no config file)
     database/       SQLite migrations + per-resource queries
     metrics/        in-memory ring buffer + percentile computation
     pool/           per-fn warm worker pool + Knative-KPA autoscaler

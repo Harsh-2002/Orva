@@ -1,6 +1,14 @@
 services:
   orva:
-    image: ${ORVA_IMAGE:-orva:local}
+    image: ${ORVA_IMAGE:-ghcr.io/harsh-2002/orva:latest}
+    # Pull rather than build. This file is meant to be downloadable on its own --
+    # the README tells operators to curl it into an empty directory -- and with a
+    # build section present Compose would otherwise try to build from a context
+    # that has no Dockerfile in it and fail before Orva ever started.
+    #
+    # Building from a checkout is still one flag: `docker compose build` uses the
+    # section below, or set ORVA_IMAGE=orva:local to run what you built.
+    pull_policy: always
     # Default runtime is runc (the pid/cgroup host settings below make nsjail work on it).
     # Uncomment for hypervisor-class isolation via Kata + Cloud Hypervisor (see docs/KATA.md);
     # on Kata the guest kernel provides cgroup/pid delegation, so it does not need pid/cgroup: host.

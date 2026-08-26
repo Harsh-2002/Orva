@@ -413,8 +413,10 @@ Per-runtime adapter scripts. The adapter is the entrypoint nsjail
 exec's into; it reads request frames from stdin, calls the user's
 exported handler, and writes response frames back.
 
-- `node/adapter.js` — also used for node
-- `python/adapter.py` — also used for python
+- `node/adapter.js` — Node.js 24. Also serves TypeScript, which `tsc`
+  compiles to JavaScript at build time, so there is no separate TS adapter.
+- `python/adapter.py` — Python 3.14. Also speaks WSGI and ASGI, so Flask and
+  FastAPI apps run unmodified.
 
 ### `frontend/`
 
@@ -451,7 +453,8 @@ Goroutines do almost everything. Critical concurrency primitives:
 - **Async writer**: single goroutine drains a `chan writeJob` and
   batches DB inserts. Replaces the old goroutine-per-call pattern that
   burned CPU at sustained 500+ req/s.
-- **Autoscaler**: one goroutine per `Manager`, ticks every second,
+- **Autoscaler**: one goroutine per `Manager`, ticks every 2s (`scalerTick`)
+  and can be woken early,
   evaluates each function's pool against its EWMA stable + panic
   windows.
 - **Reaper**: one goroutine per pool, sweeps dead and max-use workers. Idle expiry is a controller decision, not the reaper's — and `idle_ttl_seconds` applies only when `scale_to_zero` is enabled.
