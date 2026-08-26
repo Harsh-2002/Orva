@@ -15,6 +15,22 @@ before it.
 
 ## Unreleased
 
+Nothing yet.
+
+## v2026.08.26
+
+**This tag was published twice on the same day.** The first build carried the
+security fix and the documentation correction below; the second added the day
+theme. Both report `v2026.08.26`, so the version string does not tell them
+apart: check Settings -> Build info, or `commit` in
+`GET /api/v1/system/health`. **`465a17b` is the first build.** Re-run the
+installer, or pull `ghcr.io/harsh-2002/orva:latest` again, to move to the
+current one.
+
+A security fix, a documentation correction large enough to matter on its own,
+and the dashboard's second theme. Nothing here asks anything of an operator: no
+migration, no configuration change, no re-issued credentials.
+
 ### Added
 
 - **The dashboard has a day theme, and the theme is now your choice.** It
@@ -37,19 +53,11 @@ before it.
   8.49:1 at night, 5.79:1 by day. This one was real before the day theme
   existed, on every Orva ever shipped.
 
-A known deviation that is **not** fixed and is not new: form-control borders are
-1.70:1 against the night canvas and 1.89:1 against the day one, both under WCAG
-1.4.11's 3:1 floor for a component boundary. Raising that token redraws the grid
-of the whole interface, so it is a design decision to take deliberately rather
-than a contrast patch to slip into a release.
-
-## v2026.08.26
-
-One security fix, and a documentation correction large enough to matter on its
-own. Nothing here asks anything of an operator: no migration, no configuration
-change, no re-issued credentials.
-
-### Fixed
+  Not fixed, and not new: form-control borders are 1.70:1 against the night
+  canvas and 1.89:1 against the day one, both under WCAG 1.4.11's 3:1 floor for
+  a component boundary. Raising that token redraws the grid of the whole
+  interface, so it is a design decision to take deliberately rather than a
+  contrast patch to slip into a release.
 
 - **Redeploying a function now invalidates a leaked SDK credential.** The
   `ORVA_INTERNAL_TOKEN` your function's code holds was derived from the
@@ -104,6 +112,18 @@ arm64, the server and CLI installers, native systemd, docker smoke, CodeQL):
 - **The reaper path was exercised locally** against a real spawned-and-killed
   worker, rather than relying on the sandbox E2E alone.
 - **`go test -race`** on `sdkauth`, `pool`, `sandbox` and `server`.
+- **The theme was measured in a real browser, on the embedded binary rather
+  than the dev server** (Vite serves source; the binary serves a Rollup bundle
+  with different CSS ordering, and cascade order is what a second `:root` block
+  depends on). 2440 checks across 19 routes x 7 viewports x both themes on a
+  populated instance, 1290 more against a near-empty one so empty states are
+  covered, and every placeholder and focus indicator measured separately. Zero
+  failures.
+- **The two contrast regressions the day theme would have introduced were both
+  caught before release** and are therefore absent from Fixed above: no
+  operator ever saw them. The browser suite could not see one of them either,
+  until its contrast probe was taught to read the `oklab()` that Tailwind v4
+  compiles every alpha into.
 
 Not run: `test/atscale.sh` and the migration rehearsal. Neither is implicated —
 no pool sizing, scheduler or migration behaviour changed — but CONTRACT §6 lists
