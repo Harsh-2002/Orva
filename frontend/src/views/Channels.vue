@@ -5,7 +5,7 @@
          carries the full description including the trust boundary,
          so the page reads as one coherent intro instead of a header
          followed by a separate alert banner. -->
-    <div class="flex items-center justify-between gap-4">
+    <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Channels

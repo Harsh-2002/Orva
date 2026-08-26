@@ -17,10 +17,15 @@
 
     <!-- Status filter strip.
          Mobile (<sm): chips scroll horizontally inside the strip with
-         scroll-snap so the active filter doesn't get lost; actions
-         (Enqueue, Refresh) anchor to the right and don't scroll.
-         Desktop (sm+): the chip container flex-wraps as before. -->
-    <div class="flex items-center gap-2">
+         scroll-snap so the active filter doesn't get lost.
+
+         The actions used to sit in this same row, pinned with shrink-0. On a
+         360px phone that pair took ~180px of a ~330px content box, so the
+         filter strip was left a ~150px window onto ~430px of chips and the
+         next chip was sliced by the Enqueue button beside it. It read as a
+         rendering bug rather than a scroller. Below sm the actions take their
+         own row and the strip gets the full width; sm+ is unchanged. -->
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0 flex-1">
         <Button
           v-for="opt in statusOptions"

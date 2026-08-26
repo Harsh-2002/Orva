@@ -70,7 +70,7 @@
         :key="item.path"
         :to="item.path"
         :class="[
-          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
           isActive(item.path)
             ? 'text-foreground-strong bg-primary/15'
             : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
@@ -92,7 +92,7 @@
       >
         <button
           type="button"
-          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium touch-expand-sm text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium touch-expand-row text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
           :class="groupIsActive(group) ? 'text-foreground-strong' : ''"
           :aria-expanded="expandedGroups[group.id]"
           :aria-controls="`nav-group-${group.id}`"
@@ -118,7 +118,7 @@
             :key="item.path"
             :to="item.path"
             :class="[
-              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
               isActive(item.path)
                 ? 'text-foreground-strong bg-primary/15'
                 : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
@@ -140,7 +140,7 @@
           :key="item.path"
           :to="item.path"
           :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+            'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
             isActive(item.path)
               ? 'text-foreground-strong bg-primary/15'
               : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'

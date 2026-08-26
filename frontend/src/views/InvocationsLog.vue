@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Invocations
@@ -189,14 +189,19 @@
         <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
           <tr>
             <th class="px-6 py-3 w-8">
-              <input
-                ref="selectAllRef"
-                type="checkbox"
-                :checked="allChecked"
-                aria-label="Select all invocations"
-                class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                @change="toggleAll"
-              >
+              <!-- The label is the touch target. A checkbox is a replaced
+                   element: it renders no ::after, so the bounded hit
+                   extension the other tiers use cannot reach it. -->
+              <label class="touch-expand-iconbtn inline-flex items-center justify-center">
+                <input
+                  ref="selectAllRef"
+                  type="checkbox"
+                  :checked="allChecked"
+                  aria-label="Select all invocations"
+                  class="w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  @change="toggleAll"
+                >
+              </label>
             </th>
             <th class="px-6 py-3 font-medium">
               Time
@@ -236,13 +241,18 @@
               class="px-6 py-4 align-middle"
               @click.stop
             >
-              <input
-                :checked="selected.has(log.id)"
-                type="checkbox"
-                aria-label="Select invocation"
-                class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                @change="toggleOne(log.id)"
-              >
+              <!-- The label is the touch target. A checkbox is a replaced
+                   element: it renders no ::after, so the bounded hit
+                   extension the other tiers use cannot reach it. -->
+              <label class="touch-expand-iconbtn inline-flex items-center justify-center">
+                <input
+                  :checked="selected.has(log.id)"
+                  type="checkbox"
+                  aria-label="Select invocation"
+                  class="w-3.5 h-3.5 rounded border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  @change="toggleOne(log.id)"
+                >
+              </label>
             </td>
             <td class="px-6 py-4 text-foreground">
               <!-- Row clicks stay on the <tr> for the mouse, but the drawer

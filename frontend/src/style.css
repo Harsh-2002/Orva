@@ -432,11 +432,31 @@ select::-ms-expand {
 /* ============================================================
    Touch-target hit-area expansion for sub-44px controls
    ------------------------------------------------------------
-   Compact controls stay visually dense for mouse/trackpad users. On coarse
-   pointers they grow to a real 44 px box. The previous implementation used
-   invisible ::before elements outside each control; those hit regions
-   overlapped adjacent rows and made the later row capture clicks intended for
-   the visible control above it.
+   PRODUCT.md promises a 44x44 *effective* area on mobile. There are three
+   ways to pay for it and two of them have already failed here.
+
+   The first attempt put an invisible ::before well outside each control. Those
+   regions overlapped the neighbouring row and the later row captured taps
+   meant for the control above it.
+
+   The second -- the one this replaces -- set `min-height: 44px; min-width:
+   44px` on all four tiers. That is not a hit area, it is box height, so on any
+   touch device every tier collapsed into the same slab: measured on a 360px
+   phone, 439 of 602 visible controls were exactly 44px tall. A chip carrying
+   11.4px text and a primary button carrying 13.3px text became the same
+   object, and the control scale the design system describes simply did not
+   exist on a phone. Worse, `min-height` does not re-centre content, so any
+   tier applied to a non-flex element left its text pinned to the top: the
+   function links on Overview sat 13px above centre inside a 44px box.
+
+   This is the third. Each tier gets a real mobile height in proportion to its
+   type, and the remaining distance to 44px is bought as a BOUNDED extension:
+   at most 6px per edge, which cannot reach across the 8px gap the toolbars
+   use. That is the whole difference from attempt one -- it is not "no
+   overlap by luck", it is "no overlap by arithmetic".
+
+   Vertical only for the text tiers. They are already far wider than 44px, and
+   extending them sideways is what turned a two-word filter chip into a slab.
    ============================================================ */
 .touch-expand-xs,
 .touch-expand-sm,
@@ -446,17 +466,36 @@ select::-ms-expand {
 }
 
 @media (pointer: coarse) {
-  .touch-expand-xs,
-  .touch-expand-sm,
-  .touch-expand-md,
-  .touch-expand-iconbtn {
-    min-height: 44px;
-    /* Width too, not just height. A Button whose slot holds only an icon came
-       out 35px wide while measuring a compliant 44px tall, because the height
-       floor was the only one set. A button carrying text is already wider than
-       44px, so this floor only ever bites on the icon-only case. */
-    min-width: 44px;
+  .touch-expand-xs      { min-height: 32px; min-width: 44px; }
+  .touch-expand-sm      { min-height: 36px; min-width: 44px; }
+  .touch-expand-md      { min-height: 40px; min-width: 44px; }
+  .touch-expand-iconbtn { min-height: 40px; min-width: 40px; }
+
+  /* Stacked rows have nothing to borrow. A full-width nav item sits flush
+     against the next one, so an outward extension does not find empty space,
+     it finds its neighbour -- which is how the first implementation ended up
+     letting the row below capture taps meant for the row above. Measured on
+     the sidebar: a 38px row extended 4px each way overlapped its neighbour by
+     4px, 97 times across the route set. A row in a list takes its target as
+     real height instead, which costs nothing visually because a full-width
+     row is not a chip and does not read as a slab. */
+  .touch-expand-row { min-height: 44px; }
+
+  .touch-expand-xs::after,
+  .touch-expand-sm::after,
+  .touch-expand-md::after,
+  .touch-expand-iconbtn::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
   }
+
+  /* box + 2 x inset = 44 in every tier. */
+  .touch-expand-xs::after      { top: -6px; bottom: -6px; }
+  .touch-expand-sm::after      { top: -4px; bottom: -4px; }
+  .touch-expand-md::after      { top: -2px; bottom: -2px; }
+  .touch-expand-iconbtn::after { top: -2px; bottom: -2px; left: -2px; right: -2px; }
 }
 
 /* ============================================================
@@ -472,15 +511,34 @@ select::-ms-expand {
    focus, which is when the zoom would otherwise fire.
    ============================================================ */
 @media (pointer: coarse) {
-  input,
+  input:not([type='checkbox']):not([type='radio']),
   select,
   textarea {
     font-size: 16px;
-    /* The same 44px floor the touch-expand-* helpers give buttons. Form
-       controls were sized by padding alone and landed at 30-41px, so a field
-       was a smaller target than the button next to it. Height only: width is
-       set by the layout and a text field is already wide. */
+    /* A text field was sized by padding alone and landed at 30-41px, making it
+       a smaller target than the button beside it. Height only: width is set by
+       the layout and a text field is already wide. */
     min-height: 44px;
+  }
+
+  /* Checkboxes and radios are the exception this rule never had. They are
+     square by nature, so a height floor with no width floor deformed them:
+     the four permission boxes on API Keys rendered 13px wide by 44px tall,
+     a sliver in a column, with the tick floating against a two-line label.
+     Give them a real square and buy the target the same bounded way the
+     buttons do -- via the wrapping label, since a replaced element has no
+     pseudo-elements of its own. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    /* min-* both ways: a height floor alone deformed these into 13x44px
+       slivers, and leaving min-width in place from .touch-expand-iconbtn left
+       them 40x20. A replaced element renders no ::after either, so the bounded
+       hit extension cannot reach one -- the target has to come from a wrapping
+       label, which is the convention test/browser/ already measures. */
+    min-width: 0;
+    min-height: 0;
+    width: 20px;
+    height: 20px;
   }
 }
 

@@ -11,7 +11,7 @@
             Control outbound destinations and DNS for function sandboxes.
           </p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <!--
             "Refresh policy", not "Apply now". Adding, editing, toggling or
             deleting a rule already compiles and publishes a new generation on

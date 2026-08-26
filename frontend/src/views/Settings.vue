@@ -135,7 +135,7 @@
          a "Compact" affordance that runs SQLite VACUUM via the
          admin-gated POST /api/v1/system/vacuum endpoint. -->
     <section class="space-y-4 border-b border-border pb-8">
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <HardDrive class="w-4 h-4 text-foreground-muted" />
@@ -387,7 +387,7 @@
          oauth_access_tokens row. Revoke flips revoked_at; the next
          /mcp call from that connector returns 401. -->
     <section class="space-y-4 border-b border-border pb-8">
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <Plug class="w-4 h-4 text-foreground-muted" />
@@ -514,7 +514,7 @@
          calling session is flagged `current` and shows no Revoke
          button (use the Logout button in the Account card instead). -->
     <section class="space-y-4 border-b border-border pb-8">
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <Monitor class="w-4 h-4 text-foreground-muted" />
@@ -593,7 +593,7 @@
 
     <!-- Backup / Restore card. -->
     <section class="space-y-4">
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 class="text-sm font-semibold text-foreground-strong tracking-tight flex items-center gap-2">
             <DatabaseBackup class="w-4 h-4 text-foreground-muted" />

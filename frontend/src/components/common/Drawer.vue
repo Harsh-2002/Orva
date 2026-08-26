@@ -5,12 +5,21 @@
         v-if="modelValue"
         class="fixed inset-0 z-50 pointer-events-none"
       >
-        <!-- Click-outside to close. Transparent — no overlay, no blur,
-             no dimming. The drawer reads as an inline panel that slides
-             in from the right, not a modal floating on top of a darkened
-             page. -->
+        <!-- Click-outside to close.
+
+             Transparent at sm+ on purpose: the desktop drawer reads as an
+             inline panel sliding in from the right, not a modal floating over
+             a darkened page.
+
+             Below sm it is not that panel. It is a bottom sheet with
+             aria-modal="true" and a focus trap, it covers the control the
+             operator was just using (on /ai that is the composer), and this
+             catcher already swallows every tap on the page behind it. With no
+             scrim the page stayed fully lit and looked live while being
+             untappable, which reads as a broken screen rather than a modal.
+             Dim what is genuinely no longer interactive. -->
         <div
-          class="absolute inset-0 pointer-events-auto"
+          class="absolute inset-0 pointer-events-auto bg-scrim sm:bg-transparent"
           @click="close"
         />
         <Transition name="drawer-slide">

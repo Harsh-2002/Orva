@@ -17,7 +17,7 @@
           </router-link>.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <button
           class="text-xs text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover rounded-md flex items-center justify-center gap-1.5 px-2 py-1.5 transition-colors min-w-[6rem] focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
           title="Copy share link"

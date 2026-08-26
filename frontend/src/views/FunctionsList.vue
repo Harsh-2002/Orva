@@ -162,14 +162,19 @@
           <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
             <tr>
               <th class="px-6 py-3 w-8">
-                <input
-                  type="checkbox"
-                  :checked="allChecked"
-                  :indeterminate.prop="someChecked && !allChecked"
-                  aria-label="Select all functions"
-                  class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
-                  @change="toggleAll"
-                >
+                <!-- The label is the touch target. A checkbox is a replaced
+                     element: it renders no ::after, so the bounded hit
+                     extension the other tiers use cannot reach it. -->
+                <label class="touch-expand-iconbtn inline-flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    :checked="allChecked"
+                    :indeterminate.prop="someChecked && !allChecked"
+                    aria-label="Select all functions"
+                    class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+                    @change="toggleAll"
+                  >
+                </label>
               </th>
               <th class="px-6 py-3 font-medium">
                 Name
@@ -199,13 +204,18 @@
               :class="{ 'bg-surface/30': selected.has(fn.id) }"
             >
               <td class="px-6 py-4 align-middle">
-                <input
-                  :checked="selected.has(fn.id)"
-                  type="checkbox"
-                  :aria-label="`Select ${fn.name}`"
-                  class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
-                  @change="toggleOne(fn.id)"
-                >
+                <!-- The label is the touch target. A checkbox is a replaced
+                     element: it renders no ::after, so the bounded hit
+                     extension the other tiers use cannot reach it. -->
+                <label class="touch-expand-iconbtn inline-flex items-center justify-center">
+                  <input
+                    :checked="selected.has(fn.id)"
+                    type="checkbox"
+                    :aria-label="`Select ${fn.name}`"
+                    class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+                    @change="toggleOne(fn.id)"
+                  >
+                </label>
               </td>
               <td class="px-6 py-4 font-medium text-foreground-strong">
                 <div class="flex items-center gap-2 flex-wrap">

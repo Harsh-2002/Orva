@@ -202,10 +202,19 @@ test('form controls clear the iOS focus-zoom threshold on touch hardware', () =>
   // text-base is 15.2px under the 95% root and does NOT clear iOS Safari's
   // 16px threshold, so the fix has to be a real pixel value, applied once.
   const styles = readFileSync(join(SRC, 'style.css'), 'utf8')
+  // The selector carries a :not() for checkbox/radio -- they are square
+  // controls that a height floor deformed into 13x44px slivers -- so match the
+  // text-entry group by shape rather than by an exact `input,`.
   assert.match(
     styles,
-    /@media \(pointer: coarse\)\s*\{[\s\S]*?input,[\s\S]*?textarea\s*\{[\s\S]*?font-size:\s*16px/,
+    /@media \(pointer: coarse\)\s*\{[\s\S]*?input[^{,]*,\s*select,\s*textarea\s*\{[\s\S]*?font-size:\s*16px/,
     'style.css must pin input/select/textarea to 16px on coarse pointers',
+  )
+  // And the exclusion itself, so a future edit cannot quietly re-deform them.
+  assert.match(
+    styles,
+    /input\[type='checkbox'\][^{]*\{[^}]*min-height:\s*0/,
+    'checkboxes must be exempt from the 44px height floor',
   )
 })
 
