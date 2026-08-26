@@ -39,7 +39,7 @@ go vet ./...
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `safepath` | Containment for user-supplied relative paths. `Validate` on the write side so a bad `entrypoint` never reaches storage; `Join` on the read side, which must hold independently because rows written before validation still carry whatever they carry. Traversal is rejected, not collapsed. |
 | `secrets` | AES-256-GCM encrypted secrets per function. The key lives at `<dataDir>/.master.key`, outside the database — back it up with `orva.db` or restored secrets are undecryptable ciphertext |
-| `sdkauth` | Mints and verifies the worker credential (`ORVA_INTERNAL_TOKEN`). HMAC over the function id under a **process-random** key, so every credential dies on restart and a redeploy does **not** rotate one. `active` tracks live executions, which is what the SDK surfaces that require one check against |
+| `sdkauth` | Mints and verifies the worker credential (`ORVA_INTERNAL_TOKEN`). HMAC over the function id **and a per-spawn nonce**, under a process-random key — so a credential dies both when orvad restarts and when the worker it was issued to is reaped. `Mint` returns a release; the pool wires it to `sandbox.ExecConfig.OnExit` and must also call it on every spawn error path. `live` holds the nonces, `active` the executions the gated SDK surfaces check against |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
 | `mcp` | MCP server (go-sdk); 73 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. **Transport is stateless** (`StreamableHTTPOptions{Stateless: true}`) — the SDK serves protocol `2026-07-28` only in that mode, and older clients still negotiate down. No `initialize` handshake required, no `Mcp-Session-Id`, `GET`/`DELETE /mcp` → 405. Operator servers are cached by the four-bit permission surface (at most 16 variants); channel servers remain request-scoped. Actor identity and public origin live in request context, so cached servers cannot cross-label activity or leak one host into another's `invoke_url`. A process-wide `ServerOptions.SchemaCache` keeps `AddTool` reflection off first-build paths. `cacheScopeMiddleware` rewrites the SDK's hardcoded `cacheScope: "public"` to `"private"` — the catalog is permission- and channel-scoped, so a shared HTTP cache entry would leak one principal's tool surface to another. |
 | `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps`, `DELETE /api/v1/oauth/clients/{client_id}` (retires an application: revokes its grants, drops pending codes, blocks re-authorization without fresh consent) and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`; a client's **registered** scope is a ceiling, applied via `IntersectScope` on both authorize paths, so a client registered `read` cannot be issued `admin`. |
@@ -116,6 +116,13 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
   spawn with no execution bound, and the docs tell operators to cache config
   there, so an execution gate on KV would break a documented pattern silently
   at cold start.
+- **The SDK credential's release is wired to the reaper, not to Kill or to
+  retire.** `Kill` and `retirePool` express an intention to stop a worker; a
+  busy one keeps serving until it drains, so releasing there would 401 a live
+  request. The reaper goroutine in `sandbox/worker.go` is the only place the
+  process is known to be gone, and it covers every exit path. A missed release
+  leaks a map entry and degrades to the old behaviour — a credential valid
+  until restart — which is why the pool releases on its error paths too.
 - **Revocation evicts.** Every path that deletes an API key or ends a session
   must evict the auth middleware's cache; the entries carry a 30s TTL as a
   backstop, not as the mechanism. `router.go` builds one `invalidateKey`

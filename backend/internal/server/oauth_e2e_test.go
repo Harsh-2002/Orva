@@ -377,9 +377,9 @@ func TestConsentScreenIsNativeOrva(t *testing.T) {
 		// Native Orva chrome: same brand mark, font, and colour
 		// tokens as the dashboard's Login.vue.
 		"Inter:wght",
-		`#0B0D10`,    // dashboard --color-background hex, baked into the inline CSS
-		`#553F83`,    // dashboard --color-primary (the Orva purple)
-		`f(x)`, // logo glyph
+		`#0B0D10`, // dashboard --color-background hex, baked into the inline CSS
+		`#553F83`, // dashboard --color-primary (the Orva purple)
+		`f(x)`,    // logo glyph
 		">Orva<",
 		// Application identity row uses the brand-aware icon class
 		// chosen by iconForConsent — emerald for ChatGPT.

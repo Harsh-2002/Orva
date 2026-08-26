@@ -15,7 +15,7 @@ import (
 // SDK credentials must never grant access to the broader operator API.
 func TestScopedSDKCredentialCannotBypassOperatorAuth(t *testing.T) {
 	tc := newTestServer(t)
-	real := tc.srv.router.sdkAuth.Mint("function-a")
+	real := mintLive(tc.srv.router.sdkAuth, "function-a")
 	if real == "" {
 		t.Fatal("scoped SDK credential is empty")
 	}

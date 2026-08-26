@@ -40,12 +40,15 @@ Orva is **not** designed to defend against:
 
 ## Sandbox SDK identity
 
-Each worker receives a process-signed SDK credential containing a token
-version and its immutable function ID. Orvad verifies the signature on KV,
+Each worker receives a signed SDK credential naming its immutable function ID
+and the specific worker process it was issued to. Orvad verifies the signature on KV,
 function invoke/streaming, job enqueue, cron upsert, and user-span requests;
 it never trusts `X-Orva-Caller-Function` for authorization or attribution.
-The signing key is random per process, so credentials copied from an old worker
-become invalid after restart.
+Two things expire it. The signing key is random per process, so every
+credential dies when orvad restarts. And the per-spawn identifier is dropped
+when that worker's process is reaped, so a credential copied out of one worker
+stops working as soon as that worker does — including when a redeploy retires
+it.
 
 KV access is limited to the credential's function namespace, cron upsert can
 only change that function's schedules, and user spans can only attach to an
@@ -65,12 +68,18 @@ anywhere that can reach the API. It cannot reach another function's KV, cannot
 authenticate to operator APIs, and cannot create or change a cron schedule —
 that requires a live execution of the function.
 
-**To remediate, remove the dependency, redeploy, and then restart orvad.** The
-restart is the part that invalidates the credential: the signing key is random
-per process, so every credential for every function dies with it. Redeploying
-alone does **not** rotate the credential — it is derived from the function's ID,
-which does not change — so a copy taken beforehand keeps working against the
-new code until the server restarts.
+**To remediate, remove the dependency and redeploy.** Redeploying retires all of
+that function's warm workers, and each worker's credential dies with its
+process, so a copy taken beforehand stops working. Credentials also expire when
+a worker is recycled — idle timeout, or its use limit — and when orvad restarts,
+because the signing key is random per process. Restarting invalidates every
+credential for every function at once, which is the bigger hammer if you want
+one.
+
+Redeploying used not to be enough: the credential was derived from the function
+ID alone, so the deploy meant to remove a compromised dependency re-minted the
+stolen token byte-identical, and only a restart cleared it. Each credential now
+also names the specific worker process it was issued to.
 
 Then check that function's Schedules page for anything you did not create
 (schedules added by the SDK carry a name and are badged as such) and its KV
