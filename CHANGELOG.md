@@ -9,7 +9,7 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.08.26..HEAD` is the range for
+pruned with their releases — so `git log v2026.08.27..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
@@ -17,19 +17,11 @@ before it.
 
 Nothing yet.
 
-## v2026.08.26
+## v2026.08.27
 
-**This tag was published twice on the same day.** The first build carried the
-security fix and the documentation correction below; the second added the day
-theme. Both report `v2026.08.26`, so the version string does not tell them
-apart: check Settings -> Build info, or `commit` in
-`GET /api/v1/system/health`. **`465a17b` is the first build.** Re-run the
-installer, or pull `ghcr.io/harsh-2002/orva:latest` again, to move to the
-current one.
-
-A security fix, a documentation correction large enough to matter on its own,
-and the dashboard's second theme. Nothing here asks anything of an operator: no
-migration, no configuration change, no re-issued credentials.
+The dashboard's second theme, and a mobile pass that gives its controls their
+proportions back. One change for contributors: the built dashboard is no longer
+committed to the repository.
 
 ### Added
 
@@ -45,6 +37,21 @@ migration, no configuration change, no re-issued credentials.
   follows the operating system, which for most operators means it looks exactly
   as it did.
 
+### Changed
+
+- **The built dashboard is no longer committed.** This affects contributors,
+  not operators: nothing about installing or running Orva changes, and every
+  published binary is built exactly as before. If you build from source,
+  `make build` now builds the dashboard for you when it is missing, so you need
+  **Node 24** as well as Go. A fresh clone to a working binary takes about 15
+  seconds. The two supported ways to get Orva are unchanged: take a release
+  binary, or build both halves yourself.
+
+  `backend/internal/server/ui_dist/` was tracked, and it was dead weight: the
+  release workflow, the Dockerfile and CI each rebuilt the UI and overwrote it,
+  so the committed copy reached no shipped binary. All it did was let a local
+  `make build` serve a stale dashboard that looked correct.
+
 ### Fixed
 
 - **Placeholder text is legible again.** In nine views the placeholder was the
@@ -58,6 +65,48 @@ migration, no configuration change, no re-issued credentials.
   a component boundary. Raising that token redraws the grid of the whole
   interface, so it is a design decision to take deliberately rather than a
   contrast patch to slip into a release.
+
+- **Controls on a phone have a scale again.** The 44px touch floor was being
+  met by inflating each control's box, so on any touch device every tier
+  collapsed into the same slab: measured on a 360px screen, 439 of 602 visible
+  controls were exactly 44px tall, and a filter chip was the same size as a
+  primary button. Chips, buttons and icon buttons now keep heights in
+  proportion to their type and reach the 44px target through an invisible
+  extension instead. Labels that sat pinned to the top of an oversized box are
+  centred, and the checkboxes on API Keys are square rather than 13px wide by
+  44px tall.
+
+- **Four screens that read as broken on a phone.** The conversations sheet in
+  Chat dims the page behind it, instead of leaving it fully lit and looking
+  interactive while it was not. The chat composer has a visible surface and its
+  send button no longer sits faded at rest. The starter prompts are pills you
+  can see, not plain text. The Jobs filter strip gets the full width, so the
+  next filter is no longer sliced in half by the button beside it. Six page
+  headers that could collide with their own action button now wrap.
+
+### Verified
+
+- **Measured in a real browser, on the embedded binary rather than the dev
+  server** (Vite serves source; the binary serves a Rollup bundle with
+  different CSS ordering, and cascade order is what a second `:root` block
+  depends on). 2440 checks across 19 routes x 7 viewports x both themes on a
+  populated instance, 1290 more against a near-empty one so empty states are
+  covered, plus every placeholder, focus indicator and touch target measured
+  separately. Zero failures.
+- **The regressions the day theme would have introduced were caught before
+  release**, so they are absent from Fixed above: no operator ever saw them.
+  The browser suite could not see two of them either, until its contrast probe
+  was taught to read the `oklab()` that Tailwind v4 compiles every alpha into,
+  and its touch-target probe was taught to measure the target rather than the
+  ink.
+
+## v2026.08.26
+
+One security fix, and a documentation correction large enough to matter on its
+own. Nothing here asks anything of an operator: no migration, no configuration
+change, no re-issued credentials.
+
+### Fixed
 
 - **Redeploying a function now invalidates a leaked SDK credential.** The
   `ORVA_INTERNAL_TOKEN` your function's code holds was derived from the
@@ -112,18 +161,6 @@ arm64, the server and CLI installers, native systemd, docker smoke, CodeQL):
 - **The reaper path was exercised locally** against a real spawned-and-killed
   worker, rather than relying on the sandbox E2E alone.
 - **`go test -race`** on `sdkauth`, `pool`, `sandbox` and `server`.
-- **The theme was measured in a real browser, on the embedded binary rather
-  than the dev server** (Vite serves source; the binary serves a Rollup bundle
-  with different CSS ordering, and cascade order is what a second `:root` block
-  depends on). 2440 checks across 19 routes x 7 viewports x both themes on a
-  populated instance, 1290 more against a near-empty one so empty states are
-  covered, and every placeholder and focus indicator measured separately. Zero
-  failures.
-- **The two contrast regressions the day theme would have introduced were both
-  caught before release** and are therefore absent from Fixed above: no
-  operator ever saw them. The browser suite could not see one of them either,
-  until its contrast probe was taught to read the `oklab()` that Tailwind v4
-  compiles every alpha into.
 
 Not run: `test/atscale.sh` and the migration rehearsal. Neither is implicated —
 no pool sizing, scheduler or migration behaviour changed — but CONTRACT §6 lists
