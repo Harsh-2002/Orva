@@ -66,15 +66,20 @@ committed to the repository.
   interface, so it is a design decision to take deliberately rather than a
   contrast patch to slip into a release.
 
-- **Controls on a phone have a scale again.** The 44px touch floor was being
-  met by inflating each control's box, so on any touch device every tier
-  collapsed into the same slab: measured on a 360px screen, 439 of 602 visible
-  controls were exactly 44px tall, and a filter chip was the same size as a
-  primary button. Chips, buttons and icon buttons now keep heights in
-  proportion to their type and reach the 44px target through an invisible
-  extension instead. Labels that sat pinned to the top of an oversized box are
-  centred, and the checkboxes on API Keys are square rather than 13px wide by
-  44px tall.
+- **Controls have one size, everywhere.** On a phone the 44px touch floor was
+  being met by inflating each control's box, so every tier collapsed into the
+  same slab: measured on a 360px screen, 439 of 602 visible controls were
+  exactly 44px tall, and a filter chip was the same size as a primary button.
+  On a desktop the opposite had happened -- the interface had drifted to more
+  than twenty different button heights, six different squares for the same
+  icon-only action, and around forty controls with no height at all that drew
+  themselves as small as their text.
+
+  Everything now sits on one ladder, with a rung for each kind of control and a
+  matching set for touch. Labels that sat pinned to the top of an oversized box
+  are centred, the checkboxes on API Keys are square rather than 13px wide by
+  44px tall, and the trace pages no longer read a size larger than the rest of
+  the dashboard.
 
 - **Four screens that read as broken on a phone.** The conversations sheet in
   Chat dims the page behind it, instead of leaving it fully lit and looking
@@ -83,6 +88,13 @@ committed to the repository.
   can see, not plain text. The Jobs filter strip gets the full width, so the
   next filter is no longer sliced in half by the button beside it. Six page
   headers that could collide with their own action button now wrap.
+
+- **The function test panel is usable on a phone.** It is drawn as a dense
+  desktop instrument, and on a touch device only its inputs were being enlarged
+  -- leaving a full-size method selector beside labels less than half its size,
+  in rows that no longer lined up. The panel now scales as a whole on touch, and
+  it gets enough height that you can see the response without scrolling past the
+  request you just sent. The desktop layout is unchanged.
 
 ### Verified
 
@@ -93,6 +105,10 @@ committed to the repository.
   populated instance, 1290 more against a near-empty one so empty states are
   covered, plus every placeholder, focus indicator and touch target measured
   separately. Zero failures.
+- **The control ladder is measured, not asserted.** A new browser suite renders
+  every control at both pointer types and names any that drifts off a rung,
+  because a control's real height is padding plus a line box plus whatever a
+  scoped rule did, and none of that is visible from the source.
 - **The regressions the day theme would have introduced were caught before
   release**, so they are absent from Fixed above: no operator ever saw them.
   The browser suite could not see two of them either, until its contrast probe
