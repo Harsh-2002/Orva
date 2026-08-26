@@ -13,7 +13,7 @@
 # Strictly sequential. Output goes to test/kata-bench/<runtime>/.
 #
 # Env:
-#   ORVA_IMAGE        default ghcr.io/harsh-2002/orva:v2026.05.12
+#   ORVA_IMAGE        default ghcr.io/harsh-2002/orva:latest
 #   BENCH_RUNTIMES    default "runc kata kata-clh"
 #
 # Suggested invocation:
@@ -23,7 +23,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-IMAGE="${ORVA_IMAGE:-ghcr.io/harsh-2002/orva:v2026.05.12}"
+IMAGE="${ORVA_IMAGE:-ghcr.io/harsh-2002/orva:latest}"
 RUNTIMES="${BENCH_RUNTIMES:-runc kata kata-clh}"
 
 c_cyan='\033[1;36m'; c_green='\033[1;32m'; c_red='\033[1;31m'; c_yellow='\033[1;33m'; c_reset='\033[0m'

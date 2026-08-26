@@ -38,7 +38,7 @@ uses gVisor's KVM-backed platform.
 
 For each platform we ran:
 
-1. `docker run --runtime=<runtime> ... ghcr.io/harsh-2002/orva:v2026.05.12`
+1. `docker run --runtime=<runtime> ... ghcr.io/harsh-2002/orva:latest`
 2. Waited for `/api/v1/system/health` to return 200.
 3. Onboarded an admin user, minted an API key.
 4. Created a Node 24 function and deployed an inline `exports.handler`.

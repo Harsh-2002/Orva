@@ -170,7 +170,10 @@ never been executed.
 - **One published release at a time.** The previous releases are deleted after a new
   one ships. Installers resolve GitHub's "latest", so **publish first, delete after** —
   the reverse order 404s every install and upgrade in the gap. **The tag is pruned
-  with the release**, so exactly one tag exists — nothing may reference an older one
+  with the release**, so exactly one tag exists — **no example, default or doc may
+  name a specific version**, because it 404s the next time a release ships. Use
+  `latest`, or a `vYYYY.MM.DD` placeholder in help text. Nothing may reference an
+  older one
   (`git log <old-tag>..HEAD` and `releases/tag/<old>` both break). Use the current
   tag for ranges and `CHANGELOG.md` as the record for anything older. Nothing in the
   docs may pin to a superseded version, and `artifacts`'

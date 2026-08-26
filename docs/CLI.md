@@ -26,11 +26,12 @@ Pin a specific version:
 
 ```bash
 curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | \
-    ORVA_VERSION=v2026.08.25 sh
+    ORVA_VERSION=vYYYY.MM.DD sh
 
-> Orva keeps **one published release at a time** — the current one. Pinning to
-> an older version 404s once it is superseded, so use `ORVA_VERSION` to pin
-> within a rollout, not as a long-term hold.
+> Orva keeps **one published release at a time** — the current one. Any older
+> version 404s once it is superseded, which is why the example above is a
+> placeholder rather than a real tag. Use `ORVA_VERSION` to pin within a
+> rollout, not as a long-term hold; omit it to take the current release.
 ```
 
 ### Windows (PowerShell)
@@ -786,7 +787,7 @@ in CI, pin a version with the installer so reproducible builds stay
 reproducible:
 
 ```bash
-ORVA_VERSION=v2026.08.25 \
+ORVA_VERSION=vYYYY.MM.DD \
   curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh
 ```
 

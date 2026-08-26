@@ -13,7 +13,7 @@
 # Quick start:
 #   curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --docker --yes
-#   curl -fsSL .../install.sh | sh -s -- --bare-metal --version v2026.05.30
+#   curl -fsSL .../install.sh | sh -s -- --bare-metal --version vYYYY.MM.DD
 #   curl -fsSL .../install.sh | sh -s -- --cli-only
 #
 # Everything is overridable by flag OR env var. Precedence: flag > env > prompt
@@ -131,7 +131,7 @@ OPTIONS:
 Examples:
   sh install.sh                                  # interactive, smart defaults
   sh install.sh --docker --port 9000 --yes
-  sh install.sh --bare-metal --version v2026.05.30 --start
+  sh install.sh --bare-metal --version vYYYY.MM.DD --start   # omit to take the current release
   sh install.sh --cli-only --cli-path ~/.local/bin/orva
 EOF
 }

@@ -1996,8 +1996,9 @@ flow. *A real regression instead shows* a checksum mismatch, a 404 on an
 asset, `orva.service did not become active`, a `wait_for_health` timeout, or
 `✗` lines from `smoke-flow.sh`.
 *Action:* `gh run rerun <id> --failed` (a fresh runner gets a fresh IP), or
-locally `ORVA_VERSION=v2026.08.25 bash test/install/run-distro.sh <distro>` —
-use the current release, since only that one is published.
+locally `bash test/install/run-distro.sh <distro>`, which takes the current
+release. `ORVA_VERSION=vYYYY.MM.DD` pins one, but only the current release is
+ever published, so a pin to anything else 404s.
 
 > Correction to a widely-held belief: `arch` and `alpine321` are **not**
 > `continue-on-error` legs. `grep -n continue-on-error .github/workflows/*.yml`
@@ -2022,10 +2023,11 @@ after a 10 s backoff, because apt/dnf mirrors return HTTP 520 and transient DNS
 errors. Both attempts dying with the *same* package-manager error is mirror
 flake; attempt 2 failing *differently* is real.
 
-**F5 — dead pinned container image.** `kata-flow.sh` and both `kata-bench`
-scripts default to `ghcr.io/harsh-2002/orva:v2026.05.12`, which returns
-`manifest unknown`. GHCR appears to carry only `:latest`. Override with
-`ORVA_IMAGE=ghcr.io/harsh-2002/orva:latest`.
+**F5 — dead pinned container image (fixed).** `kata-flow.sh` and both
+`kata-bench` scripts used to default to a dated image tag, which returned
+`manifest unknown` once that release was pruned. They default to
+`ghcr.io/harsh-2002/orva:latest` now. Under the one-release policy a dated tag
+is never a safe default; `ORVA_IMAGE` still overrides.
 
 **F6 — egress-test's single public host.** `egress-test.sh` stakes its
 mandatory-reachability leg on `example.com` plus in-sandbox DNS. Commit
@@ -2207,7 +2209,7 @@ requires an admin key — set `API_KEY` or check 1 fails with 401 (verified, §3
 | `test/install/failure-modes.sh` | Cannot pass. It does `jq -r '.[].name'` on `/api/v1/functions`, which returns an **object** `{"functions":[…],"total":N}` — jq errors, the marker check always fails, and it reports "marker function did not survive reinstall". Its sibling `uninstall-flow.sh` uses the correct `jq -r '.functions[]? .name'`. Its onboard call also posts `{"email":…}` where the API requires `username`. Nobody noticed because CI lints it and never runs it. |
 | `test/install/matrix.sh` | The one genuinely dev-safe script in that directory, documented as the opposite: its header calls itself "the default gate in CI and locally" and references an `install-test.sh` that does not exist. CI never invokes it, and it is not marked executable (mode **664** — `bash test/install/matrix.sh` works, `./test/install/matrix.sh` does not). |
 | `test/ceiling.sh` | Parses `orva_host_mem_free_mb`, a metric that no longer exists (the exposition has `orva_host_mem_{total,available,reserved}_bytes`), and the value is discarded anyway. Its `mem_mb` column needs docker and a published port, so on a systemd install it is a constant 0. |
-| `test/kata-bench/*`, `test/install/kata-flow.sh` | Default to `ghcr.io/harsh-2002/orva:v2026.05.12` → `manifest unknown` (F5). `extended-functional.sh`'s header advertises five legs; the body implements three. |
+| `test/kata-bench/*`, `test/install/kata-flow.sh` | Default to `ghcr.io/harsh-2002/orva:latest` (F5 fixed). `extended-functional.sh`'s header advertises five legs; the body implements three. |
 | `test/api-smoke.sh` | Line 47-48 prints `ok  POST /functions {network_mode:egress}  HTTP 201` by passing literal `201 201` into `expect_code` — it validates the response field and never looks at the HTTP status. The printed status is fabricated. |
 | `test/heavy-deploy-test.sh` | Hardcodes an absolute developer path for its evidence file (`/home/dev/Orva/test/heavy-deploy-stream.log`), swallowed by `|| true`, so on any other machine it is silently not written. Its "SSE log captured" check only asserts size > 30 B; the captured file contained solely the terminal `event: succeeded` frame, so it does not prove build-log streaming. |
 | `test/e2e/CHECKLIST.md` | Two modules behind the tree (§3.2.6). |

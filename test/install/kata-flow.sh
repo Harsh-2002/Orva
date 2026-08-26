@@ -26,7 +26,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$HERE/lib/common.sh"
 
-IMAGE="${1:-ghcr.io/harsh-2002/orva:v2026.05.12}"
+IMAGE="${1:-ghcr.io/harsh-2002/orva:latest}"
 RUNTIME="${RUNTIME:-kata}"
 # Per-runtime default port so kata + kata-clh can coexist.
 case "$RUNTIME" in
