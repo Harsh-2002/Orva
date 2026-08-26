@@ -4,7 +4,8 @@ Orva is configured entirely through environment variables. There is no
 config file — every knob that needs operator input is an env var. A bare
 `docker run` with no env set works out of the box.
 
-On startup, Orva logs which of the 11 supported env vars it found set and
+On startup, Orva logs which of the 11 vars in `config.SupportedEnvVars` it
+found set and
 how many are at their defaults.
 
 Every variable below has an observable runtime effect. A knob that an
@@ -29,6 +30,7 @@ names that stopped doing anything are deleted rather than deprecated.
 | `ORVA_TRUSTED_PROXY` | `false` | Set to `true` only when a reverse proxy in front of Orva sets `X-Forwarded-For`. It makes Orva trust that header for the OAuth dynamic-registration rate limiter's client identity. Leave it off otherwise: trusting a client-settable header would let a caller bypass that limit by varying one value per request. |
 | `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Single-operator instances can set this to `30`. |
 | `ORVA_PPROF_ADDR` | (unset) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
+| `ORVA_PPROF_ADDR`, `ORVA_INTERNAL_API_BASE` are read directly where they are used rather than through the config loader, so they do **not** appear in that startup line. They still work. | |
 | `ORVA_INTERNAL_API_BASE` | (auto-detected) | The base URL sandboxed functions use to reach Orva's own internal SDK endpoints (KV, jobs, function-to-function). Orva probes for a routable address at startup — from inside a sandbox `127.0.0.1` is the sandbox's own loopback, so this is deliberately **not** a loopback address. Set it only on network setups the probe gets wrong (overlay networks, Swarm, k8s), as `http://host:port`. The compiled egress policy emits a narrow allow rule for exactly this address and port, so an operator blocking private ranges does not cut off the SDK. |
 
 ---

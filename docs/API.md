@@ -4,9 +4,15 @@ Management endpoints live under `/api/v1/`; invocation, MCP, metrics,
 and OAuth discovery/authorization also expose the public paths called out
 below. Management auth uses either:
 
-- **API key**: `X-Orva-API-Key: orva_xxx...` header. Used by curl, CI,
-  external callers.
+- **API key**: `X-Orva-API-Key: orva_xxx...` header, or
+  `Authorization: Bearer orva_xxx...` — both are accepted everywhere. Used by
+  curl, CI, external callers.
 - **Session cookie**: set by `POST /api/v1/auth/login`. Used by the dashboard.
+
+A handful of endpoints are **cookie-only** and cannot be driven with a key,
+because they act on the calling user rather than the instance:
+`/auth/me`, `/auth/refresh`, `/auth/change-password`, `/auth/sessions*`, and
+`/oauth/connected-apps*`.
 
 API keys carry a permission set. The bootstrap admin key has all four:
 `invoke`, `read`, `write`, `admin`. Operator-issued keys can be
@@ -137,6 +143,11 @@ Partial update. Whitelisted fields: `name`, `description`, `entrypoint`,
 blocks function-to-function `orva.invoke()` calls, which previously ran an
 inactive function anyway.
 
+`entrypoint` is **the file you authored** and the build pipeline never
+rewrites it. When a runtime compiles — TypeScript through `tsc` — the build
+output is recorded separately in `run_entrypoint`; empty means "same as
+`entrypoint`". Send only `entrypoint` when creating or updating a function.
+
 `auth_mode` accepts `none` | `platform_key` | `signed` and governs how
 `POST /fn/<id>` is authorized. Under `platform_key` the caller must present a
 key carrying the **`invoke`** permission (or a session cookie); a key scoped
@@ -197,6 +208,11 @@ already active.
 ### `GET /api/v1/functions/{id}/source`
 Returns the function's current code + dependencies as JSON. Used by
 the Editor view.
+
+### `DELETE /api/v1/functions/{id}/build-cache`
+Drops the function's persistent installer cache (npm / pip). The next deploy
+re-downloads its dependencies from scratch. Use when a cached dependency is
+suspect; it never touches deployed versions or the running function.
 
 ### `GET /api/v1/functions/{id}/diff?from=<dep_id>&to=<dep_id>&format=json|unified`
 Compares the handler source + dependency manifest between two past
@@ -327,9 +343,17 @@ The `/_kv` and `/_internal` route families are sandbox-SDK transport
 endpoints authenticated with a process-signed, function-scoped credential.
 The verified claim supplies caller identity; caller headers are ignored. A
 credential expires when orvad restarts, KV access is restricted to its own
-namespace, cron upsert is restricted to its own schedules, and user spans must
+namespace, and user spans must
 name an active execution owned by the credential's function. Invokes and job
 enqueue may target another function while retaining signed caller attribution.
+**Cron upsert additionally requires a live execution**: it must be called from
+inside your handler and awaited. Calling it at module scope, or after the
+handler has returned without awaiting it, returns `403 SDK_SCOPE_VIOLATION`. A
+function may declare at most 25 schedules of its own; ones you create in the
+dashboard are not capped and do not count against it. A schedule is the only
+thing an SDK credential can create that outlives the credential, which is why
+this surface is gated where KV is not.
+
 These routes are not an operator API and do not accept long-lived API keys.
 
 ## Jobs
@@ -338,6 +362,15 @@ These routes are not an operator API and do not accept long-lived API keys.
 - `GET /api/v1/jobs` and `GET /api/v1/jobs/{id}` — list or inspect jobs.
 - `POST /api/v1/jobs/{id}/retry` — retry a failed job.
 - `DELETE /api/v1/jobs/{id}` — delete a job.
+
+## Inbound webhooks — the public receiver
+
+`POST /webhook/<id>` is the public endpoint the inbound-webhook rows below
+configure, and it is **not** under `/api/v1/`, so the API-key middleware never
+sees it. Authentication is the signature scheme chosen per hook (GitHub,
+Stripe, Slack, generic HMAC, or none), verified before the function is invoked.
+A handler reads the outcome with `orva.webhook.parse(event)`; `verified` is set
+from a server-controlled header that inbound requests cannot forge.
 
 ## Webhooks
 
@@ -560,6 +593,7 @@ the compiled sandbox egress policy (see
 | `policy_generation` | 16 hex chars — a hash of the exact bytes handed to nsjail. Changes only when enforcement changes |
 | `policy_rule_counts` | Compiled rule counts: `v4`, `v6`, `allow` (carve-outs), `reject` (blocklist) |
 | `policy_stale` | A recompile failed and the last known-good generation is still in force. Read with `last_compile_error` |
+| `pending_recycle` | Warm workers are still running the previous generation. Enforcement is live for new spawns but not yet universal — without this field the status reads "enforcing" while old workers keep the old policy |
 | `last_compile_error` | Present only on failure |
 | `last_success_at` | RFC 3339 timestamp of the last successful compile |
 | `control_plane_allow` | The narrow ALLOW that keeps orvad's internal SDK (`orva.kv` / `orva.jobs` / `orva.invoke`) reachable: exact addresses, exact port, TCP only |

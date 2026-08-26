@@ -40,8 +40,27 @@ single argument:
   should split `event["path"]` on `?` themselves.
 - Headers are normalized to lowercase keys.
 
-The adapter also passes `event.rawPath` and `event.httpMethod` aliases
-so AWS-Lambda-style handlers Just Work without code changes.
+The Node adapter also passes `event.rawPath` and `event.httpMethod` aliases so
+AWS-Lambda-style handlers work without code changes. It accepts several handler
+shapes besides the default: `handler(event, context)` (Lambda) and
+`handler(req, res)` (Vercel/Express). The Python adapter accepts a plain
+`handler(event)` and also speaks WSGI and ASGI, so Flask and FastAPI apps run
+unmodified.
+
+## TypeScript
+
+TypeScript is a first-class deploy path on the `node` runtime — there is no
+separate TS runtime. Include a `tsconfig.json` and declare `typescript` in your
+`package.json` dependencies or devDependencies, and the build runs
+`tsc --project tsconfig.json` after the install step.
+
+`compilerOptions.outDir` decides where the output lands (default `dist`, and
+`"."` means "beside the sources"). It must stay inside your code directory: a
+traversing or absolute `outDir` is refused and the build falls back to `dist`.
+
+The file you authored stays in `entrypoint`; the compiled file the worker
+actually loads is recorded separately in `run_entrypoint`. You never set
+`run_entrypoint` yourself — deploy and rollback both derive it.
 
 ## Handler shape — Node.js
 
@@ -100,7 +119,9 @@ is supported on the python runtime (Python 3.14); the adapter awaits if needed.
 
 Include a `package.json` (Node) or `requirements.txt` (Python) in
 your deploy and Orva runs `npm install` / `pip install` during the
-build phase, on the host (not in the sandbox). The installed packages
+build phase. **The installer runs inside nsjail**, not on the host — a
+dependency's install scripts are third-party code and are treated as such. The
+installed packages
 land in the version directory and are visible at `/code/node_modules`
 or `/code/<package>/` inside the sandbox.
 
@@ -113,7 +134,7 @@ echo "requests==2.31.0" > requirements.txt
 ```
 
 Pip uses `--only-binary=:all:` so wheels are required (no compilation
-in the build host). For native deps that don't ship wheels, prebuild
+during the build). For native deps that don't ship wheels, prebuild
 them and include the `.whl` in the deploy.
 
 ## Environment variables
@@ -136,7 +157,7 @@ Both arrive at your handler as `process.env` (Node) or `os.environ`
 | `ORVA_FUNCTION_NAME`| the function's name |
 | `ORVA_MEMORY_MB`    | the function's declared memory limit |
 | `ORVA_TIMEOUT_MS`   | the function's configured timeout — also surfaced as `getRemainingTimeInMillis()` / `get_remaining_time_in_millis()` on the context argument, and as `ctx.timeoutMs` |
-| `ORVA_ENTRYPOINT`   | your handler file (e.g. `handler.js`) — omitted when the function has no explicit entrypoint |
+| `ORVA_ENTRYPOINT`   | the file the worker **loads**. For a compiled runtime that is the build output (`dist/handler.js`), not the file you authored (`handler.ts`) — see `run_entrypoint` in the TypeScript section. Omitted when the function has no explicit entrypoint |
 | `ORVA_EXECUTION_ID` | this invocation's ID — useful for log correlation |
 
 The first five are **spawn-scoped**: a warm worker's environment is fixed when

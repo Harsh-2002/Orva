@@ -52,23 +52,6 @@ Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)
 
 ---
 
-## Screenshots
-
-| | |
-|---|---|
-| **System overview** — live metrics, warm pools, latency percentiles | **Functions** — runtime, resources, last deploy |
-| ![System Overview](docs/screenshots/system-overview-dashboard.jpeg) | ![Functions](docs/screenshots/functions-list.jpeg) |
-| **Editor** — write, build, and test in the browser | **Traces** — causal waterfall across HTTP → F2F → jobs |
-| ![Editor](docs/screenshots/function-editor.jpeg) | ![Traces](docs/screenshots/distributed-traces.jpeg) |
-| **Activity** — live feed of API, CLI, MCP, and webhook events | **Invocation logs** — request, response, duration, trace link |
-| ![Activity](docs/screenshots/activity-live-feed.jpeg) | ![Logs](docs/screenshots/invocation-logs.jpeg) |
-| **API keys** — bearer tokens for CI, scripts, and agents | **Firewall & DNS** — per-function egress rules |
-| ![API Keys](docs/screenshots/api-keys.jpeg) | ![Firewall](docs/screenshots/firewall-and-dns.jpeg) |
-| **Built-in docs** — full reference at `/web/docs` | **Settings** — storage, OAuth apps, build info |
-| ![Docs](docs/screenshots/built-in-docs.jpeg) | ![Settings](docs/screenshots/settings-oauth.jpeg) |
-
----
-
 ## Features
 
 - **Two runtimes** — `node` (Node.js 24, also runs TypeScript) and `python` (Python 3.14).
