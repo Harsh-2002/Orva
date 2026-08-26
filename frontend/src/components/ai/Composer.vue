@@ -14,8 +14,7 @@
   >
     <div class="mx-auto w-full max-w-3xl">
       <div
-        class="rounded-2xl border border-border bg-surface transition-colors focus-within:border-foreground-muted/50"
-        :class="{ 'opacity-60': disabled }"
+        class="rounded-2xl border border-border bg-surface transition-colors focus-within:border-foreground-muted"
       >
         <textarea
           ref="ta"
@@ -24,7 +23,7 @@
           :disabled="disabled"
           :placeholder="placeholder"
           aria-label="Message the assistant"
-          class="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 pb-1.5 text-sm text-foreground placeholder-foreground-muted/60 focus:outline-none disabled:cursor-not-allowed"
+          class="max-h-40 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 pb-1.5 text-sm text-foreground placeholder-foreground-muted focus:outline-none disabled:cursor-not-allowed"
           @input="autogrow"
           @keydown="onKey"
         />
@@ -47,7 +46,7 @@
           <button
             v-else
             type="button"
-            class="touch-expand-iconbtn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-40 disabled:shadow-none"
+            class="touch-expand-iconbtn inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:bg-surface-hover disabled:text-foreground-muted disabled:shadow-none"
             :disabled="disabled || !modelReady || !text.trim()"
             aria-label="Send message"
             title="Send message"

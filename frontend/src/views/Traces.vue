@@ -1,8 +1,8 @@
 <template>
   <div class="space-y-6">
-    <header class="flex items-start justify-between gap-4">
+    <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Traces
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -36,13 +36,13 @@
         <label class="relative w-full sm:flex-1 sm:min-w-[260px] sm:max-w-[420px]">
           <span class="sr-only">Function ID or name</span>
           <Search
-            class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none"
+            class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none"
             aria-hidden="true"
           />
           <input
             v-model.trim="fnFilter"
             placeholder="Function ID or exact name…"
-            class="h-10 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="h-10 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             @keydown.enter="refresh"
           >
         </label>
@@ -81,7 +81,7 @@
           {{ opt.label }}
         </Button>
         <span
-          class="text-foreground-muted/40"
+          class="text-foreground-muted"
           aria-hidden="true"
         >·</span>
         <Button
@@ -112,11 +112,11 @@
       class="bg-background border border-border rounded-lg p-8 text-center text-sm text-foreground-muted"
     >
       <Network
-        class="w-6 h-6 mx-auto mb-3 text-foreground-muted/50"
+        class="w-6 h-6 mx-auto mb-3 text-foreground-muted"
         aria-hidden="true"
       />
       <p>No traces in this view.</p>
-      <p class="text-xs mt-1 text-foreground-muted/60">
+      <p class="text-xs mt-1 text-foreground-muted">
         Try a wider time range or invoke a function.
       </p>
     </div>
@@ -160,14 +160,14 @@
             <time class="font-mono text-foreground-muted whitespace-nowrap">{{ formatTime(item.started_at) }}</time>
             <code class="font-mono text-foreground-muted">{{ shortID(item.trace_id) }}</code>
             <span class="min-w-0">
-              <span class="block text-sm text-white truncate">{{ item.function_name || item.root_function_id }}</span>
+              <span class="block text-sm text-foreground-strong truncate">{{ item.function_name || item.root_function_id }}</span>
               <span class="block text-foreground-muted truncate">
                 {{ relationshipSummary(item) }}
                 <template v-if="item.error_count"> · <span class="text-danger-fg">{{ item.error_count }} error{{ item.error_count === 1 ? '' : 's' }}</span></template>
                 <template v-if="item.cold_start_count"> · {{ item.cold_start_count }} cold</template>
               </span>
             </span>
-            <span class="font-mono text-white md:text-foreground-muted">{{ item.duration_ms }}ms</span>
+            <span class="font-mono text-foreground-strong md:text-foreground-muted">{{ item.duration_ms }}ms</span>
             <span class="text-foreground-muted">{{ item.span_count }} span{{ item.span_count === 1 ? '' : 's' }}</span>
             <!-- The flag is decorative here: the row button carries an
                  aria-label, which replaces the accessible name of everything

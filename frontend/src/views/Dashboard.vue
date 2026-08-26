@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-xl font-semibold text-white tracking-tight">
+      <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
         System Overview
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -21,7 +21,7 @@
         <div class="min-w-0">
           <h2
             class="text-h2 font-semibold"
-            :class="failures.length ? 'text-danger-fg' : 'text-white'"
+            :class="failures.length ? 'text-danger-fg' : 'text-foreground-strong'"
           >
             {{ healthHeadline }}
           </h2>
@@ -32,7 +32,7 @@
         <router-link
           v-if="sample.length"
           to="/invocations"
-          class="shrink-0 inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-white transition-colors rounded touch-expand-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          class="shrink-0 inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground-strong transition-colors rounded touch-expand-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {{ failures.length ? 'Inspect failures' : 'All invocations' }}
           <ArrowRight class="w-3.5 h-3.5" />
@@ -77,7 +77,7 @@
       class="bg-background border border-border rounded-lg"
     >
       <div class="px-5 pt-5 pb-3">
-        <h2 class="text-sm font-semibold text-white">
+        <h2 class="text-sm font-semibold text-foreground-strong">
           Recent failures
         </h2>
         <div class="text-xs text-foreground-muted mt-1">
@@ -94,7 +94,7 @@
             class="flex items-center justify-between gap-3 px-5 py-3 hover:bg-surface-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
           >
             <span class="min-w-0 flex-1">
-              <span class="block truncate text-sm text-white">{{ fnNameFor(f.function_id) }}</span>
+              <span class="block truncate text-sm text-foreground-strong">{{ fnNameFor(f.function_id) }}</span>
               <span class="block truncate text-xs text-foreground-muted font-mono">{{ f.error_message || f.status }}</span>
             </span>
             <span class="shrink-0 flex items-center gap-3">
@@ -111,7 +111,7 @@
       <!-- Latency -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-1">
         <div class="mb-3">
-          <h2 class="text-sm font-semibold text-white">
+          <h2 class="text-sm font-semibold text-foreground-strong">
             Response time
           </h2>
           <div class="text-xs text-foreground-muted mt-1">
@@ -128,7 +128,7 @@
       <!-- Host resources — single stacked memory bar tells the whole story -->
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-2 space-y-5">
         <div>
-          <h2 class="text-sm font-semibold text-white">
+          <h2 class="text-sm font-semibold text-foreground-strong">
             Host machine
           </h2>
           <div class="text-xs text-foreground-muted mt-1">
@@ -141,7 +141,7 @@
             <div class="text-xs uppercase tracking-wider text-foreground-muted">
               CPU / worker slots
             </div>
-            <div class="text-lg font-mono text-white mt-0.5">
+            <div class="text-lg font-mono text-foreground-strong mt-0.5">
               {{ m.host?.num_cpu ?? '?' }} / {{ m.host?.effective_cpu_workers ?? '?' }}
             </div>
           </div>
@@ -149,7 +149,7 @@
             <div class="text-xs uppercase tracking-wider text-foreground-muted">
               Memory in use
             </div>
-            <div class="text-lg font-mono text-white mt-0.5">
+            <div class="text-lg font-mono text-foreground-strong mt-0.5">
               {{ formatMB(memUsed) }} <span class="text-foreground-muted text-sm">/ {{ formatMB(memTotal) }}</span>
             </div>
             <div class="text-xs text-foreground-muted mt-0.5">
@@ -196,7 +196,7 @@
       <!-- Build pipeline -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
         <div>
-          <h2 class="text-sm font-semibold text-white">
+          <h2 class="text-sm font-semibold text-foreground-strong">
             Builds
           </h2>
           <div class="text-xs text-foreground-muted mt-1">
@@ -229,7 +229,7 @@
       <!-- Sandbox -->
       <div class="bg-background border border-border rounded-lg p-5 space-y-3">
         <div>
-          <h2 class="text-sm font-semibold text-white">
+          <h2 class="text-sm font-semibold text-foreground-strong">
             Sandbox activity
           </h2>
           <div class="text-xs text-foreground-muted mt-1">
@@ -257,7 +257,7 @@
     <div v-if="(m.pools || []).length">
       <div class="flex items-baseline justify-between mb-3">
         <div>
-          <h2 class="text-sm font-semibold text-white">
+          <h2 class="text-sm font-semibold text-foreground-strong">
             Warm pools ({{ m.pools.length }})
           </h2>
           <div class="text-xs text-foreground-muted mt-1">
@@ -276,13 +276,13 @@
               <router-link
                 v-if="p.function_name"
                 :to="{ name: 'function-detail', params: { name: p.function_name } }"
-                class="touch-expand-xs block truncate text-sm font-medium text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-xs block truncate text-sm font-medium text-foreground-strong hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {{ p.function_name }}
               </router-link>
               <div
                 v-else
-                class="truncate font-mono text-sm font-medium text-white"
+                class="truncate font-mono text-sm font-medium text-foreground-strong"
               >
                 {{ p.function_id }}
               </div>
@@ -291,7 +291,7 @@
               <div class="text-xs text-foreground-muted">
                 Capacity
               </div>
-              <div class="text-xs font-mono text-white">
+              <div class="text-xs font-mono text-foreground-strong">
                 {{ p.effective_max }} max
               </div>
               <div class="text-[11px] text-foreground-muted">
@@ -327,7 +327,7 @@
               <div class="text-foreground-muted">
                 Service p95
               </div>
-              <div class="mt-0.5 font-mono text-white">
+              <div class="mt-0.5 font-mono text-foreground-strong">
                 {{ p.service_p95_ms?.toFixed?.(1) ?? 0 }} ms
               </div>
             </div>
@@ -335,7 +335,7 @@
               <div class="text-foreground-muted">
                 Queue / cold p95
               </div>
-              <div class="mt-0.5 font-mono text-white">
+              <div class="mt-0.5 font-mono text-foreground-strong">
                 {{ p.queue_wait_p95_ms?.toFixed?.(1) ?? 0 }}
                 <span class="text-foreground-muted">/ {{ p.cold_start_p95_ms?.toFixed?.(1) ?? 0 }} ms</span>
               </div>
@@ -356,7 +356,7 @@
       class="bg-background border border-border rounded-lg p-8 text-center space-y-4"
     >
       <div>
-        <div class="text-sm text-white">
+        <div class="text-sm text-foreground-strong">
           No warm pools yet
         </div>
         <div class="text-xs text-foreground-muted mt-1 max-w-prose mx-auto leading-body">
@@ -494,7 +494,7 @@ const LatencyBars = {
           return h('div', { class: 'space-y-1' }, [
             h('div', { class: 'flex items-baseline justify-between text-xs' }, [
               h('span', { class: 'font-mono uppercase text-foreground-muted tracking-wider' }, r.label),
-              h('span', { class: 'font-mono text-white' }, r.ms == null ? EMPTY : `${r.ms}ms`),
+              h('span', { class: 'font-mono text-foreground-strong' }, r.ms == null ? EMPTY : `${r.ms}ms`),
             ]),
             // Track is thicker on phones: a 6 px rule is legible on a desktop
             // monitor at arm's length and close to invisible in the hand.
@@ -525,7 +525,7 @@ const Stat = {
     return () =>
       h('div', { class: 'bg-surface border border-border rounded p-3 flex flex-col h-full' }, [
         h('div', { class: 'text-xs uppercase tracking-wider text-foreground-muted' }, p.label),
-        h('div', { class: 'text-lg font-mono text-white mt-0.5' }, String(p.value ?? 0)),
+        h('div', { class: 'text-lg font-mono text-foreground-strong mt-0.5' }, String(p.value ?? 0)),
       ])
   },
 }
@@ -537,7 +537,7 @@ const PoolStat = {
     return () =>
       h('div', { class: 'bg-surface border border-border rounded p-2.5 flex flex-col h-full' }, [
         h('div', { class: 'text-xs uppercase tracking-wider text-foreground-muted' }, p.label),
-        h('div', { class: 'text-base font-mono text-white mt-0.5 leading-none' }, String(p.value ?? 0)),
+        h('div', { class: 'text-base font-mono text-foreground-strong mt-0.5 leading-none' }, String(p.value ?? 0)),
       ])
   },
 }

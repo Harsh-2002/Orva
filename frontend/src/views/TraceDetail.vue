@@ -3,7 +3,7 @@
     <header>
       <button
         type="button"
-        class="min-h-11 inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-white rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        class="touch-expand-sm inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-foreground-muted hover:text-foreground-strong rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         @click="router.push('/traces')"
       >
         <ArrowLeft
@@ -11,7 +11,7 @@
           aria-hidden="true"
         /> All traces
       </button>
-      <h1 class="text-xl font-semibold text-white tracking-tight">
+      <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
         Trace diagnostics
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -43,10 +43,10 @@
           >
             Trace summary
           </h2>
-          <code class="bg-surface text-white px-2 py-1 rounded font-mono text-xs break-all">{{ trace.trace_id }}</code>
+          <code class="bg-surface text-foreground-strong px-2 py-1 rounded font-mono text-xs break-all">{{ trace.trace_id }}</code>
           <button
             type="button"
-            class="min-h-11 min-w-11 inline-flex items-center justify-center rounded text-foreground-muted hover:text-white hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="touch-expand-iconbtn inline-flex h-7 w-7 items-center justify-center rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label="Copy trace ID"
             @click="copyID"
           >
@@ -71,14 +71,14 @@
           <div>
             <dt class="inline text-foreground-muted">
               Duration
-            </dt><dd class="inline text-white font-mono">
+            </dt><dd class="inline text-foreground-strong font-mono">
               {{ trace.total_duration_ms }}ms
             </dd>
           </div>
           <div>
             <dt class="inline text-foreground-muted">
               Spans
-            </dt><dd class="inline text-white">
+            </dt><dd class="inline text-foreground-strong">
               {{ trace.span_count }}
             </dd>
           </div>
@@ -92,7 +92,7 @@
           <div>
             <dt class="inline text-foreground-muted">
               Cold starts
-            </dt><dd class="inline text-white">
+            </dt><dd class="inline text-foreground-strong">
               {{ trace.cold_start_count || 0 }}
             </dd>
           </div>

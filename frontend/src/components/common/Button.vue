@@ -104,7 +104,13 @@ const variantClasses = computed(() => {
     case 'secondary':
       return 'bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border shadow-sm'
     case 'danger':
-      return 'bg-danger-solid text-foreground-strong border border-danger-solid hover:bg-danger focus-visible:ring-danger shadow-sm'
+      // --color-primary-foreground, not --color-foreground-strong. The two used
+      // to be interchangeable because both were white; under a day theme they
+      // diverge. foreground-strong means "maximum contrast against the canvas"
+      // and flips to near-black in day, which put this label at 3.52:1 on the
+      // red fill. This is text on a saturated fill, which stays white in both
+      // themes because the fill is dark in both.
+      return 'bg-danger-solid text-primary-foreground border border-danger-solid hover:bg-danger focus-visible:ring-danger shadow-sm'
     case 'ghost':
       return 'bg-transparent text-foreground-muted hover:text-foreground hover:bg-surface-hover'
     case 'chip':
@@ -114,7 +120,7 @@ const variantClasses = computed(() => {
       // surface, unlike CTAs which lift.
       return props.active
         ? 'bg-primary text-primary-foreground border border-primary'
-        : 'bg-surface text-foreground-muted border border-border hover:text-white hover:border-foreground-muted'
+        : 'bg-surface text-foreground-muted border border-border hover:text-foreground-strong hover:border-foreground-muted'
     default: // primary
       return 'bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-primary shadow-sm border border-transparent'
   }

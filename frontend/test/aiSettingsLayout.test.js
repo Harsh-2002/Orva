@@ -14,7 +14,16 @@ test('active provider and model use the same field geometry', () => {
 test('wide model menus fill their settings column without changing compact chat menus', () => {
   assert.match(modelMenu, /<Popover[\s\S]*?:wide="wide"/)
   assert.match(popover, /:class="wide \? 'flex w-full' : 'inline-flex'"/)
-  assert.match(modelMenu, /: 'touch-expand-sm h-8 max-w-\[180px\]/)
+  // The invariant is that the compact variant stays compact: a fixed height and
+  // a width cap, never the wide variant's full-width field. The cap's exact
+  // value is not the point and was pinned at 180px here, which is why widening
+  // it to fit a real model id (nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+  // truncated to "nvidia/nemotron-3…") failed a test about a different thing.
+  const compact = modelMenu.match(/: '(touch-expand-sm h-8[^']*)'/)
+  assert.ok(compact, 'compact trigger branch not found')
+  assert.match(compact[1], /\bh-8\b/)
+  assert.match(compact[1], /\bmax-w-\[/)
+  assert.doesNotMatch(compact[1], /\bw-full\b/)
 })
 
 test('desktop popovers choose a direction from available viewport space', () => {

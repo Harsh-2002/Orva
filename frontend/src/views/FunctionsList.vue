@@ -11,7 +11,7 @@
   <div class="space-y-6">
     <div class="flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Functions
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -41,11 +41,11 @@
            coarse pointers, which is what actually stops iOS focus-zoom. -->
       <div class="flex items-center gap-2 flex-wrap">
         <div class="relative flex-1 min-w-0 sm:min-w-[280px] max-w-full sm:max-w-[440px]">
-          <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
+          <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
           <input
             v-model="search"
             placeholder="Search by name, runtime, or function id…"
-            class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
         </div>
         <span class="text-[11px] text-foreground-muted shrink-0 tabular-nums">
@@ -72,7 +72,7 @@
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="font-medium text-white truncate">{{ fn.name }}</span>
+                  <span class="font-medium text-foreground-strong truncate">{{ fn.name }}</span>
                   <span
                     v-if="fn.network_mode === 'egress'"
                     class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-tint text-warning-fg border border-warning-ring"
@@ -150,7 +150,7 @@
               have not been fetched yet.
             </div>
             <button
-              class="text-xs text-foreground hover:text-white underline underline-offset-2"
+              class="touch-expand-xs text-xs text-foreground hover:text-foreground-strong underline underline-offset-2"
               @click="search = ''"
             >
               Clear search
@@ -162,14 +162,19 @@
           <thead class="text-xs text-foreground-muted uppercase bg-surface border-b border-border">
             <tr>
               <th class="px-6 py-3 w-8">
-                <input
-                  type="checkbox"
-                  :checked="allChecked"
-                  :indeterminate.prop="someChecked && !allChecked"
-                  aria-label="Select all functions"
-                  class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
-                  @change="toggleAll"
-                >
+                <!-- The label is the touch target. A checkbox is a replaced
+                     element: it renders no ::after, so the bounded hit
+                     extension the other tiers use cannot reach it. -->
+                <label class="touch-expand-iconbtn inline-flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    :checked="allChecked"
+                    :indeterminate.prop="someChecked && !allChecked"
+                    aria-label="Select all functions"
+                    class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+                    @change="toggleAll"
+                  >
+                </label>
               </th>
               <th class="px-6 py-3 font-medium">
                 Name
@@ -199,15 +204,20 @@
               :class="{ 'bg-surface/30': selected.has(fn.id) }"
             >
               <td class="px-6 py-4 align-middle">
-                <input
-                  :checked="selected.has(fn.id)"
-                  type="checkbox"
-                  :aria-label="`Select ${fn.name}`"
-                  class="touch-expand-iconbtn w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
-                  @change="toggleOne(fn.id)"
-                >
+                <!-- The label is the touch target. A checkbox is a replaced
+                     element: it renders no ::after, so the bounded hit
+                     extension the other tiers use cannot reach it. -->
+                <label class="touch-expand-iconbtn inline-flex items-center justify-center">
+                  <input
+                    :checked="selected.has(fn.id)"
+                    type="checkbox"
+                    :aria-label="`Select ${fn.name}`"
+                    class="w-3.5 h-3.5 rounded border-border bg-background focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+                    @change="toggleOne(fn.id)"
+                  >
+                </label>
               </td>
-              <td class="px-6 py-4 font-medium text-white">
+              <td class="px-6 py-4 font-medium text-foreground-strong">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span>{{ fn.name }}</span>
                   <span
@@ -311,7 +321,7 @@
                     have not been fetched yet.
                   </div>
                   <button
-                    class="touch-expand-xs text-xs text-foreground hover:text-white underline underline-offset-2"
+                    class="touch-expand-xs text-xs text-foreground hover:text-foreground-strong underline underline-offset-2"
                     @click="search = ''"
                   >
                     Clear search
@@ -328,7 +338,7 @@
           class="flex justify-center border-t border-border py-3 bg-surface/30"
         >
           <button
-            class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5"
+            class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5"
             :disabled="loading"
             @click="loadMore"
           >
@@ -351,7 +361,7 @@
       class="bg-background border border-border rounded-lg p-8 text-center space-y-4"
     >
       <div class="space-y-1.5">
-        <div class="text-sm text-white">
+        <div class="text-sm text-foreground-strong">
           No functions deployed yet
         </div>
         <div class="text-xs text-foreground-muted max-w-prose mx-auto leading-body">
@@ -376,12 +386,12 @@
         v-if="selected.size"
         class="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-background border border-border shadow-lg rounded-full pl-4 pr-2 py-2"
       >
-        <span class="text-xs text-white">
+        <span class="text-xs text-foreground-strong">
           {{ selected.size }} selected
         </span>
         <span class="w-px h-4 bg-border" />
         <button
-          class="touch-expand-xs text-xs text-foreground-muted hover:text-white transition-colors px-2 py-1"
+          class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong transition-colors px-2 py-1"
           @click="selected = new Set()"
         >
           Clear

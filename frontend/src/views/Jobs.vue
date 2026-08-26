@@ -3,7 +3,7 @@
     <!-- Page header — matches Functions / Schedules style. -->
     <div class="flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Jobs
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -17,10 +17,15 @@
 
     <!-- Status filter strip.
          Mobile (<sm): chips scroll horizontally inside the strip with
-         scroll-snap so the active filter doesn't get lost; actions
-         (Enqueue, Refresh) anchor to the right and don't scroll.
-         Desktop (sm+): the chip container flex-wraps as before. -->
-    <div class="flex items-center gap-2">
+         scroll-snap so the active filter doesn't get lost.
+
+         The actions used to sit in this same row, pinned with shrink-0. On a
+         360px phone that pair took ~180px of a ~330px content box, so the
+         filter strip was left a ~150px window onto ~430px of chips and the
+         next chip was sliced by the Enqueue button beside it. It read as a
+         rendering bug rather than a scroller. Below sm the actions take their
+         own row and the strip gets the full width; sm+ is unchanged. -->
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0 flex-1">
         <Button
           v-for="opt in statusOptions"
@@ -71,7 +76,7 @@
           <label class="text-xs uppercase tracking-wider text-foreground-muted">Function</label>
           <select
             v-model="enqueue.fnId"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
           >
             <option
               v-for="f in functions"
@@ -88,7 +93,7 @@
             v-model="enqueue.payload"
             rows="6"
             spellcheck="false"
-            class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-foreground-strong font-mono focus:outline-none focus:border-focus-ring"
             placeholder="{&quot;hello&quot;:&quot;world&quot;}"
           />
         </div>
@@ -109,7 +114,7 @@
           <input
             v-model="enqueue.scheduledAt"
             type="datetime-local"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
           >
         </div>
         <div
@@ -161,7 +166,7 @@
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
-              <div class="font-medium text-white truncate">
+              <div class="font-medium text-foreground-strong truncate">
                 {{ job.function_name || job.function_id }}
               </div>
               <div class="text-[10px] text-foreground-muted font-mono break-all">
@@ -267,7 +272,7 @@
             :key="job.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-6 py-4 font-medium text-white">
+            <td class="px-6 py-4 font-medium text-foreground-strong">
               <div class="flex flex-col">
                 <span>{{ job.function_name || job.function_id }}</span>
                 <span class="text-[10px] text-foreground-muted font-mono">{{ job.id }}</span>

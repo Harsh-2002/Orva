@@ -59,8 +59,12 @@ re-read platform explanations on every visit.
   stored separately in the operator's home directory.
 - Orva is a single-instance operator product. Multi-tenant administration and
   fleet-management abstractions are not product goals.
-- Dark mode is the supported visual environment. A light theme is not a current
-  commitment.
+- Both a day and a night theme are supported, and the choice belongs to the
+  operator. The dashboard follows the operating system by default; an explicit
+  choice is remembered per browser. Both themes are warm neutrals at the same
+  hue family, so switching does not change the product's temperature, only its
+  lightness. The code editor is deliberately dark in both, the way a terminal
+  is: it is an instrument rather than a page.
 - Existing functionality must remain accessible while the interface uses
   progressive disclosure to keep routine tasks focused.
 

@@ -303,25 +303,37 @@ diff -r -x __pycache__ backend/runtimes/python backend/cmd/orva/adapters/python
 # and present on any host that has run the python adapter) is a false positive.
 ```
 
-**Trap 3 — `ui_dist`, and `make clean` breaking the build.**
-`backend/internal/server/ui_dist/` is **tracked** and is *not* matched by
-`.gitignore` (the pattern is root-anchored). `make clean` does
-`rm -rf backend/internal/server/ui_dist`, which deletes tracked files and makes
-the next build fail hard:
+**Trap 3 — a stale `ui_dist` after a frontend change.**
+`backend/internal/server/ui_dist/` is a **build artifact and is not committed**
+— not one file. `//go:embed all:ui_dist` is a compile error on an absent
+directory, so a bare `go build` on a fresh clone fails:
 
 ```
-$ rm -rf backend/internal/server/ui_dist && go build -o /dev/null ./backend/cmd/orva
+$ go build -o /dev/null ./backend/cmd/orva
 backend/internal/server/ui.go:10:12: pattern all:ui_dist: no matching files found
 ```
 
-So `make clean` must always be followed by `make embed` or `make build-all`.
+That is why `make build`, `make test` and `make lint` build the UI when the
+directory is empty. **Building the server needs Node 24**; the alternative is a
+release binary. A clean tree to a working binary took 6.5 s on the survey host
+(2.4 s on the second run, where the guard leaves a populated `ui_dist` alone).
+
+The trap that remains: the guard checks *presence*, not freshness, so a
+**frontend change you have not re-embedded still ships the previous build**.
+Deciding it from timestamps would put an npm build in front of every `go test`,
+which is worse. So after touching `frontend/`, run `make build-all` (or
+`make embed` then `make build`).
+
 Staleness check that does not touch git:
 
 ```bash
 (cd frontend && npm install && npm run build) && diff -rq frontend/dist backend/internal/server/ui_dist
 ```
 
-Empty output means the snapshot is current. It was current at survey time.
+Empty output means the snapshot is current.
+
+`make clean` is safe now. It used to delete tracked files and break the next
+build outright; the directory it removes is regenerable.
 
 **Trap 4 — the stale `orva:e2e` image.** §2.4, option 3.
 
@@ -828,7 +840,7 @@ All rows below were measured against a live instance:
 | `tracing-test.sh` | http root span + `X-Trace-Id`, F2F parent linkage, W3C `traceparent` honored, replay = fresh trace, outlier + `baseline_p95_ms` | **10.2 s** | ANSI `✓`/`✗` then `PASS: 10` / `FAIL: 0` | yes — trap + pre-run sweep |
 | `sdk-test.sh` | Scoped SDK auth plus Python/Node KV TTL and atomic batches, invoke/stream, jobs, cron, spans, and logs | CI-gated | `sdk-test: PASS=n FAIL=0` | yes |
 | `onboarding-flow.sh` | on a **virgin DB only**: onboard → session cookie → `/auth/me` → session auth → 409 re-onboard → refresh rotates → old token revoked → logout invalidates | **0.03 s** (skip path) · **0.28 s** for all 13 checks on a virgin DB | `skip  (users already exist…)` · on a virgin DB `onboarding-flow  pass=13  fail=0` | leaves its user |
-| `browser/run.mjs` | real-browser UI verification across 19 routes x 3 viewports: every route renders with no console errors, nothing overflows or is silently clipped, every control clears the 44 px touch floor on coarse pointers, accessible names / keyboard reachability / AA contrast / heading order, plus multi-step flows (nav drawer, destructive-dialog keyboard safety). `--destructive` enables the flows that delete data | ~90 s | `N passed, 0 failed`; non-zero exit if any fails | needs a scratch instance for `--destructive` |
+| `browser/run.mjs` | real-browser UI verification across 19 routes x 3 viewports **x both themes**: every route renders with no console errors, nothing overflows or is silently clipped, every control clears the 44 px touch floor on coarse pointers, accessible names / keyboard reachability / AA contrast / heading order, plus multi-step flows (nav drawer, destructive-dialog keyboard safety). `--theme night\|day` narrows to one; `--full` widens to 7 viewports (266 page loads, ~6.5 min); `--destructive` enables the flows that delete data | ~3 min (both themes) | `N passed, 0 failed`; non-zero exit if any fails | needs a scratch instance for `--destructive` |
 | `container/run.sh` | builds the image, runs it on a **throwaway Docker network** with the privileges nsjail needs (`SYS_ADMIN`, unconfined apparmor/seccomp, delegated cgroupfs, `/dev/net/tun`) and `ORVA_REQUIRE_SANDBOX=1`, then runs the TypeScript-entrypoint + rollback suite and the browser suite against it | ~4 min incl. image build | `n/n passed` per suite; non-zero exit if any fails | yes — `trap cleanup EXIT` removes container, volume and network |
 | `run-all.sh` | umbrella over 11 suites | **49.9 s** | `test/run-all-results.tsv`; exit 1 if any row is `fail` | inherits — **including `atscale.sh`'s 20 permanent functions** |
 | `atscale.sh` | **nothing is asserted** — deploys 20 fns and dumps metrics TSV | exit 2 without `hey` | none | **no — leaves 20 functions forever** |
@@ -1701,6 +1713,41 @@ no stderr fires `GET /api/v1/executions/{id}/logs` → 404 and logs a red
 `API Error` in the browser console. That is the normal case for a silent
 handler.
 
+#### Verifying both themes
+
+The dashboard ships two palettes over one set of markup, so **every screen above
+has to be seen twice**. Settings → Appearance switches between System / Day /
+Night; the preference is `localStorage['orva:theme']`, absent meaning follow the
+OS.
+
+The automated pass is one command, and it covers both themes by default:
+
+```bash
+cd test/browser
+node run.mjs --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY" --full
+```
+
+Four things it will not tell you, and how to check them by hand:
+
+- **Flash of the wrong theme.** Hard-reload with the cache disabled under both
+  OS settings. Resolution is an inline script in `index.html` above the
+  stylesheet; if it ever moves into the app bundle (a module script, therefore
+  deferred) every load paints night first and corrects itself.
+- **Live response to an OS change** while the preference is System.
+- **Placeholder text**, which has no text node and is invisible to the contrast
+  walk. `frontend/test/responsive.test.js` bans fading a muted token with alpha
+  because that was exactly where it went wrong: `/50` measured 3.09:1 at night
+  and 2.19:1 by day.
+- **Non-text contrast** (WCAG 1.4.11) on control borders and icon-only buttons.
+  Form-control borders are `--color-border`, which is 1.70:1 against the night
+  canvas and 1.89:1 against the day one. Both are under the 3:1 floor; it is a
+  known, pre-existing deviation, not a theme regression.
+
+**Test the binary, not the dev server.** Vite serves source; the binary serves a
+Rollup bundle with different CSS ordering, and cascade order is exactly what the
+second `:root[data-theme='day']` block depends on. See §2.5 — a theme change
+that is not re-embedded is invisible in the shipped product.
+
 ---
 
 ## 5. Negative testing
@@ -2168,7 +2215,7 @@ A regression in `env.py` is invisible to CI.
 | `go` vuln | `go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...` | a new advisory reddens CI with zero code change |
 | `ui` | `cd frontend && npm audit --audit-level=moderate && npm run lint && npm run build` | CI uses **`npm ci`** (lockfile-strict); `make ui` uses `npm install` and may rewrite the lockfile. `npm audit` is the classic green-locally-red-in-CI leg |
 | `docker` | `docker build -t orva:ci . && docker run -d -p 127.0.0.1:18443:8443 …` then poll health | CI uses `no-cache: true, pull: true`. Neither passes `--build-arg VERSION`, so both report `dev`/`unknown` — only `release.yml` stamps identity. The first 2–3 health curls fail with `Empty reply`; the 30× loop is required |
-| `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` embeds the **committed** `ui_dist`, so the E2E job serves the committed UI snapshot |
+| `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` builds the UI from source (the job installs Node 24 for exactly this), so the E2E job serves a freshly built dashboard |
 | `cli-unit` | `go vet ./cli/... ./internal/...` && `go test ./cli/commands/ -count=1` | CI adds `-v` |
 | `cli-cross-build` | `bash test/cli/build-matrix.sh && bash test/cli/command-tree.sh` | the qemu-aarch64 `--version` leg is a `warn`, never a failure, and is skipped without qemu |
 | `install-matrix` | `ORVA_BROWSER_LEG=0 bash test/install/run-distro.sh ubuntu24` | verified: exit 0, ~4 min, host port **19449** |
@@ -2316,7 +2363,7 @@ carries both flags for that reason.
 | run `native-engine.sh` on a machine you use | installs over `/opt/orva`, regenerates the service unit, restarts it |
 | run `loadtest.sh` anywhere | kills whatever holds 8443 and deletes `~/.orva/orva.db*` |
 | `make cli` after `make build` | overwrites the server binary at the same path |
-| `make clean` without `make embed` | deletes tracked `ui_dist/` and breaks the build |
+| a frontend change without `make embed` | `ui_dist/` is not rebuilt on freshness, only on absence, so the previous UI ships |
 | trust `sandbox.runtime == "ok"` | it is a bare `os.Stat` |
 | trust a green `run.py` in isolated mode without `--rebuild` | the image may be months old |
 | compare `$?` to 1 for the `exit $FAIL` suites | the code is the failure *count* |

@@ -1,8 +1,8 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-start justify-between gap-4">
+    <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           API Keys
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -32,7 +32,7 @@
           </div>
         </div>
         <button
-          class="inline-flex items-center justify-center shrink-0 rounded text-foreground-muted hover:text-white transition-colors touch-expand-iconbtn"
+          class="inline-flex items-center justify-center shrink-0 rounded text-foreground-muted hover:text-foreground-strong transition-colors touch-expand-iconbtn"
           title="Dismiss"
           aria-label="Dismiss API key"
           @click="createdKey = ''"
@@ -41,9 +41,9 @@
         </button>
       </div>
       <div class="flex items-center gap-2">
-        <code class="flex-1 font-mono text-sm text-white break-all bg-surface px-3 py-2 rounded border border-border">{{ createdKey }}</code>
+        <code class="flex-1 font-mono text-sm text-foreground-strong break-all bg-surface px-3 py-2 rounded border border-border">{{ createdKey }}</code>
         <button
-          class="shrink-0 px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-white transition-colors flex items-center gap-1.5 text-xs touch-expand-sm"
+          class="shrink-0 px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5 text-xs touch-expand-sm"
           @click="copyCreated"
         >
           <Check
@@ -64,7 +64,7 @@
       v-if="creating"
       class="bg-background border border-border rounded-lg p-5 space-y-4"
     >
-      <div class="text-sm font-semibold text-white">
+      <div class="text-sm font-semibold text-foreground-strong">
         New API Key
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -77,7 +77,7 @@
             id="api-key-name"
             v-model="newKey.name"
             placeholder="e.g. ci-deployer"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-focus-ring"
           >
         </div>
         <div>
@@ -88,7 +88,7 @@
           <select
             id="api-key-expiry"
             v-model="newKey.expiresInDays"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-white"
+            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-focus-ring"
           >
             <option :value="0">
               Never
@@ -115,11 +115,18 @@
         <span
           class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
         >Permissions</span>
-        <div class="flex flex-wrap gap-3">
+        <!-- A grid, not flex-wrap. Wrapping laid the four options out by their
+             own content width, and the hints run from "Call functions" to
+             "Keys, channels, firewall, backup and restore" -- a 3x spread. So
+             the wrap points were decided by hint length: two on the first row,
+             then one, then one, with no column a reader could scan down. A
+             declared column count makes the four align whatever the copy
+             says. -->
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label
             v-for="perm in permissionOptions"
             :key="perm.value"
-            class="flex items-start gap-2 text-sm text-foreground cursor-pointer"
+            class="flex items-start gap-2.5 text-sm text-foreground cursor-pointer"
           >
             <input
               v-model="newKey.permissions"
@@ -140,19 +147,24 @@
           Select at least one permission.
         </p>
       </div>
-      <div class="flex gap-2 pt-1">
+      <!-- Cancel first, then the primary: the order Button.vue documents, and
+           the one every dialog in the app already uses. This row had it
+           inverted. Stacking below sm also puts the primary nearest the thumb
+           and stops the pair sitting as a short left-aligned huddle with ~90px
+           of dead space beside it. -->
+      <div class="flex flex-col gap-2 pt-1 sm:flex-row">
+        <Button
+          variant="ghost"
+          @click="cancelCreate"
+        >
+          Cancel
+        </Button>
         <Button
           :disabled="!newKey.name.trim() || !newKey.permissions.length || submitting"
           :loading="submitting"
           @click="submitCreate"
         >
           Generate Key
-        </Button>
-        <Button
-          variant="secondary"
-          @click="cancelCreate"
-        >
-          Cancel
         </Button>
       </div>
     </div>
@@ -178,11 +190,17 @@
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-white truncate">{{ key.name || 'Unnamed' }}</span>
+              <!-- No flex-wrap. With it, whether the prefix sat beside the
+                   name or dropped below it was decided by how long the
+                   operator's name was, so two rows of the same list rendered
+                   as two different shapes and the delete button lined up
+                   against a different thing in each. The name truncates
+                   instead; the prefix is already elided and holds its place. -->
+              <div class="flex items-center gap-2">
+                <span class="min-w-0 truncate font-medium text-foreground-strong">{{ key.name || 'Unnamed' }}</span>
                 <code
                   v-if="key.prefix"
-                  class="text-[11px] font-mono text-foreground-muted bg-surface px-1.5 py-0.5 rounded"
+                  class="shrink-0 rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-foreground-muted"
                 >{{ key.prefix }}…</code>
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground-muted">
@@ -262,7 +280,7 @@
             :key="key.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-6 py-4 text-white font-medium">
+            <td class="px-6 py-4 text-foreground-strong font-medium">
               {{ key.name || 'Unnamed' }}
             </td>
             <td class="px-6 py-4 text-foreground-muted font-mono text-xs hidden sm:table-cell">

@@ -28,7 +28,7 @@ LDFLAGS = -s -w \
 # own `main.Version` instead — the same variable release.yml stamps.
 CLI_LDFLAGS = -s -w -X main.Version=$(VERSION)
 
-.PHONY: build test lint clean ui embed build-all dev adapters-embed docs-embed cli cli-all
+.PHONY: build test lint clean ui ui-dist embed build-all dev adapters-embed docs-embed cli cli-all
 
 # Sync the canonical docs reference markdown into both consumers:
 # - backend/internal/mcp/reference.md → embedded by the get_orva_docs MCP
@@ -61,22 +61,48 @@ adapters-embed:
 	@cp backend/runtimes/node/package.json   backend/cmd/orva/adapters/node/package.json
 	@cp backend/runtimes/python/py.typed     backend/cmd/orva/adapters/python/py.typed
 
-build: adapters-embed docs-embed
+UI_DIST  = backend/internal/server/ui_dist
+UI_INDEX = $(UI_DIST)/index.html
+
+# The dashboard is embedded with //go:embed all:ui_dist, and that is a COMPILE
+# error when the directory is absent. The built assets are not committed -- not
+# one file -- so anything that compiles the server package has to build the UI
+# first. This guard does it once and then gets out of the way: a populated
+# ui_dist is left alone, so backend iteration stays as fast as it was.
+#
+# It deliberately does NOT rebuild on frontend changes. Deciding that from
+# timestamps would put an npm build in front of every `go test`. Run
+# `make embed` (or `make build-all`) when you have changed the UI; that is the
+# one thing you have to remember, and it is now the only way to ship a stale
+# dashboard rather than the default.
+ui-dist:
+	@test -f $(UI_INDEX) || $(MAKE) --no-print-directory embed
+
+build: adapters-embed docs-embed ui-dist
 	@mkdir -p $(BUILD)
 	go build -ldflags="$(LDFLAGS)" -o $(BUILD)/$(BINARY) ./backend/cmd/orva
 
-test:
+# go test and go vet compile backend/internal/server too, so they need the same
+# guarantee. Without it a fresh clone fails on an embed error rather than a
+# test failure, which reads as a broken repo.
+test: ui-dist
 	go test -count=1 ./...
 
-lint:
+lint: ui-dist
 	go vet ./...
 
 ui: docs-embed
+	@command -v npm >/dev/null 2>&1 || { \
+	  echo "npm not found."; \
+	  echo "Orva embeds the dashboard in the server binary, so building the"; \
+	  echo "server needs Node 24. Install it, or use a release binary:"; \
+	  echo "  https://github.com/Harsh-2002/Orva/releases/latest"; \
+	  exit 1; }
 	cd frontend && npm install && npm run build
 
 embed: ui
-	rm -rf backend/internal/server/ui_dist
-	cp -r frontend/dist backend/internal/server/ui_dist
+	rm -rf $(UI_DIST)
+	cp -r frontend/dist $(UI_DIST)
 
 build-all: embed build
 
@@ -112,7 +138,10 @@ cli-all:
 	    -o $(BUILD)/orva-cli-$$os-$$arch$$ext ./cli/cmd/orva || exit 1; \
 	done
 
+# Safe to run now. It used to delete a tracked directory and break the next
+# `go build` outright, because ui_dist was committed and nothing rebuilt it.
+# ui_dist is a build artifact again, and the ui-dist guard puts it back.
 clean:
 	rm -rf $(BUILD)
-	rm -rf backend/internal/server/ui_dist
+	rm -rf $(UI_DIST)
 	rm -rf frontend/dist

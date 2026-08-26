@@ -5,12 +5,21 @@
         v-if="modelValue"
         class="fixed inset-0 z-50 pointer-events-none"
       >
-        <!-- Click-outside to close. Transparent — no overlay, no blur,
-             no dimming. The drawer reads as an inline panel that slides
-             in from the right, not a modal floating on top of a darkened
-             page. -->
+        <!-- Click-outside to close.
+
+             Transparent at sm+ on purpose: the desktop drawer reads as an
+             inline panel sliding in from the right, not a modal floating over
+             a darkened page.
+
+             Below sm it is not that panel. It is a bottom sheet with
+             aria-modal="true" and a focus trap, it covers the control the
+             operator was just using (on /ai that is the composer), and this
+             catcher already swallows every tap on the page behind it. With no
+             scrim the page stayed fully lit and looked live while being
+             untappable, which reads as a broken screen rather than a modal.
+             Dim what is genuinely no longer interactive. -->
         <div
-          class="absolute inset-0 pointer-events-auto"
+          class="absolute inset-0 pointer-events-auto bg-scrim sm:bg-transparent"
           @click="close"
         />
         <Transition name="drawer-slide">
@@ -41,18 +50,22 @@
             @keydown.esc="close"
           >
             <header class="px-5 py-3 border-b border-border flex items-center justify-between shrink-0">
-              <div class="text-sm font-medium text-white truncate">
+              <div class="text-sm font-medium text-foreground-strong truncate">
                 <slot name="title">
                   {{ title }}
                 </slot>
               </div>
-              <button
-                class="text-foreground-muted hover:text-white transition-colors touch-expand-iconbtn -mr-1"
-                aria-label="Close"
+              <!-- IconButton, not a hand-rolled one. This declared neither a
+                   height nor padding, so on a mouse it was a 15.2px target --
+                   the same control in Modal.vue is 26.6px, an 11.4px split in
+                   chrome an operator reads as identical. -->
+              <IconButton
+                :icon="X"
+                icon-size="md"
+                title="Close"
+                class="-mr-1"
                 @click="close"
-              >
-                <X class="w-4 h-4" />
-              </button>
+              />
             </header>
             <div class="flex-1 overflow-y-auto scrollable">
               <slot />
@@ -75,6 +88,7 @@ defineOptions({ name: 'CommonDrawer' })
 
 import { ref, toRef, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { X } from '@lucide/vue'
+import IconButton from './IconButton.vue'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 
 const props = defineProps({

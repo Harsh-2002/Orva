@@ -5,11 +5,19 @@
 /dist/
 /out/
 
-# backend/internal/server/ui_dist/ is deliberately NOT ignored. The UI is
-# embedded via //go:embed and the built snapshot is committed, so `make build`
-# alone reproduces a release artifact (CONTRACT.md section 3). An earlier
-# `internal/server/ui_dist/` entry here was dead -- it was missing the backend/
-# prefix -- and "fixing" the path would have silently broken that invariant.
+# The built dashboard. It is embedded via //go:embed, but it is a build
+# artifact and it is not committed -- not one file. It used to be, on the
+# argument that `make build` alone should reproduce a release artifact. It
+# never did: release.yml, the Dockerfile and ci.yml all run the Vite build and
+# then overwrite this directory, so the committed copy reached no shipped
+# binary. What it did do was let `make build` serve a *stale* dashboard that
+# looked plausible, silently, and put ~70 files of hashed-asset churn in the
+# diff of every frontend PR.
+#
+# Two supported ways to get Orva: take a release binary, or build both halves
+# yourself. `make build` does the second for you -- it builds the UI when this
+# directory is empty.
+backend/internal/server/ui_dist/
 
 # Local agent / Claude session files
 .claude/

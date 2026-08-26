@@ -31,7 +31,7 @@
       <div
         v-if="isOpen && !isMobile"
         ref="panelEl"
-        class="fixed z-50 min-w-[200px] max-w-[min(320px,calc(100vw-1rem))] bg-background border border-border rounded-lg shadow-xl overflow-y-auto overflow-x-hidden scrollable"
+        class="fixed z-50 min-w-[200px] max-w-[min(30rem,calc(100vw-1rem))] bg-background border border-border rounded-lg shadow-xl overflow-y-auto overflow-x-hidden scrollable"
         :style="panelStyle"
         role="menu"
         @keydown.esc="close"
@@ -63,6 +63,10 @@ defineProps({
   title: { type: String, default: '' },
   wide: { type: Boolean, default: false },
 })
+
+// Roughly a dozen rows plus the search field. Long enough that scrolling is
+// rare, short enough that the menu never becomes the page.
+const MAX_PANEL = 384
 
 const isOpen = ref(false)
 const triggerEl = ref(null)
@@ -107,8 +111,18 @@ function place() {
   // Anchor to whichever side has more room, and cap the panel to that room so
   // it can never run off screen no matter how long the list turns out to be.
   // The panel scrolls internally past that point.
+  //
+  // MAX_PANEL is a second, absolute cap, and it is what makes a menu opened
+  // upward and one opened downward read as the same control. Without it the
+  // panel simply took whatever space its side offered: anchored to the chat
+  // composer it grew to roughly 800px and ran nearly the full height of the
+  // window, while the same menu in Settings came out a few hundred px tall.
+  // Same component, same list, two different objects. Direction still follows
+  // the available space, because a menu at the bottom of the viewport has
+  // nowhere to go but up, but the size no longer does.
   const up = spaceAbove > spaceBelow
-  const maxHeight = Math.max(120, Math.floor(up ? spaceAbove : spaceBelow))
+  const room = Math.max(120, Math.floor(up ? spaceAbove : spaceBelow))
+  const maxHeight = Math.min(MAX_PANEL, room)
 
   const width = panelEl.value?.offsetWidth || 200
   const left = Math.max(edge, Math.min(r.left, window.innerWidth - edge - width))

@@ -28,7 +28,7 @@
     <button
       v-if="onRetry"
       type="button"
-      class="shrink-0 text-danger-fg hover:text-white underline underline-offset-2 touch-expand-sm px-1"
+      class="shrink-0 text-danger-fg hover:text-foreground-strong underline underline-offset-2 touch-expand-sm px-1"
       @click="onRetry"
     >
       Retry

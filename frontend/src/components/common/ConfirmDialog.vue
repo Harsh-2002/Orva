@@ -11,7 +11,7 @@
     <transition name="fade">
       <div
         v-if="confirm.visible"
-        class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm pt-safe pb-safe pl-safe pr-safe p-2 sm:p-4"
+        class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-scrim backdrop-blur-sm pt-safe pb-safe pl-safe pr-safe p-2 sm:p-4"
         @click.self="confirm.settle(false)"
         @keydown.esc="confirm.settle(false)"
       >
@@ -48,7 +48,7 @@
             <div class="flex-1 min-w-0">
               <h3
                 :id="titleId"
-                class="text-sm font-semibold text-white tracking-tight"
+                class="text-sm font-semibold text-foreground-strong tracking-tight"
               >
                 {{ confirm.title }}
               </h3>
@@ -64,7 +64,7 @@
                 v-model="confirm.promptValue"
                 :placeholder="confirm.promptPlaceholder"
                 type="text"
-                class="mt-3 w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder-foreground-muted/50 transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+                class="mt-3 w-full h-10 bg-background border border-border rounded-md px-3 text-sm text-foreground placeholder-foreground-muted transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
                 @keydown.enter.stop.prevent="confirm.settle(true)"
               >
             </div>

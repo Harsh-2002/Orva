@@ -21,7 +21,7 @@
         :id="inputId"
         :type="type"
         :value="modelValue"
-        class="w-full bg-background border border-border rounded-md px-3 py-2 text-base sm:text-sm text-foreground placeholder-foreground-muted/50 focus:outline-none focus:ring-1 focus:ring-white focus:border-white transition-colors duration-200"
+        class="w-full h-10 bg-background border border-border rounded-md px-3 text-base sm:text-sm text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring transition-colors duration-200"
         :class="{'pl-9': icon}"
         :placeholder="placeholder"
         :disabled="disabled"

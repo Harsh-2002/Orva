@@ -17,6 +17,15 @@
 //   checkbox glyph cannot be resized without breaking its rendering, so the
 //   convention is to wrap it; measuring the input alone reports a false
 //   failure, and exempting checkboxes outright hides the real ones.
+//
+//   The commitment is to an EFFECTIVE 44px area, not a 44px box. Meeting it by
+//   inflating boxes is what this suite used to reward, and the result was that
+//   on a phone every control tier collapsed into one 44px slab: a chip with
+//   11.4px text became the same object as a primary button. The tiers now take
+//   a real height in proportion to their type and buy the rest of the target
+//   with a bounded transparent ::after. So `getBoundingClientRect()` on the
+//   element is the wrong ruler -- it reports the ink, not the target -- and
+//   this suite has to grow the rect by that pseudo-element's insets.
 
 export const meta = {
   id: 'touch-targets',
@@ -48,14 +57,30 @@ const PROBE = (floor) => {
 
     // A wrapping label is the real target for the control inside it.
     const label = el.closest('label')
-    const box = label ? label.getBoundingClientRect() : r
+    const base = label || el
+    const box = base.getBoundingClientRect()
 
-    if (box.height < floor || box.width < floor) {
+    // Grow by the hit-extension pseudo-element, if this control has one. The
+    // insets are negative offsets on ::after, so `-parseFloat` is the outward
+    // distance. A control with no such rule yields NaN, which coerces to 0.
+    const after = getComputedStyle(base, '::after')
+    const grow = (v) => {
+      const n = -parseFloat(v)
+      return Number.isFinite(n) && n > 0 ? n : 0
+    }
+    const gy = after.content !== 'none' ? grow(after.top) + grow(after.bottom) : 0
+    const gx = after.content !== 'none' ? grow(after.left) + grow(after.right) : 0
+    const w = box.width + gx
+    const h = box.height + gy
+
+    if (h < floor || w < floor) {
       small.push({
         el: describe(el),
-        w: Math.round(box.width),
-        h: Math.round(box.height),
+        w: Math.round(w),
+        h: Math.round(h),
+        box: `${Math.round(box.width)}x${Math.round(box.height)}`,
         viaLabel: !!label,
+        extended: gx > 0 || gy > 0,
       })
     }
   }
@@ -74,5 +99,7 @@ export async function onPage({ page, route, viewport, report }) {
   }
 
   report.record('touch-targets', where, 'controls meet the 44px floor',
-    r.small.map((t) => `${t.el} is ${t.w}x${t.h}${t.viaLabel ? ' (measured on its wrapping label)' : ''}`))
+    r.small.map((t) => `${t.el} has a ${t.w}x${t.h} target` +
+      `${t.extended ? ` (box ${t.box} plus its hit extension)` : ''}` +
+      `${t.viaLabel ? ' (measured on its wrapping label)' : ''}`))
 }

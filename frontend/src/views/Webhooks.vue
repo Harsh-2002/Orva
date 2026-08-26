@@ -5,7 +5,7 @@
          top of it, the way every other list view is built. -->
     <div class="flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Webhooks
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -46,7 +46,7 @@
               class="min-w-0 flex-1 text-left rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               @click="openDeliveries(sub)"
             >
-              <div class="font-medium text-white truncate">
+              <div class="font-medium text-foreground-strong truncate">
                 {{ sub.name }}
               </div>
               <div class="text-[10px] text-foreground-muted font-mono break-all">
@@ -156,7 +156,7 @@
             :key="sub.id"
             class="hover:bg-surface/40 transition-colors"
           >
-            <td class="px-6 py-4 font-medium text-white">
+            <td class="px-6 py-4 font-medium text-foreground-strong">
               <!-- The drawer trigger is a real button, as it already is on the
                    mobile card. It used to be a @click on the bare <tr>, which
                    left delivery history unreachable by keyboard at every width
@@ -257,7 +257,7 @@
             id="webhook-name"
             v-model="form.name"
             placeholder="ops-slack"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
         </div>
         <div>
@@ -269,7 +269,7 @@
             id="webhook-url"
             v-model="form.url"
             placeholder="https://hooks.slack.com/services/..."
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
           <p class="text-xs text-foreground-muted mt-1.5">
             The receiver must respond 2xx within 15s. Failed deliveries retry up to 5× with exponential backoff.

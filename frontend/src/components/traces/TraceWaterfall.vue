@@ -7,7 +7,7 @@
       <div>
         <h2
           id="waterfall-heading"
-          class="text-sm font-semibold text-white tracking-tight"
+          class="text-sm font-semibold text-foreground-strong tracking-tight"
         >
           Causal waterfall
         </h2>
@@ -37,7 +37,7 @@
       >
         <button
           type="button"
-          class="group w-full min-h-11 px-3 sm:px-4 py-2.5 text-left hover:bg-surface/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary transition-colors"
+          class="group w-full min-h-[44px] px-3 sm:px-4 py-2.5 text-left hover:bg-surface/55 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary transition-colors"
           :aria-expanded="selectedKey === row.key"
           :aria-controls="`span-detail-${safeKey(row.key)}`"
           :data-span-key="row.key"
@@ -55,7 +55,7 @@
               />
               <span class="min-w-0">
                 <span class="flex items-center gap-1.5 min-w-0">
-                  <span class="text-sm text-white truncate">{{ row.label }}</span>
+                  <span class="text-sm text-foreground-strong truncate">{{ row.label }}</span>
                   <span
                     v-if="row.type === 'user'"
                     class="text-xs text-foreground-muted border border-border rounded px-1"
@@ -79,7 +79,7 @@
 
             <span class="flex sm:block justify-between items-center font-mono text-xs sm:text-right">
               <span class="sm:hidden text-foreground-muted">+{{ row.offset_ms || 0 }}ms</span>
-              <span class="text-white">{{ row.duration_ms || 0 }}ms</span>
+              <span class="text-foreground-strong">{{ row.duration_ms || 0 }}ms</span>
               <span
                 v-if="row.baseline_p95_ms"
                 class="block text-xs text-foreground-muted"
@@ -101,7 +101,7 @@
                 <dt class="text-foreground-muted">
                   Status
                 </dt>
-                <dd class="text-white mt-0.5">
+                <dd class="text-foreground-strong mt-0.5">
                   {{ row.status }}<span v-if="row.status_code"> · HTTP {{ row.status_code }}</span>
                 </dd>
               </div>
@@ -109,7 +109,7 @@
                 <dt class="text-foreground-muted">
                   Worker
                 </dt>
-                <dd class="text-white mt-0.5">
+                <dd class="text-foreground-strong mt-0.5">
                   {{ row.cold_start ? 'Cold start' : 'Warm' }}
                 </dd>
               </div>
@@ -117,7 +117,7 @@
                 <dt class="text-foreground-muted">
                   Timing
                 </dt>
-                <dd class="text-white mt-0.5 font-mono">
+                <dd class="text-foreground-strong mt-0.5 font-mono">
                   +{{ row.offset_ms || 0 }}ms · {{ row.duration_ms || 0 }}ms
                 </dd>
               </div>
@@ -125,7 +125,7 @@
                 <dt class="text-foreground-muted">
                   Baseline
                 </dt>
-                <dd class="text-white mt-0.5">
+                <dd class="text-foreground-strong mt-0.5">
                   {{ baselineComparison(row) }}
                 </dd>
               </div>
@@ -133,7 +133,7 @@
             <button
               v-if="row.execution_id"
               type="button"
-              class="min-h-11 inline-flex items-center gap-2 rounded-md px-3 text-xs text-foreground border border-border hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              class="touch-expand-sm inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs text-foreground border border-border hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               @click="$emit('open-invocation', row.execution_id)"
             >
               Open invocation <ExternalLink
@@ -153,7 +153,7 @@
             v-if="row.attributes"
             class="mt-3 text-xs"
           >
-            <summary class="min-h-11 inline-flex items-center cursor-pointer text-foreground-muted hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
+            <summary class="touch-expand-sm min-h-6 inline-flex items-center cursor-pointer text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
               Structured attributes
             </summary>
             <pre class="mt-1 overflow-x-auto rounded bg-background p-3 text-foreground whitespace-pre-wrap">{{ prettyJSON(row.attributes) }}</pre>
@@ -164,7 +164,7 @@
 
     <div class="border-t border-border px-4 sm:px-5 py-4">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <h3 class="text-sm font-medium text-white">
+        <h3 class="text-sm font-medium text-foreground-strong">
           Structured logs <span class="text-foreground-muted font-normal">({{ visibleLogs.length }})</span>
         </h3>
         <div
@@ -173,7 +173,7 @@
         >
           <button
             type="button"
-            class="min-h-11 px-3 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="touch-expand-xs h-7 px-2.5 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :class="logScope === 'all' ? 'bg-primary text-primary-foreground border-primary' : 'bg-surface text-foreground-muted border-border'"
             :aria-pressed="logScope === 'all'"
             @click="logScope = 'all'"
@@ -182,7 +182,7 @@
           </button>
           <button
             type="button"
-            class="min-h-11 px-3 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+            class="touch-expand-xs h-7 px-2.5 rounded-md text-xs border focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
             :class="logScope === 'selected' ? 'bg-primary text-primary-foreground border-primary' : 'bg-surface text-foreground-muted border-border'"
             :disabled="!selectedRow"
             :aria-pressed="logScope === 'selected'"
@@ -215,13 +215,13 @@
               class="text-xs uppercase tracking-label"
               :class="logLevelClass(entry.level)"
             >{{ entry.level }}</span>
-            <span class="text-white break-words">{{ entry.message }}</span>
+            <span class="text-foreground-strong break-words">{{ entry.message }}</span>
           </div>
           <details
             v-if="entry.fields"
             class="mt-1"
           >
-            <summary class="min-h-11 inline-flex items-center cursor-pointer text-xs text-foreground-muted hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
+            <summary class="touch-expand-sm min-h-6 inline-flex items-center cursor-pointer text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
               Fields
             </summary>
             <pre class="overflow-x-auto rounded bg-background p-3 text-foreground whitespace-pre-wrap">{{ prettyJSON(entry.fields) }}</pre>

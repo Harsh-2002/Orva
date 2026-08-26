@@ -17,21 +17,21 @@
     </h1>
     <div class="flex min-w-0 items-center gap-2">
       <button
-        class="touch-expand-iconbtn -ml-1 rounded-md p-2 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background md:hidden"
+        class="touch-expand-iconbtn -ml-1 rounded-md p-2 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background md:hidden"
         aria-label="Conversations"
         @click="$emit('toggle-rail')"
       >
         <PanelLeft class="h-4 w-4" />
       </button>
       <MessageSquare class="hidden h-4 w-4 shrink-0 text-foreground-muted md:block" />
-      <p class="truncate text-sm font-semibold tracking-tight text-white">
+      <p class="truncate text-sm font-semibold tracking-tight text-foreground-strong">
         {{ title }}
       </p>
     </div>
     <div class="flex items-center gap-0.5">
       <button
         v-if="canExport"
-        class="touch-expand-iconbtn -mr-1 rounded-md p-2 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        class="touch-expand-iconbtn -mr-1 rounded-md p-2 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         aria-label="Export conversation as Markdown"
         title="Export conversation"
         @click="$emit('export')"

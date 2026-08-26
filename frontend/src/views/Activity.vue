@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-xl font-semibold text-white tracking-tight">
+      <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
         Activity
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
@@ -15,12 +15,12 @@
          Desktop (sm+): the original single-row flex-wrap returns. -->
     <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:flex-wrap">
       <div class="relative w-full sm:flex-1 sm:min-w-[260px] sm:max-w-[420px]">
-        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted/60 pointer-events-none" />
+        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
         <input
           v-model="filters.q"
           aria-label="Search activity by path, summary, or actor"
           placeholder="Search path, summary, actor…"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted/60 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           @input="onSearchInput"
         >
       </div>
@@ -41,7 +41,7 @@
           >{{ counts[opt.value] }}</span>
         </Button>
 
-        <span class="text-foreground-muted/40 shrink-0">·</span>
+        <span class="text-foreground-muted shrink-0">·</span>
 
         <Button
           v-for="opt in statusOptions"
@@ -55,7 +55,7 @@
           {{ opt.label }}
         </Button>
 
-        <span class="text-foreground-muted/40 shrink-0">·</span>
+        <span class="text-foreground-muted shrink-0">·</span>
 
         <Button
           v-for="opt in rangeOptions"
@@ -105,7 +105,7 @@
                   :status="statusLabel(row.status)"
                 />
               </div>
-              <div class="mt-1 text-xs font-mono text-white break-all">
+              <div class="mt-1 text-xs font-mono text-foreground-strong break-all">
                 {{ row.method ? row.method + ' ' : '' }}{{ row.path || EMPTY }}
               </div>
               <div
@@ -186,12 +186,12 @@
               <SourceTag :source="row.source" />
             </td>
             <td class="px-6 py-4 hidden md:table-cell">
-              <div class="text-xs text-white truncate max-w-[200px]">
+              <div class="text-xs text-foreground-strong truncate max-w-[200px]">
                 {{ row.actor_label || row.actor_id || EMPTY }}
               </div>
               <div
                 v-if="row.actor_label && row.actor_id && row.actor_label !== row.actor_id"
-                class="text-[10px] text-foreground-muted/70 font-mono truncate"
+                class="text-[10px] text-foreground-muted font-mono truncate"
               >
                 {{ row.actor_id }}
               </div>
@@ -199,7 +199,7 @@
             <td class="px-6 py-4 text-xs font-mono text-foreground-muted hidden sm:table-cell">
               {{ row.method || EMPTY }}
             </td>
-            <td class="px-6 py-4 text-xs font-mono text-white truncate max-w-[440px]">
+            <td class="px-6 py-4 text-xs font-mono text-foreground-strong truncate max-w-[440px]">
               {{ row.path || EMPTY }}
             </td>
             <td class="px-6 py-4 hidden sm:table-cell">
@@ -290,7 +290,7 @@
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
               Time
             </div>
-            <div class="text-xs text-white font-mono truncate">
+            <div class="text-xs text-foreground-strong font-mono truncate">
               {{ formatFullTime(drawerRow.ts) }}
             </div>
           </div>
@@ -304,7 +304,7 @@
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
               Actor
             </div>
-            <div class="text-sm text-white truncate">
+            <div class="text-sm text-foreground-strong truncate">
               {{ drawerRow.actor_label || EMPTY }}
             </div>
             <div
@@ -337,7 +337,7 @@
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
               Method
             </div>
-            <div class="text-xs text-white font-mono truncate">
+            <div class="text-xs text-foreground-strong font-mono truncate">
               {{ drawerRow.method || EMPTY }}
             </div>
           </div>
@@ -345,7 +345,7 @@
             <div class="text-[10px] uppercase tracking-wider text-foreground-muted mb-1">
               Duration
             </div>
-            <div class="text-xs text-white font-mono">
+            <div class="text-xs text-foreground-strong font-mono">
               {{ formatDuration(drawerRow.duration_ms) }}
             </div>
           </div>
@@ -356,7 +356,7 @@
           <h3 class="text-xs uppercase tracking-wider text-foreground-muted mb-2">
             Path / Tool
           </h3>
-          <pre class="bg-surface border border-border rounded p-3 text-xs text-white font-mono whitespace-pre-wrap break-all">{{ drawerRow.path || EMPTY }}</pre>
+          <pre class="bg-surface border border-border rounded p-3 text-xs text-foreground-strong font-mono whitespace-pre-wrap break-all">{{ drawerRow.path || EMPTY }}</pre>
         </div>
 
         <!-- Summary -->

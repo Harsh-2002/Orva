@@ -23,6 +23,22 @@ log "building slim CLI"
 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -X main.Version=tree-test' \
     -o "$OUT/orva-cli" "$REPO_ROOT/cli/cmd/orva" || die "slim CLI build failed"
 
+# The server embeds the dashboard with //go:embed all:ui_dist, and that is a
+# compile error when the directory is absent. The built UI is not committed, so
+# on a fresh checkout it is absent. This test compares Cobra command trees and
+# has no interest in the dashboard whatsoever, so it stands up a one-file stub
+# rather than making the job install Node and run a Vite build to satisfy an
+# embed directive. A real ui_dist, if one is already there, is left alone.
+UI_DIST="$REPO_ROOT/backend/internal/server/ui_dist"
+UI_STUB=0
+if [ ! -e "$UI_DIST/index.html" ]; then
+    mkdir -p "$UI_DIST"
+    printf '<!doctype html><title>ui not built</title>\n' > "$UI_DIST/index.html"
+    UI_STUB=1
+fi
+cleanup_ui_stub() { [ "$UI_STUB" = 1 ] && rm -rf "$UI_DIST"; return 0; }
+trap cleanup_ui_stub EXIT
+
 log "building server binary"
 go build -ldflags='-X main.Version=tree-test' \
     -o "$OUT/orva-server" "$REPO_ROOT/backend/cmd/orva" || die "server build failed"

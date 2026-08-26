@@ -31,7 +31,7 @@
           <select
             id="ai-active-provider"
             :value="store.selectedProviderId || ''"
-            class="mt-1.5 h-10 w-full bg-background border border-border rounded-md text-sm px-3 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="mt-1.5 h-10 w-full bg-background border border-border rounded-md text-sm px-3 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             @change="onSelectProvider"
           >
             <option
@@ -140,7 +140,7 @@
           <select
             id="ai-provider"
             v-model="form.provider"
-            class="mt-1.5 w-full bg-background border border-border rounded-md text-sm px-3 py-2 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="mt-1.5 h-10 w-full bg-background border border-border rounded-md text-sm px-3 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
             <option
               v-for="opt in PROVIDERS"
@@ -197,10 +197,23 @@
         <p class="text-xs text-foreground-muted leading-snug">
           Choose when changes require confirmation.
         </p>
+        <!--
+          rounded-md and real padding, because the hover state is a shape.
+          These rows were px-1 py-2 with no radius, so hovering one painted a
+          hard-edged band running the full width of the fieldset with 4px of
+          air on either side of the text. It read as a selection artefact
+          rather than a control responding, which on the one setting an
+          operator opens this panel to confirm is the worst place for it.
+
+          The focus ring is white, not primary. The comment on the radio below
+          already establishes why violet cannot carry a state indicator here
+          (2.25:1 on the near-black panel, under WCAG 1.4.11's 3:1); the ring
+          around the whole row had exactly the same problem and was missed.
+        -->
         <label
           v-for="opt in APPROVAL_OPTIONS"
           :key="opt.value"
-          class="flex cursor-pointer items-start gap-3 px-1 py-2 transition-colors hover:bg-surface-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary"
+          class="flex cursor-pointer items-start gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-surface-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-inset focus-within:ring-focus-ring"
         >
           <input
             v-model="store.settings.approval_policy"

@@ -14,7 +14,7 @@
     <Transition name="fade">
       <div
         v-if="open"
-        class="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[10vh] sm:pt-[15vh] px-4"
+        class="fixed inset-0 z-50 flex items-start justify-center bg-scrim backdrop-blur-sm pt-[10vh] sm:pt-[15vh] px-4"
         @click.self="close"
       >
         <div
@@ -39,7 +39,7 @@
               v-model="query"
               type="text"
               placeholder="Search routes, actions…"
-              class="flex-1 bg-transparent border-0 text-base sm:text-sm text-white placeholder-foreground-muted focus:outline-none"
+              class="flex-1 bg-transparent border-0 text-base sm:text-sm text-foreground-strong placeholder-foreground-muted focus:outline-none"
               @keydown.down.prevent="moveSelection(1)"
               @keydown.up.prevent="moveSelection(-1)"
               @keydown.enter.prevent="activate(filtered[selectedIdx])"
@@ -69,7 +69,7 @@
               :class="[
                 'flex items-center gap-3 px-4 py-2.5 min-h-[44px] text-base sm:text-sm cursor-pointer',
                 idx === selectedIdx
-                  ? 'bg-primary/15 text-white'
+                  ? 'bg-primary/15 text-foreground-strong'
                   : 'text-foreground hover:bg-surface-hover'
               ]"
               @click="activate(item)"

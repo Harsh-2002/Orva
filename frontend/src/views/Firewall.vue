@@ -4,14 +4,14 @@
     <header class="space-y-3">
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="max-w-2xl">
-          <h1 class="text-xl font-semibold text-white tracking-tight">
+          <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
             Egress
           </h1>
           <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
             Control outbound destinations and DNS for function sandboxes.
           </p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <!--
             "Refresh policy", not "Apply now". Adding, editing, toggling or
             deleting a rule already compiles and publishes a new generation on
@@ -76,7 +76,7 @@
 
       <!-- Detailed policy state stays available without competing with status. -->
       <details class="group">
-        <summary class="cursor-pointer text-xs text-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <summary class="touch-expand-sm inline-flex items-center cursor-pointer text-xs text-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           Policy details
         </summary>
         <div class="policy-meta mt-2">
@@ -210,7 +210,7 @@
               :key="rec.host + idx"
               class="dns-record"
             >
-              <span class="font-mono text-white text-xs flex-1 truncate">{{ rec.host }}</span>
+              <span class="font-mono text-foreground-strong text-xs flex-1 truncate">{{ rec.host }}</span>
               <span class="text-foreground-muted text-xs">→</span>
               <span class="font-mono text-foreground text-xs flex-1 truncate">{{ rec.ip }}</span>
               <button
@@ -263,7 +263,7 @@
           </span>
           <button
             v-if="dns.servers.length || dns.search || dns.records.length"
-            class="inline-flex items-center text-xs text-foreground-muted hover:text-white px-2 py-1 transition-colors touch-expand-sm"
+            class="inline-flex items-center text-xs text-foreground-muted hover:text-foreground-strong px-2 py-1 transition-colors touch-expand-sm"
             @click="resetDNS"
           >
             Reset
@@ -328,8 +328,8 @@
         v-if="!visibleRules.length"
         class="empty-card"
       >
-        <ShieldOff class="w-5 h-5 mb-2 text-foreground-muted/60" />
-        <p class="text-sm text-white">
+        <ShieldOff class="w-5 h-5 mb-2 text-foreground-muted" />
+        <p class="text-sm text-foreground-strong">
           {{ filter === 'yours' ? 'No custom blocks yet' : 'Nothing matches this filter' }}
         </p>
         <p class="text-xs text-foreground-muted mt-1 max-w-sm">
@@ -950,7 +950,7 @@ const PanelSection = defineComponent({
     return () =>
       h('section', { class: 'space-y-3' }, [
         h('div', null, [
-          h('h2', { class: 'text-sm font-semibold text-white tracking-tight' }, p.title),
+          h('h2', { class: 'text-sm font-semibold text-foreground-strong tracking-tight' }, p.title),
           p.subtitle ? h('p', { class: 'text-xs text-foreground-muted mt-0.5' }, p.subtitle) : null,
         ]),
         h('div', null, slots.default?.()),
@@ -1129,7 +1129,7 @@ const RuleCard = defineComponent({
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 .rule-filter:hover {
-  color: white;
+  color: var(--color-foreground-strong);
   border-color: var(--color-foreground-muted);
 }
 .rule-filter.active {
@@ -1175,7 +1175,7 @@ const RuleCard = defineComponent({
 }
 .policy-chip-v {
   font-family: var(--font-mono);
-  color: white;
+  color: var(--color-foreground-strong);
   overflow-wrap: anywhere;
 }
 
@@ -1213,7 +1213,7 @@ const RuleCard = defineComponent({
 }
 .unenforced-note code {
   font-family: var(--font-mono);
-  color: white;
+  color: var(--color-foreground-strong);
 }
 
 .rule-grid {
@@ -1271,7 +1271,7 @@ const RuleCard = defineComponent({
 .rule-card-title {
   font-size: 13.5px;
   font-weight: 600;
-  color: white;
+  color: var(--color-foreground-strong);
   line-height: 1.3;
 }
 
@@ -1312,6 +1312,8 @@ const RuleCard = defineComponent({
    switch itself inflating: padding would have stretched the pill, and the
    ::before overlay style.css removed used to cover the card beside it. On a
    fine pointer the button hugs the track, so the box is unchanged at 36x20. */
+/* A role="switch" track, not a button on the ladder: 36x20 is the switch
+   geometry itself. Lifted to 44x44 on coarse pointers below. */
 .rule-toggle {
   flex-shrink: 0;
   display: inline-flex;
@@ -1361,7 +1363,7 @@ const RuleCard = defineComponent({
   transition: transform 150ms ease, background-color 150ms ease;
 }
 .rule-toggle.on .rule-toggle-knob {
-  background: white;
+  background: var(--color-foreground-strong);
   transform: translateX(16px);
 }
 .rule-toggle.inert .rule-toggle-knob {
@@ -1514,13 +1516,17 @@ const RuleCard = defineComponent({
   background: var(--color-background);
   border: 1px solid var(--color-border);
   font-size: 11.5px;
-  color: white;
+  color: var(--color-foreground-strong);
 }
 .dns-chip.muted {
   color: var(--color-foreground-muted);
   border-color: var(--color-border);
   background: color-mix(in srgb, var(--color-foreground) 2%, transparent);
 }
+/* Off the control ladder on purpose: this x sits INSIDE a chip whose own
+   content box is 17.25px, so giving it the 22.8px text rung would inflate the
+   chip around it. The coarse-pointer block below lifts it to a real 44px
+   target, which is where it matters. */
 .dns-chip-x {
   margin-left: 0.15rem;
   width: 16px;
@@ -1612,7 +1618,7 @@ const RuleCard = defineComponent({
 }
 .dns-input:focus {
   outline: none;
-  border-color: white;
+  border-color: var(--color-foreground-strong);
 }
 .dns-hint {
   font-size: 11.5px;

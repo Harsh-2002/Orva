@@ -9,7 +9,7 @@
       v-if="!embedded"
       class="flex h-16 shrink-0 items-center justify-between px-4 border-b border-border"
     >
-      <span class="text-sm font-semibold tracking-tight text-white">Conversations</span>
+      <span class="text-sm font-semibold tracking-tight text-foreground-strong">Conversations</span>
       <Button
         size="xs"
         variant="secondary"
@@ -36,7 +36,7 @@
       >
         <button
           class="touch-expand-sm flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-          :class="c.id === store.activeId ? 'text-white' : 'text-foreground-muted group-hover:text-white'"
+          :class="c.id === store.activeId ? 'text-foreground-strong' : 'text-foreground-muted group-hover:text-foreground-strong'"
           :aria-current="c.id === store.activeId ? 'page' : undefined"
           @click="onOpen(c.id)"
         >
@@ -45,7 +45,7 @@
         </button>
         <button
           type="button"
-          class="touch-expand-iconbtn shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
+          class="touch-expand-iconbtn shrink-0 rounded-md p-2 text-foreground-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-foreground-strong focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary group-hover:opacity-100 max-md:opacity-100"
           title="Rename conversation"
           aria-label="Rename conversation"
           @click.stop="onRename(c)"

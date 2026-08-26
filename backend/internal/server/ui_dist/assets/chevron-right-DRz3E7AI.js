@@ -1,1 +1,0 @@
-import{Mt as e}from"./index-Dy3L-GAd.js";var t=e(`chevron-right`,[[`path`,{d:`m9 18 6-6-6-6`,key:`mthhwq`}]]);export{t};

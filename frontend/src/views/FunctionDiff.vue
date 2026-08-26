@@ -4,22 +4,22 @@
          one-line subhead, max-w-prose, no icon. -->
     <div class="flex items-end justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight text-balance">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight text-balance">
           Compare versions
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Compare source and configuration for
           <router-link
             :to="`/functions/${fnName}`"
-            class="text-white underline"
+            class="text-foreground-strong underline"
           >
             {{ fnName }}
           </router-link>.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <button
-          class="text-xs text-foreground-muted hover:text-white hover:bg-surface-hover rounded-md flex items-center justify-center gap-1.5 px-2 py-1.5 transition-colors min-w-[6rem] focus:outline-none focus-visible:ring-1 focus-visible:ring-white"
+          class="text-xs text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover rounded-md flex items-center justify-center gap-1.5 px-2 py-1.5 transition-colors min-w-[6rem] focus:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
           title="Copy share link"
           aria-label="Copy share link"
           @click="copyShareLink"
@@ -50,12 +50,12 @@
             class="block text-xs font-medium uppercase tracking-label text-foreground-muted"
           >
             From
-            <span class="ml-1 text-foreground-muted/60 normal-case font-medium tracking-normal">(older)</span>
+            <span class="ml-1 text-foreground-muted normal-case font-medium tracking-normal">(older)</span>
           </label>
           <select
             id="diff-from"
             :value="fromId"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             @change="updateRange({ from: $event.target.value })"
           >
             <option
@@ -76,7 +76,7 @@
         </div>
         <button
           :disabled="!fromId || !toId"
-          class="justify-self-center sm:self-end mb-1 h-9 w-9 flex items-center justify-center rounded-md text-foreground-muted hover:text-white hover:bg-surface-hover transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-foreground-muted"
+          class="justify-self-center sm:self-end mb-1 h-9 w-9 flex items-center justify-center rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-foreground-muted"
           title="Swap from / to"
           aria-label="Swap from and to versions"
           @click="swap"
@@ -89,12 +89,12 @@
             class="block text-xs font-medium uppercase tracking-label text-foreground-muted"
           >
             To
-            <span class="ml-1 text-foreground-muted/60 normal-case font-medium tracking-normal">(newer)</span>
+            <span class="ml-1 text-foreground-muted normal-case font-medium tracking-normal">(newer)</span>
           </label>
           <select
             id="diff-to"
             :value="toId"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-white focus:border-white"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
             @change="updateRange({ to: $event.target.value })"
           >
             <option
@@ -127,7 +127,7 @@
       >
         <button
           v-if="activeDeploymentId && toId !== activeDeploymentId"
-          class="inline-flex items-center gap-1.5 text-xs text-foreground-muted hover:text-white hover:bg-surface-hover rounded-md px-2.5 py-1.5 transition-colors"
+          class="inline-flex items-center gap-1.5 text-xs text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover rounded-md px-2.5 py-1.5 transition-colors"
           title="Compare previous version with currently active"
           @click="setToActive"
         >
@@ -183,7 +183,7 @@
         >
           <button
             v-if="findVersionByHash(h)"
-            class="text-left text-warning hover:text-white hover:bg-warning/15 rounded px-1.5 py-0.5 -mx-1.5 transition-colors"
+            class="text-left text-warning hover:text-foreground-strong hover:bg-warning/15 rounded px-1.5 py-0.5 -mx-1.5 transition-colors"
             :title="`Use v${findVersionByHash(h).version} as the From side`"
             @click="useHashAsFrom(h)"
           >
@@ -252,7 +252,7 @@
             </span>
           </h2>
           <button
-            class="text-foreground-muted hover:text-white"
+            class="touch-expand-iconbtn inline-flex items-center justify-center rounded text-foreground-muted hover:text-foreground-strong"
             :aria-label="metaOpen ? 'Collapse settings diff' : 'Expand settings diff'"
             @click="metaOpen = !metaOpen"
           >
@@ -275,14 +275,14 @@
               {{ line }}
             </li>
           </ul>
-          <p class="text-[11px] text-foreground-muted/70 mt-3">
+          <p class="text-[11px] text-foreground-muted mt-3">
             Secrets aren't tracked per-version; they always reflect the current values.
           </p>
         </div>
       </section>
 
       <!-- Handler source — the page's centre of gravity. The H2 carries
-           text-white (vs the muted settings/manifest H2s) so the eye
+           text-foreground-strong (vs the muted settings/manifest H2s) so the eye
            lands here first. The view-mode label is now a real button:
            toggling persists in localStorage and the merge view rebuilds. -->
       <section
@@ -290,7 +290,7 @@
         class="bg-background border border-border rounded-lg overflow-hidden"
       >
         <header class="px-4 py-2.5 flex items-center justify-between gap-3 bg-surface border-b border-border">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-foreground-strong flex items-center gap-2">
             <FileCode class="w-3.5 h-3.5 text-foreground-muted" />
             <span class="font-mono normal-case tracking-normal text-sm font-medium">{{ handlerFile.path }}</span>
             <span
@@ -303,7 +303,7 @@
             >removed</span>
           </h2>
           <button
-            class="text-[10px] font-medium uppercase tracking-label text-foreground-muted hover:text-white hover:bg-surface-hover rounded px-2 py-1 transition-colors"
+            class="text-[10px] font-medium uppercase tracking-label text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover rounded px-2 py-1 transition-colors"
             :title="sideBySide ? 'Switch to unified inline view' : 'Switch to side-by-side view'"
             :aria-pressed="sideBySide"
             @click="toggleSideBySide"
@@ -339,13 +339,13 @@
         <header class="px-4 py-2.5 flex items-center justify-between gap-3 bg-surface border-b border-border">
           <h2 class="text-xs font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-2">
             <Package class="w-3.5 h-3.5" />
-            <span class="font-mono normal-case tracking-normal text-white text-sm font-medium">{{ manifestFile.path }}</span>
+            <span class="font-mono normal-case tracking-normal text-foreground-strong text-sm font-medium">{{ manifestFile.path }}</span>
             <span class="text-[10px] px-1.5 py-0.5 rounded bg-warning/15 text-warning border border-warning/30 font-medium tracking-normal normal-case">
               changed
             </span>
           </h2>
           <button
-            class="text-foreground-muted hover:text-white"
+            class="touch-expand-iconbtn inline-flex items-center justify-center rounded text-foreground-muted hover:text-foreground-strong"
             :aria-label="manifestOpen ? 'Collapse manifest diff' : 'Expand manifest diff'"
             @click="manifestOpen = !manifestOpen"
           >

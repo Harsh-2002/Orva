@@ -6,14 +6,14 @@
          overflow-x: hidden. Column under sm, the original row from sm up. -->
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Inbound webhooks
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Signed URLs that invoke
           <router-link
             :to="`/functions/${fnName}`"
-            class="text-white underline"
+            class="text-foreground-strong underline"
           >
             {{ fnName }}
           </router-link>
@@ -55,7 +55,7 @@
           Trigger created. Copy the secret now. It will not be shown again.
         </div>
         <button
-          class="inline-flex items-center shrink-0 rounded px-2 -mx-2 touch-expand-sm text-xs text-warning-fg hover:text-white transition-colors"
+          class="inline-flex items-center shrink-0 rounded px-2 -mx-2 touch-expand-sm text-xs text-warning-fg hover:text-foreground-strong transition-colors"
           @click="lastCreated = null"
         >
           Dismiss
@@ -64,9 +64,9 @@
       <div class="text-xs space-y-2">
         <div>
           <span class="text-foreground-muted uppercase tracking-wider text-[10px]">URL</span>
-          <code class="ml-2 font-mono text-white break-all">{{ origin + lastCreated.trigger_url }}</code>
+          <code class="ml-2 font-mono text-foreground-strong break-all">{{ origin + lastCreated.trigger_url }}</code>
           <button
-            class="inline-flex items-center rounded px-2 touch-expand-sm text-warning-fg hover:text-white transition-colors"
+            class="inline-flex items-center rounded px-2 touch-expand-sm text-warning-fg hover:text-foreground-strong transition-colors"
             @click="copy(origin + lastCreated.trigger_url)"
           >
             Copy URL
@@ -74,9 +74,9 @@
         </div>
         <div>
           <span class="text-foreground-muted uppercase tracking-wider text-[10px]">Secret</span>
-          <code class="ml-2 font-mono text-white break-all">{{ lastCreated.secret }}</code>
+          <code class="ml-2 font-mono text-foreground-strong break-all">{{ lastCreated.secret }}</code>
           <button
-            class="inline-flex items-center rounded px-2 touch-expand-sm text-warning-fg hover:text-white transition-colors"
+            class="inline-flex items-center rounded px-2 touch-expand-sm text-warning-fg hover:text-foreground-strong transition-colors"
             @click="copy(lastCreated.secret)"
           >
             Copy secret
@@ -84,7 +84,7 @@
         </div>
         <div>
           <span class="text-foreground-muted uppercase tracking-wider text-[10px]">Sample curl</span>
-          <pre class="mt-1 bg-background border border-border rounded p-3 text-[11px] font-mono text-white whitespace-pre-wrap overflow-x-auto">{{ sampleCurl(lastCreated) }}</pre>
+          <pre class="mt-1 bg-background border border-border rounded p-3 text-[11px] font-mono text-foreground-strong whitespace-pre-wrap overflow-x-auto">{{ sampleCurl(lastCreated) }}</pre>
         </div>
       </div>
     </div>
@@ -101,7 +101,7 @@
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-white truncate">{{ row.name }}</span>
+                <span class="font-medium text-foreground-strong truncate">{{ row.name }}</span>
                 <span
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border"
                   :class="row.active
@@ -206,7 +206,7 @@
             :key="row.id"
             class="hover:bg-surface/50 transition-colors"
           >
-            <td class="px-6 py-4 font-medium text-white">
+            <td class="px-6 py-4 font-medium text-foreground-strong">
               <div class="flex flex-col">
                 <span>{{ row.name }}</span>
                 <span class="text-xs text-foreground-muted font-mono">{{ row.id }}</span>
@@ -289,7 +289,7 @@
             id="inbound-name"
             v-model="create.name"
             placeholder="e.g. github-deploys"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
           >
         </div>
         <div>
@@ -300,7 +300,7 @@
           <select
             id="inbound-format"
             v-model="create.format"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
           >
             <option value="hmac_sha256_hex">
               hmac_sha256_hex (default)
@@ -379,7 +379,7 @@
             v-model="test.body"
             rows="6"
             spellcheck="false"
-            class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-white font-mono focus:outline-none focus:border-white"
+            class="mt-2 w-full bg-surface border border-border rounded p-3 text-xs text-foreground-strong font-mono focus:outline-none focus:border-focus-ring"
           />
         </div>
         <div
@@ -393,7 +393,7 @@
           class="space-y-1"
         >
           <span class="text-xs uppercase tracking-wider text-foreground-muted">Response (HTTP {{ test.response.status }})</span>
-          <pre class="bg-background border border-border rounded p-3 text-[11px] font-mono text-white whitespace-pre-wrap overflow-x-auto">{{ test.response.body }}</pre>
+          <pre class="bg-background border border-border rounded p-3 text-[11px] font-mono text-foreground-strong whitespace-pre-wrap overflow-x-auto">{{ test.response.body }}</pre>
         </div>
       </div>
       <template #footer>

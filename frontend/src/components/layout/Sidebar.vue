@@ -20,7 +20,7 @@
       <BrandLockup />
       <button
         ref="toggleBtn"
-        class="p-2 rounded-md text-foreground-muted hover:text-white hover:bg-surface transition-colors touch-expand-iconbtn"
+        class="p-2 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface transition-colors touch-expand-iconbtn"
         :aria-label="open ? 'Close menu' : 'Open menu'"
         :aria-expanded="open"
         aria-controls="primary-navigation"
@@ -42,7 +42,7 @@
   <transition name="fade">
     <div
       v-if="open"
-      class="lg:hidden fixed inset-0 bg-black/50 z-30 backdrop-blur-sm"
+      class="lg:hidden fixed inset-0 bg-scrim z-30 backdrop-blur-sm"
       @click="open = false"
     />
   </transition>
@@ -70,17 +70,17 @@
         :key="item.path"
         :to="item.path"
         :class="[
-          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
           isActive(item.path)
-            ? 'text-white bg-primary/15'
-            : 'text-foreground-muted hover:text-white hover:bg-surface-hover'
+            ? 'text-foreground-strong bg-primary/15'
+            : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
         ]"
         @click="open = false"
       >
         <component
           :is="item.icon"
           class="w-4 h-4 transition-colors"
-          :class="isActive(item.path) ? 'text-white' : 'text-foreground-muted group-hover:text-white'"
+          :class="isActive(item.path) ? 'text-foreground-strong' : 'text-foreground-muted group-hover:text-foreground-strong'"
         />
         <span>{{ item.label }}</span>
       </router-link>
@@ -92,8 +92,8 @@
       >
         <button
           type="button"
-          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium touch-expand-sm text-foreground-muted transition-colors hover:bg-surface-hover hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-          :class="groupIsActive(group) ? 'text-white' : ''"
+          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium touch-expand-row text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          :class="groupIsActive(group) ? 'text-foreground-strong' : ''"
           :aria-expanded="expandedGroups[group.id]"
           :aria-controls="`nav-group-${group.id}`"
           @click="expandedGroups[group.id] = !expandedGroups[group.id]"
@@ -118,10 +118,10 @@
             :key="item.path"
             :to="item.path"
             :class="[
-              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+              'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
               isActive(item.path)
-                ? 'text-white bg-primary/15'
-                : 'text-foreground-muted hover:text-white hover:bg-surface-hover'
+                ? 'text-foreground-strong bg-primary/15'
+                : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
             ]"
             @click="open = false"
           >
@@ -140,10 +140,10 @@
           :key="item.path"
           :to="item.path"
           :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+            'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
             isActive(item.path)
-              ? 'text-white bg-primary/15'
-              : 'text-foreground-muted hover:text-white hover:bg-surface-hover'
+              ? 'text-foreground-strong bg-primary/15'
+              : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
           ]"
           @click="open = false"
         >

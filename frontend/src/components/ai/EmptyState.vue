@@ -12,7 +12,7 @@
     than a sentence about it could.
   -->
   <div class="text-center">
-    <h2 class="text-lg font-semibold tracking-tight text-white">
+    <h2 class="text-lg font-semibold tracking-tight text-foreground-strong">
       {{ greeting }}
     </h2>
 
@@ -24,7 +24,7 @@
         v-for="(p, i) in suggestions"
         :key="i"
         type="button"
-        class="touch-expand-sm rounded-md px-3 py-2 text-left text-xs leading-snug text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        class="touch-expand-sm min-h-8 rounded-full border border-border bg-surface px-3.5 py-1 text-left text-xs leading-snug text-foreground-muted transition-colors hover:border-foreground-muted hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         @click="$emit('pick', p)"
       >
         <span class="line-clamp-2">{{ p }}</span>

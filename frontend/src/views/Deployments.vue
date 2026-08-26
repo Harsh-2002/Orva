@@ -2,14 +2,14 @@
   <div class="space-y-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <h1 class="text-xl font-semibold text-white tracking-tight">
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Deployments
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           History for
           <router-link
             :to="`/functions/${fnName}`"
-            class="text-white underline"
+            class="text-foreground-strong underline"
           >
             {{ fnName }}
           </router-link>
@@ -44,7 +44,7 @@
       <CheckCircle2 class="w-4 h-4 text-success-fg shrink-0" />
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-sm text-white font-medium">Currently serving</span>
+          <span class="text-sm text-foreground-strong font-medium">Currently serving</span>
           <span
             v-if="liveVersion"
             class="text-xs px-2 py-0.5 rounded bg-success-tint text-success-fg border border-success-ring font-mono"
@@ -100,7 +100,7 @@
                 <div class="flex items-center gap-2 flex-wrap">
                   <span
                     class="font-mono text-xs"
-                    :class="isActive(d) ? 'text-white font-semibold' : 'text-foreground-muted'"
+                    :class="isActive(d) ? 'text-foreground-strong font-semibold' : 'text-foreground-muted'"
                   >v{{ d.version }}</span>
                   <StatusBadge
                     v-if="d.status !== 'succeeded'"
@@ -108,7 +108,7 @@
                   />
                   <span
                     v-if="isActive(d)"
-                    class="px-1.5 py-0.5 rounded text-xs bg-success text-background font-semibold"
+                    class="px-1.5 py-0.5 rounded text-xs bg-success text-status-foreground font-semibold"
                   >Live</span>
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-foreground-muted">
@@ -125,7 +125,7 @@
               <router-link
                 v-if="canCompare(d)"
                 :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
-                class="text-foreground-muted hover:text-white text-xs flex items-center gap-1 px-2 py-1 rounded-sm touch-expand-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="text-foreground-muted hover:text-foreground-strong text-xs flex items-center gap-1 px-2 py-1 rounded-sm touch-expand-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :title="`Compare v${d.version} with the live version`"
               >
                 <GitCompare class="w-3 h-3" /> Compare
@@ -185,7 +185,7 @@
                      bare, so the desktop cell looks exactly as it did. -->
                 <button
                   type="button"
-                  class="touch-expand-xs text-white text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  class="touch-expand-xs text-foreground-strong text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   :class="isActive(d) ? 'font-semibold' : 'text-foreground-muted'"
                   :aria-label="detailLabel(d)"
                   @click.stop="open(d)"
@@ -194,7 +194,7 @@
                 </button>
                 <span
                   v-if="isActive(d)"
-                  class="px-1.5 py-0.5 rounded text-xs bg-success text-background font-semibold normal-case"
+                  class="px-1.5 py-0.5 rounded text-xs bg-success text-status-foreground font-semibold normal-case"
                 >Live</span>
               </div>
             </td>
@@ -205,7 +205,7 @@
               >{{ (d.code_hash || '').slice(0, 10) || EMPTY }}</span>
               <span
                 v-if="sameCodeAsLive(d) && !isActive(d)"
-                class="ml-2 normal-case text-foreground-muted/70 font-sans"
+                class="ml-2 normal-case text-foreground-muted font-sans"
               >same as live</span>
             </td>
             <td class="px-6 py-4">
@@ -233,7 +233,7 @@
                 <router-link
                   v-if="canCompare(d)"
                   :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
-                  class="touch-expand-xs text-foreground-muted hover:text-white flex items-center gap-1 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  class="touch-expand-xs text-foreground-muted hover:text-foreground-strong flex items-center gap-1 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   :title="`Compare v${d.version} with the live version, v${liveVersion}`"
                 >
                   <GitCompare class="w-3 h-3" /> Compare with live
@@ -249,11 +249,11 @@
                 </Button>
                 <span
                   v-if="isActive(d)"
-                  class="text-foreground-muted/60"
+                  class="text-foreground-muted"
                 >serving now</span>
                 <span
                   v-else-if="!canCompare(d) && !canRollback(d)"
-                  class="text-foreground-muted/30"
+                  class="text-foreground-muted"
                 >{{ EMPTY }}</span>
               </div>
             </td>
@@ -542,7 +542,7 @@ const Stat = {
     return () =>
       h('div', { class: 'bg-surface border border-border rounded p-3' }, [
         h('div', { class: 'text-xs uppercase tracking-wider text-foreground-muted mb-1' }, p.label),
-        h('div', { class: ['text-sm text-white', p.mono && 'font-mono text-xs'].filter(Boolean) }, String(p.value)),
+        h('div', { class: ['text-sm text-foreground-strong', p.mono && 'font-mono text-xs'].filter(Boolean) }, String(p.value)),
       ])
   },
 }

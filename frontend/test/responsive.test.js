@@ -202,10 +202,19 @@ test('form controls clear the iOS focus-zoom threshold on touch hardware', () =>
   // text-base is 15.2px under the 95% root and does NOT clear iOS Safari's
   // 16px threshold, so the fix has to be a real pixel value, applied once.
   const styles = readFileSync(join(SRC, 'style.css'), 'utf8')
+  // The selector carries a :not() for checkbox/radio -- they are square
+  // controls that a height floor deformed into 13x44px slivers -- so match the
+  // text-entry group by shape rather than by an exact `input,`.
   assert.match(
     styles,
-    /@media \(pointer: coarse\)\s*\{[\s\S]*?input,[\s\S]*?textarea\s*\{[\s\S]*?font-size:\s*16px/,
+    /@media \(pointer: coarse\)\s*\{[\s\S]*?input[^{,]*,\s*select,\s*textarea\s*\{[\s\S]*?font-size:\s*16px/,
     'style.css must pin input/select/textarea to 16px on coarse pointers',
+  )
+  // And the exclusion itself, so a future edit cannot quietly re-deform them.
+  assert.match(
+    styles,
+    /input\[type='checkbox'\][^{]*\{[^}]*min-height:\s*0/,
+    'checkboxes must be exempt from the 44px height floor',
   )
 })
 
@@ -218,4 +227,41 @@ test('stretched SVG strokes are pinned to a constant weight', () => {
     if (!src.includes('non-scaling-stroke')) bad.push(file)
   }
   assert.deepEqual(bad, [], `add vector-effect="non-scaling-stroke":\n${bad.join('\n')}`)
+})
+
+test('no colour literal stands in for a theme token', () => {
+  // These are not colours, they are the sentence "maximum contrast against the
+  // canvas" written in one theme's vocabulary. There were about 360 of them
+  // before the day theme existed, and every one silently meant "night". A ring
+  // that is literally white is invisible on a day-theme field: WCAG 2.4.7 gone,
+  // with nothing in the diff to show for it.
+  const banned = [
+    [/\b(?:hover:|focus:|focus-visible:|active:|group-hover:)?text-white\b/, 'text-foreground-strong'],
+    [/\b(?:hover:|focus:|focus-visible:|active:|group-hover:)?ring-white\b/, 'ring-focus-ring'],
+    [/\b(?:hover:|focus:|focus-visible:|active:|group-hover:)?border-white\b/, 'border-focus-ring'],
+    [/\bbg-black(?:\/\d+)?\b/, 'bg-scrim'],
+    [/\bbg-white\b/, 'a surface token'],
+  ]
+  const bad = []
+  for (const { file, tpl } of templates) {
+    for (const [re, use] of banned) {
+      if (re.test(tpl)) bad.push(`${file}: ${re.source.match(/[a-z-]+-white|bg-black|bg-white/)?.[0]} -> use ${use}`)
+    }
+  }
+  assert.deepEqual(bad, [], `colour literals found:\n${bad.join('\n')}`)
+})
+
+test('a muted token is never faded further with alpha', () => {
+  // --color-foreground-muted IS the muted step; there is nothing left to
+  // spend. Measured in a browser on the real pages: placeholder text at /60
+  // is 3.95:1 at night and 2.64:1 by day, at /50 it is 3.09 and 2.19. All four
+  // are under AA, and the night pair was already failing before the day theme
+  // existed -- the alpha simply hid it behind a token name that looked correct.
+  const bad = []
+  for (const { file, src } of sources) {
+    for (const m of src.matchAll(/\b(?:placeholder-|placeholder:text-|text-)foreground-muted\/\d+/g)) {
+      bad.push(`${file}: ${m[0]}`)
+    }
+  }
+  assert.deepEqual(bad, [], `drop the alpha, the token is already muted:\n${bad.join('\n')}`)
 })
