@@ -38,10 +38,11 @@ go vet ./...
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `safepath` | Containment for user-supplied relative paths. `Validate` on the write side so a bad `entrypoint` never reaches storage; `Join` on the read side, which must hold independently because rows written before validation still carry whatever they carry. Traversal is rejected, not collapsed. |
-| `secrets` | AES-256-GCM encrypted secrets per function |
+| `secrets` | AES-256-GCM encrypted secrets per function. The key lives at `<dataDir>/.master.key`, outside the database — back it up with `orva.db` or restored secrets are undecryptable ciphertext |
+| `sdkauth` | Mints and verifies the worker credential (`ORVA_INTERNAL_TOKEN`). HMAC over the function id under a **process-random** key, so every credential dies on restart and a redeploy does **not** rotate one. `active` tracks live executions, which is what the SDK surfaces that require one check against |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
 | `mcp` | MCP server (go-sdk); 73 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. **Transport is stateless** (`StreamableHTTPOptions{Stateless: true}`) — the SDK serves protocol `2026-07-28` only in that mode, and older clients still negotiate down. No `initialize` handshake required, no `Mcp-Session-Id`, `GET`/`DELETE /mcp` → 405. Operator servers are cached by the four-bit permission surface (at most 16 variants); channel servers remain request-scoped. Actor identity and public origin live in request context, so cached servers cannot cross-label activity or leak one host into another's `invoke_url`. A process-wide `ServerOptions.SchemaCache` keeps `AddTool` reflection off first-build paths. `cacheScopeMiddleware` rewrites the SDK's hardcoded `cacheScope: "public"` to `"private"` — the catalog is permission- and channel-scoped, so a shared HTTP cache entry would leak one principal's tool surface to another. |
-| `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps` and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`; a client's **registered** scope is a ceiling, applied via `IntersectScope` on both authorize paths, so a client registered `read` cannot be issued `admin`. |
+| `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps`, `DELETE /api/v1/oauth/clients/{client_id}` (retires an application: revokes its grants, drops pending codes, blocks re-authorization without fresh consent) and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`; a client's **registered** scope is a ceiling, applied via `IntersectScope` on both authorize paths, so a client registered `read` cannot be issued `admin`. |
 | `auth` | Shared `Principal` type (Kind=api_key / oauth / channel + ID/Label/Perms/Channel). Both REST middleware and MCP auth resolve the inbound bearer to a `*Principal`; downstream code (activity log, MCP tool registration) consumes the Kind directly. |
 | `trace` | Causal-trace collector + span lifecycle (W3C `traceparent` interop, outlier detection). See `docs/TRACING.md`. |
 | `urlhint` | Per-request `BaseURL(r)` helper. One source of truth for OAuth issuer URLs, MCP `invoke_url` fields, and audience-bound token validation. |
@@ -83,7 +84,7 @@ Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.g
 
 `CORS → BodySizeLimit → Auth → RequestID → Logger → Handler`
 
-Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/`, `/metrics`, `/webhook/`, `/mcp`, custom routes) bypasses the API-key check entirely — per-function auth for invocations is enforced inside `InvokeHandler`. Internal SDK paths (`/api/v1/_kv/`, `/api/v1/_internal/`) use process-signed, function-scoped credentials instead of API keys.
+Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/`, `/metrics`, `/webhook/`, `/mcp`, custom routes) bypasses the API-key check entirely — per-function auth for invocations is enforced inside `InvokeHandler`. Internal SDK paths (`/api/v1/_kv/`, `/api/v1/_internal/`) use process-signed, function-scoped credentials, and the gate **rejects an unverifiable one with 401 before the handler runs** (it used to discard the error and call the handler anyway, leaving the prefixes authenticated only by each handler remembering to re-check) instead of API keys.
 
 ## Database
 
@@ -102,3 +103,20 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 - **AI turns are one-per-conversation:** the `ai.Manager` holds a keyed try-lock (`tryLockConv`/`unlockConv`) acquired by every mutating entry point (Chat, Resume, RegenerateLast, EditAndResend, DeleteMessageFrom). An overlapping turn on the same conversation is rejected — SSE `error` for streaming paths, `ai.ErrConversationBusy` → 409 for the JSON delete. `database.InsertMessage` assigns `seq` atomically inside the INSERT (`MAX(seq)+1` subquery); never split it back into a SELECT-then-INSERT.
 - **AI gateway lifecycle:** `ai.Manager.Close()` releases the embedded Bifrost pools and is called from `Server.Shutdown` (via `s.router.ai`). The gateway is built lazily and rebuilt on provider-config change (`invalidateClient`).
 - **Docs single source:** `docs/reference.md` is the canonical Orva reference markdown (~68 KB). `make docs-embed` syncs it to `backend/internal/mcp/reference.md` (embedded by the `get_orva_docs` MCP tool), `frontend/public/docs.md` (served at `/web/docs.md` for the dashboard's Copy as Markdown button), and `cli/commands/reference.md` (embedded into the slim CLI, served by `orva docs`). Edit the canonical file then run `make docs-embed`; the Vue Docs page is the rendered version (separate templates) and must be updated alongside if content changes.
+
+## SDK surface rules that a later change could silently undo
+
+- **`crons.upsert` requires a live execution.** `CronHandler.UpsertInternal`
+  gates on `SDKAuth.OwnsExecution`, and there is a 25-schedule cap on that path.
+  This is deliberate and is the only SDK surface gated this way: a cron row is
+  the one thing a leaked `ORVA_INTERNAL_TOKEN` can create that survives the
+  process-random signing key it was minted under, and nothing in
+  `internal/scheduler` consults `auth_mode`. Removing the gate re-opens that.
+- **KV is deliberately NOT gated the same way.** Module-scope code runs at
+  spawn with no execution bound, and the docs tell operators to cache config
+  there, so an execution gate on KV would break a documented pattern silently
+  at cold start.
+- **Revocation evicts.** Every path that deletes an API key or ends a session
+  must evict the auth middleware's cache; the entries carry a 30s TTL as a
+  backstop, not as the mechanism. `router.go` builds one `invalidateKey`
+  closure and hands it to both the REST handler and `mcp.Deps` for that reason.
