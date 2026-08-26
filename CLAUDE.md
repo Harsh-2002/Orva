@@ -119,9 +119,10 @@ current release only. And `CI`'s `artifacts` suite has a CLI-upgrade-round-trip 
 upgrades *from the previous release*; with only one release published it skips cleanly, so a
 skip there is expected rather than a regression.
 
-Git **tags are kept** even when their release is deleted: `CHANGELOG.md` and the release flow
-below both reference ranges like `git log v2026.08.21..HEAD`, and those break if the tag goes.
-Delete the release, not the tag.
+**The tag goes with the release.** Pruning removes both, so exactly one tag exists at any
+time. Nothing may depend on an older tag resolving: a `git log <old-tag>..HEAD` range breaks
+the moment that tag is pruned, and a `releases/tag/<old>` link 404s. Use the current tag for
+ranges, and `CHANGELOG.md` itself as the record for anything older.
 
 The flow:
 

@@ -169,9 +169,11 @@ never been executed.
   re-run), then builds + publishes. It refuses to build on missing/red CI.
 - **One published release at a time.** The previous releases are deleted after a new
   one ships. Installers resolve GitHub's "latest", so **publish first, delete after** —
-  the reverse order 404s every install and upgrade in the gap. Keep the **tags**
-  (CHANGELOG and the release flow reference `git log <tag>..HEAD`); delete only the
-  releases. Nothing in the docs may pin to a superseded version, and `artifacts`'
+  the reverse order 404s every install and upgrade in the gap. **The tag is pruned
+  with the release**, so exactly one tag exists — nothing may reference an older one
+  (`git log <old-tag>..HEAD` and `releases/tag/<old>` both break). Use the current
+  tag for ranges and `CHANGELOG.md` as the record for anything older. Nothing in the
+  docs may pin to a superseded version, and `artifacts`'
   CLI-upgrade leg skipping for want of a previous release is expected, not a
   regression.
 - **Build-time identity** — `version.Version/Commit/BuildTime` via `-X` ldflags flow

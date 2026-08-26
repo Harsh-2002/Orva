@@ -992,9 +992,9 @@ gate a merge."*
 | `test/install/native-engine.sh` | installs Orva **on the host** and deploys+invokes Node and Python with no advisory path | **NO. Never run this on a machine you care about.** It runs `install.sh --bare-metal --yes --start` as root, regenerates `/etc/systemd/system/orva.service` (dropping any hand-added `Environment=`), restarts the unit, and writes into the live data dir. `[UNVERIFIED]` — deliberately not executed. |
 | `test/cli/build-matrix.sh` | 6-target cross-build + size ceiling | Yes. `=== build-matrix: 19 passed, 0 failed ===`; 14–16 MB per target |
 | `test/cli/command-tree.sh` | slim CLI ↔ server command-surface parity | Yes. 17.5 s, `slim CLI commands: 107` == `server CLI commands: 107` |
-| `test/cli/install-cli-test.sh [distro]` | `install-cli.sh` download + checksum + install of the **published** CLI | Yes, unprivileged Docker. 26.5 s, 19 passed / 0 failed, installed `orva v2026.08.05`, binary **21 MB** |
+| `test/cli/install-cli-test.sh [distro]` | `install-cli.sh` download + checksum + install of the **published** CLI | Yes, unprivileged Docker. 26.5 s, 19 passed / 0 failed, installed `orva v2026.08.05` at the time of the run (that release is pruned; the test always installs whatever `latest` resolves to), binary **21 MB** |
 | `test/cli/upgrade-test.sh` | `orva upgrade` round-trip from the previous release | Yes — but **currently vacuous**, see below |
-| `test/release/download-verified-asset.sh <asset> <dest>` | fetch a release asset and SHA-256 it against that release's `checksums.txt`, no fail-open | Yes, read-only. `verified release asset install-cli.sh from v2026.08.05` |
+| `test/release/download-verified-asset.sh <asset> <dest>` | fetch a release asset and SHA-256 it against that release's `checksums.txt`, no fail-open | Yes, read-only. `verified release asset install-cli.sh from v2026.08.05` at the time of the run; it verifies against whatever `latest` is |
 | `test/kata-bench/*` | Orva under kata-qemu / kata-clh vs runc | `[UNVERIFIED]` — no kata runtime registered, `hey` missing, and the scripts' pinned image tag no longer exists (§9) |
 
 **`matrix.sh`'s check count is a formula, not a number.** It is

@@ -8,7 +8,10 @@ section of every release between your current version and the one you are
 upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
-the commit messages; `git log v2026.08.21..HEAD` is the full record.
+the commit messages. Only the current release's tag exists — older tags are
+pruned with their releases — so `git log v2026.08.25..HEAD` is the range for
+anything unreleased, and the sections below are the record for everything
+before it.
 
 ## Unreleased
 
@@ -453,4 +456,4 @@ smoke, `-race`, govulncheck):
 
 ## v2026.08.05
 
-See the [release notes](https://github.com/Harsh-2002/Orva/releases/tag/v2026.08.05).
+Superseded; its release and tag have been pruned. The summary below is the record.

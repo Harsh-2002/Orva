@@ -212,10 +212,20 @@ Glassmorphism is rare and earned. The only legitimate use is `backdrop-blur-sm` 
 
 ### Shadow Vocabulary
 
-- **CTA Glow** (`box-shadow: 0 4px 6px -1px rgba(85,63,131,0.20), 0 2px 4px -2px rgba(85,63,131,0.20)`): primary buttons. Says "this is the action". Subtle, hue-matched.
-- **Danger Glow** (`box-shadow: 0 4px 6px -1px rgba(239,68,68,0.30), 0 2px 4px -2px rgba(239,68,68,0.30)`): destructive buttons. Slightly stronger so the operator pauses.
-- **Sidebar Active** (`box-shadow: 0 10px 15px -3px rgba(38,18,87,0.20)`): the currently-routed nav item. Anchors the user's "you are here".
-- **Modal Drop** (`box-shadow: 0 25px 50px -12px rgba(0,0,0,0.50)`): modal containers. Visually separates a dialog from the dimmed page beneath.
+**This section described shadows the codebase does not have.** There is no
+hue-matched shadow anywhere in `frontend/src` — `grep -rn 'shadow-\['` returns
+nothing, and no CTA, danger or sidebar-active glow was ever implemented. What
+actually ships:
+
+- **Modal / drawer lift** — the only shadow in the system, separating a dialog
+  from the dimmed page beneath it.
+- **Everything else is flat.** Depth comes from borders and the
+  background → surface → surface-hover ladder, which is what the Flat-By-Default
+  Rule below already says.
+
+Treat that as the design, not as a gap to fill: a glow vocabulary was written
+down, never built, and nothing has missed it. If you add one, add it here and to
+the code in the same commit.
 
 ### Named Rules
 
@@ -241,7 +251,9 @@ The dashboard's interactive primitive. Five variants, four sizes.
 
 ### Filter Chips
 
-Filter pills on `Jobs.vue`, `Webhooks.vue`, `CronJobs.vue` status strips. Same component as Button, `variant="chip"`.
+Filter pills on the `Activity.vue`, `Firewall.vue`, `Jobs.vue`,
+`Webhooks.vue` and `Traces.vue` status strips (`grep -rl 'variant="chip"'
+frontend/src/views`). Same component as Button, `variant="chip"`.
 
 - **At rest:** `bg-surface text-foreground-muted border border-border`.
 - **Hover:** `text-white border-foreground-muted`.
