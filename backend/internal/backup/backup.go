@@ -8,7 +8,11 @@
 //	orva.db                                   the SQLite database (VACUUM INTO'd)
 //	keys/master.key                           AES key that decrypts function secrets
 //	keys/admin.key                            bootstrap admin API key
-//	functions/<id>/versions/<hash>/...        deployed code for every function
+//	functions/<id>/versions/<hash>/...        deployed code for every function,
+//	                                          dotfiles included — a version tree is
+//	                                          content-addressed, and `.orva-ready`
+//	                                          plus any `.env` / `.npmrc` the author
+//	                                          deployed are part of its content
 //
 // On-disk things deliberately omitted:
 //
@@ -18,6 +22,11 @@
 //	-wal / -shm                               WAL sidecars — the snapshot is fully
 //	                                          checkpointed and a stale WAL on
 //	                                          restore would corrupt the new DB
+//	functions/<id>/.<anything>                host-local litter beside a version tree
+//
+// Archives written before the dotfile skip was narrowed dropped `.orva-ready`,
+// which makes every restored version report as garbage-collected. RestoreFrom
+// recreates it for any version directory that has content — see healReadyMarkers.
 //
 // SQLite is in WAL mode, so a naïve `cp orva.db` could capture a torn read
 // while a writer is mid-transaction. `VACUUM INTO` runs in a transaction,
@@ -50,6 +59,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,8 +267,12 @@ func planArchive(dataDir, snapshotPath string) (*archivePlan, error) {
 			if info.Mode()&os.ModeSymlink != 0 {
 				return nil
 			}
-			base := filepath.Base(path)
-			if strings.HasPrefix(base, ".") && path != functionsDir {
+			// A version directory is content-addressed: every file in it is
+			// deployed code, an installed dependency or the readiness marker.
+			if strings.HasPrefix(filepath.Base(path), ".") && path != functionsDir && !insideVersionDir(rel) {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if id, ok := fnIDFromRel(rel); ok {
@@ -360,6 +374,13 @@ func fnIDFromRel(rel string) (string, bool) {
 	return id, true
 }
 
+// insideVersionDir reports whether rel names something below a published
+// functions/<id>/versions/<hash>/ directory.
+func insideVersionDir(rel string) bool {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	return len(parts) > 4 && parts[0] == "functions" && parts[2] == "versions"
+}
+
 // loadLiveFunctionIDs reads the set of function IDs from the snapshot
 // database. The snapshot is a fully-checkpointed SQLite file written by
 // VACUUM INTO — opening it read-only is safe even while the live DB is
@@ -457,6 +478,12 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 	manifest, err := readAndVerifyManifest(stage)
 	if err != nil {
 		return err
+	}
+
+	// Heal before any live state moves, so a failure here still rolls back
+	// to "nothing happened".
+	if err := healReadyMarkers(filepath.Join(stage, "functions")); err != nil {
+		return fmt.Errorf("restore: heal readiness markers: %w", err)
 	}
 
 	stagedDB := filepath.Join(stage, "orva.db")
@@ -561,6 +588,76 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 
 	_ = manifest // keep available in case we surface stats later
 	return nil
+}
+
+// readyMarker is the per-version readiness file the builder writes; its
+// content is the version's code hash, which is the directory's own name.
+const readyMarker = ".orva-ready"
+
+// healReadyMarkers recreates readyMarker in staged version directories that
+// hold content but lost their marker. Archives taken before the dotfile skip
+// was narrowed dropped it, and rollback, diff, availableHashes and the version
+// GC all read its absence as "garbage-collected" — so restoring such an archive
+// yields code that is present on disk and reports as gone.
+//
+// Only a directory named by a bare 64-hex digest is healed. The builder writes
+// the marker into versions/<hash>.tmp.<rand>/ and renames that into place only
+// afterwards, so a build that died half-way is a .tmp. directory and never a
+// bare-hash one — which is what separates "stripped by a backup" from "never
+// finished building". An empty directory is left alone: there is no code to
+// vouch for.
+func healReadyMarkers(stagedFns string) error {
+	fnDirs, err := os.ReadDir(stagedFns)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, fn := range fnDirs {
+		if !fn.IsDir() {
+			continue
+		}
+		versionsDir := filepath.Join(stagedFns, fn.Name(), "versions")
+		versions, err := os.ReadDir(versionsDir)
+		if err != nil {
+			continue
+		}
+		for _, v := range versions {
+			if !v.IsDir() || !isVersionHash(v.Name()) {
+				continue
+			}
+			dir := filepath.Join(versionsDir, v.Name())
+			if _, err := os.Stat(filepath.Join(dir, readyMarker)); err == nil {
+				continue
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) == 0 {
+				continue
+			}
+			if err := os.WriteFile(filepath.Join(dir, readyMarker), []byte(v.Name()), 0o644); err != nil {
+				return fmt.Errorf("%s: %w", dir, err)
+			}
+			slog.Warn("restore: recreated readiness marker stripped by an older backup",
+				"fn", fn.Name(), "hash", v.Name()[:12])
+		}
+	}
+	return nil
+}
+
+// isVersionHash reports whether s is a 64-char lowercase-hex sha256 digest,
+// i.e. a published version directory name rather than build scratch.
+func isVersionHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // readAndVerifyManifest reads manifest.json from the staging dir and

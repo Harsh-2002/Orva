@@ -211,8 +211,8 @@ never been executed.
 ## 9. Must-not-break invariants
 
 - **SQLite migrations are additive-only** (`CREATE TABLE IF NOT EXISTS` + idempotent
-  `ALTER`), run on every boot. No `DROP`/destructive migrations. **One carve-out:**
-  `migrate_to_uuidv7.go` rewrites primary keys and renames
+  `ALTER`), run on every boot. No `DROP`/destructive migrations. **Two carve-outs.**
+  First, `migrate_to_uuidv7.go` rewrites primary keys and renames
   `<dataDir>/functions/<id>/` to match. Its child columns are derived from
   `PRAGMA foreign_key_list` — never hand-list them, that is how
   `channel_functions` came to be missing — and the functions old→new map is
@@ -220,7 +220,13 @@ never been executed.
   resume the rename. `serve.go` treats a rename failure as fatal, and the build
   GC refuses to sweep orphans while one is outstanding: without the rename every
   function fails to spawn and the GC deletes the operator's only copy of their
-  source.
+  source. Second, `reclaimOrphanedExecutionRows` (`migrations.go`) bulk-`DELETE`s
+  execution rows whose function is gone and `execution_id`-keyed child rows whose
+  execution is gone — unreachable rows a cascade orphaned before `DeleteFunction`
+  cleaned them up. It is one-shot behind `orphan_reclaim_done` in `system_config`,
+  batched and capped so a huge table resumes next boot. **It must keep running
+  inside `Migrate()`, before the async execution writer starts**; moving the call
+  site later turns a reclaim of dead rows into deletion of live ones.
 - `execution_requests`, `user_spans` and `execution_log_entries` have **no FK** to
   `executions` (intentional, for async insert ordering). The cascade is manual, via
   the single `executionChildTables` list, used by **both** `DeleteExecution` and

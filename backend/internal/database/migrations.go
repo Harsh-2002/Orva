@@ -895,6 +895,12 @@ PRAGMA foreign_keys = ON;
 		return fmt.Errorf("uuidv7 migration: %w", err)
 	}
 
+	// After the UUIDv7 rewrite, which carries these tables as softRefs so no
+	// live child is mid-rename, and before the async writer starts: a request
+	// envelope legitimately precedes its executions row, so a sweep running
+	// against live traffic would delete it as an orphan.
+	db.reclaimOrphanedExecutionRows()
+
 	// Kick off the batched async writer now that the schema exists. Safe
 	// to call multiple times — Migrate is idempotent and we only start the
 	// writer if it's nil. Tests that don't call Migrate use direct bounded
@@ -904,6 +910,89 @@ PRAGMA foreign_keys = ON;
 		db.writer.start()
 	}
 	return nil
+}
+
+const (
+	orphanReclaimMarkerKey = "orphan_reclaim_done"
+
+	// One DELETE's slice, and the per-table ceiling for one boot. Measured:
+	// a million orphaned log entries sweep in ~12s, so the ceiling bounds
+	// what boot pays and the next boot resumes whatever is left.
+	reclaimBatchRows  = 5000
+	reclaimMaxBatches = 200
+)
+
+// reclaimOrphanedExecutionRows sweeps rows whose parent is already gone:
+// children stranded by DeleteFunction, whose cascade never reached the three
+// FK-less tables, and — on databases from builds that set foreign_keys per
+// Exec rather than per connection — executions rows themselves.
+//
+// One-shot and resumable: batched so a huge table cannot stall boot, and the
+// marker is written only after a pass finds nothing left to delete.
+func (db *Database) reclaimOrphanedExecutionRows() {
+	if db.GetSystemConfigString(orphanReclaimMarkerKey, "") == "true" {
+		return
+	}
+
+	var total int64
+	clean := true
+	sweep := func(table, where string) bool {
+		n, done, err := db.deleteOrphansBatched(table, where)
+		total += n
+		if err != nil {
+			slog.Warn("orphan reclaim failed", "table", table, "err", err)
+			return false
+		}
+		clean = clean && done
+		return true
+	}
+
+	// Executions first: sweeping them strands more children, which the child
+	// pass then collects on the same boot.
+	if !sweep("executions",
+		"NOT EXISTS (SELECT 1 FROM functions f WHERE f.id = executions.function_id)") {
+		return
+	}
+	for _, t := range executionChildTables {
+		if !sweep(t, "NOT EXISTS (SELECT 1 FROM executions e WHERE e.id = "+t+".execution_id)") {
+			return
+		}
+	}
+
+	if total > 0 {
+		slog.Info("reclaimed orphaned execution rows", "rows", total, "complete", clean)
+	}
+	if !clean {
+		return
+	}
+	if err := db.SetSystemConfig(orphanReclaimMarkerKey, "true"); err != nil {
+		slog.Warn("orphan reclaim marker write failed", "err", err)
+	}
+}
+
+// deleteOrphansBatched deletes rows matching where in bounded slices. It
+// reports the rows removed and whether the table was swept clean rather than
+// hitting the per-boot ceiling. Every column these predicates touch is
+// indexed, so the anti-join probes rather than scans.
+func (db *Database) deleteOrphansBatched(table, where string) (int64, bool, error) {
+	stmt := "DELETE FROM " + table + " WHERE rowid IN (" +
+		"SELECT rowid FROM " + table + " WHERE " + where + " LIMIT ?)"
+	var total int64
+	for range reclaimMaxBatches {
+		res, err := db.write.Exec(stmt, reclaimBatchRows)
+		if err != nil {
+			return total, false, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return total, false, err
+		}
+		total += n
+		if n < reclaimBatchRows {
+			return total, true, nil
+		}
+	}
+	return total, false, nil
 }
 
 func migratePoolConfigV2(db *Database) error {

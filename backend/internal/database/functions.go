@@ -241,9 +241,26 @@ func (db *Database) UpdateFunction(fn *Function) error {
 	return err
 }
 
+// DeleteFunction cascades to executions, but the child tables that dropped
+// their FK for async insert ordering are unreachable once that row goes, so
+// they are deleted first — same transaction, same shared list as the purge.
 func (db *Database) DeleteFunction(id string) error {
-	_, err := db.write.Exec("DELETE FROM functions WHERE id = ?", id)
-	return err
+	tx, err := db.write.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, t := range executionChildTables {
+		if _, err := tx.Exec("DELETE FROM "+t+" WHERE execution_id IN ("+
+			"SELECT id FROM executions WHERE function_id = ?)", id); err != nil {
+			return fmt.Errorf("delete %s: %w", t, err)
+		}
+	}
+	if _, err := tx.Exec("DELETE FROM functions WHERE id = ?", id); err != nil {
+		return fmt.Errorf("delete function: %w", err)
+	}
+	return tx.Commit()
 }
 
 func scanFunction(row *sql.Row) (*Function, error) {
