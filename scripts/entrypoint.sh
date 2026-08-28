@@ -30,6 +30,9 @@ rt=node
 mkdir -p "$VOLUME_ROOTFS/$rt/opt/orva"
 cp "$IMAGE_ROOTFS/$rt/opt/orva/adapter.js" "$VOLUME_ROOTFS/$rt/opt/orva/adapter.js"
 if [ -d "$IMAGE_ROOTFS/$rt/opt/orva/node_modules/orva" ]; then
+  # Replace rather than merge: older images shipped orva.js under the name
+  # index.js, and a merge would leave that stale copy in the volume forever.
+  rm -rf "$VOLUME_ROOTFS/$rt/opt/orva/node_modules/orva"
   mkdir -p "$VOLUME_ROOTFS/$rt/opt/orva/node_modules/orva"
   cp -a "$IMAGE_ROOTFS/$rt/opt/orva/node_modules/orva/." "$VOLUME_ROOTFS/$rt/opt/orva/node_modules/orva/"
 fi
@@ -38,6 +41,9 @@ mkdir -p "$VOLUME_ROOTFS/$rt/opt/orva"
 cp "$IMAGE_ROOTFS/$rt/opt/orva/adapter.py" "$VOLUME_ROOTFS/$rt/opt/orva/adapter.py"
 if [ -f "$IMAGE_ROOTFS/$rt/opt/orva/orva.py" ]; then
   cp "$IMAGE_ROOTFS/$rt/opt/orva/orva.py" "$VOLUME_ROOTFS/$rt/opt/orva/orva.py"
+fi
+if [ -f "$IMAGE_ROOTFS/$rt/opt/orva/py.typed" ]; then
+  cp "$IMAGE_ROOTFS/$rt/opt/orva/py.typed" "$VOLUME_ROOTFS/$rt/opt/orva/py.typed"
 fi
 
 mkdir -p /var/lib/orva/functions

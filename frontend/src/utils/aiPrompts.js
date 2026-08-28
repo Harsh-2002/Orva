@@ -22,7 +22,7 @@ Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel 
 <runtimes>
 Pick exactly one — Orva has no Docker, no buildpacks, no per-function version pinning. Two runtimes, generic ids, latest-stable only:
 - python (Python 3.14) — entry: handler.py — deps: requirements.txt
-- node (Node.js 24, also runs TypeScript) — entry: handler.js — deps: package.json
+- node (Node.js 24, also runs TypeScript) — entry: handler.js — deps: package.json. In TypeScript reach the SDK with require('orva'), never an ESM import: the module lives outside /code so tsc cannot resolve it, and the adapter patches only Node's CommonJS resolver.
 Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error.
 </runtimes>
 

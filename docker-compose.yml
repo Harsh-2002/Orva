@@ -1,6 +1,6 @@
 services:
   orva:
-    image: ${ORVA_IMAGE:-ghcr.io/harsh-2002/orva:latest}
+    image: &image ${ORVA_IMAGE:-ghcr.io/harsh-2002/orva:latest}
     # Pull rather than build. This file is meant to be downloadable on its own --
     # the README tells operators to curl it into an empty directory -- and with a
     # build section present Compose would otherwise try to build from a context
@@ -60,6 +60,9 @@ services:
     environment:
       ORVA_WRITE_TIMEOUT_SEC: "90"
       ORVA_SESSION_DAYS: "30"
+      # Aliases the image key above so health always reports the reference
+      # this stack actually runs; the two cannot drift into different names.
+      ORVA_IMAGE: *image
       # ORVA_SECURE_COOKIES is deliberately not set. This file publishes plain
       # HTTP on 3000, and a Secure cookie is not stored over http:// on
       # anything but localhost -- forcing it here logs out every operator who

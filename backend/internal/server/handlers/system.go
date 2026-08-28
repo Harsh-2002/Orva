@@ -158,17 +158,14 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// v0.7: surface the full build identity so Settings → Build info has
-	// what it needs in one round trip. `image` is derived from Version so
-	// operators can copy "ghcr.io/harsh-2002/orva:v2026.05.15" straight
-	// out of the dashboard. Unstamped binaries render as ":dev" which is
-	// honest about not being from a release.
+	// Only a container image stamps ORVA_IMAGE: the release publishes one tag
+	// (:latest) and bare metal has none, so a Version-derived ref would 404.
 	resp := map[string]any{
 		"status":         overall,
 		"version":        version.Version,
 		"commit":         version.Commit,
 		"build_time":     version.BuildTime,
-		"image":          "ghcr.io/harsh-2002/orva:" + version.Version,
+		"image":          os.Getenv("ORVA_IMAGE"),
 		"uptime_seconds": int(uptime),
 		"database": map[string]any{
 			"status": dbStatus,

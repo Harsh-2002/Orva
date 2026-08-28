@@ -12,7 +12,7 @@ Support scripts for deployment and installation. None of these are called by the
 
 ## Gotchas
 
-- `entrypoint.sh` **always overwrites** `adapter.js` / `adapter.py` from the image on every container start — this ensures runtime upgrades roll out even when the user mounts a persistent `orva-data` volume.
+- `entrypoint.sh` **always overwrites** `adapter.js` / `adapter.py` from the image on every container start — this ensures runtime upgrades roll out even when the user mounts a persistent `orva-data` volume. The bundled SDK is *replaced*, not merged: `opt/orva/node_modules/orva/` is removed and re-copied, because a merge would leave files an older image shipped under names the current one no longer uses (`index.js`) alive in the volume forever.
 - `install.sh` embeds the systemd/OpenRC units and `uninstall.sh`; the bare-metal install writes them to `$PREFIX/share/orva/scripts/` and the generated uninstaller to the same path. Edit the heredocs in `install.sh` — there is no separate unit file.
 - `install.sh --cli-only` installs only the `orva` CLI binary to `/usr/local/bin/orva` — no systemd unit, no rootfs, no service user. Use this on operator laptops or CI runners that talk to a remote Orva over HTTPS.
 - Mode/option precedence is flag > env > interactive prompt > default. Key knobs: `--version`/`ORVA_VERSION` (pin a release), `--dry-run`/`ORVA_INSTALL_DRYRUN=1` (detect only), `--no-pkg`/`ORVA_NO_PKG=1` (skip system packages), `--runtime`/`ORVA_DOCKER_RUNTIME` (force the Docker runtime). There is **no** checksum-bypass env var (no `ORVA_SKIP_VERIFY` or similar).

@@ -44,28 +44,31 @@
           {{ formatBuildTime(buildInfo?.buildTime) }}
         </dd>
 
-        <dt class="text-foreground-muted">
-          Image
-        </dt>
-        <dd class="font-mono text-foreground-strong flex items-center gap-2 min-w-0">
-          <span class="truncate">{{ buildInfo?.image || EMPTY }}</span>
-          <!-- p-1 around a 13px icon lands at 21x21 on a phone. touch-expand-*
-               grows the real box on coarse pointers only; a button centres its
-               own content, so the glyph stays put. -->
-          <button
-            v-if="buildInfo?.image"
-            class="p-1 rounded-md hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors shrink-0 touch-expand-iconbtn"
-            title="Copy image reference"
-            aria-label="Copy image reference"
-            @click="copyImage"
-          >
-            <Copy class="w-3.5 h-3.5" />
-          </button>
-          <span
-            v-if="imageCopied"
-            class="text-xs text-primary-hover shrink-0"
-          >copied</span>
-        </dd>
+        <!-- Only a container deployment has an image; a bare-metal install
+             reports none, and an empty row with a copy button is worse. -->
+        <template v-if="buildInfo?.image">
+          <dt class="text-foreground-muted">
+            Image
+          </dt>
+          <dd class="font-mono text-foreground-strong flex items-center gap-2 min-w-0">
+            <span class="truncate">{{ buildInfo.image }}</span>
+            <!-- p-1 around a 13px icon lands at 21x21 on a phone. touch-expand-*
+                 grows the real box on coarse pointers only; a button centres its
+                 own content, so the glyph stays put. -->
+            <button
+              class="p-1 rounded-md hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors shrink-0 touch-expand-iconbtn"
+              title="Copy image reference"
+              aria-label="Copy image reference"
+              @click="copyImage"
+            >
+              <Copy class="w-3.5 h-3.5" />
+            </button>
+            <span
+              v-if="imageCopied"
+              class="text-xs text-primary-hover shrink-0"
+            >copied</span>
+          </dd>
+        </template>
       </dl>
     </details>
 

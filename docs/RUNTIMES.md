@@ -62,6 +62,21 @@ The file you authored stays in `entrypoint`; the compiled file the worker
 actually loads is recorded separately in `run_entrypoint`. You never set
 `run_entrypoint` yourself — deploy and rollback both derive it.
 
+The bundled `orva` SDK is **not** on `tsc`'s module path. It lives at
+`/opt/orva/node_modules/orva/`, and TypeScript only walks `node_modules`
+upward from your sources under `/code`, so `import { kv } from 'orva'` fails
+the build with `TS2307: Cannot find module 'orva'`. Point `paths` at the
+declarations the runtime ships:
+
+```json
+{ "compilerOptions": { "module": "commonjs", "baseUrl": ".",
+  "paths": { "orva": ["/opt/orva/node_modules/orva/orva.d.ts"] } } }
+```
+
+Keep `module: commonjs`. `tsc` then emits `require('orva')`, which the adapter
+resolves at runtime; an ESM emit leaves a bare `import`, and the adapter patches
+only Node's CommonJS resolver.
+
 ## Handler shape — Node.js
 
 ```js
