@@ -196,10 +196,17 @@ checksum for its platform asset (`latest.AssetName` looked up in the
 the same tag ⇒ reinstall. Decision lives in `upgradeAction`; the checksum probe
 is `remoteBuildDiffers` (best-effort: any network/parse failure returns
 `known=false` and falls back to version-only, so a flaky network never blocks or
-hangs the upgrade — the fetch is bounded to 10s). Note: running `orva upgrade`
-against the full server binary (`orva-<os>-<arch>`) sees a mismatch vs the CLI
-asset and offers to replace it — same direction as a version bump; `orva
-upgrade` is the CLI self-update path (servers update via install.sh / Docker).
+hangs the upgrade — the fetch is bounded to 10s).
+
+**Server builds fetch the server asset.** `backend/cmd/orva/main.go` sets
+`commands.ServerBuild = true` (the same package-level hook as `commands.Version`
+— `cli/` may not import `backend/internal/...`), and `upgradeAssetName` then
+returns `orva-<os>-<arch>` instead of `orva-cli-<os>-<arch>`. Without it the
+server binary resolved the *CLI* asset, and because the checksums never matched
+it offered the "upgrade" every single run — replacing the server with a binary
+that has no `serve`, after which systemd could not start the host. Server
+assets are linux-only, so `checkUpgradePlatform` refuses a server build on any
+other GOOS rather than falling through to the CLI asset.
 
 If the install path is not writable, `orva upgrade` exits non-zero with
 a "re-run with `sudo orva upgrade`" hint. Never silently elevates.

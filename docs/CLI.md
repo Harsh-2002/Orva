@@ -386,8 +386,8 @@ orva backup restore /backups/orva-2026-05-15.tar.gz --yes
 ```
 
 After a successful restore the server exits with status **70** so its supervisor
-(systemd / `docker restart: unless-stopped`) reopens the new files.
-The CLI sees a connection reset — that's the expected happy-path
+(systemd / OpenRC `supervise-daemon` / `docker restart: unless-stopped`) reopens
+the new files. The CLI sees a connection reset — that's the expected happy-path
 signal. Reconnect in ~5 seconds.
 
 > ⚠️ **Non-zero on purpose.** It used to exit 0, and systemd's
@@ -396,7 +396,10 @@ signal. Reconnect in ~5 seconds.
 > `restart: unless-stopped` hides this. The shipped unit now carries
 > `RestartForceExitStatus=70`; a unit created before that needs the line
 > added, or re-run `install.sh`. Check with
-> `systemctl cat orva | grep RestartForceExitStatus`.
+> `systemctl cat orva | grep RestartForceExitStatus`. On Alpine/OpenRC the
+> equivalent is `supervisor="supervise-daemon"` in `/etc/init.d/orva` —
+> `start-stop-daemon` never respawns, so the same restore left the host down
+> there too. Check with `grep supervise-daemon /etc/init.d/orva`.
 
 > The downloaded archive is written mode `0600`, because it contains the
 > database, every function version, the secrets master key and the bootstrap
@@ -855,6 +858,23 @@ How it works: the command queries the GitHub releases API, picks the
 asset matching your OS/arch, verifies its SHA-256 against the release's
 `checksums.txt`, and replaces the running binary atomically (rename
 trick on Windows, unlink-and-replace on Unix-likes).
+
+**Server binaries upgrade themselves, not into the CLI.** The Linux server
+build registers every client subcommand, `upgrade` included, so it can be run
+on the server box. It fetches the server asset `orva-<os>-<arch>`, never the
+slim `orva-cli-<os>-<arch>` — installing the CLI over a server would delete
+`orva serve` and the service would never start again. Server assets are
+published for **linux only**; on any other platform a server build refuses
+rather than falling back to the CLI asset. This replaces the binary and
+nothing else, so restart the service afterwards:
+
+```bash
+sudo orva upgrade
+sudo systemctl restart orva        # OpenRC: rc-service orva restart
+```
+
+Re-run `install.sh` instead when the runtime adapters, rootfs or the service
+unit also need refreshing — `orva upgrade` touches none of them.
 
 If the install path is not writable (e.g. `/usr/local/bin` on a system
 where you installed without `sudo`), `orva upgrade` exits non-zero

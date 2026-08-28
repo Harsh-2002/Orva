@@ -413,6 +413,18 @@ with:
 systemctl cat orva | grep RestartForceExitStatus
 ```
 
+**Alpine / OpenRC.** OpenRC has no per-exit-status restart filter, so the
+equivalent is running the daemon under a supervisor. The shipped init script
+sets `supervisor="supervise-daemon"`, which respawns on **any** unexpected
+exit — a superset of `Restart=on-failure`, and it covers exit 70. A script
+predating this used `start-stop-daemon`, which never respawns: a successful
+restore left the host down exactly as an un-patched systemd unit did. Re-run
+`install.sh` to pick it up, and check with:
+
+```bash
+grep supervise-daemon /etc/init.d/orva
+```
+
 ## Logs
 
 ```bash

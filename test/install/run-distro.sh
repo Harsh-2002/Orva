@@ -106,9 +106,24 @@ if [[ "$DISTRO_INIT" == "systemd" ]]; then
         || die "orva.service bounding set would prevent nsjail exec"
     [[ "$unit" == *"Environment=ORVA_DISABLE_USERNS="* ]] \
         || die "orva.service is missing the detected userns mode"
+    # `orva backup restore` exits 70 to force a restart; without this a
+    # successful restore leaves the server down.
+    [[ "$unit" == *"RestartForceExitStatus=70"* ]] \
+        || die "orva.service would not restart after a backup restore"
+    [[ "$unit" == *"Environment=ORVA_PORT="* ]] \
+        || die "orva.service ignores --port, so the installer's URL would lie"
     ok "orva.service sandbox capability set"
 else
     log "starting OpenRC service"
+    unit=$(docker exec "$CONTAINER" cat /etc/init.d/orva)
+    # OpenRC has no per-exit-status restart filter, so the equivalent of
+    # RestartForceExitStatus=70 is respawning under supervise-daemon.
+    [[ "$unit" == *"supervisor=\"supervise-daemon\""* ]] \
+        || die "orva openrc unit would not restart after a backup restore"
+    [[ "$unit" != *"command_background="* ]] \
+        || die "command_background backgrounds the daemon out of supervise-daemon's view"
+    [[ "$unit" == *"export ORVA_PORT="* ]] \
+        || die "orva openrc unit ignores --port, so the installer's URL would lie"
     docker exec "$CONTAINER" rc-update add orva default \
         || warn "rc-update add reported error"
     docker exec "$CONTAINER" service orva start \

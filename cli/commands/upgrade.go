@@ -31,8 +31,14 @@ var orvaRepo = "Harsh-2002/Orva"
 // httptest server (mirrors the orvaRepo override pattern).
 var githubAPIBase = "https://api.github.com"
 
-// upgradeAssetName is the EXACT release-asset name for the running platform,
-// e.g. "orva-cli-linux-amd64" or "orva-cli-windows-amd64.exe".
+// ServerBuild is set by the server binary's main(); the slim CLI leaves it
+// false. The server registers `upgrade` too, so without this the command
+// installs the slim CLI over the server and `orva serve` ceases to exist.
+var ServerBuild bool
+
+// upgradeAssetName is the EXACT release-asset name for the running platform:
+// "orva-cli-linux-amd64" / "orva-cli-windows-amd64.exe" for the slim CLI, and
+// the separate "orva-linux-<arch>" server asset for a server build.
 //
 // This is stronger than the old "^orva-cli-<os>-<arch>" regex filter: matching
 // the full os-arch token exactly means a wrong-OS asset (e.g. a darwin Mach-O
@@ -40,6 +46,9 @@ var githubAPIBase = "https://api.github.com"
 // matrix in parallel, so asset order is non-deterministic; an exact-name match
 // removes the "exec format error after a successful upgrade" class entirely.
 func upgradeAssetName(goos, goarch string) string {
+	if ServerBuild {
+		return fmt.Sprintf("orva-%s-%s", goos, goarch)
+	}
 	name := fmt.Sprintf("orva-cli-%s-%s", goos, goarch)
 	if goos == "windows" {
 		name += ".exe"
@@ -47,11 +56,27 @@ func upgradeAssetName(goos, goarch string) string {
 	return name
 }
 
+// checkUpgradePlatform rejects a server-build upgrade off linux. Releases
+// publish the server binary for linux only, and the one thing this must never
+// do is quietly settle for the CLI asset.
+func checkUpgradePlatform(server bool, goos string) error {
+	if server && goos != "linux" {
+		return fmt.Errorf("no server release asset for %s: the Orva server is published for linux only", goos)
+	}
+	return nil
+}
+
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade orva to the latest GitHub release",
-	Long: `Download the latest orva CLI release from GitHub, verify its SHA-256
-against checksums.txt, and atomically replace the running binary.
+	Long: `Download the latest orva release from GitHub, verify its SHA-256
+against checksums.txt, and atomically replace the running binary. A CLI build
+fetches the CLI asset and a server build fetches the server asset; neither is
+ever installed over the other.
+
+On a server this replaces the binary only. Restart the service afterwards, and
+re-run install.sh instead when the runtime adapters, rootfs or the service unit
+also need refreshing.
 
 If the install location is not writable by the current user, the command
 exits non-zero with a hint to re-run under sudo. It never silently elevates.
@@ -72,6 +97,9 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 
 	if env := os.Getenv("ORVA_UPGRADE_REPO"); env != "" {
 		orvaRepo = env
+	}
+	if err := checkUpgradePlatform(ServerBuild, runtime.GOOS); err != nil {
+		return err
 	}
 
 	ctx := cmd.Context()
@@ -139,6 +167,10 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Fprintf(out, "Upgraded to orva %s\n", latestStr)
+	if ServerBuild {
+		fmt.Fprintf(out, "Restart to apply: systemctl restart orva (OpenRC: rc-service orva restart)\n")
+		fmt.Fprintf(out, "This replaced the binary only; re-run install.sh to also refresh adapters, rootfs and the unit.\n")
+	}
 	return nil
 }
 
