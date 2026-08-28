@@ -197,7 +197,7 @@
           @click="deployFunction"
         >
           <UploadCloud class="w-4 h-4" />
-          {{ isEditing ? 'Deploy New Version' : 'Deploy' }}
+          {{ isEditing ? 'Deploy new version' : 'Deploy' }}
         </Button>
       </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
@@ -211,7 +211,7 @@
       <span class="text-foreground-muted shrink-0 uppercase tracking-wider text-[10px]">Invoke URL</span>
       <code class="font-mono text-foreground-strong truncate flex-1 min-w-0">{{ invokeUrl }}</code>
       <button
-        class="px-2 py-1 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors flex items-center gap-1 shrink-0 touch-expand-sm"
+        class="touch-expand-xs inline-flex items-center h-7 px-2.5 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors flex items-center gap-1 shrink-0 touch-expand-sm"
         @click="copyInvokeUrl"
       >
         <Check
@@ -227,7 +227,7 @@
       <router-link
         v-if="isEditing && form.name"
         :to="`/functions/${form.name}/deployments`"
-        class="text-foreground-muted hover:text-foreground-strong transition-colors px-2 flex items-center touch-expand-sm"
+        class="text-foreground-muted hover:text-foreground-strong transition-colors inline-flex h-7 items-center rounded-md px-2.5 touch-expand-sm"
       >
         Deployments →
       </router-link>
@@ -326,7 +326,7 @@
             Run
           </button>
           <button
-            class="p-1.5 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
+            class="p-1.5 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
             :title="terminalOpen ? 'Collapse' : 'Expand'"
             :aria-label="terminalOpen ? 'Collapse terminal' : 'Expand terminal'"
             @click="terminalOpen = !terminalOpen"
@@ -402,20 +402,14 @@
                 for="test-method"
                 class="sr-only"
               >Request method</label>
-              <select
-                id="test-method"
+              <FilterSelect
                 v-model="testMethod"
+                :options="methodOptions"
                 :disabled="!canTest"
-                class="text-[11px] font-mono bg-background border border-border rounded px-1.5 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-              >
-                <option
-                  v-for="m in methods"
-                  :key="m"
-                  :value="m"
-                >
-                  {{ m }}
-                </option>
-              </select>
+                label="Method"
+                trigger-id="test-method"
+                bare
+              />
               <label
                 for="test-path"
                 class="sr-only"
@@ -707,7 +701,7 @@
             v-model="form.description"
             rows="2"
             placeholder="One-line summary of what this function does. Surfaces in MCP tool catalogs and the agent channel picker."
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring resize-y"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring resize-y"
           />
         </div>
         <div>
@@ -750,29 +744,14 @@
             for="fn-template"
             class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
           >Template</label>
-          <select
-            id="fn-template"
+          <FilterSelect
             v-model="templateId"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-            @change="applyTemplate"
-          >
-            <option value="">
-              Custom (blank)
-            </option>
-            <optgroup
-              v-for="cat in groupedTemplates"
-              :key="cat.label"
-              :label="cat.label"
-            >
-              <option
-                v-for="tpl in cat.items"
-                :key="tpl.id"
-                :value="tpl.id"
-              >
-                {{ tpl.label }}{{ tpl.cron ? ' · scheduled' : '' }}: {{ tpl.description }}
-              </option>
-            </optgroup>
-          </select>
+            :options="templateOptions"
+            label="Custom (blank)"
+            trigger-id="fn-template"
+            wide
+            @update:model-value="applyTemplate"
+          />
           <p
             v-if="selectedTemplateDescription"
             class="text-[11px] text-foreground-muted mt-1.5"
@@ -813,19 +792,14 @@
                 for="fn-concurrency-policy"
                 class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
               >When at cap</label>
-              <select
-                id="fn-concurrency-policy"
+              <FilterSelect
                 v-model="form.concurrency_policy"
+                :options="concurrencyPolicyOptions"
                 :disabled="!form.max_concurrency"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring disabled:opacity-50"
-              >
-                <option value="queue">
-                  Queue requests
-                </option>
-                <option value="reject">
-                  Reject (429)
-                </option>
-              </select>
+                label="When at cap"
+                trigger-id="fn-concurrency-policy"
+                wide
+              />
             </div>
           </div>
           <p class="text-[11px] text-foreground-muted leading-snug">
@@ -861,21 +835,13 @@
           >
             <Lock class="w-3.5 h-3.5" /> Invoke gate
           </label>
-          <select
-            id="fn-auth-mode"
+          <FilterSelect
             v-model="form.auth_mode"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-          >
-            <option value="none">
-              Public, anyone can invoke
-            </option>
-            <option value="platform_key">
-              Require Orva API key (server-to-server)
-            </option>
-            <option value="signed">
-              Require HMAC signature (X-Orva-Signature)
-            </option>
-          </select>
+            :options="authModeOptions"
+            label="Invoke gate"
+            trigger-id="fn-auth-mode"
+            wide
+          />
           <p class="text-[11px] text-foreground-muted leading-snug">
             Public is the default, matches Cloudflare Workers and Vercel
             Functions. For end-user auth (JWT, session cookies), keep this on
@@ -1078,7 +1044,7 @@
         <textarea
           v-model="dependencyText"
           aria-label="Dependencies, one package per line"
-          class="w-full bg-surface-hover border border-border rounded-md text-xs font-mono p-3 text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring resize-none min-h-[200px]"
+          class="w-full bg-background border border-border rounded-md text-xs font-mono p-3 text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring resize-none min-h-[200px]"
           placeholder="One package per line. e.g. requests==2.31.0"
         />
       </div>
@@ -1215,7 +1181,7 @@
             </router-link>
             <button
               :disabled="rollingBack"
-              class="text-foreground-muted hover:text-foreground-strong disabled:opacity-50 flex items-center gap-1"
+              class="touch-expand-xs inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong disabled:opacity-50"
               @click="rollbackToVersion(v)"
             >
               <RotateCcw class="w-3 h-3" /> Rollback
@@ -1244,7 +1210,7 @@
           Export a single <code class="font-mono text-foreground-strong">handler(event)</code> that returns an
           HTTP-shaped object. Orva injects env vars and secrets at spawn time.
         </p>
-        <pre class="bg-surface border border-border rounded p-3 font-mono text-[12px] text-foreground-strong overflow-x-auto whitespace-pre">{{ handlerHint }}</pre>
+        <pre class="bg-surface border border-border rounded p-3 font-mono text-[12px] text-foreground-strong overflow-x-auto scrollable whitespace-pre">{{ handlerHint }}</pre>
         <ul class="space-y-1 pl-4 list-disc marker:text-foreground-muted">
           <li><span class="text-foreground-strong font-mono">event.body</span> is the raw request body (string or parsed JSON).</li>
           <li>Return <span class="text-foreground-strong font-mono">{ statusCode, headers, body }</span>.</li>
@@ -1359,7 +1325,7 @@
       </div>
       <template #footer>
         <Button
-          variant="secondary"
+          variant="ghost"
           @click="modals.firstDeploy = false"
         >
           Cancel
@@ -1381,6 +1347,7 @@ import { ref, computed, defineAsyncComponent, h, nextTick, onMounted, onBeforeUn
 import { useRoute, useRouter } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
 import PythonIcon from '@/components/icons/brand/PythonIcon.vue'
@@ -1568,6 +1535,16 @@ const testPath = ref('/')
 const testHeaders = ref([])
 const headersOpen = ref(false)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+const methodOptions = methods.map((m) => ({ value: m, label: m }))
+const concurrencyPolicyOptions = [
+  { value: 'queue', label: 'Queue requests' },
+  { value: 'reject', label: 'Reject (429)' },
+]
+const authModeOptions = [
+  { value: 'none', label: 'Public, anyone can invoke' },
+  { value: 'platform_key', label: 'Require Orva API key (server-to-server)' },
+  { value: 'signed', label: 'Require HMAC signature (X-Orva-Signature)' },
+]
 const fixtures = ref([])
 const savedPopoverOpen = ref(false)
 const savedPopoverRef = ref(null)
@@ -1820,7 +1797,7 @@ const applyTemplate = () => {
   }
 }
 
-// Templates grouped by category for the picker's <optgroup>s. Categories
+// Templates grouped by category for the picker. Categories
 // render in `categoryOrder`; an entry with no category falls into "Other".
 const groupedTemplates = computed(() => {
   const list = templates[form.value.runtime] || []
@@ -1838,6 +1815,17 @@ const groupedTemplates = computed(() => {
   }
   return ordered
 })
+
+const templateOptions = computed(() => [
+  { value: '', label: 'Custom (blank)' },
+  ...groupedTemplates.value.flatMap((cat) => [
+    { header: true, label: cat.label },
+    ...cat.items.map((tpl) => ({
+      value: tpl.id,
+      label: `${tpl.label}${tpl.cron ? ' · scheduled' : ''}: ${tpl.description}`,
+    })),
+  ]),
+])
 
 const selectedTemplateDescription = computed(() => {
   const list = templates[form.value.runtime] || []
@@ -2880,7 +2868,7 @@ const resetForm = async () => {
 
    This used to be a ::before overlay inset -8px vertically. That is the
    exact pattern style.css removed: the toolbar is flex-wrap, so when
-   "Deploy New Version" pushes the row past a phone's width the buttons
+   "Deploy new version" pushes the row past a phone's width the buttons
    wrap onto two rows separated by gap-2 (7.6 px) and each row-2 overlay
    covered the row-1 buttons above it — winning the hit test on paint
    order and swallowing taps meant for Config. Grow the box, never the
@@ -2889,8 +2877,8 @@ const resetForm = async () => {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  border-radius: 0.375rem;
+  padding: 0 0.625rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-hover);
   color: var(--color-foreground-muted);
@@ -2898,6 +2886,7 @@ const resetForm = async () => {
   font-weight: 500;
   white-space: nowrap;
   transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+  height: 30.4px;
 }
 .panel-btn:hover {
   color: var(--color-foreground);
@@ -2929,6 +2918,7 @@ const resetForm = async () => {
   text-align: left;
   cursor: pointer;
   transition: background-color 120ms ease;
+  border-radius: var(--radius-md);
 }
 .menu-item:hover,
 .menu-item:focus-visible {
@@ -2946,8 +2936,8 @@ const resetForm = async () => {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 0.3rem;
+  padding: 0 0.55rem;
+  border-radius: var(--radius-md);
   border: 1px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
   background: color-mix(in srgb, var(--color-primary) 18%, transparent);
   color: var(--color-foreground);
@@ -2955,6 +2945,7 @@ const resetForm = async () => {
   font-weight: 500;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  height: 26.6px;
 }
 .run-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-primary) 32%, transparent);
@@ -2974,17 +2965,37 @@ const resetForm = async () => {
    cannot lift. Desktop (fine pointers) is untouched. */
 @media (pointer: coarse) {
   .panel-btn {
-    min-height: 44px;
-  }
-  .run-btn {
-    min-height: 44px;
-  }
-  .terminal-bar {
     height: auto;
     min-height: 44px;
   }
+
+  /* Run sat at 44px inside a 44px bar: a bordered control exactly as tall as
+     the strip containing it, touching both edges, which is what made it read
+     as a slab rather than a button. It takes the sm rung (36px) and buys the
+     rest of its target the same bounded way the shared helpers do. */
+  .run-btn {
+    height: auto;
+    min-height: 36px;
+    position: relative;
+  }
+  .run-btn::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    left: 0;
+    right: 0;
+  }
+
+  /* The bar has to be taller than the control it holds, or there is no bar
+     left to see. Tabs stay full-height because their underline is the
+     selected-state indicator and it belongs on the bar's own bottom edge. */
+  .terminal-bar {
+    height: auto;
+    min-height: 48px;
+  }
   .terminal-tab {
-    height: 44px;
+    height: 48px;
   }
   /* The method select inside this bar inherits the global 44 px form-control
      floor, which overflowed a hard h-7 (26.6 px) row and painted over the

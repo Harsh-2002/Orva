@@ -5,10 +5,19 @@ import { readFileSync } from 'node:fs'
 const settings = readFileSync(new URL('../src/components/ai/AISettingsPanel.vue', import.meta.url), 'utf8')
 const modelMenu = readFileSync(new URL('../src/components/ai/ModelMenu.vue', import.meta.url), 'utf8')
 const popover = readFileSync(new URL('../src/components/common/Popover.vue', import.meta.url), 'utf8')
+const filterSelect = readFileSync(new URL('../src/components/common/FilterSelect.vue', import.meta.url), 'utf8')
 
 test('active provider and model use the same field geometry', () => {
-  assert.match(settings, /id="ai-active-provider"[\s\S]*?class="[^"]*h-10 w-full[^"]*rounded-md[^"]*text-sm/)
-  assert.match(modelMenu, /wide[\s\S]*?'h-10 w-full justify-between rounded-md[^']*text-sm/)
+  // Both are the app's own picker in wide mode, which is the strongest form of
+  // "these two match": one class string, not two that happen to agree. The
+  // provider was a native <select> and the pair drifted the moment either moved.
+  assert.match(settings, /trigger-id="ai-active-provider"[\s\S]*?\bwide\b/)
+  assert.match(settings, /id="ai-active-model"[\s\S]*?:wide="true"|<ModelMenu[\s\S]*?\bwide\b/)
+  // ...and each carries the touch floor, or it is the one field on the panel
+  // that stays 38px on a phone while its neighbours reach 44.
+  assert.match(filterSelect, /'h-10 w-full justify-between px-3 text-sm touch-expand-md'/)
+  assert.match(modelMenu, /wide[\s\S]*?'[^']*\bh-10 w-full justify-between rounded-md[^']*text-sm/)
+  assert.match(modelMenu, /wide[\s\S]*?'[^']*\btouch-expand-md\b[^']*h-10 w-full/)
 })
 
 test('wide model menus fill their settings column without changing compact chat menus', () => {

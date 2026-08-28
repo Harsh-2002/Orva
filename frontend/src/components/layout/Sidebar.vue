@@ -50,7 +50,7 @@
   <aside
     id="primary-navigation"
     ref="drawerEl"
-    class="bg-background border-r border-border flex flex-col h-full shrink-0 z-40
+    class="bg-background lg:border-r border-border flex flex-col h-full shrink-0 z-40
            w-64 lg:w-52
            fixed inset-y-0 left-0 transform transition-transform duration-150 ease-out
            lg:static lg:translate-x-0 lg:transform-none lg:transition-none
@@ -60,11 +60,15 @@
     @touchmove="onTouchMove"
     @touchend="onTouchEnd"
   >
-    <div class="h-16 flex items-center px-6 border-b border-border">
+    <!-- h-14 and no border below lg: the mobile top bar already draws a rule
+         at that exact y, and a second one 7.6px lower reads as a misalignment. -->
+    <div class="h-14 lg:h-16 flex items-center px-6 lg:border-b border-border">
       <BrandLockup />
     </div>
 
-    <nav class="flex-1 p-3 space-y-1 overflow-y-auto scrollable">
+    <!-- The drawer's vertical edge starts below the header rather than cutting
+         through it; above lg the aside carries a full-height one instead. -->
+    <nav class="flex-1 p-3 space-y-1 overflow-y-auto scrollable border-r border-border lg:border-r-0">
       <router-link
         v-for="item in primaryItems"
         :key="item.path"

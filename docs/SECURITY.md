@@ -92,7 +92,7 @@ its own place to revoke it:
 
 | Class | Grants | Revoke at |
 |---|---|---|
-| **API keys** | full instance management | Settings → API Keys |
+| **API keys** | full instance management | Settings → API keys |
 | **Channel tokens** | MCP only, invoke only, over a named set of functions — and they bypass those functions' `auth_mode` by design | Channels page |
 | **OAuth grants** | issued to a connected application (claude.ai, ChatGPT) through the consent screen | Settings → Connected applications |
 

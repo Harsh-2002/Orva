@@ -17,7 +17,7 @@
       <!-- Login Card -->
       <div class="bg-surface border border-border rounded-lg shadow-lg p-8">
         <h2 class="text-xl font-semibold text-foreground mb-6">
-          Sign In
+          Sign in
         </h2>
 
         <!-- The focus ring is white, not primary: it marks where the cursor is
@@ -84,7 +84,7 @@
             :disabled="!form.username || !form.password || loading"
           >
             <LogIn class="w-4 h-4" />
-            Sign In
+            Sign in
           </Button>
         </form>
       </div>

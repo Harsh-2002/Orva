@@ -251,6 +251,17 @@ test('no colour literal stands in for a theme token', () => {
   assert.deepEqual(bad, [], `colour literals found:\n${bad.join('\n')}`)
 })
 
+test('no view opens the operating system picker', () => {
+  // A native <select> hands a phone its OS wheel, beside a FilterSelect that
+  // opens a sheet: two behaviours for one job. The app had fifteen of them.
+  const bad = []
+  for (const { file, tpl } of templates) {
+    if (file.endsWith('FilterSelect.vue')) continue
+    if (/<select[\s>]/.test(tpl)) bad.push(file)
+  }
+  assert.deepEqual(bad, [], `use FilterSelect instead of a native <select>:\n${bad.join('\n')}`)
+})
+
 test('a muted token is never faded further with alpha', () => {
   // --color-foreground-muted IS the muted step; there is nothing left to
   // spend. Measured in a browser on the real pages: placeholder text at /60

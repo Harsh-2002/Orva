@@ -110,7 +110,7 @@
         </div>
         <div class="flex gap-2">
           <Button
-            variant="secondary"
+            variant="ghost"
             @click="$emit('close')"
           >
             Cancel

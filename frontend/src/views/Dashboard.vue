@@ -2,7 +2,7 @@
   <div class="space-y-6">
     <div>
       <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
-        System Overview
+        System overview
       </h1>
       <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
         Live platform health and activity.
@@ -32,7 +32,7 @@
         <router-link
           v-if="sample.length"
           to="/invocations"
-          class="shrink-0 inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground-strong transition-colors rounded touch-expand-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          class="shrink-0 inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground-strong transition-colors rounded-md touch-expand-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {{ failures.length ? 'Inspect failures' : 'All invocations' }}
           <ArrowRight class="w-3.5 h-3.5" />

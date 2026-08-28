@@ -16,7 +16,7 @@
         type="button"
         class="inline-flex items-center gap-1.5 transition-colors focus-visible:outline-none"
         :class="wide
-          ? 'h-10 w-full justify-between rounded-md border border-border bg-background px-3 text-sm text-foreground hover:bg-surface-hover focus-visible:border-focus-ring focus-visible:ring-1 focus-visible:ring-focus-ring'
+          ? 'touch-expand-md h-10 w-full justify-between rounded-md border border-border bg-background px-3 text-sm text-foreground hover:bg-surface-hover focus-visible:border-focus-ring focus-visible:ring-1 focus-visible:ring-focus-ring'
           : 'touch-expand-sm h-8 max-w-[min(24rem,48vw)] rounded-lg px-2.5 text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface'"
         :title="store.selectedModel || 'Select model'"
         aria-label="Select model"

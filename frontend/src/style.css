@@ -303,6 +303,9 @@ body {
 html, body {
   overflow-x: hidden;
   max-width: 100vw;
+  /* overflow-x:hidden does not stop iOS panning the visual viewport: the whole
+     page could be dragged diagonally, showing the background behind it. */
+  overscroll-behavior: none;
 }
 
 /* Overflow should be discoverable on dense operational surfaces. Keep the
@@ -310,6 +313,37 @@ html, body {
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
+}
+
+/* ...except on a horizontal strip you swipe.
+   ------------------------------------------------------------
+   The rule above is right for a vertical scroller inside a table or a code
+   block, where a quiet bar is the only clue there is more to see. It is wrong
+   for a filter-chip strip: the chips themselves are the affordance, the strip
+   is swiped rather than dragged, and a 6px bar underneath them lands like a
+   stray horizontal rule between the toolbar and the content. On a phone it
+   reads as a rendering fault rather than a scrollbar.
+
+   Opt in per strip rather than switching it off for all horizontal overflow,
+   because a wide table genuinely does want the bar. */
+.swipe-x {
+  scrollbar-width: none;
+
+  /* Stop the strip rubber-banding past its ends, and stop the gesture
+     chaining to the page behind it.
+     ------------------------------------------------------------
+     `overscroll-behavior: contain` on .scrollable prevents CHAINING but still
+     permits the local elastic bounce, so on iOS the whole strip could be
+     dragged well past its last chip and sprung back -- it reads as a loose
+     component floating over the page rather than a scroller with ends.
+     `none` is the value that suppresses the bounce itself. Chromium clamps at
+     the end either way, which is exactly why this was missed: the defect only
+     appears on a real iOS device, and a headless run reports scrollLeft
+     stopping cleanly at its maximum. */
+  overscroll-behavior-x: none;
+}
+.swipe-x::-webkit-scrollbar {
+  display: none;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -428,6 +462,42 @@ select::-ms-expand {
   top: max(env(safe-area-inset-top, 0px), 0px);
   bottom: max(env(safe-area-inset-bottom, 0px), 0px);
 }
+
+/* ============================================================
+   transition-colors, without the gradient custom properties
+   ------------------------------------------------------------
+   Tailwind v4 compiles `transition-colors` to a list that ends with
+   --tw-gradient-from, --tw-gradient-via and --tw-gradient-to. Those are
+   REGISTERED custom properties (@property with a declared syntax), which makes
+   them animatable -- and animating a registered custom property is a known
+   repaint hazard in WebKit: it can invalidate the element's layer on every
+   transition, which is visible on a phone as a flicker for the length of the
+   transition. It is on 117 controls here.
+
+   This codebase ships no Tailwind gradient utilities at all (grep for
+   bg-gradient / gradient-to / from-[ returns nothing), so those three
+   properties transition from nothing to nothing on every hover and tap. Narrow
+   the list to the four that actually change.
+
+   Unlayered on purpose: it has to outrank the utility it is correcting.
+   ============================================================ */
+.transition-colors {
+  transition-property: color, background-color, border-color, outline-color;
+}
+
+/* ============================================================
+   Glyph size follows the button's rung
+   ------------------------------------------------------------
+   Icon size was set per call site, so it stopped correlating with the control
+   it sat in: measured across the app, 15.2 / 13.3 / 11.4px appeared on
+   controls of every height, and "Refresh" shipped all three. The size prop now
+   decides, and this is unlayered so it outranks a w-3/w-4 utility left on the
+   slotted icon.
+   ============================================================ */
+.btn-ico-xs > svg { width: 0.75rem; height: 0.75rem; }
+.btn-ico-sm > svg { width: 0.875rem; height: 0.875rem; }
+.btn-ico-md > svg { width: 1rem; height: 1rem; }
+.btn-ico-lg > svg { width: 1.125rem; height: 1.125rem; }
 
 /* ============================================================
    Touch-target hit-area expansion for sub-44px controls
@@ -555,6 +625,18 @@ select::-ms-expand {
     min-height: 44px;
   }
 
+  /* And the padding has to get out of the way of that floor. A single-line
+     field with both `min-height: 44px` and its own vertical padding leaves two
+     things deciding where the text sits, and WebKit does not reliably centre
+     the inner editor when the used height exceeds the content box -- so the
+     text rode high while the magnifier, absolutely centred against the
+     wrapper, sat at the true middle. That gap is what reads as "the search
+     icon is not in the middle". Textareas keep theirs: their text starts at
+     the top by definition. */
+  input:not([type='checkbox']):not([type='radio']) {
+    padding-block: 0;
+  }
+
   /* Checkboxes and radios are the exception this rule never had. They are
      square by nature, so a height floor with no width floor deformed them:
      the four permission boxes on API Keys rendered 13px wide by 44px tall,
@@ -579,13 +661,24 @@ select::-ms-expand {
 /* ============================================================
    Bounded scrollers — for code blocks, drawer/modal bodies,
    wide tables that need horizontal scroll inside their bounds.
-   Restores momentum on iOS (the global hidden-scrollbar rule
-   above strips visual scrollbars; this restores feel) and
-   prevents body bounce when scrolling reaches the edge.
+   Restores momentum on iOS and prevents body bounce when
+   scrolling reaches the edge.
+
+   This used to say it was restoring feel after "the global
+   hidden-scrollbar rule above strips visual scrollbars". There
+   is no such rule and there never was in this file: the global
+   rule SHOWS a 6px bar on every scroller. The comment described
+   the opposite of the code it sat next to, which is how a
+   filter-chip strip ended up with a visible bar under it that
+   nobody had chosen. `.swipe-x` is the opt-out.
    ============================================================ */
 .scrollable {
   -webkit-overflow-scrolling: touch;
+  /* contain stops the gesture chaining to the page; none additionally stops
+     the element's own elastic bounce. Horizontal strips need the second --
+     see .swipe-x above for why this only shows up on a real iOS device. */
   overscroll-behavior: contain;
+  overscroll-behavior-x: none;
 }
 
 /* ============================================================

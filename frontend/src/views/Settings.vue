@@ -15,7 +15,10 @@
          these values don't change while the binary is running). -->
     <details class="group border-b border-border pb-6">
       <summary class="touch-expand-sm flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
-        <Info class="w-4 h-4 text-foreground-muted" />
+        <ChevronRight
+          class="w-3.5 h-3.5 shrink-0 transition-transform group-open:rotate-90 text-foreground-muted"
+          aria-hidden="true"
+        />
         Build info
         <span class="ml-auto text-xs font-normal text-foreground-muted group-open:hidden">{{ buildInfo?.version || EMPTY }}</span>
       </summary>
@@ -51,7 +54,7 @@
                own content, so the glyph stays put. -->
           <button
             v-if="buildInfo?.image"
-            class="p-1 rounded hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors shrink-0 touch-expand-iconbtn"
+            class="p-1 rounded-md hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors shrink-0 touch-expand-iconbtn"
             title="Copy image reference"
             aria-label="Copy image reference"
             @click="copyImage"
@@ -96,7 +99,7 @@
             role="radio"
             :aria-checked="themePref === opt.value"
             :tabindex="themePref === opt.value ? 0 : -1"
-            class="touch-expand-sm inline-flex items-center gap-1.5 rounded px-3 h-8 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            class="touch-expand-sm inline-flex items-center gap-1.5 rounded-md px-3 h-8 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             :class="themePref === opt.value
               ? 'bg-surface-hover text-foreground-strong'
               : 'text-foreground-muted hover:text-foreground hover:bg-surface-hover'"
@@ -305,7 +308,7 @@
               type="password"
               autocomplete="current-password"
               aria-describedby="pw-error"
-              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              class="h-10 bg-surface border border-border rounded-md px-3 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
           </div>
@@ -320,7 +323,7 @@
               type="password"
               autocomplete="new-password"
               aria-describedby="pw-error"
-              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              class="h-10 bg-surface border border-border rounded-md px-3 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
           </div>
@@ -335,7 +338,7 @@
               type="password"
               autocomplete="new-password"
               aria-describedby="pw-error"
-              class="bg-surface border border-border rounded-md px-3 py-2 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              class="h-10 bg-surface border border-border rounded-md px-3 text-sm text-foreground-strong placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             >
           </div>
@@ -683,11 +686,11 @@ import {
   Monitor,
   Trash2,
   Ban,
-  Info,
   Copy,
   MessagesSquare,
   Sun,
   Moon,
+  ChevronRight,
 } from '@lucide/vue'
 import AISettingsPanel from '@/components/ai/AISettingsPanel.vue'
 import Button from '@/components/common/Button.vue'

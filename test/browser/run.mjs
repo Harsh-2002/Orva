@@ -7,7 +7,7 @@
 //
 //   node run.mjs --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
 //   node run.mjs --url ... --api-key ... --destructive     # include delete flows
-//   node run.mjs --url ... --suite responsive,touch-targets
+//   node run.mjs --url ... --suite responsive,consistency
 //   node run.mjs --url ... --theme day                     # one theme, not both
 //
 // Exit codes:  0 all checks passed   1 at least one failed   2 could not start
@@ -28,9 +28,11 @@ import * as responsive from './suites/responsive.mjs'
 import * as touchTargets from './suites/touch-targets.mjs'
 import * as accessibility from './suites/accessibility.mjs'
 import * as controlScale from './suites/control-scale.mjs'
+import * as edgeGuard from './suites/edge-guard.mjs'
+import * as consistency from './suites/consistency.mjs'
 import * as journeys from './suites/journeys.mjs'
 
-const PAGE_SUITES = [smoke, responsive, touchTargets, controlScale, accessibility]
+const PAGE_SUITES = [smoke, responsive, touchTargets, controlScale, consistency, edgeGuard, accessibility]
 const FLOW_SUITES = [journeys]
 
 const BASE = arg('url', process.env.ORVA_URL || 'http://127.0.0.1:8443').replace(/\/$/, '')
@@ -164,6 +166,16 @@ try {
 
       if (SHOT_DIR) {
         await page.screenshot({ path: join(SHOT_DIR, `${theme}__${viewport.name}__${route.name}.png`) })
+      }
+    }
+
+    // A relational check needs every route in hand before it can speak.
+    for (const suite of pageSuites) {
+      if (!suite.afterViewport) continue
+      try {
+        await suite.afterViewport({ viewport, theme, report: themeReport })
+      } catch (e) {
+        themeReport.fail(suite.meta.id, viewport.name, 'suite ran', `threw: ${String(e).slice(0, 160)}`)
       }
     }
 

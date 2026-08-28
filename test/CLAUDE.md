@@ -76,7 +76,7 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 ## Subdirectories
 
 - `e2e/` — comprehensive programmatic **Python (stdlib-only)** E2E suite; spins its own fresh isolated Docker container via `cd test/e2e && python3 run.py`. Covers the full server API + CLI + AI assistant and is the source-of-truth "does everything still work as spec'd" suite. See `test/e2e/CLAUDE.md`.
-- `browser/` — real-browser UI suite (Playwright over system Chrome): overflow and clipping, touch targets, accessibility, and multi-step journeys. Needs a running instance; see `test/browser/CLAUDE.md`.
+- `browser/` — real-browser UI suite (Playwright over system Chrome): overflow and clipping, touch targets, the control size ladder, cross-view control consistency, accessibility, and multi-step journeys. Needs a running instance; see `test/browser/CLAUDE.md`.
 - `container/` — end-to-end against a **real container on a throwaway Docker network**, with the privileges nsjail actually needs. Builds the image, brings the instance up, runs the API/sandbox and browser suites, and removes everything on exit. Unlike the rest of this directory it needs no running instance. See `test/container/CLAUDE.md`.
 - `cli/` — CLI-only harnesses: build matrix, install-cli, upgrade round-trip, command-tree golden diff.
 - `install/` — server-install e2e (privileged systemd-in-docker across distros + Kata flow).

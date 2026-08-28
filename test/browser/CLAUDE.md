@@ -42,6 +42,7 @@ clear iOS's 16px focus-zoom threshold. Neither is visible in the class name.
 | `responsive` | nothing overflows the viewport; nothing is clipped without a scroll affordance |
 | `touch-targets` | every control clears 44×44 where the pointer is coarse |
 | `control-scale` | every control lands on the size ladder, on both pointer types |
+| `consistency` | controls agree with their neighbours: siblings, the same label across views, and the size of the radius/icon populations |
 | `accessibility` | accessible names, keyboard reachability, AA contrast, heading order, duplicate ids |
 | `journeys` | real multi-step flows (nav drawer, destructive-dialog keyboard safety) |
 
@@ -64,6 +65,37 @@ inline target), and any control whose label runs to more than one line or whose
 children are stacked blocks — a card body that happens to be a button is sized
 by its content. Two controls are exempt by name, each with its reason in the
 file.
+
+`consistency` is the answer to the question `control-scale` cannot ask. Every
+other suite here measures a control against a **standard**; none of them can see
+a **pair**. That is how the app reached 40 off-system controls, 9 radius values,
+a `Refresh` drawn at three heights with three icon sizes across six views, and a
+`Copy secret` rendered four different ways — all while 2520 assertions passed.
+`Function` at 26.6px passed. `STATUS` at 26.6px passed. That one was 10px
+uppercase beside the other at 11.4px sentence-case was invisible to both.
+
+Three relational invariants:
+
+- **Siblings in a row agree** on height, label size, case and radius. A "row" is
+  the nearest ancestor holding more than one control, because a filter strip's
+  triggers are cousins — each sits in its own `Popover` root — not siblings.
+- **The same label is drawn the same way in every view.** Accumulated across
+  routes and judged in `afterViewport`, which is why the runner has that hook:
+  the comparison cannot happen on the page where the first sighting was made.
+- **The radius and icon populations stay inside the declared sets.** Per-control
+  rules cannot catch this; the point is that the *set* stays small, and a tenth
+  radius is drift even when each one is individually defensible.
+
+**The walk stops at a table cell.** The columns of a data row are different type
+roles by design — a mono timestamp, a medium function name, a ghost action — and
+they share a line only because the row centres them. Comparing across `<td>`
+boundaries reported four defects that were not defects.
+
+Two exemption lists, each entry with its reason in the file: `ROW_EXEMPT` for a
+control that may sit in any row (the firewall switch, whose geometry *is* the
+switch), and `LABEL_EXEMPT` for a word deliberately drawn twice (the composer's
+model button is a full control when the rail is open and a bare glyph when it is
+collapsed).
 
 Layout suites run per viewport. Flow suites run once, on the widest viewport,
 because they drive interactions rather than measure layout. The accessibility

@@ -20,7 +20,7 @@
           variant="secondary"
           @click="$router.push(`/functions/${fnName}`)"
         >
-          <UploadCloud class="w-4 h-4 mr-2" />
+          <UploadCloud class="w-4 h-4" />
           New version
         </Button>
         <Button
@@ -28,7 +28,7 @@
           @click="refresh"
         >
           <RefreshCw
-            class="w-4 h-4 mr-2"
+            class="w-4 h-4"
             :class="{ 'animate-spin': loading }"
           />
           Refresh
@@ -76,7 +76,7 @@
       {{ error }}
     </div>
 
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
@@ -93,7 +93,7 @@
                    wrap the whole row, because the row carries its own links. -->
               <button
                 type="button"
-                class="touch-expand-sm w-full text-left cursor-pointer rounded-sm active:bg-surface-hover/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm w-full text-left cursor-pointer rounded-md active:bg-surface-hover/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :aria-label="detailLabel(d)"
                 @click="open(d)"
               >
@@ -125,7 +125,7 @@
               <router-link
                 v-if="canCompare(d)"
                 :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
-                class="text-foreground-muted hover:text-foreground-strong text-xs flex items-center gap-1 px-2 py-1 rounded-sm touch-expand-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="text-foreground-muted hover:text-foreground-strong text-xs inline-flex items-center gap-1 h-7 px-2.5 rounded-md touch-expand-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :title="`Compare v${d.version} with the live version`"
               >
                 <GitCompare class="w-3 h-3" /> Compare
@@ -185,7 +185,7 @@
                      bare, so the desktop cell looks exactly as it did. -->
                 <button
                   type="button"
-                  class="touch-expand-xs text-foreground-strong text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  class="touch-expand-xs text-foreground-strong text-left rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   :class="isActive(d) ? 'font-semibold' : 'text-foreground-muted'"
                   :aria-label="detailLabel(d)"
                   @click.stop="open(d)"
@@ -233,7 +233,7 @@
                 <router-link
                   v-if="canCompare(d)"
                   :to="{ name: 'function-diff', params: { name: fnName }, query: { from: d.id, to: activeDeploymentId } }"
-                  class="touch-expand-xs text-foreground-muted hover:text-foreground-strong flex items-center gap-1 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  class="touch-expand-xs text-foreground-muted hover:text-foreground-strong inline-flex items-center gap-1 h-7 px-2.5 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   :title="`Compare v${d.version} with the live version, v${liveVersion}`"
                 >
                   <GitCompare class="w-3 h-3" /> Compare with live

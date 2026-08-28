@@ -151,7 +151,7 @@ const items = [
   { id: 'go-cron',     label: 'Schedules',         icon: CalendarClock,action: () => router.push('/cron') },
   { id: 'go-activity', label: 'Activity',          icon: Activity,     action: () => router.push('/activity') },
   { id: 'go-traces',   label: 'Traces',            icon: Network,      action: () => router.push('/traces') },
-  { id: 'go-keys',     label: 'API Keys',          icon: Fingerprint,  action: () => router.push('/api-keys') },
+  { id: 'go-keys',     label: 'API keys',          icon: Fingerprint,  action: () => router.push('/api-keys') },
   { id: 'go-channels', label: 'Channels',          icon: Plug,         action: () => router.push('/channels') },
   { id: 'go-hooks',    label: 'Webhooks',          icon: Webhook,      action: () => router.push('/webhooks') },
   // keywords keeps this reachable by its old name; the page was "Firewall"

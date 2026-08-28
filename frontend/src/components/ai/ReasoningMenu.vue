@@ -29,7 +29,7 @@
         :aria-expanded="open"
         @click="toggle"
       >
-        <Brain class="w-4 h-4 shrink-0" />
+        <Brain class="w-3.5 h-3.5 shrink-0" />
         <span v-if="active">{{ currentLabel }}</span>
       </button>
     </template>

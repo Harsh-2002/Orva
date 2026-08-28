@@ -4,7 +4,7 @@
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div class="min-w-0">
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
-          KV Store
+          KV store
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           JSON state for
@@ -24,7 +24,7 @@
         </span>
         <Button
           variant="secondary"
-          size="sm"
+          size="md"
           @click="refresh"
         >
           <RefreshCw
@@ -34,7 +34,7 @@
           Refresh
         </Button>
         <Button
-          size="sm"
+          size="md"
           @click="openSet()"
         >
           <Plus class="w-3.5 h-3.5" />
@@ -53,7 +53,7 @@
           v-model="prefix"
           aria-label="Search keys by prefix"
           placeholder="Search by key prefix… (e.g. user:)"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+          class="h-7 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           @input="onPrefixInput"
         >
       </div>
@@ -77,7 +77,7 @@
              clicks from neighbouring rows. -->
         <button
           type="button"
-          class="underline hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm"
+          class="touch-expand-sm inline-flex h-8 items-center rounded-md px-3 text-xs text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           :disabled="loading"
           @click="refresh({ append: true })"
         >
@@ -88,7 +88,7 @@
     </div>
 
     <!-- Table -->
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
@@ -103,7 +103,7 @@
                  list view where it was never applied. -->
             <button
               type="button"
-              class="min-w-0 flex-1 text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              class="min-w-0 flex-1 text-left rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               :aria-label="inspectLabel(row)"
               @click="openInspect(row)"
             >
@@ -180,7 +180,7 @@
                    cell looks exactly as it did. -->
               <button
                 type="button"
-                class="touch-expand-sm block w-full truncate text-left font-mono text-xs text-foreground-strong rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm block w-full truncate text-left font-mono text-xs text-foreground-strong rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :aria-label="inspectLabel(row)"
                 @click.stop="openInspect(row)"
               >

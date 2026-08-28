@@ -26,7 +26,7 @@
         </span>
         <Button
           variant="secondary"
-          size="sm"
+          size="md"
           @click="refresh"
         >
           <RefreshCw
@@ -36,7 +36,7 @@
           Refresh
         </Button>
         <Button
-          size="sm"
+          size="md"
           @click="openCreate()"
         >
           <Plus class="w-3.5 h-3.5" />
@@ -90,7 +90,7 @@
     </div>
 
     <!-- Table -->
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
@@ -297,27 +297,15 @@
             for="inbound-format"
             class="text-xs uppercase tracking-wider text-foreground-muted"
           >Signature format</label>
-          <select
-            id="inbound-format"
-            v-model="create.format"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
-          >
-            <option value="hmac_sha256_hex">
-              hmac_sha256_hex (default)
-            </option>
-            <option value="hmac_sha256_base64">
-              hmac_sha256_base64
-            </option>
-            <option value="github">
-              github (X-Hub-Signature-256)
-            </option>
-            <option value="stripe">
-              stripe (Stripe-Signature)
-            </option>
-            <option value="slack">
-              slack (X-Slack-Signature)
-            </option>
-          </select>
+          <div class="mt-2">
+            <FilterSelect
+              v-model="create.format"
+              :options="formatOptions"
+              label="Signature format"
+              trigger-id="inbound-format"
+              wide
+            />
+          </div>
           <p class="text-[11px] text-foreground-muted mt-2">
             Pick the format your upstream service produces. The header name is
             stamped automatically; you can override on the row after creation.
@@ -425,6 +413,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, Trash2, Send, RefreshCw, Pause, Play } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import { listInboundWebhooks, createInboundWebhook, deleteInboundWebhook, updateInboundWebhook, signInboundWebhook } from '@/api/endpoints'
@@ -443,6 +432,13 @@ const testing = ref(false)
 const lastCreated = ref(null)
 const origin = computed(() => window.location.origin)
 
+const formatOptions = [
+  { value: 'hmac_sha256_hex', label: 'hmac_sha256_hex (default)' },
+  { value: 'hmac_sha256_base64', label: 'hmac_sha256_base64' },
+  { value: 'github', label: 'github (X-Hub-Signature-256)' },
+  { value: 'stripe', label: 'stripe (Stripe-Signature)' },
+  { value: 'slack', label: 'slack (X-Slack-Signature)' },
+]
 const create = reactive({
   open: false,
   name: '',

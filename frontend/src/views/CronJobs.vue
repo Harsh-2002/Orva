@@ -3,7 +3,7 @@
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
-          Scheduled Jobs
+          Scheduled jobs
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Run functions on a cron schedule.
@@ -11,7 +11,7 @@
       </div>
       <Button @click="showCreateModal = true">
         <PlusCircle class="w-4 h-4" />
-        New Schedule
+        New schedule
       </Button>
     </div>
 
@@ -23,7 +23,7 @@
       class="mb-3"
     />
 
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
@@ -212,7 +212,7 @@
     <!-- Create/Edit Modal -->
     <Modal
       :model-value="showCreateModal"
-      :title="editingJob ? 'Edit Schedule' : 'Create Schedule'"
+      :title="editingJob ? 'Edit schedule' : 'Create schedule'"
       size="lg"
       @update:model-value="(v) => { if (!v) closeModal() }"
     >
@@ -223,23 +223,14 @@
             for="cron-function"
             class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-2"
           >Function</label>
-          <select
-            id="cron-function"
+          <FilterSelect
             v-model="form.function_name"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+            :options="fnOptions"
             :disabled="!!editingJob"
-          >
-            <option value="">
-              Select a function
-            </option>
-            <option
-              v-for="fn in functions"
-              :key="fn.name"
-              :value="fn.name"
-            >
-              {{ fn.name }} ({{ runtimeLabel(fn.runtime) }})
-            </option>
-          </select>
+            label="Select a function"
+            trigger-id="cron-function"
+            wide
+          />
         </div>
 
         <!-- Schedule Type Tabs -->
@@ -261,7 +252,7 @@
               :aria-pressed="scheduleType === type"
               @click="scheduleType = type"
             >
-              {{ type === 'simple' ? 'Natural Language' : 'Cron Expression' }}
+              {{ type === 'simple' ? 'Natural language' : 'Cron expression' }}
             </button>
           </div>
         </div>
@@ -275,36 +266,22 @@
             <div>
               <label
                 for="cron-frequency"
-                class="text-xs font-medium text-foreground-muted block mb-1.5"
+                class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
               >Frequency</label>
-              <select
-                id="cron-frequency"
+              <FilterSelect
                 v-model="simpleSchedule.frequency"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-                @change="updateCronFromSimple"
-              >
-                <option value="minute">
-                  Every Minute
-                </option>
-                <option value="hour">
-                  Hourly
-                </option>
-                <option value="day">
-                  Daily
-                </option>
-                <option value="week">
-                  Weekly
-                </option>
-                <option value="month">
-                  Monthly
-                </option>
-              </select>
+                :options="frequencyOptions"
+                label="Frequency"
+                trigger-id="cron-frequency"
+                wide
+                @update:model-value="updateCronFromSimple"
+              />
             </div>
 
             <div v-if="['hour', 'day', 'week', 'month'].includes(simpleSchedule.frequency)">
               <label
                 for="cron-minute"
-                class="text-xs font-medium text-foreground-muted block mb-1.5"
+                class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
               >At Minute</label>
               <input
                 id="cron-minute"
@@ -320,7 +297,7 @@
             <div v-if="['day', 'week', 'month'].includes(simpleSchedule.frequency)">
               <label
                 for="cron-hour"
-                class="text-xs font-medium text-foreground-muted block mb-1.5"
+                class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
               >At Hour</label>
               <input
                 id="cron-hour"
@@ -336,42 +313,22 @@
             <div v-if="simpleSchedule.frequency === 'week'">
               <label
                 for="cron-day-of-week"
-                class="text-xs font-medium text-foreground-muted block mb-1.5"
+                class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
               >Day of Week</label>
-              <select
-                id="cron-day-of-week"
+              <FilterSelect
                 v-model="simpleSchedule.dayOfWeek"
-                class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-                @change="updateCronFromSimple"
-              >
-                <option value="0">
-                  Sunday
-                </option>
-                <option value="1">
-                  Monday
-                </option>
-                <option value="2">
-                  Tuesday
-                </option>
-                <option value="3">
-                  Wednesday
-                </option>
-                <option value="4">
-                  Thursday
-                </option>
-                <option value="5">
-                  Friday
-                </option>
-                <option value="6">
-                  Saturday
-                </option>
-              </select>
+                :options="dayOfWeekOptions"
+                label="Day of Week"
+                trigger-id="cron-day-of-week"
+                wide
+                @update:model-value="updateCronFromSimple"
+              />
             </div>
 
             <div v-if="simpleSchedule.frequency === 'month'">
               <label
                 for="cron-day-of-month"
-                class="text-xs font-medium text-foreground-muted block mb-1.5"
+                class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
               >Day of Month</label>
               <input
                 id="cron-day-of-month"
@@ -387,7 +344,7 @@
 
           <div class="bg-background border border-border rounded-lg p-4">
             <div class="text-xs font-medium text-foreground-muted uppercase tracking-wide mb-2">
-              Generated Expression
+              Generated expression
             </div>
             <div class="font-mono text-sm text-foreground">
               {{ form.cron }}
@@ -406,8 +363,8 @@
           <div>
             <label
               for="cron-expression"
-              class="text-xs font-medium text-foreground-muted block mb-1.5"
-            >Cron Expression</label>
+              class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
+            >Cron expression</label>
             <input
               id="cron-expression"
               v-model="form.cron"
@@ -441,20 +398,13 @@
           >
             Timezone
           </label>
-          <select
-            id="cron-timezone"
+          <FilterSelect
             v-model="form.timezone"
-            aria-describedby="cron-timezone-hint"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-          >
-            <option
-              v-for="tz in timezoneOptions"
-              :key="tz"
-              :value="tz"
-            >
-              {{ tz }}{{ tz === detectedTZ ? '  (your browser)' : '' }}
-            </option>
-          </select>
+            :options="timezonePickerOptions"
+            label="Timezone"
+            trigger-id="cron-timezone"
+            wide
+          />
           <div
             id="cron-timezone-hint"
             class="text-xs text-foreground-muted mt-1.5"
@@ -495,7 +445,7 @@
           :disabled="!form.function_name || !form.cron"
           @click="saveSchedule"
         >
-          {{ editingJob ? 'Update' : 'Create' }} Schedule
+          {{ editingJob ? 'Update' : 'Create' }} schedule
         </Button>
       </template>
     </Modal>
@@ -504,9 +454,10 @@
 
 <script setup>
 import { EMPTY } from '@/utils/format'
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Modal from '@/components/common/Modal.vue'
 import LoadError from '@/components/common/LoadError.vue'
@@ -544,6 +495,22 @@ const jobs = ref([])
 const loadError = ref('')
 const loaded = ref(false)
 const functions = ref([])
+const fnOptions = computed(() => [
+  { value: '', label: 'Select a function' },
+  ...functions.value.map((fn) => ({ value: fn.name, label: `${fn.name} (${runtimeLabel(fn.runtime)})` })),
+])
+const frequencyOptions = [
+  { value: 'minute', label: 'Every Minute' },
+  { value: 'hour', label: 'Hourly' },
+  { value: 'day', label: 'Daily' },
+  { value: 'week', label: 'Weekly' },
+  { value: 'month', label: 'Monthly' },
+]
+const dayOfWeekOptions = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  .map((label, i) => ({ value: String(i), label }))
+const timezonePickerOptions = timezoneOptions.map((tz) => ({
+  value: tz, label: tz === detectedTZ ? `${tz}  (your browser)` : tz,
+}))
 const showCreateModal = ref(false)
 const editingJob = ref(null)
 const scheduleType = ref('simple')

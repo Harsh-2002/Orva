@@ -72,7 +72,7 @@
           <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
             <Button
               v-if="!confirm.noticeOnly"
-              variant="secondary"
+              variant="ghost"
               class="w-full sm:w-auto"
               @click="confirm.settle(false)"
             >
