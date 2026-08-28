@@ -187,3 +187,186 @@ func countRows(t *testing.T, db *Database, table, execID string) int {
 	}
 	return n
 }
+
+// seedExecutionChildren fills every executionChildTables row for execID. The
+// inserts are hard failures so a later "table is empty" assertion can never
+// pass vacuously — the trap that hid this class of bug in the purge test above.
+func seedExecutionChildren(t *testing.T, db *Database, execID string) {
+	t.Helper()
+	stmts := map[string]string{
+		"execution_logs": `INSERT INTO execution_logs (execution_id, stdout, stderr)
+			VALUES (?, 'out', 'err')`,
+		"execution_requests": `INSERT INTO execution_requests
+			(execution_id, method, path, headers_json, body, captured_at)
+			VALUES (?, 'POST', '/', '{}', 'x', 0)`,
+		"user_spans": `INSERT INTO user_spans
+			(id, trace_id, parent_span_id, execution_id, name, started_at, duration_ms)
+			VALUES ('span-' || ?, 'tr-1', '', ?, 'work', datetime('now'), 5)`,
+		"execution_log_entries": `INSERT INTO execution_log_entries
+			(execution_id, ts, level, message)
+			VALUES (?, datetime('now'), 'info', 'hello')`,
+	}
+	for table, stmt := range stmts {
+		args := []any{execID}
+		if table == "user_spans" {
+			args = []any{execID, execID}
+		}
+		if _, err := db.write.Exec(stmt, args...); err != nil {
+			t.Fatalf("seed %s: %v", table, err)
+		}
+		if n := countRows(t, db, table, execID); n == 0 {
+			t.Fatalf("seed %s inserted nothing; later assertions would be vacuous", table)
+		}
+	}
+}
+
+func totalRows(t *testing.T, db *Database, table string) int {
+	t.Helper()
+	var n int
+	if err := db.read.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+
+// TestDeleteFunctionLeavesNoOrphanedChildRows is the guard DeleteFunction
+// never had. ON DELETE CASCADE reaches executions and execution_logs; the
+// other three child tables dropped their FK for async insert ordering, so
+// deleting a function stranded their rows with nothing able to join them back.
+func TestDeleteFunctionLeavesNoOrphanedChildRows(t *testing.T) {
+	db := newTestDB(t)
+	const execID = "exec-doomed"
+	seedExecution(t, db, execID, 1) // creates parent function fn-retention
+	seedExecutionChildren(t, db, execID)
+
+	if err := db.DeleteFunction("fn-retention"); err != nil {
+		t.Fatalf("delete function: %v", err)
+	}
+
+	if n := totalRows(t, db, "executions"); n != 0 {
+		t.Errorf("executions: want 0 after the function was deleted, got %d", n)
+	}
+	for _, table := range executionChildTables {
+		if n := totalRows(t, db, table); n != 0 {
+			t.Errorf("%s kept %d row(s) whose function is gone — the parent "+
+				"executions row went with the cascade, so nothing can ever "+
+				"join these back", table, n)
+		}
+	}
+}
+
+// TestDeleteFunctionKeepsAnotherFunctionsRows pins the blast radius: the
+// subselect is keyed on function_id, so a second function's children survive.
+func TestDeleteFunctionKeepsAnotherFunctionsRows(t *testing.T) {
+	db := newTestDB(t)
+	seedExecution(t, db, "exec-doomed", 1)
+	seedExecutionChildren(t, db, "exec-doomed")
+
+	if _, err := db.write.Exec(
+		`INSERT INTO functions (id, name, runtime) VALUES ('fn-keep','fn-keep','node')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.write.Exec(
+		`INSERT INTO executions (id, function_id, status, started_at)
+		 VALUES ('exec-keep', 'fn-keep', 'success', datetime('now'))`); err != nil {
+		t.Fatal(err)
+	}
+	seedExecutionChildren(t, db, "exec-keep")
+
+	if err := db.DeleteFunction("fn-retention"); err != nil {
+		t.Fatalf("delete function: %v", err)
+	}
+
+	for _, table := range executionChildTables {
+		if n := countRows(t, db, table, "exec-keep"); n != 1 {
+			t.Errorf("%s: fn-keep's row count is %d, want 1 — deleting one "+
+				"function must not touch another's history", table, n)
+		}
+	}
+}
+
+// TestReclaimSweepsPreExistingOrphans covers the databases already damaged:
+// child rows whose execution is gone, and execution rows whose function is
+// gone. Both are seeded the only way they can occur — behind the FK, with
+// foreign_keys off, exactly as the old code left them.
+func TestReclaimSweepsPreExistingOrphans(t *testing.T) {
+	db := newTestDB(t)
+	seedExecution(t, db, "exec-orphaned-children", 1)
+	seedExecutionChildren(t, db, "exec-orphaned-children")
+
+	// A stranded executions row: FK off is how a pre-DSN-fix build deleted a
+	// function without cascading, so it is how the damage is reproduced.
+	if _, err := db.write.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.write.Exec(
+		`INSERT INTO executions (id, function_id, status, started_at)
+		 VALUES ('exec-no-function', 'fn-vanished', 'success', datetime('now'))`); err != nil {
+		t.Fatal(err)
+	}
+	// Drop the parent executions row only, leaving its children behind.
+	if _, err := db.write.Exec(
+		"DELETE FROM executions WHERE id = 'exec-orphaned-children'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.write.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, table := range executionChildTables {
+		if n := countRows(t, db, table, "exec-orphaned-children"); n != 1 {
+			t.Fatalf("seed: %s has %d orphan rows, want 1", table, n)
+		}
+	}
+
+	// The reclaim is a boot step; run it the way boot does. The marker has
+	// already been written by newTestDB's Migrate, so clear it first —
+	// which also proves the marker is what makes the sweep one-shot.
+	if err := db.SetSystemConfig(orphanReclaimMarkerKey, ""); err != nil {
+		t.Fatal(err)
+	}
+	db.reclaimOrphanedExecutionRows()
+
+	for _, table := range executionChildTables {
+		if n := countRows(t, db, table, "exec-orphaned-children"); n != 0 {
+			t.Errorf("%s kept %d orphan row(s) after reclaim", table, n)
+		}
+	}
+	var n int
+	if err := db.read.QueryRow(
+		"SELECT COUNT(*) FROM executions WHERE id = 'exec-no-function'").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("executions row whose function is gone survived the reclaim")
+	}
+
+	// Idempotent: a second run is a no-op, and the marker is set.
+	db.reclaimOrphanedExecutionRows()
+	if got := db.GetSystemConfigString(orphanReclaimMarkerKey, ""); got != "true" {
+		t.Errorf("marker = %q, want \"true\" after a clean pass", got)
+	}
+}
+
+// TestReclaimKeepsLiveRows is the counterweight: the sweep must delete only
+// rows whose parent is missing. A predicate inverted, or an anti-join against
+// the wrong column, wipes the instance's entire execution history.
+func TestReclaimKeepsLiveRows(t *testing.T) {
+	db := newTestDB(t)
+	seedExecution(t, db, "exec-live", 1)
+	seedExecutionChildren(t, db, "exec-live")
+
+	if err := db.SetSystemConfig(orphanReclaimMarkerKey, ""); err != nil {
+		t.Fatal(err)
+	}
+	db.reclaimOrphanedExecutionRows()
+
+	if n := totalRows(t, db, "executions"); n != 1 {
+		t.Fatalf("reclaim deleted a live executions row: %d left, want 1", n)
+	}
+	for _, table := range executionChildTables {
+		if n := countRows(t, db, table, "exec-live"); n != 1 {
+			t.Errorf("%s: reclaim deleted a live row (%d left, want 1)", table, n)
+		}
+	}
+}

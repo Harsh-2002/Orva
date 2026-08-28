@@ -384,3 +384,133 @@ func TestRestoreRejectsTraversal(t *testing.T) {
 		t.Fatalf("expected unsafe-path error, got %v", err)
 	}
 }
+
+// TestRestorePreservesDotfilesAndHealsMarker drives the real
+// SnapshotDB -> ArchiveTo -> RestoreFrom path and pins both halves of the
+// dotfile fix: the archive must carry dotfiles that live inside a version
+// directory (`.orva-ready`, and the `.env`/`.npmrc` the CLI packs because it
+// only skips hidden *directories*), and restore must recreate a marker that an
+// archive taken by an older binary already stripped.
+//
+// It also pins the two cases healing must NOT touch — an empty version dir and
+// a build-scratch dir — and the litter beside a version tree that stays excluded.
+func TestRestorePreservesDotfilesAndHealsMarker(t *testing.T) {
+	const (
+		hashReady = "1111111111111111111111111111111111111111111111111111111111111111"
+		hashBare  = "2222222222222222222222222222222222222222222222222222222222222222"
+		hashEmpty = "3333333333333333333333333333333333333333333333333333333333333333"
+		scratch   = hashBare + ".tmp.abc123"
+	)
+
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	db, err := database.New(filepath.Join(srcDir, "orva.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	fn := &database.Function{
+		ID: "fn_dotfile_test", Name: "dotfile-test", Runtime: "node",
+		Entrypoint: "handler.js", TimeoutMS: 30000, MemoryMB: 64, CPUs: 0.5,
+		EnvVars: map[string]string{}, NetworkMode: "none", Status: "active",
+		CodeHash: hashReady,
+	}
+	if err := db.InsertFunction(fn); err != nil {
+		t.Fatalf("insert function: %v", err)
+	}
+
+	fnDir := filepath.Join(srcDir, "functions", fn.ID)
+	writeInto := func(dir string, files map[string]string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		for name, body := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+				t.Fatalf("write %s: %v", name, err)
+			}
+		}
+	}
+
+	// A healthy published version: marker plus the user dotfiles the CLI packs.
+	writeInto(filepath.Join(fnDir, "versions", hashReady), map[string]string{
+		"handler.js":      "export default () => 'ok'\n",
+		".orva-ready":     hashReady,
+		".env":            "API_TOKEN=s3cret\n",
+		".npmrc":          "registry=https://example.invalid\n",
+		".python-version": "3.14\n",
+	})
+	// A version whose marker an older backup already stripped.
+	writeInto(filepath.Join(fnDir, "versions", hashBare), map[string]string{
+		"handler.js": "export default () => 'stale'\n",
+	})
+	// An empty version dir and a build-scratch dir: neither may be healed.
+	if err := os.MkdirAll(filepath.Join(fnDir, "versions", hashEmpty), 0o755); err != nil {
+		t.Fatalf("mkdir empty version: %v", err)
+	}
+	writeInto(filepath.Join(fnDir, "versions", scratch), map[string]string{
+		"handler.js": "half-built\n",
+	})
+	// Host-local litter beside the version tree stays excluded — both a
+	// stray dotfile and the contents of a dot-prefixed directory.
+	writeInto(fnDir, map[string]string{".DS_Store": "junk\n"})
+	writeInto(filepath.Join(fnDir, ".git"), map[string]string{"config": "url = https://token@host/\n"})
+
+	snapPath := filepath.Join(srcDir, "snap.db")
+	if err := SnapshotDB(db.WriteDB(), snapPath); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := ArchiveTo(&buf, srcDir, snapPath); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close source db: %v", err)
+	}
+	if err := RestoreFrom(&buf, dstDir); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	versions := filepath.Join(dstDir, "functions", fn.ID, "versions")
+	rel := func(path string) string { return strings.TrimPrefix(path, dstDir+"/") }
+	// Non-fatal so one run reports every broken assertion, not just the first.
+	mustContain := func(path, want string) {
+		t.Helper()
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("missing after restore: %s", rel(path))
+			return
+		}
+		if string(got) != want {
+			t.Errorf("%s = %q, want %q", rel(path), got, want)
+		}
+	}
+	mustAbsent := func(path string) {
+		t.Helper()
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("expected %s to be absent after restore", rel(path))
+		}
+	}
+
+	// The archive must not drop dotfiles inside a version directory.
+	mustContain(filepath.Join(versions, hashReady, ".orva-ready"), hashReady)
+	mustContain(filepath.Join(versions, hashReady, ".env"), "API_TOKEN=s3cret\n")
+	mustContain(filepath.Join(versions, hashReady, ".npmrc"), "registry=https://example.invalid\n")
+	mustContain(filepath.Join(versions, hashReady, ".python-version"), "3.14\n")
+	mustContain(filepath.Join(versions, hashReady, "handler.js"), "export default () => 'ok'\n")
+
+	// A marker an older archive already stripped is recreated, with the code
+	// hash as content exactly as builder.Build writes it.
+	mustContain(filepath.Join(versions, hashBare, ".orva-ready"), hashBare)
+
+	// Neither an empty version dir nor build scratch may be vouched for.
+	mustAbsent(filepath.Join(versions, hashEmpty, ".orva-ready"))
+	mustAbsent(filepath.Join(versions, scratch, ".orva-ready"))
+
+	// The narrowed skip still keeps litter beside the version tree out.
+	mustAbsent(filepath.Join(dstDir, "functions", fn.ID, ".DS_Store"))
+	mustAbsent(filepath.Join(dstDir, "functions", fn.ID, ".git", "config"))
+}

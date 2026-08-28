@@ -17,6 +17,44 @@ before it.
 
 ### Fixed
 
+- **Deleting a function permanently orphaned its traces and structured logs.**
+  `DELETE /api/v1/functions/{id}` removed the function and cascaded to its
+  `executions` rows, but three tables keyed by `execution_id` carry no foreign
+  key — `execution_requests` (captured replay envelopes), `user_spans`
+  (`orva.trace.span()`) and `execution_log_entries` (`orva.log.*`). The cascade
+  could not reach them, and once the parent `executions` row was gone nothing
+  could ever join them back, so every function ever deleted left unreachable
+  rows behind forever — in the two fastest-growing tables on the instance.
+  Deletion now removes those children first, in one transaction, off the same
+  shared list retention uses. On first boot after upgrading, a batched one-shot
+  sweep reclaims rows already stranded by earlier deletions. The sweep resumes
+  across boots on a very large database and logs `reclaimed orphaned execution
+  rows` when it removes anything; a database with nothing to reclaim pays one
+  pass and never scans again.
+
+- **Backup dropped every dotfile under `functions/`, so restored versions
+  reported as garbage-collected.** The archive walk skipped any dot-prefixed
+  entry, which was aimed at the `current` symlink — already excluded a few lines
+  above by a symlink check. What it actually excluded was file content: the
+  `.orva-ready` marker that tells Orva a version finished building, plus any
+  `.env`, `.npmrc` or `.python-version` the author deployed (`orva deploy` packs
+  hidden *files*; it only skips hidden *directories*). Without the marker,
+  rollback and version diff return HTTP 410 `VERSION_GCD` for code sitting on
+  disk, `details.available_hashes` comes back empty, and the version GC skips
+  the function entirely — so `versions_to_keep` silently stops applying and old
+  versions accumulate forever. A version directory is now captured whole;
+  dot-prefixed litter beside one is still skipped.
+
+  **Restore repairs archives already taken.** Every existing backup is missing
+  these markers, so fixing only the archive side would have left them
+  unrestorable. Restore now recreates `.orva-ready` for any version directory
+  that arrives with content and no marker, writing the directory's own name,
+  which is exactly what the builder writes. A half-finished build is never
+  mistaken for a stripped one: the builder writes the marker into
+  `versions/<hash>.tmp.<rand>/` and only then renames it into place, so a
+  crashed build is a `.tmp.` directory and never a bare-hash one. Empty
+  directories and `.tmp.` scratch are left alone.
+
 - **The dashboard offered a container image tag that does not exist.** Settings
   → Build info showed `ghcr.io/harsh-2002/orva:<version>` with a copy button,
   but Orva publishes exactly one image tag, `:latest`; every per-version tag
@@ -36,6 +74,16 @@ before it.
   the same files. Nothing an operator does changes; on the next container start
   the entrypoint replaces the SDK directory in a persistent volume, which also
   clears the stale `index.js` an older image left there.
+
+### Upgrade notes
+
+- **Re-take any backup you are keeping as a restore point.** Restoring an old
+  archive with this build gives you working versions again — the markers are
+  recreated on the way in — but a user dotfile such as `.env` was never written
+  to that archive and cannot be recovered from it. Only a fresh backup contains
+  them.
+- To repair a data directory in place without a restore cycle, see
+  "rollback fails with `VERSION_GCD`" in `docs/OPERATIONS.md`.
 
 ## v2026.08.28
 

@@ -194,6 +194,28 @@ sqlite3 /var/lib/orva/orva.db \
 
 The active hash is **always** kept regardless.
 
+**If the hash *is* there and rollback still says `VERSION_GCD`**, the data
+directory came from a backup taken by a binary that predates this fix. Those
+archives dropped every dotfile under `functions/`, including the `.orva-ready`
+marker that tells Orva a version is complete — so the code is on disk and
+reports as gone, and the version GC stops pruning that function entirely
+(`versions_to_keep` silently does nothing). Restoring the archive again with a
+current binary repairs the markers on the way in. To repair a data directory in
+place instead:
+
+```bash
+docker exec orva sh -c '
+  for d in /var/lib/orva/functions/*/versions/*/; do
+    h=$(basename "$d")
+    [ ${#h} -eq 64 ] || continue          # skip build scratch, <hash>.tmp.<rand>
+    [ -e "$d/.orva-ready" ] && continue   # already complete
+    [ -n "$(ls -A "$d")" ] || continue    # empty: nothing to vouch for
+    printf %s "$h" > "$d/.orva-ready"
+  done'
+```
+
+The marker's content is the version's own directory name.
+
 ## Symptom: lots of `INSUFFICIENT_DISK` errors
 
 **Diagnosis.**
@@ -359,6 +381,14 @@ it every removal fails with `EACCES` and is skipped.
 `orva backup download` writes an archive containing the SQLite database,
 every deployed function version, the secrets master key, and the bootstrap
 admin API key. It is written mode `0600` — treat it as the credential it is.
+
+A version directory is captured whole, dotfiles included. Older archives
+skipped them, which lost both the `.orva-ready` completeness marker and any
+`.env` / `.npmrc` / `.python-version` the author deployed — `orva deploy` packs
+hidden *files*, it only skips hidden *directories*. Restore recreates a missing
+marker, so an old archive comes back usable; files that were never archived
+cannot be recovered from it, so **re-take any backup you are keeping as a
+restore point.**
 
 `orva backup restore` replaces the live data directory and then **exits with
 status 70** so the supervisor restarts the process against the restored
