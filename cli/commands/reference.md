@@ -190,7 +190,9 @@ The bundled `orva` module is a stdlib-only wrapper over Orva's loopback
 API. It ships beside the runtime adapter — `require('orva')` (Node) and
 `from orva import …` (Python) work without `npm install` / `pip
 install`. The Node SDK ships TypeScript declarations (`orva.d.ts`); the
-Python SDK ships a `py.typed` marker so IDEs surface full type hints.
+Python SDK ships a `py.typed` marker so IDEs surface full type hints. A
+TypeScript handler must map the module in `tsconfig.json` before `tsc` can
+see those declarations — see the TypeScript section of `docs/RUNTIMES.md`.
 
 Surface, as of v0.7:
 

@@ -30,7 +30,8 @@ names that stopped doing anything are deleted rather than deprecated.
 | `ORVA_TRUSTED_PROXY` | `false` | Set to `true` only when a reverse proxy in front of Orva sets `X-Forwarded-For`. It makes Orva trust that header for the OAuth dynamic-registration rate limiter's client identity. Leave it off otherwise: trusting a client-settable header would let a caller bypass that limit by varying one value per request. |
 | `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Single-operator instances can set this to `30`. |
 | `ORVA_PPROF_ADDR` | (unset) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
-| `ORVA_PPROF_ADDR`, `ORVA_INTERNAL_API_BASE` are read directly where they are used rather than through the config loader, so they do **not** appear in that startup line. They still work. | |
+| `ORVA_IMAGE` | (set by the container image) | The image reference this instance runs from, echoed at `GET /api/v1/system/health` and in Settings → Build info. The published image stamps it; set it yourself only for a mirrored or re-tagged copy. A bare-metal install leaves it unset and reports no image. |
+| `ORVA_PPROF_ADDR`, `ORVA_INTERNAL_API_BASE`, `ORVA_IMAGE` are read directly where they are used rather than through the config loader, so they do **not** appear in that startup line. They still work. | |
 | `ORVA_INTERNAL_API_BASE` | (auto-detected) | The base URL sandboxed functions use to reach Orva's own internal SDK endpoints (KV, jobs, function-to-function). Orva probes for a routable address at startup — from inside a sandbox `127.0.0.1` is the sandbox's own loopback, so this is deliberately **not** a loopback address. Set it only on network setups the probe gets wrong (overlay networks, Swarm, k8s), as `http://host:port`. The compiled egress policy emits a narrow allow rule for exactly this address and port, so an operator blocking private ranges does not cut off the SDK. |
 
 ---
@@ -217,7 +218,7 @@ The server binary stamps three values at link time and exposes them at `GET /api
 | `version`    | git tag (release) or `git describe` (dev)       | `v2026.05.15` |
 | `commit`     | short git SHA at build time                     | `1be3399` |
 | `build_time` | wall-clock RFC3339 UTC at link time             | `2026-05-15T14:20:34Z` |
-| `image`      | derived: `ghcr.io/harsh-2002/orva:` + version   | `ghcr.io/harsh-2002/orva:latest` |
+| `image`      | `ORVA_IMAGE`, stamped into the published image  | `ghcr.io/harsh-2002/orva:latest`, empty on bare metal |
 
 Override at build time:
 
@@ -228,3 +229,5 @@ make build VERSION=v2026.05.15 \
 ```
 
 Container images carry the same identity as OCI labels (`org.opencontainers.image.{version,revision,created}`) so `docker inspect` agrees with the running server's `/api/v1/system/health` response. Unstamped binaries report `"dev"` / `"unknown"` — an intentional signal that the build chain wasn't wired through.
+
+Orva publishes exactly **one** image tag, `:latest` — there is no per-version image tag, and pruning removes any that appear — so nothing derives a pullable reference from `version`. `image` reports whatever `ORVA_IMAGE` holds, and nothing when it is unset.

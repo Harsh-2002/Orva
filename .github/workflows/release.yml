@@ -68,9 +68,11 @@ jobs:
     steps:
       - name: resolve commit SHA for the tag
         id: sha
+        if: ${{ github.event.inputs.force != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.tag }}"
           else
@@ -80,8 +82,14 @@ jobs:
             echo "::error::release tag must use stable date format vYYYY.MM.DD"
             exit 1
           }
-          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha 2>/dev/null || true)"
-          [ -n "$SHA" ] || { echo "::error::could not resolve a commit SHA to gate on"; exit 1; }
+          # gh prints its error body on stdout, so a failed call is caught by SHA shape, not emptiness.
+          deadline=$((SECONDS + 120))  # ~2 min cap
+          while :; do
+            SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha || true)"
+            if [[ "$SHA" =~ ^[0-9a-f]{40,64}$ ]]; then break; fi
+            [ $SECONDS -lt $deadline ] || { echo "::error::$TAG did not resolve to a commit SHA — see the gh errors above"; exit 1; }
+            echo "… $TAG has not resolved to a commit yet — retrying"; sleep 10
+          done
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "gating on commit $SHA"
 
@@ -103,9 +111,15 @@ jobs:
           check() {
             local wf="$1" mode="$2" deadline=$((SECONDS + 1200))  # ~20 min cap
             while :; do
+              # gh prints its error body on stdout, so an unreadable status must be caught by shape.
               read -r status conclusion < <(gh api \
                 "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${SHA}&event=push&branch=main&per_page=1" \
-                --jq '.workflow_runs[0] | "\(.status) \(.conclusion)"' 2>/dev/null || echo "null null")
+                --jq '.workflow_runs[0] | "\(.status) \(.conclusion)"' || echo "api_error null")
+              case "$status" in
+                null|queued|in_progress|requested|waiting|pending|completed) ;;
+                *) [ $SECONDS -lt $deadline ] || { echo "::error::could not read $wf status for $SHA — see the gh errors above"; return 1; }
+                   echo "… $wf status for $SHA is unreadable — retrying"; sleep 20; continue ;;
+              esac
               if [ "$status" = "null" ]; then
                 if [ "$mode" = "soft" ]; then echo "• $wf: no run for $SHA (path-filtered) — skipping"; return 0; fi
                 echo "::error::no $wf run for $SHA — commit was not verified (use force=true to override)"; return 1
@@ -690,6 +704,7 @@ jobs:
             VERSION=${{ steps.v.outputs.tag }}
             COMMIT=${{ steps.v.outputs.commit }}
             BUILD_TIME=${{ steps.v.outputs.build_time }}
+            IMAGE_REF=${{ env.IMAGE_NAME }}:latest
             NSJAIL_REF=${{ env.NSJAIL_REF }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 

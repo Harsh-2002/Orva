@@ -526,7 +526,9 @@ Cascade — removes the channel and every junction row.
 ### `GET /api/v1/system/health`
 Returns 200 and `{"status": "healthy", ...}` when orvad is up, alongside
 `version`, `commit`, `build_time`, `image`, `uptime_seconds`, and `database`,
-`sandbox`, `host` and `writer` sub-objects. Returns **503** with
+`sandbox`, `host` and `writer` sub-objects. `image` echoes the `ORVA_IMAGE`
+stamp — the published container image sets it; a bare-metal install has no
+image and reports it empty. Returns **503** with
 `{"status": "degraded"}` when the 2-second database ping fails. Used by Docker
 HEALTHCHECK and load balancers — match on `healthy`, not `ok`.
 

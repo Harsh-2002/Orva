@@ -301,20 +301,26 @@ func installAdapter(rootfs, runtime string) error {
 	return installSDK(rootfs, runtime)
 }
 
+// sdkFiles and sdkDestDir are the in-sandbox SDK layout. The Dockerfile
+// bakes the same layout into its rootfs stages; setup_test.go pins the two
+// against each other.
+var (
+	sdkFiles = map[string][]string{
+		"node":   {"orva.js", "orva.d.ts", "package.json"},
+		"python": {"orva.py", "py.typed"},
+	}
+	sdkDestDir = map[string]string{
+		"node":   "opt/orva/node_modules/orva",
+		"python": "opt/orva",
+	}
+)
+
 func installSDK(rootfs, runtime string) error {
-	var files []string
-	var destSub string
-	switch runtime {
-	case "node":
-		files = []string{"orva.js", "orva.d.ts", "package.json"}
-		destSub = "opt/orva/node_modules/orva"
-	case "python":
-		files = []string{"orva.py", "py.typed"}
-		destSub = "opt/orva"
-	default:
+	files, ok := sdkFiles[runtime]
+	if !ok {
 		return nil
 	}
-	dstDir := filepath.Join(rootfs, destSub)
+	dstDir := filepath.Join(rootfs, sdkDestDir[runtime])
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dstDir, err)
 	}

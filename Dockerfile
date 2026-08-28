@@ -50,9 +50,12 @@ FROM node:24-slim AS rootfs-node
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /opt/orva /opt/orva/node_modules/orva /code
-COPY backend/runtimes/node/adapter.js /opt/orva/adapter.js
-COPY backend/runtimes/node/orva.js    /opt/orva/node_modules/orva/index.js
-RUN echo '{"name":"orva","version":"0.2.0","main":"index.js"}' > /opt/orva/node_modules/orva/package.json
+# The SDK's own package.json is canonical (main ./orva.js, types ./orva.d.ts),
+# so every file must keep its real name — a rename here breaks `main`.
+COPY backend/runtimes/node/adapter.js   /opt/orva/adapter.js
+COPY backend/runtimes/node/orva.js      /opt/orva/node_modules/orva/orva.js
+COPY backend/runtimes/node/orva.d.ts    /opt/orva/node_modules/orva/orva.d.ts
+COPY backend/runtimes/node/package.json /opt/orva/node_modules/orva/package.json
 
 FROM python:3.14-slim AS rootfs-python
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -62,11 +65,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && mkdir -p /opt/orva /code
 COPY backend/runtimes/python/adapter.py /opt/orva/adapter.py
 COPY backend/runtimes/python/orva.py    /opt/orva/orva.py
+COPY backend/runtimes/python/py.typed   /opt/orva/py.typed
 
 FROM debian:bookworm-slim
 ARG VERSION
 ARG COMMIT
 ARG BUILD_TIME
+ARG IMAGE_REF
 
 LABEL org.opencontainers.image.title="Orva" \
       org.opencontainers.image.description="Self-hosted serverless function platform — Node.js + Python on nsjail" \
@@ -98,6 +103,9 @@ WORKDIR /var/lib/orva
 EXPOSE 8443
 
 ENV ORVA_DATA_DIR=/var/lib/orva
+# Only the publishing pipeline knows the reference this image is pushed under;
+# unset (any local build) makes /system/health report no image, not a wrong one.
+ENV ORVA_IMAGE=${IMAGE_REF}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:8443/api/v1/system/health || exit 1

@@ -81,3 +81,26 @@ func TestHealthDBDownReturns503(t *testing.T) {
 		t.Errorf("status = %v, want degraded", body["status"])
 	}
 }
+
+// TestHealthImageOnlyWhenStamped pins `image` to what the deployment actually
+// runs from: the release publishes one tag (:latest) and bare metal has no
+// image, so a Version-derived reference is unpullable.
+func TestHealthImageOnlyWhenStamped(t *testing.T) {
+	t.Run("unstamped reports nothing", func(t *testing.T) {
+		t.Setenv("ORVA_IMAGE", "")
+		h := &SystemHandler{DB: newTestDB(t), StartTime: time.Now()}
+		_, body := callHealth(t, h)
+		if body["image"] != "" {
+			t.Errorf("image = %q, want empty (there is no image to pull)", body["image"])
+		}
+	})
+
+	t.Run("stamped reports the stamp", func(t *testing.T) {
+		t.Setenv("ORVA_IMAGE", "ghcr.io/harsh-2002/orva:latest")
+		h := &SystemHandler{DB: newTestDB(t), StartTime: time.Now()}
+		_, body := callHealth(t, h)
+		if body["image"] != "ghcr.io/harsh-2002/orva:latest" {
+			t.Errorf("image = %q, want the stamped reference", body["image"])
+		}
+	})
+}

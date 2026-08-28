@@ -15,7 +15,27 @@ before it.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+- **The dashboard offered a container image tag that does not exist.** Settings
+  → Build info showed `ghcr.io/harsh-2002/orva:<version>` with a copy button,
+  but Orva publishes exactly one image tag, `:latest`; every per-version tag
+  404s on `docker pull`, and a bare-metal install has no image at all.
+  `/api/v1/system/health` now reports the image the deployment actually runs
+  from — the published image stamps it, the shipped compose file passes through
+  whatever it pulled — and reports it empty otherwise, where the dashboard hides
+  the row. If you script on that field, it is now empty on bare-metal and
+  self-built deployments; `version` remains the build identity.
+
+- **The Docker image shipped an incomplete `orva` SDK.** The image's rootfs
+  stage copied `orva.js` in under the name `index.js` and hand-wrote its own
+  `package.json` claiming version `0.2.0` — five SDK releases stale — while
+  omitting `orva.d.ts` and Python's `py.typed` entirely. The bare-metal
+  installer never had this problem: `orva setup` installs the SDK from the
+  binary's embedded copy, under the real filenames. Docker deployments now get
+  the same files. Nothing an operator does changes; on the next container start
+  the entrypoint replaces the SDK directory in a persistent volume, which also
+  clears the stale `index.js` an older image left there.
 
 ## v2026.08.28
 
