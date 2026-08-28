@@ -14,7 +14,7 @@
         @click="refresh"
       >
         <RefreshCw
-          class="w-4 h-4 mr-2"
+          class="w-4 h-4"
           :class="{ 'animate-spin': loading }"
         />
         Refresh
@@ -26,47 +26,40 @@
          filters appear inline as compact chips. Active filters render
          as removable pills next to the chips. -->
     <div class="flex items-center gap-2 flex-wrap">
-      <div class="relative flex-1 min-w-0 sm:min-w-[280px] max-w-full sm:max-w-[440px]">
+      <div class="relative basis-full sm:basis-auto sm:flex-1 min-w-0 sm:min-w-[280px] max-w-full sm:max-w-[440px]">
         <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
         <input
           v-model="filters.q"
           placeholder="Search errors, container ids…"
           aria-label="Search invocations by error or container id"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+          class="h-7 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           @input="onSearchInput"
         >
       </div>
 
-      <FilterChip
+      <FilterSelect
         :options="statusOptions"
         :model-value="filters.status"
         label="Status"
         @update:model-value="filters.status = $event; onFilterChange()"
       />
-      <FilterChip
+      <FilterSelect
         :options="rangeOptions"
         :model-value="filters.range"
         label="Range"
         @update:model-value="filters.range = $event; onFilterChange()"
       />
 
-      <select
-        v-model="filters.fnId"
-        aria-label="Filter by function"
-        class="h-7 bg-background border border-border rounded-md pl-2.5 pr-2 text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus:border-focus-ring max-w-[180px]"
-        @change="onFilterChange"
-      >
-        <option value="">
-          All functions
-        </option>
-        <option
-          v-for="(name, id) in fnMap"
-          :key="id"
-          :value="id"
-        >
-          {{ name }}
-        </option>
-      </select>
+      <!-- Was a native <select>, which handed the phone its OS wheel while the
+           two chips beside it opened a custom panel: three controls that look
+           like one family and behaved like two. -->
+      <FilterSelect
+        :options="fnOptions"
+        :model-value="filters.fnId"
+        label="Function"
+        class="max-w-[180px]"
+        @update:model-value="filters.fnId = $event; onFilterChange()"
+      />
 
       <button
         v-if="hasActiveFilter"
@@ -137,7 +130,7 @@
                    the detail drawer out of reach of the keyboard entirely. -->
               <button
                 type="button"
-                class="touch-expand-sm w-full text-left cursor-pointer rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm w-full text-left cursor-pointer rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :aria-label="detailLabel(log)"
                 @click="openDetail(log)"
               >
@@ -167,7 +160,7 @@
               <button
                 v-if="log.trace_id"
                 type="button"
-                class="touch-expand-xs mt-1 inline-flex items-center gap-1 py-1 text-[11px] text-foreground-muted hover:text-foreground-strong font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-xs mt-1 inline-flex items-center gap-1 py-1 text-xs text-foreground-muted hover:text-foreground-strong font-mono underline-offset-2 hover:underline rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :title="log.trace_id"
                 @click="openTrace(log.trace_id)"
               >
@@ -260,7 +253,7 @@
                    bare, so the desktop cell looks exactly as it did. -->
               <button
                 type="button"
-                class="touch-expand-sm text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm text-left rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :aria-label="detailLabel(log)"
                 @click.stop="openDetail(log)"
               >
@@ -271,7 +264,7 @@
               <button
                 v-if="log.trace_id"
                 type="button"
-                class="touch-expand-xs lg:hidden mt-1 flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground-strong font-mono underline-offset-2 hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-xs lg:hidden mt-1 flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground-strong font-mono underline-offset-2 hover:underline rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :title="log.trace_id"
                 @click.stop="openTrace(log.trace_id)"
               >
@@ -282,7 +275,7 @@
             <td class="px-6 py-4 font-medium text-foreground-strong">
               <button
                 type="button"
-                class="touch-expand-sm text-left hover:underline rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm text-left hover:underline rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :aria-label="`Open function ${getFnName(log.function_id)}`"
                 @click.stop="router.push('/functions/' + getFnName(log.function_id))"
               >
@@ -344,7 +337,7 @@
         class="flex justify-center border-t border-border py-3 bg-surface/30"
       >
         <button
-          class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5"
+          class="touch-expand-sm inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong transition-colors"
           :disabled="loading"
           @click="loadMore"
         >
@@ -618,7 +611,7 @@
             :title="replayTooltip"
             @click="replay"
           >
-            <Play class="w-4 h-4 mr-2" />
+            <Play class="w-4 h-4" />
             Replay
           </Button>
           <Button
@@ -629,7 +622,7 @@
             :title="suggestFixTooltip"
             @click="suggestFix"
           >
-            <Sparkles class="w-4 h-4 mr-2" />
+            <Sparkles class="w-4 h-4" />
             Suggest fix
           </Button>
           <span
@@ -646,9 +639,10 @@
 
 <script setup>
 import { EMPTY } from '@/utils/format'
-import { ref, computed, h, watch, defineComponent, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
+import { ref, computed, h, watch, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, Search, ChevronDown, Check, Trash2, Play, RotateCcw, Sparkles, Network, CircleAlert } from '@lucide/vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
+import { RefreshCw, Search, Trash2, Play, RotateCcw, Sparkles, Network, CircleAlert } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
@@ -844,98 +838,11 @@ const Stat = {
 // a value is picked; once active, becomes a pill with the value + an x.
 // Click anywhere to open the menu, click an option to apply, click the x
 // to clear. Calmer than a row of always-visible buttons.
-const FilterChip = defineComponent({
-  name: 'FilterChip',
-  props: {
-    options:    { type: Array,   required: true },
-    modelValue: { type: String,  default: '' },
-    label:      { type: String,  required: true },
-  },
-  emits: ['update:modelValue'],
-  setup(p, { emit }) {
-    const open = ref(false)
-    const triggerRef = ref(null)
-    const active = computed(() => p.options.find((o) => o.value === p.modelValue && o.value !== ''))
-    const close = () => { open.value = false }
-    // Picking from the menu unmounts it, so hand focus back to the trigger
-    // rather than dropping it on <body>.
-    const choose = (v) => { emit('update:modelValue', v); close(); triggerRef.value?.focus() }
-    const clear = (e) => { e.stopPropagation(); emit('update:modelValue', '') }
-
-    // Close on outside click. Listener attached on first open + removed
-    // on close so we don't leak handlers.
-    const onDoc = (e) => {
-      if (!e.target.closest('.fc-root')) close()
-    }
-    return () =>
-      h('div', {
-        class: 'fc-root relative',
-        onMouseenter: () => { document.addEventListener('mousedown', onDoc) },
-        onMouseleave: () => { /* keep listener while open */ },
-        onKeydown: (e) => {
-          if (e.key === 'Escape' && open.value) { close(); triggerRef.value?.focus() }
-        },
-      }, [
-        // Visual rhythm matches Button variant=chip size=xs (h-7 px-2.5)
-        // so this stateful dropdown chip lines up with the flat toggle
-        // chips on Jobs.vue / Webhooks.vue. We can't reuse <Button> here
-        // because this trigger needs to host a child clear-x and a
-        // dropdown — different shape from a single-action chip. Button's
-        // coarse-pointer floor is not inherited with the classes, so
-        // touch-expand-md brings the 28 px target up to 44 px on touch
-        // hardware without moving the desktop height.
-        h('button', {
-          ref: triggerRef,
-          type: 'button',
-          'aria-expanded': open.value ? 'true' : 'false',
-          class: [
-            'inline-flex items-center gap-1.5 rounded-md border h-7 px-2.5 text-xs transition-colors touch-expand-md',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-            active.value
-              ? 'bg-primary text-primary-foreground border-primary'
-              : 'bg-surface text-foreground-muted border-border hover:text-foreground-strong hover:border-foreground-muted',
-          ],
-          onClick: () => { open.value = !open.value },
-        }, [
-          h('span', { class: 'text-[10px] uppercase tracking-wider' }, p.label + (active.value ? ':' : '')),
-          active.value ? h('span', null, active.value.label) : null,
-          // Mouse-only shortcut: it cannot be a button (this is already one)
-          // and it is not focusable, so it stays hidden from assistive tech.
-          // The keyboard path to the same result is the menu's own reset row.
-          active.value
-            ? h('span', {
-                class: 'opacity-70 hover:opacity-100 -mr-0.5',
-                onClick: clear,
-                title: 'Clear',
-                'aria-hidden': 'true',
-              }, '✕')
-            : h(ChevronDown, { class: 'w-3 h-3 opacity-60' }),
-        ]),
-        open.value
-          ? h('div', {
-              class: 'absolute z-30 mt-1 left-0 min-w-[140px] bg-background border border-border rounded-md shadow-xl py-1',
-            },
-              // The empty-value option ("All", "All time") stays in the menu:
-              // it is the only way to clear an active filter without a mouse.
-              p.options.map((o) =>
-                h('button', {
-                  key: o.value,
-                  type: 'button',
-                  class: [
-                    'w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 transition-colors touch-expand-sm',
-                    'focus:outline-none focus-visible:bg-surface-hover focus-visible:text-foreground-strong',
-                    o.value === p.modelValue ? 'text-foreground-strong' : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover',
-                  ],
-                  onClick: () => choose(o.value),
-                }, [
-                  h(Check, { class: ['w-3 h-3', o.value === p.modelValue ? 'opacity-100' : 'opacity-0'] }),
-                  o.label,
-                ]))
-          ) : null,
-      ])
-  },
-})
-
+// fnMap is { id: name } for the table's own lookups; the picker wants a list.
+const fnOptions = computed(() => [
+  { value: '', label: 'All functions' },
+  ...Object.entries(fnMap.value || {}).map(([id, name]) => ({ value: id, label: name })),
+])
 const formatTime = (ts) => (ts ? new Date(ts).toLocaleString() : EMPTY)
 
 // Accessible name for the row trigger: the visible text is just a timestamp,

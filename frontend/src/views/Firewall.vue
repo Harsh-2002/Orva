@@ -22,14 +22,16 @@
           -->
           <Button
             variant="secondary"
-            size="sm"
-            :loading="resolving"
+            size="md"
             @click="forceResolve"
           >
-            <RefreshCw class="w-4 h-4" /> Refresh policy
+            <RefreshCw
+              :class="{ 'animate-spin': resolving }"
+              aria-hidden="true"
+            /> Refresh policy
           </Button>
           <Button
-            size="sm"
+            size="md"
             @click="showCreate = true"
           >
             <Plus class="w-4 h-4" /> Add block
@@ -76,7 +78,11 @@
 
       <!-- Detailed policy state stays available without competing with status. -->
       <details class="group">
-        <summary class="touch-expand-sm inline-flex items-center cursor-pointer text-xs text-foreground-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <summary class="touch-expand-sm inline-flex items-center gap-1.5 cursor-pointer list-none text-xs text-foreground-muted hover:text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+          <ChevronRight
+            class="w-3.5 h-3.5 shrink-0 transition-transform group-open:rotate-90"
+            aria-hidden="true"
+          />
           Policy details
         </summary>
         <div class="policy-meta mt-2">
@@ -263,7 +269,7 @@
           </span>
           <button
             v-if="dns.servers.length || dns.search || dns.records.length"
-            class="inline-flex items-center text-xs text-foreground-muted hover:text-foreground-strong px-2 py-1 transition-colors touch-expand-sm"
+            class="inline-flex items-center h-8 px-3 text-xs text-foreground-muted hover:text-foreground-strong rounded-md transition-colors touch-expand-sm"
             @click="resetDNS"
           >
             Reset
@@ -428,7 +434,7 @@
       </div>
       <template #footer>
         <Button
-          variant="secondary"
+          variant="ghost"
           @click="showCreate = false"
         >
           Cancel
@@ -450,7 +456,7 @@
 import { computed, h, onMounted, onActivated, onDeactivated, ref, defineComponent } from 'vue'
 import {
   Plus, RefreshCw, ShieldAlert, ShieldOff, ShieldCheck,
-  AlertTriangle, Globe, Globe2, Asterisk, Hash, Trash2,
+  AlertTriangle, Globe, Globe2, Asterisk, Hash, Trash2, ChevronRight,
 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
@@ -1119,14 +1125,15 @@ const RuleCard = defineComponent({
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.3rem 0.7rem;
-  border-radius: 999px;
+  padding: 0 0.7rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-foreground-muted);
   font-size: 12px;
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+  height: 26.6px;
 }
 .rule-filter:hover {
   color: var(--color-foreground-strong);
@@ -1375,6 +1382,11 @@ const RuleCard = defineComponent({
 /* On/off is the primary control on this page and it painted a 36x20 target.
    Only the hit box grows; the track keeps its mouse-density proportions. */
 @media (pointer: coarse) {
+  /* The tier owns the touch height; the fine-pointer `height` must yield. */
+  .rule-filter {
+    height: auto;
+  }
+
   .rule-toggle {
     min-width: 44px;
     min-height: 44px;
@@ -1579,21 +1591,23 @@ const RuleCard = defineComponent({
    honest at any container size, and the row wraps when the viewport
    shrinks. */
 .dns-input {
+    height: auto;
   background: var(--color-background);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-md);
+  padding: 0 0.65rem;
   font-size: 12px;
   font-family: var(--font-mono);
   color: var(--color-foreground);
   flex: 0 0 auto;
   width: 18ch;        /* default: IP-sized */
+  height: 30.4px;
 }
 .dns-input.host {
   width: 26ch;        /* hostname slot — slightly wider */
 }
 .dns-input.narrow {
-  width: 14ch;        /* search domain etc. */
+  width: 17ch;        /* fits "search domain" -- 14ch clipped its own placeholder */
 }
 /* The ch-based widths and 12px type above are a mouse-density choice, and on a
    coarse pointer they cost twice: 12px re-triggers iOS focus zoom (the global

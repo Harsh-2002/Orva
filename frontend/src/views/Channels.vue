@@ -48,7 +48,7 @@
       <div class="flex items-center gap-2">
         <code class="flex-1 font-mono text-sm text-foreground-strong break-all bg-surface px-3 py-2 rounded border border-border">{{ createdToken }}</code>
         <button
-          class="px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5 text-xs"
+          class="shrink-0 px-3 py-2 rounded-md border border-border bg-surface-hover hover:bg-surface text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5 text-xs touch-expand-sm"
           @click="copyCreated"
         >
           <Check
@@ -87,7 +87,7 @@
             id="channel-name"
             v-model="newChannel.name"
             placeholder="e.g. support-bot"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
         </div>
         <div>
@@ -95,24 +95,13 @@
             for="channel-expiry"
             class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
           >Expires in</label>
-          <select
-            id="channel-expiry"
+          <FilterSelect
             v-model="newChannel.expiresInDays"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-          >
-            <option :value="0">
-              Never
-            </option>
-            <option :value="7">
-              7 days
-            </option>
-            <option :value="30">
-              30 days
-            </option>
-            <option :value="90">
-              90 days
-            </option>
-          </select>
+            :options="expiryOptions"
+            label="Expiry"
+            trigger-id="channel-expiry"
+            wide
+          />
         </div>
       </div>
       <div>
@@ -124,7 +113,7 @@
           id="channel-description"
           v-model="newChannel.description"
           placeholder="What this channel is for"
-          class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
+          class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
         >
       </div>
       <!-- A <label> cannot name a button, and this one pointed at nothing: it
@@ -161,17 +150,17 @@
       </div>
       <div class="flex gap-2 pt-1">
         <Button
+          variant="ghost"
+          @click="cancelCreate"
+        >
+          Cancel
+        </Button>
+        <Button
           :disabled="!canSubmit || submitting"
           :loading="submitting"
           @click="submitCreate"
         >
           Generate token
-        </Button>
-        <Button
-          variant="secondary"
-          @click="cancelCreate"
-        >
-          Cancel
         </Button>
       </div>
     </div>
@@ -181,7 +170,7 @@
          IconButton actions, and the same semantic warning/danger tokens
          for the "Never used" / "Expired" hints, so an identical state
          reads as an identical colour across the two views. -->
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
@@ -392,6 +381,7 @@ defineOptions({ name: 'ChannelsView' })
 import { ref, computed, onMounted } from 'vue'
 import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import FunctionPickerModal from '@/components/channels/FunctionPickerModal.vue'
 import {
@@ -416,6 +406,12 @@ const submitting = ref(false)
 const createError = ref('')
 const pickerOpen = ref(false)
 
+const expiryOptions = [
+  { value: 0, label: 'Never' },
+  { value: 7, label: '7 days' },
+  { value: 30, label: '30 days' },
+  { value: 90, label: '90 days' },
+]
 const newChannel = ref({
   name: '',
   description: '',

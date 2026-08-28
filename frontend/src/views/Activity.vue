@@ -20,11 +20,11 @@
           v-model="filters.q"
           aria-label="Search activity by path, summary, or actor"
           placeholder="Search path, summary, actor…"
-          class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-base sm:text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+          class="h-7 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           @input="onSearchInput"
         >
       </div>
-      <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0">
+      <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable swipe-x snap-x min-w-0">
         <Button
           v-for="opt in sourceOptions"
           :key="opt.value"
@@ -80,7 +80,7 @@
       class="mb-3"
     />
 
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list. -->
       <ul class="sm:hidden divide-y divide-border">
         <li
@@ -93,7 +93,7 @@
                the detail drawer out of reach of the keyboard entirely. -->
           <button
             type="button"
-            class="w-full text-left cursor-pointer px-4 py-3 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="w-full text-left cursor-pointer px-4 py-3 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             :aria-label="detailLabel(row)"
             @click="openDrawer(row)"
           >
@@ -175,7 +175,7 @@
                    bare, so the desktop cell looks exactly as it did. -->
               <button
                 type="button"
-                class="touch-expand-sm text-left rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm text-left rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :aria-label="detailLabel(row)"
                 @click.stop="openDrawer(row)"
               >

@@ -92,10 +92,10 @@ const sizeClasses = computed(() => {
   // and the page-header CTA on every view — needs expanding too. It was
   // previously left out on the assumption that 40 px was already compliant.
   switch (props.size) {
-    case 'xs': return 'h-7 px-2.5 text-xs touch-expand-xs'
-    case 'sm': return 'h-8 px-3 text-xs touch-expand-sm'
-    case 'lg': return 'h-12 px-6 text-base'
-    default:   return 'h-10 px-4 text-sm touch-expand-md'
+    case 'xs': return 'h-7 px-2.5 text-xs touch-expand-xs btn-ico-xs'
+    case 'sm': return 'h-8 px-3 text-xs touch-expand-sm btn-ico-sm'
+    case 'lg': return 'h-12 px-6 text-base btn-ico-lg'
+    default:   return 'h-10 px-4 text-sm touch-expand-md btn-ico-md'
   }
 })
 

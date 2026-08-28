@@ -127,7 +127,7 @@ async function onCopy() {
   padding: 0.25rem 0.55rem;
   background: var(--color-background);
   border: 1px solid var(--color-border);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-md);
   color: var(--color-foreground-muted);
   font-family: var(--font-sans);
   font-size: 11px;
@@ -190,6 +190,7 @@ async function onCopy() {
   font-size: 11px;
   cursor: pointer;
   transition: color 120ms, background 120ms;
+  border-radius: var(--radius-md);
 }
 .cb-expand:hover {
   color: var(--color-foreground);

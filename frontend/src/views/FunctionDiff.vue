@@ -31,7 +31,7 @@
           variant="secondary"
           @click="$router.push(`/functions/${fnName}/deployments`)"
         >
-          <List class="w-4 h-4 mr-2" />
+          <List class="w-4 h-4" />
           All deployments
         </Button>
       </div>
@@ -52,27 +52,14 @@
             From
             <span class="ml-1 text-foreground-muted normal-case font-medium tracking-normal">(older)</span>
           </label>
-          <select
-            id="diff-from"
-            :value="fromId"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-            @change="updateRange({ from: $event.target.value })"
-          >
-            <option
-              value=""
-              disabled
-            >
-              Pick a version
-            </option>
-            <option
-              v-for="v in versionOptions"
-              :key="v.id"
-              :value="v.id"
-              :disabled="v.id === toId"
-            >
-              {{ versionLabel(v) }}
-            </option>
-          </select>
+          <FilterSelect
+            :model-value="fromId"
+            :options="fromOptions"
+            label="Pick a version"
+            trigger-id="diff-from"
+            wide
+            @update:model-value="updateRange({ from: $event })"
+          />
         </div>
         <button
           :disabled="!fromId || !toId"
@@ -91,27 +78,14 @@
             To
             <span class="ml-1 text-foreground-muted normal-case font-medium tracking-normal">(newer)</span>
           </label>
-          <select
-            id="diff-to"
-            :value="toId"
-            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-            @change="updateRange({ to: $event.target.value })"
-          >
-            <option
-              value=""
-              disabled
-            >
-              Pick a version
-            </option>
-            <option
-              v-for="v in versionOptions"
-              :key="v.id"
-              :value="v.id"
-              :disabled="v.id === fromId"
-            >
-              {{ versionLabel(v) }}
-            </option>
-          </select>
+          <FilterSelect
+            :model-value="toId"
+            :options="toOptions"
+            label="Pick a version"
+            trigger-id="diff-to"
+            wide
+            @update:model-value="updateRange({ to: $event })"
+          />
         </div>
       </div>
 
@@ -388,6 +362,7 @@ import Button from '@/components/common/Button.vue'
 import { ArrowLeftRight, Copy, Settings2, ChevronDown, FileCode, Package, List, RotateCcw, Zap } from '@lucide/vue'
 import { compareDeployments, listDeployments, listFunctions, getDeployment, rollbackFunction } from '@/api/endpoints'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
 
@@ -744,6 +719,14 @@ const compactWhen = (iso) => {
   return `${date} ${time}`
 }
 
+const fromOptions = computed(() => [
+  { value: '', label: 'Pick a version', disabled: true },
+  ...versionOptions.value.map((v) => ({ value: v.id, label: versionLabel(v), disabled: v.id === toId.value })),
+])
+const toOptions = computed(() => [
+  { value: '', label: 'Pick a version', disabled: true },
+  ...versionOptions.value.map((v) => ({ value: v.id, label: versionLabel(v), disabled: v.id === fromId.value })),
+])
 const versionLabel = (v) =>
   `v${v.version} · ${v.shortHash} · ${compactWhen(v.submittedAt)}${v.isActive ? ' · active' : ''}`
 

@@ -26,7 +26,7 @@
          rendering bug rather than a scroller. Below sm the actions take their
          own row and the strip gets the full width; sm+ is unchanged. -->
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable snap-x min-w-0 flex-1">
+      <div class="flex items-center gap-2 sm:flex-wrap overflow-x-auto sm:overflow-visible scrollable swipe-x snap-x min-w-0 flex-1">
         <Button
           v-for="opt in statusOptions"
           :key="opt.value"
@@ -45,7 +45,6 @@
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <Button
-          size="xs"
           @click="openEnqueue"
         >
           <Plus class="w-3 h-3" />
@@ -53,10 +52,9 @@
         </Button>
         <Button
           variant="secondary"
-          size="xs"
           @click="loadJobs"
         >
-          <RefreshCcw class="w-3 h-3" />
+          <RefreshCw />
           Refresh
         </Button>
       </div>
@@ -74,18 +72,14 @@
       <div class="p-5 space-y-5 text-sm">
         <div>
           <label class="text-xs uppercase tracking-wider text-foreground-muted">Function</label>
-          <select
-            v-model="enqueue.fnId"
-            class="mt-2 w-full bg-surface border border-border rounded px-3 py-2 text-sm text-foreground-strong focus:outline-none focus:border-focus-ring"
-          >
-            <option
-              v-for="f in functions"
-              :key="f.id"
-              :value="f.id"
-            >
-              {{ f.name }} ({{ runtimeLabel(f.runtime) }})
-            </option>
-          </select>
+          <div class="mt-2">
+            <FilterSelect
+              v-model="enqueue.fnId"
+              :options="fnOptions"
+              label="Function"
+              wide
+            />
+          </div>
         </div>
         <div>
           <label class="text-xs uppercase tracking-wider text-foreground-muted">Payload (JSON)</label>
@@ -154,7 +148,7 @@
     />
 
     <!-- Table. -->
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-card list. Surfaces every column the
            desktop table hides (status, attempts, scheduled, finished)
            so nothing is silently dropped on small screens. -->
@@ -349,13 +343,14 @@ defineOptions({ name: 'JobsView' })
 
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
-import { Trash2, RotateCcw, RefreshCcw, Plus, CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
+import { Trash2, RotateCcw, RefreshCw, Plus, CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
 import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import Drawer from '@/components/common/Drawer.vue'
 import LoadError from '@/components/common/LoadError.vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import { runtimeLabel } from '@/utils/runtime'
 
 const confirmStore = useConfirmStore()
@@ -364,6 +359,7 @@ const jobs = ref([])
 const loadError = ref('')
 const loaded = ref(false)
 const functions = ref([])
+const fnOptions = computed(() => functions.value.map((f) => ({ value: f.id, label: `${f.name} (${runtimeLabel(f.runtime)})` })))
 const statusFilter = ref('all')
 // countSource is always an unfiltered page: the pills count from it so they
 // stay meaningful while a filter narrows the table.

@@ -248,7 +248,7 @@ if the row ever goes missing.
 
 **If the keyfile is genuinely gone**, the plaintext is unrecoverable: the
 database stores only its SHA-256. Sign in to the dashboard with your operator
-account and mint a fresh key from Settings → API Keys (or
+account and mint a fresh key from Settings → API keys (or
 `POST /api/v1/keys`). Deleting the keyfile alone does **not** make Orva
 generate a new one — it regenerates only when the database has no keys at all.
 

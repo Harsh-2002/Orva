@@ -153,7 +153,11 @@
             v-if="row.attributes"
             class="mt-3 text-xs"
           >
-            <summary class="touch-expand-sm min-h-6 inline-flex items-center cursor-pointer text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
+            <summary class="touch-expand-sm min-h-6 inline-flex items-center gap-1.5 cursor-pointer list-none text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded [&::-webkit-details-marker]:hidden">
+              <ChevronRight
+                class="w-3.5 h-3.5 shrink-0 transition-transform group-open:rotate-90"
+                aria-hidden="true"
+              />
               Structured attributes
             </summary>
             <pre class="mt-1 overflow-x-auto rounded bg-background p-3 text-foreground whitespace-pre-wrap">{{ prettyJSON(row.attributes) }}</pre>
@@ -221,7 +225,11 @@
             v-if="entry.fields"
             class="mt-1"
           >
-            <summary class="touch-expand-sm min-h-6 inline-flex items-center cursor-pointer text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
+            <summary class="touch-expand-sm min-h-6 inline-flex items-center gap-1.5 cursor-pointer list-none text-xs text-foreground-muted hover:text-foreground-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded [&::-webkit-details-marker]:hidden">
+              <ChevronRight
+                class="w-3.5 h-3.5 shrink-0 transition-transform group-open:rotate-90"
+                aria-hidden="true"
+              />
               Fields
             </summary>
             <pre class="overflow-x-auto rounded bg-background p-3 text-foreground whitespace-pre-wrap">{{ prettyJSON(entry.fields) }}</pre>

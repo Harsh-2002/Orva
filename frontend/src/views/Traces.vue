@@ -11,12 +11,11 @@
       </div>
       <Button
         variant="secondary"
-        size="sm"
-        :loading="loading"
+        size="md"
         @click="refresh"
       >
         <RefreshCw
-          class="w-3.5 h-3.5"
+          :class="{ 'animate-spin': loading }"
           aria-hidden="true"
         /> Refresh
       </Button>
@@ -33,7 +32,9 @@
         Trace filters
       </h2>
       <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:flex-wrap">
-        <label class="relative w-full sm:flex-1 sm:min-w-[260px] sm:max-w-[420px]">
+        <!-- block, not inline: an inline box would build the magnifier's
+             containing block from its own font metrics, not the field's. -->
+        <label class="relative block w-full sm:flex-1 sm:min-w-[260px] sm:max-w-[420px]">
           <span class="sr-only">Function ID or name</span>
           <Search
             class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none"
@@ -42,12 +43,12 @@
           <input
             v-model.trim="fnFilter"
             placeholder="Function ID or exact name…"
-            class="h-10 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            class="h-7 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             @keydown.enter="refresh"
           >
         </label>
         <div
-          class="flex items-center gap-2 overflow-x-auto scrollable snap-x min-w-0"
+          class="flex items-center gap-2 overflow-x-auto scrollable swipe-x snap-x min-w-0"
           aria-label="Time range"
         >
           <Button
@@ -65,7 +66,7 @@
         </div>
       </div>
       <div
-        class="flex items-center gap-2 overflow-x-auto scrollable snap-x min-w-0"
+        class="flex items-center gap-2 overflow-x-auto scrollable swipe-x snap-x min-w-0"
         aria-label="Trace status"
       >
         <Button

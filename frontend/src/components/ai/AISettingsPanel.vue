@@ -28,20 +28,19 @@
             for="ai-active-provider"
             class="text-xs font-medium text-foreground-muted uppercase tracking-wide"
           >Active provider</label>
-          <select
-            id="ai-active-provider"
-            :value="store.selectedProviderId || ''"
-            class="mt-1.5 h-10 w-full bg-background border border-border rounded-md text-sm px-3 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-            @change="onSelectProvider"
-          >
-            <option
-              v-for="p in store.providers"
-              :key="p.id"
-              :value="p.id"
-            >
-              {{ p.label ? `${p.provider} (${p.label})` : p.provider }}
-            </option>
-          </select>
+          <!-- The model field beside this one is a Popover; this was a native
+               <select>. Two identical-looking fields in matching grid cells,
+               one opening the OS wheel and one a panel. -->
+          <div class="mt-1.5">
+            <FilterSelect
+              trigger-id="ai-active-provider"
+              :options="providerOptions"
+              :model-value="store.selectedProviderId || ''"
+              label="Active provider"
+              wide
+              @update:model-value="onSelectProviderId"
+            />
+          </div>
         </div>
         <div>
           <label
@@ -121,12 +120,12 @@
 
     <!-- Add / update provider -->
     <details class="group border-t border-border pt-4">
-      <summary class="flex cursor-pointer list-none items-center justify-between rounded-sm text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-        Add provider
-        <span
-          class="text-foreground-muted transition-transform group-open:rotate-45"
+      <summary class="flex cursor-pointer list-none items-center gap-1.5 rounded-md text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <ChevronRight
+          class="w-3.5 h-3.5 shrink-0 transition-transform group-open:rotate-90 text-foreground-muted"
           aria-hidden="true"
-        >+</span>
+        />
+        Add provider
       </summary>
       <div class="mt-4 space-y-3">
         <p class="text-xs text-foreground-muted max-w-prose leading-snug">
@@ -137,19 +136,15 @@
             for="ai-provider"
             class="text-xs font-medium text-foreground-muted uppercase tracking-wide"
           >Provider</label>
-          <select
-            id="ai-provider"
-            v-model="form.provider"
-            class="mt-1.5 h-10 w-full bg-background border border-border rounded-md text-sm px-3 text-foreground transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-          >
-            <option
-              v-for="opt in PROVIDERS"
-              :key="opt"
-              :value="opt"
-            >
-              {{ opt }}
-            </option>
-          </select>
+          <div class="mt-1.5">
+            <FilterSelect
+              v-model="form.provider"
+              :options="providerKindOptions"
+              label="Provider"
+              trigger-id="ai-provider"
+              wide
+            />
+          </div>
         </div>
         <Input
           v-model="form.label"
@@ -264,6 +259,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { ChevronRight } from '@lucide/vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import ModelMenu from '@/components/ai/ModelMenu.vue'
@@ -341,6 +338,16 @@ onMounted(async () => {
   await store.loadSettings()
   await store.loadProviders()
 })
+
+// The picker emits a value; the existing handler reads an event target. Adapt
+// here rather than rewriting the handler, which also serves nothing else.
+const providerKindOptions = PROVIDERS.map((opt) => ({ value: opt, label: opt }))
+const providerOptions = computed(() => (store.providers || []).map((p) => ({
+  value: p.id,
+  label: p.label ? `${p.provider} (${p.label})` : p.provider,
+})))
+
+const onSelectProviderId = (id) => onSelectProvider({ target: { value: id } })
 
 async function onSelectProvider(event) {
   await store.selectProvider(event.target.value)

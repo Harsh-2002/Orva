@@ -15,7 +15,77 @@ before it.
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+
+- **One control, drawn one way, everywhere.** The dashboard had reached nine
+  corner radii, `Refresh` at three heights with three icon sizes across six
+  views, `Cancel` as a ghost button on seven screens and a secondary button on
+  five, and `Copy secret` rendered four different ways in four places. Each of
+  those was individually defensible and the set was not. Radii are down to five
+  values from nine, every control sits on the size ladder, and a label that
+  appears in two views is now the same control in both.
+
+- **Every picker is the dashboard's own control, not the phone's.** Fifteen
+  fields were still native `<select>`s, which hand a phone its operating-system
+  wheel — several of them sitting beside a control that opened a panel instead,
+  so two fields in the same form behaved differently. All of them are now one
+  picker: a type-ahead box once a list runs long (which the timezone and
+  template lists needed), grouped headings where the list had them, and a bottom
+  sheet on a phone rather than a dropdown too small to hit.
+
+- **Dialogs are sheets on a phone.** A modal used to be the desktop dialog with
+  its margins turned down: a bordered, fully rounded card floating against the
+  top of the screen, which is the one presentation a phone has no idiom for. It
+  now rises from the bottom edge with a grab handle, where the thumb already is,
+  and every overlay in the product behaves the same way.
+
+### Fixed
+
+- **Filter strips no longer drag the page sideways.** Swiping a horizontal strip
+  that had reached its end pulled the whole page with it, so the layout slid
+  diagonally and settled back. The strips stop at their ends now, and the page
+  itself does not pan.
+
+- **Buttons no longer flicker when tapped.** The colour transition on 117
+  controls also animated three gradient properties, which some mobile browsers
+  repaint in full rather than interpolate.
+
+- **The mobile drawer draws one line, not two.** Its header rule sat a few
+  pixels below the top bar's, and a vertical edge crossed both.
+
+- **Expandable sections look expandable.** Five of them had four different
+  affordances, and two — the egress policy detail and a trace's structured
+  attributes — had none at all and read as plain text. All five now carry the
+  same chevron.
+
+- **Smaller things that were visibly inconsistent.** Two fields in the same form
+  had different fills; button labels and page headings were split between
+  sentence case and Title Case; one cron form mixed two label styles; the
+  invocations search box was squeezed to three characters by the filter chips
+  beside it on a phone; the DNS search-domain field clipped its own placeholder;
+  and the docs Copy button was a lone unlabelled square on a phone.
+
+### Verified
+
+- **A new `consistency` browser suite makes this stick.** Every other check in
+  the suite measures a control against a standard, which is how the drift above
+  survived 2520 passing assertions: `Function` at 26.6px passed, `STATUS` at
+  26.6px passed, and that one was 10px uppercase beside the other at 11.4px
+  sentence-case was invisible to both. The new suite asserts three relational
+  facts instead — controls sharing a row agree on height, label size, case and
+  radius; a label that appears in two views is drawn the same way in both; and
+  the radius and icon-size populations stay inside a declared set. It found real
+  drift on its first run, and each of its three checks has been shown to fail on
+  a defect before being trusted to pass.
+
+- **2668 checks, zero failures**, across 19 routes x 7 viewports x both themes,
+  run against the embedded binary rather than the dev server — Vite serves
+  source and the binary serves a bundle with different CSS ordering. `go vet`
+  clean, 25 Go packages green, 53 frontend unit tests green.
+
+- **Looked at, not only measured.** Every fix above the test suites could not
+  see — a squeezed search box, two fields with different fills, a disclosure
+  with no affordance — was found by reading screenshots of the running product.
 
 ## v2026.08.27
 

@@ -260,4 +260,10 @@ never been executed.
 - Vue: Composition API + `<script setup>` only; Pinia for state (no Vuex, no Options API
   in new code).
 - Handlers respond via `respond.JSON` / `respond.Error` (`backend/internal/server/handlers/respond/`).
-- Comments explain the **why**, not the **what**.
+- Comments explain the **why**, not the **what** — and they have a **budget**.
+  Default to none. One line when warranted, two at most. A block comment has to
+  earn itself: a real trap, a prior attempt someone would otherwise repeat, or a
+  number that came from a measurement. Never narrate history a commit message
+  already carries, and never restate the diff in prose above the diff. "Explain
+  the why" alone was not enough — it was obeyed while one-line changes grew
+  eight-line essays.

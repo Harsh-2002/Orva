@@ -3,7 +3,7 @@
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
-          API Keys
+          API keys
         </h1>
         <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
           Tokens for REST and MCP clients. Secrets are shown once.
@@ -11,7 +11,7 @@
       </div>
       <Button @click="openCreate">
         <KeyRound class="w-4 h-4" />
-        New Key
+        New key
       </Button>
     </div>
 
@@ -65,7 +65,7 @@
       class="bg-background border border-border rounded-lg p-5 space-y-4"
     >
       <div class="text-sm font-semibold text-foreground-strong">
-        New API Key
+        New API key
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
@@ -77,7 +77,7 @@
             id="api-key-name"
             v-model="newKey.name"
             placeholder="e.g. ci-deployer"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-focus-ring"
+            class="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
         </div>
         <div>
@@ -85,30 +85,13 @@
             for="api-key-expiry"
             class="text-xs font-medium text-foreground-muted uppercase tracking-wide block mb-1.5"
           >Expires in</label>
-          <select
-            id="api-key-expiry"
+          <FilterSelect
             v-model="newKey.expiresInDays"
-            class="w-full bg-surface-hover border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:border-focus-ring"
-          >
-            <option :value="0">
-              Never
-            </option>
-            <option :value="1">
-              1 day
-            </option>
-            <option :value="7">
-              7 days
-            </option>
-            <option :value="30">
-              30 days
-            </option>
-            <option :value="90">
-              90 days
-            </option>
-            <option :value="365">
-              1 year
-            </option>
-          </select>
+            :options="expiryOptions"
+            label="Expiry"
+            trigger-id="api-key-expiry"
+            wide
+          />
         </div>
       </div>
       <div>
@@ -164,7 +147,7 @@
           :loading="submitting"
           @click="submitCreate"
         >
-          Generate Key
+          Generate key
         </Button>
       </div>
     </div>
@@ -178,7 +161,7 @@
       class="mb-3"
     />
 
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list — name + prefix on the primary
            line, last-used + expires as secondary metadata, delete on
            the right. The desktop table returns at sm+. -->
@@ -343,6 +326,7 @@ import { KeyRound, Copy, Check, X, Trash2 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import LoadError from '@/components/common/LoadError.vue'
+import FilterSelect from '@/components/common/FilterSelect.vue'
 import { listApiKeys, createApiKey, deleteApiKey } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
 import { formatRelative, isExpired } from '@/utils/time'
@@ -368,6 +352,14 @@ const permissionOptions = [
   { value: 'admin', label: 'Admin', hint: 'Keys, channels, firewall, backup and restore' },
 ]
 const defaultPermissions = () => ['invoke', 'read']
+const expiryOptions = [
+  { value: 0, label: 'Never' },
+  { value: 1, label: '1 day' },
+  { value: 7, label: '7 days' },
+  { value: 30, label: '30 days' },
+  { value: 90, label: '90 days' },
+  { value: 365, label: '1 year' },
+]
 const newKey = ref({ name: '', expiresInDays: 0, permissions: defaultPermissions() })
 
 const loadKeys = async () => {

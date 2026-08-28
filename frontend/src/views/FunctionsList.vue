@@ -20,7 +20,7 @@
       </div>
       <Button @click="router.push('/functions/new')">
         <Plus class="w-4 h-4" />
-        New Function
+        New function
       </Button>
     </div>
 
@@ -45,7 +45,7 @@
           <input
             v-model="search"
             placeholder="Search by name, runtime, or function id…"
-            class="w-full bg-background border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+            class="h-7 w-full bg-background border border-border rounded-md pl-8 pr-3 text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
           >
         </div>
         <span class="text-[11px] text-foreground-muted shrink-0 tabular-nums">
@@ -53,7 +53,7 @@
         </span>
       </div>
 
-      <div class="bg-background border border-border rounded-lg overflow-x-auto">
+      <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
         <!--
         Mobile (<sm) stacked-row list. Each card carries: name + badges,
         description (clamped), a runtime / resources / function-id
@@ -338,7 +338,7 @@
           class="flex justify-center border-t border-border py-3 bg-surface/30"
         >
           <button
-            class="touch-expand-xs text-xs text-foreground-muted hover:text-foreground-strong transition-colors flex items-center gap-1.5"
+            class="touch-expand-sm inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong transition-colors"
             :disabled="loading"
             @click="loadMore"
           >

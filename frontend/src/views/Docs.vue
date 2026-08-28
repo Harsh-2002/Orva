@@ -29,6 +29,7 @@
                 v-else
                 class="w-4 h-4"
               />
+              <span class="docs-hero-copy-label">{{ docsCopied ? 'Copied' : 'Copy as Markdown' }}</span>
             </button>
           </div>
         </div>
@@ -2272,7 +2273,7 @@ const CodeBlock = defineComponent({
       h('div', { class: 'doc-codeblock' }, [
         h('div', { class: 'doc-codeblock-bar' }, [
           h('span', { class: 'doc-codeblock-lang' }, props.lang || ''),
-          h('button', { class: 'doc-codeblock-copy', onClick: onCopy, title: 'Copy code' }, [
+          h('button', { class: 'doc-codeblock-copy touch-expand-xs', onClick: onCopy, title: 'Copy code' }, [
             copied.value ? h(Check, { class: 'w-3 h-3' }) : h(Copy, { class: 'w-3 h-3' }),
             copied.value ? 'Copied' : 'Copy',
           ]),
@@ -2428,21 +2429,36 @@ const Callout = defineComponent({
   align-items: flex-start;
   flex-shrink: 0;
 }
-/* Icon-only Copy button. Sits in the top-right corner of the hero
-   row — quiet by default, primary tint on hover, green check on
-   success. Same 1.2s flip pattern as CodeBlock copy. */
+/* Icon-only Copy button beside the title. Below sm it wraps onto its own line,
+   where a lone glyph says nothing, so it takes its label there. */
 .docs-hero-copy-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 30.4px;
   height: 30.4px;
-  border-radius: 0.45rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-foreground-muted);
   cursor: pointer;
   transition: color 120ms, border-color 120ms, background-color 120ms;
+}
+.docs-hero-copy-label {
+  display: none;
+}
+@media (max-width: 639px) {
+  .docs-hero-copy-icon {
+    width: auto;
+    flex-shrink: 0;
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
+    white-space: nowrap;
+  }
+  .docs-hero-copy-label {
+    display: inline;
+    font-size: 0.8125rem;
+  }
 }
 .docs-hero-copy-icon:hover {
   color: var(--color-foreground);
@@ -2486,7 +2502,7 @@ const Callout = defineComponent({
   align-items: center;
   gap: 0.4rem;
   padding: 0.32rem 0.6rem;
-  border-radius: 0.4rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-foreground-muted);
@@ -2867,7 +2883,7 @@ const Callout = defineComponent({
   margin-top: 0.5rem;
   padding: 0.45rem 0.85rem;
   border: 1px solid var(--color-border);
-  border-radius: 0.45rem;
+  border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-foreground-muted);
   font-family: var(--font-sans);
@@ -3152,7 +3168,7 @@ const Callout = defineComponent({
   color: var(--color-foreground);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 0.4rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: background 120ms, border-color 120ms;
 }
@@ -3190,6 +3206,7 @@ const Callout = defineComponent({
   color: var(--color-foreground);
   user-select: none;
   transition: background 120ms;
+  border-radius: var(--radius-md);
 }
 .doc-details-summary::-webkit-details-marker {
   display: none;
@@ -3239,7 +3256,7 @@ const Callout = defineComponent({
   padding: 0.3rem 0.6rem;
   background: var(--color-background);
   border: 1px solid var(--color-border);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-md);
   color: var(--color-foreground-muted);
   font-family: var(--font-sans);
   font-size: 11.5px;
@@ -3300,6 +3317,7 @@ const Callout = defineComponent({
   color: var(--color-foreground-muted);
   cursor: pointer;
   transition: color 120ms;
+  border-radius: var(--radius-md);
 }
 .doc-tabbed-tab:hover {
   color: var(--color-foreground);
@@ -3392,7 +3410,7 @@ const Callout = defineComponent({
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-foreground-muted);
@@ -3416,17 +3434,24 @@ const Callout = defineComponent({
    vertical padding so the taller copy button costs a few pixels per
    snippet rather than a full row. */
 @media (pointer: coarse) {
-  .docs-hero-copy-icon {
-    width: 44px;
-    height: 44px;
-  }
+  /* These carry a hard fine-pointer height, which min-height cannot lift, and
+     the fine-pointer rung also overwrote the floor they used to declare. */
+  .docs-hero-copy-icon,
   .docs-hero-toc-link,
-  .doc-token-btn,
   .doc-prompt-expand-btn,
-  .doc-ai-copy-btn,
+  .doc-token-btn,
   .doc-details-summary,
-  .doc-codeblock-copy {
+  .doc-tabbed-tab,
+  .doc-ai-copy-btn {
+    height: auto;
     min-height: 44px;
+  }
+
+  /* min-width, not width: below sm this button takes its label and has to be
+     able to grow past the floor. */
+  .docs-hero-copy-icon {
+    min-width: 44px;
+    height: 44px;
   }
   .doc-tabbed-tab {
     display: inline-flex;

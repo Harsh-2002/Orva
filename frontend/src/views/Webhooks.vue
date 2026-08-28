@@ -30,7 +30,7 @@
       class="mb-3"
     />
 
-    <div class="bg-background border border-border rounded-lg overflow-x-auto">
+    <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <ul class="sm:hidden divide-y divide-border">
         <li
           v-for="sub in subscriptions"
@@ -163,7 +163,7 @@
                    the table renders at, with no other route to it. -->
               <button
                 type="button"
-                class="touch-expand-sm w-full text-left cursor-pointer rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                class="touch-expand-sm w-full text-left cursor-pointer rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 @click="openDeliveries(sub)"
               >
                 <div class="flex flex-col">
