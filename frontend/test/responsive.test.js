@@ -253,7 +253,7 @@ test('no colour literal stands in for a theme token', () => {
 
 test('no view opens the operating system picker', () => {
   // A native <select> hands a phone its OS wheel, beside a FilterSelect that
-  // opens a sheet: two behaviours for one job. The app had fifteen of them.
+  // opens a sheet: two behaviours for one job. The app had seventeen of them.
   const bad = []
   for (const { file, tpl } of templates) {
     if (file.endsWith('FilterSelect.vue')) continue

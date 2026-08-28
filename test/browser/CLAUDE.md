@@ -43,6 +43,7 @@ clear iOS's 16px focus-zoom threshold. Neither is visible in the class name.
 | `touch-targets` | every control clears 44×44 where the pointer is coarse |
 | `control-scale` | every control lands on the size ladder, on both pointer types |
 | `consistency` | controls agree with their neighbours: siblings, the same label across views, and the size of the radius/icon populations |
+| `edge-guard` | a horizontal strip stops at its ends instead of dragging the page with it |
 | `accessibility` | accessible names, keyboard reachability, AA contrast, heading order, duplicate ids |
 | `journeys` | real multi-step flows (nav drawer, destructive-dialog keyboard safety) |
 

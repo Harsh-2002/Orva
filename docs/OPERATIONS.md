@@ -266,9 +266,9 @@ by nsjail, so no build creates a host firewall table any more — there is no
 migration step, no service reconfiguration, and no leftover state on a normal
 upgrade.
 
-The one exception applies to the **currently published release**, not to some
-older build: `v2026.08.05` was the last nftables-based one. Its release and
-tag have since been pruned, so it is no longer installable, and on
+The one exception applies to hosts that ran the **last nftables-based build**.
+Its release and tag have since been pruned, so that version is no longer
+installable, and on
 bare-metal systemd it created `table inet orva_firewall` while running. A clean
 `systemctl stop` (which the installer performs on upgrade) removes it. If that
 daemon was instead SIGKILLed, OOM-killed, or lost to a hard reboot, the table
