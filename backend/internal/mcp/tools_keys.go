@@ -47,7 +47,7 @@ type ListAPIKeysOutput struct {
 }
 
 type CreateAPIKeyInput struct {
-	Name          string   `json:"name" jsonschema:"human-readable label for this key (e.g. 'ci-deploys', 'mobile-app-prod'). Surfaces in list_api_keys and the dashboard's API Keys page."`
+	Name          string   `json:"name" jsonschema:"human-readable label for this key (e.g. 'ci-deploys', 'mobile-app-prod'). Surfaces in list_api_keys and the dashboard's API keys page."`
 	Permissions   []string `json:"permissions" jsonschema:"REQUIRED — subset of [invoke, read, write, admin]. 'invoke' = call functions; 'read' = list/get resources; 'write' = create/update/delete functions+secrets+routes etc.; 'admin' = manage API keys + system settings. Pick the smallest set the consumer actually needs (least-privilege); 'admin' should be rare. Empty / silently-defaulted to 'all four' was the previous behaviour and produced over-privileged keys."`
 	ExpiresInDays int      `json:"expires_in_days" jsonschema:"REQUIRED — days until the key auto-expires. Pick from intent: short-lived CI runs ~1-7, dev/staging ~30, production rotations ~90, long-lived service accounts up to 365. Pass 0 ONLY if the user explicitly asked for a never-expiring key (rare; usually wrong)."`
 }

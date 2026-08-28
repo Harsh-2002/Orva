@@ -9,11 +9,20 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.08.27..HEAD` is the range for
+pruned with their releases — so `git log v2026.08.28..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
 ## Unreleased
+
+Nothing yet.
+
+## v2026.08.28
+
+A dashboard consistency pass: one picker everywhere, one size ladder, and a new
+browser suite that measures controls against each other rather than against a
+standard. Nothing here asks anything of an operator — no migration, no
+configuration change, no re-issued credentials.
 
 ### Changed
 
@@ -21,11 +30,11 @@ before it.
   corner radii, `Refresh` at three heights with three icon sizes across six
   views, `Cancel` as a ghost button on seven screens and a secondary button on
   five, and `Copy secret` rendered four different ways in four places. Each of
-  those was individually defensible and the set was not. Radii are down to five
+  those was individually defensible and the set was not. Radii are down to four
   values from nine, every control sits on the size ladder, and a label that
   appears in two views is now the same control in both.
 
-- **Every picker is the dashboard's own control, not the phone's.** Fifteen
+- **Every picker is the dashboard's own control, not the phone's.** Seventeen
   fields were still native `<select>`s, which hand a phone its operating-system
   wheel — several of them sitting beside a control that opened a panel instead,
   so two fields in the same form behaved differently. All of them are now one

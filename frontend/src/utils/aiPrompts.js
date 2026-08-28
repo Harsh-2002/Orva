@@ -204,7 +204,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 <auth_modes>
 Configure auth_mode on the function record (editor Settings modal or PUT /api/v1/functions/<id>). The only accepted values are "none", "platform_key" and "signed" — there is NO "public", and sending it fails validation:
 - "none" (default) — anyone with the URL can invoke. If the function needs user auth, verify a JWT IN the handler.
-- "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. The key must carry the "invoke" permission; a key scoped to read/write only gets 403. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API Keys page.
+- "platform_key" — caller must send X-Orva-API-Key: <key>  OR  Authorization: Bearer <key>, OR be in the Orva session cookie. The key must carry the "invoke" permission; a key scoped to read/write only gets 403. Use for server-to-server, CI deploys, internal dashboards, cron-triggered functions invoked from elsewhere. Mint keys from the API keys page.
 - "signed" — caller signs the request with HMAC-SHA256 over "<unix-timestamp>.<raw_body>" using ORVA_SIGNING_SECRET (a function secret). Headers: X-Orva-Timestamp, X-Orva-Signature: sha256=<hex>. ±5 min skew window. Use for partner integrations where you've shared a secret and want pure HTTP without OAuth.
 
 For end-user apps prefer in-handler JWT verification (Auth0, Clerk, Supabase, Firebase) — the platform stays out of the way. Pattern in Python:
@@ -379,7 +379,7 @@ def handler(event):
             "body": {"deleted": deleted}}
 \`\`\`
 
-Wire it up: enable outbound network, then open Schedules → New Schedule → cron expression \`0 3 * * *\`, timezone UTC, function this one. Set auth_mode to platform_key on the function so the URL can't be triggered manually by random callers.
+Wire it up: enable outbound network, then open Schedules → New schedule → cron expression \`0 3 * * *\`, timezone UTC, function this one. Set auth_mode to platform_key on the function so the URL can't be triggered manually by random callers.
 </your_response>
 </example_2_cron_cleanup>
 

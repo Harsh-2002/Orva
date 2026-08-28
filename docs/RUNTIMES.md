@@ -142,7 +142,7 @@ them and include the `.whl` in the deploy.
 Two sources, merged at spawn time:
 
 1. **Function `env_vars`** — set via `PUT /api/v1/functions/{id}` or
-   the dashboard's Editor → Environment Variables panel.
+   the dashboard's Editor → Environment variables panel.
 2. **Function secrets** — encrypted at rest, set via
    `POST /api/v1/functions/{id}/secrets`. Same env-var contract; the
    only difference is that secret values are AES-256-GCM encrypted in

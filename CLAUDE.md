@@ -135,7 +135,7 @@ The flow:
    verification — the release will not re-run it.
 2. **Tag today's date and push** (zero-padded `vYYYY.MM.DD`):
    ```bash
-   git tag -a v2026.05.03 -m "Orva v2026.05.03" && git push origin v2026.05.03
+   git tag -a vYYYY.MM.DD -m "Orva vYYYY.MM.DD" && git push origin vYYYY.MM.DD
    ```
    The Release workflow's **`gate`** job confirms `CI` already concluded `success` for
    that exact commit (a status lookup — seconds, not a test run; it polls briefly if you tag

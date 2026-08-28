@@ -14,7 +14,7 @@
 # Usage:
 #   bash test/install/matrix.sh                 # all checks, dry-run only
 #   REAL_CLI=1 bash test/install/matrix.sh      # also do a real CLI install
-#   CLI_VERSION=v2026.05.30 REAL_CLI=1 bash test/install/matrix.sh
+#   CLI_VERSION=vYYYY.MM.DD REAL_CLI=1 bash test/install/matrix.sh
 #   bash test/install/matrix.sh debian:stable-slim alpine:latest   # subset
 #
 # Requires Docker. Exits non-zero on the first failure.

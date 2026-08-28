@@ -54,7 +54,7 @@ log "latest version: $LATEST"
 
 if [[ "$OLD_VERSION" == "$LATEST" ]]; then
     warn "old and latest are the same tag ($OLD_VERSION); upgrade is a no-op."
-    warn "Pin OLD_VERSION explicitly: bash $0 v2026.04.28"
+    warn "Pin OLD_VERSION explicitly: bash $0 vYYYY.MM.DD"
     exit 0
 fi
 

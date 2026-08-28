@@ -27,12 +27,12 @@ Pin a specific version:
 ```bash
 curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | \
     ORVA_VERSION=vYYYY.MM.DD sh
+```
 
 > Orva keeps **one published release at a time** — the current one. Any older
 > version 404s once it is superseded, which is why the example above is a
 > placeholder rather than a real tag. Use `ORVA_VERSION` to pin within a
 > rollout, not as a long-term hold; omit it to take the current release.
-```
 
 ### Windows (PowerShell)
 
