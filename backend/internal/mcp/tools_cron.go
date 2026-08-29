@@ -95,7 +95,7 @@ type CreateCronInput struct {
 }
 
 type UpdateCronInput struct {
-	ID       string         `json:"id"        jsonschema:"schedule id (cron_...)"`
+	ID       string         `json:"id"        jsonschema:"schedule id (UUIDv7, unprefixed)"`
 	CronExpr string         `json:"cron_expr,omitempty" jsonschema:"new cron expression; omit to keep"`
 	Enabled  *bool          `json:"enabled,omitempty"   jsonschema:"new enabled flag; omit to keep"`
 	Payload  map[string]any `json:"payload,omitempty"   jsonschema:"new payload; omit to keep"`

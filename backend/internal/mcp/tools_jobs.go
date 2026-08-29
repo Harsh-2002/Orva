@@ -86,7 +86,7 @@ type ListJobsOutput struct {
 }
 
 type JobIDInput struct {
-	ID string `json:"id" jsonschema:"job id (job_...)"`
+	ID string `json:"id" jsonschema:"job id (UUIDv7, unprefixed)"`
 }
 type JobIDInputWithConfirm struct {
 	ID      string `json:"id"`

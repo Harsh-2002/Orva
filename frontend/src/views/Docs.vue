@@ -469,7 +469,7 @@
         Every cron-triggered invocation arrives at the function with
         <code class="doc-chip">x-orva-trigger: cron</code>
         and
-        <code class="doc-chip">x-orva-cron-id: cron_…</code>
+        <code class="doc-chip">x-orva-cron-id: &lt;uuid&gt;</code>
         on the event headers, so user code can branch on origin.
       </Callout>
     </section>
@@ -1688,13 +1688,17 @@ const sdkInvokeTabs = [
   {
     label: 'Python',
     lang: 'python',
-    code: `from orva import invoke, OrvaError
+    code: `import json
+
+from orva import invoke, OrvaError
 
 def handler(event):
+    # event["body"] is the raw request body, as a string. Always parse it.
+    url = json.loads(event["body"] or "{}")["url"]
     try:
         # invoke() returns the downstream {statusCode, headers, body}.
         # body is JSON-decoded when possible.
-        result = invoke("resize-image", {"url": event["body"]["url"]})
+        result = invoke("resize-image", {"url": url})
         return {"statusCode": 200, "body": result["body"]}
     except OrvaError as e:
         # 404 = function not found, 507 = call depth exceeded.
@@ -1724,18 +1728,21 @@ const sdkJobsTabs = [
   {
     label: 'Python',
     lang: 'python',
-    code: `from orva import jobs
+    code: `import json
+
+from orva import jobs
 
 def handler(event):
-    # Fire-and-forget. Returns the job id immediately; the function
-    # body runs later via the scheduler. max_attempts retries with
+    # Fire-and-forget. Returns {"id": ..., "replayed": ...} immediately;
+    # the body runs later via the scheduler. max_attempts retries with
     # exponential backoff on 5xx / exception.
-    job_id = jobs.enqueue(
+    body = json.loads(event["body"] or "{}")
+    job = jobs.enqueue(
         "send-welcome-email",
-        {"to": event["body"]["email"]},
+        {"to": body["email"]},
         max_attempts=3,
     )
-    return {"statusCode": 202, "body": job_id}`,
+    return {"statusCode": 202, "body": job}`,
   },
   {
     label: 'Node.js',
@@ -1743,12 +1750,13 @@ def handler(event):
     code: `const { jobs } = require('orva')
 
 exports.handler = async (event) => {
-  const jobId = await jobs.enqueue(
+  const { email } = JSON.parse(event.body || '{}')
+  const job = await jobs.enqueue(
     'send-welcome-email',
-    { to: JSON.parse(event.body || '{}').email },
+    { to: email },
     { maxAttempts: 3 }
   )
-  return { statusCode: 202, body: jobId }
+  return { statusCode: 202, body: job }
 }`,
   },
 ]
