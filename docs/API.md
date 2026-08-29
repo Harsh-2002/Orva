@@ -154,7 +154,9 @@ key carrying the **`invoke`** permission (or a session cookie); a key scoped
 to `read`/`write` only gets 403. `concurrency_policy` accepts `reject` | `queue`
 and decides what happens once `max_concurrency` is reached (`reject` returns
 429 FUNCTION_BUSY). `rate_limit_per_min` is a per-client-IP cap; exceeding it
-returns 429 RATE_LIMITED with `Retry-After: 60`.
+returns 429 RATE_LIMITED with `Retry-After: 60`. The client IP is the TCP peer
+address — `X-Forwarded-For` decides it only when `ORVA_TRUSTED_PROXY=true`, so
+behind an un-declared proxy every caller shares one bucket.
 
 `filename` defaults to the function's own `entrypoint` before falling back to
 `handler.js` / `handler.py`. It used to hardcode those two, so a function

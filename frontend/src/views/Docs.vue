@@ -1568,7 +1568,7 @@ const configRows = [
   { field: '/secrets',           purpose: 'Encrypted',       body: 'AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time.',             icon: KeyRound, iconClass: 'text-primary' },
   { field: 'network_mode',       purpose: 'Egress control',  body: 'none = isolated loopback. egress = outbound HTTPS allowed, filtered by the sandbox egress policy.', icon: Globe,    iconClass: 'text-primary' },
   { field: 'auth_mode',          purpose: 'Invoke gate',     body: 'none = public. platform_key = require Orva API key. signed = require HMAC.',                       icon: Lock,     iconClass: 'text-primary' },
-  { field: 'rate_limit_per_min', purpose: 'Per-IP throttle', body: 'Optional cap for public or webhook-facing functions. Exceeding it returns 429.',                  icon: Gauge,    iconClass: 'text-primary' },
+  { field: 'rate_limit_per_min', purpose: 'Per-IP throttle', body: 'Optional cap for public or webhook-facing functions. Exceeding it returns 429. The IP is the TCP peer address; X-Forwarded-For counts only when the operator sets ORVA_TRUSTED_PROXY=true, and then its rightmost entry.', icon: Gauge,    iconClass: 'text-primary' },
 ]
 
 const curlCreate = computed(() => `curl -X POST ${origin.value}/api/v1/functions \\

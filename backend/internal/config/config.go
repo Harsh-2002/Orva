@@ -80,9 +80,9 @@ type SecurityConfig struct {
 	CORSOrigins   []string
 	SecureCookies bool
 	// TrustedProxy asserts that something in front of Orva sets
-	// X-Forwarded-For. Off by default: the OAuth DCR rate limiter is the
-	// only abuse control on POST /register, and trusting the header by
-	// default made it bypassable by varying one header per request.
+	// X-Forwarded-For. Off by default: it decides the client identity every
+	// rate limiter buckets on (invoke, login, OAuth DCR), and trusting a
+	// client-settable header made all three bypassable one header at a time.
 	TrustedProxy bool
 	SessionDays  int
 }
