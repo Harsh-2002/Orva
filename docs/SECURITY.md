@@ -659,11 +659,21 @@ function still runs in the user-namespace-isolated sandbox at runtime.
 
 > "Can a function read another function's secrets?"
 
-No. Secrets are decrypted by orvad and injected as `--env KEY=VAL`
-flags at sandbox spawn time (`sandbox.go`, `buildArgs()`). Each sandbox sees
-only its own function's secrets in its environment; the secret
-material never leaves orvad and is never readable from any sandbox
-filesystem.
+No. Secrets are decrypted by orvad and passed into the sandbox's environment
+at spawn time (`sandbox.go`, `buildArgs()`). Each sandbox sees only its own
+function's secrets; the secret material never leaves orvad and is never
+readable from any sandbox filesystem.
+
+> "Can a user on the host read a function's secrets?"
+
+Not from the process list. Values travel in the nsjail child's environment and
+argv carries only the variable *name* — `--env SECRET`, which nsjail resolves
+from its own environment. This matters because `/proc/<pid>/cmdline` is
+world-readable and the shipped compose runs `pid: host`, so anything in argv is
+visible to every local user for as long as the call runs.
+`/proc/<pid>/environ` is owner-only (mode 400), so the value is readable only
+by the user orvad runs as, and by root. Earlier builds passed
+`--env KEY=VAL` in argv and also logged the full argv at debug level.
 
 > "Can a function read another function's code?"
 

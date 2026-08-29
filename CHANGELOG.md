@@ -17,6 +17,17 @@ before it.
 
 ### Fixed
 
+- **Function secrets were visible in the host process list.** Decrypted
+  secrets and each worker's `ORVA_INTERNAL_TOKEN` were passed to nsjail as
+  `--env KEY=VALUE` command-line arguments. `/proc/<pid>/cmdline` is
+  world-readable, and the shipped compose file runs with `pid: host`, so every
+  value was readable by any local user for as long as the call ran — and the
+  full argument list was written to the debug log as well. Values now travel in
+  the sandbox process's environment and the command line carries only the
+  variable name. `/proc/<pid>/environ` is readable only by the user Orva runs
+  as, and by root. Nothing changes inside the sandbox: a function sees exactly
+  the same variables it did before.
+
 - **Four dashboard pages showed, or acted on, the function you were looking at
   before.** Every view is cached in a `<keep-alive>`, and a cached view is not
   unmounted — it stays alive with a live `useRoute()`, so it kept reacting to

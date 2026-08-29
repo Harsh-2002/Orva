@@ -127,7 +127,7 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 		return &ExecResult{Error: err, Duration: time.Since(start)}
 	}
 
-	args, err := buildArgs(cfg, rootfs, entrypoint)
+	args, childEnv, err := buildArgs(cfg, rootfs, entrypoint)
 	if err != nil {
 		return &ExecResult{Error: err, Duration: time.Since(start)}
 	}
@@ -138,6 +138,8 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 	// nsjail itself carries the required capabilities via setcap (installed
 	// by `orva setup` or baked into the Docker image). No sudo wrapper.
 	cmd := exec.CommandContext(ctx, cfg.NsjailBin, args...)
+	// Values live here, not in argv; nsjail forwards them by name.
+	cmd.Env = append(os.Environ(), childEnv...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -220,7 +222,11 @@ func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
 	return rootfs, entrypoint, nil
 }
 
-func buildArgs(cfg ExecConfig, rootfs, entrypoint string) ([]string, error) {
+// buildArgs returns nsjail's argv and the environment its child process must
+// carry. Values go in the env, never argv: /proc/<pid>/cmdline is world-readable
+// and the shipped compose runs pid: host, so a secret in argv is readable by any
+// local user for the life of the call. /proc/<pid>/environ is owner-only.
+func buildArgs(cfg ExecConfig, rootfs, entrypoint string) (args, childEnv []string, err error) {
 	// Prefer user namespaces for nsjail's mount/chroot setup. On hosts that
 	// restrict unprivileged user namespaces, the bare-metal installer grants
 	// the nsjail executable the narrow capability set it needs and exports
@@ -229,14 +235,13 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) ([]string, error) {
 	// NOTE: --time_limit intentionally dropped; Go-side context.WithTimeout
 	// + Worker.Kill() handles timeouts with millisecond resolution and
 	// avoids the skew from nsjail's whole-second limit.
-	var args []string
 
 	// The compiled egress policy is loaded via --config, which MUST be the very
 	// first argument — see egressConfigArgs for why, and for the fail-closed
 	// contract when no policy is available.
 	prefix, err := egressConfigArgs(cfg.NetworkMode, cfg.EgressPolicyPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	args = append(args, prefix...)
 
@@ -300,17 +305,25 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) ([]string, error) {
 	// Inject env vars + secrets. nsjail takes --env KEY=VAL; an --env with
 	// no '=' passes the host-side value through, which we never want for
 	// security. Always format as KEY=VAL explicitly.
+	// --env NAME (no '=') tells nsjail to forward the value from its own
+	// environment, which is what keeps secrets out of argv. Safe here only
+	// because childEnv is explicit: nothing is forwarded that we did not put
+	// there by name.
 	for k, v := range cfg.Env {
 		if k == "" {
 			continue
 		}
-		args = append(args, "--env", k+"="+v)
+		args = append(args, "--env", k)
+		childEnv = append(childEnv, k+"="+v)
 	}
 	// Also tell the Python/Node adapter about Orva context via env.
-	args = append(args,
-		"--env", "ORVA_FUNCTION_ID="+getenvOr(cfg.Env, "ORVA_FUNCTION_ID", ""),
-		"--env", "ORVA_EXECUTION_ID="+getenvOr(cfg.Env, "ORVA_EXECUTION_ID", ""),
-	)
+	for _, k := range []string{"ORVA_FUNCTION_ID", "ORVA_EXECUTION_ID"} {
+		if _, ok := cfg.Env[k]; ok {
+			continue // already forwarded above
+		}
+		args = append(args, "--env", k)
+		childEnv = append(childEnv, k+"="+getenvOr(cfg.Env, k, ""))
+	}
 
 	args = append(args, "--", entrypoint)
 
@@ -321,7 +334,7 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) ([]string, error) {
 		args = append(args, "/opt/orva/adapter.js")
 	}
 
-	return args, nil
+	return args, childEnv, nil
 }
 
 // egressConfigArgs returns the `--config <policy>` prefix an egress jail must
