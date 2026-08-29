@@ -34,18 +34,6 @@ before it.
   nothing else, and now says so: restart the service afterwards, or re-run
   `install.sh` when the adapters, rootfs or service unit also need refreshing.
 
-- **On Alpine, a successful `orva backup restore` left the server down
-  permanently.** `orva backup restore` exits 70 on purpose so its supervisor
-  restarts the process against the restored files, and the shipped systemd unit
-  carries `RestartForceExitStatus=70` for exactly that. The OpenRC init script
-  had no equivalent: it ran under `start-stop-daemon`, which never respawns
-  anything. A restore that worked perfectly therefore ended with orvad exited
-  and nothing to bring it back — the same outage the systemd fix closed, still
-  open on every Alpine bare-metal install. The unit now runs under
-  `supervisor="supervise-daemon"` with `respawn_delay=5` and `respawn_max=0`.
-  OpenRC has no per-exit-status restart filter, so this respawns on any
-  unexpected exit — a superset of `Restart=on-failure` that covers exit 70.
-
 - **`--port` was silently ignored by the bare-metal installer, which then
   printed a URL nothing listened on.** The flag was parsed and used only by the
   Docker path (as the host side of the `PORT:8443` map). Neither the systemd
@@ -122,9 +110,7 @@ before it.
 - To repair a data directory in place without a restore cycle, see
   "rollback fails with `VERSION_GCD`" in `docs/OPERATIONS.md`.
 - **Bare-metal hosts: re-run `install.sh` to pick up the fixed service unit.**
-  It rewrites the unit on an upgrade, which is what installs the OpenRC
-  `supervise-daemon` supervisor (Alpine) — without it a `orva backup restore`
-  there still leaves the host down. The rewrite also drops any `Environment=`
+  The rewrite drops any `Environment=`
   you hand-added, and the unit now sets `ORVA_PORT` explicitly: if your server
   listens on anything other than 8443, pass `--port <n>` (or `ORVA_PORT=<n>`)
   to the reinstall, or it moves back to 8443.

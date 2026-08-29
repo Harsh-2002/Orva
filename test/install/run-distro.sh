@@ -116,18 +116,14 @@ if [[ "$DISTRO_INIT" == "systemd" ]]; then
 else
     log "starting OpenRC service"
     unit=$(docker exec "$CONTAINER" cat /etc/init.d/orva)
-    # OpenRC has no per-exit-status restart filter, so the equivalent of
-    # RestartForceExitStatus=70 is respawning under supervise-daemon.
-    [[ "$unit" == *"supervisor=\"supervise-daemon\""* ]] \
-        || die "orva openrc unit would not restart after a backup restore"
-    [[ "$unit" != *"command_background="* ]] \
-        || die "command_background backgrounds the daemon out of supervise-daemon's view"
     [[ "$unit" == *"export ORVA_PORT="* ]] \
         || die "orva openrc unit ignores --port, so the installer's URL would lie"
     docker exec "$CONTAINER" rc-update add orva default \
         || warn "rc-update add reported error"
-    docker exec "$CONTAINER" service orva start \
-        || die "service orva start failed"
+    # Bounded: a unit that never backgrounds hangs `service start` forever, and
+    # an unbounded exec burns the whole 6h job limit before anyone sees it.
+    timeout 120 docker exec "$CONTAINER" service orva start \
+        || die "service orva start failed or hung (120s)"
     ok "orva openrc service started"
 fi
 

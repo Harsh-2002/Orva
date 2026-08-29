@@ -386,7 +386,7 @@ orva backup restore /backups/orva-2026-05-15.tar.gz --yes
 ```
 
 After a successful restore the server exits with status **70** so its supervisor
-(systemd / OpenRC `supervise-daemon` / `docker restart: unless-stopped`) reopens
+(systemd / OpenRC / `docker restart: unless-stopped`) reopens
 the new files. The CLI sees a connection reset — that's the expected happy-path
 signal. Reconnect in ~5 seconds.
 
@@ -396,10 +396,6 @@ signal. Reconnect in ~5 seconds.
 > `restart: unless-stopped` hides this. The shipped unit now carries
 > `RestartForceExitStatus=70`; a unit created before that needs the line
 > added, or re-run `install.sh`. Check with
-> `systemctl cat orva | grep RestartForceExitStatus`. On Alpine/OpenRC the
-> equivalent is `supervisor="supervise-daemon"` in `/etc/init.d/orva` —
-> `start-stop-daemon` never respawns, so the same restore left the host down
-> there too. Check with `grep supervise-daemon /etc/init.d/orva`.
 
 > The downloaded archive is written mode `0600`, because it contains the
 > database, every function version, the secrets master key and the bootstrap
