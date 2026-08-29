@@ -73,6 +73,85 @@ func TestUpgradeAssetName(t *testing.T) {
 	}
 }
 
+// TestUpgradeAssetNameServerBuild pins the server-build asset. The server
+// binary registers `upgrade` too, and installing the slim CLI over it deletes
+// `orva serve`, which leaves systemd unable to start the host again.
+func TestUpgradeAssetNameServerBuild(t *testing.T) {
+	prev := ServerBuild
+	t.Cleanup(func() { ServerBuild = prev })
+	ServerBuild = true
+	cases := []struct{ goos, goarch, want string }{
+		{"linux", "amd64", "orva-linux-amd64"},
+		{"linux", "arm64", "orva-linux-arm64"},
+	}
+	for _, c := range cases {
+		if got := upgradeAssetName(c.goos, c.goarch); got != c.want {
+			t.Errorf("server upgradeAssetName(%q,%q) = %q, want %q", c.goos, c.goarch, got, c.want)
+		}
+	}
+}
+
+// TestCheckUpgradePlatform pins the fail-loudly rule: server assets exist for
+// linux only, and every other platform must error rather than reach the
+// CLI-asset path.
+func TestCheckUpgradePlatform(t *testing.T) {
+	cases := []struct {
+		server  bool
+		goos    string
+		wantErr bool
+	}{
+		{false, "darwin", false},
+		{false, "windows", false},
+		{true, "linux", false},
+		{true, "darwin", true},
+		{true, "windows", true},
+	}
+	for _, c := range cases {
+		err := checkUpgradePlatform(c.server, c.goos)
+		if (err != nil) != c.wantErr {
+			t.Errorf("checkUpgradePlatform(%v,%q) err = %v, wantErr %v", c.server, c.goos, err, c.wantErr)
+		}
+	}
+}
+
+// TestDetectLatestServerBuild resolves the server asset out of a release that
+// publishes both matrices — the CLI asset for the same platform must lose.
+func TestDetectLatestServerBuild(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("server builds are published for linux only")
+	}
+	prev := ServerBuild
+	t.Cleanup(func() { ServerBuild = prev })
+	ServerBuild = true
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{
+			"tag_name": "v2026.08.09",
+			"assets": [
+				{"name": "orva-cli-linux-%s", "browser_download_url": "http://dl/CLI"},
+				{"name": "orva-linux-%s", "browser_download_url": "http://dl/SERVER"},
+				{"name": "checksums.txt", "browser_download_url": "http://dl/checksums"}
+			]
+		}`, runtime.GOARCH, runtime.GOARCH)
+	}))
+	defer srv.Close()
+
+	old := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = old })
+
+	rel, found, err := detectLatest(context.Background(), "acme/orva")
+	if err != nil || !found {
+		t.Fatalf("detectLatest: found=%v err=%v", found, err)
+	}
+	if want := "orva-linux-" + runtime.GOARCH; rel.AssetName != want {
+		t.Errorf("asset = %q, want %q", rel.AssetName, want)
+	}
+	if rel.AssetURL != "http://dl/SERVER" {
+		t.Errorf("asset url = %q, want the server asset", rel.AssetURL)
+	}
+}
+
 // TestFileSHA256 checks the running-binary hasher against a known digest.
 func TestFileSHA256(t *testing.T) {
 	dir := t.TempDir()

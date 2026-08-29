@@ -17,6 +17,31 @@ before it.
 
 ### Fixed
 
+- **`orva upgrade` replaced a bare-metal server with the CLI, and the host
+  never came back.** The Linux server binary registers every client subcommand
+  so an operator can work from the server box — `upgrade` included. It always
+  resolved the slim CLI asset `orva-cli-<os>-<arch>`, and `executablePath()`
+  deliberately follows symlinks, so `/usr/local/bin/orva -> /opt/orva/bin/orva`
+  meant the *server* binary was overwritten with a build that has no `serve`
+  subcommand; systemd then failed to start it, on a box whose only remaining
+  Orva binary could not run a server. It was not even a rare accident: the
+  running server's checksum never matched the CLI asset's, so `orva upgrade`
+  reported an upgrade as available on every single run, indefinitely. A server
+  build now fetches the server asset `orva-<os>-<arch>` and verifies its
+  SHA-256 under that name. Server assets are published for linux only, so a
+  server build on any other platform now fails loudly instead of quietly
+  settling for the CLI asset. `orva upgrade` still replaces the binary and
+  nothing else, and now says so: restart the service afterwards, or re-run
+  `install.sh` when the adapters, rootfs or service unit also need refreshing.
+
+- **`--port` was silently ignored by the bare-metal installer, which then
+  printed a URL nothing listened on.** The flag was parsed and used only by the
+  Docker path (as the host side of the `PORT:8443` map). Neither the systemd
+  unit nor the OpenRC script passed `ORVA_PORT`, so `install.sh --bare-metal
+  --port 9000` produced a server on 8443 and a closing summary reading
+  `http://<host>:9000`. Both units now export `ORVA_PORT`, so the flag does what
+  it says and the summary is true.
+
 - **Deleting a function permanently orphaned its traces and structured logs.**
   `DELETE /api/v1/functions/{id}` removed the function and cascaded to its
   `executions` rows, but three tables keyed by `execution_id` carry no foreign
@@ -84,6 +109,15 @@ before it.
   them.
 - To repair a data directory in place without a restore cycle, see
   "rollback fails with `VERSION_GCD`" in `docs/OPERATIONS.md`.
+- **Bare-metal hosts: re-run `install.sh` to pick up the fixed service unit.**
+  The rewrite drops any `Environment=`
+  you hand-added, and the unit now sets `ORVA_PORT` explicitly: if your server
+  listens on anything other than 8443, pass `--port <n>` (or `ORVA_PORT=<n>`)
+  to the reinstall, or it moves back to 8443.
+- **Bare-metal hosts running `orva upgrade`:** it now replaces the server with
+  the server binary rather than the CLI, but it still only replaces the binary.
+  Restart the service after it runs, and prefer re-running `install.sh` when
+  the runtime adapters, rootfs or the unit also need refreshing.
 
 ## v2026.08.28
 

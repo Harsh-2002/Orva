@@ -17,6 +17,9 @@ func main() {
 	// time. Forward it into the Cobra root so `orva --version` reports
 	// the same identity as /api/v1/system/health.
 	commands.Version = version.Version
+	// This binary carries `serve`; `orva upgrade` would otherwise fetch the
+	// slim CLI asset and replace the server with a build that has no daemon.
+	commands.ServerBuild = true
 	root := commands.NewRoot()
 	// `orva init` was removed: it wrote an orva.yaml that nothing read, then
 	// told the operator to run `orva serve --config orva.yaml`, a flag that

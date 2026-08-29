@@ -227,7 +227,7 @@ sudo systemctl start orva
 ```
 
 The installer is idempotent — same data dir is preserved. Re-running it also
-rewrites the systemd unit, which is how a unit predating
+rewrites the service unit, which is how a unit predating
 `RestartForceExitStatus=70` picks that up. Without it, `orva backup restore`
 exits 70 to force a restart and systemd's `Restart=on-failure` leaves the
 service down instead. Verify with

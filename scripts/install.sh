@@ -116,7 +116,7 @@ OPTIONS:
   --data-dir <dir>    data directory (default: /var/lib/orva)         [ORVA_DATA_DIR]
   --cli-path <path>   CLI destination (default: /usr/local/bin/orva)  [ORVA_CLI_PATH]
   --compose-dir <d>   Docker compose dir (default: /opt/orva)         [ORVA_COMPOSE_DIR]
-  --port <n>          host port to expose (default: 8443)             [ORVA_PORT]
+  --port <n>          listen port / Docker host port (default: 8443)  [ORVA_PORT]
   --runtime <name>    Docker container runtime (auto-detected if unset; [ORVA_DOCKER_RUNTIME]
                       Kata qemu/clh supported, gVisor/runsc refused)
   --repo <owner/name> GitHub repo (default: ${REPO})                  [ORVA_REPO]
@@ -844,6 +844,7 @@ LimitNOFILE=65536
 LimitNPROC=8192
 Environment=ORVA_DATA_DIR=${DATA_DIR}
 Environment=ORVA_DISABLE_USERNS=${SERVICE_DISABLE_USERNS}
+Environment=ORVA_PORT=${PORT}
 
 [Install]
 WantedBy=multi-user.target
@@ -862,6 +863,7 @@ error_log="/var/log/orva.log"
 
 export ORVA_DATA_DIR="${DATA_DIR}"
 export ORVA_DISABLE_USERNS="${SERVICE_DISABLE_USERNS}"
+export ORVA_PORT="${PORT}"
 
 depend() {
     need net
@@ -1105,7 +1107,7 @@ if [ -f /etc/init.d/orva ]; then
     openrc_pid=""
     [ -s /run/orva.pid ] && openrc_pid=\$(cat /run/orva.pid 2>/dev/null || true)
     rc-service orva stop 2>/dev/null || service orva stop 2>/dev/null || true
-    # OpenRC can return before a command_background process is fully gone.
+    # OpenRC can return from stop before the daemon's pid is gone.
     # A rapid uninstall/reinstall would then reuse its stale pidfile and mark
     # the new service started without launching it. Bound the wait, terminate
     # a lingering old process, and clear OpenRC's cached service state.
