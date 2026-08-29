@@ -39,6 +39,23 @@ before it.
   operator their instance was empty when the request had simply failed. It now
   shows the same load-failure banner, with the server's message and a Retry, that
   the jobs, cron, webhooks, activity and API-key lists already used.
+- **Documentation that shipped code which does not run.** Six examples were
+  wrong, in the four places a function author actually reads: the canonical
+  reference (and its three embedded copies), the dashboard's Docs page, the
+  editor's Handler reference modal, and the prompt the in-product assistant
+  generates code from. The cron API example named its request field with a UUID
+  instead of `cron_expr`, so the documented `curl` always returned 400. The
+  Python `jobs.enqueue` example used a UUID as a variable name and was a literal
+  `SyntaxError`. The function-to-function and jobs examples indexed
+  `event.body` as if the platform had parsed it — Python raised and returned
+  500, Node silently sent an empty payload, which is worse. `event.body` has
+  always been the raw request body as a string, and every one of these now says
+  so and parses it. `docs/RUNTIMES.md` also promised `event.rawPath` and
+  `event.httpMethod` aliases that neither adapter has ever provided; the promise
+  is gone rather than the aliases added, because the event shape is a contract.
+  Two MCP tool schemas claimed job and schedule ids arrive prefixed `job_` /
+  `cron_`; both are bare UUIDv7s, and that description ships to every connected
+  agent.
 
 - **On Alpine, a successful `orva backup restore` left the server down
   permanently.** `orva backup restore` exits 70 on purpose so its supervisor

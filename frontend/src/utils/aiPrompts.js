@@ -109,10 +109,11 @@ might want to inspect it.
 Uses the scoped internal SDK endpoint and dispatches through the warm pool; the signed credential supplies immutable caller attribution while the named target may be another function. Recursion guard: max call depth 8. The callee's full {statusCode, headers, body} is returned; body is JSON-decoded when possible.
 
   Python:
+    import json
     from orva import invoke, OrvaError
 
     try:
-        res = invoke("resize-image", {"url": event["body"]["url"]})
+        res = invoke("resize-image", json.loads(event["body"] or "{}"))
         # res = {"statusCode": 200, "headers": {...}, "body": <decoded>}
     except OrvaError as e:
         # e.status: 404 = function not found, 408 = timeout,
@@ -123,7 +124,7 @@ Uses the scoped internal SDK endpoint and dispatches through the warm pool; the 
     const { invoke, OrvaError } = require('orva')
 
     try {
-      const res = await invoke('resize-image', { url: event.body.url })
+      const res = await invoke('resize-image', JSON.parse(event.body || '{}'))
     } catch (e) {
       if (e instanceof OrvaError) {
         return { statusCode: e.status || 502, body: { error: e.message } }
@@ -258,7 +259,7 @@ Channels do not change how you write the handler. The HTTP request the channel-t
 Treat each handler as a tiny service. Apply these by default:
 
 1. Validate input early. Return 400 with {"error": "..."} for missing/typed-wrong fields. NEVER trust event.body without checking shape.
-2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, a request id (use event.headers["x-orva-request-id"]), and any relevant ids. Logs land on the Activity page and on stdout.
+2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, the execution id (use event.headers["x-orva-execution-id"]), and any relevant ids. Logs land on the Activity page and on stdout.
 3. Idempotency where it matters (POST / job workers / webhook receivers). Key on a client-supplied Idempotency-Key header or the job id; store a "done" marker in orva.kv with 24 h TTL.
 4. Timeouts on outbound HTTPS. httpx default is no timeout — set timeout=10. node fetch default is also no timeout — pass an AbortSignal.timeout(10_000). 30 s sandbox cap means you get killed mid-request otherwise.
 5. Catch broad, return narrow. try/except around your business logic; map to 400 / 401 / 404 / 502 / 500 with a short message. Don't leak stack traces in production responses (log them, return a request id).
@@ -305,7 +306,11 @@ async def handler(event):
         return {"statusCode": 405, "headers": {"Content-Type": "application/json"},
                 "body": {"error": "POST only"}}
 
-    body = event.get("body") or {}
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError:
+        return {"statusCode": 400, "headers": {"Content-Type": "application/json"},
+                "body": {"error": "invalid json"}}
     url = body.get("url") if isinstance(body, dict) else None
     if not isinstance(url, str) or not url.startswith(("http://", "https://")):
         return {"statusCode": 400, "headers": {"Content-Type": "application/json"},
@@ -371,7 +376,7 @@ def handler(event):
         "msg": "session sweep done",
         "deleted": deleted,
         "trigger": "cron" if is_cron else "manual",
-        "request_id": event["headers"].get("x-orva-request-id"),
+        "execution_id": event["headers"].get("x-orva-execution-id"),
     }))
 
     return {"statusCode": 200,
@@ -414,11 +419,9 @@ exports.handler = async (event) => {
   if (event.method !== 'POST') {
     return { statusCode: 405, body: { error: 'POST only' } }
   }
-  // Stripe sends raw bytes. Orva passes the unparsed string through when
-  // Content-Type isn't application/json — make sure the route's content-type
-  // handling preserves the raw body. If event.body is an object (already
-  // parsed), JSON.stringify it back for verification.
-  const rawBody = typeof event.body === 'string' ? event.body : JSON.stringify(event.body)
+  // event.body is always the raw string Stripe sent, whatever the
+  // Content-Type, so the bytes the signature covers arrive intact.
+  const rawBody = event.body || ''
   const sigHeader = event.headers['stripe-signature']
   if (!verifyStripe(rawBody, sigHeader)) {
     return { statusCode: 401, body: { error: 'bad signature' } }
@@ -426,7 +429,7 @@ exports.handler = async (event) => {
 
   let payload
   try {
-    payload = typeof event.body === 'string' ? JSON.parse(event.body) : event.body
+    payload = JSON.parse(rawBody)
   } catch {
     return { statusCode: 400, body: { error: 'invalid json' } }
   }
@@ -443,7 +446,7 @@ exports.handler = async (event) => {
     level: 'info',
     msg: 'stripe webhook ok',
     type: payload.type,
-    request_id: event.headers['x-orva-request-id'],
+    execution_id: event.headers['x-orva-execution-id'],
   }))
 
   return { statusCode: 200, body: { received: true } }

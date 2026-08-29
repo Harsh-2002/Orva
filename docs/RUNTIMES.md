@@ -40,8 +40,9 @@ single argument:
   should split `event["path"]` on `?` themselves.
 - Headers are normalized to lowercase keys.
 
-The Node adapter also passes `event.rawPath` and `event.httpMethod` aliases so
-AWS-Lambda-style handlers work without code changes. It accepts several handler
+Those five keys are the whole event — there are no `rawPath` / `httpMethod`
+aliases. What makes AWS-Lambda-style code run unchanged is the calling
+convention, not the key names: the Node adapter accepts several handler
 shapes besides the default: `handler(event, context)` (Lambda) and
 `handler(req, res)` (Vercel/Express). The Python adapter accepts a plain
 `handler(event)` and also speaks WSGI and ASGI, so Flask and FastAPI apps run
@@ -81,8 +82,8 @@ only Node's CommonJS resolver.
 
 ```js
 exports.handler = async (event) => {
-  const path   = event.path || event.rawPath || '/';
-  const method = event.method || event.httpMethod;
+  const path   = event.path || '/';
+  const method = event.method;
 
   if (method === 'GET' && path === '/health') {
     return { ok: true, ts: Date.now() };
@@ -113,8 +114,8 @@ return {
 
 ```python
 def handler(req):
-    method = req.get('method') or req.get('httpMethod')
-    path   = req.get('path')   or req.get('rawPath') or '/'
+    method = req.get('method')
+    path   = req.get('path') or '/'
 
     if method == 'GET' and path == '/health':
         return {'ok': True}

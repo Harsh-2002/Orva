@@ -266,13 +266,17 @@ exports.handler = async (event) => {
 ### F2F — Python
 
 ```python
+import json
+
 from orva import invoke, OrvaError
 
 def handler(event):
+    # event["body"] is the raw request body, as a string. Always parse it.
+    url = json.loads(event["body"] or "{}")["url"]
     try:
         # invoke() returns the downstream {statusCode, headers, body}.
         # body is JSON-decoded when possible.
-        result = invoke("resize-image", {"url": event["body"]["url"]})
+        result = invoke("resize-image", {"url": url})
         return {"statusCode": 200, "body": result["body"]}
     except OrvaError as e:
         # 404 = function not found, 507 = call depth exceeded.
@@ -285,8 +289,10 @@ def handler(event):
 const { invoke, OrvaError } = require('orva')
 
 exports.handler = async (event) => {
+  // event.body is the raw request body, as a string. Always parse it.
+  const { url } = JSON.parse(event.body || '{}')
   try {
-    const result = await invoke('resize-image', { url: event.body.url })
+    const result = await invoke('resize-image', { url })
     return { statusCode: 200, body: result.body }
   } catch (e) {
     if (e instanceof OrvaError) {
@@ -302,18 +308,21 @@ exports.handler = async (event) => {
 ### Jobs — Python
 
 ```python
+import json
+
 from orva import jobs
 
 def handler(event):
-    # Fire-and-forget. Returns the job id immediately; the function
-    # body runs later via the scheduler. max_attempts retries with
+    # Fire-and-forget. Returns {"id": ..., "replayed": ...} immediately;
+    # the body runs later via the scheduler. max_attempts retries with
     # exponential backoff on 5xx / exception.
-    019df210-7b00-7e00-9c00-aab1cd2e3f43 = jobs.enqueue(
+    body = json.loads(event["body"] or "{}")
+    job = jobs.enqueue(
         "send-welcome-email",
-        {"to": event["body"]["email"]},
+        {"to": body["email"]},
         max_attempts=3,
     )
-    return {"statusCode": 202, "body": 019df210-7b00-7e00-9c00-aab1cd2e3f43}
+    return {"statusCode": 202, "body": job}
 ```
 
 ### Jobs — Node.js
@@ -322,12 +331,13 @@ def handler(event):
 const { jobs } = require('orva')
 
 exports.handler = async (event) => {
-  const jobId = await jobs.enqueue(
+  const { email } = JSON.parse(event.body || '{}')
+  const job = await jobs.enqueue(
     'send-welcome-email',
-    { to: event.body.email },
+    { to: email },
     { maxAttempts: 3 }
   )
-  return { statusCode: 202, body: jobId }
+  return { statusCode: 202, body: job }
 }
 ```
 
@@ -394,10 +404,12 @@ exports.handler = async () => {
 ### Jobs — idempotency
 
 ```python
+import json
+
 from orva import jobs
 
 def handler(event):
-    body = event["body"] or {}
+    body = json.loads(event["body"] or "{}")
     # Same idempotency_key inside the window returns the existing job
     # id instead of enqueuing again. Useful for webhook handlers that
     # may be retried by the source.
@@ -543,7 +555,7 @@ curl -X POST {{ORIGIN}}/api/v1/functions/<function_id>/cron \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
   -d '{
-    "019df210-7b00-7e00-9c00-aab1cd2e3f44": "0 9 * * *",
+    "cron_expr": "0 9 * * *",
     "enabled":   true,
     "payload":   {"task": "daily-summary"}
   }'
@@ -551,7 +563,7 @@ curl -X POST {{ORIGIN}}/api/v1/functions/<function_id>/cron \
 
 ### Cron — Toggle / edit
 
-> PUT accepts any subset of {019df210-7b00-7e00-9c00-aab1cd2e3f44, enabled, payload}; omitted fields keep their previous value. next_run_at is recomputed on expr changes.
+> PUT accepts any subset of {cron_expr, enabled, payload}; omitted fields keep their previous value. next_run_at is recomputed on expr changes.
 
 ```bash
 # pause
@@ -564,7 +576,7 @@ curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e00-9
 curl -X PUT {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e00-9c00-aab1cd2e3f44> \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \
   -H 'Content-Type: application/json' \
-  -d '{"019df210-7b00-7e00-9c00-aab1cd2e3f44": "*/15 * * * *"}'
+  -d '{"cron_expr": "*/15 * * * *"}'
 ```
 
 ### Cron — List & delete
@@ -583,7 +595,7 @@ curl -X DELETE {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e0
 
 > **Cron-fired headers:** every cron-triggered invocation arrives at
 > the function with `x-orva-trigger: cron` and
-> `x-orva-cron-id: cron_…` on the event headers, so user code can
+> `x-orva-cron-id: <uuid>` on the event headers, so user code can
 > branch on origin.
 
 ---
@@ -1192,10 +1204,11 @@ might want to inspect it.
 Uses the scoped internal SDK endpoint and dispatches through the warm pool; the signed credential supplies immutable caller attribution while the named target may be another function. Recursion guard: max call depth 8. The callee's full {statusCode, headers, body} is returned; body is JSON-decoded when possible.
 
   Python:
+    import json
     from orva import invoke, OrvaError
 
     try:
-        res = invoke("resize-image", {"url": event["body"]["url"]})
+        res = invoke("resize-image", json.loads(event["body"] or "{}"))
         # res = {"statusCode": 200, "headers": {...}, "body": <decoded>}
     except OrvaError as e:
         # e.status: 404 = function not found, 408 = timeout,
@@ -1206,7 +1219,7 @@ Uses the scoped internal SDK endpoint and dispatches through the warm pool; the 
     const { invoke, OrvaError } = require('orva')
 
     try {
-      const res = await invoke('resize-image', { url: event.body.url })
+      const res = await invoke('resize-image', JSON.parse(event.body || '{}'))
     } catch (e) {
       if (e instanceof OrvaError) {
         return { statusCode: e.status || 502, body: { error: e.message } }
@@ -1219,36 +1232,36 @@ Fire-and-forget. Producer returns immediately; worker runs async on the same poo
 
   Python:
     from orva import jobs
-    019df210-7b00-7e00-9c00-aab1cd2e3f43 = jobs.enqueue(
+    job = jobs.enqueue(
         "send-welcome-email",
         {"to": "user@x.com", "tpl": "welcome"},
         max_attempts=3,                          # optional, default 3
         scheduled_at="2026-01-01T03:00:00Z",     # optional RFC3339; omit to run now
     )
-    # returns {"id": ..., "replayed": bool}
+    job_id = job["id"]    # returns {"id": ..., "replayed": bool}
 
   Node:
     const { jobs } = require('orva')
-    const jobId = await jobs.enqueue(
+    const { id: jobId } = await jobs.enqueue(   // returns { id, replayed }
       'send-welcome-email',
       { to: 'user@x.com', tpl: 'welcome' },
-      { maxAttempts: 3, scheduledAt: '2026-01-01T03:00:00Z' }   // returns { id, replayed }
+      { maxAttempts: 3, scheduledAt: '2026-01-01T03:00:00Z' }   // scheduledAt optional
     )
 
-The worker function receives the payload as event.body (parsed dict). Job-fired invocations arrive with header x-orva-trigger: "job" and x-orva-job-id: "job_..." — branch on those when the same function handles both HTTP and queue work.
+The worker function receives the payload as event.body — a raw JSON string, like every other request, so parse it. Job-fired invocations arrive with header x-orva-trigger: "job" and x-orva-job-id: "<uuid>" — branch on those when the same function handles both HTTP and queue work.
 
 Idempotency rule: jobs CAN run more than once on retry. Make worker handlers idempotent (check kv for a "done" marker keyed on payload, or use the job id).
 </orva_sdk>
 
 <schedules>
 Wire any function to a cron expression from the Schedules page or:
-  POST /api/v1/functions/<id>/cron   { "019df210-7b00-7e00-9c00-aab1cd2e3f44": "*/5 * * * *", "timezone": "UTC", "enabled": true }
+  POST /api/v1/functions/<id>/cron   { "cron_expr": "*/5 * * * *", "timezone": "UTC", "enabled": true }
 
 Standard 5-field cron with shorthands: @hourly, @daily, @weekly, @monthly, @yearly. Plus the usual */N, ranges (1-5), and lists (1,15,30). Timezone defaults to the orvad process timezone; pass an IANA name to override per schedule.
 
 Cron-fired invocations arrive with these event headers — branch on them for dry-run / real-run logic, or to tag log lines:
   x-orva-trigger: "cron"
-  x-orva-cron-id: "cron_..."
+  x-orva-cron-id: "<uuid>"
 
 The scheduler is in-process (no external service), drift < 1s, survives restart, hot-reloads on edit. Failed cron runs emit a cron.failed webhook.
 </schedules>
@@ -1329,7 +1342,7 @@ There are no path parameters: the matched path arrives whole in event.path, so p
 Treat each handler as a tiny service. Apply these by default:
 
 1. Validate input early. Return 400 with {"error": "..."} for missing/typed-wrong fields. NEVER trust event.body without checking shape.
-2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, a request id (use event.headers["x-orva-request-id"]), and any relevant ids. Logs land on the Activity page and on stdout.
+2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, the execution id (use event.headers["x-orva-execution-id"]), and any relevant ids. Logs land on the Activity page and on stdout.
 3. Idempotency where it matters (POST / job workers / webhook receivers). Key on a client-supplied Idempotency-Key header or the job id; store a "done" marker in orva.kv with 24 h TTL.
 4. Timeouts on outbound HTTPS. httpx default is no timeout — set timeout=10. node fetch default is also no timeout — pass an AbortSignal.timeout(10_000). 30 s sandbox cap means you get killed mid-request otherwise.
 5. Catch broad, return narrow. try/except around your business logic; map to 400 / 401 / 404 / 502 / 500 with a short message. Don't leak stack traces in production responses (log them, return a request id).
@@ -1376,7 +1389,11 @@ async def handler(event):
         return {"statusCode": 405, "headers": {"Content-Type": "application/json"},
                 "body": {"error": "POST only"}}
 
-    body = event.get("body") or {}
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError:
+        return {"statusCode": 400, "headers": {"Content-Type": "application/json"},
+                "body": {"error": "invalid json"}}
     url = body.get("url") if isinstance(body, dict) else None
     if not isinstance(url, str) or not url.startswith(("http://", "https://")):
         return {"statusCode": 400, "headers": {"Content-Type": "application/json"},
@@ -1442,7 +1459,7 @@ def handler(event):
         "msg": "session sweep done",
         "deleted": deleted,
         "trigger": "cron" if is_cron else "manual",
-        "request_id": event["headers"].get("x-orva-request-id"),
+        "execution_id": event["headers"].get("x-orva-execution-id"),
     }))
 
     return {"statusCode": 200,
@@ -1485,11 +1502,9 @@ exports.handler = async (event) => {
   if (event.method !== 'POST') {
     return { statusCode: 405, body: { error: 'POST only' } }
   }
-  // Stripe sends raw bytes. Orva passes the unparsed string through when
-  // Content-Type isn't application/json — make sure the route's content-type
-  // handling preserves the raw body. If event.body is an object (already
-  // parsed), JSON.stringify it back for verification.
-  const rawBody = typeof event.body === 'string' ? event.body : JSON.stringify(event.body)
+  // event.body is always the raw string Stripe sent, whatever the
+  // Content-Type, so the bytes the signature covers arrive intact.
+  const rawBody = event.body || ''
   const sigHeader = event.headers['stripe-signature']
   if (!verifyStripe(rawBody, sigHeader)) {
     return { statusCode: 401, body: { error: 'bad signature' } }
@@ -1497,7 +1512,7 @@ exports.handler = async (event) => {
 
   let payload
   try {
-    payload = typeof event.body === 'string' ? JSON.parse(event.body) : event.body
+    payload = JSON.parse(rawBody)
   } catch {
     return { statusCode: 400, body: { error: 'invalid json' } }
   }
@@ -1514,7 +1529,7 @@ exports.handler = async (event) => {
     level: 'info',
     msg: 'stripe webhook ok',
     type: payload.type,
-    request_id: event.headers['x-orva-request-id'],
+    execution_id: event.headers['x-orva-execution-id'],
   }))
 
   return { statusCode: 200, body: { received: true } }

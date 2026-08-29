@@ -1212,7 +1212,7 @@
         </p>
         <pre class="bg-surface border border-border rounded p-3 font-mono text-[12px] text-foreground-strong overflow-x-auto scrollable whitespace-pre">{{ handlerHint }}</pre>
         <ul class="space-y-1 pl-4 list-disc marker:text-foreground-muted">
-          <li><span class="text-foreground-strong font-mono">event.body</span> is the raw request body (string or parsed JSON).</li>
+          <li><span class="text-foreground-strong font-mono">event.body</span> is the raw request body, always a string. Parse it yourself.</li>
           <li>Return <span class="text-foreground-strong font-mono">{ statusCode, headers, body }</span>.</li>
           <li>Add packages via the <span class="text-foreground-strong">Deps</span> panel (installed at build time).</li>
         </ul>
