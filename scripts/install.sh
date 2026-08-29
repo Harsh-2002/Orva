@@ -856,7 +856,12 @@ description="Orva self-hosted serverless platform"
 command="${PREFIX}/bin/orva"
 command_args="serve"
 command_user="${SERVICE_USER}:${SERVICE_USER}"
-command_background="yes"
+# supervise-daemon respawns; start-stop-daemon does not. 'orva backup restore'
+# exits 70 on purpose to force a restart, so without a supervisor a successful
+# restore left the host down. respawn_max=0 = unlimited, as systemd effectively is.
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=0
 pidfile="/run/orva.pid"
 output_log="/var/log/orva.log"
 error_log="/var/log/orva.log"
@@ -1107,7 +1112,7 @@ if [ -f /etc/init.d/orva ]; then
     openrc_pid=""
     [ -s /run/orva.pid ] && openrc_pid=\$(cat /run/orva.pid 2>/dev/null || true)
     rc-service orva stop 2>/dev/null || service orva stop 2>/dev/null || true
-    # OpenRC can return from stop before the daemon's pid is gone.
+    # /run/orva.pid is supervise-daemon's; OpenRC can return before it is gone.
     # A rapid uninstall/reinstall would then reuse its stale pidfile and mark
     # the new service started without launching it. Bound the wait, terminate
     # a lingering old process, and clear OpenRC's cached service state.
