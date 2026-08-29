@@ -72,7 +72,12 @@ start_distro_container() {
     else
         # Alpine: start with `tail -f /dev/null` so the container stays alive,
         # then bring up OpenRC manually inside it (Alpine's `openrc default`).
-        docker run -d "${args[@]}" "$DISTRO_IMAGE" sh -c 'tail -f /dev/null' >/dev/null \
+        #
+        # --init only here, never on the systemd branch, which needs systemd
+        # itself as pid 1. `tail` does not reap, so an exited supervise-daemon
+        # stays a zombie and `supervise-daemon --stop` waits forever on a pid
+        # that can never disappear -- a six-hour job timeout, not a failure.
+        docker run -d --init "${args[@]}" "$DISTRO_IMAGE" sh -c 'tail -f /dev/null' >/dev/null \
             || die "container start failed for $distro"
         docker exec "$name" sh -c 'apk add --no-cache openrc >/dev/null 2>&1 && rc-status >/dev/null 2>&1; openrc default >/dev/null 2>&1 || true'
     fi

@@ -395,7 +395,9 @@ signal. Reconnect in ~5 seconds.
 > **down** — so a successful restore was an outage on bare metal. Docker's
 > `restart: unless-stopped` hides this. The shipped unit now carries
 > `RestartForceExitStatus=70`; a unit created before that needs the line
-> added, or re-run `install.sh`. Check with
+> added, or re-run `install.sh`. On Alpine/OpenRC the equivalent is
+> `supervisor="supervise-daemon"` in `/etc/init.d/orva` — `start-stop-daemon`
+> never respawns, so the same restore left the host down there too. Check with
 
 > The downloaded archive is written mode `0600`, because it contains the
 > database, every function version, the secrets master key and the bootstrap

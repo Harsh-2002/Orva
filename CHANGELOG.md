@@ -17,6 +17,18 @@ before it.
 
 ### Fixed
 
+- **On Alpine, a successful `orva backup restore` left the server down
+  permanently.** `orva backup restore` exits 70 on purpose so its supervisor
+  restarts the process against the restored files, and the shipped systemd unit
+  carries `RestartForceExitStatus=70` for exactly that. The OpenRC init script
+  had no equivalent: it ran under `start-stop-daemon`, which never respawns
+  anything. A restore that worked perfectly therefore ended with the server
+  exited and nothing to bring it back — the same outage the systemd fix closed,
+  still open on every Alpine bare-metal install. The unit now runs under
+  `supervisor="supervise-daemon"`. OpenRC has no per-exit-status restart
+  filter, so this respawns on any unexpected exit — a superset of
+  `Restart=on-failure` that covers exit 70.
+
 - **`orva upgrade` replaced a bare-metal server with the CLI, and the host
   never came back.** The Linux server binary registers every client subcommand
   so an operator can work from the server box — `upgrade` included. It always
@@ -110,7 +122,9 @@ before it.
 - To repair a data directory in place without a restore cycle, see
   "rollback fails with `VERSION_GCD`" in `docs/OPERATIONS.md`.
 - **Bare-metal hosts: re-run `install.sh` to pick up the fixed service unit.**
-  The rewrite drops any `Environment=`
+  It rewrites the unit on an upgrade, which is what installs the OpenRC
+  `supervise-daemon` supervisor (Alpine) — without it an `orva backup restore`
+  there still leaves the host down. The rewrite also drops any `Environment=`
   you hand-added, and the unit now sets `ORVA_PORT` explicitly: if your server
   listens on anything other than 8443, pass `--port <n>` (or `ORVA_PORT=<n>`)
   to the reinstall, or it moves back to 8443.

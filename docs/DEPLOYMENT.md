@@ -231,7 +231,10 @@ rewrites the service unit, which is how a unit predating
 `RestartForceExitStatus=70` picks that up. Without it, `orva backup restore`
 exits 70 to force a restart and systemd's `Restart=on-failure` leaves the
 service down instead. Verify with
-`systemctl cat orva | grep RestartForceExitStatus`.
+`systemctl cat orva | grep RestartForceExitStatus`. On Alpine/OpenRC the same
+restore needs `supervisor="supervise-daemon"` in `/etc/init.d/orva`
+(`start-stop-daemon` never respawns); verify with
+`grep supervise-daemon /etc/init.d/orva`.
 
 ### Downtime
 
