@@ -81,10 +81,13 @@ foreach ($line in (Get-Content -LiteralPath $ChecksumsTmp)) {
         break
     }
 }
-Remove-Item -Force $ChecksumsTmp -ErrorAction SilentlyContinue
 if (-not $Want) {
-    Die "checksum entry for $Asset missing from checksums.txt (first 5 lines were:`n$((Get-Content -LiteralPath $ChecksumsTmp -TotalCount 5 -ErrorAction SilentlyContinue) -join "`n"))"
+    # Read before the delete below, or the diagnostic quotes a file that is gone.
+    $Head = (Get-Content -LiteralPath $ChecksumsTmp -TotalCount 5 -ErrorAction SilentlyContinue) -join "`n"
+    Remove-Item -Force $ChecksumsTmp -ErrorAction SilentlyContinue
+    Die "checksum entry for $Asset missing from checksums.txt (first 5 lines were:`n$Head)"
 }
+Remove-Item -Force $ChecksumsTmp -ErrorAction SilentlyContinue
 $Got = (Get-FileHash -Algorithm SHA256 $TmpExe).Hash.ToLower()
 if ($Want -ne $Got) { Die "checksum mismatch: want=$Want got=$Got" }
 Log "checksum OK"

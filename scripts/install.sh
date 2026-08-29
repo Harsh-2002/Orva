@@ -96,6 +96,9 @@ pacman_run() {
 }
 
 usage() {
+    # --help exits from parse_args, before main() calls resolve_self_url, so
+    # derive it here or the printed curl one-liner has an empty URL.
+    resolve_self_url
     cat <<EOF
 Orva installer — install the server (Docker or bare-metal) or just the CLI.
 
@@ -453,7 +456,9 @@ detect_existing() {
     EXISTING_KIND="none"; EXISTING_VERSION=""
     if [ -x "$PREFIX/bin/orva" ]; then
         EXISTING_KIND="bare"
-        EXISTING_VERSION=$("$PREFIX/bin/orva" --version 2>/dev/null | head -n1 || echo "")
+        # cobra prints "orva vX.Y.Z"; strip the name so this compares against
+        # VERSION ("vX.Y.Z") instead of never matching.
+        EXISTING_VERSION=$("$PREFIX/bin/orva" --version 2>/dev/null | head -n1 | awk '{print $NF}' || echo "")
     fi
     if have docker && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^orva$'; then
         [ "$EXISTING_KIND" = "none" ] && EXISTING_KIND="docker"
