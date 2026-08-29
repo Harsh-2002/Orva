@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 )
 
 // authorizeInvoke applies the per-function auth_mode policy. Returns "" on
@@ -152,27 +152,11 @@ func (h *InvokeHandler) authorizeInvoke(w http.ResponseWriter, r *http.Request, 
 	return "INTERNAL"
 }
 
-// clientIP returns the best-effort identifier for rate-limit bucketing. Falls
-// back to RemoteAddr's host portion if no proxy headers are present.
-func clientIP(r *http.Request) string {
-	// X-Forwarded-For is comma-separated; the leftmost entry is the
-	// originating client. Trust this only if the operator runs Orva
-	// behind a proxy — the alternative (RemoteAddr) is the only honest
-	// signal in the no-proxy case anyway.
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.Index(xff, ","); i >= 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
+// clientIP is the rate-limit bucket key for both callers here — the
+// per-function invoke limit and the login throttle. Both want the same thing:
+// an address the caller cannot pick. urlhint.ClientIP is the single source of
+// truth, shared with the OAuth DCR limiter.
+func clientIP(r *http.Request) string { return urlhint.ClientIP(r) }
 
 func writeInvokeAuthError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")

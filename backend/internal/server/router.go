@@ -21,6 +21,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 	"github.com/Harsh-2002/Orva/backend/internal/version"
 )
 
@@ -520,9 +521,9 @@ func (r *Router) setupRoutes() {
 	// token (authorization_code + refresh_token grants), revoke (RFC 7009).
 	// Lets claude.ai / ChatGPT add /mcp as a custom channel via OAuth
 	// without the operator pasting a bearer token.
-	// Process-wide: whether X-Forwarded-For may be trusted for the DCR rate
-	// limiter's client identity.
-	oauth.TrustForwardedFor = r.cfg.Security.TrustedProxy
+	// Process-wide: whether the proxy forwarding headers may decide the
+	// client identity every rate limiter buckets on.
+	urlhint.TrustProxyHeaders = r.cfg.Security.TrustedProxy
 
 	oauthHandler := &oauth.Handler{
 		DB:            r.db,

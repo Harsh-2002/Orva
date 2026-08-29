@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 )
 
 func TestDCRRateLimiter_BurstThenDeny(t *testing.T) {
@@ -32,30 +34,31 @@ func TestDCRRateLimiter_PerIPIsolation(t *testing.T) {
 }
 
 // TestDCRClientIP_XForwardedFor — the header is honoured ONLY behind a
-// declared proxy. It used to be trusted unconditionally, and this limiter is
-// the sole abuse control on POST /register (everything else there is
-// metadata validation with no authentication), so a caller who varied one
-// header had no rate limit at all -- while each distinct value allocated a
-// bucket that lived for hours.
+// declared proxy, and then only its rightmost entry. It used to be trusted
+// unconditionally and read leftmost-first, and this limiter is the sole abuse
+// control on POST /register (everything else there is metadata validation with
+// no authentication), so a caller who varied one header had no rate limit at
+// all -- while each distinct value allocated a bucket that lived for hours.
 func TestDCRClientIP_XForwardedFor(t *testing.T) {
-	t.Run("trusted proxy: honoured", func(t *testing.T) {
-		prev := TrustForwardedFor
-		TrustForwardedFor = true
-		t.Cleanup(func() { TrustForwardedFor = prev })
+	setTrust := func(t *testing.T, v bool) {
+		prev := urlhint.TrustProxyHeaders
+		urlhint.TrustProxyHeaders = v
+		t.Cleanup(func() { urlhint.TrustProxyHeaders = prev })
+	}
 
+	t.Run("trusted proxy: the appended entry is honoured", func(t *testing.T) {
+		setTrust(t, true)
 		r := httptest.NewRequest("POST", "/register", nil)
-		r.Header.Set("X-Forwarded-For", "203.0.113.5, 10.0.0.1")
-		r.RemoteAddr = "10.0.0.1:54321"
+		// The client forged 10.0.0.1; the proxy appended the peer it saw.
+		r.Header.Set("X-Forwarded-For", "10.0.0.1, 203.0.113.5")
+		r.RemoteAddr = "127.0.0.1:54321"
 		if got := dcrClientIP(r); got != "203.0.113.5" {
 			t.Errorf("XFF not honored behind a trusted proxy: got %q", got)
 		}
 	})
 
 	t.Run("untrusted: ignored", func(t *testing.T) {
-		prev := TrustForwardedFor
-		TrustForwardedFor = false
-		t.Cleanup(func() { TrustForwardedFor = prev })
-
+		setTrust(t, false)
 		r := httptest.NewRequest("POST", "/register", nil)
 		r.Header.Set("X-Forwarded-For", "203.0.113.5")
 		r.RemoteAddr = "198.51.100.9:54321"
@@ -65,10 +68,7 @@ func TestDCRClientIP_XForwardedFor(t *testing.T) {
 	})
 
 	t.Run("rotating the header cannot escape the bucket", func(t *testing.T) {
-		prev := TrustForwardedFor
-		TrustForwardedFor = false
-		t.Cleanup(func() { TrustForwardedFor = prev })
-
+		setTrust(t, false)
 		seen := map[string]bool{}
 		for i := 0; i < 50; i++ {
 			r := httptest.NewRequest("POST", "/register", nil)

@@ -16,8 +16,11 @@
 package urlhint
 
 import (
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // BaseURL infers the canonical "scheme://host" identifier for this
@@ -62,4 +65,69 @@ func IsHTTPS(r *http.Request) bool {
 	}
 	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
 	return strings.EqualFold(strings.TrimSpace(proto), "https")
+}
+
+// TrustProxyHeaders is set once at startup from ORVA_TRUSTED_PROXY. Off by
+// default: X-Forwarded-For is client-settable, so trusting it unconditionally
+// hands every rate limiter a bucket key the caller picks per request.
+var TrustProxyHeaders bool
+
+var untrustedProxyHeaderOnce sync.Once
+
+// ClientIP returns the address rate limiters bucket on. Without the operator's
+// opt-in that is the TCP peer, which cannot be forged over a completed
+// handshake. With it, the RIGHTMOST X-Forwarded-For entry: nginx, Caddy and
+// Traefik append the peer they saw, so every entry further left was supplied
+// by the client.
+func ClientIP(r *http.Request) string {
+	// Values, not Get: HAProxy's `option forwardfor` and several ingress
+	// controllers append a second X-Forwarded-For line instead of merging.
+	xff := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
+	xri := ""
+	if v := r.Header.Values("X-Real-IP"); len(v) > 0 {
+		xri = v[len(v)-1]
+	}
+	if TrustProxyHeaders {
+		last := xff
+		if i := strings.LastIndexByte(xff, ','); i >= 0 {
+			last = xff[i+1:]
+		}
+		if ip := normalizeIP(last); ip != "" {
+			return ip
+		}
+		if ip := normalizeIP(xri); ip != "" {
+			return ip
+		}
+	} else if xff != "" || xri != "" {
+		untrustedProxyHeaderOnce.Do(func() {
+			slog.Warn("ignoring proxy forwarding headers; rate limits are keyed on the peer address and all proxied clients share one bucket",
+				"hint", "set ORVA_TRUSTED_PROXY=true only if a proxy you control rewrites X-Forwarded-For",
+				"peer", r.RemoteAddr)
+		})
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		if ip := normalizeIP(host); ip != "" {
+			return ip
+		}
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// normalizeIP canonicalises an address so " 1.2.3.4 ", "1.2.3.4" and
+// "1.2.3.4:9999" cannot each claim their own rate-limit bucket.
+func normalizeIP(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if ip := net.ParseIP(s); ip != nil {
+		return ip.String()
+	}
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.String()
+		}
+	}
+	return ""
 }

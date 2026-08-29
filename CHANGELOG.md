@@ -29,6 +29,21 @@ before it.
   filter, so this respawns on any unexpected exit — a superset of
   `Restart=on-failure` that covers exit 70.
 
+- **One header defeated every rate limit Orva has.** `X-Forwarded-For` (then
+  `X-Real-IP`) decided the client identity that the per-function
+  `rate_limit_per_min` cap and the unauthenticated login brute-force throttle
+  bucket on, and it was trusted whether or not a proxy was in front of Orva.
+  Any caller could send a different value per request and get a fresh bucket
+  every time, so both limits were advisory. Both now key on the TCP peer
+  address unless the operator opts in with `ORVA_TRUSTED_PROXY` — the same flag
+  that already governed the OAuth dynamic-registration limiter, the only
+  limiter it had ever reached. All three now resolve the caller through one
+  function (`urlhint.ClientIP`) so they cannot drift apart again. When the flag
+  is on, the rightmost `X-Forwarded-For` entry wins rather than the leftmost,
+  and every `X-Forwarded-For` header line is read rather than the first: a
+  proxy appends the peer it saw — as a new entry, or as a whole new header
+  line — so anything before it is still what the client chose to send.
+
 - **`orva upgrade` replaced a bare-metal server with the CLI, and the host
   never came back.** The Linux server binary registers every client subcommand
   so an operator can work from the server box — `upgrade` included. It always
@@ -121,6 +136,18 @@ before it.
   them.
 - To repair a data directory in place without a restore cycle, see
   "rollback fails with `VERSION_GCD`" in `docs/OPERATIONS.md`.
+- **If a reverse proxy fronts your instance, set `ORVA_TRUSTED_PROXY=true`.**
+  Orva no longer trusts `X-Forwarded-For` / `X-Real-IP` by default (see Fixed,
+  above). Without the flag every rate limiter keys on the TCP peer — which
+  behind a proxy is the proxy — so all of your clients share a single bucket:
+  a function with `rate_limit_per_min: 60` starts returning 429 at 60 req/min
+  *in total* rather than per caller. There is no data migration. The first
+  request carrying either header while the flag is off logs one warning naming
+  the variable, so a missed upgrade is greppable rather than silent.
+
+  Set it only when the proxy is genuinely in front of every request, and keep
+  Orva off the open network (`ORVA_HOST=127.0.0.1`, or a firewall): the flag
+  asserts that the peer is always your proxy.
 - **Bare-metal hosts: re-run `install.sh` to pick up the fixed service unit.**
   It rewrites the unit on an upgrade, which is what installs the OpenRC
   `supervise-daemon` supervisor (Alpine) — without it an `orva backup restore`

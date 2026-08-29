@@ -254,13 +254,22 @@ Retry logic at the caller (or the SDK) handles it.
   (`builder.DefaultMaxCodeSize`) with no config key.
 - **Read timeout**: must exceed the longest function `timeout_ms`. SSE
   streams need a long read timeout (≥ 5 min recommended).
-- **`X-Forwarded-For`**: Orva **ignores** this header unless you set
-  `ORVA_TRUSTED_PROXY=true`. Left off, the OAuth dynamic-registration rate
-  limiter — the only abuse control on the unauthenticated `POST /register` —
-  keys on your proxy's own address, so every client shares one bucket. Turn
-  it on once a proxy you control is rewriting the header, and **not before**:
-  trusting a client-settable value means a caller can have no rate limit at
-  all simply by varying it.
+- **`X-Forwarded-For`**: Orva **ignores** this header (and `X-Real-IP`)
+  unless you set `ORVA_TRUSTED_PROXY=true`. Left off, every rate limiter —
+  per-function `rate_limit_per_min`, the login brute-force throttle, and the
+  OAuth dynamic-registration limiter that is the only abuse control on the
+  unauthenticated `POST /register` — keys on your proxy's own address, so
+  every client behind it shares one bucket. **Set it whenever a proxy fronts
+  Orva**, and **not before**: trusting a client-settable value means a caller
+  can have no rate limit at all simply by varying it. When on, Orva reads the
+  **rightmost** entry, which is the one your proxy appended
+  (`$proxy_add_x_forwarded_for` in the nginx example above; Caddy and Traefik
+  append by default). Anything further left was sent by the client. Also make
+  sure Orva is reachable *only* through the proxy — `ORVA_HOST=127.0.0.1`, or
+  a firewall — because the flag is an assertion that the peer always is the
+  proxy. Make sure that proxy is the one writing `X-Forwarded-For`: a config
+  that sets only `X-Real-IP` and passes the client's `X-Forwarded-For` through
+  untouched leaves the bucket client-chosen even with the flag on.
 - **`X-Forwarded-Proto`**: forward it (the nginx example above does) and Orva
   marks session cookies `Secure` automatically, without `ORVA_SECURE_COOKIES`.
 - **HTTP/2**: helps with the dashboard's parallel API calls. SSE works

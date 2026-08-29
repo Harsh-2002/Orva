@@ -154,7 +154,7 @@ encrypted and only decrypt into the worker environment at spawn time.
 | `/secrets` | Encrypted | AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time. |
 | `network_mode` | Egress control | none = isolated loopback. egress = outbound HTTPS allowed; firewall blocklist applies. The orva SDK (kv / invoke / jobs) reaches orvad over the bridge, so it requires `egress`. |
 | `auth_mode` | Invoke gate | none = public. platform_key = require an Orva session cookie, or an API key carrying the `invoke` permission (via `X-Orva-API-Key` or `Authorization: Bearer`). signed = require HMAC. |
-| `rate_limit_per_min` | Per-IP throttle | Optional cap for public or webhook-facing functions. Exceeding it returns 429. |
+| `rate_limit_per_min` | Per-IP throttle | Optional cap for public or webhook-facing functions. Exceeding it returns 429. The IP is the TCP peer address; `X-Forwarded-For` is honoured only when the operator sets `ORVA_TRUSTED_PROXY=true`, and then its rightmost entry. |
 | custom routes | Pretty URLs | Operator-defined `/path` or `/prefix/*` mappings to the function. Manage via `POST /api/v1/routes`, the `set_route` MCP tool, the `orva routes set` CLI, or the dashboard's function settings → "Custom routes" section (collision-checks against other functions). Optional. |
 
 ### Set a secret
@@ -963,7 +963,7 @@ need to run a second service.
 | `GET /.well-known/oauth-protected-resource` | 9728 | Tells clients `/mcp` is OAuth-protected. |
 | `GET /.well-known/oauth-authorization-server` | 8414 | Authorization Server Metadata. |
 | `GET /.well-known/openid-configuration` | OIDC | Same metadata + OIDC fields (ChatGPT probes this). |
-| `POST /register` | 7591 | Dynamic Client Registration. Rate-limited per source address — the peer IP, or the first `X-Forwarded-For` entry only when `ORVA_TRUSTED_PROXY=true`. Behind a proxy without that flag every client shares one bucket. |
+| `POST /register` | 7591 | Dynamic Client Registration. Rate-limited per source address — the peer IP, or the **rightmost** `X-Forwarded-For` entry only when `ORVA_TRUSTED_PROXY=true`. Behind a proxy without that flag every client shares one bucket. |
 | `GET/POST /oauth/authorize` | OAuth 2.1 | Server-rendered consent screen (uses session cookie). |
 | `POST /oauth/token` | OAuth 2.1 | `authorization_code` + `refresh_token` grants. |
 | `POST /oauth/revoke` | 7009 | Revoke an access or refresh token. |

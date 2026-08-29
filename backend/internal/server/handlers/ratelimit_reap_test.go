@@ -2,8 +2,12 @@ package handlers
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 )
 
 // TestRateLimiterReapsIdleBuckets — the type comment promised eviction for a
@@ -81,4 +85,54 @@ func TestRateLimiterStillLimits(t *testing.T) {
 	if allowed != 5 {
 		t.Errorf("allowed %d of 20 with perMin=5, want 5", allowed)
 	}
+}
+
+// TestRateLimitBucketIgnoresForgedForwardedFor — clientIP read X-Forwarded-For
+// unconditionally, so any caller could mint a fresh bucket per request and had
+// no per-function rate limit and no login throttle at all. The header now only
+// decides the bucket when the operator declared a proxy.
+func TestRateLimitBucketIgnoresForgedForwardedFor(t *testing.T) {
+	req := func(xff string) *http.Request {
+		r := httptest.NewRequest("POST", "/fn/demo", nil)
+		r.RemoteAddr = "198.51.100.9:54321"
+		r.Header.Set("X-Forwarded-For", xff)
+		return r
+	}
+	setTrust := func(t *testing.T, v bool) {
+		prev := urlhint.TrustProxyHeaders
+		urlhint.TrustProxyHeaders = v
+		t.Cleanup(func() { urlhint.TrustProxyHeaders = prev })
+	}
+
+	t.Run("opt-in off: rotating the header cannot mint buckets", func(t *testing.T) {
+		setTrust(t, false)
+		rl := newRateLimiter()
+		allowed := 0
+		for i := 0; i < 12; i++ {
+			if rl.Allow("fn-demo", clientIP(req(fmt.Sprintf("203.0.113.%d", i))), 5) {
+				allowed++
+			}
+		}
+		if allowed != 5 {
+			t.Errorf("12 requests with 12 forged X-Forwarded-For values got %d through a limit of 5", allowed)
+		}
+	})
+
+	t.Run("opt-in on: the entry the proxy appended wins", func(t *testing.T) {
+		setTrust(t, true)
+		// The client forged 10.9.9.9; the proxy appended the peer it saw.
+		if got := clientIP(req("10.9.9.9, 203.0.113.7")); got != "203.0.113.7" {
+			t.Fatalf("clientIP = %q, want the proxy-appended 203.0.113.7", got)
+		}
+		rl := newRateLimiter()
+		for i := 0; i < 5; i++ {
+			rl.Allow("fn-demo", clientIP(req("10.9.9.9, 203.0.113.7")), 5)
+		}
+		if rl.Allow("fn-demo", clientIP(req("203.0.113.7, 203.0.113.7")), 5) {
+			t.Error("a client that varies its own X-Forwarded-For prefix escaped its bucket")
+		}
+		if !rl.Allow("fn-demo", clientIP(req("10.9.9.9, 203.0.113.8")), 5) {
+			t.Error("a different client behind the proxy shares one bucket")
+		}
+	})
 }

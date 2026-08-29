@@ -54,7 +54,7 @@ OOM it should not.
 | `CONFLICT` | 409 | `PUT /functions/{id}` renaming onto a name that already exists. Used to surface as a 500. | no — pick another name |
 | `NOT_FOUND` | 404 | `DELETE /executions/{id}` for an id that does not exist. Used to report success. | no |
 | `TOO_MANY_REQUESTS` | 429 | host-wide concurrency cap reached during TryAcquire grace | **yes** — back off briefly |
-| `RATE_LIMITED` | 429 | rate limit exceeded — per-function invoke limit (`rate_limit_per_min`, per client IP) or too many login attempts (per client IP) | **yes** — `Retry-After: 60` |
+| `RATE_LIMITED` | 429 | rate limit exceeded — per-function invoke limit (`rate_limit_per_min`, per client IP) or too many login attempts (per client IP). “Client IP” is the TCP peer address unless `ORVA_TRUSTED_PROXY=true`; see `docs/CONFIG.md` | **yes** — `Retry-After: 60` |
 | `FUNCTION_BUSY` | 429 | function at its own `max_concurrency` cap under the `reject` policy | **yes** — `Retry-After: 1`, or raise `max_concurrency` / switch the policy to `queue` |
 
 ### 5xx — server / platform errors

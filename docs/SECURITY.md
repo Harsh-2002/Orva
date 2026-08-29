@@ -629,6 +629,24 @@ against the **resolved** function. If a route could redirect `/fn/{id}`, a
 request aimed at a `platform_key`-gated function would be served by whatever
 function the route named — including one with `auth_mode: none`.
 
+> "What stops a caller from getting a fresh rate-limit bucket per request?"
+
+Every limiter Orva has — per-function `rate_limit_per_min`, the login
+brute-force throttle, and the OAuth dynamic-registration cap on
+`POST /register` — buckets on one shared identity, and by default that is the
+**TCP peer address**, which cannot be forged over a completed handshake.
+`X-Forwarded-For` and `X-Real-IP` are ignored unless the operator sets
+`ORVA_TRUSTED_PROXY=true`. They used to be trusted unconditionally, so a caller
+who sent a different `X-Forwarded-For` on each request had no invoke limit and
+no login throttle at all.
+
+With the flag on, Orva reads the **rightmost** `X-Forwarded-For` entry — the
+one your proxy appended — not the leftmost. Everything to the left was supplied
+by the client, so a leftmost read leaves the same bypass in place one hop
+further in. The flag is an assertion that the peer is always your proxy, so
+pair it with `ORVA_HOST=127.0.0.1` or a firewall; a client that can reach Orva
+directly while it is set can still choose its own bucket.
+
 > "I saw `WARNING: Running pip as the 'root' user' in the build log
 > earlier. Was my function being installed as root?"
 
