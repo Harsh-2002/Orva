@@ -40,7 +40,7 @@ func TestBuildArgs_NoEgressByDefault(t *testing.T) {
 				CodeDir:     "/tmp/code",
 				NetworkMode: tc.mode,
 			}
-			args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+			args, _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
 			if err != nil {
 				t.Fatalf("buildArgs: %v", err)
 			}
@@ -67,7 +67,7 @@ func TestBuildArgs_EgressAddsUserNet(t *testing.T) {
 		NetworkMode:      "egress",
 		EgressPolicyPath: testPolicyFile(t),
 	}
-	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
+	args, _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestBuildArgs_EgressWithoutPolicyPathIsAnError(t *testing.T) {
 		CodeDir:     "/tmp/code",
 		NetworkMode: "egress",
 	}
-	if _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js"); !errors.Is(err, ErrEgressPolicyMissing) {
+	if _, _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js"); !errors.Is(err, ErrEgressPolicyMissing) {
 		t.Fatalf("want ErrEgressPolicyMissing, got %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestBuildArgs_ConfigFlagIsFirst(t *testing.T) {
 		Env:              map[string]string{"SECRET": "value"},
 		SeccompPolicy:    "POLICY x { ALLOW { read } }",
 	}
-	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
+	args, _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestBuildArgs_DisableUsernsTracksTheEnvVar(t *testing.T) {
 
 	t.Run("enabled", func(t *testing.T) {
 		t.Setenv("ORVA_DISABLE_USERNS", "1")
-		args, err := buildArgs(newCfg(), "/tmp/rootfs", "/tmp/code/handler.js")
+		args, _, err := buildArgs(newCfg(), "/tmp/rootfs", "/tmp/code/handler.js")
 		if err != nil {
 			t.Fatalf("buildArgs: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestBuildArgs_DisableUsernsTracksTheEnvVar(t *testing.T) {
 	for _, value := range []string{"", "0", "true", "yes"} {
 		t.Run("disabled/"+value, func(t *testing.T) {
 			t.Setenv("ORVA_DISABLE_USERNS", value)
-			args, err := buildArgs(newCfg(), "/tmp/rootfs", "/tmp/code/handler.js")
+			args, _, err := buildArgs(newCfg(), "/tmp/rootfs", "/tmp/code/handler.js")
 			if err != nil {
 				t.Fatalf("buildArgs: %v", err)
 			}
@@ -198,7 +198,7 @@ func TestBuildArgs_DisableUsernsTracksTheEnvVar(t *testing.T) {
 // entirely, making a silently-dropped policy rule invisible.
 func TestBuildArgs_UsesWarningLogLevel(t *testing.T) {
 	cfg := ExecConfig{Language: Python, CodeDir: "/tmp/code"}
-	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+	args, _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestBuildArgs_AlwaysHasOnceMode(t *testing.T) {
 		Language: Python,
 		CodeDir:  "/tmp/code",
 	}
-	args, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
+	args, _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.py")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -485,7 +485,7 @@ func TestBuildArgs_EgressPolicyFileMustExist(t *testing.T) {
 		NetworkMode:      "egress",
 		EgressPolicyPath: filepath.Join(t.TempDir(), "does-not-exist.cfg"),
 	}
-	_, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
+	_, _, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
 	if !errors.Is(err, ErrEgressPolicyMissing) {
 		t.Fatalf("want ErrEgressPolicyMissing for a vanished policy file, got %v", err)
 	}
@@ -525,6 +525,58 @@ func TestKafelAliasesRespectTheArchFilter(t *testing.T) {
 		if strings.TrimSpace(tok) == "open" {
 			t.Fatal("an arm64-unsupported alias reached the compiled policy; " +
 				"Kafel would fail to compile it and no sandbox would start")
+		}
+	}
+}
+
+// TestBuildArgs_SecretsNeverAppearInArgv pins the fix for secrets leaking via
+// /proc/<pid>/cmdline. That file is world-readable and the shipped compose runs
+// `pid: host`, so a value in argv was readable by any local user for the life of
+// the call. Values now travel in the child's environment; argv carries only the
+// NAME, which nsjail resolves from its own env.
+//
+// Fails on the pre-fix code: argv contained "SECRET=hunter2".
+func TestBuildArgs_SecretsNeverAppearInArgv(t *testing.T) {
+	const secret = "hunter2-do-not-leak"
+	cfg := ExecConfig{
+		Language:    Node,
+		CodeDir:     "/tmp/code",
+		NetworkMode: "none",
+		Env: map[string]string{
+			"SECRET":              secret,
+			"ORVA_INTERNAL_TOKEN": "tok-" + secret,
+			"ORVA_FUNCTION_ID":    "fn-1",
+		},
+	}
+	args, childEnv, err := buildArgs(cfg, "/tmp/rootfs", "/tmp/code/handler.js")
+	if err != nil {
+		t.Fatalf("buildArgs: %v", err)
+	}
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, secret) {
+		t.Errorf("secret value leaked into argv: %s", joined)
+	}
+	// The names must still be forwarded, or the function loses its env.
+	for _, name := range []string{"SECRET", "ORVA_INTERNAL_TOKEN", "ORVA_FUNCTION_ID"} {
+		if !hasPair(args, "--env", name) {
+			t.Errorf("--env %s missing from argv", name)
+		}
+	}
+	// ...and the values must be in the child env exactly once.
+	want := map[string]bool{
+		"SECRET=" + secret:                  false,
+		"ORVA_INTERNAL_TOKEN=tok-" + secret: false,
+		"ORVA_FUNCTION_ID=fn-1":             false,
+	}
+	for _, kv := range childEnv {
+		if _, ok := want[kv]; ok {
+			want[kv] = true
+		}
+	}
+	for kv, seen := range want {
+		if !seen {
+			t.Errorf("child env missing %q; got %v", kv, childEnv)
 		}
 	}
 }

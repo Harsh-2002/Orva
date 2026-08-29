@@ -99,7 +99,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	args, err := buildArgs(cfg, rootfs, entrypoint)
+	args, childEnv, err := buildArgs(cfg, rootfs, entrypoint)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +108,8 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		"egress_policy_gen", cfg.EgressPolicyGen)
 
 	cmd := exec.Command(cfg.NsjailBin, args...)
+	// Values live here, not in argv; nsjail forwards them by name.
+	cmd.Env = append(os.Environ(), childEnv...)
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
