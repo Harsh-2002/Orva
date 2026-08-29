@@ -25,16 +25,18 @@ const router = createRouter({
         { path: '', name: 'dashboard', component: () => import('@/views/Dashboard.vue') },
         { path: 'ai', name: 'ai', component: () => import('@/views/AI.vue') },
         { path: 'functions', name: 'functions', component: () => import('@/views/FunctionsList.vue') },
-        { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue') },
-        { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue') },
+        // props: true, not useRoute(), on every scoped view below: Layout.vue
+        // keep-alives the router-view and Vue does not patch a cached
+        // instance's props, so an off-screen view stops following the URL.
+        { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue'), props: true },
+        { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue'), props: true },
         { path: 'functions/:name/diff', name: 'function-diff', component: () => import('@/views/FunctionDiff.vue') },
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
-        { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue') },
-        // Canonical create route. The Editor watches `route.params.name`
-        // (undefined here) to enter create mode with a fresh slate; it
-        // resets state on every navigation so existing functions never
-        // see leaked boilerplate from a prior /functions/new visit.
-        { path: 'functions/new', name: 'function-new', component: () => import('@/views/Editor.vue') },
+        { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue'), props: true },
+        // Canonical create route. The Editor keys off its `name` prop, which
+        // this route leaves empty -- that is what puts it in create mode, and
+        // why it resolves props too rather than inheriting a stale one.
+        { path: 'functions/new', name: 'function-new', component: () => import('@/views/Editor.vue'), props: true },
         // Legacy /deploy redirects to the canonical create route. Kept so
         // any bookmarks or external links keep working; new code points
         // at /functions/new.
@@ -44,7 +46,7 @@ const router = createRouter({
         { path: 'activity', name: 'activity', component: () => import('@/views/Activity.vue') },
         { path: 'invocations', name: 'invocations', component: () => import('@/views/InvocationsLog.vue') },
         { path: 'traces', name: 'traces', component: () => import('@/views/Traces.vue') },
-        { path: 'traces/:id', name: 'trace-detail', component: () => import('@/views/TraceDetail.vue') },
+        { path: 'traces/:id', name: 'trace-detail', component: () => import('@/views/TraceDetail.vue'), props: true },
         { path: 'api-keys', name: 'api-keys', component: () => import('@/views/ApiKeys.vue') },
         { path: 'channels', name: 'channels', component: () => import('@/views/Channels.vue') },
         { path: 'webhooks', name: 'webhooks', component: () => import('@/views/Webhooks.vue') },

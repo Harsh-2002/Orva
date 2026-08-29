@@ -17,6 +17,29 @@ before it.
 
 ### Fixed
 
+- **Four dashboard pages showed, or acted on, the function you were looking at
+  before.** Every view is cached in a `<keep-alive>`, and a cached view is not
+  unmounted — it stays alive with a live `useRoute()`, so it kept reacting to
+  navigations that belonged to another page. The editor wiped an unsaved code
+  buffer as soon as you opened any page without a function in its URL (Docs,
+  Firewall, the function list), and it still answered the global Cmd/Ctrl-S
+  deploy shortcut from a function's KV or Deployments page, so that keystroke
+  deployed the last-edited function with nothing on screen to say so. Inbound
+  webhooks kept the first function's id for the rest of the session, aiming
+  create, delete and test at the wrong function. Deployments listed the previous
+  function's builds, with Rollback and Compare acting on them. Trace diagnostics
+  rendered the previously-opened trace when you clicked a second one. Each view
+  is now scoped by a route prop, which Vue leaves frozen while the view is
+  cached: it reloads when *its own* URL changes and at no other time. An unsaved
+  editor buffer now survives every trip away and back to the same function, and
+  is replaced only when you deliberately open a different one.
+
+- **A failed function list read "No functions deployed yet".** `/functions`
+  swallowed the error and fell through to the first-run empty state, telling an
+  operator their instance was empty when the request had simply failed. It now
+  shows the same load-failure banner, with the server's message and a Retry, that
+  the jobs, cron, webhooks, activity and API-key lists already used.
+
 - **On Alpine, a successful `orva backup restore` left the server down
   permanently.** `orva backup restore` exits 70 on purpose so its supervisor
   restarts the process against the restored files, and the shipped systemd unit

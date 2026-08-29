@@ -117,15 +117,18 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowLeft, Copy, Flag } from '@lucide/vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import TraceWaterfall from '@/components/traces/TraceWaterfall.vue'
 import { getTrace } from '@/api/endpoints'
 import { shortID } from '@/utils/traceLayout'
 
-const route = useRoute()
+// The trace this view is scoped to. A route prop, not useRoute(): Vue does
+// not patch a keep-alived view's props, so a cached view stops following the URL.
+const props = defineProps({ id: { type: String, default: '' } })
+
 const router = useRouter()
 const trace = ref(null)
 const loading = ref(false)
@@ -135,7 +138,7 @@ const fetchTrace = async () => {
   loading.value = true
   error.value = ''
   try {
-    trace.value = (await getTrace(route.params.id)).data
+    trace.value = (await getTrace(props.id)).data
   } catch (err) {
     error.value = err?.response?.status === 404
       ? 'No spans found for that trace.'
@@ -150,5 +153,10 @@ const copyID = async () => {
   try { await navigator.clipboard.writeText(trace.value.trace_id) } catch { /* selection remains available */ }
 }
 
-onMounted(fetchTrace)
+// Clearing first matters as much as refetching: without it the previous trace
+// stayed on screen for the whole request, under the new trace's URL.
+watch(() => props.id, () => {
+  trace.value = null
+  fetchTrace()
+}, { immediate: true })
 </script>
