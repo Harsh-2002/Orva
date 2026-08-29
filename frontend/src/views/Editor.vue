@@ -1343,7 +1343,7 @@
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, h, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
@@ -1397,6 +1397,12 @@ import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 
+// The function this Editor is scoped to; empty on /functions/new. A route prop,
+// not useRoute(): Vue does not patch a keep-alived view's props, and an Editor
+// that followed the live route reset the unsaved buffer on every navigation to
+// a page without a :name.
+const props = defineProps({ name: { type: String, default: '' } })
+
 const route = useRoute()
 const router = useRouter()
 const confirmStore = useConfirmStore()
@@ -1441,7 +1447,7 @@ const navMenu = (to) => {
 
 // Click-outside listener: closes whichever overlay is open if the press
 // landed outside its root. Esc keydown does the same on the global key
-// handler. Mounted once via onMounted below.
+// handler. Bound while this view is activated; see bindGlobals below.
 //
 // pointerdown, not mousedown: the saved-fixtures popover used to rely on
 // @mouseleave alone, an event a touch device never fires, so once opened on
@@ -1613,7 +1619,7 @@ const myRoutes = computed(() =>
 const pendingSecrets = ref([])
 const totalSecretsCount = computed(() => secrets.value.length + pendingSecrets.value.length)
 
-const isEditing = computed(() => !!route.params.name)
+const isEditing = computed(() => !!props.name)
 
 // canTest: function has deployed code AND there's no active build in
 // flight. While `deploying` is true, the warm pool may be holding stale
@@ -1945,18 +1951,12 @@ watch(
   },
 )
 
-// loadRoute synchronises Editor state with the current route. Vue
-// Router REUSES the same component instance when navigating between
-// /functions/new (create mode) and /functions/<name> (edit mode) — the
-// route record is the same shape — so a one-shot onMounted is the
-// wrong hook. Without this watcher, a user who lands on /functions/new
-// first, then clicks an existing function, would carry the boilerplate
-// code + create-mode form state into edit mode. The bug surfaces as
-// "I clicked the function but it shows the deploy template" — the
-// deploy template is just whatever the create-mode default seeded.
-//
-// The watcher fires `immediate: true` so this also handles the
-// initial mount (no separate onMounted needed).
+// loadRouteData re-scopes the Editor to the function in its `name` prop. Vue
+// Router REUSES the same component instance between /functions/new (create
+// mode) and /functions/<name> (edit mode), so a one-shot onMounted is the
+// wrong hook: a user who landed on /functions/new first and then clicked an
+// existing function would carry the boilerplate into edit mode. The watcher
+// below fires `immediate: true`, so it covers the initial mount too.
 const resetEditorState = () => {
   fnId.value = ''
   form.value = {
@@ -2000,11 +2000,11 @@ const resetEditorState = () => {
 const loadRouteData = async () => {
   resetEditorState()
 
-  if (route.params.name) {
+  if (props.name) {
     // Edit mode — load function metadata + actual deployed source code.
     try {
       const listRes = await apiClient.get('/functions')
-      const fn = (listRes.data.functions || []).find(f => f.name === route.params.name)
+      const fn = (listRes.data.functions || []).find(f => f.name === props.name)
       if (!fn) throw new Error('Function not found')
 
       fnId.value = fn.id
@@ -2037,11 +2037,6 @@ const loadRouteData = async () => {
       await loadSecrets()
       // Load deployment history so the Versions card can render.
       await loadVersions(fn)
-      // v0.4 B3: pre-fill the test pane from a deep link. Used by the
-      // Activity drawer's "Save as fixture" button which round-trips
-      // through this route with the captured method/path/headers/body
-      // ready to be reviewed and saved.
-      applyPrefillFromQuery()
     } catch (e) {
       console.error("Failed to load function", e)
       error.value = "Failed to load function: " + (e.response?.data?.error?.message || e.message)
@@ -2055,7 +2050,7 @@ const loadRouteData = async () => {
   }
 }
 
-watch(() => route.params.name, loadRouteData, { immediate: true })
+watch(() => props.name, loadRouteData, { immediate: true })
 
 // reloadSource pulls the function's currently-deployed source from
 // `/api/v1/functions/<id>/source` and slams it into the editor buffer
@@ -2115,18 +2110,25 @@ const onDeployShortcut = () => {
   deployFunction()
 }
 
-onMounted(() => {
+// Bound to the activation window, not the mount. keep-alive leaves this view
+// mounted behind /functions/<name>/kv, where Cmd-S still dispatches
+// orva:deploy — and the cached Editor deployed on it, with no page to show it.
+const bindGlobals = () => {
   window.addEventListener('focus', onWindowFocus)
   document.addEventListener('pointerdown', onDocClick)
   document.addEventListener('keydown', onDocKey)
   window.addEventListener('orva:deploy', onDeployShortcut)
-})
-onBeforeUnmount(() => {
+}
+const unbindGlobals = () => {
   window.removeEventListener('focus', onWindowFocus)
   document.removeEventListener('pointerdown', onDocClick)
   document.removeEventListener('keydown', onDocKey)
   window.removeEventListener('orva:deploy', onDeployShortcut)
-})
+}
+onActivated(bindGlobals)
+onDeactivated(unbindGlobals)
+// onDeactivated does not fire when keep-alive evicts this instance at :max.
+onBeforeUnmount(unbindGlobals)
 
 // applyPrefillFromQuery reads a base64-encoded JSON request envelope from
 // the `prefill` query param and populates the test pane. Used by the
@@ -2158,6 +2160,17 @@ const applyPrefillFromQuery = () => {
     /* ignore malformed prefill */
   }
 }
+
+// The prefill deep link is its own trigger, not part of the route load: "Save
+// as fixture" lands on whichever function the invocation belonged to. The guard
+// stops a cached Editor claiming another view's query; `flush: 'post'` runs it
+// after loadRouteData's pre-flush resetEditorState, which otherwise wiped the
+// prefill and left nothing to retry from -- the param is stripped on apply.
+watch(
+  () => route.query.prefill,
+  (raw) => { if (raw && route.params.name === props.name) applyPrefillFromQuery() },
+  { immediate: true, flush: 'post' },
+)
 
 // Re-roll the auto-generated function name. No-op once the function
 // has been deployed (the name is the routing identity at that point).

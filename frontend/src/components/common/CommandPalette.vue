@@ -228,7 +228,7 @@ const onGlobalKey = (e) => {
     return
   }
   // Cmd/Ctrl-S in the Editor → trigger the Deploy button. The Editor
-  // listens for this same shortcut in its own onMounted and runs
+  // listens for this same shortcut while it is the active view and runs
   // deployFunction(); we just suppress the browser's "save page" dialog.
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
     if (window.location.pathname.includes('/functions/')) {

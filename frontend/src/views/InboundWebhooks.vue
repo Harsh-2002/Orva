@@ -409,8 +409,7 @@
 
 <script setup>
 import { EMPTY } from '@/utils/format'
-import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, reactive, computed, watch } from 'vue'
 import { Plus, Trash2, Send, RefreshCw, Pause, Play } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
@@ -420,11 +419,12 @@ import { listInboundWebhooks, createInboundWebhook, deleteInboundWebhook, update
 import { useConfirmStore } from '@/stores/confirm'
 import { copyText } from '@/utils/clipboard'
 
-const route = useRoute()
 const confirmStore = useConfirmStore()
 
-const fnName = computed(() => route.params.name)
-const fnId = ref('')
+// The function this view is scoped to. A route prop, not useRoute(): Vue does
+// not patch a keep-alived view's props, so a cached view stops following the URL.
+const props = defineProps({ name: { type: String, default: '' } })
+const fnName = computed(() => props.name)
 const rows = ref([])
 const loading = ref(false)
 const creating = ref(false)
@@ -470,8 +470,7 @@ const refresh = async () => {
     // accepts only a UUID and would 404 on a name; that was true, and is the
     // bug that also made older functions unopenable from the dashboard. It
     // now resolves names like every other function endpoint.)
-    if (!fnId.value) fnId.value = fnName.value
-    const res = await listInboundWebhooks(fnId.value)
+    const res = await listInboundWebhooks(fnName.value)
     rows.value = res.data?.inbound_webhooks || []
   } catch (e) {
     console.error('load inbound webhooks failed', e)
@@ -501,7 +500,7 @@ const saveCreate = async () => {
   creating.value = true
   create.error = ''
   try {
-    const res = await createInboundWebhook(fnId.value, {
+    const res = await createInboundWebhook(fnName.value, {
       name,
       signature_format: create.format,
     })
@@ -528,7 +527,7 @@ const confirmRemove = async (row) => {
   })
   if (!ok) return
   try {
-    await deleteInboundWebhook(fnId.value, row.id)
+    await deleteInboundWebhook(fnName.value, row.id)
     await refresh()
   } catch (e) {
     confirmStore.notify({
@@ -550,7 +549,7 @@ const busyId = ref('')
 const toggleActive = async (row) => {
   busyId.value = row.id
   try {
-    await updateInboundWebhook(fnId.value, row.id, { active: !row.active })
+    await updateInboundWebhook(fnName.value, row.id, { active: !row.active })
     await refresh()
   } catch (e) {
     confirmStore.notify({
@@ -665,5 +664,14 @@ const copy = async (text) => {
   })
 }
 
-onMounted(refresh)
+// Re-scope on a param change. The rows, the one-time plaintext secret and any
+// open drawer all belong to the previous function; create / delete / test all
+// take a row, so leaving them up aims them at the wrong one.
+watch(() => props.name, () => {
+  rows.value = []
+  lastCreated.value = null
+  create.open = false
+  test.open = false
+  refresh()
+}, { immediate: true })
 </script>

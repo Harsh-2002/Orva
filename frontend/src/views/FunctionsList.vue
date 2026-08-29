@@ -24,6 +24,13 @@
       </Button>
     </div>
 
+    <LoadError
+      v-if="loadError"
+      what="Functions"
+      :message="loadError"
+      :on-retry="refresh"
+    />
+
     <!-- Search strip + table are a tight group (search filters the
          table), so they sit on a 12 px rhythm inside their own
          container. Search + table hide entirely when there are no
@@ -357,7 +364,7 @@
          just spun up the container has a clear next step. Mirrors
          the Dashboard empty-state pattern. -->
     <div
-      v-if="!loading && functions.length === 0"
+      v-if="!loading && !loadError && functions.length === 0"
       class="bg-background border border-border rounded-lg p-8 text-center space-y-4"
     >
       <div class="space-y-1.5">
@@ -416,6 +423,7 @@ import { useRouter } from 'vue-router'
 import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import LoadError from '@/components/common/LoadError.vue'
 import RuntimeTag from '@/components/common/RuntimeTag.vue'
 import apiClient from '@/api/client'
 import { listFunctions } from '@/api/endpoints'
@@ -431,6 +439,7 @@ const PAGE_SIZE = 25
 const functions = ref([])
 const total = ref(0)
 const loading = ref(false)
+const loadError = ref('')
 const search = ref('')
 const copiedId = ref('')
 const deletingId = ref('')
@@ -502,8 +511,11 @@ const fetchPage = async (offset) => {
     total.value = res.data.total ?? rows.length
     if (offset === 0) functions.value = rows
     else functions.value = [...functions.value, ...rows]
+    loadError.value = ''
   } catch (e) {
-    console.error(e)
+    // A failed fetch must not fall through to "No functions deployed yet" --
+    // that tells the operator their instance is empty when we do not know.
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
   } finally {
     loading.value = false
   }
@@ -520,8 +532,9 @@ const reloadLoaded = async () => {
     const res = await listFunctions({ limit: want, offset: 0 })
     functions.value = res.data.functions || []
     total.value = res.data.total ?? functions.value.length
+    loadError.value = ''
   } catch (e) {
-    console.error(e)
+    loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
   } finally {
     loading.value = false
   }

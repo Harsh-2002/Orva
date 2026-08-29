@@ -360,7 +360,6 @@ defineOptions({ name: 'DeploymentsView' })
 import { EMPTY } from '@/utils/format'
 import { ref, computed, onMounted, onBeforeUnmount, watch, h } from 'vue'
 import { useEventsStore } from '@/stores/events'
-import { useRoute } from 'vue-router'
 import { RefreshCw, UploadCloud, CheckCircle2, RotateCcw, GitCompare } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
@@ -372,8 +371,10 @@ import { runtimeLabel } from '@/utils/runtime'
 
 const confirmStore = useConfirmStore()
 
-const route = useRoute()
-const fnName = computed(() => route.params.name)
+// The function this view is scoped to. A route prop, not useRoute(): Vue does
+// not patch a keep-alived view's props, so a cached view stops following the URL.
+const props = defineProps({ name: { type: String, default: '' } })
+const fnName = computed(() => props.name)
 
 const fnId = ref(null)
 const activeFn = ref(null)  // the currently-active function record (for active-version banner)
@@ -646,8 +647,17 @@ const scheduleRefresh = () => {
 let unsubDep = null
 let unsubFn = null
 
-onMounted(() => {
+// Re-scope on a param change: the rows, the resolved id and any open drawer
+// all belong to the previous function, and Rollback / Compare act on them.
+watch(() => props.name, () => {
+  fnId.value = null
+  activeFn.value = null
+  deployments.value = []
+  drawerOpen.value = false
   refresh()
+}, { immediate: true })
+
+onMounted(() => {
   unsubDep = events.subscribe('deployment', scheduleRefresh)
   unsubFn = events.subscribe('function', scheduleRefresh)
 })
