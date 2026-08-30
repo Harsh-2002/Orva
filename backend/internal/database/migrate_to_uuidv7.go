@@ -80,6 +80,10 @@ var rewrites = []idRewrite{
 		parentTable: "deployments", idColumn: "id",
 		softRefs: []childRef{
 			{"deployments", "parent_deployment_id"}, // self-reference
+			// Added by ALTER with no FK, so foreign_key_list cannot see it.
+			// Left out, it kept the pre-migration dep_ id forever:
+			// backfillActiveDeployment only fills '' and never repairs a dangle.
+			{"functions", "active_deployment_id"},
 		},
 	},
 	{

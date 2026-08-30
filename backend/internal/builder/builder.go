@@ -68,7 +68,8 @@ type Builder struct {
 
 	// Logger, when non-nil, receives per-line stdout/stderr from pip/npm
 	// and validator output so build progress can stream into build_logs.
-	// Set by the Queue worker right before calling Build and cleared after.
+	// Set on a per-job COPY of the Builder -- never on a shared one, or
+	// concurrent workers cross-attribute their output.
 	Logger interface {
 		Append(stream, line string)
 	}

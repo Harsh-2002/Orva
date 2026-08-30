@@ -261,6 +261,41 @@ func TestMigrationRewritesSoftReferences(t *testing.T) {
 	assertCount(t, db, `SELECT COUNT(*) FROM jobs WHERE enqueued_by_function_id = ?`, 0, legacyParentFnID)
 }
 
+// TestMigrationRewritesActiveDeploymentID pins the one soft reference the
+// rewrite used to miss. functions.active_deployment_id is added by ALTER with
+// no FK, so PRAGMA foreign_key_list cannot see it, and it was absent from the
+// deployments soft-ref list -- so it kept its pre-migration dep_ id forever.
+// backfillActiveDeployment cannot repair that: it only fills '' values.
+//
+// Fails on the pre-fix code: the column still holds the legacy id.
+func TestMigrationRewritesActiveDeploymentID(t *testing.T) {
+	db, _ := unmigratedDB(t)
+
+	const legacyFnID = "fn_activedep0001"
+	const legacyDepID = "dep_activedep001"
+
+	mustExecT(t, db, `INSERT INTO functions (id, name, runtime, entrypoint, active_deployment_id) VALUES (?, ?, ?, ?, ?)`,
+		legacyFnID, "active-dep-func", "python", "handler.py", legacyDepID)
+	mustExecT(t, db, `INSERT INTO deployments (id, function_id, version, status, submitted_at) VALUES (?, ?, 1, 'succeeded', datetime('now'))`,
+		legacyDepID, legacyFnID)
+
+	assertCount(t, db, `SELECT COUNT(*) FROM functions WHERE active_deployment_id = ?`, 1, legacyDepID)
+
+	if err := db.MigrateToUUIDv7(); err != nil {
+		t.Fatalf("migration failed: %v", err)
+	}
+
+	var newDepID string
+	if err := db.read.QueryRow(`SELECT id FROM deployments`).Scan(&newDepID); err != nil {
+		t.Fatal(err)
+	}
+
+	// It must point at the rewritten deployment, and nothing may still hold
+	// the legacy value -- a dangling pointer here silently breaks rollback.
+	assertCount(t, db, `SELECT COUNT(*) FROM functions WHERE active_deployment_id = ?`, 1, newDepID)
+	assertCount(t, db, `SELECT COUNT(*) FROM functions WHERE active_deployment_id = ?`, 0, legacyDepID)
+}
+
 func assertCount(t *testing.T, db *Database, query string, want int, args ...any) {
 	t.Helper()
 	var got int

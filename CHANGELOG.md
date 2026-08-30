@@ -67,6 +67,29 @@ before it.
   Two MCP tool schemas claimed job and schedule ids arrive prefixed `job_` /
   `cron_`; both are bare UUIDv7s, and that description ships to every connected
   agent.
+- **Concurrent builds wrote into each other's logs.** The build queue runs one
+  worker per CPU and they all shared a single builder, each setting its log
+  writer on that shared object and clearing it in a defer. So a build streamed
+  its `pip`/`npm` output into another deployment's log, and the first build to
+  finish cleared the writer out from under every build still running, which
+  simply lost the rest. It is a data race, not only a mix-up — the race
+  detector reports it. Each job now builds through its own copy.
+
+- **The UUIDv7 id migration left `functions.active_deployment_id` dangling.**
+  That column holds a deployment id but was added by `ALTER` with no foreign
+  key, so the migration's automatic child discovery could not see it and it was
+  missing from the hand-maintained list of unreferenced columns. Deployment ids
+  were rewritten and the pointer was not, leaving it aimed at an id that no
+  longer existed. The existing backfill could never repair it, because it only
+  fills the column when it is empty.
+
+- **Three installer papercuts.** `install.sh --help` printed its own `curl`
+  one-liner with the URL missing, because `--help` exits before that URL is
+  derived. The "already at this version, nothing to do" check could never be
+  true: it compared `orva --version`'s output, `orva vX.Y.Z`, against `vX.Y.Z`.
+  And `install-cli.ps1`'s "checksum entry missing" error deleted the checksums
+  file immediately before quoting its first five lines, so the one diagnostic
+  that would tell you what went wrong was always blank.
 
 - **On Alpine, a successful `orva backup restore` left the server down
   permanently.** `orva backup restore` exits 70 on purpose so its supervisor

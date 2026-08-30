@@ -177,11 +177,14 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	}
 
 	lw := newLogWriter(q.db, job.DeploymentID)
-	q.bld.Logger = lw
-	defer func() { q.bld.Logger = nil }()
+	// Per-job copy: Logger used to be set on the one shared *Builder, so with
+	// NumCPU workers a build wrote its output to another job's log and the
+	// first defer to fire nil'd the logger out from under the rest.
+	bld := *q.bld
+	bld.Logger = lw
 
 	_ = q.db.UpdateDeploymentPhase(job.DeploymentID, "deps")
-	result, buildErr := q.bld.Build(context.Background(), fn, job.TarballPath)
+	result, buildErr := bld.Build(context.Background(), fn, job.TarballPath)
 
 	if buildErr != nil {
 		logger.Warn("build failed", "err", buildErr)
