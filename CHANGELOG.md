@@ -9,11 +9,24 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.08.28..HEAD` is the range for
+pruned with their releases — so `git log v2026.08.30..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
 ## Unreleased
+
+Nothing yet.
+
+## v2026.08.30
+
+Fifteen defects closed, every one of them pre-existing and found by a single
+systematic audit rather than reported from use. Two lost data, one let any
+caller bypass every rate limit, one made `orva upgrade` destroy a bare-metal
+server, and one left function secrets readable in the host process list. Each
+fix ships with a test that fails on the code it replaces.
+
+Nothing here asks anything of an operator except the proxy setting under
+**Upgrade notes**.
 
 ### Fixed
 
