@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
 // Editor.vue reads matchMedia during setup to decide whether the console
@@ -41,6 +41,7 @@ const endpoints = {
   updateFixture: vi.fn(async () => ({ data: {} })),
   deleteFixture: vi.fn(async () => ({ data: {} })),
   invokeFunctionFull: vi.fn(async () => ({ data: {} })),
+  getInvocationLogs: vi.fn(async () => ({ data: { stderr: '', log_entries: [] } })),
   listRoutes: vi.fn(async () => ({ data: { routes: [] } })),
   setRoute: vi.fn(async () => ({ data: {} })),
   deleteRoute: vi.fn(async () => ({ data: {} })),
@@ -92,10 +93,11 @@ const boot = async (routes, path) => {
   })
   router.push(path)
   await router.isReady()
-  const wrapper = mount(Shell, { global: { plugins: [router, createPinia()] } })
+  const pinia = createPinia()
+  const wrapper = mount(Shell, { global: { plugins: [router, pinia] } })
   mounted.push(wrapper)
   await settle()
-  return { wrapper, go: async (to) => { await router.push(to); await settle() } }
+  return { wrapper, router, pinia, go: async (to) => { await router.push(to); await settle() } }
 }
 
 beforeEach(() => { vi.clearAllMocks() })
@@ -107,6 +109,7 @@ describe('keep-alive route scoping', () => {
     const { wrapper, go } = await boot([
       { path: '/functions/new', name: 'function-new', component: Editor, props: true },
       { path: '/functions/:name', name: 'function-detail', component: Editor, props: true },
+      { path: '/functions/:name/test', name: 'function-test', component: OTHER },
     ], '/functions/alpha')
 
     const buffer = () => wrapper.find('[data-code]').text()
@@ -132,39 +135,57 @@ describe('keep-alive route scoping', () => {
     expect(buffer().startsWith('import json')).toBe(true)
   })
 
-  it('Editor applies a ?prefill deep link to the function it is already showing', async () => {
+  it('Editor hands a ?prefill deep link to the workbench, headers included', async () => {
     const Editor = (await import('@/views/Editor.vue')).default
-    const { wrapper, go } = await boot([
+    const { router, pinia, go } = await boot([
       { path: '/functions/:name', name: 'function-detail', component: Editor, props: true },
+      { path: '/functions/:name/test', name: 'function-test', component: OTHER },
     ], '/functions/alpha')
 
     // The real flow: edit alpha, go to Invocations, "Save as fixture" pushes
-    // base64(JSON) of the captured request back onto that same function.
+    // base64(JSON) of the captured request back onto that same function. A
+    // captured request carries headers, which is why it goes to the workbench
+    // rather than the editor's one-line strip.
     await go('/elsewhere')
-    const envelope = btoa(JSON.stringify({ method: 'PUT', path: '/replay', body: '{"a":1}' }))
+    const envelope = btoa(JSON.stringify({
+      method: 'PUT', path: '/replay', headers: { 'X-Sig': 'abc' }, body: '{"a":1}',
+    }))
     await go(`/functions/alpha?prefill=${envelope}`)
 
-    expect(wrapper.find('input[placeholder="/"]').element.value).toBe('/replay')
-    expect(wrapper.find('textarea[placeholder="{}"]').element.value).toBe('{"a":1}')
+    // Imported here, not at the top: the endpoints mock factory is hoisted
+    // above this file's own consts, and the store pulls that module in.
+    const { useTestbenchStore } = await import('@/stores/testbench')
+    setActivePinia(pinia)
+    const req = useTestbenchStore().requestFor('fn-a')
+    expect(req.method).toBe('PUT')
+    expect(req.path).toBe('/replay')
+    expect(req.body).toBe('{"a":1}')
+    expect(req.headers).toEqual([{ key: 'X-Sig', value: 'abc' }])
+    // replace, not push: Back belongs to the invocation that sent them here.
+    expect(router.currentRoute.value.fullPath).toBe('/functions/alpha/test')
   })
 
   it('Editor applies a ?prefill deep link aimed at a function it is not holding', async () => {
     const Editor = (await import('@/views/Editor.vue')).default
-    const { wrapper, go } = await boot([
+    const { router, pinia, go } = await boot([
       { path: '/functions/:name', name: 'function-detail', component: Editor, props: true },
+      { path: '/functions/:name/test', name: 'function-test', component: OTHER },
     ], '/functions/alpha')
 
     // Same flow, but the captured request belongs to another function. The
-    // prop change runs resetEditorState pre-flush, which wiped a prefill
-    // applied by a pre-flush watcher -- and the param is stripped on apply,
-    // so there is nothing left to retry from.
+    // prop change runs resetEditorState pre-flush, and the store keys the
+    // request by an id that only exists once that load resolves -- so the
+    // prefill has to survive both, and land under beta rather than alpha.
     await go('/elsewhere')
     const envelope = btoa(JSON.stringify({ method: 'PUT', path: '/replay', body: '{"a":1}' }))
     await go(`/functions/beta?prefill=${envelope}`)
 
-    expect(wrapper.find('[data-code]').text()).toBe('source of /functions/fn-b/source')
-    expect(wrapper.find('input[placeholder="/"]').element.value).toBe('/replay')
-    expect(wrapper.find('textarea[placeholder="{}"]').element.value).toBe('{"a":1}')
+    const { useTestbenchStore } = await import('@/stores/testbench')
+    setActivePinia(pinia)
+    const store = useTestbenchStore()
+    expect(store.requestFor('fn-b').path).toBe('/replay')
+    expect(store.requestFor('fn-a').path).toBe('/')
+    expect(router.currentRoute.value.fullPath).toBe('/functions/beta/test')
   })
 
   it('Editor ignores orva:deploy while it is cached behind another view', async () => {
@@ -172,6 +193,7 @@ describe('keep-alive route scoping', () => {
     const { go } = await boot([
       { path: '/functions/:name', name: 'function-detail', component: Editor, props: true },
       { path: '/functions/:name/kv', name: 'function-kv', component: OTHER },
+      { path: '/functions/:name/test', name: 'function-test', component: OTHER },
     ], '/functions/alpha')
 
     window.dispatchEvent(new CustomEvent('orva:deploy'))

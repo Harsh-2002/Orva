@@ -255,6 +255,16 @@ the handler throws or returns an AWS-shape `{statusCode, body}`.
 Custom routes (e.g. `/webhooks/stripe`) reach the same handler — see
 the routes section below.
 
+**Response headers.** Every invoke carries `X-Orva-Execution-ID`, including a
+timeout or a sandbox failure, which answer from the invoke handler rather than
+the proxy. Pass it to `GET /api/v1/executions/{id}/logs` to read what the
+handler wrote — `stderr` for `console.log`/`print`, and `log_entries` for
+`orva.log.*`. A successful invoke also carries `X-Orva-Duration-MS`.
+
+It used to be set only on the success path, so the runs whose logs you most
+need — a crashed sandbox, a timeout — returned no id and their stored stderr
+was unreachable.
+
 ## Deployments
 
 ### `GET /api/v1/deployments/{id}`

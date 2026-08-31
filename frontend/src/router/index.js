@@ -33,6 +33,7 @@ const router = createRouter({
         { path: 'functions/:name/diff', name: 'function-diff', component: () => import('@/views/FunctionDiff.vue') },
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
         { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue'), props: true },
+        { path: 'functions/:name/test', name: 'function-test', component: () => import('@/views/TestWorkbench.vue'), props: true },
         // Canonical create route. The Editor keys off its `name` prop, which
         // this route leaves empty -- that is what puts it in create mode, and
         // why it resolves props too rather than inheriting a stale one.

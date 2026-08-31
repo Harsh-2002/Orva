@@ -130,6 +130,7 @@ export async function discoverRoutes(base, apiKey) {
       routes.push(
         { name: 'editor', path: `/functions/${e}`, fn },
         { name: 'deployments', path: `/functions/${e}/deployments`, fn },
+        { name: 'test-workbench', path: `/functions/${e}/test`, fn },
         { name: 'kv', path: `/functions/${e}/kv`, fn },
         { name: 'inbound-webhooks', path: `/functions/${e}/inbound-webhooks`, fn },
       )

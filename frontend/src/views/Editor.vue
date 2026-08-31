@@ -197,7 +197,7 @@
           @click="deployFunction"
         >
           <UploadCloud class="w-4 h-4" />
-          {{ isEditing ? 'Deploy new version' : 'Deploy' }}
+          Deploy
         </Button>
       </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
@@ -264,422 +264,147 @@
       </div>
     </div>
 
-    <!-- Bottom terminal: VS Code-style. Tabs across build, output, and
-         test-run results. Collapsible — clicking the header chevron hides
-         the panel body. -->
+    <!-- Bottom drawer: build logs, plus a thin strip for the last test run.
+         The request workbench that used to be crushed in here is its own
+         route now, at /functions/:name/test. -->
     <div class="mt-3 bg-background border border-border rounded-lg overflow-hidden shrink-0">
       <div class="terminal-bar h-10 border-b border-border flex items-center px-2 bg-surface">
-        <!-- A real tablist: the strip used to be a run of plain buttons, so
-             screen readers announced two unrelated controls with no "current"
-             state and no link to the panel each one swaps in. The right-hand
-             Run/collapse group is not a tab, hence the inner wrapper rather
-             than role="tablist" on the bar itself. -->
-        <div
-          class="flex items-center self-stretch"
-          role="tablist"
-          aria-label="Console panels"
-          @keydown="onTabKeydown"
+        <h2 class="px-3 text-xs font-medium text-foreground-strong flex items-center gap-1.5">
+          <Terminal class="w-3 h-3" />
+          Build
+          <span
+            v-if="buildLogs.length"
+            class="ml-1 text-[10px] px-1.5 rounded bg-surface-hover text-foreground-muted"
+          >{{ buildLogs.length }}</span>
+        </h2>
+        <button
+          class="ml-auto p-1.5 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
+          :title="terminalOpen ? 'Collapse' : 'Expand'"
+          :aria-label="terminalOpen ? 'Collapse build log' : 'Expand build log'"
+          :aria-expanded="terminalOpen"
+          aria-controls="build-log"
+          @click="terminalOpen = !terminalOpen"
         >
-          <button
-            v-for="(t, i) in terminalTabs"
-            :id="`terminal-tab-${t.id}`"
-            :key="t.id"
-            :ref="(el) => setTabRef(el, i)"
-            type="button"
-            role="tab"
-            :aria-selected="terminalTab === t.id"
-            :aria-controls="`terminal-panel-${t.id}`"
-            :tabindex="terminalTab === t.id ? 0 : -1"
-            class="terminal-tab px-3 h-10 text-xs flex items-center gap-1.5 border-b-2 transition-colors"
-            :class="terminalTab === t.id
-              ? 'text-foreground-strong border-link'
-              : 'text-foreground-muted border-transparent hover:text-foreground-strong'"
-            @click="selectTerminalTab(t.id)"
-          >
-            <component
-              :is="t.icon"
-              class="w-3 h-3"
-            />
-            {{ t.label }}
-            <span
-              v-if="t.badge"
-              class="ml-1 text-[10px] px-1.5 rounded bg-surface-hover text-foreground-muted"
-            >{{ t.badge }}</span>
-          </button>
-        </div>
-        <div class="ml-auto flex items-center gap-1">
-          <button
-            v-if="terminalTab === 'test'"
-            :disabled="!canTest || invoking"
-            class="run-btn"
-            :title="canTest ? 'Invoke with the payload below' : 'Deploy first'"
-            @click="invokeFunction"
-          >
-            <Play
-              v-if="!invoking"
-              class="w-3 h-3"
-            />
-            <span
-              v-else
-              class="run-spinner"
-            />
-            Run
-          </button>
-          <button
-            class="p-1.5 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
-            :title="terminalOpen ? 'Collapse' : 'Expand'"
-            :aria-label="terminalOpen ? 'Collapse terminal' : 'Expand terminal'"
-            @click="terminalOpen = !terminalOpen"
-          >
-            <ChevronDown
-              class="w-4 h-4 transition-transform"
-              :class="terminalOpen ? 'rotate-0' : 'rotate-180'"
-            />
-          </button>
-        </div>
+          <ChevronDown
+            class="w-4 h-4 transition-transform"
+            :class="terminalOpen ? 'rotate-0' : 'rotate-180'"
+          />
+        </button>
       </div>
-      <!-- Height steps with the viewport. A flat h-48 (182 px) left a
-           375x667 phone with less room for the code surface than for the
-           console below it. -->
+      <!-- max-h, not h: with the request composer gone nothing holds a fixed
+           height open, so two log lines would sit in a 182px hole. -->
       <div
         v-show="terminalOpen"
-        class="h-64 sm:h-56 md:h-48 overflow-y-auto bg-background"
+        id="build-log"
+        class="max-h-64 overflow-y-auto bg-background p-3 font-mono text-xs space-y-0.5"
       >
-        <!-- Build logs tab. v-show rather than v-if so both panels exist in
-             the DOM and each tab's aria-controls resolves to a real node. -->
+        <!-- A build failure gets its own line here rather than the run
+             result's, where it drew a Suggest-fix button for a run that
+             never happened. -->
         <div
-          v-show="terminalTab === 'build'"
-          id="terminal-panel-build"
-          role="tabpanel"
-          aria-labelledby="terminal-tab-build"
-          tabindex="0"
-          class="p-3 font-mono text-xs space-y-0.5"
+          v-if="buildError"
+          class="text-danger-fg whitespace-pre-wrap break-words"
         >
-          <div
-            v-if="!buildLogs.length"
-            class="text-foreground-muted"
-          >
-            No build activity yet. Deploy the function to stream logs here.
-          </div>
-          <div
-            v-for="(log, idx) in buildLogs"
-            :key="idx"
-            class="text-foreground-muted whitespace-pre-wrap break-words"
-          >
-            {{ log }}
-          </div>
+          {{ buildError }}
         </div>
-
-        <!-- Test tab — VS-Code-style split: request on the left, response
-             on the right. Each side has its own column header that
-             matches the surrounding tab strip's micro-label rhythm so
-             the divider line and label baselines align across both
-             columns. v0.4 B3: method/path/headers/body controls + saved
-             fixtures popover land in the request column. -->
         <div
-          v-show="terminalTab === 'test'"
-          id="terminal-panel-test"
-          role="tabpanel"
-          aria-labelledby="terminal-tab-test"
-          class="test-panel grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] min-h-full md:h-full"
+          v-if="!buildLogs.length"
+          class="text-foreground-muted"
         >
-          <!--
-            Request column. Below md the two columns stack inside the
-            console body, so they need a real floor: with h-full on the
-            grid the payload textarea (flex-1) absorbed the whole shortfall
-            and collapsed to about two lines. min-h-full on the grid lets
-            the body scroll instead.
+          No build activity yet. Deploy the function to stream logs here.
+        </div>
+        <div
+          v-for="(log, idx) in buildLogs"
+          :key="idx"
+          class="text-foreground-muted whitespace-pre-wrap break-words"
+        >
+          {{ log }}
+        </div>
+      </div>
 
-            The console body is h-64 below sm rather than h-32, because the
-            stacked pair has a ~340px floor and was being scrolled inside a
-            121.6px window -- you ran a request and then scrolled past a
-            full-height payload box to find out what happened.
-          -->
-          <div class="flex flex-col min-h-[13rem] md:min-h-0 border-b md:border-b-0 md:border-r border-border">
-            <!-- Method + path + Saved popover sit on the column header. -->
-            <div class="request-bar h-7 px-2 flex items-center gap-1.5 bg-surface/60 border-b border-border shrink-0">
-              <label
-                for="test-method"
-                class="sr-only"
-              >Request method</label>
-              <FilterSelect
-                v-model="testMethod"
-                :options="methodOptions"
-                :disabled="!canTest"
-                label="Method"
-                trigger-id="test-method"
-                bare
-              />
-              <label
-                for="test-path"
-                class="sr-only"
-              >Request path</label>
-              <input
-                id="test-path"
-                v-model="testPath"
-                :disabled="!canTest"
-                spellcheck="false"
-                placeholder="/"
-                class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-              >
-              <div
-                ref="savedPopoverRef"
-                class="relative shrink-0"
-              >
-                <button
-                  type="button"
-                  class="touch-expand-xs text-[11px] font-medium text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1"
-                  :disabled="!fnId"
-                  :title="fnId ? 'Saved fixtures for this function' : 'Deploy first'"
-                  @click="toggleSavedPopover"
-                >
-                  Saved
-                  <span
-                    v-if="fixtures.length"
-                    class="text-[10px] text-foreground-muted"
-                  >· {{ fixtures.length }}</span>
-                  <ChevronDown class="w-3 h-3" />
-                </button>
-                <div
-                  v-if="savedPopoverOpen"
-                  class="absolute right-0 top-full mt-1 z-30 w-64 bg-surface border border-border rounded shadow-lg overflow-hidden"
-                  @mouseleave="savedPopoverOpen = false"
-                >
-                  <div class="px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-foreground-muted border-b border-border bg-surface/60">
-                    Saved fixtures
-                  </div>
-                  <div
-                    v-if="!fixtures.length"
-                    class="px-3 py-3 text-[11px] text-foreground-muted italic"
-                  >
-                    No fixtures yet. Set up a request and click Save.
-                  </div>
-                  <ul
-                    v-else
-                    class="max-h-56 overflow-y-auto"
-                  >
-                    <!--
-                      The row is a real button, not a click handler on the
-                      <li>: loading a fixture was previously unreachable by
-                      keyboard while the destructive Delete next to it was
-                      not. Delete is a sibling of the row button, never a
-                      child, so the two hit areas stay disjoint.
-                    -->
-                    <li
-                      v-for="fx in fixtures"
-                      :key="fx.id"
-                      class="flex items-center pr-3 text-xs hover:bg-surface-hover focus-within:bg-surface-hover group"
-                    >
-                      <button
-                        type="button"
-                        class="flex items-center gap-2 flex-1 min-w-0 pl-3 pr-2 py-1.5 text-left touch-expand-sm"
-                        @click="loadFixture(fx)"
-                      >
-                        <span class="font-mono text-[10px] text-foreground-muted shrink-0">{{ fx.method }}</span>
-                        <span class="truncate flex-1 text-foreground">{{ fx.name }}</span>
-                      </button>
-                      <!--
-                        Below lg the delete affordance is permanently
-                        visible (touch devices have no hover state).
-                        From lg up it fades in on row hover, or on keyboard
-                        focus anywhere in the row, so the fixtures list
-                        stays calm at rest on desktop without hiding a
-                        control the operator has just tabbed to.
-                      -->
-                      <button
-                        type="button"
-                        class="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 text-foreground-muted hover:text-danger-fg transition-opacity shrink-0 touch-expand-iconbtn inline-flex items-center justify-center"
-                        :title="`Delete ${fx.name}`"
-                        :aria-label="`Delete ${fx.name}`"
-                        @click="removeFixture(fx)"
-                      >
-                        <Trash2 class="w-3 h-3" />
-                      </button>
-                    </li>
-                  </ul>
-                  <div class="border-t border-border px-2 py-1.5 bg-surface/50">
-                    <button
-                      type="button"
-                      class="touch-expand-xs text-[11px] text-foreground hover:text-foreground-strong w-full text-left px-1.5 py-1 rounded hover:bg-surface-hover transition-colors disabled:opacity-50"
-                      :disabled="!canTest"
-                      @click="saveCurrentAsFixture"
-                    >
-                      + Save current as…
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Headers (collapsible). -->
-            <div class="border-b border-border shrink-0">
-              <button
-                type="button"
-                class="w-full h-6 px-3 flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-foreground-strong bg-surface/30 transition-colors"
-                @click="headersOpen = !headersOpen"
-              >
-                <span>
-                  Headers
-                  <span
-                    v-if="headerCount"
-                    class="ml-1 text-foreground-muted normal-case tracking-normal"
-                  >· {{ headerCount }}</span>
-                </span>
-                <ChevronDown
-                  class="w-3 h-3 transition-transform"
-                  :class="headersOpen ? 'rotate-0' : '-rotate-90'"
-                />
-              </button>
-              <div
-                v-if="headersOpen"
-                class="px-2 py-2 space-y-1"
-              >
-                <div
-                  v-for="(header, idx) in testHeaders"
-                  :key="idx"
-                  class="flex items-center gap-1.5"
-                >
-                  <label
-                    :for="`test-header-name-${idx}`"
-                    class="sr-only"
-                  >Header {{ idx + 1 }} name</label>
-                  <input
-                    :id="`test-header-name-${idx}`"
-                    v-model="header.name"
-                    :disabled="!canTest"
-                    spellcheck="false"
-                    placeholder="Header name"
-                    class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-                  >
-                  <label
-                    :for="`test-header-value-${idx}`"
-                    class="sr-only"
-                  >Header {{ idx + 1 }} value</label>
-                  <input
-                    :id="`test-header-value-${idx}`"
-                    v-model="header.value"
-                    :disabled="!canTest"
-                    spellcheck="false"
-                    placeholder="value"
-                    class="flex-1 min-w-0 text-[11px] font-mono bg-background border border-border rounded px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-                  >
-                  <button
-                    type="button"
-                    class="touch-expand-iconbtn inline-flex items-center justify-center rounded text-foreground-muted hover:text-danger-fg p-0.5 transition-colors"
-                    title="Remove header"
-                    aria-label="Remove header"
-                    @click="removeHeaderRow(idx)"
-                  >
-                    <X class="w-3 h-3" />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  class="touch-expand-xs inline-flex items-center text-[11px] text-foreground-muted hover:text-foreground-strong transition-colors px-1.5 py-0.5 rounded hover:bg-surface-hover"
-                  :disabled="!canTest"
-                  @click="addHeaderRow"
-                >
-                  + Add header
-                </button>
-              </div>
-            </div>
-
-            <!-- Body sub-header + textarea. -->
-            <div class="h-6 px-3 flex items-center justify-between bg-surface/30 border-b border-border shrink-0">
-              <span class="text-[10px] uppercase tracking-[0.14em] font-medium text-foreground-muted">
-                Body
-              </span>
-              <span
-                v-if="!canTest"
-                class="text-[10px] text-warning-fg/80"
-              >Deploy first</span>
-              <span
-                v-else
-                class="text-[10px] text-foreground-muted font-mono"
-              >{{ testPayload.length }} chars</span>
-            </div>
-            <textarea
-              v-model="testPayload"
-              :disabled="!canTest"
-              spellcheck="false"
-              class="flex-1 w-full min-h-0 bg-background text-xs font-mono p-3 text-foreground focus:outline-none resize-none disabled:opacity-50 placeholder:text-foreground-muted"
-              placeholder="{}"
+      <!-- Last-run strip. One line on purpose: enough to confirm a deploy and
+           leave, with the workbench a click away for anything longer. The row
+           gap clears 11.4px because touch-expand-sm reaches 4px past each
+           control, and two wrapped rows at gap-y-2 would overlap by 0.4px. -->
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-3 border-t border-border bg-surface/60 px-3 py-2">
+        <button
+          :disabled="!canTest || testbench.invoking"
+          class="run-btn shrink-0"
+          :title="canTest ? 'Replay the current test request' : 'Deploy first'"
+          @click="runTest"
+        >
+          <Play
+            v-if="!testbench.invoking"
+            class="w-3 h-3"
+          />
+          <span
+            v-else
+            class="run-spinner"
+          />
+          Run
+        </button>
+        <!-- One live region, so a run that finishes seconds after the click is
+             announced rather than only painted. -->
+        <div
+          role="status"
+          aria-live="polite"
+          class="flex flex-wrap items-center gap-x-3 gap-y-1 flex-1 min-w-0"
+        >
+          <span
+            class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5 shrink-0"
+            :class="lastRunTone.text"
+          >
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              :class="lastRunTone.dot"
             />
-          </div>
-
-          <!-- Response + logs column -->
-          <div class="flex flex-col min-h-[9rem] md:min-h-0">
-            <div class="response-bar h-7 px-3 flex items-center justify-between bg-surface/60 border-b border-border shrink-0">
-              <span
-                class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5"
-                :class="error ? 'text-danger-fg' : output ? 'text-success-fg' : 'text-foreground-muted'"
-              >
-                <span
-                  class="w-1.5 h-1.5 rounded-full"
-                  :class="error ? 'bg-danger-fg' : output ? 'bg-success-fg' : 'bg-foreground-muted/40'"
-                />
-                {{ error ? 'Error' : output ? 'Response' : 'Idle' }}
-              </span>
-              <div class="flex items-center gap-2">
-                <!-- v0.4 B4: AI Suggest-fix button. Only shows after a
-                     failed run; assembles a debug prompt from the
-                     in-memory editor state (no network fetch needed —
-                     source, request, and stderr are all already loaded
-                     in this pane) and writes it to the clipboard. -->
-                <button
-                  v-if="lastRunFailed"
-                  type="button"
-                  class="touch-expand-xs text-[10px] uppercase tracking-[0.14em] text-foreground-muted hover:text-foreground-strong px-1.5 py-0.5 rounded hover:bg-surface-hover transition-colors flex items-center gap-1 disabled:opacity-50"
-                  :disabled="suggestingFix"
-                  title="Build a paste-ready debug prompt with source + request + stderr"
-                  @click="suggestFix"
-                >
-                  <Sparkles class="w-3 h-3" />
-                  Suggest fix
-                </button>
-                <span
-                  v-if="duration"
-                  class="text-[10px] text-foreground-muted font-mono"
-                >{{ status }} · {{ duration }}ms</span>
-              </div>
-            </div>
-
-            <div class="flex-1 min-h-0 overflow-y-auto">
-              <!-- Response body -->
-              <pre
-                v-if="output || error"
-                class="px-3 py-2.5 font-mono text-xs whitespace-pre-wrap break-all leading-relaxed"
-                :class="error ? 'text-danger-fg' : 'text-foreground'"
-              >{{ output || error }}</pre>
-              <div
-                v-else
-                class="px-3 py-3 text-xs text-foreground-muted italic"
-              >
-                Hit <span class="not-italic text-foreground-strong">Run</span> to invoke this function with the request payload.
-              </div>
-
-              <!-- Function stdout/stderr — only when present, with its own
-                   micro-divider so it doesn't blend into the response. -->
-              <div
-                v-if="invokeLogs.length"
-                class="border-t border-border"
-              >
-                <div class="h-6 px-3 flex items-center text-[10px] uppercase tracking-[0.14em] text-foreground-muted bg-surface/30">
-                  Function logs · {{ invokeLogs.length }}
-                </div>
-                <div class="px-3 py-2 font-mono text-xs space-y-0.5">
-                  <div
-                    v-for="(log, idx) in invokeLogs"
-                    :key="idx"
-                    class="text-foreground-muted whitespace-pre-wrap break-words"
-                  >
-                    {{ log }}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+            {{ lastRunTone.word }}
+          </span>
+          <span
+            v-if="lastRunMeta"
+            class="text-[10px] text-foreground-muted font-mono shrink-0"
+          >{{ lastRunMeta }}</span>
+          <span
+            v-if="lastRunStale"
+            class="text-[10px] text-foreground-muted shrink-0"
+          >ran before this deploy</span>
+          <code
+            v-if="resultExcerpt"
+            :title="resultExcerpt"
+            class="font-mono text-[11px] truncate flex-1 min-w-0"
+            :class="lastRun?.failed ? 'text-danger-fg' : 'text-foreground'"
+          >{{ resultExcerpt }}</code>
+          <span
+            v-else-if="lastRun"
+            class="text-[11px] text-foreground-muted flex-1 min-w-0 truncate"
+          >No output. This run printed nothing and returned an empty body.</span>
+          <span
+            v-else
+            class="text-[11px] text-foreground-muted flex-1 min-w-0 truncate"
+          >Headers, fixtures, history and full logs live in the workbench.</span>
+          <span
+            v-if="runLines.length > 1"
+            class="text-[10px] text-foreground-muted shrink-0"
+          >{{ runLines.length }} log lines</span>
         </div>
+        <button
+          v-if="lastRun?.failed"
+          type="button"
+          class="touch-expand-sm inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 disabled:opacity-50"
+          :disabled="suggestingFix"
+          title="Build a debug prompt from the source, the request and this run's stderr"
+          @click="suggestFix"
+        >
+          <Sparkles class="w-3 h-3" />
+          Suggest fix
+        </button>
+        <router-link
+          v-if="isEditing && form.name"
+          :to="{ name: 'function-test', params: { name: form.name } }"
+          class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-[11px] text-link hover:text-foreground-strong transition-colors shrink-0"
+        >
+          Open workbench →
+        </router-link>
       </div>
     </div>
 
@@ -1343,7 +1068,7 @@
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, h, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
@@ -1387,14 +1112,14 @@ const CodeEditor = defineAsyncComponent({
   delay: 0,
 })
 import apiClient from '@/api/client'
-import { getApiKey } from '@/api/client'
 import { copyText } from '@/utils/clipboard'
 import { generateFunctionName } from '@/utils/funName'
 import { runtimeLabel } from '@/utils/runtime'
 import { templates, defaultCode, categoryOrder } from '@/templates'
-import { rollbackFunction, listFixtures, updateFixture, deleteFixture, invokeFunctionFull, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
+import { rollbackFunction, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
 import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
+import { useTestbenchStore } from '@/stores/testbench'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 
 // The function this Editor is scoped to; empty on /functions/new. A route prop,
@@ -1406,6 +1131,7 @@ const props = defineProps({ name: { type: String, default: '' } })
 const route = useRoute()
 const router = useRouter()
 const confirmStore = useConfirmStore()
+const testbench = useTestbenchStore()
 
 // Modals open-state. One per panel; clicking a header button toggles it.
 const modals = ref({
@@ -1449,69 +1175,26 @@ const navMenu = (to) => {
 // landed outside its root. Esc keydown does the same on the global key
 // handler. Bound while this view is activated; see bindGlobals below.
 //
-// pointerdown, not mousedown: the saved-fixtures popover used to rely on
-// @mouseleave alone, an event a touch device never fires, so once opened on
-// a phone the only ways out were picking a fixture or deleting one. Both
-// menu roots wrap their trigger AND their dropdown, so a press on a menu
-// item is "inside" and the item's click still lands.
+// pointerdown, not mousedown: a touch device never fires @mouseleave, so a
+// dropdown that leans on it has no way out on a phone. Both menu roots wrap
+// their trigger AND their dropdown, so a press on an item is "inside".
 const onDocClick = (e) => {
-  if (menus.value.config || menus.value.bindings) {
-    const inConfig = configMenuRef.value?.contains(e.target)
-    const inBindings = bindingsMenuRef.value?.contains(e.target)
-    if (!inConfig && !inBindings) closeMenus()
-  }
-  if (savedPopoverOpen.value && !savedPopoverRef.value?.contains(e.target)) {
-    savedPopoverOpen.value = false
-  }
+  if (!menus.value.config && !menus.value.bindings) return
+  const inConfig = configMenuRef.value?.contains(e.target)
+  const inBindings = bindingsMenuRef.value?.contains(e.target)
+  if (!inConfig && !inBindings) closeMenus()
 }
 const onDocKey = (e) => {
-  if (e.key !== 'Escape') return
-  if (menus.value.config || menus.value.bindings) closeMenus()
-  if (savedPopoverOpen.value) savedPopoverOpen.value = false
+  if (e.key === 'Escape') closeMenus()
 }
 
-// Bottom terminal: two tabs only — Build (deploy progress) and Test
-// (payload + response + function logs all in one place). The terminal
-// auto-switches: Build during a deploy, Test when the user runs the
-// function. No need to click between three different surfaces.
-//
-// The console starts collapsed below md. At 375x667 the open panel plus the
-// wrapped toolbar leaves the code surface smaller than the log pane under
-// it, which inverts what the operator came to the page to do. Desktop keeps
-// it open, where the build log is the first thing wanted after a deploy.
-// Evaluated once at setup: a mid-session viewport change should not yank the
-// panel out from under someone who has already opened or closed it, and
-// every deploy/invoke path opens it explicitly anyway.
+// One panel left, so no tablist: the drawer is Build, and it auto-opens on
+// deploy. Collapsed below md because at 375x667 an open panel plus the wrapped
+// toolbar leaves the code surface smaller than the log under it. Read once at
+// setup so a mid-session rotate cannot yank it from under the operator.
 const terminalOpen = ref(
   typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches,
 )
-const terminalTab = ref('build')
-const terminalTabs = computed(() => [
-  { id: 'build', label: 'Build', icon: Terminal, badge: buildLogs.value.length || null },
-  { id: 'test',  label: 'Test',  icon: Play,     badge: invokeLogs.value.length || null },
-])
-const selectTerminalTab = (id) => {
-  terminalTab.value = id
-  terminalOpen.value = true
-}
-// Roving tabindex for the console tablist: only the selected tab sits in the
-// tab order, and Left/Right/Home/End move selection and focus together, which
-// is what a screen-reader user expects once the strip announces as tabs.
-const tabRefs = []
-const setTabRef = (el, i) => { tabRefs[i] = el }
-const onTabKeydown = (e) => {
-  const ids = terminalTabs.value.map((t) => t.id)
-  const cur = ids.indexOf(terminalTab.value)
-  let next
-  if (e.key === 'ArrowRight') next = (cur + 1) % ids.length
-  else if (e.key === 'ArrowLeft') next = (cur - 1 + ids.length) % ids.length
-  else if (e.key === 'Home') next = 0
-  else if (e.key === 'End') next = ids.length - 1
-  else return
-  e.preventDefault()
-  selectTerminalTab(ids[next])
-  nextTick(() => tabRefs[next]?.focus())
-}
 
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
@@ -1530,18 +1213,6 @@ const form = ref({
 })
 const fnId = ref('')  // backend function ID
 
-const testPayload = ref('{"name": "World"}')
-// v0.4 B3: Postman-style request controls. testHeaders is an array of
-// {name, value} pairs so the editor can render an ordered list with
-// inline edit + delete; we collapse to a flat object on send. headersOpen
-// keeps the headers section collapsed by default to stay focused on the
-// body, which is still the primary input for most users.
-const testMethod = ref('POST')
-const testPath = ref('/')
-const testHeaders = ref([])
-const headersOpen = ref(false)
-const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-const methodOptions = methods.map((m) => ({ value: m, label: m }))
 const concurrencyPolicyOptions = [
   { value: 'queue', label: 'Queue requests' },
   { value: 'reject', label: 'Reject (429)' },
@@ -1551,25 +1222,14 @@ const authModeOptions = [
   { value: 'platform_key', label: 'Require Orva API key (server-to-server)' },
   { value: 'signed', label: 'Require HMAC signature (X-Orva-Signature)' },
 ]
-const fixtures = ref([])
-const savedPopoverOpen = ref(false)
-const savedPopoverRef = ref(null)
-const headerCount = computed(() => testHeaders.value.filter((h) => h.name && h.name.trim()).length)
 const deploying = ref(false)
-const invoking = ref(false)
 const deployedThisSession = ref(false)
-const output = ref(null)
-const error = ref(null)
-const duration = ref(0)
-const status = ref('')
 const buildLogs = ref([])
-const invokeLogs = ref([])
+// A build failure used to be written into the Test tab's response ref, which
+// painted a build error under a Suggest-fix button for a run that never ran.
+const buildError = ref('')
+const lastDeployAt = ref('')
 const urlCopied = ref(false)
-// v0.4 B4 — Suggest-fix affordance for the Test pane. Tracks "did the
-// most recent run fail" so the button hides on idle / success runs.
-// Set true when status >= 500 OR the request threw before getting a
-// response (network error, timeout); reset when the user runs again.
-const lastRunFailed = ref(false)
 const suggestingFix = ref(false)
 
 // Invoke URL is built from window.location.origin so it works on localhost,
@@ -1975,21 +1635,10 @@ const resetEditorState = () => {
   code.value = ''
   dependencyText.value = ''
   buildLogs.value = []
-  invokeLogs.value = []
-  output.value = null
-  error.value = null
-  duration.value = 0
-  status.value = ''
+  buildError.value = ''
+  lastDeployAt.value = ''
   deployedThisSession.value = false
   versions.value = []
-  fixtures.value = []
-  // Test pane defaults — keep these consistent so a fresh /functions/new
-  // visit always starts with the same blank canvas.
-  testMethod.value = 'POST'
-  testPath.value = '/'
-  testHeaders.value = []
-  testPayload.value = '{"name": "World"}'
-  headersOpen.value = false
   autoDetected.value = false
   runtimeManuallySet.value = false
   templateId.value = ''
@@ -2038,8 +1687,12 @@ const loadRouteData = async () => {
       // Load deployment history so the Versions card can render.
       await loadVersions(fn)
     } catch (e) {
-      console.error("Failed to load function", e)
-      error.value = "Failed to load function: " + (e.response?.data?.error?.message || e.message)
+      console.error('Failed to load function', e)
+      confirmStore.notify({
+        title: 'Could not open function',
+        message: e.response?.data?.error?.message || e.message,
+        danger: true,
+      })
     }
   } else {
     // Create mode (/functions/new). Seed a friendly auto-generated
@@ -2130,45 +1783,40 @@ onDeactivated(unbindGlobals)
 // onDeactivated does not fire when keep-alive evicts this instance at :max.
 onBeforeUnmount(unbindGlobals)
 
-// applyPrefillFromQuery reads a base64-encoded JSON request envelope from
-// the `prefill` query param and populates the test pane. Used by the
-// "Save as fixture" affordance in InvocationsLog.vue's Request panel:
-// the drawer encodes the captured request and links here so the user
-// lands on the editor with the form already filled in.
+// The `prefill` deep link ("Save as fixture" in InvocationsLog) carries a
+// captured production request, headers and all: that belongs in the workbench,
+// so this loads the store and replaces itself with that route rather than
+// leaving a redirect stop in history for the Back button to fall into.
 const applyPrefillFromQuery = () => {
   const raw = route.query.prefill
   if (!raw) return
   try {
-    const decoded = atob(String(raw))
-    const data = JSON.parse(decoded)
-    if (data.method) testMethod.value = String(data.method).toUpperCase()
-    if (data.path)   testPath.value = String(data.path)
+    const data = JSON.parse(atob(String(raw)))
+    const patch = {}
+    if (data.method) patch.method = String(data.method).toUpperCase()
+    if (data.path)   patch.path = String(data.path)
     if (data.headers && typeof data.headers === 'object') {
-      testHeaders.value = Object.entries(data.headers).map(([name, value]) => ({ name, value: String(value) }))
-      if (testHeaders.value.length) headersOpen.value = true
+      patch.headers = Object.entries(data.headers).map(([key, value]) => ({ key, value: String(value) }))
     }
     if (data.body !== undefined) {
-      testPayload.value = typeof data.body === 'string' ? data.body : JSON.stringify(data.body, null, 2)
+      patch.body = typeof data.body === 'string' ? data.body : JSON.stringify(data.body, null, 2)
     }
-    // Drop the focus to the test panel so the user sees the prefill.
-    terminalTab.value = 'test'
-    terminalOpen.value = true
-    // Strip the query param without triggering a fresh navigation
-    // (router.replace keeps the same component instance).
-    router.replace({ query: { ...route.query, prefill: undefined } })
+    testbench.setRequest(fnId.value, patch)
+    router.replace({ name: 'function-test', params: { name: props.name } })
   } catch {
     /* ignore malformed prefill */
   }
 }
 
-// The prefill deep link is its own trigger, not part of the route load: "Save
-// as fixture" lands on whichever function the invocation belonged to. The guard
-// stops a cached Editor claiming another view's query; `flush: 'post'` runs it
-// after loadRouteData's pre-flush resetEditorState, which otherwise wiped the
-// prefill and left nothing to retry from -- the param is stripped on apply.
+// Waits on fnId as well as the param, because the store keys the request by it
+// and loadRouteData resolves it asynchronously. The name guard stops a cached
+// Editor claiming another view's query; `flush: 'post'` runs after that same
+// load's pre-flush resetEditorState.
 watch(
-  () => route.query.prefill,
-  (raw) => { if (raw && route.params.name === props.name) applyPrefillFromQuery() },
+  () => [route.query.prefill, fnId.value],
+  () => {
+    if (route.query.prefill && fnId.value && route.params.name === props.name) applyPrefillFromQuery()
+  },
   { immediate: true, flush: 'post' },
 )
 
@@ -2218,6 +1866,19 @@ const loadVersions = async (fn) => {
   }
 }
 
+// loadVersions ran on mount, on window focus and after a rollback, but not
+// after a deploy, which is why Config -> Versions lagged the thing you just did.
+const refreshVersions = async () => {
+  if (!fnId.value) return
+  try {
+    const res = await apiClient.get('/functions')
+    const fn = (res.data.functions || []).find((f) => f.id === fnId.value)
+    if (fn) await loadVersions(fn)
+  } catch {
+    /* the badge can lag; the deployment itself already landed */
+  }
+}
+
 // Close any in-flight SSE stream when the user leaves the page so we don't
 // keep a phantom connection open (and so the next page-load gets a fresh
 // view of build state).
@@ -2259,12 +1920,9 @@ const runDeploy = async () => {
     return
   }
 
-  // Auto-switch to the Build tab so logs are visible without a click.
-  terminalTab.value = 'build'
   terminalOpen.value = true
   deploying.value = true
-  output.value = null
-  error.value = null
+  buildError.value = ''
   buildLogs.value = ['Starting deployment...']
 
   try {
@@ -2356,8 +2014,8 @@ const runDeploy = async () => {
     buildLogs.value.push(`Build queued (${depId})`)
     await streamBuild(depId)
   } catch (err) {
-    error.value = err.response?.data?.error?.message || err.message || 'Deployment failed'
-    buildLogs.value.push(`Error: ${error.value}`)
+    buildError.value = err.response?.data?.error?.message || err.message || 'Deployment failed'
+    buildLogs.value.push(`Error: ${buildError.value}`)
     deploying.value = false
   }
 }
@@ -2390,13 +2048,17 @@ const streamBuild = (depId) => new Promise((resolve) => {
     deploying.value = false
     if (ok) {
       deployedThisSession.value = true
-      buildLogs.value.push(`✓ Build succeeded in ${payload?.duration_ms ?? '?'}ms`)
-      // Helpful nudge: when the build finishes, jump to the Test tab so
-      // the user can run their function with one click instead of two.
-      terminalTab.value = 'test'
+      lastDeployAt.value = new Date().toISOString()
+      // The button no longer promises a new version, so the result names the
+      // one it made; a response without `version` still reports its duration.
+      const ms = payload?.duration_ms ?? '?'
+      buildLogs.value.push(payload?.version
+        ? `✓ v${payload.version} live in ${ms}ms`
+        : `✓ Build succeeded in ${ms}ms`)
+      refreshVersions()
     } else {
       const msg = payload?.error_message || 'build failed (see logs)'
-      error.value = msg
+      buildError.value = msg
       buildLogs.value.push(`✗ Build failed: ${msg}`)
     }
     resolve()
@@ -2438,264 +2100,129 @@ const streamBuild = (depId) => new Promise((resolve) => {
   }
 })
 
-// Collapse the editor's [{name, value}, …] header rows into a flat object
-// for the request. Empty/whitespace-only names are dropped — the user
-// often leaves an empty trailing row from the "+ Add header" button.
-const buildHeadersObject = () => {
-  const out = {}
-  for (const h of testHeaders.value) {
-    const k = (h.name || '').trim()
-    if (!k) continue
-    out[k] = h.value ?? ''
-  }
-  return out
+// The strip reads one run object, so its dot, status and duration cannot
+// disagree the way three independently-cleared refs could.
+const lastRun = computed(() => (fnId.value ? testbench.latestRun(fnId.value) : null))
+// The store calls only 5xx `failed`, so painting everything below it green put
+// a success dot beside a 404. Three tones: answered, refused, broke.
+const RUN_TONES = {
+  idle:     { word: 'Idle',     text: 'text-foreground-muted', dot: 'bg-border' },
+  ok:       { word: 'Response', text: 'text-success-fg',       dot: 'bg-success-fg' },
+  rejected: { word: 'Rejected', text: 'text-warning-fg',       dot: 'bg-warning-fg' },
+  failed:   { word: 'Failed',   text: 'text-danger-fg',        dot: 'bg-danger-fg' },
+}
+const lastRunTone = computed(() => {
+  const run = lastRun.value
+  if (!run) return RUN_TONES.idle
+  if (run.failed) return RUN_TONES.failed
+  return Number(run.status) >= 400 ? RUN_TONES.rejected : RUN_TONES.ok
+})
+// A transport failure has no duration to report, so the status stands alone
+// rather than reading "Error · ms".
+const lastRunMeta = computed(() => {
+  const run = lastRun.value
+  if (!run) return ''
+  return run.durationMs ? `${run.status} · ${run.durationMs}ms` : run.status
+})
+// A deploy leaves the run history alone, so the strip says when the result on
+// screen describes code that is no longer the live one.
+const lastRunStale = computed(
+  () => !!(lastRun.value && lastDeployAt.value && lastRun.value.at < lastDeployAt.value),
+)
+
+// Both log paths, in one list: console.log/print arrive as stderr, orva.log.*
+// as parsed entries that never reached the editor at all. The level prefix is
+// what keeps a structured line distinguishable from something the handler printed.
+const runLines = computed(() => {
+  const run = lastRun.value
+  if (!run) return []
+  return [
+    ...(run.stderr || []).filter((l) => l.trim()),
+    ...(run.structured || []).map((e) => `${(e.level || 'info').toLowerCase()}: ${e.message || ''}`),
+  ]
+})
+
+// A stack frame names the runtime, not the bug. Node prints the message first
+// and Python last, so skipping frames from the end lands on the message in both;
+// taking the last line outright showed `at process.processTicksAndRejections`.
+const isStackFrame = (l) => /^\s*(?:at\s|File ")/.test(l)
+
+// A pretty-printed body's first line is `{`, which is what the strip showed for
+// every successful JSON response. Collapse the whole value onto the one line.
+const oneLine = (text) => (text || '').split('\n').map((l) => l.trim()).filter(Boolean).join(' ')
+
+// A failure wants the line that explains it; a success wants the answer, and
+// falls back to a log line so a 204 that only called orva.log.* still says something.
+const resultExcerpt = computed(() => {
+  const run = lastRun.value
+  if (!run) return ''
+  const lines = runLines.value
+  const spoken = [...lines].reverse().find((l) => !isStackFrame(l)) || lines[lines.length - 1] || ''
+  const body = oneLine(run.body)
+  const err = oneLine(run.error)
+  return run.failed ? (spoken || err || body) : (body || err || spoken)
+})
+
+const runTest = async () => {
+  if (!fnId.value || !canTest.value || testbench.invoking) return
+  await testbench.invoke(fnId.value)
 }
 
-// Default Content-Type for body-bearing methods. Keeping the test pane's
-// behaviour roughly aligned with curl: if the user supplied a body but
-// didn't explicitly set Content-Type, assume JSON (the most common case).
-const ensureContentType = (headers, method, body) => {
-  const m = (method || 'POST').toUpperCase()
-  if (m === 'GET' || m === 'HEAD') return headers
-  if (!body) return headers
-  const hasCT = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
-  if (!hasCT) headers['Content-Type'] = 'application/json'
-  return headers
-}
-
-// Invoke function by ID. v0.4 B3: routes through invokeFunctionFull so
-// the method/path/headers from the Test pane round-trip correctly.
-const invokeFunction = async () => {
-  if (!fnId.value) {
-    error.value = 'No function deployed yet'
-    return
-  }
-
-  // Auto-show the Test tab + open terminal so the user sees the result
-  // without juggling two surfaces.
-  terminalTab.value = 'test'
-  terminalOpen.value = true
-  invoking.value = true
-  output.value = null
-  error.value = null
-  invokeLogs.value = []
-  // Reset the failed-run flag at the start of every run so the
-  // Suggest-fix button stays in sync with THIS run's outcome, not a
-  // stale one from a prior invocation.
-  lastRunFailed.value = false
-
-  try {
-    const headers = ensureContentType(buildHeadersObject(), testMethod.value, testPayload.value)
-    headers['X-Orva-API-Key'] = headers['X-Orva-API-Key'] || getApiKey()
-
-    const res = await invokeFunctionFull(fnId.value, {
-      method: testMethod.value,
-      path: testPath.value || '/',
-      headers,
-      body: testPayload.value || '',
-    })
-
-    const text = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
-    status.value = `${res.status}`
-    duration.value = res.headers?.['x-orva-duration-ms'] || res.headers?.['X-Orva-Duration-MS'] || '?'
-
-    try {
-      output.value = JSON.stringify(JSON.parse(text), null, 2)
-    } catch {
-      output.value = text
-    }
-    // 2xx/3xx are happy paths; only flag 5xx so the Suggest-fix button
-    // shows on real failures (a deliberate 4xx from an authz check is
-    // not a bug to debug).
-    if (typeof res.status === 'number' && res.status >= 500) {
-      lastRunFailed.value = true
-    }
-  } catch (err) {
-    // Axios surfaces non-2xx as throws — pull out body + status for the UI.
-    if (err.response) {
-      status.value = `${err.response.status}`
-      const t = err.response.data
-      error.value = typeof t === 'string' ? t : JSON.stringify(t)
-      if (err.response.status >= 500) lastRunFailed.value = true
-    } else {
-      error.value = err.message || 'Invocation failed'
-      status.value = 'Error'
-      // Network-level error: no status, but the operator still wants
-      // the AI to look at the source + payload + whatever the platform
-      // wrote to stderr. Treat as a failure.
-      lastRunFailed.value = true
-    }
-  } finally {
-    invoking.value = false
-  }
-}
-
-// v0.4 B4 — assemble a debug prompt for the most-recent failed run
-// and write it to the clipboard. All inputs are already in memory:
-// - source: the editor's `code` ref (what the user is currently
-//   editing). This is the right thing to debug; if the user has made
-//   uncommitted edits since the failed run, those edits are what they
-//   want the AI to look at.
-// - runtime: from form.runtime.
-// - request preview: built from the test pane's method/path/headers/body.
-// - stderr: joined from invokeLogs (the function logs panel content).
-// - error/status: from the response panel's existing refs.
-// NOTHING goes to the network from this handler.
+// Debugs the buffer, not the deployed version: `code` is what the operator is
+// editing, and uncommitted edits are the thing they want looked at. The request
+// and both log streams come from the run in the store. Nothing goes over the
+// network from here.
 const suggestFix = async () => {
   if (suggestingFix.value) return
+  const run = lastRun.value
+  if (!run) return
   suggestingFix.value = true
   try {
-    // Stitch invokeLogs into a single stderr-shaped string so the
-    // prompt's <stderr> section reads like a real traceback.
-    const stderrText = (invokeLogs.value || []).join('\n')
-    // Normalise the request preview. Headers in testHeaders are an
-    // ordered list of {name,value}; collapse to a flat object and
-    // drop empty rows so the prompt isn't littered with blank pairs.
+    const req = testbench.requestFor(fnId.value)
     const headersObj = {}
-    for (const h of testHeaders.value || []) {
-      if (h?.name && h.name.trim()) headersObj[h.name.trim()] = h.value || ''
+    for (const h of req.headers || []) {
+      if (h?.key && h.key.trim()) headersObj[h.key.trim()] = h.value || ''
     }
-    const requestPreview = {
-      method: testMethod.value || 'POST',
-      path: testPath.value || '/',
-      headers: headersObj,
-      body: testPayload.value || '',
-    }
-    // status.value is a string ("500", "Error", …); coerce to a
-    // number when it parses cleanly so the prompt's <error> line
-    // reads "500 …" instead of "500 (string) …".
-    const sc = /^\d+$/.test(status.value) ? Number(status.value) : status.value
+    // orva.log.* lines are parsed out of stderr server-side, so they have to be
+    // folded back in or the prompt gets a traceback with the context missing.
+    const structured = (run.structured || []).map(
+      (e) => `[${e.level || 'info'}] ${e.message || ''}`,
+    )
+    const sc = /^\d+$/.test(run.status) ? Number(run.status) : run.status
     const ok = await copyFixSuggestionToClipboard({
       source: code.value || '',
       runtime: form.value.runtime || '',
-      stderr: stderrText,
-      requestPreview,
-      errorMessage: error.value || '',
+      stderr: [...(run.stderr || []), ...structured].join('\n'),
+      requestPreview: {
+        method: req.method || 'POST',
+        path: req.path || '/',
+        headers: headersObj,
+        body: req.body || '',
+      },
+      errorMessage: run.error || '',
       statusCode: sc || '',
     })
-    if (ok) {
-      confirmStore.notify({
-        title: 'Prompt copied',
-        message: 'Paste into ChatGPT, Claude, or your AI tool of choice.',
-      })
-    } else {
+    if (!ok) {
       confirmStore.notify({
         title: 'Copy failed',
         message: 'Could not write to the clipboard. Try again, or copy the stderr by hand.',
         danger: true,
       })
+      return
     }
+    // The clipboard is the handoff because it is the only one that exists:
+    // stores/ai.js holds no draft and AI.vue fills its composer from a local ref.
+    const open = await confirmStore.ask({
+      title: 'Prompt copied',
+      message: 'Paste it into Chat to debug this run inside Orva, or into whichever AI tool you prefer.',
+      confirmLabel: 'Open Chat',
+      cancelLabel: 'Stay here',
+    })
+    if (open) router.push({ name: 'ai' })
   } finally {
     suggestingFix.value = false
   }
 }
-
-// ── Fixtures (v0.4 B3) ──────────────────────────────────────────────
-//
-// A fixture is one saved (method, path, headers, body) preset attached
-// to a function. We refresh them on first deploy / first test-tab open
-// so the popover always reflects what the backend has. Concurrency note:
-// the backend's UNIQUE(function_id, name) means create races resolve
-// server-side via 409; the editor opts into the simpler "PUT acts as
-// upsert" path so there's never a true race in normal use.
-const addHeaderRow = () => {
-  testHeaders.value.push({ name: '', value: '' })
-  headersOpen.value = true
-}
-const removeHeaderRow = (idx) => {
-  testHeaders.value.splice(idx, 1)
-}
-
-const refreshFixtures = async () => {
-  if (!fnId.value) return
-  try {
-    const res = await listFixtures(fnId.value)
-    fixtures.value = res.data?.fixtures || []
-  } catch {
-    // Soft-fail — fixture popover stays empty if the backend is
-    // unreachable; the rest of the editor still works.
-    fixtures.value = []
-  }
-}
-
-const toggleSavedPopover = async () => {
-  savedPopoverOpen.value = !savedPopoverOpen.value
-  if (savedPopoverOpen.value) {
-    await refreshFixtures()
-  }
-}
-
-// loadFixture populates the test pane from a saved fixture and closes
-// the popover. We replace (not merge) headers so the operator never gets
-// a surprise mash-up of "what I had typed" + "what the fixture saved".
-const loadFixture = (fx) => {
-  testMethod.value = fx.method || 'POST'
-  testPath.value = fx.path || '/'
-  testHeaders.value = Object.entries(fx.headers || {}).map(([name, value]) => ({ name, value }))
-  if (testHeaders.value.length) headersOpen.value = true
-  testPayload.value = fx.body || ''
-  savedPopoverOpen.value = false
-}
-
-const removeFixture = async (fx) => {
-  const ok = await confirmStore.ask({
-    title: `Delete fixture "${fx.name}"?`,
-    message: 'This only removes the saved request preset. Function code and execution history are untouched.',
-    confirmLabel: 'Delete',
-    danger: true,
-  })
-  if (!ok) return
-  try {
-    await deleteFixture(fnId.value, fx.name)
-    await refreshFixtures()
-  } catch (e) {
-    confirmStore.notify({
-      title: 'Delete failed',
-      message: e.response?.data?.error?.message || e.message,
-      danger: true,
-    })
-  }
-}
-
-const saveCurrentAsFixture = async () => {
-  if (!fnId.value) return
-  const raw = await confirmStore.prompt({
-    title: 'Save fixture',
-    message: 'Give this request a name so you can replay or share it later.',
-    placeholder: 'e.g. happy-path, signed-stripe, empty-body',
-    confirmLabel: 'Save',
-  })
-  const name = (raw || '').trim()
-  if (!name) return
-  const headers = buildHeadersObject()
-  const body = {
-    name,
-    method: testMethod.value,
-    path: testPath.value || '/',
-    headers,
-    body: testPayload.value || '',
-  }
-  try {
-    // PUT-by-name is an upsert on (function_id, name) so re-saving with
-    // the same name overwrites without a separate confirm step.
-    await updateFixture(fnId.value, name, body)
-    savedPopoverOpen.value = false
-    await refreshFixtures()
-  } catch (e) {
-    confirmStore.notify({
-      title: 'Save failed',
-      message: e.response?.data?.error?.message || e.message,
-      danger: true,
-    })
-  }
-}
-
-// Refresh fixtures whenever fnId becomes known (initial load for an
-// existing function, or right after first deploy lands a fresh id).
-watch(fnId, async (id) => {
-  if (id) await refreshFixtures()
-  else fixtures.value = []
-})
 
 const rollingBack = ref(false)
 const rollbackToVersion = async (v) => {
@@ -2811,7 +2338,11 @@ const saveSecret = async () => {
     secretForm.value.value = ''
     await loadSecrets()
   } catch (err) {
-    error.value = err.response?.data?.error?.message || 'Failed to save secret'
+    confirmStore.notify({
+      title: 'Save failed',
+      message: err.response?.data?.error?.message || 'Failed to save secret',
+      danger: true,
+    })
   }
 }
 
@@ -2832,7 +2363,11 @@ const removeSecret = async (key) => {
     await apiClient.delete(`/functions/${fnId.value}/secrets/${encodeURIComponent(key)}`)
     await loadSecrets()
   } catch (err) {
-    error.value = err.response?.data?.error?.message || 'Failed to delete secret'
+    confirmStore.notify({
+      title: 'Delete failed',
+      message: err.response?.data?.error?.message || 'Failed to delete secret',
+      danger: true,
+    })
   }
 }
 
@@ -2867,8 +2402,7 @@ const resetForm = async () => {
   fnId.value = ''
   code.value = ''
   deployedThisSession.value = false
-  output.value = null
-  error.value = null
+  buildError.value = ''
   setRuntime('python')
 }
 </script>
@@ -2880,12 +2414,11 @@ const resetForm = async () => {
    media query at the bottom of this block).
 
    This used to be a ::before overlay inset -8px vertically. That is the
-   exact pattern style.css removed: the toolbar is flex-wrap, so when
-   "Deploy new version" pushes the row past a phone's width the buttons
-   wrap onto two rows separated by gap-2 (7.6 px) and each row-2 overlay
-   covered the row-1 buttons above it — winning the hit test on paint
-   order and swallowing taps meant for Config. Grow the box, never the
-   shadow of it. */
+   exact pattern style.css removed: the toolbar is flex-wrap, so once the
+   row passes a phone's width the buttons wrap onto two rows separated by
+   gap-2 (7.6 px) and each row-2 overlay covered the row-1 buttons above
+   it — winning the hit test on paint order and swallowing taps meant for
+   Config. Grow the box, never the shadow of it. */
 .panel-btn {
   display: inline-flex;
   align-items: center;
@@ -3001,51 +2534,10 @@ const resetForm = async () => {
   }
 
   /* The bar has to be taller than the control it holds, or there is no bar
-     left to see. Tabs stay full-height because their underline is the
-     selected-state indicator and it belongs on the bar's own bottom edge. */
+     left to see. */
   .terminal-bar {
     height: auto;
     min-height: 48px;
-  }
-  .terminal-tab {
-    height: 48px;
-  }
-  /* The method select inside this bar inherits the global 44 px form-control
-     floor, which overflowed a hard h-7 (26.6 px) row and painted over the
-     headers section below it. */
-  .request-bar {
-    height: auto;
-    min-height: 44px;
-  }
-
-  /* The response side had the identical hard h-7 and never got this reset, so
-     its status row stayed locked at 26.6 px while everything inside it grew.
-     Same bug, other half of the panel. */
-  .response-bar {
-    height: auto;
-    min-height: 44px;
-  }
-
-  /* The panel is drawn as a dense desktop instrument: 24 font declarations,
-     three sizes, every one under 12 px. On a touch device the global form
-     floor lifts ONLY its inputs to 16 px / 44 px, so a 16 px method selector
-     ends up beside a 10 px section label -- a six-pixel type range and 44 px
-     rows fighting 22 px ones, in one panel. That reads as broken, and it is
-     the panel's own scale that is wrong for the device rather than the
-     inputs. Lift the panel's floor to the app's ordinary register so the
-     inputs stop being aliens in it. */
-  .test-panel .text-\[10px\] {
-    font-size: 12px;
-  }
-  .test-panel .text-\[11px\],
-  .test-panel .text-xs {
-    font-size: 13px;
-  }
-
-  /* Hard sub-heads inside the panel, same reason as .request-bar. */
-  .test-panel .h-6 {
-    height: auto;
-    min-height: 32px;
   }
 }
 .run-spinner {

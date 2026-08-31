@@ -15,7 +15,49 @@ before it.
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- **A real test workbench, at `/functions/<name>/test`.** Composing a request
+  used to happen in a drawer under the code editor that was 182px tall and could
+  not be resized — 15px under the minimum that component declares for itself.
+  Reading a failure there was not merely cramped, it was impossible: an
+  eight-line Python traceback needs 174px and had 156px, at every screen size.
+  Opening the headers editor on a captured request could collapse the body box
+  to nothing, which is exactly what the "replay this failed invocation" deep
+  link did. The workbench is a page instead: method, path, headers, body, saved
+  requests as a real panel rather than a popover, and the last twenty runs so
+  you can hold one against the one before it.
+
+### Fixed
+
+- **Your function's logs now appear where you are working.** `console.log` and
+  `print` are rerouted to stderr by the runtimes, and `orva.log.*` is parsed
+  into structured entries — and the editor showed neither. The panel that
+  claimed to show them was wired to a list nothing ever wrote to, so it was
+  always empty; the Suggest-fix prompt was quietly built on that same empty
+  list. Both streams are now fetched and shown separately, labelled by the call
+  that produced them.
+
+- **A failed invocation returned no execution id, so its logs were
+  unreachable.** `X-Orva-Execution-ID` was set only when a call succeeded. A
+  timeout or a crashed sandbox answers from a different path and got no header
+  — while its stderr was stored anyway. So for exactly the runs whose output you
+  need, nothing could fetch it. Every invocation carries the header now.
+
+- **The editor stops pretending to be two things.** The bottom drawer keeps
+  build logs and gains a one-line result strip: status, duration, one line of
+  output or the error that explains it, and a link to the workbench. A response
+  that fails now says which line matters — a Node traceback showed an internal
+  `node:internal/process/task_queues` frame, and a successful JSON response
+  showed a single `{`. A 404 no longer draws a green dot.
+
+- **`Deploy new version` is now `Deploy`.** It was the only place in the product
+  that said it that way; the CLI, the API route and the MCP tool have always
+  been `deploy`. The version it created is reported in the build log where it is
+  a measured fact — `v7 live in 1240ms` — rather than promised on a button. The
+  version list also refreshes after a deploy, which it previously did on mount,
+  on window focus and after a rollback, but not after the thing that changes it.
+
 
 ## v2026.08.30
 
