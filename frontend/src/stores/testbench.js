@@ -33,6 +33,9 @@ const blankRun = () => ({
   executionId: '',
   stderr: [],
   structured: [],
+  logsState: 'idle',   // idle | loading | loaded | error | no-execution
+  logsError: '',
+  logsPromise: null,
   at: null,
 })
 
@@ -79,16 +82,44 @@ export const useTestbenchStore = defineStore('testbench', () => {
   // adapters, and orva.log.* is parsed server-side out of that same stderr
   // into log_entries. The editor could never show either, because it never
   // read X-Orva-Execution-ID off the invoke response.
+  // The server writes the log row with AsyncInsertExecutionLog, so it is
+  // routinely not there yet when the invoke response lands: fetching once made a
+  // handler that logged four lines report that it had logged nothing. Poll
+  // briefly, then accept the empty answer as real.
+  const LOG_ATTEMPTS = 12
+  const LOG_INTERVAL_MS = 150
+
   const loadLogs = async (run) => {
-    if (!run.executionId) return
-    try {
-      const { data } = await getInvocationLogs(run.executionId)
-      const raw = data?.stderr || ''
-      run.stderr = raw ? raw.split('\n').filter((l) => l !== '') : []
-      run.structured = data?.log_entries || []
-    } catch {
-      // A handler that wrote nothing has no logs row; that is not an error.
+    if (!run.executionId) {
+      run.logsState = 'no-execution'
+      return
     }
+    run.logsState = 'loading'
+    for (let i = 0; i < LOG_ATTEMPTS; i++) {
+      try {
+        const { data } = await getInvocationLogs(run.executionId)
+        const raw = data?.stderr || ''
+        run.stderr = raw ? raw.split('\n').filter((l) => l !== '') : []
+        run.structured = data?.log_entries || []
+        // An empty answer is NOT proof the handler was silent: a 200 can arrive
+        // with nothing while the write is still in flight. Measured on a 2ms run
+        // -- it reported "logged nothing" for a handler that logged three lines,
+        // while the same handler at 4ms rendered them. Keep asking.
+        if (run.stderr.length || run.structured.length) {
+          run.logsState = 'loaded'
+          return
+        }
+      } catch (err) {
+        // 404 is the documented shape for "no logs row yet".
+        if (err?.response?.status !== 404) {
+          run.logsState = 'error'
+          run.logsError = err?.response?.data?.error?.message || err?.message || 'could not read the execution log'
+          return
+        }
+      }
+      if (i < LOG_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, LOG_INTERVAL_MS))
+    }
+    run.logsState = 'loaded'
   }
 
   const invoke = async (fnId) => {
@@ -132,9 +163,16 @@ export const useTestbenchStore = defineStore('testbench', () => {
       invoking.value = false
     }
     run.at = new Date().toISOString()
-    await loadLogs(run)
+    // History first, logs after: the run object is reactive, so the response
+    // paints immediately and the log panel fills in when the poll resolves.
+    // Awaiting the poll here left the whole page blank for up to two seconds.
     runs.value[fnId] = [run, ...runsFor(fnId)].slice(0, 20)
-    return run
+    // Write through the REACTIVE entry, not the raw object: Vue tracks the
+    // proxy, so mutating `run` after it lands here would fill the logs in and
+    // never re-render -- the same trap stores/ai.js documents for streaming.
+    const live = runs.value[fnId][0]
+    live.logsPromise = loadLogs(live)
+    return live
   }
 
   const loadFixtures = async (fnId) => {

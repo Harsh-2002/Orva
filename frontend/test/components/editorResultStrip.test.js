@@ -79,7 +79,9 @@ const runOnce = async () => {
   )
   await settle()
   await wrapper.find('button.run-btn').trigger('click')
-  await settle()
+  // The run lands in history immediately and the logs poll in behind it, so the
+  // strip's log-derived excerpt needs the extra ticks that poll resolves in.
+  await settle(30)
   const live = wrapper.find('[role="status"]')
   return {
     wrapper,

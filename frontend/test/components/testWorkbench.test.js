@@ -52,6 +52,18 @@ const OTHER = { render: () => null }
 const Shell = {
   template: '<router-view v-slot="{ Component }"><keep-alive :max="10"><component :is="Component" /></keep-alive></router-view>',
 }
+// The log poll retries on real timers until the execution row is written, so a
+// fixed number of ticks cannot reach its settled state. Wait for the text.
+const waitForText = async (wrapper, text, ms = 4000) => {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    await nextTick()
+    if (wrapper.text().includes(text)) return true
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return false
+}
+
 const settle = async (n = 8) => {
   for (let i = 0; i < n; i++) { await nextTick(); await new Promise((r) => setTimeout(r, 0)) }
 }
@@ -161,11 +173,10 @@ describe('TestWorkbench', () => {
   })
 
   it('separates "logged nothing" from "logs failed to load", and can retry', async () => {
-    endpoints.getInvocationLogs.mockResolvedValueOnce({ data: { stderr: '', log_entries: [] } })
+    endpoints.getInvocationLogs.mockResolvedValue({ data: { stderr: '', log_entries: [] } })
     const { wrapper } = await boot('/functions/alpha/test')
     await wrapper.findAll('button').find((b) => b.text().includes('Run')).trigger('click')
-    await settle()
-    expect(wrapper.text()).toContain('Either the handler logged nothing')
+    expect(await waitForText(wrapper, 'This run logged nothing')).toBe(true)
     expect(wrapper.text()).not.toContain('could not be loaded')
 
     endpoints.getInvocationLogs.mockRejectedValueOnce(new Error('logs endpoint 503'))
@@ -174,9 +185,16 @@ describe('TestWorkbench', () => {
     expect(wrapper.text()).toContain('Function logs could not be loaded')
     expect(wrapper.text()).toContain('logs endpoint 503')
 
+    // Back to the file's default fixture: mockResolvedValue above replaced it
+    // for the whole test, and this phase needs a run that did log something.
+    endpoints.getInvocationLogs.mockResolvedValue({
+      data: {
+        stderr: 'Traceback (most recent call last):\n  File "handler.py"\nZeroDivisionError',
+        log_entries: [{ id: 1, ts: '2026-08-31T10:00:00.5Z', level: 'error', message: 'divide failed', fields: '{"n":0}' }],
+      },
+    })
     await wrapper.findAll('button').find((b) => b.text().includes('Reload')).trigger('click')
-    await settle()
-    expect(wrapper.text()).toContain('ZeroDivisionError')
+    expect(await waitForText(wrapper, 'ZeroDivisionError')).toBe(true)
   })
 
   it('says a transport failure produced no execution record', async () => {
@@ -214,11 +232,10 @@ describe('TestWorkbench', () => {
   it('never claims the handler logged nothing when the log fetch failed', async () => {
     // Start from a run that genuinely returned nothing, so the two per-section
     // "None from this run" lines are the ones on screen when the retry fails.
-    endpoints.getInvocationLogs.mockResolvedValueOnce({ data: { stderr: '', log_entries: [] } })
+    endpoints.getInvocationLogs.mockResolvedValue({ data: { stderr: '', log_entries: [] } })
     const { wrapper } = await boot('/functions/alpha/test')
     await wrapper.findAll('button').find((b) => b.text().includes('Run')).trigger('click')
-    await settle()
-    expect(wrapper.text()).toContain('None from this run')
+    expect(await waitForText(wrapper, 'None from this run')).toBe(true)
     endpoints.getInvocationLogs.mockRejectedValueOnce(new Error('logs endpoint 503'))
     await wrapper.findAll('button').find((b) => b.text().includes('Reload')).trigger('click')
     await settle()

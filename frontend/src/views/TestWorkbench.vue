@@ -385,12 +385,18 @@
                 Run the function to see what it logged.
               </p>
               <p
+                v-else-if="selectedRun.logsState === 'loading'"
+                class="text-xs text-foreground-muted"
+              >
+                Reading the execution record.
+              </p>
+              <p
                 v-else-if="!selectedRun.executionId"
                 class="text-xs text-foreground-muted leading-snug"
               >
                 This run got no execution id back, so there is no record to read logs from. The response panel above holds the transport error.
               </p>
-              <template v-else>
+              <template v-else-if="selectedRun.logsState !== 'loading'">
                 <div>
                   <div class="flex flex-wrap items-baseline justify-between gap-x-3">
                     <h3 class="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
@@ -452,7 +458,7 @@
                   v-if="!logsError && !selectedRun.structured.length && !selectedRun.stderr.length"
                   class="text-xs text-foreground-muted leading-snug"
                 >
-                  Either the handler logged nothing, or its execution row had not been written yet when this page asked. Choose Reload to look again.
+                  This run logged nothing. Add orva.log.info() or console.log() to the handler and run it again.
                 </p>
               </template>
             </div>
