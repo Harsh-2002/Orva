@@ -323,11 +323,27 @@
           <p class="doc-lede">
             The bundled
             <code class="doc-chip">orva</code>
-            module exposes three primitives every function can use without
-            extra dependencies: a per-function key/value store, in-process
-            calls to other Orva functions, and a fire-and-forget background
-            job queue. Routes through a process-signed, function-scoped credential
-            injected at worker spawn time.
+            The bundled
+            <code class="doc-chip">orva</code>
+            module is importable with no extra dependencies. This section
+            covers the four primitives most functions reach for: a
+            per-function key/value store, in-process calls to other Orva
+            functions, a fire-and-forget background job queue, and structured
+            logging. The first three reach orvad over loopback with a
+            process-signed, function-scoped credential injected at worker
+            spawn time;
+            <code class="doc-chip">orva.log.{debug,info,warn,error}(msg, fields)</code>
+            instead writes to stderr and is parsed back out server-side, so it
+            needs no network access and lands under
+            <strong>Structured logs</strong> in the test workbench and in the
+            invocation drawer's <strong>Logs</strong> panel. The module also
+            exports
+            <code class="doc-chip">crons</code>,
+            <code class="doc-chip">trace</code>,
+            <code class="doc-chip">secrets</code>,
+            <code class="doc-chip">webhook</code>
+            and
+            <code class="doc-chip">context</code>.
           </p>
         </div>
       </div>
@@ -380,9 +396,9 @@
           Browse / inspect / edit / delete / set keys without leaving
           the dashboard at
           <code class="doc-chip">/web/functions/&lt;name&gt;/kv</code>
-          (or click the
-          <code class="doc-chip">KV</code>
-          button in the editor's action bar). REST mirror at
+          (or open
+          <code class="doc-chip">Bindings → KV store</code>
+          in the editor's action bar). REST mirror at
           <code class="doc-chip">GET/PUT/DELETE /api/v1/functions/&lt;id&gt;/kv[/&lt;key&gt;]</code>;
           MCP tools
           <code class="doc-chip">kv_list</code> /

@@ -83,7 +83,7 @@ Every transient error includes a `hint` field telling the operator what to chang
 - `POOL_AT_CAPACITY`: "inspect pool limiting_reason; raise max_warm only for operator_max, otherwise add host capacity or reduce worker limits"
 - `MEMORY_EXHAUSTED`: "deploy fewer concurrent functions or increase host RAM; see /api/v1/system/metrics.json host.mem_*"
 - `BUILD_QUEUE_FULL`: "wait for current builds to drain; consider raising NumCPU or staggering deploys"
-- `WORKER_CRASHED`: "check stderr in the latest execution log; common causes: process.exit, OOM, syntax error in handler"
+- `WORKER_CRASHED`: "check stderr in the latest execution log; common causes: process.exit, OOM, syntax error in handler" — you do not have to guess which execution that was: the failing response itself carries `X-Orva-Execution-ID` (set for every invoke that reaches the sandbox, timeouts and crashes included), and the crashed run's stderr is stored under that same id, so pass it to `GET /api/v1/executions/{id}/logs`
 - `EGRESS_POLICY_UNAVAILABLE`: "see GET /api/v1/firewall/status (last_compile_error) — fix the offending rule, then POST /api/v1/firewall/resolve". nsjail's NSTUN stack is default-**allow**, so a missing policy would mean no egress filtering at all; Orva fails the invocation closed instead. `GET /api/v1/firewall/status` reports `enforced`, `policy_generation`, `policy_stale` and `unenforced_rules`.
 
 ## Backward-compatibility

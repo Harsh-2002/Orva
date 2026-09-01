@@ -532,7 +532,8 @@ orva rollback greeter --code-hash 9f8e7d…
 
 A fixture bundles a method, sub-path, headers, and body under a name so
 you can replay a request without retyping it — the same presets the
-dashboard's Test pane stores and the `test_function_with_fixture` MCP
+dashboard's test workbench saves under **Saved requests**
+(`/web/functions/<name>/test`) and the `test_function_with_fixture` MCP
 tool reads.
 
 ```bash
