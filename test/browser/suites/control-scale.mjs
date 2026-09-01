@@ -35,6 +35,18 @@ const LADDERS = {
   coarse: [32, 36, 40, 44],
 }
 
+// Each rung carries a type size, and Button.vue is the authority: xs/sm are
+// text-xs, md is text-sm, lg is text-base. The ladder was pinned and the type
+// was not, so bespoke classes drifted -- eight of them, from 10px to 12.5px,
+// putting two sizes in one toolbar and three in one docs page. Height alone is
+// not proportion.
+// 22.8 is deliberately absent. The ladder above names it the "text" rung: a
+// control that IS text -- a row link, a table-cell action -- and takes the type
+// size of whatever it sits in, not a button's. The boxed rungs start at xs.
+const RUNG_FONT = { 26.6: 11.4, 30.4: 11.4, 38.0: 13.3, 45.6: 15.2 }
+// A tenth of a pixel is a rounding artefact; a whole one is a different token.
+const FONT_TOL = 0.35
+
 // Half a pixel is sub-pixel layout; a whole one is a decision. 1.2 leaves room
 // for a border resolving differently without letting a real rung slip.
 const TOL = 1.2
@@ -49,7 +61,7 @@ const EXEMPT = [
   'dns-chip-x',
 ]
 
-const PROBE = ({ ladder, tol, exempt }) => {
+const PROBE = ({ ladder, tol, exempt, rungFont, fontTol }) => {
   const out = []
   const vis = (el) => {
     const s = getComputedStyle(el)
@@ -93,7 +105,25 @@ const PROBE = ({ ladder, tol, exempt }) => {
 
     const near = ladder.reduce((a, b) => (Math.abs(b - r.height) < Math.abs(a - r.height) ? b : a))
     const delta = r.height - near
-    if (Math.abs(delta) <= tol) continue
+
+    // On the rung: the type has to match it too. Skipped for an icon-only
+    // control, where font-size renders nothing and is not a proportion.
+    if (Math.abs(delta) <= tol) {
+      const want = rungFont[near]
+      const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+      if (want && hasText) {
+        const fs = parseFloat(cs.fontSize)
+        if (Math.abs(fs - want) > fontTol) {
+          const key = `f|${describe(el)}|${fs}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            out.push(`${describe(el)} "${(el.textContent || '').trim().slice(0, 14)}" is ` +
+              `${fs}px on the ${near}px rung, which takes ${want}px`)
+          }
+        }
+      }
+      continue
+    }
 
     const key = `${describe(el)}|${r.height.toFixed(1)}`
     if (seen.has(key)) continue
@@ -111,8 +141,9 @@ export async function onPage({ page, route, viewport, report }) {
   if (viewport.name !== 'laptop' && viewport.name !== 'phone') return
 
   const kind = viewport.touch ? 'coarse' : 'fine'
-  const bad = await page.evaluate(PROBE, { ladder: LADDERS[kind], tol: TOL, exempt: EXEMPT })
+  const bad = await page.evaluate(PROBE, { ladder: LADDERS[kind], tol: TOL, exempt: EXEMPT,
+    rungFont: kind === 'fine' ? RUNG_FONT : {}, fontTol: FONT_TOL })
 
   report.record('control-scale', `${viewport.name} ${route.name}`,
-    `controls sit on the ${kind}-pointer ladder`, bad)
+    `controls sit on the ${kind}-pointer ladder, and take its type size`, bad)
 }

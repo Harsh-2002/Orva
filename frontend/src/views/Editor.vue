@@ -356,7 +356,7 @@
             >{{ buildLogs[buildLogs.length - 1] }}</span>
             <button
               type="button"
-              class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-[11px] text-link hover:text-foreground-strong transition-colors shrink-0"
+              class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
               @click="buildModalOpen = true"
             >
               View log
@@ -399,7 +399,7 @@
         <button
           v-if="lastRun?.failed"
           type="button"
-          class="touch-expand-sm inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 disabled:opacity-50"
+          class="touch-expand-sm inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 disabled:opacity-50"
           :disabled="suggestingFix"
           title="Build a debug prompt from the source, the request and this run's stderr"
           @click="suggestFix"
@@ -410,7 +410,7 @@
         <router-link
           v-if="fnId && form.name"
           :to="{ name: 'function-test', params: { name: form.name } }"
-          class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-[11px] text-link hover:text-foreground-strong transition-colors shrink-0"
+          class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
         >
           Open workbench →
         </router-link>
@@ -2701,7 +2701,8 @@ const resetForm = async () => {
   border: 1px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
   background: color-mix(in srgb, var(--color-primary) 18%, transparent);
   color: var(--color-foreground);
-  font-size: 11px;
+  /* 0.75rem: 26.6px is the h-7 rung, same as Button size="xs". */
+  font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
