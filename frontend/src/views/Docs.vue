@@ -323,8 +323,6 @@
           <p class="doc-lede">
             The bundled
             <code class="doc-chip">orva</code>
-            The bundled
-            <code class="doc-chip">orva</code>
             module is importable with no extra dependencies. This section
             covers the four primitives most functions reach for: a
             per-function key/value store, in-process calls to other Orva

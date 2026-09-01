@@ -9,11 +9,11 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.08.30..HEAD` is the range for
+pruned with their releases — so `git log v2026.09.01..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
-## Unreleased
+## v2026.09.01
 
 ### Added
 
@@ -71,12 +71,48 @@ before it.
   send, red for a 5xx it did not. A run whose response carried no timing header
   now reads `503` rather than `503 · ?ms`, which read as a measurement.
 
+- **The docs told you the SDK was already imported. It is not.** `docs/reference.md`
+  and the in-product assistant's prompt both said every function has the `orva`
+  module "pre-imported". It is pre-*installed*: neither runtime adapter injects a
+  global. Measured on a real sandbox, a handler that calls `orva.kv` without the
+  import returns HTTP 500 — `NameError: name 'orva' is not defined` on Python,
+  `ReferenceError: orva is not defined` on Node. Because that sentence was in the
+  prompt the in-product assistant generates from, it did not produce a stale
+  sentence; it produced code that does not run. Both now say to write
+  `import orva` / `const orva = require('orva')`, and a test fails on the old
+  wording.
+
+- **The docs sent you to the wrong place for your logs.** "Logs land on the
+  Activity page and on stdout" was wrong twice in one sentence: both adapters
+  reroute stdout onto stderr because stdout carries the framed response, so a
+  `print()` never reaches an observable stdout — and `/activity` is the API and
+  MCP audit trail, not handler output. It was the one line in the reference that
+  answered "where do my log lines appear". It now names the Invocations page's
+  Stderr panel and the workbench's Console output.
+
+- **Thirteen further documentation claims corrected**, each verified against the
+  source rather than read: the editor's Test pane and its tablet two-pane split
+  no longer exist, the `WORKER_CRASHED` hint now says the failing response
+  carries the execution id you need, and `docs/TESTING.md`'s local equivalent for
+  the `ui` job omitted `npm test` — which CI runs, so a frontend change checked
+  only through the Makefile had run no frontend test at all.
+
 - **`Deploy new version` is now `Deploy`.** It was the only place in the product
   that said it that way; the CLI, the API route and the MCP tool have always
-  been `deploy`. The version it created is reported in the build log where it is
-  a measured fact — `v7 live in 1240ms` — rather than promised on a button. The
+  been `deploy`. Which version it created is reported where it is a measured
+  fact — `v7 live` in the file header — rather than promised on a button. The
   version list also refreshes after a deploy, which it previously did on mount,
   on window focus and after a rollback, but not after the thing that changes it.
+
+### Upgrade notes
+
+- **If the in-product assistant wrote a function for you before this release,
+  check that it imports the SDK.** The prompt it generated from claimed the
+  `orva` module was already imported, so a generated handler that calls
+  `orva.kv`, `orva.invoke`, `orva.jobs` or `orva.log` may be missing its
+  `import orva` (Python) or `const orva = require('orva')` (Node). Such a handler
+  fails at invoke time with `NameError` / `ReferenceError`, not at deploy time,
+  so a function can sit deployed and broken. Adding the import is the whole fix.
 
 
 ## v2026.08.30
