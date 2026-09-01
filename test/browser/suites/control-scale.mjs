@@ -110,7 +110,20 @@ const PROBE = ({ ladder, tol, exempt, rungFont, fontTol }) => {
     // control, where font-size renders nothing and is not a proportion.
     if (Math.abs(delta) <= tol) {
       const want = rungFont[near]
-      const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+      // Text that is actually painted, anywhere inside -- not just a direct
+      // child, because most labels sit in a span, and not merely present,
+      // because a label hidden at this width leaves an icon-only control.
+      // Both halves were learned the hard way: the direct-child version
+      // skipped six of the controls this rule exists for, and the
+      // textContent version flagged a copy button whose label is
+      // display:none above 640px.
+      const painted = (n) => {
+        if (n.classList.contains('sr-only')) return false
+        const s2 = getComputedStyle(n)
+        return s2.display !== 'none' && s2.visibility !== 'hidden'
+      }
+      const hasText = [el, ...el.querySelectorAll('*')].some((n) =>
+        painted(n) && [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim()))
       if (want && hasText) {
         const fs = parseFloat(cs.fontSize)
         if (Math.abs(fs - want) > fontTol) {
