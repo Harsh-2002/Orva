@@ -2639,7 +2639,10 @@ const resetForm = async () => {
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-hover);
   color: var(--color-foreground-muted);
-  font-size: 11px;
+  /* 0.75rem, not 11px: Button size="sm" sits beside these in the same row at
+     the same 30.4px height, and an arbitrary 11px put two type sizes in one
+     toolbar. */
+  font-size: 0.75rem;
   font-weight: 500;
   white-space: nowrap;
   transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
