@@ -259,11 +259,16 @@ the routes section below.
 timeout or a sandbox failure, which answer from the invoke handler rather than
 the proxy. Pass it to `GET /api/v1/executions/{id}/logs` to read what the
 handler wrote — `stderr` for `console.log`/`print`, and `log_entries` for
-`orva.log.*`. A successful invoke also carries `X-Orva-Duration-MS`.
+`orva.log.*`. It used to be set only on the success path, so the runs whose
+logs you most need — a crashed sandbox, a timeout — returned no id and their
+stored stderr was unreachable.
 
-It used to be set only on the success path, so the runs whose logs you most
-need — a crashed sandbox, a timeout — returned no id and their stored stderr
-was unreachable.
+A non-streaming response that the handler produced — whatever status it
+returned — also carries `X-Orva-Duration-MS`. A streaming response carries
+`X-Orva-Ttfb-Ms` instead, because its headers flush on the first chunk and a
+duration written there would measure time-to-first-byte; total streaming
+duration is on the execution row. Neither duration header is set when the
+invoke handler answers for itself.
 
 ## Deployments
 
