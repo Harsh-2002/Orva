@@ -3,15 +3,17 @@
 # likely to behave differently under a hypervisor-class runtime than
 # under runc:
 #
-#   1. egress     — network_mode=egress, fetch https://example.com.
+#   1. baseline   — deploy and invoke a plain handler, so a failure in the
+#                   legs below is attributable to the feature, not the runtime.
+#   2. egress     — network_mode=egress, fetch https://example.com.
 #                   Highest-risk leg: nsjail's --user_net needs
 #                   /dev/net/tun in the guest. Cloud Hypervisor's
 #                   minimal device set may lack it.
-#   2. secrets    — set a secret, invoke a handler that reads
+#   3. secrets    — set a secret, invoke a handler that reads
 #                   process.env.FOO, assert echoed.
-#   3. kv         — put then get via /api/v1/_kv/.
-#   4. cron       — 1-min cron schedule, wait, verify an execution row.
-#   5. f2f        — function A invokes function B via the SDK.
+#
+# kv, cron and f2f were listed here but never implemented. Do not read this
+# header as coverage: grep `record ` for the legs that actually run.
 #
 # Usage:
 #   bash test/kata-bench/extended-functional.sh <base_url> <runtime_label>
