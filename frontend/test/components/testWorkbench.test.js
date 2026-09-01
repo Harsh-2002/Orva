@@ -253,6 +253,24 @@ describe('TestWorkbench', () => {
     expect(wrapper.text()).not.toContain('None from this run')
   })
 
+  // The two tests above drive the manual Reload. The automatic poll records
+  // its failure on the run instead, and that is the one an operator hits
+  // without touching anything.
+  it('reports a failed automatic log fetch rather than claiming silence', async () => {
+    endpoints.getInvocationLogs.mockRejectedValue(Object.assign(new Error('req failed'), {
+      response: { status: 500, data: { error: { message: 'log store unavailable' } } },
+    }))
+    const { wrapper } = await boot('/functions/alpha/test')
+    await wrapper.findAll('button').find((b) => b.text().includes('Run')).trigger('click')
+    await settle()
+
+    expect(wrapper.text()).toContain('Function logs could not be loaded')
+    expect(wrapper.text()).toContain('log store unavailable')
+    // Nothing may report on what the handler wrote: the fetch never found out.
+    expect(wrapper.text()).not.toContain('This run logged nothing')
+    expect(wrapper.text()).not.toContain('None from this run')
+  })
+
   it('runs on Ctrl or Cmd + Enter, and stops once the view is left', async () => {
     const { go } = await boot('/functions/alpha/test')
     ctrlEnter()

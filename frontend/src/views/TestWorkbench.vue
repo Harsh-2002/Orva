@@ -400,9 +400,9 @@
 
             <div class="px-4 py-3 space-y-4">
               <LoadError
-                v-if="logsError"
+                v-if="logsProblem"
                 what="Function logs"
-                :message="logsError"
+                :message="logsProblem"
                 :on-retry="reloadLogs"
               />
 
@@ -456,7 +456,7 @@
                   <!-- Not v-else: a fetch that failed knows nothing about what
                        the handler logged, so it must not claim "none". -->
                   <p
-                    v-else-if="!logsError"
+                    v-else-if="!logsProblem"
                     class="mt-2 text-xs text-foreground-muted leading-snug"
                   >
                     None from this run. Call orva.log.info() in the handler and the level, message and fields land here.
@@ -475,7 +475,7 @@
                     class="mt-2 max-h-72 overflow-auto scrollable rounded-md border border-border bg-background p-3 font-mono text-[11px] text-foreground whitespace-pre-wrap break-words"
                   >{{ selectedRun.stderr.join('\n') }}</pre>
                   <p
-                    v-else-if="!logsError"
+                    v-else-if="!logsProblem"
                     class="mt-2 text-xs text-foreground-muted leading-snug"
                   >
                     None from this run. The runtime routes both onto stderr, because stdout carries the handler's response.
@@ -483,7 +483,7 @@
                 </div>
 
                 <p
-                  v-if="!logsError && !selectedRun.structured.length && !selectedRun.stderr.length"
+                  v-if="!logsProblem && !selectedRun.structured.length && !selectedRun.stderr.length"
                   class="text-xs text-foreground-muted leading-snug"
                 >
                   This run logged nothing. Add orva.log.info() or console.log() to the handler and run it again.
@@ -608,6 +608,13 @@ const req = computed(() => store.requests[fnId.value] || blankRequest)
 const fixtures = computed(() => store.fixturesFor(fnId.value))
 const runs = computed(() => store.runsFor(fnId.value))
 const selectedRun = computed(() => runs.value[selectedIdx.value] || null)
+
+// The manual Reload records a failure here; the automatic poll records it on
+// the run. Either one means the panel below must not report on what the
+// handler wrote -- a fetch that failed never found out, and saying "logged
+// nothing" there is the same lie the whole log panel exists to end.
+const logsProblem = computed(() => logsError.value
+  || (selectedRun.value?.logsState === 'error' ? selectedRun.value.logsError : ''))
 // fnClient sets no validateStatus, so axios rejects every 4xx/5xx; the store
 // formats that body the same way it formats a success body.
 const responseText = computed(() => selectedRun.value?.error || selectedRun.value?.body || '')
@@ -712,8 +719,9 @@ const deleteFixture = async (fx) => {
   }
 }
 
-// The store fetches logs once, straight after the response returns, while the
-// execution row is still being written asynchronously. This is the retry.
+// The store polls briefly after the response returns, because the execution
+// row is written asynchronously. This is the manual retry, for a line that
+// landed after that window closed.
 const reloadLogs = async () => {
   const target = selectedRun.value
   if (!target?.executionId || reloadingLogs.value) return
