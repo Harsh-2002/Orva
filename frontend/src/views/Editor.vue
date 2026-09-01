@@ -184,6 +184,19 @@
 
         <div class="w-px h-5 bg-border mx-1" />
 
+        <!-- The workbench was only reachable from the result strip, which is
+             empty until you have already run something. Named for the page it
+             lands on, the way that page's own button back here says Editor. -->
+        <Button
+          v-if="fnId && form.name"
+          variant="secondary"
+          size="sm"
+          title="Open the request workbench for this function"
+          @click="openWorkbench"
+        >
+          <FlaskConical class="w-4 h-4" />
+          Test
+        </Button>
         <Button
           variant="secondary"
           size="sm"
@@ -191,13 +204,19 @@
         >
           Reset
         </Button>
+        <!-- min-w pins the box across the Deploy/Building label swap: without it
+             the toolbar reflowed on every click, and wrapped at phone width. -->
         <Button
           size="sm"
+          class="min-w-[7.25rem]"
           :loading="deploying"
           @click="deployFunction"
         >
-          <UploadCloud class="w-4 h-4" />
-          Deploy
+          <UploadCloud
+            v-if="!deploying"
+            class="w-4 h-4"
+          />
+          {{ deploying ? 'Building' : 'Deploy' }}
         </Button>
       </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
@@ -234,8 +253,8 @@
     </div>
 
 
-    <!-- Code editor takes the main area. No sidebar, no scroll inside the
-         page — the editor and the bottom terminal share vertical space. -->
+    <!-- Code editor takes the whole main area. Its last row is the run strip,
+         so the card is one instrument: name, surface, result. -->
     <div class="flex-1 flex flex-col min-h-0 mt-3 bg-background border border-border rounded-lg overflow-hidden shadow-sm">
       <div class="h-9 border-b border-border flex items-center justify-between px-4 bg-surface shrink-0">
         <div class="text-xs font-mono text-foreground-muted flex items-center gap-2">
@@ -246,8 +265,28 @@
             class="text-foreground-muted"
           >· template: {{ templateId }}</span>
         </div>
-        <div class="text-[10px] text-foreground-muted font-mono">
-          {{ code.length }} chars
+        <div class="flex items-center gap-3 shrink-0">
+          <!-- A failure survives the modal being dismissed. Without this, the
+               only record of a failed deploy was a dialog you had just closed. -->
+          <button
+            v-if="!deploying && buildError"
+            type="button"
+            class="touch-expand-sm inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[10px] font-medium text-danger-fg hover:bg-surface-hover transition-colors"
+            @click="buildModalOpen = true"
+          >
+            <span class="w-1.5 h-1.5 rounded-full bg-danger-fg" />
+            Build failed
+          </button>
+          <span
+            v-else-if="deploying"
+            class="text-[10px] text-foreground-muted font-medium flex items-center gap-1.5"
+          >
+            <span class="run-spinner" />
+            Building
+          </span>
+          <span class="text-[10px] text-foreground-muted font-mono">
+            {{ code.length }} chars
+          </span>
         </div>
       </div>
       <!-- The editor is always dark, in both themes. On paper that reads as a
@@ -262,70 +301,11 @@
           class="flex-1 min-h-0"
         />
       </div>
-    </div>
-
-    <!-- Bottom drawer: build logs, plus a thin strip for the last test run.
-         The request workbench that used to be crushed in here is its own
-         route now, at /functions/:name/test. -->
-    <div class="mt-3 bg-background border border-border rounded-lg overflow-hidden shrink-0">
-      <div class="terminal-bar h-10 border-b border-border flex items-center px-2 bg-surface">
-        <h2 class="px-3 text-xs font-medium text-foreground-strong flex items-center gap-1.5">
-          <Terminal class="w-3 h-3" />
-          Build
-          <span
-            v-if="buildLogs.length"
-            class="ml-1 text-[10px] px-1.5 rounded bg-surface-hover text-foreground-muted"
-          >{{ buildLogs.length }}</span>
-        </h2>
-        <button
-          class="ml-auto p-1.5 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors touch-expand-iconbtn inline-flex items-center justify-center"
-          :title="terminalOpen ? 'Collapse' : 'Expand'"
-          :aria-label="terminalOpen ? 'Collapse build log' : 'Expand build log'"
-          :aria-expanded="terminalOpen"
-          aria-controls="build-log"
-          @click="terminalOpen = !terminalOpen"
-        >
-          <ChevronDown
-            class="w-4 h-4 transition-transform"
-            :class="terminalOpen ? 'rotate-0' : 'rotate-180'"
-          />
-        </button>
-      </div>
-      <!-- max-h, not h: with the request composer gone nothing holds a fixed
-           height open, so two log lines would sit in a 182px hole. -->
-      <div
-        v-show="terminalOpen"
-        id="build-log"
-        class="max-h-64 overflow-y-auto bg-background p-3 font-mono text-xs space-y-0.5"
-      >
-        <!-- A build failure gets its own line here rather than the run
-             result's, where it drew a Suggest-fix button for a run that
-             never happened. -->
-        <div
-          v-if="buildError"
-          class="text-danger-fg whitespace-pre-wrap break-words"
-        >
-          {{ buildError }}
-        </div>
-        <div
-          v-if="!buildLogs.length"
-          class="text-foreground-muted"
-        >
-          No build activity yet. Deploy the function to stream logs here.
-        </div>
-        <div
-          v-for="(log, idx) in buildLogs"
-          :key="idx"
-          class="text-foreground-muted whitespace-pre-wrap break-words"
-        >
-          {{ log }}
-        </div>
-      </div>
-
-      <!-- Last-run strip. One line on purpose: enough to confirm a deploy and
-           leave, with the workbench a click away for anything longer. The row
-           gap clears 11.4px because touch-expand-sm reaches 4px past each
-           control, and two wrapped rows at gap-y-2 would overlap by 0.4px. -->
+      <!-- Last-run strip, the editor card's own status bar. One line on
+           purpose: enough to confirm a deploy and leave, with the workbench a
+           click away for anything longer. The row gap clears 11.4px because
+           touch-expand-sm reaches 4px past each control, and two wrapped rows
+           at gap-y-2 would overlap by 0.4px. -->
       <div class="flex flex-wrap items-center gap-x-3 gap-y-3 border-t border-border bg-surface/60 px-3 py-2">
         <button
           :disabled="!canTest || testbench.invoking"
@@ -350,42 +330,67 @@
           aria-live="polite"
           class="flex flex-wrap items-center gap-x-3 gap-y-1 flex-1 min-w-0"
         >
-          <span
-            class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5 shrink-0"
-            :class="lastRunTone.text"
-          >
+          <!-- A build owns the strip while it runs: the previous run's verdict
+               is about code that is being replaced, and reads as this build's. -->
+          <template v-if="deploying">
+            <span class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5 shrink-0 text-foreground-muted">
+              <span class="run-spinner" />
+              Building
+            </span>
+            <!-- Hidden on a phone for the same reason as the hint below: at
+                 390px it truncated to "Build …", which reports nothing. The
+                 spinner says it is building; View log says the rest. -->
             <span
-              class="w-1.5 h-1.5 rounded-full"
-              :class="lastRunTone.dot"
-            />
-            {{ lastRunTone.word }}
-          </span>
-          <span
-            v-if="lastRunMeta"
-            class="text-[10px] text-foreground-muted font-mono shrink-0"
-          >{{ lastRunMeta }}</span>
-          <span
-            v-if="lastRunStale"
-            class="text-[10px] text-foreground-muted shrink-0"
-          >ran before this deploy</span>
-          <code
-            v-if="resultExcerpt"
-            :title="resultExcerpt"
-            class="font-mono text-[11px] truncate flex-1 min-w-0"
-            :class="lastRun?.failed ? 'text-danger-fg' : 'text-foreground'"
-          >{{ resultExcerpt }}</code>
-          <span
-            v-else-if="lastRun"
-            class="text-[11px] text-foreground-muted flex-1 min-w-0 truncate"
-          >No output. This run printed nothing and returned an empty body.</span>
-          <span
-            v-else
-            class="text-[11px] text-foreground-muted flex-1 min-w-0 truncate"
-          >Headers, fixtures, history and full logs live in the workbench.</span>
-          <span
-            v-if="runLines.length > 1"
-            class="text-[10px] text-foreground-muted shrink-0"
-          >{{ runLines.length }} log lines</span>
+              class="hidden sm:block font-mono text-[11px] text-foreground-muted flex-1 min-w-0 truncate"
+            >{{ buildLogs[buildLogs.length - 1] }}</span>
+            <button
+              type="button"
+              class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-[11px] text-link hover:text-foreground-strong transition-colors shrink-0"
+              @click="buildModalOpen = true"
+            >
+              View log
+            </button>
+          </template>
+          <template v-else>
+            <span
+              class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5 shrink-0"
+              :class="lastRunTone.text"
+            >
+              <span
+                class="w-1.5 h-1.5 rounded-full"
+                :class="lastRunTone.dot"
+              />
+              {{ lastRunTone.word }}
+            </span>
+            <span
+              v-if="lastRunMeta"
+              class="text-[10px] text-foreground-muted font-mono shrink-0"
+            >{{ lastRunMeta }}</span>
+            <span
+              v-if="lastRunStale"
+              class="text-[10px] text-foreground-muted shrink-0"
+            >ran before this deploy</span>
+            <code
+              v-if="resultExcerpt"
+              :title="resultExcerpt"
+              class="font-mono text-[11px] truncate flex-1 min-w-0"
+              :class="lastRun?.failed ? 'text-danger-fg' : 'text-foreground'"
+            >{{ resultExcerpt }}</code>
+            <span
+              v-else-if="lastRun"
+              class="text-[11px] text-foreground-muted flex-1 min-w-0 truncate"
+            >No output. This run printed nothing and returned an empty body.</span>
+            <!-- The hint is the one thing here worth losing on a phone: at 390px
+                 it truncated to "Headers, fixtu…", which teaches nobody anything. -->
+            <span
+              v-else
+              class="hidden sm:block text-[11px] text-foreground-muted flex-1 min-w-0 truncate"
+            >Headers, fixtures, history and full logs live in the workbench.</span>
+            <span
+              v-if="runLines.length > 1"
+              class="text-[10px] text-foreground-muted shrink-0"
+            >{{ runLines.length }} log lines</span>
+          </template>
         </div>
         <button
           v-if="lastRun?.failed"
@@ -399,7 +404,7 @@
           Suggest fix
         </button>
         <router-link
-          v-if="isEditing && form.name"
+          v-if="fnId && form.name"
           :to="{ name: 'function-test', params: { name: form.name } }"
           class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-[11px] text-link hover:text-foreground-strong transition-colors shrink-0"
         >
@@ -409,6 +414,94 @@
     </div>
 
     <!-- ─────────────── Modals ─────────────── -->
+
+    <!-- Build log. Raised by a failure, or on demand from the strip; never by
+         starting a build. A pure reader of the deploy's state -- neither
+         runDeploy nor streamBuild consults buildModalOpen, so dismissing this
+         can only hide the log, never cancel what it is showing. -->
+    <Modal
+      v-model="buildModalOpen"
+      title="Build log"
+      :icon="Terminal"
+      size="lg"
+    >
+      <div class="space-y-3">
+        <div
+          class="flex items-start gap-2"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            v-if="deploying"
+            class="run-spinner mt-1 shrink-0 text-foreground-muted"
+          />
+          <Check
+            v-else-if="buildState === 'ok'"
+            class="w-4 h-4 mt-0.5 shrink-0 text-success-fg"
+          />
+          <X
+            v-else-if="buildState === 'failed'"
+            class="w-4 h-4 mt-0.5 shrink-0 text-danger-fg"
+          />
+          <div class="min-w-0">
+            <p
+              class="text-sm font-medium break-words"
+              :class="buildState === 'failed' ? 'text-danger-fg' : 'text-foreground-strong'"
+            >
+              {{ buildHeadline }}
+            </p>
+            <p
+              v-if="deploying"
+              class="text-xs text-foreground-muted mt-1"
+            >
+              Closing this does not cancel the build. It keeps running, and a failure brings this back.
+            </p>
+          </div>
+        </div>
+        <div
+          ref="buildLogBox"
+          class="scrollable max-h-64 overflow-y-auto rounded-md border border-border bg-surface px-3 py-2 font-mono text-[11px] leading-relaxed"
+        >
+          <p
+            v-if="!buildLogs.length"
+            class="text-foreground-muted"
+          >
+            Waiting for the builder.
+          </p>
+          <p
+            v-for="(log, idx) in buildLogs"
+            :key="idx"
+            class="text-foreground-muted whitespace-pre-wrap break-words"
+          >
+            {{ log }}
+          </p>
+        </div>
+      </div>
+      <template #footer>
+        <Button
+          variant="ghost"
+          @click="buildModalOpen = false"
+        >
+          Close
+        </Button>
+        <Button
+          v-if="buildState === 'failed'"
+          variant="secondary"
+          :loading="suggestingBuildFix"
+          @click="suggestBuildFix"
+        >
+          <Sparkles class="w-4 h-4" />
+          Suggest fix
+        </Button>
+        <Button
+          v-if="buildState === 'ok' && fnId && form.name"
+          @click="openWorkbench"
+        >
+          Open workbench →
+        </Button>
+      </template>
+    </Modal>
+
     <Modal
       v-model="modals.settings"
       title="Function configuration"
@@ -1064,17 +1157,36 @@
         </Button>
       </template>
     </Modal>
+
+    <!-- The build modal closes itself on success, so the version it made lands
+         here rather than vanishing with it. -->
+    <Toast
+      :visible="!!deployToast"
+      :title="deployToast?.version ? `v${deployToast.version} live` : 'Deployed'"
+      action-label="Open workbench"
+      @action="openWorkbench(); deployToast = null"
+      @dismiss="deployToast = null"
+    >
+      Built in {{ deployToast?.durationMs }}ms. The full build log is on the
+      <router-link
+        :to="{ name: 'function-deployments', params: { name: form.name } }"
+        class="text-link underline underline-offset-2"
+      >
+        Deployments
+      </router-link> page.
+    </Toast>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, h, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare } from '@lucide/vue'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare, FlaskConical } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
+import Toast from '@/components/common/Toast.vue'
 import PythonIcon from '@/components/icons/brand/PythonIcon.vue'
 import NodeIcon from '@/components/icons/brand/NodeIcon.vue'
 
@@ -1117,7 +1229,7 @@ import { generateFunctionName } from '@/utils/funName'
 import { runtimeLabel } from '@/utils/runtime'
 import { templates, defaultCode, categoryOrder } from '@/templates'
 import { rollbackFunction, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
-import { copyFixSuggestionToClipboard } from '@/utils/aiPrompts'
+import { copyFixSuggestionToClipboard, copyBuildFixToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
 import { useTestbenchStore } from '@/stores/testbench'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
@@ -1188,13 +1300,13 @@ const onDocKey = (e) => {
   if (e.key === 'Escape') closeMenus()
 }
 
-// One panel left, so no tablist: the drawer is Build, and it auto-opens on
-// deploy. Collapsed below md because at 375x667 an open panel plus the wrapped
-// toolbar leaves the code surface smaller than the log under it. Read once at
-// setup so a mid-session rotate cannot yank it from under the operator.
-const terminalOpen = ref(
-  typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches,
-)
+// The build log is a modal Deploy opens, not a panel that stands there all day
+// holding "No build activity yet." Nothing in the deploy path reads this ref, so
+// closing it cannot reach the build.
+const buildModalOpen = ref(false)
+// Success closes the modal and hands the version to a toast; failure keeps the
+// log on screen, because that is the one time you need to read it.
+const deployToast = ref(null)
 
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
@@ -1228,9 +1340,50 @@ const buildLogs = ref([])
 // A build failure used to be written into the Test tab's response ref, which
 // painted a build error under a Suggest-fix button for a run that never ran.
 const buildError = ref('')
+// What the last build produced, so the modal can name the version it made
+// rather than making the operator read it back out of the log.
+const lastBuild = ref(null)
 const lastDeployAt = ref('')
 const urlCopied = ref(false)
 const suggestingFix = ref(false)
+const suggestingBuildFix = ref(false)
+const buildLogBox = ref(null)
+
+// Declared up here, not beside streamBuild: resetEditorState runs from the
+// props watcher during setup, which is before a later `let` has left its TDZ.
+let abortActiveStream = null
+// Bumped by every deploy and by every re-scope, so a build that outlives the
+// editor that started it can tell it is no longer the one on screen.
+let buildEpoch = 0
+
+const buildState = computed(() => {
+  if (deploying.value) return 'running'
+  if (buildError.value) return 'failed'
+  return lastBuild.value ? 'ok' : 'idle'
+})
+const buildHeadline = computed(() => {
+  if (buildState.value === 'running') return 'Building'
+  if (buildState.value === 'failed') return buildError.value
+  const b = lastBuild.value
+  if (!b) return 'No build has run in this session.'
+  const ms = b.durationMs == null ? '' : ` in ${b.durationMs}ms`
+  return b.version ? `v${b.version} live${ms}` : `Build succeeded${ms}`
+})
+
+// Autoscroll: a build log that stops following the newest line is a log you
+// have to chase while it is still being written.
+watch(() => buildLogs.value.length, () => {
+  nextTick(() => {
+    const el = buildLogBox.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+})
+
+const openWorkbench = () => {
+  if (!form.value.name) return
+  buildModalOpen.value = false
+  router.push({ name: 'function-test', params: { name: form.value.name } })
+}
 
 // Invoke URL is built from window.location.origin so it works on localhost,
 // custom IPs/ports, and behind reverse proxies with TLS termination — the
@@ -1618,6 +1771,12 @@ watch(
 // existing function would carry the boilerplate into edit mode. The watcher
 // below fires `immediate: true`, so it covers the initial mount too.
 const resetEditorState = () => {
+  // A build outlives the editor that started it: the router reuses this
+  // instance, so without this the previous function's failure re-opened the
+  // build modal over the next one and blamed it for the error.
+  buildEpoch += 1
+  if (abortActiveStream) abortActiveStream()
+  deploying.value = false
   fnId.value = ''
   form.value = {
     name: '',
@@ -1636,6 +1795,8 @@ const resetEditorState = () => {
   dependencyText.value = ''
   buildLogs.value = []
   buildError.value = ''
+  lastBuild.value = null
+  buildModalOpen.value = false
   lastDeployAt.value = ''
   deployedThisSession.value = false
   versions.value = []
@@ -1883,10 +2044,7 @@ const refreshVersions = async () => {
 // keep a phantom connection open (and so the next page-load gets a fresh
 // view of build state).
 onBeforeUnmount(() => {
-  if (activeStream) {
-    try { activeStream.close() } catch {}
-    activeStream = null
-  }
+  if (abortActiveStream) abortActiveStream()
 })
 
 // Top-level deploy entry. For brand-new functions we open the
@@ -1920,9 +2078,13 @@ const runDeploy = async () => {
     return
   }
 
-  terminalOpen.value = true
+  // The build runs headless. Most finish in well under a second, and a modal
+  // that opens and closes inside that window is a flash, not information --
+  // so Deploy carries its own progress and only a failure raises the log.
+  const epoch = ++buildEpoch
   deploying.value = true
   buildError.value = ''
+  lastBuild.value = null
   buildLogs.value = ['Starting deployment...']
 
   try {
@@ -2000,10 +2162,13 @@ const runDeploy = async () => {
     })
 
     const depId = deployRes.data.deployment_id
+    // The editor may have been re-scoped while the upload was in flight.
+    if (epoch !== buildEpoch) return
     if (!depId) {
       // Legacy synchronous response — older backend without async pipeline.
       buildLogs.value.push(`Deployed! Hash: ${deployRes.data.code_hash || 'unknown'}`)
       deployedThisSession.value = true
+      lastBuild.value = { version: null, durationMs: null }
       deploying.value = false
       return
     }
@@ -2012,10 +2177,12 @@ const runDeploy = async () => {
     // the stream emits `succeeded`. Deploying flag stays true so the
     // Deploy button keeps its loading state.
     buildLogs.value.push(`Build queued (${depId})`)
-    await streamBuild(depId)
+    await streamBuild(depId, epoch)
   } catch (err) {
+    if (epoch !== buildEpoch) return
     buildError.value = err.response?.data?.error?.message || err.message || 'Deployment failed'
     buildLogs.value.push(`Error: ${buildError.value}`)
+    buildModalOpen.value = true
     deploying.value = false
   }
 }
@@ -2027,24 +2194,31 @@ const runDeploy = async () => {
 //   event: succeeded     — final deployment row
 //   event: failed        — final deployment row (with error_message)
 //   event: error         — transport/server error; we fall back to polling
-let activeStream = null
-const streamBuild = (depId) => new Promise((resolve) => {
-  if (activeStream) {
-    try { activeStream.close() } catch {}
-    activeStream = null
-  }
+const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
+  if (abortActiveStream) abortActiveStream()
   const es = new EventSource(`/api/v1/deployments/${depId}/stream`)
-  activeStream = es
+  const mine = () => epoch === buildEpoch
 
   // settled becomes true once we've seen a terminal `succeeded`/`failed`
   // event. After that the server closes the stream — which fires `onerror`
   // with readyState=CLOSED. That's a normal termination, not a failure.
   let settled = false
-  const finish = (ok, payload) => {
-    if (settled) return
+  const release = () => {
     settled = true
     try { es.close() } catch {}
-    activeStream = null
+    abortActiveStream = null
+  }
+  // Abandon the build without reporting it. The caller has moved on; the
+  // deployment itself is unaffected and the server still records its outcome.
+  abortActiveStream = () => {
+    if (settled) return
+    release()
+    resolve()
+  }
+  const finish = (ok, payload) => {
+    if (settled) return
+    release()
+    if (!mine()) { resolve(); return }
     deploying.value = false
     if (ok) {
       deployedThisSession.value = true
@@ -2052,19 +2226,29 @@ const streamBuild = (depId) => new Promise((resolve) => {
       // The button no longer promises a new version, so the result names the
       // one it made; a response without `version` still reports its duration.
       const ms = payload?.duration_ms ?? '?'
+      lastBuild.value = { version: payload?.version || null, durationMs: ms }
       buildLogs.value.push(payload?.version
         ? `✓ v${payload.version} live in ${ms}ms`
         : `✓ Build succeeded in ${ms}ms`)
       refreshVersions()
+      // A finished build is done with the screen. The full log stays reachable
+      // on the Deployments page, so closing loses nothing; the toast carries
+      // the version, which is the one thing only this moment knows.
+      buildModalOpen.value = false
+      deployToast.value = { version: payload?.version || null, durationMs: ms }
     } else {
       const msg = payload?.error_message || 'build failed (see logs)'
       buildError.value = msg
       buildLogs.value.push(`✗ Build failed: ${msg}`)
+      // A dismissed build that never went live has nowhere else to report it:
+      // the strip speaks for the last run, not the last build.
+      buildModalOpen.value = true
     }
     resolve()
   }
 
   es.addEventListener('log', (e) => {
+    if (!mine()) return
     try {
       const line = JSON.parse(e.data)
       const text = `[${line.stream || 'log'}] ${line.line}`
@@ -2221,6 +2405,43 @@ const suggestFix = async () => {
     if (open) router.push({ name: 'ai' })
   } finally {
     suggestingFix.value = false
+  }
+}
+
+// The build's counterpart to suggestFix. Same clipboard handoff, different
+// artefacts: there is no request and no run, so the builder's log stands in for
+// the stderr a failed invocation would have produced.
+const suggestBuildFix = async () => {
+  if (suggestingBuildFix.value || !buildError.value) return
+  suggestingBuildFix.value = true
+  try {
+    const ok = await copyBuildFixToClipboard({
+      source: code.value || '',
+      runtime: form.value.runtime || '',
+      dependencies: dependencyText.value || '',
+      buildLog: buildLogs.value.join('\n'),
+      errorMessage: buildError.value,
+    })
+    if (!ok) {
+      confirmStore.notify({
+        title: 'Copy failed',
+        message: 'Could not write to the clipboard. Try again, or copy the build log by hand.',
+        danger: true,
+      })
+      return
+    }
+    const open = await confirmStore.ask({
+      title: 'Prompt copied',
+      message: 'Paste it into Chat to fix the build inside Orva, or into whichever AI tool you prefer.',
+      confirmLabel: 'Open Chat',
+      cancelLabel: 'Stay here',
+    })
+    if (open) {
+      buildModalOpen.value = false
+      router.push({ name: 'ai' })
+    }
+  } finally {
+    suggestingBuildFix.value = false
   }
 }
 
@@ -2403,6 +2624,7 @@ const resetForm = async () => {
   code.value = ''
   deployedThisSession.value = false
   buildError.value = ''
+  lastBuild.value = null
   setRuntime('python')
 }
 </script>
@@ -2475,9 +2697,9 @@ const resetForm = async () => {
   border-top: 1px solid var(--color-border);
 }
 
-/* Compact Run button in the terminal-tab strip. Smaller than panel-btn
-   but distinguishable via the primary tint so the user spots the
-   action immediately. Sits right-aligned next to the collapse chevron. */
+/* Compact Run button in the editor card's result strip. Smaller than
+   panel-btn but distinguishable via the primary tint so the user spots the
+   action immediately. */
 .run-btn {
   display: inline-flex;
   align-items: center;
@@ -2505,14 +2727,24 @@ const resetForm = async () => {
 
 /* Coarse-pointer floors for the controls this view styles itself. The
    touch-expand-* helpers cover everything that goes through Button /
-   IconButton; these five are scoped-CSS controls that never see them.
-   .terminal-bar and .terminal-tab need `height` reset as well as a
-   min-height because Tailwind's h-9 is a hard height that a min- alone
-   cannot lift. Desktop (fine pointers) is untouched. */
+   IconButton; these two are scoped-CSS controls that never see them.
+   Desktop (fine pointers) is untouched. */
 @media (pointer: coarse) {
+  /* The sm rung, then buy the target: a 44px BOX made Config and Bindings
+     visibly taller than the Test / Reset / Deploy trio beside them, which is
+     the "floor is not the size" mistake DESIGN.md names. */
   .panel-btn {
     height: auto;
-    min-height: 44px;
+    min-height: 36px;
+    position: relative;
+  }
+  .panel-btn::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    left: 0;
+    right: 0;
   }
 
   /* Run sat at 44px inside a 44px bar: a bordered control exactly as tall as
@@ -2531,13 +2763,6 @@ const resetForm = async () => {
     bottom: -4px;
     left: 0;
     right: 0;
-  }
-
-  /* The bar has to be taller than the control it holds, or there is no bar
-     left to see. */
-  .terminal-bar {
-    height: auto;
-    min-height: 48px;
   }
 }
 .run-spinner {

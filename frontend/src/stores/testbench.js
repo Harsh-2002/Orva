@@ -39,6 +39,57 @@ const blankRun = () => ({
   at: null,
 })
 
+const headersObject = (req) => {
+  const out = {}
+  for (const h of req.headers || []) {
+    const k = (h.key || '').trim()
+    if (k) out[k] = h.value ?? ''
+  }
+  return out
+}
+
+// A JSON body with no Content-Type is the most common way a first test 415s.
+const withContentType = (headers, method, body) => {
+  if (method === 'GET' || method === 'DELETE') return headers
+  const has = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
+  if (!has && (body || '').trim()) headers['Content-Type'] = 'application/json'
+  return headers
+}
+
+// POSIX single-quoting: everything inside is literal, and a quote of its own is
+// spliced in as '\''. A body holding an apostrophe used to be the whole risk.
+const shellQuote = (s) => `'${String(s ?? '').replace(/'/g, "'\\''")}'`
+
+// Never the operator's real key. A copied command is one paste away from an
+// issue or a chat, and the docs' own examples carry the same placeholder.
+// auth_mode 'none' gets no header at all: it is not needed, so it is noise.
+const AUTH_HEADERS = {
+  platform_key: ['X-Orva-API-Key: <YOUR_KEY>'],
+  signed: ['X-Orva-Timestamp: <UNIX_SECONDS>', 'X-Orva-Signature: sha256=<HMAC_SHA256_OF_TIMESTAMP.BODY>'],
+}
+
+// The same request the Run button sends, as a runnable curl command. It calls
+// withContentType rather than restating the rule, so the two cannot drift.
+export const buildCurlCommand = ({ url = '', request = {}, authMode = 'none' } = {}) => {
+  const method = (request.method || 'POST').toUpperCase()
+  const body = request.body || ''
+  const own = headersObject(request)
+  const named = new Set(Object.keys(own).map((k) => k.toLowerCase()))
+
+  const lines = [`curl -X ${method} ${shellQuote(url)}`]
+  for (const h of AUTH_HEADERS[authMode] || []) {
+    if (!named.has(h.slice(0, h.indexOf(':')).toLowerCase())) lines.push(`-H ${shellQuote(h)}`)
+  }
+  for (const [k, v] of Object.entries(withContentType(own, method, body))) {
+    lines.push(`-H ${shellQuote(`${k}: ${v}`)}`)
+  }
+  // endpoints.js withholds a body from GET and HEAD, so the command must too.
+  // --data-raw, never --data: a body starting with @ makes --data read a local
+  // file instead of sending the text, which the Run button never does.
+  if (body && method !== 'GET' && method !== 'HEAD') lines.push(`--data-raw ${shellQuote(body)}`)
+  return lines.join(' \\\n  ')
+}
+
 export const useTestbenchStore = defineStore('testbench', () => {
   const requests = ref({})   // fnId -> request
   const runs = ref({})       // fnId -> run[] (newest first)
@@ -58,23 +109,6 @@ export const useTestbenchStore = defineStore('testbench', () => {
   const setRequest = (fnId, patch) => {
     if (!fnId) return
     requests.value[fnId] = { ...requestFor(fnId), ...patch }
-  }
-
-  const headersObject = (req) => {
-    const out = {}
-    for (const h of req.headers || []) {
-      const k = (h.key || '').trim()
-      if (k) out[k] = h.value ?? ''
-    }
-    return out
-  }
-
-  // A JSON body with no Content-Type is the most common way a first test 415s.
-  const withContentType = (headers, method, body) => {
-    if (method === 'GET' || method === 'DELETE') return headers
-    const has = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
-    if (!has && (body || '').trim()) headers['Content-Type'] = 'application/json'
-    return headers
   }
 
   // Both log paths come from the execution record, which is the only place

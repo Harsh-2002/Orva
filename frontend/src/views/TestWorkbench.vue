@@ -109,27 +109,42 @@
         <!-- Request column -->
         <div class="space-y-6 min-w-0">
           <section class="bg-surface border border-border rounded-lg">
-            <header class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+            <header class="px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <h2 class="text-sm font-semibold text-foreground-strong">
                 Request
               </h2>
-              <span class="hidden sm:inline text-[11px] text-foreground-muted">
-                Ctrl or Cmd + Enter runs it
-              </span>
+              <div class="flex items-center gap-3">
+                <span class="hidden sm:inline text-[11px] text-foreground-muted">
+                  Ctrl or Cmd + Enter runs it
+                </span>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  :title="curlTitle"
+                  @click="copyCurl"
+                >
+                  <Terminal class="w-3 h-3" />
+                  {{ curlCopied ? 'Copied' : 'Copy as cURL' }}
+                </Button>
+              </div>
             </header>
 
-            <div class="px-4 py-3 flex items-center gap-2 border-b border-border">
-              <label
-                for="tw-method"
-                class="sr-only"
-              >Request method</label>
-              <FilterSelect
-                v-model="req.method"
-                :options="methodOptions"
-                label="Method"
-                trigger-id="tw-method"
-                bare
-              />
+            <!-- Stacked below sm, like the Traces filter strip: a coarse pointer
+                 floors the field at 44px while the chip keeps its 32px rung. -->
+            <div class="px-4 py-3 flex flex-col gap-2 border-b border-border sm:flex-row sm:items-center">
+              <div class="shrink-0">
+                <label
+                  for="tw-method"
+                  class="sr-only"
+                >Request method</label>
+                <FilterSelect
+                  v-model="req.method"
+                  :options="methodOptions"
+                  label="Method"
+                  trigger-id="tw-method"
+                  bare
+                />
+              </div>
               <label
                 for="tw-path"
                 class="sr-only"
@@ -139,7 +154,7 @@
                 v-model="req.path"
                 spellcheck="false"
                 placeholder="/"
-                class="h-7 flex-1 min-w-0 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+                class="h-7 w-full min-w-0 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring sm:flex-1"
               >
             </div>
 
@@ -164,41 +179,50 @@
               >
                 None set. A body sent with POST, PUT or PATCH gets Content-Type: application/json unless you name one here.
               </p>
+              <!-- min-w-40, not min-w-0: two fields sharing 278px on a phone
+                   showed twelve characters each, so they wrap onto a line each. -->
               <div
-                v-for="(header, idx) in req.headers"
                 v-else
-                :key="idx"
-                class="flex items-center gap-2"
+                class="space-y-3 sm:space-y-2"
               >
-                <label
-                  :for="`tw-header-name-${idx}`"
-                  class="sr-only"
-                >Header {{ idx + 1 }} name</label>
-                <input
-                  :id="`tw-header-name-${idx}`"
-                  v-model="header.key"
-                  spellcheck="false"
-                  placeholder="Header name"
-                  class="h-8 flex-1 min-w-0 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+                <div
+                  v-for="(header, idx) in req.headers"
+                  :key="idx"
+                  class="flex items-center gap-2"
                 >
-                <label
-                  :for="`tw-header-value-${idx}`"
-                  class="sr-only"
-                >Header {{ idx + 1 }} value</label>
-                <input
-                  :id="`tw-header-value-${idx}`"
-                  v-model="header.value"
-                  spellcheck="false"
-                  placeholder="value"
-                  class="h-8 flex-1 min-w-0 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
-                >
-                <IconButton
-                  :icon="X"
-                  :title="`Remove header ${header.key || idx + 1}`"
-                  variant="danger"
-                  size="md"
-                  @click="removeHeader(idx)"
-                />
+                  <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1.5">
+                    <label
+                      :for="`tw-header-name-${idx}`"
+                      class="sr-only"
+                    >Header {{ idx + 1 }} name</label>
+                    <input
+                      :id="`tw-header-name-${idx}`"
+                      v-model="header.key"
+                      spellcheck="false"
+                      placeholder="Header name"
+                      class="h-8 flex-1 min-w-40 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+                    >
+                    <label
+                      :for="`tw-header-value-${idx}`"
+                      class="sr-only"
+                    >Header {{ idx + 1 }} value</label>
+                    <input
+                      :id="`tw-header-value-${idx}`"
+                      v-model="header.value"
+                      spellcheck="false"
+                      placeholder="value"
+                      class="h-8 flex-1 min-w-40 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+                    >
+                  </div>
+                  <IconButton
+                    :icon="X"
+                    :title="`Remove header ${header.key || idx + 1}`"
+                    variant="danger"
+                    size="md"
+                    class="shrink-0"
+                    @click="removeHeader(idx)"
+                  />
+                </div>
               </div>
             </div>
 
@@ -215,12 +239,14 @@
                 for="tw-body"
                 class="sr-only"
               >Request body</label>
+              <!-- h-64, not min-h-64: style.css floors form controls at 44px from
+                   outside @layer, which beat the utility and won at 67px here. -->
               <textarea
                 id="tw-body"
                 v-model="req.body"
                 spellcheck="false"
                 placeholder="{}"
-                class="w-full min-h-64 resize-y rounded-md border border-border bg-background p-3 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
+                class="w-full h-64 resize-y rounded-md border border-border bg-background p-3 font-mono text-xs text-foreground placeholder-foreground-muted focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring"
               />
             </div>
           </section>
@@ -251,15 +277,17 @@
                 :key="fx.id || fx.name"
                 class="flex items-center gap-1 px-2 py-1"
               >
+                <!-- Below sm the path takes its own line, so the name the
+                     operator picked is whole; above it the row holds its rung. -->
                 <button
                   type="button"
-                  class="touch-expand-row h-8 flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left hover:bg-surface-hover transition-colors"
+                  class="touch-expand-row min-h-8 flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1 text-left hover:bg-surface-hover transition-colors sm:h-8 sm:flex-nowrap sm:py-0"
                   :title="`Load ${fx.name} into the request`"
                   @click="applyFixture(fx)"
                 >
                   <span class="font-mono text-[10px] text-foreground-muted shrink-0">{{ fx.method }}</span>
-                  <span class="truncate text-xs text-foreground-strong">{{ fx.name }}</span>
-                  <span class="truncate font-mono text-[10px] text-foreground-muted">{{ fx.path }}</span>
+                  <span class="min-w-0 truncate text-xs text-foreground-strong">{{ fx.name }}</span>
+                  <span class="w-full truncate font-mono text-[10px] text-foreground-muted sm:w-auto sm:min-w-0">{{ fx.path }}</span>
                 </button>
                 <IconButton
                   :icon="Trash2"
@@ -331,7 +359,7 @@
                 v-if="!selectedRun"
                 class="text-xs text-foreground-muted leading-snug"
               >
-                No runs yet. Choose Run to invoke {{ fnName }} with the request on the left.
+                No runs yet. Choose Run to send this request to {{ fnName }}.
               </p>
               <template v-else>
                 <pre
@@ -531,8 +559,8 @@
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 import {
-  CheckCircle2, Code2, Copy, Info, Play, Plus, RefreshCw, Save, Trash2,
-  TriangleAlert, X, XCircle,
+  CheckCircle2, Code2, Copy, Info, Play, Plus, RefreshCw, Save, Terminal,
+  Trash2, TriangleAlert, X, XCircle,
 } from '@lucide/vue'
 import Badge from '@/components/common/Badge.vue'
 import Button from '@/components/common/Button.vue'
@@ -541,7 +569,7 @@ import IconButton from '@/components/common/IconButton.vue'
 import LoadError from '@/components/common/LoadError.vue'
 import { getInvocationLogs, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
-import { METHODS, useTestbenchStore } from '@/stores/testbench'
+import { METHODS, buildCurlCommand, useTestbenchStore } from '@/stores/testbench'
 import { copyText } from '@/utils/clipboard'
 
 // The function this view is scoped to. A route prop, not useRoute(): Vue does
@@ -561,6 +589,7 @@ const selectedIdx = ref(0)
 const logsError = ref('')
 const reloadingLogs = ref(false)
 const urlCopied = ref(false)
+const curlCopied = ref(false)
 
 const fnId = computed(() => fn.value?.id || '')
 const invoking = computed(() => store.invoking)
@@ -571,7 +600,7 @@ const isDeployed = computed(() => !!(fn.value?.active_deployment_id || fn.value?
 const canRun = computed(() => !!fnId.value && isDeployed.value && !invoking.value)
 const runTitle = computed(() =>
   isDeployed.value
-    ? 'Invoke with the request on the left'
+    ? 'Send this request to the deployed function'
     : `${fnName.value} has no deployed version to invoke`)
 
 const blankRequest = { method: 'POST', path: '/', headers: [], body: '' }
@@ -709,6 +738,25 @@ const copyUrl = async () => {
   }
   urlCopied.value = true
   setTimeout(() => { urlCopied.value = false }, 1500)
+}
+
+const authMode = computed(() => fn.value?.auth_mode || 'none')
+const curlCommand = computed(() => buildCurlCommand({
+  url: invokeUrl.value,
+  request: req.value,
+  authMode: authMode.value,
+}))
+const curlTitle = computed(() => authMode.value === 'none'
+  ? 'Copy this request as a curl command you can paste into a terminal'
+  : 'Copy this request as a curl command. The auth header is a placeholder, not your key.')
+
+const copyCurl = async () => {
+  if (!await copyText(curlCommand.value)) {
+    confirmStore.notify({ title: 'Copy failed', message: `Select the command by hand:\n\n${curlCommand.value}`, danger: true })
+    return
+  }
+  curlCopied.value = true
+  setTimeout(() => { curlCopied.value = false }, 1500)
 }
 
 // Colour never carries the outcome on its own: every status prints the code, a

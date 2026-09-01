@@ -13,8 +13,16 @@ window.matchMedia = window.matchMedia || ((query) => ({
   addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
 }))
 
-const FN_A = { id: 'fn-a', name: 'alpha', runtime: 'python', code_hash: 'ha', active_deployment_id: 'd1' }
+const FN_A = { id: 'fn-a', name: 'alpha', runtime: 'python', code_hash: 'ha', active_deployment_id: 'd1', auth_mode: 'none' }
 const FN_NEW = { id: 'fn-n', name: 'fresh', runtime: 'python', code_hash: '', active_deployment_id: '' }
+const FN_GATED = { id: 'fn-g', name: 'gated', runtime: 'node', code_hash: 'hg', active_deployment_id: 'd2', auth_mode: 'platform_key' }
+
+// The copy control writes through utils/clipboard; jsdom has neither
+// navigator.clipboard nor execCommand, so the real one always reports failure.
+const clip = vi.hoisted(() => ({ last: '', ok: true }))
+vi.mock('@/utils/clipboard', () => ({
+  copyText: async (text) => { clip.last = text; return clip.ok },
+}))
 
 const serverError = () => Object.assign(new Error('Request failed with status code 500'), {
   response: {
@@ -29,7 +37,7 @@ const endpoints = {
   listFunctions: vi.fn(async () => {
     if (listFail) throw new Error('network is down')
     // Fresh objects per call, the way the API answers.
-    return { data: { functions: [{ ...FN_A }, { ...FN_NEW }] } }
+    return { data: { functions: [{ ...FN_A }, { ...FN_NEW }, { ...FN_GATED }] } }
   }),
   listFixtures: vi.fn(async () => ({ data: { fixtures: [{ id: 'fx1', name: 'happy-path', method: 'POST', path: '/', headers: { A: 'b' }, body: '{}' }] } })),
   updateFixture: vi.fn(async () => ({ data: {} })),
@@ -267,5 +275,107 @@ describe('TestWorkbench', () => {
     await settle(2)
     expect(wrapper.find('#tw-header-name-0').element.value).toBe('A')
     expect(wrapper.find('#tw-header-value-0').element.value).toBe('b')
+  })
+
+  it('copies the request as a runnable curl command, with no auth header on an open function', async () => {
+    clip.last = ''
+    const { wrapper } = await boot('/functions/alpha/test')
+    await wrapper.findAll('button').find((b) => b.text().includes('Copy as cURL')).trigger('click')
+    await settle(2)
+    expect(clip.last).toBe([
+      `curl -X POST '${window.location.origin}/fn/fn-a'`,
+      "  -H 'Content-Type: application/json'",
+      `  --data-raw '{"name": "World"}'`,
+    ].join(' \\\n'))
+    expect(clip.last).not.toContain('X-Orva-API-Key')
+    expect(wrapper.text()).toContain('Copied')
+  })
+
+  it('copies a placeholder key, never the operator\'s own, for a gated function', async () => {
+    clip.last = ''
+    const { wrapper } = await boot('/functions/gated/test')
+    await wrapper.findAll('button').find((b) => b.text().includes('Copy as cURL')).trigger('click')
+    await settle(2)
+    expect(clip.last).toContain("-H 'X-Orva-API-Key: <YOUR_KEY>'")
+    expect(clip.last).not.toContain('orva_')
+  })
+})
+
+// The copied command has to run. Every case below is a way a naive join breaks
+// it: an apostrophe in the body, a query string in the path, a body on a verb
+// that carries none, a Content-Type the operator already named.
+describe('buildCurlCommand', () => {
+  const url = 'http://box.lan:8443/fn/019d-abc'
+  const build = async (request, authMode = 'none', u = url) => {
+    const { buildCurlCommand } = await import('@/stores/testbench')
+    return buildCurlCommand({ url: u, request, authMode })
+  }
+
+  it('shell-quotes a body containing a single quote', async () => {
+    const body = `{"name": "it's here", "shell": "don't $(rm -rf /) \`x\`"}`
+    const cmd = await build({ method: 'POST', path: '/', headers: [], body })
+    expect(cmd).toContain(`--data-raw '{"name": "it'\\''s here", "shell": "don'\\''t $(rm -rf /) \`x\`"}'`)
+    // POSIX single-quoting: splice the quote in, never escape it in place.
+    expect(cmd).not.toContain("\\'s here")
+  })
+
+  it('reproduces the default POST, Content-Type and all', async () => {
+    const cmd = await build({ method: 'POST', path: '/', headers: [], body: '{"a":1}' })
+    expect(cmd).toBe([
+      `curl -X POST '${url}'`,
+      "  -H 'Content-Type: application/json'",
+      `  --data-raw '{"a":1}'`,
+    ].join(' \\\n'))
+  })
+
+  it('omits the auth header entirely when the function is open', async () => {
+    const cmd = await build({ method: 'POST', path: '/', headers: [], body: '{}' }, 'none')
+    expect(cmd).not.toContain('-H \'X-Orva')
+  })
+
+  it('names the two signature headers when the gate is signed', async () => {
+    const cmd = await build({ method: 'POST', path: '/', headers: [], body: '{}' }, 'signed')
+    expect(cmd).toContain("-H 'X-Orva-Timestamp: <UNIX_SECONDS>'")
+    expect(cmd).toContain("-H 'X-Orva-Signature: sha256=<HMAC_SHA256_OF_TIMESTAMP.BODY>'")
+  })
+
+  it('does not repeat a header the operator already set', async () => {
+    const cmd = await build({
+      method: 'POST',
+      path: '/',
+      headers: [{ key: 'x-orva-api-key', value: 'orva_live' }, { key: 'Content-Type', value: 'text/plain' }],
+      body: 'hello',
+    }, 'platform_key')
+    expect(cmd).toContain("-H 'x-orva-api-key: orva_live'")
+    expect(cmd).not.toContain('<YOUR_KEY>')
+    expect(cmd).toContain("-H 'Content-Type: text/plain'")
+    expect(cmd).not.toContain('application/json')
+  })
+
+  it('sends no body on GET, and adds no Content-Type there or on DELETE', async () => {
+    const get = await build({ method: 'GET', path: '/health', headers: [], body: '{"a":1}' })
+    expect(get).toBe(`curl -X GET '${url}'`)
+    const del = await build({ method: 'DELETE', path: '/', headers: [], body: '{"a":1}' })
+    expect(del).toBe([`curl -X DELETE '${url}'`, `  --data-raw '{"a":1}'`].join(' \\\n'))
+  })
+
+  it('adds no Content-Type for a body that is only whitespace', async () => {
+    const cmd = await build({ method: 'POST', path: '/', headers: [], body: '   ' })
+    expect(cmd).not.toContain('Content-Type')
+    expect(cmd).toContain(`--data-raw '   '`)
+  })
+
+  it('quotes a URL carrying a query string so the shell cannot split it', async () => {
+    const cmd = await build({ method: 'GET', path: '/x', headers: [], body: '' }, 'none',
+      `${url}/x?a=1&b=2`)
+    expect(cmd).toBe(`curl -X GET '${url}/x?a=1&b=2'`)
+  })
+
+  // Verified against curl 8.18: --data '@/etc/passwd' uploads that file's
+  // contents. The Run button sends the literal text, so the command must too.
+  it('sends a body that starts with @ as text, not as a file to read', async () => {
+    const cmd = await build({ method: 'POST', path: '/', headers: [], body: '@/etc/passwd' })
+    expect(cmd).toContain(`--data-raw '@/etc/passwd'`)
+    expect(cmd).not.toMatch(/--data\s/)
   })
 })

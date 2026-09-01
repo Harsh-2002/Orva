@@ -26,7 +26,10 @@ before it.
   to nothing, which is exactly what the "replay this failed invocation" deep
   link did. The workbench is a page instead: method, path, headers, body, saved
   requests as a real panel rather than a popover, and the last twenty runs so
-  you can hold one against the one before it.
+  you can hold one against the one before it. `Copy as cURL` hands you the same
+  request as a runnable command — with a placeholder in place of your API key,
+  and `--data-raw`, so a body beginning with `@` is sent as text rather than
+  read as a filename.
 
 ### Fixed
 
@@ -44,12 +47,22 @@ before it.
   — while its stderr was stored anyway. So for exactly the runs whose output you
   need, nothing could fetch it. Every invocation carries the header now.
 
-- **The editor stops pretending to be two things.** The bottom drawer keeps
-  build logs and gains a one-line result strip: status, duration, one line of
-  output or the error that explains it, and a link to the workbench. A response
-  that fails now says which line matters — a Node traceback showed an internal
+- **The editor stops pretending to be two things.** The build drawer is gone;
+  the code surface now takes the whole page. In its place is a one-line result
+  strip: status, duration, one line of output or the error that explains it,
+  and a link to the workbench. A response that fails now says which line
+  matters — a Node traceback showed an internal
   `node:internal/process/task_queues` frame, and a successful JSON response
   showed a single `{`. A 404 no longer draws a green dot.
+
+- **A build no longer interrupts you to say it is building.** Deploy reports
+  its own progress — it becomes a spinner reading `Building`, and the strip
+  shows the newest build line with a `View log` link beside it. Most builds
+  finish in well under a second, and the log dialog that used to open on every
+  deploy spent that whole time opening and closing again. It now appears for
+  the one case that needs reading: a failure raises it with the error, and if
+  you dismiss it the editor keeps a `Build failed` marker that opens it again.
+  Success is a toast carrying the version, with a shortcut into the workbench.
 
 - **`Deploy new version` is now `Deploy`.** It was the only place in the product
   that said it that way; the CLI, the API route and the MCP tool have always

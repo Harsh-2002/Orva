@@ -602,3 +602,63 @@ export const buildFixSuggestionPrompt = ({
 // Promise<boolean> from copyText so callers can toast on success.
 export const copyFixSuggestionToClipboard = (args) =>
   copyText(buildFixSuggestionPrompt(args))
+
+// ── Build failure ───────────────────────────────────────────────────
+//
+// A build failure is not a runtime failure. There is no request, no worker
+// stderr and no status code, so handing it buildFixSuggestionPrompt told the
+// model the function "failed at runtime" and that the operator had triggered
+// it outside the dashboard — two claims that are false for every tsc error and
+// every unresolvable dependency.
+
+// The build log's answer is at the END: npm and pip narrate for pages and then
+// say what broke. truncateStderr keeps the head, which is exactly the half that
+// does not matter here.
+const truncateTail = (s, cap = STDERR_CAP_BYTES) => {
+  if (!s) return ''
+  const enc = new TextEncoder()
+  const dec = new TextDecoder('utf-8', { fatal: false })
+  const bytes = enc.encode(s)
+  if (bytes.length <= cap) return s
+  const tail = dec.decode(bytes.slice(bytes.length - cap))
+  return `[truncated — original was ${bytes.length} bytes; showing last ${cap}]\n${tail}`
+}
+
+export const buildBuildFailurePrompt = ({
+  source = '',
+  language,           // optional — falls back to detection from runtime
+  runtime = '',       // canonical Orva runtime id (node / python)
+  dependencies = '',
+  buildLog = '',
+  errorMessage = '',
+} = {}) => {
+  const lang = language || sourceLanguageFor(runtime)
+  return [
+    '<context>',
+    `An Orva serverless function (${formatRuntime(runtime)}) failed to BUILD, so nothing was deployed and the function never ran. Below are the source, its declared dependencies, the builder's log and the error Orva recorded. Help me get it to build.`,
+    '</context>',
+    '',
+    `<source language="${lang}">`,
+    source || '(source unavailable — copy it from the editor before debugging)',
+    '</source>',
+    '',
+    '<dependencies>',
+    dependencies || '(none declared)',
+    '</dependencies>',
+    '',
+    '<build-log>',
+    truncateTail(buildLog) || '(no build log captured)',
+    '</build-log>',
+    '',
+    '<error>',
+    errorMessage || 'the builder failed without an explicit error message.',
+    '</error>',
+    '',
+    '<task>',
+    'Explain in 2-3 sentences why the build failed. Then give the smallest change that makes it build: the corrected source in a code block, and the corrected dependency file if that is where the problem is. Do not include unrelated changes or refactors.',
+    '</task>',
+  ].join('\n')
+}
+
+export const copyBuildFixToClipboard = (args) =>
+  copyText(buildBuildFailurePrompt(args))
