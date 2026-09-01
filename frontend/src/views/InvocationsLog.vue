@@ -1044,12 +1044,11 @@ const prettyBody = (raw) => {
   }
 }
 
-// v0.4 B3: pack the captured request envelope into a base64-encoded
-// query param and route to the editor. The editor's onMounted hook
-// pulls `prefill` off the URL, decodes it, and lands the user on the
-// Test pane with method/path/headers/body already filled in. We pass
-// through the redacted headers as-is — the editor lets the user prune
-// them before saving.
+// Pack the captured request envelope into a base64-encoded query param and
+// route to the function. The editor decodes it into the testbench store and
+// replaces itself with /functions/<name>/test, so the request lands in the
+// workbench with method/path/headers/body already filled in. Redacted headers
+// pass through as-is; the workbench lets the user prune them before saving.
 const saveAsFixture = () => {
   if (!drawerRow.value || !requestData.value) return
   const fnName = getFnName(drawerRow.value.function_id)

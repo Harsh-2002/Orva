@@ -88,7 +88,12 @@ try {
   die(String(e.message || e))
 }
 
-const routes = await discoverRoutes(BASE, API_KEY)
+let routes
+try {
+  routes = await discoverRoutes(BASE, API_KEY, auth)
+} catch (e) {
+  die(String(e.message || e))
+}
 if (SHOT_DIR) mkdirSync(SHOT_DIR, { recursive: true })
 
 console.log('Orva dashboard UI suite')
@@ -98,6 +103,7 @@ console.log(`  user      ${auth.username}`)
 console.log(`  suites    ${[...pageSuites, ...flowSuites].map((s) => s.meta.id).join(', ')}`)
 console.log(`  matrix    ${routes.length} routes x ${VIEWPORTS.length} viewports` +
             ` x ${THEMES.join('/')}${DESTRUCTIVE ? ' (+ destructive flows)' : ''}`)
+console.log(`  routes    ${routes.map((r) => r.name).join(', ')}`)
 
 const report = new Report()
 const browser = await chromium.launch({

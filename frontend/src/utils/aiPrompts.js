@@ -64,7 +64,7 @@ Secrets are stored encrypted at rest, decrypted only into the worker environment
 </env_and_secrets>
 
 <orva_sdk>
-Every function has the \`orva\` module pre-imported — zero install, zero config. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with \`network_mode: "egress"\` (or updated to it later). With the default \`network_mode: "none"\`, every SDK call fails at runtime with \`ENETUNREACH\` / \`OrvaUnavailableError\` / \`TypeError: fetch failed\`. Core primitives:
+Every function has the \`orva\` module pre-installed — zero install, zero config — but you MUST import it: \`import orva\` in Python, \`const orva = require('orva')\` in Node. Without the import the handler dies with NameError / ReferenceError: orva is not defined. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with \`network_mode: "egress"\` (or updated to it later). With the default \`network_mode: "none"\`, every SDK call fails at runtime with \`ENETUNREACH\` / \`OrvaUnavailableError\` / \`TypeError: fetch failed\`. Core primitives:
 
 ## orva.kv — per-function key/value store on SQLite
 Per-function namespace enforced by a process-signed, function-scoped SDK credential; caller identity never comes from a request header. Keys never collide across functions. TTL is optional: omit it to preserve an existing expiry (new keys are persistent), pass 0 to clear expiry, or pass a positive value to set/refresh it; negative values are rejected. Expiry is filtered at read time and swept every 5 minutes. Values must be valid JSON and are capped at 64 KiB; keys must be non-empty UTF-8 and are capped at 256 characters. Batches are all-or-nothing and capped at 100 operations. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
@@ -259,7 +259,7 @@ Channels do not change how you write the handler. The HTTP request the channel-t
 Treat each handler as a tiny service. Apply these by default:
 
 1. Validate input early. Return 400 with {"error": "..."} for missing/typed-wrong fields. NEVER trust event.body without checking shape.
-2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, the execution id (use event.headers["x-orva-execution-id"]), and any relevant ids. Logs land on the Activity page and on stdout.
+2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, the execution id (use event.headers["x-orva-execution-id"]), and any relevant ids. Both runtimes reroute print()/console.log() onto stderr, because stdout carries the handler's framed response, so those lines land in the execution's stderr: the Stderr panel on the dashboard's Invocations page, and Function logs → Console output in the function's test workbench (/web/functions/<name>/test). Prefer the SDK's log.{debug,info,warn,error}(msg, fields) (\`from orva import log\` / \`const { log } = require('orva')\`) when you want the dashboard to parse the level and fields instead of showing a raw line.
 3. Idempotency where it matters (POST / job workers / webhook receivers). Key on a client-supplied Idempotency-Key header or the job id; store a "done" marker in orva.kv with 24 h TTL.
 4. Timeouts on outbound HTTPS. httpx default is no timeout — set timeout=10. node fetch default is also no timeout — pass an AbortSignal.timeout(10_000). 30 s sandbox cap means you get killed mid-request otherwise.
 5. Catch broad, return narrow. try/except around your business logic; map to 400 / 401 / 404 / 502 / 500 with a short message. Don't leak stack traces in production responses (log them, return a request id).
@@ -602,3 +602,63 @@ export const buildFixSuggestionPrompt = ({
 // Promise<boolean> from copyText so callers can toast on success.
 export const copyFixSuggestionToClipboard = (args) =>
   copyText(buildFixSuggestionPrompt(args))
+
+// ── Build failure ───────────────────────────────────────────────────
+//
+// A build failure is not a runtime failure. There is no request, no worker
+// stderr and no status code, so handing it buildFixSuggestionPrompt told the
+// model the function "failed at runtime" and that the operator had triggered
+// it outside the dashboard — two claims that are false for every tsc error and
+// every unresolvable dependency.
+
+// The build log's answer is at the END: npm and pip narrate for pages and then
+// say what broke. truncateStderr keeps the head, which is exactly the half that
+// does not matter here.
+const truncateTail = (s, cap = STDERR_CAP_BYTES) => {
+  if (!s) return ''
+  const enc = new TextEncoder()
+  const dec = new TextDecoder('utf-8', { fatal: false })
+  const bytes = enc.encode(s)
+  if (bytes.length <= cap) return s
+  const tail = dec.decode(bytes.slice(bytes.length - cap))
+  return `[truncated — original was ${bytes.length} bytes; showing last ${cap}]\n${tail}`
+}
+
+export const buildBuildFailurePrompt = ({
+  source = '',
+  language,           // optional — falls back to detection from runtime
+  runtime = '',       // canonical Orva runtime id (node / python)
+  dependencies = '',
+  buildLog = '',
+  errorMessage = '',
+} = {}) => {
+  const lang = language || sourceLanguageFor(runtime)
+  return [
+    '<context>',
+    `An Orva serverless function (${formatRuntime(runtime)}) failed to BUILD, so nothing was deployed and the function never ran. Below are the source, its declared dependencies, the builder's log and the error Orva recorded. Help me get it to build.`,
+    '</context>',
+    '',
+    `<source language="${lang}">`,
+    source || '(source unavailable — copy it from the editor before debugging)',
+    '</source>',
+    '',
+    '<dependencies>',
+    dependencies || '(none declared)',
+    '</dependencies>',
+    '',
+    '<build-log>',
+    truncateTail(buildLog) || '(no build log captured)',
+    '</build-log>',
+    '',
+    '<error>',
+    errorMessage || 'the builder failed without an explicit error message.',
+    '</error>',
+    '',
+    '<task>',
+    'Explain in 2-3 sentences why the build failed. Then give the smallest change that makes it build: the corrected source in a code block, and the corrected dependency file if that is where the problem is. Do not include unrelated changes or refactors.',
+    '</task>',
+  ].join('\n')
+}
+
+export const copyBuildFixToClipboard = (args) =>
+  copyText(buildBuildFailurePrompt(args))

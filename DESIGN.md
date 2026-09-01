@@ -166,7 +166,7 @@ A single muted violet accent sits on neutral graphite-black surfaces with cool l
 
 ### Status (semantic, used at low chroma)
 - **Success** (`#22C55E`, ≈`oklch(73% 0.21 144)`): only for terminal-success states. Pair with the recommended `success/15` tint background and `success/30` border (see Named Rule below).
-- **Warning** (`#EAB308`, ≈`oklch(78% 0.16 86)`): in-flight, queued, soft warnings ("expires in 7 days"), drift hints.
+- **Warning** (`#EAB308`, ≈`oklch(78% 0.16 86)`): in-flight, queued, soft warnings ("expires in 7 days"), drift hints, and a 4xx the handler meant to send. A refusal is not a fault: the editor's run strip and the test workbench both draw a 4xx in warning and keep danger for a 5xx or a request that never got an answer, so a 404 does not wear the same colour as a crash.
 - **Danger** (`#EF4444`, ≈`oklch(64% 0.23 25)`): destructive actions, failed states, error toasts.
 
 ### Named Rules
@@ -319,7 +319,7 @@ Glassmorphism is rare and earned. The only legitimate use is `backdrop-blur-sm` 
 grep it rested on, `grep -rn 'shadow-\['`, only matches Tailwind's
 arbitrary-value bracket syntax and therefore missed every one of them, including
 the hue-matched `shadow-black/30` it specifically denied existed. Corrected
-count: 7 `shadow-xl`, 7 `shadow-lg`, 6 `shadow-sm`, 1 `shadow-black/30`, 1
+count: 6 `shadow-xl`, 6 `shadow-lg`, 6 `shadow-sm`, 1
 `shadow-none`. Six of those sit at rest on cards and buttons, which the
 Flat-By-Default Rule below forbids.
 
@@ -535,7 +535,7 @@ Tailwind defaults, unmodified. Only three carry meaning here:
 | Token | Width | What changes |
 |---|---|---|
 | `sm` | 640px | Mobile card list gives way to the desktop table. |
-| `md` | 768px | Two-pane layouts split (editor, AI rail). |
+| `md` | 768px | The AI chat's conversation rail leaves its drawer and sits beside the chat pane. |
 | `lg` | 1024px | Sidebar stops being a drawer and becomes inline. |
 
 `xl` (1280px) is for progressive column reveal only. Do not introduce `2xl`.

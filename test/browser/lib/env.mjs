@@ -100,7 +100,12 @@ export async function session(base, apiKey) {
 // The routes the dashboard actually serves. Function-scoped ones are resolved
 // against whatever is deployed so the suite does not depend on fixture names,
 // and are simply absent on an empty instance rather than failing.
-export async function discoverRoutes(base, apiKey) {
+//
+// `auth` is the session from session(); it is what the lookup actually uses.
+// A stale --key used to 401 here and be swallowed as "this instance has no
+// functions", which silently dropped the five most complex routes -- editor,
+// workbench, deployments, kv, webhooks -- and still printed PASS.
+export async function discoverRoutes(base, apiKey, auth) {
   const routes = [
     { name: 'overview', path: '/' },
     { name: 'functions', path: '/functions' },
@@ -118,25 +123,32 @@ export async function discoverRoutes(base, apiKey) {
     { name: 'ai', path: '/ai' },
     { name: 'not-found', path: '/this-route-does-not-exist' },
   ]
-  if (!apiKey) return routes
+  const headers = auth?.cookie
+    ? { cookie: `session_token=${auth.cookie}` }
+    : apiKey ? { 'X-Orva-API-Key': apiKey } : null
+  if (!headers) return routes
 
   try {
-    const res = await fetch(`${base}/api/v1/functions?limit=1`, {
-      headers: { 'X-Orva-API-Key': apiKey },
-    })
+    const res = await fetch(`${base}/api/v1/functions?limit=1`, { headers })
+    if (!res.ok) {
+      throw new Error(`function lookup failed: HTTP ${res.status}. Function-scoped `
+        + 'routes would be skipped silently, so this is fatal rather than empty.')
+    }
     const fn = (await res.json())?.functions?.[0]?.name
     if (fn) {
       const e = encodeURIComponent(fn)
       routes.push(
         { name: 'editor', path: `/functions/${e}`, fn },
         { name: 'deployments', path: `/functions/${e}/deployments`, fn },
+        { name: 'test-workbench', path: `/functions/${e}/test`, fn },
         { name: 'kv', path: `/functions/${e}/kv`, fn },
         { name: 'inbound-webhooks', path: `/functions/${e}/inbound-webhooks`, fn },
       )
     }
-  } catch {
-    // Function-scoped routes are a bonus. An instance with none is a valid
-    // target for every other suite.
+  } catch (err) {
+    // A reachable instance that simply has no functions is a valid target. An
+    // instance that refused the lookup is not: it looks identical from here.
+    throw new Error(`could not resolve function-scoped routes: ${err.message}`)
   }
   return routes
 }

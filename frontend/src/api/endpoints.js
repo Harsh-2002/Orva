@@ -105,7 +105,10 @@ export const listInvocations = (params) => apiClient.get('/executions', { params
 
 export const getInvocation = (id) => apiClient.get(`/executions/${id}`)
 
-export const getInvocationLogs = (id) => apiClient.get(`/executions/${id}/logs`)
+// `quiet404` is for the workbench's poll, which asks repeatedly while the
+// execution row is still being written and treats the 404 as "not yet".
+export const getInvocationLogs = (id, { quiet404 = false } = {}) =>
+  apiClient.get(`/executions/${id}/logs`, quiet404 ? { quietStatuses: [404] } : undefined)
 
 // v0.4 A3: captured request envelope for the Replay button. Returns 404
 // when capture was disabled at the time the original ran (or for legacy

@@ -1159,7 +1159,7 @@ Secrets are stored encrypted at rest, decrypted only into the worker environment
 </env_and_secrets>
 
 <orva_sdk>
-Every function has the `orva` module pre-imported — zero install, zero config. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with `network_mode: "egress"` (or updated to it later). With the default `network_mode: "none"`, every SDK call fails at runtime with `ENETUNREACH` / `OrvaUnavailableError` / `TypeError: fetch failed`. Core primitives:
+Every function has the `orva` module pre-installed — zero install, zero config — but you MUST import it: `import orva` in Python, `const orva = require('orva')` in Node. Without the import the handler dies with NameError / ReferenceError: orva is not defined. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with `network_mode: "egress"` (or updated to it later). With the default `network_mode: "none"`, every SDK call fails at runtime with `ENETUNREACH` / `OrvaUnavailableError` / `TypeError: fetch failed`. Core primitives:
 
 ## orva.kv — per-function key/value store on SQLite
 Per-function namespace enforced by a process-signed, function-scoped SDK credential; caller identity never comes from a request header. Keys never collide across functions. TTL is optional: omit it to preserve an existing expiry (new keys are persistent), pass 0 to clear expiry, or pass a positive value to set/refresh it; negative values are rejected. Expiry is filtered at read time and swept every 5 minutes. Values must be valid JSON and are capped at 64 KiB; keys must be non-empty UTF-8 and are capped at 256 characters. Batches are all-or-nothing and capped at 100 operations. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
@@ -1192,8 +1192,8 @@ Common pattern — idempotency:
   do_work()
 
 Operators can browse / edit / delete / set keys live from the dashboard
-at /web/functions/<name>/kv (the "KV" button in the editor's action
-bar) — useful for hand-fixing a stuck counter or seeding test data
+at /web/functions/<name>/kv (the editor's Bindings menu → "KV store")
+— useful for hand-fixing a stuck counter or seeding test data
 without redeploying. The same surface is reachable via REST
 (GET/PUT/DELETE /api/v1/functions/<id>/kv[/<key>]) and via MCP tools.
 Tell the user about this when their function uses kv state and they
@@ -1292,7 +1292,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - Filesystem: read-only, INCLUDING /code (your own code is mounted read-only). /tmp is the only writable path — ephemeral, cleared between cold starts.
 - NO raw sockets. NO listening ports — the platform owns the HTTP server. Subprocesses are permitted by the default seccomp policy, but the sandbox ships no shell and no package manager, so treat them as unavailable.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
-- orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — the editor's deploy step will warn you when the import meets `none`.
+- orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — `deploy_function_inline` (MCP) and `POST /api/v1/functions/<id>/deploy-inline` return a `warning` field when the import meets `none`; the dashboard's Deploy button does not surface it.
 - When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
 - Concurrency: each warm worker handles one request at a time. Pool Controller v2 sizes workers from arrival rate, queue pressure, service time, and cold-start time, bounded by the function's pool ceiling and effective host CPU/memory capacity. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>
@@ -1342,7 +1342,7 @@ There are no path parameters: the matched path arrives whole in event.path, so p
 Treat each handler as a tiny service. Apply these by default:
 
 1. Validate input early. Return 400 with {"error": "..."} for missing/typed-wrong fields. NEVER trust event.body without checking shape.
-2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, the execution id (use event.headers["x-orva-execution-id"]), and any relevant ids. Logs land on the Activity page and on stdout.
+2. Structured logs. print(json.dumps({...})) in Python or console.log(JSON.stringify({...})) in Node — one JSON object per line, includes a level, the execution id (use event.headers["x-orva-execution-id"]), and any relevant ids. Both runtimes reroute print()/console.log() onto stderr, because stdout carries the handler's framed response, so those lines land in the execution's stderr: the Stderr panel on the dashboard's Invocations page, and Function logs → Console output in the function's test workbench (/web/functions/<name>/test). Prefer the SDK's log.{debug,info,warn,error}(msg, fields) (`from orva import log` / `const { log } = require('orva')`) when you want the dashboard to parse the level and fields instead of showing a raw line.
 3. Idempotency where it matters (POST / job workers / webhook receivers). Key on a client-supplied Idempotency-Key header or the job id; store a "done" marker in orva.kv with 24 h TTL.
 4. Timeouts on outbound HTTPS. httpx default is no timeout — set timeout=10. node fetch default is also no timeout — pass an AbortSignal.timeout(10_000). 30 s sandbox cap means you get killed mid-request otherwise.
 5. Catch broad, return narrow. try/except around your business logic; map to 400 / 401 / 404 / 502 / 500 with a short message. Don't leak stack traces in production responses (log them, return a request id).

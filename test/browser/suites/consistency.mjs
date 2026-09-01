@@ -27,6 +27,10 @@ const LABEL_EXEMPT = [
   // The composer's model button is a full control when the rail is open and a
   // bare glyph when it is collapsed. Same label, two roles.
   'no model',
+  // The workbench's Run is the page's primary action; the editor strip's is one
+  // control in a one-line status row. Equalising them would either inflate the
+  // strip or demote the CTA.
+  'run',
 ]
 
 const PROBE = ({ radii, icons, tol, rowExempt, labelExempt }) => {

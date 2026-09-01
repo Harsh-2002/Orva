@@ -840,7 +840,7 @@ All rows below were measured against a live instance:
 | `tracing-test.sh` | http root span + `X-Trace-Id`, F2F parent linkage, W3C `traceparent` honored, replay = fresh trace, outlier + `baseline_p95_ms` | **10.2 s** | ANSI `✓`/`✗` then `PASS: 10` / `FAIL: 0` | yes — trap + pre-run sweep |
 | `sdk-test.sh` | Scoped SDK auth plus Python/Node KV TTL and atomic batches, invoke/stream, jobs, cron, spans, and logs | CI-gated | `sdk-test: PASS=n FAIL=0` | yes |
 | `onboarding-flow.sh` | on a **virgin DB only**: onboard → session cookie → `/auth/me` → session auth → 409 re-onboard → refresh rotates → old token revoked → logout invalidates | **0.03 s** (skip path) · **0.28 s** for all 13 checks on a virgin DB | `skip  (users already exist…)` · on a virgin DB `onboarding-flow  pass=13  fail=0` | leaves its user |
-| `browser/run.mjs` | real-browser UI verification across 19 routes x 3 viewports **x both themes**: every route renders with no console errors, nothing overflows or is silently clipped, every control clears the 44 px touch floor on coarse pointers, every control lands on the size ladder and agrees with its neighbours (`consistency`), a horizontal strip stops at its ends rather than dragging the page (`edge-guard`), accessible names / keyboard reachability / AA contrast / heading order, plus multi-step flows (nav drawer, destructive-dialog keyboard safety). `--theme night\|day` narrows to one; `--full` widens to 7 viewports (266 page loads, ~6.5 min); `--destructive` enables the flows that delete data | ~3 min (both themes) | `N passed, 0 failed`; non-zero exit if any fails | needs a scratch instance for `--destructive` |
+| `browser/run.mjs` | real-browser UI verification across 20 routes x 3 viewports **x both themes**: every route renders with no console errors, nothing overflows or is silently clipped, every control clears the 44 px touch floor on coarse pointers, every control lands on the size ladder and agrees with its neighbours (`consistency`), a horizontal strip stops at its ends rather than dragging the page (`edge-guard`), accessible names / keyboard reachability / AA contrast / heading order, plus multi-step flows (nav drawer, destructive-dialog keyboard safety). Fifteen routes are fixed; five are resolved from the first function the instance returns (editor, deployments, **test workbench**, kv, inbound-webhooks). A lookup the instance *refuses* aborts the run (exit 2) — it used to be swallowed, silently dropping those five routes as if the instance simply had no functions while the run still printed PASS — so read the `routes` line the run prints before trusting a green result. `--theme night\|day` narrows to one; `--full` widens to 7 viewports (280 page loads, ~7 min); `--destructive` enables the flows that delete data | ~3 min (both themes) | `N passed, 0 failed`; non-zero exit if any fails | needs a scratch instance for `--destructive` |
 | `container/run.sh` | builds the image, runs it on a **throwaway Docker network** with the privileges nsjail needs (`SYS_ADMIN`, unconfined apparmor/seccomp, delegated cgroupfs, `/dev/net/tun`) and `ORVA_REQUIRE_SANDBOX=1`, then runs the TypeScript-entrypoint + rollback suite and the browser suite against it | ~4 min incl. image build | `n/n passed` per suite; non-zero exit if any fails | yes — `trap cleanup EXIT` removes container, volume and network |
 | `run-all.sh` | umbrella over 11 suites | **49.9 s** | `test/run-all-results.tsv`; exit 1 if any row is `fail` | inherits — **including `atscale.sh`'s 20 permanent functions** |
 | `atscale.sh` | **nothing is asserted** — deploys 20 fns and dumps metrics TSV | exit 2 without `hey` | none | **no — leaves 20 functions forever** |
@@ -1703,8 +1703,15 @@ The click-through that earns its time, and what each screen proves:
 4. **`/web/settings`** — Build info (Version / Commit / Built / Image) must match
    `/api/v1/system/health`; AI providers; Storage + **Compact database**
    (`VACUUM`); Change password; Log out.
-5. **`/web/functions/<name>`** — the Editor/Test pane, with `/deployments`,
-   `/diff`, `/kv`, `/inbound-webhooks` as sub-routes.
+5. **`/web/functions/<name>`** — the code editor. Its bottom **result strip**
+   (Run · the HTTP status drawn green/amber/red · one line of output ·
+   *Suggest fix*) replaced the old test drawer; Deploy is headless — the button
+   spins `Building`, then reads `Deployed`, the file header reads `vN live`,
+   and only a **failure** raises the build-log modal. Sub-routes: `/test` — the
+   **test workbench** (method/path/headers/body, *Copy as cURL*, saved requests,
+   the last 20 runs of this browser session, a Response panel, and Function logs
+   split into *Structured logs* (`orva.log.*`) and *Console output* (stderr)) —
+   plus `/deployments`, `/diff`, `/kv`, `/inbound-webhooks`.
 6. **`/web/docs`** — the hand-maintained view. *Copy as Markdown* fetches
    `/web/docs.md` and substitutes `{{ORIGIN}}` **client-side**.
 
@@ -2213,7 +2220,7 @@ A regression in `env.py` is invisible to CI.
 | `go` vet | `make lint` | CI runs `make embed` first, which **rewrites tracked files** |
 | `go` test | **`go test -count=1 -race ./...`** | `make test` omits `-race` |
 | `go` vuln | `go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...` | a new advisory reddens CI with zero code change |
-| `ui` | `cd frontend && npm audit --audit-level=moderate && npm run lint && npm run build` | CI uses **`npm ci`** (lockfile-strict); `make ui` uses `npm install` and may rewrite the lockfile. `npm audit` is the classic green-locally-red-in-CI leg |
+| `ui` | `cd frontend && npm audit --audit-level=moderate && npm test && npm run lint && npm run build` | CI uses **`npm ci`** (lockfile-strict); `make ui` uses `npm install` and may rewrite the lockfile. `npm audit` is the classic green-locally-red-in-CI leg. `npm test` is two runners — `node --test test/*.test.js` and `vitest run` over `test/components/**` — and `make ui`/`make embed`/`make build-all` run **neither**, so a frontend change verified only through the Makefile has run no frontend test at all |
 | `docker` | `docker build -t orva:ci . && docker run -d -p 127.0.0.1:18443:8443 …` then poll health | CI uses `no-cache: true, pull: true`. Neither passes `--build-arg VERSION`, so both report `dev`/`unknown` — only `release.yml` stamps identity. The first 2–3 health curls fail with `Empty reply`; the 30× loop is required |
 | `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` builds the UI from source (the job installs Node 24 for exactly this), so the E2E job serves a freshly built dashboard |
 | `cli-unit` | `go vet ./cli/... ./internal/...` && `go test ./cli/commands/ -count=1` | CI adds `-v` |

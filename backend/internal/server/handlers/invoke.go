@@ -152,6 +152,11 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// time-clustered B-tree inserts).
 	execID := ids.New()
 
+	// Set here rather than on the success path alone: a timeout or a crashed
+	// sandbox answers from this handler, and its stderr is stored too, so the
+	// caller needs the id to fetch the logs for exactly the runs that failed.
+	w.Header().Set("X-Orva-Execution-ID", execID)
+
 	// HTTP-rooted span. Trace ID was set by requestIDMiddleware; we add
 	// the span ID for this execution and stamp the trigger label.
 	traceID := trace.TraceID(r.Context())
