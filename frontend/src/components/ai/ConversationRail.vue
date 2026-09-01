@@ -35,7 +35,7 @@
         :class="c.id === store.activeId ? 'bg-primary/15' : 'hover:bg-surface-hover'"
       >
         <button
-          class="touch-expand-sm flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          class="touch-expand-sm flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
           :class="c.id === store.activeId ? 'text-foreground-strong' : 'text-foreground-muted group-hover:text-foreground-strong'"
           :aria-current="c.id === store.activeId ? 'page' : undefined"
           @click="onOpen(c.id)"

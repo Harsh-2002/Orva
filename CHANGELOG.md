@@ -104,6 +104,17 @@ before it.
   version list also refreshes after a deploy, which it previously did on mount,
   on window focus and after a rollback, but not after the thing that changes it.
 
+- **Every boxed control now takes the type size of its own height.** The size
+  ladder was pinned for height and never for type, so bespoke CSS classes
+  drifted — thirteen of them, from 10px to 12.5px, against a scale that has
+  three values. That put two type sizes in one editor toolbar, three across the
+  docs page, and two `h-8` buttons in the AI rail at different sizes. The rule
+  is `Button.vue`'s own map — 26.6px and 30.4px take `text-xs`, 38px takes
+  `text-sm` — and measuring 788 rendered controls confirmed 530 already
+  followed it. Icon-only controls, controls sized by their text rather than by
+  a box, and the ladder's own 22.8px "text" rung stay outside the rule, because
+  for them a font size is not a proportion.
+
 ### Upgrade notes
 
 - **If the in-product assistant wrote a function for you before this release,

@@ -2479,7 +2479,7 @@ const Callout = defineComponent({
   }
   .docs-hero-copy-label {
     display: inline;
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
   }
 }
 .docs-hero-copy-icon:hover {
@@ -2529,7 +2529,7 @@ const Callout = defineComponent({
   background: var(--color-surface);
   color: var(--color-foreground-muted);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: 0.75rem;
   font-weight: 500;
   text-decoration: none;
   transition: color 120ms, border-color 120ms, background-color 120ms;
@@ -2909,7 +2909,7 @@ const Callout = defineComponent({
   background: var(--color-surface);
   color: var(--color-foreground-muted);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
   transition: color 120ms, border-color 120ms, background-color 120ms;
@@ -3185,7 +3185,7 @@ const Callout = defineComponent({
   gap: 0.45rem;
   padding: 0.45rem 0.85rem;
   font-family: var(--font-sans);
-  font-size: 12.5px;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--color-foreground);
   background: var(--color-surface);
@@ -3281,7 +3281,7 @@ const Callout = defineComponent({
   border-radius: var(--radius-md);
   color: var(--color-foreground-muted);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: 0.75rem;
   cursor: pointer;
   transition: color 120ms, border-color 120ms, background 120ms;
 }
@@ -3334,7 +3334,7 @@ const Callout = defineComponent({
   border: 0;
   padding: 0.6rem 0.95rem;
   font-family: var(--font-sans);
-  font-size: 12.5px;
+  font-size: 0.875rem;
   font-weight: 500;
   color: var(--color-foreground-muted);
   cursor: pointer;
@@ -3436,7 +3436,7 @@ const Callout = defineComponent({
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-foreground-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease;
 }

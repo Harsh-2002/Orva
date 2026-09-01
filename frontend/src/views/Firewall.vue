@@ -1130,7 +1130,7 @@ const RuleCard = defineComponent({
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-foreground-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
   height: 26.6px;
