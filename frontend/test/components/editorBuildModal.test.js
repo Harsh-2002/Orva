@@ -264,6 +264,23 @@ describe('editor build log modal', () => {
     expect(stream.closed).toBe(true)
   })
 
+  // The acknowledgement is on a timer, so it outlives the navigation that
+  // follows a deploy unless the re-scope clears it.
+  it('does not carry the deploy acknowledgement onto another function', async () => {
+    const { wrapper, router } = await openEditor()
+    await clickDeploy(wrapper)
+    stream.emit('succeeded', { version: 7, duration_ms: 1240 })
+    await settle()
+    expect(wrapper.findAll('button').some((b) => b.text().trim() === 'Deployed')).toBe(true)
+
+    router.push('/functions/beta')
+    await settle()
+    expect(wrapper.text()).toContain('handler.py')
+    // beta was not deployed, so its button must not say so.
+    expect(wrapper.findAll('button').some((b) => b.text().trim() === 'Deployed')).toBe(false)
+    expect(wrapper.text()).not.toContain('v7 live')
+  })
+
   it('routes the toolbar Test control to the workbench', async () => {
     const { wrapper, router } = await openEditor()
     const btn = wrapper.findAll('button').find((b) => b.text().trim() === 'Test')

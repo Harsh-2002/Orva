@@ -1785,6 +1785,10 @@ const resetEditorState = () => {
   buildError.value = ''
   lastBuild.value = null
   buildModalOpen.value = false
+  // Without this the acknowledgement follows you: deploy, navigate, and the
+  // next function's button reads "Deployed" for the rest of the timer.
+  clearTimeout(deployedTimer)
+  justDeployed.value = false
   lastDeployAt.value = ''
   deployedThisSession.value = false
   versions.value = []
@@ -1930,7 +1934,7 @@ const unbindGlobals = () => {
 onActivated(bindGlobals)
 onDeactivated(unbindGlobals)
 // onDeactivated does not fire when keep-alive evicts this instance at :max.
-onBeforeUnmount(unbindGlobals)
+onBeforeUnmount(() => { unbindGlobals(); clearTimeout(deployedTimer) })
 
 // The `prefill` deep link ("Save as fixture" in InvocationsLog) carries a
 // captured production request, headers and all: that belongs in the workbench,
