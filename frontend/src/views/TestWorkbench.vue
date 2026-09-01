@@ -799,10 +799,9 @@ const statusVariant = (item) => STATUS_VARIANT[statusClass(item)]
 const statusTextClass = (item) => STATUS_TEXT[statusClass(item)]
 const statusIcon = (item) => STATUS_ICON[statusClass(item)]
 
-const durationLabel = (item) => {
-  const ms = item?.durationMs
-  return ms && ms !== '?' ? `${ms} ms` : 'no timing'
-}
+// The invoke handler answers a timeout or a pool rejection itself and sets no
+// duration header, so a run can genuinely have no timing to report.
+const durationLabel = (item) => (item?.durationMs ? `${item.durationMs} ms` : 'no timing')
 
 const liveStatus = computed(() => {
   const item = selectedRun.value

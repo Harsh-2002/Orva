@@ -217,20 +217,23 @@ describe('editor build log modal', () => {
     expect(dialogText()).toContain("Cannot find name 'reqeust'")
   })
 
-  it('never opens on a successful build, and hands the version to a toast', async () => {
+  it('acknowledges a successful build on the button, with no banner', async () => {
     const { wrapper } = await openEditor()
     await clickDeploy(wrapper)
     stream.emit('succeeded', { version: 7, duration_ms: 1240 })
     await settle()
 
-    // A finished build is done with the screen. The full log stays on the
-    // Deployments page, so the version is the only thing this moment owns.
+    // A 1ms build is not worth an interruption. Deploy says it landed, the
+    // file header says which version is live, and nothing has to be dismissed.
     expect(dialog()).toBeNull()
     expect(wrapper.text()).not.toContain('Build failed')
     expect(wrapper.text()).not.toContain('Suggest fix')
-    const toast = document.body.textContent || ''
-    expect(toast).toContain('v7 live')
-    expect(toast).toContain('Open workbench')
+    expect(wrapper.findAll('button').some((b) => b.text().trim() === 'Deployed')).toBe(true)
+    expect(wrapper.text()).toContain('v7 live')
+    // The toast this replaced put a dismissable banner on screen for every
+    // deploy, carrying this copy. (The strip's own workbench link stays.)
+    expect(document.body.textContent || '').not.toContain('Built in 1240ms')
+    expect(document.body.textContent || '').not.toContain('The full build log is on the')
   })
 
   it('has no build drawer left standing under the editor', async () => {

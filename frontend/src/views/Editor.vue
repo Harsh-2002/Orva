@@ -204,19 +204,24 @@
         >
           Reset
         </Button>
-        <!-- min-w pins the box across the Deploy/Building label swap: without it
-             the toolbar reflowed on every click, and wrapped at phone width. -->
+        <!-- Three states in one box. min-w pins it across the label swaps:
+             without it the toolbar reflowed on every click, and wrapped at
+             phone width. -->
         <Button
           size="sm"
           class="min-w-[7.25rem]"
           :loading="deploying"
           @click="deployFunction"
         >
-          <UploadCloud
-            v-if="!deploying"
+          <Check
+            v-if="justDeployed && !deploying"
             class="w-4 h-4"
           />
-          {{ deploying ? 'Building' : 'Deploy' }}
+          <UploadCloud
+            v-else-if="!deploying"
+            class="w-4 h-4"
+          />
+          {{ deploying ? 'Building' : justDeployed ? 'Deployed' : 'Deploy' }}
         </Button>
       </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
@@ -284,6 +289,12 @@
             <span class="run-spinner" />
             Building
           </span>
+          <!-- Which version is live is a fact about the function, not an event,
+               so it stays here rather than being announced and taken away. -->
+          <span
+            v-else-if="lastBuild?.version"
+            class="text-[10px] text-success-fg font-medium"
+          >v{{ lastBuild.version }} live</span>
           <span class="text-[10px] text-foreground-muted font-mono">
             {{ code.length }} chars
           </span>
@@ -352,19 +363,12 @@
             </button>
           </template>
           <template v-else>
-            <span
-              class="text-[10px] uppercase tracking-[0.14em] font-medium flex items-center gap-1.5 shrink-0"
-              :class="lastRunTone.text"
-            >
-              <span
-                class="w-1.5 h-1.5 rounded-full"
-                :class="lastRunTone.dot"
-              />
-              {{ lastRunTone.word }}
-            </span>
+            <!-- No status chip. "Idle" reported nothing, and "Response" next to
+                 a 200 said it twice; the status code carries the tone itself. -->
             <span
               v-if="lastRunMeta"
-              class="text-[10px] text-foreground-muted font-mono shrink-0"
+              class="text-[11px] font-mono font-medium shrink-0"
+              :class="lastRunTone"
             >{{ lastRunMeta }}</span>
             <span
               v-if="lastRunStale"
@@ -1157,24 +1161,6 @@
         </Button>
       </template>
     </Modal>
-
-    <!-- The build modal closes itself on success, so the version it made lands
-         here rather than vanishing with it. -->
-    <Toast
-      :visible="!!deployToast"
-      :title="deployToast?.version ? `v${deployToast.version} live` : 'Deployed'"
-      action-label="Open workbench"
-      @action="openWorkbench(); deployToast = null"
-      @dismiss="deployToast = null"
-    >
-      Built in {{ deployToast?.durationMs }}ms. The full build log is on the
-      <router-link
-        :to="{ name: 'function-deployments', params: { name: form.name } }"
-        class="text-link underline underline-offset-2"
-      >
-        Deployments
-      </router-link> page.
-    </Toast>
   </div>
 </template>
 
@@ -1186,7 +1172,6 @@ import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
-import Toast from '@/components/common/Toast.vue'
 import PythonIcon from '@/components/icons/brand/PythonIcon.vue'
 import NodeIcon from '@/components/icons/brand/NodeIcon.vue'
 
@@ -1304,9 +1289,12 @@ const onDocKey = (e) => {
 // holding "No build activity yet." Nothing in the deploy path reads this ref, so
 // closing it cannot reach the build.
 const buildModalOpen = ref(false)
-// Success closes the modal and hands the version to a toast; failure keeps the
-// log on screen, because that is the one time you need to read it.
-const deployToast = ref(null)
+// Deploy acknowledges itself: the spinner becomes a check for a moment and
+// then the button is a button again. A banner for a 1ms build is more
+// interruption than the event is worth, and the version it announced is
+// already in the file header and the version list.
+const justDeployed = ref(false)
+let deployedTimer = null
 
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
@@ -2231,11 +2219,12 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
         ? `✓ v${payload.version} live in ${ms}ms`
         : `✓ Build succeeded in ${ms}ms`)
       refreshVersions()
-      // A finished build is done with the screen. The full log stays reachable
-      // on the Deployments page, so closing loses nothing; the toast carries
-      // the version, which is the one thing only this moment knows.
+      // A finished build is done with the screen: the full log stays reachable
+      // on the Deployments page and the version lands in the file header.
       buildModalOpen.value = false
-      deployToast.value = { version: payload?.version || null, durationMs: ms }
+      justDeployed.value = true
+      clearTimeout(deployedTimer)
+      deployedTimer = setTimeout(() => { justDeployed.value = false }, 2500)
     } else {
       const msg = payload?.error_message || 'build failed (see logs)'
       buildError.value = msg
@@ -2289,17 +2278,13 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
 const lastRun = computed(() => (fnId.value ? testbench.latestRun(fnId.value) : null))
 // The store calls only 5xx `failed`, so painting everything below it green put
 // a success dot beside a 404. Three tones: answered, refused, broke.
-const RUN_TONES = {
-  idle:     { word: 'Idle',     text: 'text-foreground-muted', dot: 'bg-border' },
-  ok:       { word: 'Response', text: 'text-success-fg',       dot: 'bg-success-fg' },
-  rejected: { word: 'Rejected', text: 'text-warning-fg',       dot: 'bg-warning-fg' },
-  failed:   { word: 'Failed',   text: 'text-danger-fg',        dot: 'bg-danger-fg' },
-}
+// A 4xx the handler meant to send is not the same as a 5xx it did not, so the
+// status code is drawn in three tones rather than pass/fail.
 const lastRunTone = computed(() => {
   const run = lastRun.value
-  if (!run) return RUN_TONES.idle
-  if (run.failed) return RUN_TONES.failed
-  return Number(run.status) >= 400 ? RUN_TONES.rejected : RUN_TONES.ok
+  if (!run) return 'text-foreground-muted'
+  if (run.failed) return 'text-danger-fg'
+  return Number(run.status) >= 400 ? 'text-warning-fg' : 'text-success-fg'
 })
 // A transport failure has no duration to report, so the status stands alone
 // rather than reading "Error · ms".

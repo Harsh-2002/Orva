@@ -58,8 +58,9 @@ vi.mock('@/components/common/CodeEditor.vue', async () => {
 const OTHER = { render: () => null }
 const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await nextTick(); await new Promise((r) => setTimeout(r, 0)) } }
 
-// Returns the strip after one Run: its excerpt, its status word, and the dot's
-// classes, which is the whole of what the strip promises.
+// Returns the strip after one Run: its excerpt and the status readout's tone,
+// which is the whole of what the strip promises. There is no status word or
+// dot -- the status code itself is drawn in the tone.
 const runOnce = async () => {
   const Editor = (await import('@/views/Editor.vue')).default
   const router = createRouter({
@@ -87,7 +88,10 @@ const runOnce = async () => {
     wrapper,
     live,
     excerpt: live.find('code').exists() ? live.find('code').text() : '',
-    dot: live.find('span.rounded-full').attributes('class'),
+    // The status/duration readout, e.g. "200 · 12ms", and the class carrying
+    // its tone. Class rather than word: the code is the word.
+    meta: live.find('span.font-mono')?.text() ?? '',
+    tone: live.find('span.font-mono')?.attributes('class') ?? '',
   }
 }
 
@@ -103,9 +107,22 @@ describe('editor result strip', () => {
   it('shows the whole answer on one line, not the first line of pretty JSON', async () => {
     ok(200, { message: 'Hello, World' })
     logs('')
-    const { excerpt, live } = await runOnce()
+    const { excerpt, meta, tone } = await runOnce()
     expect(excerpt).toBe('{ "message": "Hello, World" }')
-    expect(live.text()).toContain('Response')
+    expect(meta).toBe('200 · 12ms')
+    expect(tone).toContain('text-success-fg')
+  })
+
+  // The invoke handler answers a timeout or a pool rejection itself and sets
+  // no duration header. It used to render "503 · ?ms", which reads as a
+  // measurement rather than an absence.
+  it('reports no duration rather than inventing one, when the header is absent', async () => {
+    INVOKE.mockRejectedValue({ response: { status: 503, data: '', headers: { 'x-orva-execution-id': 'e1' } } })
+    logs('')
+    const { meta, tone } = await runOnce()
+    expect(meta).toBe('503')
+    expect(meta).not.toContain('?')
+    expect(tone).toContain('text-danger-fg')
   })
 
   it('picks the exception, not the last stack frame, out of a Node traceback', async () => {
@@ -119,9 +136,9 @@ describe('editor result strip', () => {
       '    at handler (/var/task/handler.js:3:11)',
       '    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)',
     ].join('\n'))
-    const { excerpt, live } = await runOnce()
+    const { excerpt, live, tone } = await runOnce()
     expect(excerpt).toBe('Error: boom')
-    expect(live.text()).toContain('Failed')
+    expect(tone).toContain('text-danger-fg')
     // ...and says there is more to read, so the workbench link has a reason.
     expect(live.text()).toContain('6 log lines')
   })
@@ -152,10 +169,10 @@ describe('editor result strip', () => {
   it('does not paint a 404 as a green success', async () => {
     fail(404, 'no such user')
     logs('')
-    const { dot, live } = await runOnce()
-    expect(dot).toContain('bg-warning-fg')
-    expect(dot).not.toContain('bg-success-fg')
-    expect(live.text()).toContain('Rejected')
+    const { meta, tone } = await runOnce()
+    expect(meta).toBe('404 · 9ms')
+    expect(tone).toContain('text-warning-fg')
+    expect(tone).not.toContain('text-success-fg')
   })
 
   it('says a silent run was silent instead of pointing at logs that do not exist', async () => {

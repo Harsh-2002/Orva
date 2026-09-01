@@ -131,7 +131,7 @@ export const useTestbenchStore = defineStore('testbench', () => {
     run.logsState = 'loading'
     for (let i = 0; i < LOG_ATTEMPTS; i++) {
       try {
-        const { data } = await getInvocationLogs(run.executionId)
+        const { data } = await getInvocationLogs(run.executionId, { quiet404: true })
         const raw = data?.stderr || ''
         run.stderr = raw ? raw.split('\n').filter((l) => l !== '') : []
         run.structured = data?.log_entries || []
@@ -173,7 +173,7 @@ export const useTestbenchStore = defineStore('testbench', () => {
       })
       const text = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
       run.status = `${res.status}`
-      run.durationMs = res.headers?.['x-orva-duration-ms'] || '?'
+      run.durationMs = res.headers?.['x-orva-duration-ms'] || ''
       run.executionId = res.headers?.['x-orva-execution-id'] || ''
       try { run.body = JSON.stringify(JSON.parse(text), null, 2) } catch { run.body = text }
       // Only 5xx is a bug to debug; a deliberate 401 from an authz check is not.
@@ -181,7 +181,7 @@ export const useTestbenchStore = defineStore('testbench', () => {
     } catch (err) {
       if (err.response) {
         run.status = `${err.response.status}`
-        run.durationMs = err.response.headers?.['x-orva-duration-ms'] || '?'
+        run.durationMs = err.response.headers?.['x-orva-duration-ms'] || ''
         run.executionId = err.response.headers?.['x-orva-execution-id'] || ''
         // Formatted like the success body: this is the one an operator reads.
         const t = err.response.data

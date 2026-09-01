@@ -28,7 +28,12 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
-      console.error('API Error:', error.response.data)
+      // A caller that treats a status as an ordinary answer marks the request
+      // quiet for it. The log poll expects 404 until the execution row is
+      // written, and logged twelve console errors per run saying so.
+      if (!(error.config?.quietStatuses || []).includes(error.response.status)) {
+        console.error('API Error:', error.response.data)
+      }
       // An expired session used to leave every list silently blank with no
       // prompt, because nothing inspected the status. Dispatch an event the
       // shell listens for so the user is told to sign in again instead of

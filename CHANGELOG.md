@@ -62,7 +62,14 @@ before it.
   deploy spent that whole time opening and closing again. It now appears for
   the one case that needs reading: a failure raises it with the error, and if
   you dismiss it the editor keeps a `Build failed` marker that opens it again.
-  Success is a toast carrying the version, with a shortcut into the workbench.
+  Success needs no dialog and no banner — the button shows a check reading
+  `Deployed` for a moment, and the file header says which version is live.
+
+- **The result strip drops its status chip.** `Idle` reported nothing, and
+  `Response` beside a `200` said the same thing twice. The status code carries
+  the tone itself: green for an answer, amber for a 4xx the handler meant to
+  send, red for a 5xx it did not. A run whose response carried no timing header
+  now reads `503` rather than `503 · ?ms`, which read as a measurement.
 
 - **`Deploy new version` is now `Deploy`.** It was the only place in the product
   that said it that way; the CLI, the API route and the MCP tool have always
