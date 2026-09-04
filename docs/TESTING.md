@@ -117,7 +117,7 @@ Say these out loud before you claim a change is verified:
 
 | Requirement | Why | Check |
 |---|---|---|
-| Go 1.26+ | the embedded Bifrost AI gateway needs it | `go version` |
+| Go 1.27+ | the embedded Bifrost AI gateway needs it | `go version` |
 | Node 24 | frontend build only — *not* the function runtime | `node --version` |
 | Python 3.14 (CONTRACT §1) | CI parity. The E2E suite is stdlib-only and **ran clean on 3.13.5** — do not go install 3.14 before you can run anything | `python3 -V` |
 | Linux, cgroup v2, unprivileged userns | nsjail | `mount \| grep cgroup2` |

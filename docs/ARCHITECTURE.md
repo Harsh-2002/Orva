@@ -383,7 +383,7 @@ BYO provider keys. Served at `/api/v1/ai/*` (SSE for chat + approval).
   normalized event stream. `Account` resolves BYO keys from
   `ai_provider_configs` at request time; thinking levels map to
   `ChatReasoning`. (The Bifrost dependency is why the module requires
-  Go ≥1.26.)
+  Go ≥1.27.)
 - `agent/` — the agentic loop (≈25-iteration budget): stream a model
   turn → emit SSE deltas → detect tool calls → approval-gate writes →
   dispatch the tool **in-process as a Go call** (no MCP transport, no
