@@ -24,7 +24,7 @@ target list (`build`, `build-all`, `cli`, `cli-all`, `embed`, `adapters-embed`,
 
 Requires:
 
-- **Go 1.26+** (the embedded AI gateway requires it)
+- **Go 1.27+** (the embedded AI gateway requires it)
 - **Node 24+**
 - **nsjail** at exactly `/usr/local/bin/nsjail` — the path is hardcoded
   (`config/defaults.go`, pinned by `config_test.go`) and `PATH` is never

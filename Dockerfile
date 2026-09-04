@@ -13,7 +13,7 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-FROM golang:1.26-bookworm AS go
+FROM golang:1.27-bookworm AS go
 WORKDIR /src
 # go.mod / go.sum live at the repo root since the v2026.05.12 CLI split.
 COPY go.mod go.sum ./

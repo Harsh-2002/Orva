@@ -36,7 +36,7 @@ python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.
 ```
 
 **Requirements:** `docker` (for isolated mode), `python3`, and a built `build/orva`
-(for the CLI tests — `make build` from repo root). The image build needs Go 1.26
+(for the CLI tests — `make build` from repo root). The image build needs Go 1.27
 (the Dockerfile pins it; the AI gateway requires it).
 
 ## Architecture

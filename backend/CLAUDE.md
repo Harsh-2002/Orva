@@ -1,6 +1,6 @@
 # Backend
 
-Go 1.26 (bumped from 1.25 — the embedded Bifrost AI gateway requires go ≥1.26; the Dockerfile + all CI workflows pin golang 1.26 in lock-step). Module: `github.com/Harsh-2002/Orva` (rooted at the repo, not at
+Go 1.27 (the embedded Bifrost AI gateway requires go ≥1.27; the Dockerfile + all CI workflows pin golang 1.27 in lock-step). Module: `github.com/Harsh-2002/Orva` (rooted at the repo, not at
 `backend/`). SQLite with no CGO (`modernc.org/sqlite`).
 
 The server binary built from `backend/cmd/orva` is the daemon (`orva serve`)

@@ -150,7 +150,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           # Published binaries must not carry a stdlib CVE already fixed upstream.
           check-latest: true
           # No build cache — every release builds from scratch so we
@@ -243,7 +243,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           # Published binaries must not carry a stdlib CVE already fixed upstream.
           check-latest: true
           # No build cache — every release builds from scratch so we

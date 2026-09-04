@@ -13,6 +13,17 @@ pruned with their releases — so `git log v2026.09.01..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
+## Unreleased
+
+### Upgrade notes
+
+- **Building Orva from source now needs Go 1.27** (was 1.26). The embedded
+  Bifrost AI gateway declares `go 1.27.0` in its own module, so the floor moves
+  with it; the Dockerfile and both workflows are pinned in lock-step. Nothing
+  changes if you install a released binary or run the container — each carries
+  its own toolchain.
+
+
 ## v2026.09.01
 
 ### Added

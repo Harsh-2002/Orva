@@ -4,7 +4,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/Harsh-2002/Orva/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/Harsh-2002/Orva/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fharsh--2002%2Forva-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/Harsh-2002/Orva/pkgs/container/orva)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![Node](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 
