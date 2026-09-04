@@ -9,11 +9,30 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.09.01..HEAD` is the range for
+pruned with their releases — so `git log v2026.09.04..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
-## Unreleased
+## v2026.09.04
+
+A dependency and toolchain release; no Orva source changed.
+
+### Changed
+
+- **The embedded Bifrost AI gateway moves to 1.8.4** (from 1.7.13). Every API
+  Orva uses is unchanged — the update is upstream provider fixes plus an opt-in
+  SSRF allowlist Orva does not enable.
+- **The server is built with Go 1.27** (was 1.26), which that gateway requires.
+  Two upstream defaults move with it, both reachable only at the edges. A
+  request carrying more than 500 header values is now refused by `net/http`
+  (`DefaultMaxHeaderValueCount`, overridable via `Server.MaxHeaderValueCount`),
+  where 1.26 accepted it; and `encoding/json` is compiled on the v2 engine, so
+  a string holding invalid UTF-8 serializes as raw U+FFFD bytes rather than the
+  escaped form. Decoded values are unchanged.
+- **Dashboard dependencies updated** — Vue 3.5.42, vue-router 5.3.0, axios
+  1.20.0, `@lucide/vue` 1.38.0 and four others. Route resolution, navigation
+  guards and the API client's interceptor contract were checked against the new
+  versions and behave identically.
 
 ### Upgrade notes
 
