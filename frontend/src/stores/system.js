@@ -75,6 +75,7 @@ export const useSystemStore = defineStore('system', () => {
           buildTime: healthRes.data.build_time,
           image: healthRes.data.image,
           uptimeSeconds: healthRes.data.uptime_seconds,
+          sandbox: healthRes.data.sandbox,
         }
       }
       isConnected.value = true

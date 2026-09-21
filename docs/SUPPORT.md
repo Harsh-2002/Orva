@@ -37,15 +37,22 @@ an issue.
 
 ## Kernel feature requirements
 
-None of these block installation — the installer warns where it can probe,
-and otherwise the feature simply stops working at invocation time:
+The installer verifies the sandbox path as the `orva` service user before it
+starts the daemon. A failed user-namespace probe automatically tries nsjail's
+file-capability fallback; a host where neither works aborts installation. The
+cgroup and TUN checks remain warnings because they affect resource enforcement
+or egress only:
 
 - `kernel.unprivileged_userns_clone = 1` — preferred for nsjail's
   per-function user namespaces. On bare-metal hosts that disable or restrict
-  unprivileged user namespaces, `install.sh` applies a verified, narrow file
-  capability set to nsjail and configures `ORVA_DISABLE_USERNS=1`; the runtime
+  unprivileged user namespaces, `install.sh` proves the normal mode first, then
+  applies and proves a narrow file-capability fallback (`ORVA_DISABLE_USERNS=1`)
+  only when needed; the runtime
   still uses mount, PID, network, IPC, UTS, chroot, and seccomp isolation.
-- cgroup v2 — required for per-function memory / CPU limits.
+- cgroup v2 with delegated controllers — required for hard per-function memory
+  / CPU / pid limits. Without delegation, functions still run with `rlimit`
+  address-space protection and a persistent health/dashboard warning; do not
+  treat it as equivalent to the configured hard memory budget.
 - `/dev/net/tun` (the `tun` kernel module) — required by nsjail's
   `--user_net`, i.e. by every function with `network_mode: egress`, and
   therefore by the egress policy that filters those functions. Without the

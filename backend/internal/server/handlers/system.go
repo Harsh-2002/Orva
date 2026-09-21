@@ -157,6 +157,21 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 			sandboxRuntime = "unavailable"
 		}
 	}
+	userNamespaceMode := "enabled"
+	if os.Getenv("ORVA_DISABLE_USERNS") == "1" {
+		userNamespaceMode = "capability_fallback"
+	}
+	resourceLimits := "cgroup_v2"
+	if sandbox.CgroupV2Mount() == "" {
+		resourceLimits = "rlimit_only"
+	}
+	warnings := make([]string, 0, 2)
+	if userNamespaceMode == "capability_fallback" {
+		warnings = append(warnings, "user namespaces are disabled; nsjail is using its verified file-capability fallback")
+	}
+	if resourceLimits == "rlimit_only" {
+		warnings = append(warnings, "cgroup v2 controllers are not delegated; per-sandbox CPU, pid, and hard memory caps are unavailable")
+	}
 
 	// Only a container image stamps ORVA_IMAGE: the release publishes one tag
 	// (:latest) and bare metal has none, so a Version-derived ref would 404.
@@ -174,6 +189,9 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 			"active_executions":   active,
 			"lifetime_executions": total,
 			"runtime":             sandboxRuntime,
+			"user_namespace":      userNamespaceMode,
+			"resource_limits":     resourceLimits,
+			"warnings":            warnings,
 		},
 		"host": map[string]any{
 			"num_cpu":       runtime.NumCPU(),

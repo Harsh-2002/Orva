@@ -60,6 +60,13 @@ DOCKER_DEFAULT_RUNTIME=""
 DOCKER_RUNTIMES=""
 DOCKER_RUNTIME_PATHS=""
 SERVICE_DISABLE_USERNS="${ORVA_DISABLE_USERNS:-}"
+# Keep the fact that the operator made a choice separate from its value. An
+# empty value is not a valid choice, but it is also different from automatic
+# selection: silently changing an explicit setting obscures host-policy bugs.
+SERVICE_DISABLE_USERNS_EXPLICIT=0
+if [ "${ORVA_DISABLE_USERNS+x}" = "x" ]; then
+    SERVICE_DISABLE_USERNS_EXPLICIT=1
+fi
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -693,15 +700,12 @@ check_kernel_features() {
     fi
     if [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
        [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ]; then
-        warn "AppArmor restricts unprivileged user namespaces — using nsjail's setcap fallback"
+        warn "AppArmor restricts unprivileged user namespaces — nsjail will be execution-tested before the service is started"
         ckf_missing="userns ${ckf_missing#userns }"
-        [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=1
     fi
     if containerized_host; then
-        warn "containerized host detected — using nsjail's setcap fallback"
-        [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=1
+        warn "containerized host detected — nsjail will be execution-tested before the service is started"
     fi
-    [ -n "$SERVICE_DISABLE_USERNS" ] || SERVICE_DISABLE_USERNS=0
     if ! grep -q cgroup2 /proc/mounts 2>/dev/null; then
         warn "cgroup v2 not detected — per-function resource limits will be best-effort"
         ckf_missing="${ckf_missing}cgroupv2 "
@@ -711,6 +715,74 @@ check_kernel_features() {
     else
         log "kernel features: OK"
     fi
+}
+
+# ── Sandbox execution gate (bare-metal) ─────────────────────────────────────
+# A sysctl only says an unprivileged user namespace is theoretically available.
+# It does not prove nsjail can create its nested namespace under this host's
+# LSM/container policy. Some VMs allow unshare(2) but deny nsjail's
+# /proc/<pid>/setgroups setup. Test the exact binary, rootfs and service user
+# before installing a unit that would otherwise look healthy but invoke nothing.
+run_as_service_user() {
+    if have runuser; then
+        runuser -u "$SERVICE_USER" -- "$@"
+    elif have su; then
+        # Passing argv after the command string avoids re-quoting paths.
+        # `--` is essential: without it GNU su parses nsjail's `-Mo` as an
+        # option of its own instead of passing it to the shell command.
+        su -s /bin/sh "$SERVICE_USER" -c 'exec "$@"' -- sh "$@"
+    else
+        die "cannot run the sandbox probe as $SERVICE_USER (install runuser or su)"
+    fi
+}
+
+probe_sandbox_mode() {
+    psm_mode="$1"
+    psm_rootfs="$DATA_DIR/rootfs/node"
+    [ -d "$psm_rootfs" ] || die "sandbox probe cannot find Node rootfs at $psm_rootfs"
+
+    if [ "$psm_mode" = "1" ]; then
+        psm_label="capability fallback"
+        psm_output=$(run_as_service_user "$PREFIX/bin/nsjail" -Mo --disable_clone_newuser \
+            --chroot "$psm_rootfs" -T /tmp -q -- /usr/local/bin/node --version 2>&1) || {
+            warn "nsjail capability-fallback probe failed: $psm_output"
+            return 1
+        }
+    else
+        psm_label="user namespaces"
+        psm_output=$(run_as_service_user "$PREFIX/bin/nsjail" -Mo \
+            --chroot "$psm_rootfs" -T /tmp -q -- /usr/local/bin/node --version 2>&1) || {
+            warn "nsjail user-namespace probe failed: $psm_output"
+            return 1
+        }
+    fi
+    log "sandbox execution probe passed ($psm_label): $psm_output"
+}
+
+select_sandbox_mode() {
+    if [ "$SERVICE_DISABLE_USERNS_EXPLICIT" = "1" ]; then
+        case "$SERVICE_DISABLE_USERNS" in
+            0|1) ;;
+            *) die "ORVA_DISABLE_USERNS must be exactly 0 or 1" ;;
+        esac
+        if ! probe_sandbox_mode "$SERVICE_DISABLE_USERNS"; then
+            die "requested ORVA_DISABLE_USERNS=$SERVICE_DISABLE_USERNS cannot run nsjail as $SERVICE_USER; correct the host policy or choose the other verified mode"
+        fi
+        log "sandbox mode selected by ORVA_DISABLE_USERNS=$SERVICE_DISABLE_USERNS"
+        return
+    fi
+
+    if probe_sandbox_mode 0; then
+        SERVICE_DISABLE_USERNS=0
+        log "sandbox mode: user namespaces"
+        return
+    fi
+    if probe_sandbox_mode 1; then
+        SERVICE_DISABLE_USERNS=1
+        warn "user-namespace setup is blocked on this host; using nsjail's file-capability fallback (mount, PID, network, IPC, UTS, chroot and seccomp isolation remain enabled)"
+        return
+    fi
+    die "nsjail cannot start in either user-namespace mode as $SERVICE_USER; refusing to install a server that cannot invoke functions"
 }
 
 # ── Download helpers (all assets checksum-verified) ──────────────────────────
@@ -985,13 +1057,17 @@ run_bare_metal() {
     install_prereqs
     check_kernel_features
     download_and_install_binaries
-    write_service_files
     create_user
     # After create_user: the /dev/net/tun probe reports whether the *service
     # user* can open it, which needs that user to exist.
     check_egress_device
     download_rootfs
     install_adapters
+    # The rootfs and service account now exist, so this is an execution gate,
+    # not a kernel-feature guess.
+    [ "$DRYRUN" = "1" ] || select_sandbox_mode
+    [ "$DRYRUN" = "1" ] && SERVICE_DISABLE_USERNS="${SERVICE_DISABLE_USERNS:-0}"
+    write_service_files
     # Always refresh the unit file so unit changes reach existing installs.
     install_unit
     if [ "$bm_upgrade" = "1" ]; then
@@ -1070,7 +1146,28 @@ run_docker() {
     # shellcheck disable=SC2086
     ( cd "$COMPOSE_DIR" && $COMPOSE_CMD pull && $COMPOSE_CMD up -d ) \
         || die "docker compose failed"
+    validate_docker_sandbox
     print_followup_docker
+}
+
+# The image healthcheck intentionally covers daemon/database liveness only.
+# Prove the namespace path inside the running container too, otherwise a
+# successful `docker compose up` can leave a dashboard whose every function
+# fails on first invocation.
+validate_docker_sandbox() {
+    vds_try=0
+    while [ "$vds_try" -lt 30 ]; do
+        # shellcheck disable=SC2086
+        if vds_output=$(cd "$COMPOSE_DIR" && $COMPOSE_CMD exec -T orva \
+            /usr/local/bin/nsjail -Mo --chroot /var/lib/orva/rootfs/node -T /tmp -q \
+            -- /usr/local/bin/node --version 2>&1); then
+            log "Docker sandbox execution probe passed: $vds_output"
+            return
+        fi
+        vds_try=$((vds_try + 1))
+        sleep 1
+    done
+    die "Docker started but nsjail could not execute a Node process. Run '(cd $COMPOSE_DIR && $COMPOSE_CMD logs orva)' and confirm the host permits pid/cgroup host namespaces, SYS_ADMIN, and /dev/net/tun."
 }
 
 # ── CLI-only install ─────────────────────────────────────────────────────────
@@ -1265,4 +1362,6 @@ main() {
     esac
 }
 
-main "$@"
+if [ "${ORVA_INSTALL_LIB:-0}" != "1" ]; then
+    main "$@"
+fi

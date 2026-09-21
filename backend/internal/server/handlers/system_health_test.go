@@ -104,3 +104,22 @@ func TestHealthImageOnlyWhenStamped(t *testing.T) {
 		}
 	})
 }
+
+func TestHealthReportsSandboxFallbackModes(t *testing.T) {
+	t.Setenv("ORVA_DISABLE_USERNS", "1")
+	h := &SystemHandler{DB: newTestDB(t), StartTime: time.Now()}
+	_, body := callHealth(t, h)
+	sb, ok := body["sandbox"].(map[string]any)
+	if !ok {
+		t.Fatalf("sandbox = %T, want object", body["sandbox"])
+	}
+	if sb["user_namespace"] != "capability_fallback" {
+		t.Errorf("sandbox.user_namespace = %v, want capability_fallback", sb["user_namespace"])
+	}
+	if got, ok := sb["warnings"].([]any); !ok || len(got) == 0 {
+		t.Errorf("sandbox.warnings = %#v, want non-empty fallback warning", sb["warnings"])
+	}
+	if got := sb["resource_limits"]; got != "cgroup_v2" && got != "rlimit_only" {
+		t.Errorf("sandbox.resource_limits = %v, want cgroup_v2|rlimit_only", got)
+	}
+}

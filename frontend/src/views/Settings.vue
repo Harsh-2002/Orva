@@ -69,7 +69,35 @@
             >copied</span>
           </dd>
         </template>
+
+        <template v-if="buildInfo?.sandbox">
+          <dt class="text-foreground-muted">
+            Sandbox mode
+          </dt>
+          <dd class="font-mono text-foreground-strong">
+            {{ buildInfo.sandbox.user_namespace === 'capability_fallback' ? 'file-capability fallback' : 'user namespaces' }}
+          </dd>
+
+          <dt class="text-foreground-muted">
+            Resource limits
+          </dt>
+          <dd class="font-mono text-foreground-strong">
+            {{ buildInfo.sandbox.resource_limits === 'rlimit_only' ? 'rlimit-only fallback' : 'cgroup v2' }}
+          </dd>
+        </template>
       </dl>
+      <div
+        v-if="(buildInfo?.sandbox?.warnings || []).length"
+        class="mt-4 rounded-md border border-warning-ring bg-warning-tint p-3 text-xs text-warning-fg"
+        role="status"
+      >
+        <p
+          v-for="warning in buildInfo.sandbox.warnings"
+          :key="warning"
+        >
+          {{ warning }}
+        </p>
+      </div>
     </details>
 
     <!-- Appearance card. Theme is the operator's choice and follows the OS by

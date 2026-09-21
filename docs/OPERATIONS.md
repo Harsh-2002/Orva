@@ -135,6 +135,22 @@ Quick confirmation that nsjail itself works on the host:
 `sudo -u orva nsjail -Mo --chroot /var/lib/orva/rootfs/node -T /tmp -- /usr/local/bin/node --version`
 should print the Node version.
 
+If it instead reports `setGroupsDeny failed`, `Couldn't initialize user
+namespace`, or cannot write `/proc/<pid>/setgroups`, the host has blocked the
+nsjail user-namespace sequence even when `unshare` or the sysctl appears to
+work. Re-run the current installer: it tests both modes as `orva` and persists
+the verified fallback. To diagnose an intentional override, test the fallback:
+
+```bash
+sudo -u orva /usr/local/bin/nsjail -Mo --disable_clone_newuser \
+  --chroot /var/lib/orva/rootfs/node -T /tmp -- /usr/local/bin/node --version
+```
+
+Do not run orvad as root to work around this. The service account remains
+unprivileged; only nsjail carries the narrow capability set needed to construct
+the sandbox. Check Settings → Build info or `orva system health` for the active
+sandbox mode and any `rlimit_only` warning.
+
 ## Symptom: deploys stuck in `building` forever
 
 **Diagnosis.**

@@ -63,7 +63,7 @@ OOM it should not.
 |---|---|---|---|
 | `INTERNAL` | 500 | unmapped server fault | no — file a bug with `request_id` |
 | `BUILD_ERROR` | 500 | the deploy's build failed; the function is left in `error` status | no — check `/api/v1/deployments/<id>/logs` for the npm/pip error, fix, redeploy |
-| `WORKER_CRASHED` | 502 | adapter exited unexpectedly (`process.exit`, OOM-kill, syntax error in handler) | no — fix the function |
+| `WORKER_CRASHED` | 502 | adapter exited unexpectedly (`process.exit`, OOM-kill, syntax error in handler, or an older/manual nsjail host-policy setup) | no — inspect the execution log and sandbox health |
 | `BUILDING` | 503 | first deploy in flight; no prior code to serve | **yes** — `Retry-After: 5` |
 | `BUILD_QUEUE_FULL` | 503 | build queue at channel capacity | yes — `Retry-After: depth × 30s` |
 | `POOL_AT_CAPACITY` | 503 | function pool at `dynamicMax` and ctx fired waiting | yes — `Retry-After: 5` |
@@ -83,7 +83,7 @@ Every transient error includes a `hint` field telling the operator what to chang
 - `POOL_AT_CAPACITY`: "inspect pool limiting_reason; raise max_warm only for operator_max, otherwise add host capacity or reduce worker limits"
 - `MEMORY_EXHAUSTED`: "deploy fewer concurrent functions or increase host RAM; see /api/v1/system/metrics.json host.mem_*"
 - `BUILD_QUEUE_FULL`: "wait for current builds to drain; consider raising NumCPU or staggering deploys"
-- `WORKER_CRASHED`: "check stderr in the latest execution log; common causes: process.exit, OOM, syntax error in handler" — you do not have to guess which execution that was: the failing response itself carries `X-Orva-Execution-ID` (set for every invoke that reaches the sandbox, timeouts and crashes included), and the crashed run's stderr is stored under that same id, so pass it to `GET /api/v1/executions/{id}/logs`
+- `WORKER_CRASHED`: "check stderr in the latest execution log; common causes: process.exit, OOM, syntax error in handler" — you do not have to guess which execution that was: the failing response itself carries `X-Orva-Execution-ID` (set for every invoke that reaches the sandbox, timeouts and crashes included), and the crashed run's stderr is stored under that same id, so pass it to `GET /api/v1/executions/{id}/logs`. If stderr names `setgroups`, `/proc/<pid>/setgroups`, or user-namespace initialization, re-run the installer rather than run the daemon as root; it validates and persists the safe nsjail fallback.
 - `EGRESS_POLICY_UNAVAILABLE`: "see GET /api/v1/firewall/status (last_compile_error) — fix the offending rule, then POST /api/v1/firewall/resolve". nsjail's NSTUN stack is default-**allow**, so a missing policy would mean no egress filtering at all; Orva fails the invocation closed instead. `GET /api/v1/firewall/status` reports `enforced`, `policy_generation`, `policy_stale` and `unenforced_rules`.
 
 ## Backward-compatibility

@@ -549,6 +549,12 @@ image and reports it empty. Returns **503** with
 `{"status": "degraded"}` when the 2-second database ping fails. Used by Docker
 HEALTHCHECK and load balancers — match on `healthy`, not `ok`.
 
+`sandbox.user_namespace` is `enabled` or `capability_fallback` and
+`sandbox.resource_limits` is `cgroup_v2` or `rlimit_only`. `sandbox.warnings`
+contains operator-visible caveats. These are readiness diagnostics, not liveness
+gates: a database-healthy instance remains HTTP 200 so a load balancer does not
+flap while the dashboard explains the reduced resource-limit mode.
+
 ### `GET /api/v1/system/metrics`
 Prometheus text format.
 

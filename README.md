@@ -44,6 +44,8 @@ docker run -d --name orva -p 8443:8443 \
 > its own TAP device inside nsjail's user namespace, so the container itself needs
 > no `NET_ADMIN` (only add it back if you force `ORVA_DISABLE_USERNS=1`).
 > `docker compose up -d` (see [Install](#install)) sets all of this for you.
+> The installer also runs an nsjail Node probe inside the started container and
+> fails with a host-feature diagnosis if functions could not run.
 
 Open **http://localhost:8443**, finish onboarding (~30s), and deploy your first
 function from the in-browser editor.
@@ -102,7 +104,7 @@ docker compose up -d
 Compose publishes on **http://localhost:3000** (it maps `3000:8443`), not
 `:8443` like the `docker run` above.
 
-**Bare-metal / VM** — systemd or OpenRC, no Docker (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, Alpine, Arch, openSUSE):
+**Bare-metal / VM** — systemd or OpenRC, no Docker (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, Alpine, Arch, openSUSE). The installer executes nsjail as the unprivileged `orva` service user before it starts the daemon. If user-namespace setup is blocked, it verifies and selects nsjail's narrow file-capability fallback; if neither mode works, installation stops rather than shipping a non-invokable instance:
 
 ```bash
 curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh

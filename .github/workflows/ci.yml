@@ -190,6 +190,9 @@ jobs:
             scripts/install-cli.sh \
             test/release/download-verified-asset.sh
 
+      - name: installer sandbox preflight unit tests
+        run: bash test/install/sandbox-preflight-test.sh
+
       # bash scripts — entrypoint + every test suite. Failing builds here
       # gate the consolidated E2E suites' installer and CLI jobs.
       - name: bash scripts
