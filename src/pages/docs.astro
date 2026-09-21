@@ -79,6 +79,12 @@ $ docker compose up -d
             <span class="num">/usr/local/bin/nsjail</span>. That path is hardcoded: PATH is never consulted
             and there is no environment override. The Docker image ships it.
           </p>
+          <p>
+            The current installer verifies a real nsjail Node spawn before it reports success: inside the
+            running container for Docker, and as the unprivileged <span class="num">orva</span> service account
+            on a VM. On a host that blocks user-namespace setup it verifies nsjail's file-capability fallback; if
+            neither mode works it stops before starting a server that could not run functions.
+          </p>
         </div>
         <p>
           State is a single directory, <span class="num">/var/lib/orva</span>: one SQLite database in WAL mode
@@ -193,7 +199,12 @@ def handler(event):
           </div>
           <div>
             <dt><span class="num">memory_mb</span> / <span class="num">cpus</span></dt>
-            <dd>Enforced by cgroup v2 on the sandbox, not advisory.</dd>
+            <dd>
+              Enforced by cgroup v2 on the sandbox, not advisory. If the host does not delegate cgroup
+              controllers, Orva keeps the sandbox running with an rlimit-only fallback and surfaces a
+              persistent warning in system health and Settings; that fallback is not a substitute for the
+              declared CPU, pid and hard-memory limits.
+            </dd>
           </div>
           <div>
             <dt><span class="num">timeout_ms</span></dt>
@@ -512,6 +523,17 @@ $ orva logs my-fn --follow`}
               <span class="num">--pid host</span>, <span class="num">--cgroupns host</span> and
               <span class="num">--cap-add SYS_ADMIN</span>, plus a writable cgroup mount, to construct
               sandboxes at all.
+            </dd>
+          </div>
+          <div>
+            <dt>Every function crashes with setgroups or user-namespace stderr</dt>
+            <dd>
+              Do not run the daemon as root. Re-run the current bare-metal installer: it tests the shipped
+              nsjail binary as <span class="num">orva</span>, then persists its file-capability fallback only
+              if that fallback starts successfully. Check <span class="num">orva system health</span> for
+              <span class="num">sandbox.user_namespace</span>, <span class="num">sandbox.resource_limits</span
+              >
+              and warnings after installation.
             </dd>
           </div>
         </dl>
