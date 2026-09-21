@@ -83,7 +83,9 @@ $ docker compose up -d
             The current installer verifies a real nsjail Node spawn before it reports success: inside the
             running container for Docker, and as the unprivileged <span class="num">orva</span> service account
             on a VM. On a host that blocks user-namespace setup it verifies nsjail's file-capability fallback; if
-            neither mode works it stops before starting a server that could not run functions.
+            neither mode works it stops before starting a server that could not run functions. Bare-metal installs
+            use a statically linked nsjail asset, so Fedora, Rocky, Arch, Alpine, Debian and Ubuntu do not depend
+            on matching one distribution's protobuf or libnl ABI.
           </p>
         </div>
         <p>
