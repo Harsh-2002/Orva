@@ -1838,6 +1838,8 @@ orva activity --source mcp --limit 200 # MCP-only, last 200
 `rlimit_only`), and `sandbox.warnings`. The bare-metal installer validates an
 nsjail Node spawn as the `orva` service user before starting the service; it
 uses the file-capability fallback only after that mode also passes its probe.
+The downloaded nsjail release asset is statically linked, so supported target
+distros do not need Debian-compatible protobuf or libnl shared-library ABIs.
 
 ### Shell completion
 

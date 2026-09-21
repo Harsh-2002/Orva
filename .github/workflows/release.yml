@@ -2,7 +2,7 @@ name: Release
 
 # Triggers on `v*` tag pushes. Produces:
 #   - orva-linux-{amd64,arm64}       (Go binary, static)
-#   - nsjail-linux-{amd64,arm64}     (built from source, stripped)
+#   - nsjail-linux-{amd64,arm64}     (built from source, static, stripped)
 #   - rootfs-{node,python}-{amd64,arm64}.tar.zst
 #                                    (extracted from official Docker slim
 #                                    images + adapter pre-installed)
@@ -293,20 +293,7 @@ jobs:
   # solely for producing the standalone `nsjail-linux-{amd64,arm64}`
   # binary that ships as a GitHub release asset for bare-metal installs.
   #
-  # Why container: debian:bookworm-slim
-  # ───────────────────────────────────
-  # nsjail is a C++ binary that dynamically links against libprotobuf,
-  # libnl-route-3, libstdc++, libcap, libc. Built on the ubuntu-24.04
-  # host runner (glibc 2.39 / libstdc++ 14 / GLIBCXX_3.4.32+), the
-  # binary carries symbol references too new for the bookworm-class
-  # runtime its install.sh seeds it into — at which point dynamic
-  # linking aborts at exec with
-  #   "libprotobuf.so.32: cannot open shared object file"
-  # then, after that lib is added,
-  #   "version `GLIBC_2.38' not found"
-  # Building inside debian:bookworm-slim matches the binary's symbol
-  # references to the install target on every supported kernel
-  # (Linux ≥ 3.2, which covers every system anyone deploys this on).
+  # Static linkage avoids coupling target distros to Debian's protobuf/libnl ABI.
   build-nsjail:
     name: build nsjail (${{ matrix.goarch }})
     needs: gate
@@ -320,37 +307,24 @@ jobs:
           - goarch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      # No actions/checkout: the job clones nsjail upstream and produces
-      # one binary; no Orva repo files are read here.
-
       - name: install build deps
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates git make gcc g++ autoconf bison flex libtool pkg-config \
+            binutils ca-certificates file git make gcc g++ autoconf bison flex libtool pkg-config \
             libprotobuf-dev libnl-route-3-dev protobuf-compiler
+
+      - uses: actions/checkout@v7
 
       - name: build nsjail from source
         run: |
-          git clone --filter=blob:none https://github.com/google/nsjail.git /tmp/nsjail
-          git -C /tmp/nsjail checkout "$NSJAIL_REF"
-          cd /tmp/nsjail
-          make -j"$(nproc)"
-          strip nsjail
-          file ./nsjail
-          # Confirm the binary's NEEDED dyn deps match what the runtime
-          # apt list installs (libprotobuf32, libnl-route-3-200,
-          # libcap2-bin, libstdc++6, libc6). If a future libprotobuf
-          # bookworm bump renames the .so version, this readlink + dump
-          # output will surface in the workflow log immediately.
-          objdump -p ./nsjail | grep NEEDED || true
-          cp ./nsjail nsjail-linux-${{ matrix.goarch }}
+          bash scripts/build-nsjail-static.sh "/tmp/nsjail-linux-${{ matrix.goarch }}"
 
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: nsjail-${{ matrix.goarch }}
-          path: /tmp/nsjail/nsjail-linux-${{ matrix.goarch }}
+          path: /tmp/nsjail-linux-${{ matrix.goarch }}
           if-no-files-found: error
           retention-days: 1
 

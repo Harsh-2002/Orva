@@ -67,6 +67,9 @@ SERVICE_DISABLE_USERNS_EXPLICIT=0
 if [ "${ORVA_DISABLE_USERNS+x}" = "x" ]; then
     SERVICE_DISABLE_USERNS_EXPLICIT=1
 fi
+# CI-only seam: pre-release installer tests inject the candidate static nsjail
+# because no release asset exists until after the tagged commit passes CI.
+TEST_NSJAIL_PATH="${ORVA_TEST_NSJAIL_PATH:-}"
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -597,12 +600,12 @@ resolve_version() {
 install_prereqs() {
     if [ "$NO_PKG" = "1" ]; then log "skipping package install (--no-pkg)"; return; fi
     case "$DISTRO_ID" in
-        ubuntu)        ip_nsjail="libprotobuf32t64 libnl-route-3-200 libnl-3-200 libcap2-bin" ;;
-        debian)        ip_nsjail="libprotobuf32 libnl-route-3-200 libnl-3-200 libcap2-bin" ;;
-        alpine)        ip_nsjail="protobuf libnl3 gcompat libcap" ;;
-        fedora|rhel|centos|rocky|almalinux|amzn) ip_nsjail="protobuf libnl3 libcap" ;;
-        arch|manjaro|endeavouros)                ip_nsjail="protobuf libnl libcap" ;;
-        opensuse-leap|opensuse-tumbleweed|sles)  ip_nsjail="libprotobuf-lite libnl3-200 libcap-progs" ;;
+        ubuntu|debian)                            ip_nsjail="libcap2-bin" ;;
+        alpine)                                  ip_nsjail="libcap" ;;
+        fedora)                                   ip_nsjail="libcap util-linux-user" ;;
+        rhel|centos|rocky|almalinux|amzn)        ip_nsjail="libcap" ;;
+        arch|manjaro|endeavouros)                ip_nsjail="libcap" ;;
+        opensuse-leap|opensuse-tumbleweed|sles)  ip_nsjail="libcap-progs" ;;
         *)             ip_nsjail="" ;;
     esac
     ip_pkgs="ca-certificates curl tar zstd $ip_nsjail"
@@ -804,13 +807,20 @@ verify() {
 download_and_install_binaries() {
     [ "$DRYRUN" = "1" ] && { log "(dryrun) would download orva + nsjail ($ARCH)"; return; }
     base="https://github.com/${REPO}/releases/download/${VERSION}"
-    log "downloading orva + nsjail (linux-${ARCH})"
+    log "downloading orva (linux-${ARCH})"
     fetch "$base/orva-linux-${ARCH}"   "$tmp/orva"   || die "failed to download orva-linux-${ARCH}"
-    fetch "$base/nsjail-linux-${ARCH}" "$tmp/nsjail" || die "failed to download nsjail-linux-${ARCH}"
     fetch "$base/checksums.txt"        "$tmp/checksums.txt" || die "failed to download checksums.txt"
     log "verifying checksums"
     verify "$tmp/orva"   "orva-linux-${ARCH}"
-    verify "$tmp/nsjail" "nsjail-linux-${ARCH}"
+    if [ -n "$TEST_NSJAIL_PATH" ]; then
+        [ -f "$TEST_NSJAIL_PATH" ] || die "ORVA_TEST_NSJAIL_PATH does not exist: $TEST_NSJAIL_PATH"
+        log "using pre-release nsjail candidate from the installer test harness"
+        install -m 0755 "$TEST_NSJAIL_PATH" "$tmp/nsjail"
+    else
+        log "downloading nsjail (linux-${ARCH})"
+        fetch "$base/nsjail-linux-${ARCH}" "$tmp/nsjail" || die "failed to download nsjail-linux-${ARCH}"
+        verify "$tmp/nsjail" "nsjail-linux-${ARCH}"
+    fi
     log "installing binaries to $PREFIX/bin"
     install -d -m 0755 "$PREFIX/bin" "$PREFIX/share/orva/scripts"
     install -m 0755 "$tmp/orva"   "$PREFIX/bin/orva"
@@ -1048,8 +1058,16 @@ run_bare_metal() {
     [ "$EXISTING_KIND" = "bare" ] && bm_upgrade=1
     if [ "$bm_upgrade" = "1" ]; then
         if [ -n "$EXISTING_VERSION" ] && [ "$EXISTING_VERSION" = "$VERSION" ]; then
-            ask_yn "Orva $VERSION is already installed. Reinstall/repair?" "n" || {
-                log "nothing to do (already at $VERSION)"; return; }
+            if [ "$INTERACTIVE" = "1" ]; then
+                ask_yn "Orva $VERSION is already installed. Reinstall/repair?" "n" || {
+                    log "nothing to do (already at $VERSION)"; return; }
+            else
+                # A previous attempt may have installed the binary/rootfs and
+                # then failed its sandbox gate before writing the service unit.
+                # Non-interactive retries must repair that partial state rather
+                # than returning a false success because the version matches.
+                log "Orva $VERSION is present; running non-interactive repair"
+            fi
         else
             log "upgrading bare-metal install ${EXISTING_VERSION:-?} → $VERSION"
         fi

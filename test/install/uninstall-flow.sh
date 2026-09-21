@@ -63,6 +63,11 @@ esac
 log "reinstalling to verify /var/lib/orva data survives"
 INSTALL_ENV=()
 [[ -n "${ORVA_VERSION:-}" ]] && INSTALL_ENV=(-e "ORVA_VERSION=$ORVA_VERSION")
+if [[ -n "${ORVA_TEST_NSJAIL_PATH:-}" ]]; then
+    [[ -x "$ORVA_TEST_NSJAIL_PATH" ]] || die "candidate nsjail is missing or not executable: $ORVA_TEST_NSJAIL_PATH"
+    docker cp "$ORVA_TEST_NSJAIL_PATH" "$CONTAINER:/root/nsjail-candidate"
+    INSTALL_ENV+=(-e "ORVA_TEST_NSJAIL_PATH=/root/nsjail-candidate")
+fi
 if ! docker exec "${INSTALL_ENV[@]}" "$CONTAINER" sh /root/install.sh >>"$LOGS_DIR/${DISTRO}-reinstall.log" 2>&1; then
     fail "reinstall failed — see $LOGS_DIR/${DISTRO}-reinstall.log"
     FAIL=$((FAIL+1))

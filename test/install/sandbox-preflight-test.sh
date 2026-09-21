@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Unit tests for install.sh's sandbox mode selector. These do not need a
-# privileged host or nsjail: probe_sandbox_mode is replaced with a deterministic
-# fake, which lets CI cover the exact "normal mode fails, fallback works"
-# regression independently of the runner's kernel policy.
+# Unit tests for install.sh's sandbox selection and repair paths. These do not
+# need a privileged host or nsjail: side effects are replaced with deterministic
+# fakes so CI covers failure recovery independently of runner kernel policy.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -90,6 +89,57 @@ if [[ "$out" == 1:* && "$out" == *'ORVA_DISABLE_USERNS must be exactly 0 or 1'* 
   ok 'invalid explicit mode is rejected'
 else
   bad "invalid explicit mode: $out"
+fi
+
+# A failed first install can leave the same-version binary behind but no unit.
+# Non-interactive retry must run the whole repair path rather than falsely
+# succeeding with "already installed". This is the exact CI-matrix regression.
+out=$(ORVA_INSTALL_LIB=1 sh -c '
+  . "$1"
+  EXISTING_KIND=bare
+  EXISTING_VERSION=v2099.01.01
+  VERSION=v2099.01.01
+  INTERACTIVE=0
+  DRYRUN=0
+  calls=""
+  record() { calls="${calls}$1 "; }
+  install_prereqs() { record prereqs; }
+  check_kernel_features() { record kernel; }
+  download_and_install_binaries() { record binaries; }
+  create_user() { record user; }
+  check_egress_device() { record egress; }
+  download_rootfs() { record rootfs; }
+  install_adapters() { record adapters; }
+  select_sandbox_mode() { SERVICE_DISABLE_USERNS=1; record sandbox; }
+  write_service_files() { record files; }
+  install_unit() { record unit; }
+  restart_if_running() { record restart; }
+  start_service() { record start; }
+  install_cli_shortcut() { record cli; }
+  print_followup_bare() { record followup; }
+  run_bare_metal
+  printf "calls=%s\n" "$calls"
+' sh "$INSTALLER" 2>&1)
+if [[ "$out" == *'running non-interactive repair'* && "$out" == *'calls=prereqs kernel binaries user egress rootfs adapters sandbox files unit restart cli followup '* ]]; then
+  ok 'same-version non-interactive retry repairs a partial installation'
+else
+  bad "non-interactive repair: $out"
+fi
+
+out=$(ORVA_INSTALL_LIB=1 sh -c '
+  . "$1"
+  EXISTING_KIND=bare
+  EXISTING_VERSION=v2099.01.01
+  VERSION=v2099.01.01
+  INTERACTIVE=1
+  ask_yn() { return 1; }
+  install_prereqs() { echo unexpected-side-effect; return 1; }
+  run_bare_metal
+' sh "$INSTALLER" 2>&1)
+if [[ "$out" == *'nothing to do (already at v2099.01.01)'* && "$out" != *'unexpected-side-effect'* ]]; then
+  ok 'interactive same-version install still honors repair refusal'
+else
+  bad "interactive repair refusal: $out"
 fi
 
 printf 'passed=%d failed=%d\n' "$pass" "$fail"

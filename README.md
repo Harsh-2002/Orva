@@ -104,7 +104,7 @@ docker compose up -d
 Compose publishes on **http://localhost:3000** (it maps `3000:8443`), not
 `:8443` like the `docker run` above.
 
-**Bare-metal / VM** — systemd or OpenRC, no Docker (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, Alpine, Arch, openSUSE). The installer executes nsjail as the unprivileged `orva` service user before it starts the daemon. If user-namespace setup is blocked, it verifies and selects nsjail's narrow file-capability fallback; if neither mode works, installation stops rather than shipping a non-invokable instance:
+**Bare-metal / VM** — systemd or OpenRC, no Docker (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, Alpine, Arch, openSUSE). The installer uses a statically linked nsjail release asset, executes it as the unprivileged `orva` service user before it starts the daemon, and needs no target-distro protobuf/libnl ABI match. If user-namespace setup is blocked, it verifies and selects nsjail's narrow file-capability fallback; if neither mode works, installation stops rather than shipping a non-invokable instance:
 
 ```bash
 curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh

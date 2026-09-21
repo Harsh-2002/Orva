@@ -140,11 +140,14 @@ End-to-end passes on Ubuntu 24 and ARM64 bare metal surfaced several bugs in
 1. `nsjail` was installed at `/opt/orva/bin/nsjail`, but the daemon's
    default `NsjailBin` is `/usr/local/bin/nsjail` (matches the Docker
    image). The installer now puts a copy at both paths.
-2. `nsjail` was documented as static, but is actually dynamically
-   linked against `libprotobuf` and `libnl-route-3` / `libnl-3`. The
-   installer now resolves and installs the right runtime libraries
-   per-distro (e.g. `libprotobuf32t64` on Ubuntu 24, `libprotobuf32`
-   on Debian 12, `protobuf` on Fedora/Alpine/Arch).
+2. Older `nsjail` release assets were dynamically linked to Debian's exact
+   `libprotobuf` and `libnl` ABIs. Installing similarly named packages could
+   not make that binary portable: Fedora, Rocky, Arch, and Alpine failed at
+   the dynamic loader before nsjail started. Release assets are now fully
+   static and CI executes the candidate binary on every supported installer
+   distro before a tag can ship. Target hosts no longer install protobuf or
+   libnl for Orva; the installer adds only the native capability and
+   service-user tooling it uses.
 3. The language adapters (`adapter.js` / `adapter.py`) were never
    written into the downloaded rootfs trees, so every invocation
    crashed with `read frame: EOF`. The installer now runs
@@ -165,3 +168,8 @@ End-to-end passes on Ubuntu 24 and ARM64 bare metal surfaced several bugs in
    its own. On hosts where AppArmor or container policy blocks unprivileged
    user namespaces, the installer also selects nsjail's setcap fallback
    automatically.
+6. A failed sandbox gate could leave the server binary at the requested
+   version. A non-interactive retry then mistook that partial state for a
+   completed install and returned success without a service unit. Same-version
+   non-interactive runs now perform a repair; interactive runs retain the
+   explicit repair prompt.
