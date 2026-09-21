@@ -922,6 +922,21 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends jq
+      - name: build candidate static nsjail
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: |
+          docker run --rm \
+            -e NSJAIL_REF="$NSJAIL_REF" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -v "$RUNNER_TEMP:/out" \
+            debian:bookworm-slim sh -c '
+              apt-get update -qq
+              apt-get install -y --no-install-recommends \
+                binutils ca-certificates file git make gcc g++ autoconf bison flex \
+                libtool pkg-config libprotobuf-dev libnl-route-3-dev protobuf-compiler
+              bash /workspace/scripts/build-nsjail-static.sh /out/nsjail-linux-candidate
+            '
+          echo "ORVA_TEST_NSJAIL_PATH=$RUNNER_TEMP/nsjail-linux-candidate" >> "$GITHUB_ENV"
       - name: fetch exact released installer
         if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
@@ -939,7 +954,7 @@ jobs:
           # on a PR this script installs the current release, where npm runs on
           # the host as the orva user and fails EACCES on /home/orva/.npm.
           ORVA_DEPS_CANARY: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
-        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH,ORVA_DEPS_CANARY bash test/install/native-engine.sh
+        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH,ORVA_DEPS_CANARY,ORVA_TEST_NSJAIL_PATH bash test/install/native-engine.sh
 
   released-container:
     name: released container (${{ matrix.arch }})
