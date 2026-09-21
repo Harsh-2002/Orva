@@ -1823,7 +1823,7 @@ orva webhooks inbound create order-handler --name stripe-orders --format hmac_sh
 #### System health, metrics, vacuum
 
 ```bash
-orva system health        # daemon up + DB ok
+orva system health        # daemon + DB; inspect sandbox.warnings as well
 orva system metrics       # JSON metrics snapshot
 orva system db-stats      # on-disk breakdown (orva.db, WAL, functions/)
 orva system vacuum        # rewrite SQLite to reclaim freelist pages
@@ -1832,6 +1832,14 @@ orva activity                          # last 50 activity rows
 orva activity --follow                 # live feed (Ctrl-C)
 orva activity --source mcp --limit 200 # MCP-only, last 200
 ```
+
+`system health` includes `sandbox.user_namespace` (`enabled` or
+`capability_fallback`), `sandbox.resource_limits` (`cgroup_v2` or
+`rlimit_only`), and `sandbox.warnings`. The bare-metal installer validates an
+nsjail Node spawn as the `orva` service user before starting the service; it
+uses the file-capability fallback only after that mode also passes its probe.
+The downloaded nsjail release asset is statically linked, so supported target
+distros do not need Debian-compatible protobuf or libnl shared-library ABIs.
 
 ### Shell completion
 

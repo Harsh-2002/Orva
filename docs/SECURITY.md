@@ -324,7 +324,9 @@ bare-metal host that blocks unprivileged user namespaces, the installer uses
 nsjail file capabilities for setup and starts it with
 `--disable_clone_newuser`; nsjail drops privileges before running the adapter,
 while the remaining mount, PID, network, IPC, UTS, chroot, and seccomp
-boundaries stay enabled.
+boundaries stay enabled. This is selected only after an execution probe using
+the actual `orva` service account, binary, and rootfs; running the daemon as
+root is neither required nor an accepted workaround.
 nsjail does not need to call `prctl(PR_SET_NO_NEW_PRIVS)` separately —
 the user namespace gives the same effect for cross-namespace operations.
 
@@ -372,6 +374,13 @@ Per-function caps are enforced in two places:
   - `cpu.max` via `cgroup_cpu_ms_per_sec` (e.g., `cpus: 0.5` →
     500 ms of CPU per 1000 ms wall — fractional CPU as bandwidth, not
     affinity, so the scheduler can load-balance freely).
+
+When cgroup controllers are not delegated, Orva deliberately refuses to pass
+invalid cgroup arguments to nsjail and falls back to `rlimit_as`. It reports
+`sandbox.resource_limits: "rlimit_only"` plus a warning in health and Settings.
+That retains process address-space protection but does **not** enforce the
+function's declared CPU, pid, or hard-memory limits; delegate cgroup v2
+controllers for the full resource boundary.
 
 The host-wide concurrency cap (`cfg.Sandbox.MaxConcurrent`, see the
 `TOO_MANY_REQUESTS` error) is enforced at the Go layer in

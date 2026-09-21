@@ -66,22 +66,44 @@ docker cp "$INSTALLER_PATH" "$CONTAINER:/root/install.sh"
 log "running install.sh inside $CONTAINER (log → $INSTALL_LOG)"
 INSTALL_ENV=()
 [[ -n "${ORVA_VERSION:-}" ]] && INSTALL_ENV=(-e "ORVA_VERSION=$ORVA_VERSION")
+if [[ -n "${ORVA_TEST_NSJAIL_PATH:-}" ]]; then
+    [[ -x "$ORVA_TEST_NSJAIL_PATH" ]] || die "candidate nsjail is missing or not executable: $ORVA_TEST_NSJAIL_PATH"
+    docker cp "$ORVA_TEST_NSJAIL_PATH" "$CONTAINER:/root/nsjail-candidate"
+    INSTALL_ENV+=(-e "ORVA_TEST_NSJAIL_PATH=/root/nsjail-candidate")
+fi
 
 # One retry on failure — apt/dnf mirrors flake (HTTP 520, transient
 # DNS, etc.). A second attempt with a small backoff usually clears it.
 install_attempt() {
-    docker exec "${INSTALL_ENV[@]}" "$CONTAINER" sh /root/install.sh >"$INSTALL_LOG" 2>&1
+    attempt_log="$1"
+    docker exec "${INSTALL_ENV[@]}" "$CONTAINER" sh /root/install.sh >"$attempt_log" 2>&1
 }
 
-if ! install_attempt; then
+: >"$INSTALL_LOG.first"
+: >"$INSTALL_LOG.retry"
+if ! install_attempt "$INSTALL_LOG.first"; then
     warn "install.sh failed on first attempt — retrying after 10s (mirror flake?)"
     sleep 10
-    if ! install_attempt; then
+    if ! install_attempt "$INSTALL_LOG.retry"; then
+        {
+            printf '%s\n' '=== first attempt ==='
+            cat "$INSTALL_LOG.first"
+            printf '%s\n' '=== retry ==='
+            cat "$INSTALL_LOG.retry"
+        } >"$INSTALL_LOG"
         fail "install.sh exited non-zero (twice) — see $INSTALL_LOG"
         tail -40 "$INSTALL_LOG" >&2
         exit 2
     fi
 fi
+{
+    printf '%s\n' '=== first attempt ==='
+    cat "$INSTALL_LOG.first"
+    if [[ -s "$INSTALL_LOG.retry" ]]; then
+        printf '%s\n' '=== retry ==='
+        cat "$INSTALL_LOG.retry"
+    fi
+} >"$INSTALL_LOG"
 ok "install.sh completed"
 
 # ── 3. Start the service and wait for health ─────────────────────────────

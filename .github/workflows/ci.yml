@@ -55,6 +55,7 @@ permissions:
 # output belongs in logs/check summaries; only Release may create artifacts.
 env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
+  NSJAIL_REF: 5ebcc30bef4af60d6e28f012dd8bf7b99b8b0acf
 
 jobs:
   # Path routing keeps expensive jobs scoped to the files they cover.
@@ -113,9 +114,11 @@ jobs:
               - '.github/workflows/ci.yml'
             server_install:
               - 'scripts/install.sh'
+              - 'scripts/build-nsjail-static.sh'
               - 'test/install/**'
               - 'test/release/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
 
   # ── Agent-doc mirror guard ─────────────────────────────────────────────
   # Every directory with a CLAUDE.md must also have an AGENTS.md symlink -> it,
@@ -190,15 +193,20 @@ jobs:
             scripts/install-cli.sh \
             test/release/download-verified-asset.sh
 
+      - name: installer sandbox preflight unit tests
+        run: bash test/install/sandbox-preflight-test.sh
+
       # bash scripts — entrypoint + every test suite. Failing builds here
       # gate the consolidated E2E suites' installer and CLI jobs.
       - name: bash scripts
         run: |
           bash -n scripts/entrypoint.sh
           bash -n scripts/build-rootfs.sh
+          bash -n scripts/build-nsjail-static.sh
           shellcheck -S warning \
             scripts/entrypoint.sh \
             scripts/build-rootfs.sh \
+            scripts/build-nsjail-static.sh \
             test/*.sh \
             test/install/*.sh \
             test/install/lib/*.sh \
@@ -823,6 +831,21 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y jq curl
+      - name: build candidate static nsjail
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: |
+          docker run --rm \
+            -e NSJAIL_REF="$NSJAIL_REF" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -v "$RUNNER_TEMP:/out" \
+            debian:bookworm-slim sh -c '
+              apt-get update -qq
+              apt-get install -y --no-install-recommends \
+                binutils ca-certificates file git make gcc g++ autoconf bison flex \
+                libtool pkg-config libprotobuf-dev libnl-route-3-dev protobuf-compiler
+              bash /workspace/scripts/build-nsjail-static.sh /out/nsjail-linux-candidate
+            '
+          echo "ORVA_TEST_NSJAIL_PATH=$RUNNER_TEMP/nsjail-linux-candidate" >> "$GITHUB_ENV"
       - name: fetch exact released installer
         if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
@@ -899,6 +922,21 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends jq
+      - name: build candidate static nsjail
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: |
+          docker run --rm \
+            -e NSJAIL_REF="$NSJAIL_REF" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -v "$RUNNER_TEMP:/out" \
+            debian:bookworm-slim sh -c '
+              apt-get update -qq
+              apt-get install -y --no-install-recommends \
+                binutils ca-certificates file git make gcc g++ autoconf bison flex \
+                libtool pkg-config libprotobuf-dev libnl-route-3-dev protobuf-compiler
+              bash /workspace/scripts/build-nsjail-static.sh /out/nsjail-linux-candidate
+            '
+          echo "ORVA_TEST_NSJAIL_PATH=$RUNNER_TEMP/nsjail-linux-candidate" >> "$GITHUB_ENV"
       - name: fetch exact released installer
         if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
@@ -916,7 +954,7 @@ jobs:
           # on a PR this script installs the current release, where npm runs on
           # the host as the orva user and fails EACCES on /home/orva/.npm.
           ORVA_DEPS_CANARY: ${{ (github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
-        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH,ORVA_DEPS_CANARY bash test/install/native-engine.sh
+        run: sudo --preserve-env=RELEASE_TAG,ORVA_INSTALLER_PATH,ORVA_DEPS_CANARY,ORVA_TEST_NSJAIL_PATH bash test/install/native-engine.sh
 
   released-container:
     name: released container (${{ matrix.arch }})

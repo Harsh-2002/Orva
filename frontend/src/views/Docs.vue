@@ -1216,6 +1216,16 @@
         <code class="doc-chip">powershell</code>.
         Tab-completes commands, subcommands, and flags.
       </Callout>
+
+      <Callout
+        :icon="KeyRound"
+        title="Sandbox readiness"
+      >
+        <code class="doc-chip">orva system health</code> reports the active
+        sandbox mode, resource-limit mode, and any warnings. The bare-metal
+        installer validates nsjail as the unprivileged service account before
+        starting Orva; it never requires running the daemon as root.
+      </Callout>
     </section>
   </div>
 </template>

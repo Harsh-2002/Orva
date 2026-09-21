@@ -9,9 +9,33 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.09.04..HEAD` is the range for
+pruned with their releases — so `git log v2026.09.21..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
+
+## v2026.09.21
+
+### Fixed
+
+- **Installation now proves functions can start before it reports success.**
+  A VM could permit the user-namespace sysctl while denying nsjail's
+  `/proc/<pid>/setgroups` setup. Both the Docker and bare-metal server then
+  looked healthy while every invocation crashed. Bare-metal installation now
+  executes the shipped nsjail binary against the shipped Node rootfs as the
+  unprivileged `orva` service user, uses the file-capability fallback only when
+  that fallback also passes, and aborts when neither mode can run. Docker now
+  executes the equivalent in-container probe after Compose starts.
+- **Bare-metal nsjail assets are distro-independent.** The standalone binary
+  is now statically linked and verified without a dynamic interpreter, then
+  exercised by CI on Ubuntu, Debian, Alpine, Rocky, Fedora, and Arch. Hosts no
+  longer need matching protobuf/libnl ABIs. A same-version non-interactive run
+  also repairs partial installations instead of returning success without a
+  service unit.
+- **Sandbox caveats are visible rather than implicit.** Health and Settings now
+  show the selected user-namespace mode and whether cgroup v2 limits are fully
+  enforced or using the rlimit-only fallback. The CI pipeline includes unit
+  coverage for normal mode, automatic fallback, explicit overrides, and both
+  modes failing.
 
 ## v2026.09.04
 

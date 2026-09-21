@@ -37,15 +37,22 @@ an issue.
 
 ## Kernel feature requirements
 
-None of these block installation — the installer warns where it can probe,
-and otherwise the feature simply stops working at invocation time:
+The installer verifies the sandbox path as the `orva` service user before it
+starts the daemon. A failed user-namespace probe automatically tries nsjail's
+file-capability fallback; a host where neither works aborts installation. The
+cgroup and TUN checks remain warnings because they affect resource enforcement
+or egress only:
 
 - `kernel.unprivileged_userns_clone = 1` — preferred for nsjail's
   per-function user namespaces. On bare-metal hosts that disable or restrict
-  unprivileged user namespaces, `install.sh` applies a verified, narrow file
-  capability set to nsjail and configures `ORVA_DISABLE_USERNS=1`; the runtime
+  unprivileged user namespaces, `install.sh` proves the normal mode first, then
+  applies and proves a narrow file-capability fallback (`ORVA_DISABLE_USERNS=1`)
+  only when needed; the runtime
   still uses mount, PID, network, IPC, UTS, chroot, and seccomp isolation.
-- cgroup v2 — required for per-function memory / CPU limits.
+- cgroup v2 with delegated controllers — required for hard per-function memory
+  / CPU / pid limits. Without delegation, functions still run with `rlimit`
+  address-space protection and a persistent health/dashboard warning; do not
+  treat it as equivalent to the configured hard memory budget.
 - `/dev/net/tun` (the `tun` kernel module) — required by nsjail's
   `--user_net`, i.e. by every function with `network_mode: egress`, and
   therefore by the egress policy that filters those functions. Without the
@@ -133,11 +140,14 @@ End-to-end passes on Ubuntu 24 and ARM64 bare metal surfaced several bugs in
 1. `nsjail` was installed at `/opt/orva/bin/nsjail`, but the daemon's
    default `NsjailBin` is `/usr/local/bin/nsjail` (matches the Docker
    image). The installer now puts a copy at both paths.
-2. `nsjail` was documented as static, but is actually dynamically
-   linked against `libprotobuf` and `libnl-route-3` / `libnl-3`. The
-   installer now resolves and installs the right runtime libraries
-   per-distro (e.g. `libprotobuf32t64` on Ubuntu 24, `libprotobuf32`
-   on Debian 12, `protobuf` on Fedora/Alpine/Arch).
+2. Older `nsjail` release assets were dynamically linked to Debian's exact
+   `libprotobuf` and `libnl` ABIs. Installing similarly named packages could
+   not make that binary portable: Fedora, Rocky, Arch, and Alpine failed at
+   the dynamic loader before nsjail started. Release assets are now fully
+   static and CI executes the candidate binary on every supported installer
+   distro before a tag can ship. Target hosts no longer install protobuf or
+   libnl for Orva; the installer adds only the native capability and
+   service-user tooling it uses.
 3. The language adapters (`adapter.js` / `adapter.py`) were never
    written into the downloaded rootfs trees, so every invocation
    crashed with `read frame: EOF`. The installer now runs
@@ -158,3 +168,8 @@ End-to-end passes on Ubuntu 24 and ARM64 bare metal surfaced several bugs in
    its own. On hosts where AppArmor or container policy blocks unprivileged
    user namespaces, the installer also selects nsjail's setcap fallback
    automatically.
+6. A failed sandbox gate could leave the server binary at the requested
+   version. A non-interactive retry then mistook that partial state for a
+   completed install and returned success without a service unit. Same-version
+   non-interactive runs now perform a repair; interactive runs retain the
+   explicit repair prompt.
