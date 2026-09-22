@@ -740,7 +740,7 @@ jobs:
           - arch: amd64
             runner: windows-2025
           - arch: arm64
-            runner: windows-11-arm
+            runner: windows-11-vs2026-arm
     runs-on: ${{ matrix.runner }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
