@@ -20,6 +20,8 @@ per-invocation billing.
 > **Active development.** Solid for homelabs, side-projects, and internal tools.
 > Not recommended for customer-facing production yet.
 
+![Orva dashboard showing system health, activity, host resources, builds, and sandbox metrics](docs/assets/orva-dashboard.png)
+
 ---
 
 ## Features
