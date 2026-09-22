@@ -9,11 +9,11 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.09.21..HEAD` is the range for
+pruned with their releases — so `git log v2026.09.22..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
-## v2026.09.21
+## v2026.09.22
 
 ### Fixed
 
