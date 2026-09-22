@@ -1,5 +1,5 @@
-name: CI
-run-name: CI / ${{ inputs.suite || github.event_name }}
+name: Orva Verification
+run-name: "Orva verification — ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || github.event_name == 'push' && 'main branch' || github.event_name == 'release' && format('published {0}', github.event.release.tag_name) || format('{0} suite', inputs.suite || github.event_name) }}"
 
 # Orva's single verification workflow. It owns everything that gates a merge
 # or a release: fast lint/build/unit checks, plus the consolidated E2E
@@ -152,6 +152,45 @@ jobs:
           done
           [ "$fail" = 0 ] && echo "OK: every CLAUDE.md dir mirrors an AGENTS.md -> CLAUDE.md symlink"
           exit $fail
+
+  codeql:
+    name: security / CodeQL (${{ matrix.language }})
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 3 * * 0')
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v7
+      - name: initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: autobuild
+        if: matrix.build-mode == 'autobuild'
+        uses: github/codeql-action/autobuild@v4
+      - name: analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
 
   # ── Fast lint/build/unit gate ──────────────────────────────────────────
   lint:

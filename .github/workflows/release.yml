@@ -1,4 +1,5 @@
-name: Release
+name: Orva Release
+run-name: "Orva release — ${{ inputs.tag || github.ref_name }}"
 
 # Triggers on `v*` tag pushes. Produces:
 #   - orva-linux-{amd64,arm64}       (Go binary, static)
@@ -60,7 +61,7 @@ jobs:
   # code whose tests failed. Every build job `needs: gate`. `workflow_dispatch`
   # with force=true is emergency-only.
   gate:
-    name: gate (verify CI already passed)
+    name: gate (verification already passed)
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -93,7 +94,7 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "gating on commit $SHA"
 
-      - name: require CI success on that commit
+      - name: require verification success on that commit
         if: ${{ github.event.inputs.force != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}

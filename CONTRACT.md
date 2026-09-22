@@ -174,7 +174,7 @@ never been executed.
   do differently, or that will 403/behave differently after upgrading, belongs
   in **Breaking** or **Upgrade notes**.
 - **Ship on `vYYYY.MM.DD` tag** (zero-padded). `release.yml`'s `gate` job confirms
-  `CI` already concluded `success` for that exact commit (a status lookup, not a
+  `Orva Verification` already concluded `success` for that exact commit (a status lookup, not a
   re-run), then builds + publishes. It refuses to build on missing/red CI.
 - **One published release at a time.** The previous releases are deleted after a new
   one ships. Installers resolve GitHub's "latest", so **publish first, delete after** —

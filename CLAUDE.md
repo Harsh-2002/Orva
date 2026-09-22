@@ -81,7 +81,7 @@ Dockerfile        Multi-stage image (dev and production — single file)
 
 **Two-stage policy: verify on push/PR, ship on tag.** The release workflow does
 **no testing** — it gates on the tagged commit's checks already being green, then builds and
-publishes. All verification lives in one consolidated `CI` workflow (`.github/workflows/ci.yml`):
+publishes. All verification lives in one consolidated `Orva Verification` workflow (`.github/workflows/ci.yml`):
 workflow lint, shellcheck, go vet/test/build, UI lint/build, dependency audit, a running-container
 smoke test, plus the full E2E suites (source API/sandbox, CLI cross-build/installers, bare-metal
 server installers, native runtime).
@@ -137,7 +137,7 @@ The flow:
    ```bash
    git tag -a vYYYY.MM.DD -m "Orva vYYYY.MM.DD" && git push origin vYYYY.MM.DD
    ```
-   The Release workflow's **`gate`** job confirms `CI` already concluded `success` for
+   The `Orva Release` workflow's **`gate`** job confirms `Orva Verification` already concluded `success` for
    that exact commit (a status lookup — seconds, not a test run; it polls briefly if you tag
    right after the merge). It **refuses to build** if it is missing or red. On pass it builds
    + publishes `ghcr.io/harsh-2002/orva:latest` (multi-arch), all CLI binaries, rootfs tarballs,
