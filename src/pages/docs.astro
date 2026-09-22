@@ -5,6 +5,49 @@ import Brand from '../components/Brand.astro';
 
 const repo = 'https://github.com/Harsh-2002/Orva';
 
+const serverEnvironment = [
+  [
+    'ORVA_DATA_DIR',
+    '~/.orva from source; /var/lib/orva when packaged',
+    'Persistent database, function code, runtime rootfs, and instance data.',
+  ],
+  ['ORVA_HOST', '0.0.0.0', 'HTTP bind address. Use 127.0.0.1 behind a local reverse proxy.'],
+  ['ORVA_PORT', '8443', 'Plain-HTTP listen port.'],
+  ['ORVA_WRITE_TIMEOUT_SEC', '60', 'Buffered-response write timeout in seconds.'],
+  [
+    'ORVA_MAX_BODY_BYTES',
+    '6291456',
+    'JSON API request-body limit; deploy and restore uploads have separate limits.',
+  ],
+  ['ORVA_CORS_ORIGINS', '*', 'Comma-separated browser and MCP Origin allow-list.'],
+  ['ORVA_SECCOMP_POLICY', 'default', 'Sandbox policy: default, strict, permissive, or disabled.'],
+  ['ORVA_LOG_LEVEL', 'info', 'Logging level: debug, info, warn, or error.'],
+  ['ORVA_SECURE_COOKIES', 'false', 'Force secure cookies when Orva cannot observe TLS or X-Forwarded-Proto.'],
+  [
+    'ORVA_TRUSTED_PROXY',
+    'false',
+    'Trust proxy client-IP headers; enable only behind a proxy that rewrites them.',
+  ],
+  ['ORVA_SESSION_DAYS', '7', 'Session-cookie lifetime in days.'],
+  ['ORVA_PPROF_ADDR', 'unset', 'Optional loopback-only Go diagnostics listener, such as 127.0.0.1:6060.'],
+  ['ORVA_IMAGE', 'image-stamped; unset on bare metal', 'Image identity reported by health and Settings.'],
+  [
+    'ORVA_DISABLE_USERNS',
+    'installer-selected; 0 in Docker',
+    '0 uses user namespaces; 1 uses the verified capability fallback.',
+  ],
+  [
+    'ORVA_CGROUPV2_MOUNT',
+    'auto-detected',
+    'Delegated cgroup v2 subtree for CPU, memory, and process limits.',
+  ],
+  [
+    'ORVA_INTERNAL_API_BASE',
+    'auto-detected',
+    'Internal SDK base URL; override only if sandbox-to-host routing detection is wrong.',
+  ],
+] as const;
+
 // Every example here is taken from main and is meant to run as written. The
 // previous version of this site shipped three handler samples that could not:
 // a signature that does not exist, a ctx object that is never passed, and an
@@ -371,47 +414,39 @@ $ orva logs my-fn --follow`}
       <!-- Server config -->
       <section id="server">
         <h2>Server config</h2>
-        <p>The server is configured by environment variables only. There is no server config file.</p>
-        <dl class="deflist">
-          <div>
-            <dt><span class="num">ORVA_PORT</span></dt>
-            <dd>
-              Default <span class="num">8443</span>. Plain HTTP, no TLS. Put a reverse proxy in front of it
-              for TLS.
-            </dd>
-          </div>
-          <div>
-            <dt><span class="num">ORVA_HOST</span></dt>
-            <dd>
-              Default <span class="num">0.0.0.0</span>. Set <span class="num">127.0.0.1</span> to listen on loopback
-              only, which is the recommendation behind a proxy.
-            </dd>
-          </div>
-          <div>
-            <dt><span class="num">ORVA_DATA_DIR</span></dt>
-            <dd>
-              <span class="num">/var/lib/orva</span> under Docker,
-              <span class="num">~/.orva</span> in development.
-            </dd>
-          </div>
-          <div>
-            <dt><span class="num">ORVA_TRUSTED_PROXY</span></dt>
-            <dd>
-              Default <span class="num">false</span>. Turn it on only when a proxy in front of Orva actually
-              sets <span class="num">X-Forwarded-For</span>, because it makes Orva trust that header.
-            </dd>
-          </div>
-          <div>
-            <dt><span class="num">ORVA_LOG_LEVEL</span></dt>
-            <dd>
-              <span class="num">debug</span>, <span class="num">info</span> (default),
-              <span class="num">warn</span> or <span class="num">error</span>.
-            </dd>
-          </div>
-        </dl>
         <p>
-          The full table, including body limits, retention, session lifetime and the seccomp policy switch, is
-          in
+          The server is configured by environment variables only. There is no server config file, and the
+          defaults work without extra configuration.
+        </p>
+        <div class="config-table-wrap" role="region" aria-label="Server environment variables">
+          <table class="config-table">
+            <thead>
+              <tr>
+                <th scope="col">Variable</th>
+                <th scope="col">Default</th>
+                <th scope="col">Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              {
+                serverEnvironment.map(([name, defaultValue, purpose]) => (
+                  <tr>
+                    <th scope="row">
+                      <span class="num">{name}</span>
+                    </th>
+                    <td>
+                      <span class="num">{defaultValue}</span>
+                    </td>
+                    <td>{purpose}</td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Runtime-control variables are normally selected by the installer or container. Read their security
+          implications and validation rules in
           <a class="link" href={`${repo}/blob/main/docs/CONFIG.md`}>CONFIG.md</a>.
         </p>
       </section>
@@ -846,6 +881,42 @@ $ orva logs my-fn --follow`}
   .deflist dd {
     margin: var(--v-0) 0 0;
     font-size: var(--t-small);
+    color: var(--ink-2);
+  }
+
+  .config-table-wrap {
+    margin-top: var(--v-2);
+    overflow-x: auto;
+    border-block: 1px solid var(--bd-hair);
+  }
+
+  .config-table {
+    width: 100%;
+    min-width: 46rem;
+    border-collapse: collapse;
+    font-size: var(--t-small);
+  }
+
+  .config-table th,
+  .config-table td {
+    padding: var(--v-1) var(--v);
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--bd-hair);
+  }
+
+  .config-table tr:last-child th,
+  .config-table tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .config-table thead th,
+  .config-table tbody th {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .config-table td {
     color: var(--ink-2);
   }
 </style>
