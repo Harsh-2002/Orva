@@ -100,6 +100,34 @@ const CLAIMS = [
   },
 ];
 
+const SERVER_ENVIRONMENT = [
+  'ORVA_DATA_DIR',
+  'ORVA_HOST',
+  'ORVA_PORT',
+  'ORVA_WRITE_TIMEOUT_SEC',
+  'ORVA_MAX_BODY_BYTES',
+  'ORVA_CORS_ORIGINS',
+  'ORVA_SECCOMP_POLICY',
+  'ORVA_LOG_LEVEL',
+  'ORVA_SECURE_COOKIES',
+  'ORVA_TRUSTED_PROXY',
+  'ORVA_SESSION_DAYS',
+  'ORVA_PPROF_ADDR',
+  'ORVA_IMAGE',
+  'ORVA_DISABLE_USERNS',
+  'ORVA_CGROUPV2_MOUNT',
+  'ORVA_INTERNAL_API_BASE',
+];
+
+for (const name of SERVER_ENVIRONMENT) {
+  CLAIMS.push({
+    what: `${name} is documented in the complete server environment table`,
+    file: 'docs/CONFIG.md',
+    want: new RegExp('\\\\| `' + name + '` \\\\|'),
+    site: new RegExp(name),
+  });
+}
+
 /** Read a path from main: local git first, then the network, then give up. */
 async function fromMain(path) {
   try {
