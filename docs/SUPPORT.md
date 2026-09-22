@@ -2,7 +2,7 @@
 
 Orva runs on any Linux distro with kernel 5.10+ that ships unprivileged
 user namespaces and cgroup v2. The `install-matrix` job in the consolidated
-`CI` workflow (`.github/workflows/ci.yml`, harness at `test/install/`)
+`Orva Verification` workflow (`.github/workflows/ci.yml`, harness at `test/install/`)
 exercises the 6 distros below end-to-end on every pull request affecting
 `scripts/install.sh`, on every `main` push, and against every published release.
 

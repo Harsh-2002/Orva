@@ -152,35 +152,30 @@ endpoint) and optional per-write approval.
 
 ---
 
-## Configuration
+## Environment variables
 
-Defaults work out of the box. Common knobs: `ORVA_PORT` (8443), `ORVA_DATA_DIR`
-(`/var/lib/orva`), `ORVA_SECURE_COOKIES` (only needed if neither TLS nor `X-Forwarded-Proto` reaches Orva — it sets the flag itself when it can see the real scheme). Full reference:
-[docs/CONFIG.md](docs/CONFIG.md).
+Defaults work out of the box. These are all supported server environment variables:
 
----
+| Variable | Default | Purpose |
+|---|---|---|
+| `ORVA_DATA_DIR` | `~/.orva` from a source binary; `/var/lib/orva` in packaged installs | Database, function code, runtime rootfs, and other persistent data. |
+| `ORVA_HOST` | `0.0.0.0` | HTTP bind address. Use `127.0.0.1` behind a local reverse proxy. |
+| `ORVA_PORT` | `8443` | Plain-HTTP listen port. |
+| `ORVA_WRITE_TIMEOUT_SEC` | `60` | Buffered-response write timeout in seconds. |
+| `ORVA_MAX_BODY_BYTES` | `6291456` | JSON API request-body limit; deploy and restore uploads use their own limits. |
+| `ORVA_CORS_ORIGINS` | `*` | Comma-separated browser and MCP Origin allow-list. |
+| `ORVA_SECCOMP_POLICY` | `default` | Sandbox policy: `default`, `strict`, `permissive`, or `disabled`. |
+| `ORVA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
+| `ORVA_SECURE_COOKIES` | `false` | Force secure session cookies when Orva cannot observe TLS or `X-Forwarded-Proto`. |
+| `ORVA_TRUSTED_PROXY` | `false` | Trust proxy client-IP headers; enable only behind a proxy that rewrites them. |
+| `ORVA_SESSION_DAYS` | `7` | Session-cookie lifetime in days. |
+| `ORVA_PPROF_ADDR` | unset | Optional loopback-only Go diagnostics listener, for example `127.0.0.1:6060`. |
+| `ORVA_IMAGE` | image-stamped; unset on bare metal | Image identity reported by health and Settings. |
+| `ORVA_DISABLE_USERNS` | installer-selected; `0` in Docker | `0` uses user namespaces; `1` uses the installer-verified capability fallback. |
+| `ORVA_CGROUPV2_MOUNT` | auto-detected | Delegated cgroup v2 subtree used for hard CPU, memory, and process limits. |
+| `ORVA_INTERNAL_API_BASE` | auto-detected | Internal SDK base URL; override only when sandbox-to-host routing detection is wrong. |
 
-## Documentation
-
-| | |
-|---|---|
-| [ARCHITECTURE](docs/ARCHITECTURE.md) | System design, request + deploy lifecycle |
-| [SECURITY](docs/SECURITY.md) | Threat model, sandbox isolation, verification recipe |
-| [RUNTIMES](docs/RUNTIMES.md) | Handler contract, event shape, streaming |
-| [Reference](docs/reference.md) | The canonical single-page reference — also served at `/web/docs.md` and by `orva docs` |
-| [API](docs/API.md) | Full REST API reference |
-| [CLI](docs/CLI.md) | Config precedence, command reference, workflows |
-| [CONFIG](docs/CONFIG.md) | All configuration knobs |
-| [DEPLOYMENT](docs/DEPLOYMENT.md) | TLS, reverse proxy, backups, upgrades |
-| [OPERATIONS](docs/OPERATIONS.md) | Monitoring, troubleshooting, common errors |
-| [ERRORS](docs/ERRORS.md) | Error-code catalogue: slug → HTTP status → what to do |
-| [TRACING](docs/TRACING.md) | Causal trace model, propagation, W3C interop |
-| [SUPPORT](docs/SUPPORT.md) | Distro / kernel / container-runtime matrix |
-| [CAPACITY](docs/CAPACITY.md) | Throughput numbers + benchmark methodology |
-| [CONTRIBUTING](docs/CONTRIBUTING.md) | Dev setup, build from source, tests |
-| [TESTING](docs/TESTING.md) | End-to-end verification guide: bring-up, testing layers, user journeys, triage |
-
-Runtime isolation specifics (Kata, gVisor) live in [docs/KATA.md](docs/KATA.md) and [docs/GVISOR.md](docs/GVISOR.md).
+See [docs/CONFIG.md](docs/CONFIG.md) for validation rules, security implications, and examples.
 
 ---
 

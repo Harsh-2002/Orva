@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +59,31 @@ func TestSupportedEnvVars(t *testing.T) {
 	}
 	for v := range want {
 		t.Errorf("missing env var from SupportedEnvVars: %s", v)
+	}
+}
+
+func TestServerEnvDocumentationIsComplete(t *testing.T) {
+	all := append([]string{}, SupportedEnvVars...)
+	all = append(all,
+		"ORVA_CGROUPV2_MOUNT",
+		"ORVA_DISABLE_USERNS",
+		"ORVA_IMAGE",
+		"ORVA_INTERNAL_API_BASE",
+		"ORVA_PPROF_ADDR",
+	)
+
+	for _, path := range []string{"../../../README.md", "../../../docs/CONFIG.md"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		text := string(body)
+		for _, name := range all {
+			needle := "| `" + name + "` |"
+			if got := strings.Count(text, needle); got != 1 {
+				t.Errorf("%s: want exactly one table row for %s, got %d", path, name, got)
+			}
+		}
 	}
 }
 

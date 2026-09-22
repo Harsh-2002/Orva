@@ -4,9 +4,10 @@ Orva is configured entirely through environment variables. There is no
 config file — every knob that needs operator input is an env var. A bare
 `docker run` with no env set works out of the box.
 
-On startup, Orva logs which of the 11 vars in `config.SupportedEnvVars` it
-found set and
-how many are at their defaults.
+The table below lists all 16 supported server variables. On startup, Orva logs
+which of the 11 variables loaded through `config.SupportedEnvVars` it found set
+and how many are at their defaults. The five marked as direct runtime inputs
+are read by their owning subsystem instead of the central config loader.
 
 Every variable below has an observable runtime effect. A knob that an
 operator can set with no consequence is worse than no knob at all, so
@@ -29,11 +30,11 @@ names that stopped doing anything are deleted rather than deprecated.
 | `ORVA_SECURE_COOKIES` | `false` | Force the `Secure` flag on session cookies. Orva already sets it automatically when the request arrives over TLS or carries `X-Forwarded-Proto: https`; set this when neither is visible to it. |
 | `ORVA_TRUSTED_PROXY` | `false` | Set to `true` only when a reverse proxy in front of Orva sets `X-Forwarded-For`. It makes Orva trust that header (and `X-Real-IP`) for the client identity **every** rate limiter buckets on: per-function `rate_limit_per_min`, the login brute-force throttle, and the OAuth dynamic-registration limiter. Leave it off otherwise — trusting a client-settable header lets any caller bypass all three by varying one value per request. When it is on, Orva reads the **rightmost** `X-Forwarded-For` entry: nginx, Caddy and Traefik all append the peer they saw, so entries further left came from the client and remain forgeable. With two or more proxy hops (Cloudflare in front of nginx) the bucket is your outermost hop's address — coarser, never more permissive. |
 | `ORVA_SESSION_DAYS` | `7` | Session cookie lifetime in days. Single-operator instances can set this to `30`. |
-| `ORVA_PPROF_ADDR` | (unset) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
-| `ORVA_IMAGE` | (set by the container image) | The image reference this instance runs from, echoed at `GET /api/v1/system/health` and in Settings → Build info. The published image stamps it; set it yourself only for a mirrored or re-tagged copy. A bare-metal install leaves it unset and reports no image. |
-| `ORVA_DISABLE_USERNS` | installer-selected | `0` keeps nsjail's preferred user namespace; `1` uses its file-capability fallback when the host blocks user-namespace setup. The bare-metal installer execution-tests the selected mode as the `orva` service user. Set only `0` or `1`: an explicit choice is verified and fails installation if it cannot run. Docker keeps `0`. |
-| `ORVA_PPROF_ADDR`, `ORVA_INTERNAL_API_BASE`, `ORVA_IMAGE` are read directly where they are used rather than through the config loader, so they do **not** appear in that startup line. They still work. | |
-| `ORVA_INTERNAL_API_BASE` | (auto-detected) | The base URL sandboxed functions use to reach Orva's own internal SDK endpoints (KV, jobs, function-to-function). Orva probes for a routable address at startup — from inside a sandbox `127.0.0.1` is the sandbox's own loopback, so this is deliberately **not** a loopback address. Set it only on network setups the probe gets wrong (overlay networks, Swarm, k8s), as `http://host:port`. The compiled egress policy emits a narrow allow rule for exactly this address and port, so an operator blocking private ranges does not cut off the SDK. |
+| `ORVA_PPROF_ADDR` | (unset; direct runtime input) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
+| `ORVA_IMAGE` | (image-stamped; direct runtime input) | The image reference this instance runs from, echoed at `GET /api/v1/system/health` and in Settings → Build info. The published image stamps it; set it yourself only for a mirrored or re-tagged copy. A bare-metal install leaves it unset and reports no image. |
+| `ORVA_DISABLE_USERNS` | installer-selected; `0` in Docker (direct runtime input) | `0` keeps nsjail's preferred user namespace; `1` uses its file-capability fallback when the host blocks user-namespace setup. The bare-metal installer execution-tests the selected mode as the `orva` service user. Set only `0` or `1`: an explicit choice is verified and fails installation if it cannot run. |
+| `ORVA_CGROUPV2_MOUNT` | (auto-detected; direct runtime input) | Delegated cgroup v2 subtree used for per-sandbox CPU, memory, and process limits. The Docker entrypoint creates and exports it when delegation succeeds; override only when the service manager delegates a different subtree. If unset and no writable delegated subtree is found, Orva reports the `rlimit_only` fallback in system health. |
+| `ORVA_INTERNAL_API_BASE` | (auto-detected; direct runtime input) | The base URL sandboxed functions use to reach Orva's own internal SDK endpoints (KV, jobs, function-to-function). Orva probes for a routable address at startup — from inside a sandbox `127.0.0.1` is the sandbox's own loopback, so this is deliberately **not** a loopback address. Set it only on network setups the probe gets wrong (overlay networks, Swarm, k8s), as `http://host:port`. The compiled egress policy emits a narrow allow rule for exactly this address and port, so an operator blocking private ranges does not cut off the SDK. |
 
 ---
 
