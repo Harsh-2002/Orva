@@ -22,38 +22,6 @@ per-invocation billing.
 
 ---
 
-## Quick start
-
-```bash
-docker run -d --name orva -p 8443:8443 \
-  --pid host --cgroupns host \
-  --cap-add SYS_ADMIN \
-  --security-opt seccomp=unconfined \
-  --security-opt apparmor=unconfined \
-  --security-opt systempaths=unconfined \
-  --device /dev/net/tun \
-  -v orva-data:/var/lib/orva \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-  ghcr.io/harsh-2002/orva:latest
-```
-
-> `--pid host` and `--cgroupns host` are **required** on the default runc runtime:
-> nsjail enrolls each sandbox PID in the host cgroup hierarchy, and without them
-> every invocation fails with `Launching child process failed`. `--device
-> /dev/net/tun` is what `network_mode: egress` functions need — each sandbox gets
-> its own TAP device inside nsjail's user namespace, so the container itself needs
-> no `NET_ADMIN` (only add it back if you force `ORVA_DISABLE_USERNS=1`).
-> `docker compose up -d` (see [Install](#install)) sets all of this for you.
-> The installer also runs an nsjail Node probe inside the started container and
-> fails with a host-feature diagnosis if functions could not run.
-
-Open **http://localhost:8443**, finish onboarding (~30s), and deploy your first
-function from the in-browser editor.
-
-Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)**.
-
----
-
 ## Features
 
 - **Two runtimes** — `node` (Node.js 24, also runs TypeScript) and `python` (Python 3.14).
@@ -64,6 +32,78 @@ Prefer Compose, a bare-metal service, or just the CLI? See **[Install](#install)
 - **Versioning** — content-hashed deploys with one-click (or one-command) rollback and side-by-side diffs.
 - **MCP + AI** — a 73-tool operator MCP server at `/mcp` and a built-in agentic AI assistant (dashboard or `orva chat`) that operate your instance with your own provider key. → [AI & MCP](#ai--mcp)
 - **Templates** — 21 starters (Stripe/GitHub webhooks, JWT/OAuth, CSV→JSON, URL shortener, …) in the editor.
+
+---
+
+## Quick start
+
+**Docker Compose** (recommended for persistent setups):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+
+Compose publishes on **http://localhost:3000** (it maps `3000:8443`), not
+`:8443`. Open it and finish the short onboarding flow.
+
+**Bare metal / VM** (systemd or OpenRC):
+
+```bash
+curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh
+```
+
+The installer supports Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, Alpine, Arch, and
+openSUSE. It verifies a real sandbox as the unprivileged `orva` service user and
+stops with a host-specific diagnosis if the kernel cannot run Orva securely.
+
+**CLI only** (operator laptop or CI runner):
+
+```bash
+curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh   # macOS / Linux
+irm  https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.ps1 | iex        # Windows
+```
+
+Installers are idempotent — re-run to upgrade; pin a version with `ORVA_VERSION=vYYYY.MM.DD`.
+TLS, reverse proxy, and backup guidance: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+After onboarding, connect the CLI and deploy:
+
+```bash
+orva login http://localhost:3000
+orva deploy ./src --name my-fn --runtime node   # runtimes: node | python
+orva invoke my-fn --body '{"name":"world"}'
+orva logs my-fn --follow
+```
+
+CLI reference: [docs/CLI.md](docs/CLI.md).
+
+---
+
+## Environment variables
+
+Defaults work out of the box. These are all supported server environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ORVA_DATA_DIR` | `~/.orva` from a source binary; `/var/lib/orva` in packaged installs | Database, function code, runtime rootfs, and other persistent data. |
+| `ORVA_HOST` | `0.0.0.0` | HTTP bind address. Use `127.0.0.1` behind a local reverse proxy. |
+| `ORVA_PORT` | `8443` | Plain-HTTP listen port. |
+| `ORVA_WRITE_TIMEOUT_SEC` | `60` | Buffered-response write timeout in seconds. |
+| `ORVA_MAX_BODY_BYTES` | `6291456` | JSON API request-body limit; deploy and restore uploads use their own limits. |
+| `ORVA_CORS_ORIGINS` | `*` | Comma-separated browser and MCP Origin allow-list. |
+| `ORVA_SECCOMP_POLICY` | `default` | Sandbox policy: `default`, `strict`, `permissive`, or `disabled`. |
+| `ORVA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
+| `ORVA_SECURE_COOKIES` | `false` | Force secure session cookies when Orva cannot observe TLS or `X-Forwarded-Proto`. |
+| `ORVA_TRUSTED_PROXY` | `false` | Trust proxy client-IP headers; enable only behind a proxy that rewrites them. |
+| `ORVA_SESSION_DAYS` | `7` | Session-cookie lifetime in days. |
+| `ORVA_PPROF_ADDR` | unset | Optional loopback-only Go diagnostics listener, for example `127.0.0.1:6060`. |
+| `ORVA_IMAGE` | image-stamped; unset on bare metal | Image identity reported by health and Settings. |
+| `ORVA_DISABLE_USERNS` | installer-selected; `0` in Docker | `0` uses user namespaces; `1` uses the installer-verified capability fallback. |
+| `ORVA_CGROUPV2_MOUNT` | auto-detected | Delegated cgroup v2 subtree used for hard CPU, memory, and process limits. |
+| `ORVA_INTERNAL_API_BASE` | auto-detected | Internal SDK base URL; override only when sandbox-to-host routing detection is wrong. |
+
+See [docs/CONFIG.md](docs/CONFIG.md) for validation rules, security implications, and examples.
 
 ---
 
@@ -92,90 +132,19 @@ Handler contract, event shape, and streaming: [docs/RUNTIMES.md](docs/RUNTIMES.m
 
 ---
 
-## Install
-
-**Docker Compose** (recommended for persistent setups):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Harsh-2002/Orva/main/docker-compose.yml -o docker-compose.yml
-docker compose up -d
-```
-
-Compose publishes on **http://localhost:3000** (it maps `3000:8443`), not
-`:8443` like the `docker run` above.
-
-**Bare-metal / VM** — systemd or OpenRC, no Docker (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, Alpine, Arch, openSUSE). The installer uses a statically linked nsjail release asset, executes it as the unprivileged `orva` service user before it starts the daemon, and needs no target-distro protobuf/libnl ABI match. If user-namespace setup is blocked, it verifies and selects nsjail's narrow file-capability fallback; if neither mode works, installation stops rather than shipping a non-invokable instance:
-
-```bash
-curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install.sh | sh
-```
-
-**CLI only** — operator laptop or CI runner (Linux, macOS, Windows × amd64/arm64):
-
-```bash
-curl -fsSL https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.sh | sh   # macOS / Linux
-irm  https://github.com/Harsh-2002/Orva/releases/latest/download/install-cli.ps1 | iex        # Windows
-```
-
-Installers are idempotent — re-run to upgrade; pin a version with `ORVA_VERSION=vYYYY.MM.DD`.
-TLS, reverse proxy, and backup guidance: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-
----
-
-## CLI
-
-Orva ships a full Linux server binary and a slim cross-platform CLI. They share the same client-command library, so after `orva login` the whole platform is in your terminal:
-
-```bash
-orva deploy ./src --name my-fn --runtime node   # runtimes: node | python
-orva invoke my-fn --body '{"name":"world"}'
-orva logs my-fn --follow
-orva chat                                        # the AI assistant, in your terminal
-```
-
-Output is scripting-clean (`-o json`; data on stdout, status on stderr). Full reference: [docs/CLI.md](docs/CLI.md).
-
----
-
 ## AI & MCP
 
-Add Orva to any MCP client (Claude Code, Cursor, or claude.ai via OAuth) with one URL:
+The dashboard's **AI** section and `orva chat` operate the instance using your own
+OpenAI, Anthropic, or OpenAI-compatible provider key, with optional approval before writes.
+
+To use an external MCP client such as Claude Code or Cursor, add:
 
 ```
 https://your-orva-instance/mcp
 ```
 
-The agent can create and deploy functions, invoke them, read logs, manage secrets, and browse KV.
-Prefer not to wire up an external client? The dashboard's **AI** section — and `orva chat` — run
-the same agent in-product with your own provider key (OpenAI, Anthropic, or any OpenAI-compatible
-endpoint) and optional per-write approval.
-
----
-
-## Environment variables
-
-Defaults work out of the box. These are all supported server environment variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `ORVA_DATA_DIR` | `~/.orva` from a source binary; `/var/lib/orva` in packaged installs | Database, function code, runtime rootfs, and other persistent data. |
-| `ORVA_HOST` | `0.0.0.0` | HTTP bind address. Use `127.0.0.1` behind a local reverse proxy. |
-| `ORVA_PORT` | `8443` | Plain-HTTP listen port. |
-| `ORVA_WRITE_TIMEOUT_SEC` | `60` | Buffered-response write timeout in seconds. |
-| `ORVA_MAX_BODY_BYTES` | `6291456` | JSON API request-body limit; deploy and restore uploads use their own limits. |
-| `ORVA_CORS_ORIGINS` | `*` | Comma-separated browser and MCP Origin allow-list. |
-| `ORVA_SECCOMP_POLICY` | `default` | Sandbox policy: `default`, `strict`, `permissive`, or `disabled`. |
-| `ORVA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
-| `ORVA_SECURE_COOKIES` | `false` | Force secure session cookies when Orva cannot observe TLS or `X-Forwarded-Proto`. |
-| `ORVA_TRUSTED_PROXY` | `false` | Trust proxy client-IP headers; enable only behind a proxy that rewrites them. |
-| `ORVA_SESSION_DAYS` | `7` | Session-cookie lifetime in days. |
-| `ORVA_PPROF_ADDR` | unset | Optional loopback-only Go diagnostics listener, for example `127.0.0.1:6060`. |
-| `ORVA_IMAGE` | image-stamped; unset on bare metal | Image identity reported by health and Settings. |
-| `ORVA_DISABLE_USERNS` | installer-selected; `0` in Docker | `0` uses user namespaces; `1` uses the installer-verified capability fallback. |
-| `ORVA_CGROUPV2_MOUNT` | auto-detected | Delegated cgroup v2 subtree used for hard CPU, memory, and process limits. |
-| `ORVA_INTERNAL_API_BASE` | auto-detected | Internal SDK base URL; override only when sandbox-to-host routing detection is wrong. |
-
-See [docs/CONFIG.md](docs/CONFIG.md) for validation rules, security implications, and examples.
+The MCP server can create and deploy functions, invoke them, read logs, manage secrets,
+and browse KV. See the [Orva reference](docs/reference.md).
 
 ---
 
