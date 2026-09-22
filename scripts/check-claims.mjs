@@ -87,9 +87,9 @@ const CLAIMS = [
     want: /\/usr\/local\/bin\/nsjail/,
   },
   {
-    what: 'The docker run recipe needs SYS_ADMIN, not NET_ADMIN',
-    file: 'README.md',
-    want: /--cap-add SYS_ADMIN/,
+    what: 'The Compose recipe needs SYS_ADMIN, not NET_ADMIN',
+    file: 'docker-compose.yml',
+    want: /cap_add:\s*\n\s*- SYS_ADMIN\s*\n\s*\n\s*#/,
     forbidSite: /cap-add NET_ADMIN/,
   },
   {
