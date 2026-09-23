@@ -135,6 +135,29 @@ func TestFinalizeExecution_ColdStartSkipsBaseline(t *testing.T) {
 	}
 }
 
+func TestObserveExecutionClassifiesWithoutStorageWrite(t *testing.T) {
+	b := NewBaselines()
+	for i := 0; i < baselineMinForOutlier; i++ {
+		b.Record("fn_x", 20)
+	}
+	outlier, p95 := b.ObserveExecution("fn_x", "error", false, 100)
+	if !outlier || p95 != 20 {
+		t.Fatalf("error classification = (%t, %d), want (true, 20)", outlier, p95)
+	}
+	_, _, _, n := b.Snapshot("fn_x")
+	if n != baselineMinForOutlier {
+		t.Fatalf("error changed baseline sample count: %d", n)
+	}
+	outlier, p95 = b.ObserveExecution("fn_x", "success", false, 20)
+	if outlier || p95 != 20 {
+		t.Fatalf("warm classification = (%t, %d), want (false, 20)", outlier, p95)
+	}
+	_, _, _, n = b.Snapshot("fn_x")
+	if n != baselineMinForOutlier+1 {
+		t.Fatalf("warm success did not update baseline: %d", n)
+	}
+}
+
 func TestFinalizeExecution_ErrorSkipsBaseline(t *testing.T) {
 	b := NewBaselines()
 	upd := &fakeUpdater{}

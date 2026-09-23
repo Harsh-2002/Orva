@@ -1,5 +1,59 @@
 # Pool Controller v2 capacity validation
 
+## 2026-09-23 profiled concurrency follow-up (candidate, not released)
+
+A separate disposable 2-vCPU/4-GiB smolvm guest ran the current candidate with
+real nsjail sandboxes and enforced cgroup-v2 worker limits. A local-only CPU
+profile of a warm Python `"ok"` handler at 100 clients showed substantial
+async SQLite writer and pool-controller CPU use. The candidate consequently
+prepares repeated SQL statements once per writer batch, inserts HTTP execution
+outlier fields with the execution row, stores arrival rates in bounded
+one-second buckets, and coalesces controller wakeups within 20 ms. These are
+internal costs, not new operator concurrency settings or increased hard limits.
+
+Sequential 30-second runs on the *same, growing* guest database ranged from
+770 req/s on a repeated baseline to 964 req/s on the latest pre-UI candidate;
+the latter returned 28,975/28,975 HTTP 200 at 100 clients with 246 ms client
+p99. The comparison is **not controlled**: database size, WAL state and the
+guest-local load generator changed the conditions between runs. It does not
+prove a 25% production gain. The candidate also dropped 677 telemetry writes
+in that run, so persistence pressure is not solved. The full real-sandbox E2E
+suite passed 28 modules and 660 checks on that pre-UI binary. Repeatable
+external-client and high-concurrency validation remain required before a
+release claim.
+
+The final rebuilt binary passed all 28 E2E modules with 664 checks. On that
+candidate after the E2E suite, guest-loopback `hey` runs of
+the same warm Python handler returned 5,000/5,000 HTTP 200 at 100 clients
+(785 req/s, client p99 584 ms); 14,715 HTTP 200 and 5,285 HTTP 429 at
+500 clients over 20,000 requests (1,167 total responses/s, mixed-status
+client p99 1.14 s); and 48,423 HTTP 200 plus 1,577 HTTP 429 at 1,000
+clients over 50,000 requests (1,108 total responses/s, mixed-status client
+p99 1.60 s). There were no 504s or client transport failures in these three
+guest-local runs. The 500-client result preceding the 1,000-client result
+likely changed warm-worker state, so these are not steady-state comparative
+curves. After the final run the critical writer queue drained and reported
+zero timeouts, but the telemetry-drop counter stood at 69,868 and the
+critical-failure counter at 3; neither counter was reset before the E2E
+suite, so their increments cannot be attributed to this load phase alone.
+Fixed pending-work caps and persistence throughput remain open bottlenecks.
+
+A host-side `hey` client through smolvm's forwarded port returned 5,000/5,000
+HTTP 200 at 100 clients (1,260 req/s), but at 500 clients returned only 5,402
+HTTP 200 of 20,000 attempts; the rest were mostly EOF or connection-reset
+errors at that forwarding path. The guest-loopback 500-client test had no
+transport errors. This does not prove where the reset originates, and the
+forwarded-port result is **not** an Orva throughput measurement. A direct
+routed VM interface or another independently validated external path is still
+needed.
+
+The dashboard now separates worker/proxy `latency_ms` from
+`response_latency_ms`, which covers the complete public invocation handler,
+including admission failures and execution-record enqueue. Neither includes
+client network/TLS transit. Compare response classes and client timings when
+assessing overload; the previous 7/51/75 ms card cannot be read as public
+end-to-end latency.
+
 The current optimization work improves cgroup-v2 resource *discovery*:
 capacity checks walk visible ancestors and account for parent and host physical
 memory pressure, CPU quotas, and the effective CPU set. This does not enable missing cgroup

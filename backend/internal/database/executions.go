@@ -112,9 +112,9 @@ func (db *Database) InsertExecutionFinal(exec *Execution, durationMS int64, stat
 // for the bounded critical writer. Enqueue applies deadline-aware backpressure
 // only when saturated; commit remains off the hot request path. Trace fields are
 // taken from exec.TraceID/SpanID/ParentSpanID/Trigger/ParentFunctionID;
-// callers populate them before calling. IsOutlier + BaselineP95MS are NOT
-// written here — the baseline package back-writes them via UpdateOutlier
-// once the execution has been recorded against its function's baseline.
+// callers populate them before calling. IsOutlier and BaselineP95MS are
+// written in this same INSERT when the caller has classified the execution;
+// older entry points may still back-write them via UpdateOutlier.
 //
 // started_at uses exec.StartedAt when non-zero; otherwise CURRENT_TIMESTAMP.
 // Setting it explicitly matters for the trace tree: under the async batch
@@ -133,14 +133,15 @@ func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64,
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
 			started_at, finished_at,
-			trace_id, span_id, parent_span_id, trigger, parent_function_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`,
+			trace_id, span_id, parent_span_id, trigger, parent_function_id,
+			is_outlier, baseline_p95_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`,
 		exec.ID, exec.FunctionID, exec.Status, coldStart, exec.ContainerID,
 		durationMS, statusCode, errMsg, responseSize,
 		startedAt,
 		nullableString(exec.TraceID), nullableString(exec.SpanID),
 		nullableString(exec.ParentSpanID), nullableString(exec.Trigger),
-		nullableString(exec.ParentFunctionID),
+		nullableString(exec.ParentFunctionID), exec.IsOutlier, exec.BaselineP95MS,
 	)
 }
 

@@ -69,6 +69,40 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- A disposable 2-vCPU/4-GiB smolvm with real nsjail and cgroup-v2 limits
+  identified the async SQLite writer and per-arrival pool-controller work as
+  prominent CPU costs under a warm Python handler. The writer now prepares
+  each SQL text once per batch; HTTP execution baseline fields are inserted
+  with the row rather than updated afterward. Arrival history is sixty
+  one-second counters and scaler wakeups coalesce within 20 ms. Unit tests
+  cover bounded history, batch failure recovery, baseline persistence, and
+  wake timing. A 100-client sequential candidate run achieved 28,975/28,975
+  HTTP 200 over 30 seconds, but 677 telemetry writes were still dropped.
+  Database growth and a guest-local generator make that throughput observation
+  exploratory, not a controlled before/after claim. The pre-UI candidate
+  passed 28 real-sandbox E2E modules (660 checks). Full final-binary and
+  external-client stress validation remains open.
+- The final rebuilt candidate again passed all 28 isolated real-sandbox E2E
+  modules (664 checks). Guest-loopback load returned 5,000/5,000 success at 100 clients;
+  14,715 success/5,285 retryable 429 at 500 clients (20,000 requests); and
+  48,423 success/1,577 retryable 429 at 1,000 clients (50,000 requests),
+  without 504 or transport errors. The writer drained but telemetry drops
+  accumulated to 69,868 across the guest's lifetime. These data identify
+  fixed pending-work caps and writer throughput as remaining concerns, not a
+  performance victory: the generator shared the two guest CPUs, the database
+  grew between runs, and baseline counters were not reset for each phase.
+- A host-side generator through smolvm's forwarded port succeeded at 100
+  clients (5,000/5,000, 1,260 req/s), but at 500 clients it received only
+  5,402 HTTP 200 of 20,000 attempts, with the remainder mostly EOF/reset
+  errors. The same guest handled 500 clients on its loopback without
+  transport errors. The forwarding path is not yet trustworthy for capacity
+  comparisons; obtain a direct routed path before attributing these resets.
+- The dashboard's new `response_latency_ms` is a separate rolling ring for
+  the complete public invoke handler. It includes rejection and record-enqueue
+  time but not network transit; the older `latency_ms` retains its proxy/worker
+  meaning. This corrects the previous misleading use of the shorter metric
+  as a public response-time figure.
+
 - Resource discovery now walks the process's visible cgroup-v2 ancestry for
   `memory.max`, `memory.current`, `cpu.max`, and `cpuset.cpus.effective`. The
   tightest ancestor memory headroom and host physical headroom are used rather than only the leaf's

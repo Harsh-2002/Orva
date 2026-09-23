@@ -11,6 +11,7 @@ import (
 
 const (
 	scalerTick                 = 2 * time.Second
+	minScalerEvaluateInterval  = 20 * time.Millisecond
 	stableWindow               = 60 * time.Second
 	panicWindow                = 6 * time.Second
 	utilFactor                 = 0.70
@@ -53,17 +54,41 @@ func (s *scaler) run() {
 	defer t.Stop()
 	defer close(s.runDone)
 	slog.Info("pool controller v2 started", "tick", s.tick, "stable_window", stableWindow, "burst_window", panicWindow)
+	var lastEvaluation time.Time
 	for {
 		select {
 		case <-t.C:
 			s.evaluateAll()
+			lastEvaluation = time.Now()
 		case <-s.wake:
+			// The first shortage is evaluated immediately. A saturated pool
+			// can then nudge once per request; coalesce that burst so sorting
+			// rolling demand samples never consumes a core by itself.
+			if wait := scalerEvaluationWait(lastEvaluation, time.Now()); wait > 0 {
+				select {
+				case <-time.After(wait):
+				case <-s.stop:
+					slog.Info("pool controller v2 stopped")
+					return
+				}
+			}
 			s.evaluateAll()
+			lastEvaluation = time.Now()
 		case <-s.stop:
 			slog.Info("pool controller v2 stopped")
 			return
 		}
 	}
+}
+
+func scalerEvaluationWait(last, now time.Time) time.Duration {
+	if last.IsZero() {
+		return 0
+	}
+	if remaining := minScalerEvaluateInterval - now.Sub(last); remaining > 0 {
+		return remaining
+	}
+	return 0
 }
 
 func (s *scaler) nudge() {

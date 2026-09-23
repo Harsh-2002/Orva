@@ -41,15 +41,16 @@ type SystemHandler struct {
 // /metrics endpoint stays for Prometheus scrapers; this is the cheaper
 // path for the dashboard so it doesn't have to parse Prom text.
 type MetricsJSONShape struct {
-	UptimeSeconds  int64           `json:"uptime_seconds"`
-	Host           hostBlock       `json:"host"`
-	Totals         totalsBlock     `json:"totals"`
-	Rates          ratesBlock      `json:"rates"`
-	ActiveRequests int64           `json:"active_requests"`
-	LatencyMS      latencyBlock    `json:"latency_ms"`
-	Sandbox        sandboxBlock    `json:"sandbox"`
-	BuildQueue     buildQueueBlock `json:"build_queue"`
-	Pools          []poolBlock     `json:"pools"`
+	UptimeSeconds     int64           `json:"uptime_seconds"`
+	Host              hostBlock       `json:"host"`
+	Totals            totalsBlock     `json:"totals"`
+	Rates             ratesBlock      `json:"rates"`
+	ActiveRequests    int64           `json:"active_requests"`
+	LatencyMS         latencyBlock    `json:"latency_ms"`
+	ResponseLatencyMS latencyBlock    `json:"response_latency_ms"`
+	Sandbox           sandboxBlock    `json:"sandbox"`
+	BuildQueue        buildQueueBlock `json:"build_queue"`
+	Pools             []poolBlock     `json:"pools"`
 }
 
 type hostBlock struct {
@@ -406,6 +407,11 @@ func (h *SystemHandler) BuildMetricsSnapshot() MetricsJSONShape {
 			P50: snap.P50MS,
 			P95: snap.P95MS,
 			P99: snap.P99MS,
+		},
+		ResponseLatencyMS: latencyBlock{
+			P50: snap.ResponseP50MS,
+			P95: snap.ResponseP95MS,
+			P99: snap.ResponseP99MS,
 		},
 	}
 

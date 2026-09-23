@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"sync"
@@ -397,15 +398,31 @@ func (a *asyncWriter) commit(batch []writeJob, telemetry bool) []writeJob {
 		return batch
 	}
 	stmtCtx := ctx
+	prepared := make(map[string]*sql.Stmt)
+	closePrepared := func() {
+		for _, stmt := range prepared {
+			_ = stmt.Close()
+		}
+	}
 
 	failedIdx := -1
 	var failErr error
 	for i, j := range batch {
-		if _, err := tx.ExecContext(stmtCtx, j.sql, j.args...); err != nil {
+		stmt := prepared[j.sql]
+		if stmt == nil {
+			stmt, err = tx.PrepareContext(stmtCtx, j.sql)
+			if err != nil {
+				failedIdx, failErr = i, err
+				break
+			}
+			prepared[j.sql] = stmt
+		}
+		if _, err := stmt.ExecContext(stmtCtx, j.args...); err != nil {
 			failedIdx, failErr = i, err
 			break
 		}
 	}
+	closePrepared()
 	if failedIdx < 0 {
 		if err := tx.Commit(); err != nil {
 			_ = tx.Rollback()

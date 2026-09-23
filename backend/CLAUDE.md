@@ -45,6 +45,14 @@ seccomp policy; the worker's actual policy is built at spawn in `pool/pool.go`.
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.
 
+The pool's demand history uses sixty one-second arrival buckets instead of a
+timestamp per request; controller wakeups coalesce within 20 ms. Neither is an
+execution-concurrency cap. The async SQLite writer prepares each distinct SQL
+statement once per batch; HTTP execution baseline/outlier fields are included
+in the execution INSERT instead of a second UPDATE. `metrics.latency_ms` stops
+at proxy return, while `response_latency_ms` measures the complete public
+invoke handler (including admission and record enqueue), not network transit.
+
 `server.detectInternalAPIBase` chooses a local interface IP (default-route
 interface first) for the sandbox SDK control plane. Do not reintroduce a
 gateway or generic health probe: it can select a separate Orva instance before

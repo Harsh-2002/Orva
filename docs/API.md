@@ -565,7 +565,15 @@ flap while the dashboard explains the reduced resource-limit mode.
 Prometheus text format.
 
 ### `GET /api/v1/system/metrics.json`
-Same data, JSON shape, used by the dashboard.
+Structured metrics used by the dashboard. `latency_ms` contains p50/p95/p99
+for the dispatch/proxy interval of recent invocations; it stops before
+execution-record enqueue and does not represent the full HTTP response.
+`response_latency_ms` contains p50/p95/p99 for the complete public invoke
+handler, including admission rejection and record enqueue. Both are rolling
+windows of at most 8,192 samples across functions, in integer milliseconds.
+Neither includes reverse-proxy, network, or client-side time. Compare a public
+load test with `response_latency_ms`, not `latency_ms`, and remember that the
+two windows can contain different sets of requests.
 
 Prometheus also scrapes the unauthenticated `GET /metrics` path.
 

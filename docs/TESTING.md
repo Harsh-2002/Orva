@@ -42,6 +42,16 @@ attributed. The harness now retries deletion of every function it created if
 transport fails; inspect `admission-test-*` names before deleting anything
 manually after an interrupted run.
 
+For performance work, capture writer counters before and after each phase,
+not just the final health status: a queue that drains afterward can still
+have dropped telemetry at saturation. Split success, 429, 504, and client
+errors before comparing latency percentiles. Dashboard
+`response_latency_ms` covers the full public invoke handler but excludes
+network/TLS/reverse-proxy time; `latency_ms` is the shorter proxy/worker
+interval. Neither substitutes for client-side `hey` percentiles. See
+[CAPACITY.md](CAPACITY.md) for the 2026-09-23 exploratory 100/500/1,000-client
+guest-loopback results and their limitations.
+
 ### 1.1 Ten minutes: does this build and does the sandbox actually execute code
 
 ```bash

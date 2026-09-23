@@ -47,6 +47,12 @@ type InvokeHandler struct {
 //   - any custom route previously registered via /api/v1/routes that maps
 //     a user-chosen path (e.g. /webhooks/stripe) to a function_id
 func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	responseStart := time.Now()
+	defer func() {
+		if h.Metrics != nil {
+			h.Metrics.RecordResponseDuration(time.Since(responseStart))
+		}
+	}()
 	reqID := r.Header.Get("X-Request-ID")
 
 	var fnID string
@@ -215,17 +221,13 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			statusCode = result.StatusCode
 		}
 		coldStart := result != nil && result.ColdStart
-		h.DB.AsyncInsertExecutionFinal(
-			&database.Execution{
-				ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: coldStart,
-				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
-				StartedAt: start,
-			},
-			duration.Milliseconds(), statusCode, errMsg, 0,
-		)
-		if h.Metrics != nil {
-			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", coldStart, duration.Milliseconds())
+		exec := &database.Execution{
+			ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: coldStart,
+			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
+			StartedAt: start,
 		}
+		h.observeExecutionBaseline(exec, duration.Milliseconds())
+		h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), statusCode, errMsg, 0)
 		if result != nil && len(result.Stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,
@@ -252,17 +254,13 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if result.StatusCode >= 500 {
 		execStatus = "error"
 	}
-	h.DB.AsyncInsertExecutionFinal(
-		&database.Execution{
-			ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: result.ColdStart,
-			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
-			StartedAt: start,
-		},
-		duration.Milliseconds(), result.StatusCode, "", result.ResponseSize,
-	)
-	if h.Metrics != nil {
-		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, result.ColdStart, duration.Milliseconds())
+	exec := &database.Execution{
+		ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: result.ColdStart,
+		TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
+		StartedAt: start,
 	}
+	h.observeExecutionBaseline(exec, duration.Milliseconds())
+	h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), result.StatusCode, "", result.ResponseSize)
 	// Persist stderr after the execution row so the FK constraint is satisfied.
 	if len(result.Stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
@@ -271,6 +269,17 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	h.publishExecution(execID, fn, execStatus, result.StatusCode, duration.Milliseconds(), result.ResponseSize, result.ColdStart)
+}
+
+func (h *InvokeHandler) observeExecutionBaseline(exec *database.Execution, durationMS int64) {
+	if h.Metrics == nil || h.Metrics.Baselines == nil {
+		return
+	}
+	isOutlier, p95 := h.Metrics.Baselines.ObserveExecution(exec.FunctionID, exec.Status, exec.ColdStart, durationMS)
+	exec.IsOutlier = isOutlier
+	if p95 > 0 {
+		exec.BaselineP95MS = &p95
+	}
 }
 
 // publishExecution fires an `event: execution` to the SSE hub so the live

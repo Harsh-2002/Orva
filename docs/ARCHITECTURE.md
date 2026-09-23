@@ -364,9 +364,12 @@ the data dir's existence; rotation is a future project.
 
 ### `backend/internal/metrics/`
 
-In-memory ring buffer over the last ~8k invocations. Computes p50,
-p95, p99 server-side so the dashboard doesn't recompute on every
-poll.
+Two bounded in-memory rings each retain at most 8,192 samples. `latency_ms`
+measures invocation dispatch through proxy completion; `response_latency_ms`
+measures the whole public invoke handler, including admission failures and
+execution-record enqueue. The dashboard uses the latter for its **Server
+response time** card. Both compute p50/p95/p99 server-side and exclude
+reverse-proxy, network, and client time.
 
 ### `backend/internal/ai/`
 

@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 )
@@ -40,6 +42,28 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	// The histogram series must still be present.
 	if !strings.Contains(body, "orva_invocation_duration_ms_bucket{le=") {
 		t.Errorf("duration histogram buckets missing\n---\n%s", body)
+	}
+}
+
+func TestMetricsJSONSeparatesHandlerResponseFromWorkerDuration(t *testing.T) {
+	m := metrics.New()
+	m.RecordDuration(7 * time.Millisecond)
+	m.RecordResponseDuration(75 * time.Millisecond)
+	h := &SystemHandler{Metrics: m}
+	w := httptest.NewRecorder()
+	h.GetMetricsJSON(w, httptest.NewRequest("GET", "/api/v1/system/metrics.json", nil))
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var body struct {
+		LatencyMS         latencyBlock `json:"latency_ms"`
+		ResponseLatencyMS latencyBlock `json:"response_latency_ms"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.LatencyMS.P50 != 7 || body.ResponseLatencyMS.P50 != 75 {
+		t.Fatalf("latency=%+v response=%+v", body.LatencyMS, body.ResponseLatencyMS)
 	}
 }
 

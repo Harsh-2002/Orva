@@ -183,29 +183,36 @@ func (b *Baselines) FinalizeExecution(db outlierUpdater, execID, fnID, status st
 	if b == nil || db == nil || execID == "" || fnID == "" {
 		return
 	}
-	// Only feed warm successes into the baseline. Cold starts and errors
-	// would skew the P95 enough to drown out genuine signal.
-	if status == "success" && !coldStart {
-		b.Record(fnID, durationMS)
-	}
-	// Classify against the (now-updated) baseline. We always back-write
-	// the baseline_p95_ms (even when not flagged) so the UI can render
-	// "took 80ms · baseline 60ms" without re-querying.
-	isOutlier, p95 := b.Classify(fnID, durationMS)
+	isOutlier, p95 := b.ObserveExecution(fnID, status, coldStart, durationMS)
 	if p95 > 0 || isOutlier {
 		db.UpdateOutlier(execID, isOutlier, p95)
 	}
 }
 
+// ObserveExecution updates the warm-success baseline and classifies this
+// execution without writing to storage. Callers that have not yet queued the
+// execution INSERT can include these fields in that same statement.
+func (b *Baselines) ObserveExecution(fnID, status string, coldStart bool, durationMS int64) (bool, int64) {
+	if b == nil || fnID == "" {
+		return false, 0
+	}
+	// Only feed warm successes into the baseline. Cold starts and errors
+	// would skew the P95 enough to drown out genuine signal.
+	if status == "success" && !coldStart {
+		b.Record(fnID, durationMS)
+	}
+	return b.Classify(fnID, durationMS)
+}
+
 // BaselineSummary is the read-model returned by GET /api/v1/functions/{id}/baseline.
 type BaselineSummary struct {
-	FunctionID    string  `json:"function_id"`
-	P95MS         int64   `json:"p95_ms"`
-	P99MS         int64   `json:"p99_ms"`
-	MeanMS        int64   `json:"mean_ms"`
-	SampleCount   int     `json:"sample_count"`
-	WindowSize    int     `json:"window_size"`
-	LastUpdatedAt int64   `json:"last_updated_at"` // unix millis; zero when buffer is empty
+	FunctionID    string `json:"function_id"`
+	P95MS         int64  `json:"p95_ms"`
+	P99MS         int64  `json:"p99_ms"`
+	MeanMS        int64  `json:"mean_ms"`
+	SampleCount   int    `json:"sample_count"`
+	WindowSize    int    `json:"window_size"`
+	LastUpdatedAt int64  `json:"last_updated_at"` // unix millis; zero when buffer is empty
 }
 
 // WarmEntry is a single (function_id, duration_ms) pair used to seed the

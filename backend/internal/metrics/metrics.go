@@ -39,10 +39,14 @@ type Metrics struct {
 	// from DB before the HTTP listener accepts traffic.
 	Baselines *Baselines
 
-	mu    sync.Mutex
-	ring  [durationRingSize]time.Duration
-	idx   int // next write index
-	count int // total entries (capped at ring size)
+	mu            sync.Mutex
+	ring          [durationRingSize]time.Duration
+	idx           int // next write index
+	count         int // total entries (capped at ring size)
+	responseMu    sync.Mutex
+	responseRing  [durationRingSize]time.Duration
+	responseIdx   int
+	responseCount int
 
 	// Cumulative histogram buckets for invocation duration. buckets[i] is
 	// the running count of samples ≤ HistogramBucketsMS[i] in ms.
@@ -92,6 +96,19 @@ func (m *Metrics) RecordDuration(d time.Duration) {
 
 	ms := float64(d) / float64(time.Millisecond)
 	bumpHistogram(&m.invocBuckets, &m.invocCount, &m.invocSumMS, ms)
+}
+
+// RecordResponseDuration tracks the full public invoke handler lifetime,
+// including admission failures and execution-record enqueue. It is distinct
+// from RecordDuration, which stops when the worker/proxy returns.
+func (m *Metrics) RecordResponseDuration(d time.Duration) {
+	m.responseMu.Lock()
+	m.responseRing[m.responseIdx] = d
+	m.responseIdx = (m.responseIdx + 1) % durationRingSize
+	if m.responseCount < durationRingSize {
+		m.responseCount++
+	}
+	m.responseMu.Unlock()
 }
 
 // RecordSpawnDuration feeds a sandbox-spawn duration into the spawn
@@ -173,6 +190,20 @@ func (m *Metrics) snapshotSorted() []time.Duration {
 	return out
 }
 
+func (m *Metrics) responseSnapshotSorted() []time.Duration {
+	m.responseMu.Lock()
+	n := m.responseCount
+	if n == 0 {
+		m.responseMu.Unlock()
+		return nil
+	}
+	out := make([]time.Duration, n)
+	copy(out, m.responseRing[:n])
+	m.responseMu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
 // Percentile returns the p-th percentile of recorded durations (0-100).
 // Returns 0 if no durations have been recorded.
 func (m *Metrics) Percentile(p float64) time.Duration {
@@ -190,15 +221,16 @@ func (m *Metrics) Percentile(p float64) time.Duration {
 // Snapshot returns a point-in-time copy of all metric values.
 func (m *Metrics) Snapshot() MetricsSnapshot {
 	sorted := m.snapshotSorted()
-	pct := func(p float64) time.Duration {
-		if len(sorted) == 0 {
+	responseSorted := m.responseSnapshotSorted()
+	pct := func(values []time.Duration, p float64) time.Duration {
+		if len(values) == 0 {
 			return 0
 		}
-		idx := int(float64(len(sorted)-1) * p / 100.0)
-		if idx >= len(sorted) {
-			idx = len(sorted) - 1
+		idx := int(float64(len(values)-1) * p / 100.0)
+		if idx >= len(values) {
+			idx = len(values) - 1
 		}
-		return sorted[idx]
+		return values[idx]
 	}
 	return MetricsSnapshot{
 		TotalInvocations: m.TotalInvocations.Load(),
@@ -207,9 +239,12 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 		TotalBuilds:      m.TotalBuilds.Load(),
 		BuildErrors:      m.BuildErrors.Load(),
 		ActiveRequests:   m.ActiveRequests.Load(),
-		P50MS:            pct(50).Milliseconds(),
-		P95MS:            pct(95).Milliseconds(),
-		P99MS:            pct(99).Milliseconds(),
+		P50MS:            pct(sorted, 50).Milliseconds(),
+		P95MS:            pct(sorted, 95).Milliseconds(),
+		P99MS:            pct(sorted, 99).Milliseconds(),
+		ResponseP50MS:    pct(responseSorted, 50).Milliseconds(),
+		ResponseP95MS:    pct(responseSorted, 95).Milliseconds(),
+		ResponseP99MS:    pct(responseSorted, 99).Milliseconds(),
 	}
 }
 
@@ -227,4 +262,7 @@ type MetricsSnapshot struct {
 	P50MS            int64 `json:"p50_ms"`
 	P95MS            int64 `json:"p95_ms"`
 	P99MS            int64 `json:"p99_ms"`
+	ResponseP50MS    int64 `json:"response_p50_ms"`
+	ResponseP95MS    int64 `json:"response_p95_ms"`
+	ResponseP99MS    int64 `json:"response_p99_ms"`
 }

@@ -17,6 +17,11 @@ before it.
 
 ### Fixed
 
+- The dashboard's response-time card now uses full public invoke-handler
+  latency. Its previous percentile stopped before execution-record enqueue
+  and understated what the server spent handling a request, especially under
+  write pressure. The older `latency_ms` field remains available; the metrics
+  JSON adds `response_latency_ms` for the new card.
 - Sandbox SDK calls now target a local Orva interface, not any healthy Orva
   found by probing the default gateway. On hosts with another Orva instance at
   that gateway, KV/jobs/F2F calls could reach the wrong instance and fail 401;
@@ -27,6 +32,11 @@ before it.
 
 ### Changed
 
+- The pool controller now keeps bounded request-rate buckets and coalesces
+  burst wakeups. The execution writer prepares repeated SQL once per batch,
+  and HTTP execution rows carry baseline/outlier fields in their first INSERT
+  instead of scheduling a follow-up UPDATE. These reduce controller and
+  persistence overhead without relaxing sandbox or admission boundaries.
 - HTTP and MCP invocations no longer build an unused seccomp policy per
   request. Streaming settings are cached for up to 30 seconds instead of
   causing two SQLite reads on every invocation; worker-spawn security policy

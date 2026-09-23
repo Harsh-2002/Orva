@@ -140,6 +140,16 @@ print(r.json())
 > collision-checks against other functions before saving).
 > Reserved prefixes: `/api/` `/auth/` `/fn/` `/mcp/` `/web/` `/webhook/` `/_orva/`.
 
+### Check response latency
+
+`GET {{ORIGIN}}/api/v1/system/metrics.json` (with a read-capable API key)
+returns `response_latency_ms: {p50, p95, p99}` for the most recent 8,192
+public invoke-handler completions, including admission failures and execution
+record enqueue. The dashboard's **Server response time** card uses these
+values. They exclude reverse-proxy, network, and client time. The separate
+`latency_ms` field stops when the sandbox proxy returns, before record enqueue;
+it is not the end-to-end response time seen by an HTTP client.
+
 ---
 
 ## Configuration reference

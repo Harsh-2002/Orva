@@ -112,16 +112,16 @@
       <div class="bg-background border border-border rounded-lg p-5 lg:col-span-1">
         <div class="mb-3">
           <h2 class="text-sm font-semibold text-foreground-strong">
-            Response time
+            Server response time
           </h2>
           <div class="text-xs text-foreground-muted mt-1">
-            Invocation latency by percentile.
+            Full invoke handler, including admission and record enqueue; excludes network transit.
           </div>
         </div>
         <LatencyBars
-          :p50="m.latency_ms?.p50"
-          :p95="m.latency_ms?.p95"
-          :p99="m.latency_ms?.p99"
+          :p50="m.response_latency_ms?.p50"
+          :p95="m.response_latency_ms?.p95"
+          :p99="m.response_latency_ms?.p99"
         />
       </div>
 
