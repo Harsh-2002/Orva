@@ -57,11 +57,13 @@ MOCK_HOST=<guest-reachable-host-ip> python3 run.py --url http://127.0.0.1:<forwa
 ### How the isolated environment works (`env.py`)
 `docker build -t orva:e2e .` → `docker run` with `--cap-add SYS_ADMIN` (no
 `NET_ADMIN` — nsjail makes the TAP device inside its own user namespace),
-`--cgroupns=host --pid=host`, `seccomp/apparmor=unconfined`, a `/sys/fs/cgroup`
+`--cgroupns=host --pid=host`, `seccomp/apparmor/systempaths=unconfined`, a `/sys/fs/cgroup`
 mount, and `--add-host host.docker.internal:host-gateway` (so a test's host-side
 mock LLM is reachable from inside the container). A fresh named volume gives each
 run pristine state. The container is removed (with its volume) on teardown unless
-`--keep`.
+`--keep`. Keep these sandbox flags aligned with `docker-compose.yml`: omitting
+`systempaths=unconfined` on a host that masks `/proc/kcore` makes nsjail fail
+its mandatory `/proc` mount before an adapter can start.
 
 ### Keyless AI testing (`mock_llm.py`)
 Bifrost can point a provider at any base URL, so a test configures an Orva

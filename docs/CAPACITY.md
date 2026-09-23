@@ -1,5 +1,87 @@
 # Pool Controller v2 capacity validation
 
+## 2026-09-23 live worker-churn diagnosis
+
+The same isolated 2-vCPU/4-GiB server and separate 512-MiB client VM drove
+30,000 mixed Node/Python requests at 500 closed-loop clients on an unchanged
+server: all 30,000 returned HTTP 200 (286 successful/s; p50 1,576 ms,
+p95 2,701 ms, p99 4,145 ms). A 20-second guest `/proc/stat` interval was
+97.8% non-idle/non-iowait/non-steal, so CPU was near saturation. The daemon's
+own Go CPU profile contained 5.34 CPU-seconds in that interval, about 13% of
+two-core capacity; SQLite was prominent inside that profile, but it does not
+explain all guest CPU use. The remaining CPU includes sandboxed runtimes and
+kernel work, whose exact fractions were not measured. The VM used real nsjail
+with `ORVA_REQUIRE_SANDBOX=1`, but its cgroup controllers were not delegated
+(`rlimit_only`), so hard per-worker cgroup enforcement remains unverified here.
+
+Node-only/Python-only/Node-only 10,000-request runs at 500 clients, with the
+same unchanged daemon, returned all HTTP 200 at 400/433/320 successful/s.
+This spread makes a runtime-specific throughput claim unsafe. Pool metrics
+during the last Node run reported 1,008 cumulative Node spawns and 989 kills
+across the daemon's preceding runs, far beyond the 1,000-use recycling limit's
+expected churn. Code inspection found two extra churn paths: release killed a
+healthy worker immediately when a fluctuating `dynamicMax` fell below the
+current total, bypassing the controller's 30-second scale-down grace; and a
+queued function could reclaim idle workers from another *active* function
+merely because that donor was above its configured minimum.
+
+The first candidate removed release-path capacity pruning. In a restarted
+Node-only 10,000-request run it returned all 200 at 821/s with 31 spawns and
+zero kills. A baseline restart between candidate runs returned all 200 at
+486/s with 211 spawns and 181 kills. Repeating the first candidate returned
+all 200 at 457/s with 31 spawns and zero kills. The churn reduction repeated,
+but throughput did not: restart, shared-host pressure, and growing SQLite
+storage were not controlled. The first candidate then returned 20,000/20,000
+mixed HTTP 200 at 500 clients and 332/s, with 193 total spawns and 162 kills
+across the two function pools.
+
+The second candidate also protects an active donor's desired capacity and
+never reclaims from a donor with its own queue. Its restarted 20,000-request
+mixed run returned 20,000 HTTP 200, no 429 or transport errors, at 635/s;
+p50/p95/p99 were 608/1,374/2,111 ms. It spawned 83 workers and killed 52
+across the two pools. This is strong evidence of less worker churn, not yet a
+controlled throughput gain: the two mixed runs were sequential on a shared
+host and the database/cache state changed. A 50,000-request, 1,000-client
+repeat with execution-row reconciliation and full real-sandbox E2E was still
+required. After its 20,000-request run and writer drain,
+critical failures/timeouts were zero, but 26,818 optional telemetry writes
+had been dropped, including 8,259 activity records. The churn fix does not
+make best-effort activity lossless under SQLite saturation.
+
+The same second candidate then completed 50,000 mixed requests at 1,000
+closed-loop clients in 95.28 seconds: all 50,000 HTTP 200, no 429 or
+transport errors, 525 successful/s, and p50/p95/p99 of 1,764/3,040/3,439 ms.
+After all writer queues drained, a read-only SQLite query for the run's
+start-time window found exactly 25,000 status-200 execution rows for each
+function. Critical writer failures and timeouts remained zero. Cumulative
+telemetry drops rose to 99,087, including 31,778 activity drops, so the
+operator activity feed is incomplete under this load. The host's available
+memory stayed above 1.6 GiB at the monitored point; this validates the
+scratch VM's functional capacity, not a hardware-independent throughput
+guarantee or full E2E compatibility.
+
+An immediate repeat on the same running candidate returned another
+50,000/50,000 mixed HTTP 200 at 1,000 clients in 77.44 seconds (646/s),
+with p50/p95/p99 of 1,457/2,358/3,523 ms. After drain, a separate read-only
+time-window query again found exactly 25,000 status-200 execution rows per
+function; critical failures/timeouts remained zero. Throughput differed by
+23% between the two repetitions, reinforcing that the shared host/cache
+state matters. Cumulative telemetry/activity drops reached 167,922/51,867;
+the second run therefore did not solve best-effort data loss. Cumulative pool
+spawns/kills reached 188/169 for Python and 218/206 for Node, so some worker
+turnover remains despite protecting active donor capacity.
+
+After the load runs, the current candidate passed the complete isolated Docker
+E2E suite: 29 modules, 676 checks, zero failures or skips, with
+`ORVA_REQUIRE_SANDBOX=1`. The first local run had failed four invocation
+modules because `test/e2e/env.py` omitted `systempaths=unconfined`, a flag
+already present in the production compose and documented `docker run` commands.
+Inside that test container Docker masked `/proc/kcore`, making nsjail's mandatory
+procfs mount fail before the adapter started. Adding the missing test-container
+flag made real Node/Python invocation, firewall, CLI, and deletion-race modules
+pass. The production sandbox continues to mount a scoped procfs; no sandbox
+weakening was shipped.
+
 An additional 2026-09-23 diagnostic rules out two tempting but incomplete
 explanations for the low cold-run rate. A 10,000-row, 200-row-batch execution
 INSERT probe using Orva's actual pure-Go SQLite driver completed at 10,860

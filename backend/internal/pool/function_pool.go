@@ -425,9 +425,9 @@ func (p *functionPool) markRetired() {
 }
 
 // release returns the worker to the pool unless it errored or is unusable.
-// Also kills the worker when the idle channel already holds at least the
-// effective host/operator cap, preventing a completed burst from parking
-// workers that the controller can no longer admit.
+// Capacity changes are handled by the controller's hysteretic scale-down.
+// Killing on every release when dynamicMax briefly falls below the current
+// worker count causes a spawn/kill loop under fluctuating memory headroom.
 func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	p.busy.Add(-1)
 
@@ -456,23 +456,8 @@ func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 		return
 	}
 
-	// Aggressive prune: don't park excess workers above the autoscaler's
-	// current cap. dynamicMax==0 only at first boot (autoscaler hasn't
-	// computed yet) — fall through to the original cap-only check there.
-	// dyn is a TOTAL-worker ceiling, so compare the same total startSpawn
-	// gates on. Comparing len(idle) alone was masked by cap(idle) being the
-	// smaller number; now that the channel holds max_warm, a shrinking
-	// dynamicMax would otherwise settle the pool above effective_max and
-	// break the idle+busy+spawning <= effective_max invariant.
-	dyn := int(p.dynamicMax.Load())
-	if dyn > 0 && int(p.busy.Load()+p.spawning.Load())+len(p.idle) >= dyn {
-		p.mu.Unlock()
-		p.killWorker(w)
-		return
-	}
-
 	// Non-blocking push to the idle channel. If the channel is full we're
-	// shrinking (pool max was reduced, or race) — kill the worker.
+	// shrinking the configured pool max or racing another release — kill it.
 	select {
 	case p.idle <- w:
 		p.mu.Unlock()

@@ -45,6 +45,15 @@ seccomp policy; the worker's actual policy is built at spawn in `pool/pool.go`.
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.
 
+Worker release parks a healthy worker even if a transient capacity snapshot is
+below the current pool size; the controller applies its 30-second scale-down
+grace before pruning idle workers. A queued pool may reclaim idle capacity from
+another function, but not from a donor with its own queue or from an active
+donor below its desired worker count. New spawns still require host memory and
+CPU reservations. Do not reintroduce release-path pruning or reclaim from an
+actively demanded pool: both cause repeated nsjail/adapter cold starts under
+mixed load.
+
 The pool's demand history uses sixty one-second arrival buckets instead of a
 timestamp per request; controller wakeups coalesce within 20 ms. Neither is an
 execution-concurrency cap. The async SQLite writer prepares each distinct SQL

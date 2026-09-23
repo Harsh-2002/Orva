@@ -362,9 +362,9 @@ func (s *scaler) startSpawn(p *functionPool, reason string) bool {
 	return true
 }
 
-// reclaimBorrowedIdle frees one worker above a pool's configured active
-// minimum, choosing the largest borrower first. Busy workers are never
-// touched and configured minimums are never crossed.
+// reclaimBorrowedIdle frees one worker that another pool is not actively
+// using. A momentarily idle worker in a busy donor pool is not surplus: the
+// next request will need it, and stealing it causes cross-pool spawn churn.
 func (s *scaler) reclaimBorrowedIdle(requester *functionPool) bool {
 	var donor *functionPool
 	bestBorrowed := 0
@@ -373,8 +373,17 @@ func (s *scaler) reclaimBorrowedIdle(requester *functionPool) bool {
 		if p == requester || p.closing.Load() {
 			return true
 		}
+		if p.queued.Load() > 0 {
+			return true
+		}
 		current := int(p.busy.Load()+p.spawning.Load()) + len(p.idle)
-		borrowed := current - p.min
+		protected := p.min
+		if p.busy.Load() > 0 || p.spawning.Load() > 0 {
+			if desired := int(p.desired.Load()); desired > protected {
+				protected = desired
+			}
+		}
+		borrowed := current - protected
 		if borrowed > len(p.idle) {
 			borrowed = len(p.idle)
 		}

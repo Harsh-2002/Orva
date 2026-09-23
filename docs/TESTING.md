@@ -177,13 +177,11 @@ invocation is the isolated Docker mode:
 cd test/e2e && python3 run.py --rebuild
 ```
 
-**`[UNVERIFIED]`** — no surveyor executed a full `run.py` in isolated-Docker
-mode, because it overwrites the tracked `test/e2e/CHECKLIST.md` and requires a
-full image build whose duration was never measured. The isolated path
-(`env.py`) is documented here from source plus verified preconditions, not from
-a run. What *was* verified: on the survey host, nsjail cannot spawn inside that
-container at all (§2.4), so the isolated mode is not usable there — use `--url`
-against a bare-metal instance instead:
+On 2026-09-23, `ORVA_REQUIRE_SANDBOX=1 python3 test/e2e/run.py --rebuild`
+passed all 29 modules against a freshly built isolated Docker image, with no
+failures or skips. This includes real sandboxed Node/Python deploy/invoke.
+The run overwrites the tracked `test/e2e/CHECKLIST.md`; inspect its diff before
+committing. For an already-provisioned scratch instance, use `--url` instead:
 
 ```bash
 cd test/e2e && python3 run.py --url $BASE --api-key "$KEY"
@@ -273,7 +271,7 @@ Two distinct failure signatures, both reproduced:
 | Condition | Deploy | Invoke |
 |---|---|---|
 | nsjail binary missing | succeeds, function reaches `active` | **503** `SANDBOX_ERROR` — `pool acquire: start nsjail: fork/exec /usr/local/bin/nsjail: no such file or directory` |
-| nsjail present but cannot spawn (e.g. `/proc` overmounted in a `--pid=host` container) | succeeds, `active` | **502** `WORKER_CRASHED`; nsjail's own stderr says `buildMountTree(): Failed to mount mandatory point: '/proc'` |
+| nsjail present but cannot spawn (e.g. Docker masks `/proc` and `systempaths=unconfined` is missing) | succeeds, `active` | **502** `WORKER_CRASHED`; nsjail's own stderr says `buildMountTree(): Failed to mount mandatory point: '/proc'` |
 
 Note that in both cases the server stays `healthy` and deploys still succeed.
 **`status: active` is not proof the platform works.**
@@ -329,11 +327,9 @@ shell suites' default `BASE_URL`.
 **(2) `docker compose up -d` — host 3000 → container 8443.** `docker compose
 config` validates; the file supplies everything nsjail needs (`cap_add:
 SYS_ADMIN`, `cgroup: host`, `pid: host`, `/sys/fs/cgroup`, `/dev/net/tun`,
-seccomp/apparmor/systempaths unconfined). **`[UNVERIFIED]` end to end** — on
-the survey host the dev instance already owns port 3000, so compose was never
-brought up. Given that the same `--pid=host` + `/sys/fs/cgroup` combination
-broke nsjail's `/proc` mount in the E2E container on that host, do not assume
-compose gives you a working sandbox there without checking with a real invoke.
+seccomp/apparmor/systempaths unconfined). The isolated E2E container with the
+same flags passed real sandboxed deploy/invoke on this host; compose itself
+still needs a direct invoke check after installation.
 
 **(3) The isolated E2E container (`test/e2e/env.py`) — host 8455 → container
 8443.**
@@ -347,8 +343,10 @@ python3 run.py --url URL --api-key KEY  # target an existing instance, skips Doc
 ```
 
 Container `orva-e2e`, volume `orva-e2e-data`, both removed on teardown. Admin
-key via `docker exec orva-e2e cat /var/lib/orva/.admin-key`. **`[UNVERIFIED]`
-as a full run** — see §1.2. Two traps that *were* verified:
+key via `docker exec orva-e2e cat /var/lib/orva/.admin-key`. On 2026-09-23 a
+freshly rebuilt image with the corrected harness passed 29 modules, including
+real Node/Python invocation and firewall checks, with `ORVA_REQUIRE_SANDBOX=1`.
+Two traps were verified:
 
 - **`ensure_image()` silently reuses a stale image.** It returns early whenever
   the `orva:e2e` tag exists, with no staleness check. On the survey host that
@@ -360,11 +358,14 @@ as a full run** — see §1.2. Two traps that *were* verified:
   ```bash
   docker image inspect orva:e2e --format '{{.Created}}'
   ```
-- **Nested sandboxing failed in that container on the survey host.** `--pid=host`
-  plus the host's `/proc` overmounts made nsjail fail
-  `buildMountTree(): Failed to mount mandatory point: '/proc'`, so
-  `test_deploy_invoke.py` skipped (exit 3) — and with `ORVA_REQUIRE_SANDBOX=1`
-  reported `1 FAILED / 6 checks`. If you see that, use option (1).
+- **The E2E harness once omitted `systempaths=unconfined`.** On hosts where
+  Docker masks `/proc/kcore`, nsjail then failed
+  `buildMountTree(): Failed to mount mandatory point: '/proc'`; with
+  `ORVA_REQUIRE_SANDBOX=1`, the suite correctly failed its invocation modules.
+  The harness now passes the flag already used by compose and the documented
+  `docker run` command. Do not disable nsjail's `/proc` mount as a workaround;
+  sandboxed handlers may need `/proc/self/*` and the security contract promises
+  a fresh procfs scoped to their PID namespace.
 
 **(4) A live/shared instance.** Read-only work is fine. Before you point any
 suite at it, read §3.2.5 — one E2E module deletes *every* AI conversation on the

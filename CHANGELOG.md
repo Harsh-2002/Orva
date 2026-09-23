@@ -17,6 +17,10 @@ before it.
 
 ### Fixed
 
+- A fluctuating pool capacity estimate no longer kills healthy workers on
+  every request release, bypassing the controller's scale-down grace period.
+  Cross-function capacity reclamation also leaves workers needed by an active
+  donor pool alone, reducing unnecessary sandbox restarts under mixed load.
 - HTTP, inbound webhook, replay, internal SDK, and MCP invocations now reserve
   execution-record writer capacity before running user code. Cron runs check
   storage before dispatch, and queued jobs reserve capacity before claiming a
