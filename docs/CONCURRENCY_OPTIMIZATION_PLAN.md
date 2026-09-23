@@ -55,7 +55,7 @@ Code and read-only instance inspection establish the following:
 | Admission happened after expensive preparation (baseline) | `proxy/proxy.go:Forward` read the complete body, copied/encoded it and captured before `Pool.Acquire` | Candidate now reserves daemon body memory before read and captures only admitted requests; it still serializes before worker acquisition. |
 | Scheduler bookkeeping scales with traffic/history | `function_pool.go` retains arrival timestamps, copies rolling samples, sorts under `sigMu`; scaler wake evaluates/sorts all pools | Measure and replace with bounded structures and targeted scheduling. |
 | Request-path work is avoidable | Proxy reads two streaming settings through SQL each invocation; invoke handler builds an unused seccomp policy; worker dispatch creates read/write goroutines and channels each request | Cache immutable settings/policy and profile transport allocation costs. |
-| Timing samples are inconsistent | Streaming proxy records `DispatchEx` time at first response frame, although worker ownership continues through the stream | Separate time-to-first-byte, handler/worker occupancy, queueing and client response drain. |
+| Timing samples were inconsistent (addressed in current candidate) | Streaming proxy recorded `DispatchEx` time at first response frame, although worker ownership continued through the stream | Worker lease is now measured centrally on release; queueing and end-to-end HTTP latency remain separate signals. |
 | Worker lifecycle can add burst cost | Four concurrent spawns per pool, periodic controller tick, default recycle after 1,000 uses; prewarm counts spawning as current | Track ready separately, bound global spawn pressure and avoid synchronized replenishment. |
 | Runtime protocol assumes exclusive ownership | `sandbox/worker.go` holds a worker mutex; both adapters process one frame at a time and mutate process-wide execution/trace environment | Same-interpreter multiplexing would require a new behavioral contract. |
 | Python recreates event loops | `runtimes/python/adapter.py` uses `asyncio.run` on async handler/ASGI/stream paths | Evaluate a persistent loop with per-invocation context and cleanup. |
@@ -104,6 +104,17 @@ No production load or configuration change is part of this optimization work.
   skips), and a Python handler sleeping three seconds during module import
   returned its first HTTP 200 in 4.57 seconds. Because host OOM ended the
   4-GiB stress guest, no 4-GiB throughput claim is attached to this change.
+
+- The controller's service-time signal was dispatch-only even though a worker
+  remained busy through proxy response processing or streaming. All invocation
+  paths now sample the full successful-acquire-to-release lease centrally in
+  `Manager.Release`; failed queue admission has no service sample. This fixes
+  an undersized Little's-Law demand input, but it does not raise the host's
+  CPU/memory ceilings or prove a throughput gain without a safe A/B VM run.
+  The changed binary passed the full 28-module/668-check real-sandbox E2E
+  suite on a disposable 2-vCPU/2-GiB VM (zero failures/skips). Its nsjail
+  capability fallback worked, but cgroup controllers were not delegated;
+  this is a functional result, not a hard-limit or throughput result.
 
 - A direct **inter-VM** link now supplies an independent load generator, so
   smolvm's host port-forward resets are outside the measured request path.

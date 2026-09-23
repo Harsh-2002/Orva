@@ -336,7 +336,7 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		promHeader(w, "orva_pool_desired_workers", "gauge", "Controller desired workers per function.")
 		promHeader(w, "orva_pool_effective_max", "gauge", "Effective host and operator capacity per function.")
 		promHeader(w, "orva_pool_queue_wait_p95_ms", "gauge", "Observed queue-wait p95 per function.")
-		promHeader(w, "orva_pool_service_p95_ms", "gauge", "Observed service-time p95 per function.")
+		promHeader(w, "orva_pool_service_p95_ms", "gauge", "Observed worker-lease p95 per function, from acquire to release.")
 		promHeader(w, "orva_pool_cold_start_p95_ms", "gauge", "Observed worker start p95 per function.")
 		promHeader(w, "orva_pool_rejections_total", "counter", "Pool admission rejections per function.")
 		promHeader(w, "orva_pool_capacity_timeouts_total", "counter", "Capacity waits that reached their deadline.")

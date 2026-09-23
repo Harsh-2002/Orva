@@ -473,13 +473,7 @@ func (p *Proxy) Forward(
 	var reqErr error
 	defer func() { p.Pool.Release(acq, reqErr) }()
 
-	dispatchStart := time.Now()
 	dres, err := acq.Worker.DispatchEx(ctx, reqJSON)
-	// Feed the per-fn EWMA so the autoscaler can compute Little's-Law floor.
-	// (Streaming responses inflate this number — the dispatch "duration"
-	// includes the entire stream wall-clock. The autoscaler treats this as
-	// signal regardless; see pool.go's note near recordAcquire.)
-	p.Pool.RecordLatency(acq, time.Since(dispatchStart))
 	var stderr []byte
 	if dres != nil {
 		stderr = p.finalizeStderr(r, execID, dres.Stderr())

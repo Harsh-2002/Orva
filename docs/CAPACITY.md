@@ -1,5 +1,15 @@
 # Pool Controller v2 capacity validation
 
+The current unreleased candidate measures `service_p95_ms` over each complete
+worker lease rather than stopping at the adapter's first response frame. This
+corrects the controller's service-time input but has not yet been benchmarked
+against the prior build in a safely isolated mixed-function capacity run.
+The changed binary passed 28 E2E modules and 668 checks with real nsjail
+invocations required on a disposable 2-vCPU/2-GiB Ubuntu smolvm guest; no
+module failed or skipped. That guest used the verified nsjail file-capability
+fallback but reported `rlimit_only` because cgroup controllers were not
+delegated, so this pass does not validate hard per-worker cgroup limits.
+
 ## 2026-09-23 independent two-VM follow-up (unreleased candidate)
 
 ### Mixed-function and scheduled-arrival follow-up
@@ -313,7 +323,9 @@ Use these Pool Controller v2 signals together:
   demand, immediate pressure, configured minimum, idle TTL, operator maximum,
   function concurrency, CPU capacity, or memory capacity.
 - `cold_start_p95_ms` and `service_p95_ms` explain why two functions with the
-  same request rate can require different worker counts.
+  same request rate can require different worker counts. Service p95 measures
+  the full worker lease, from acquisition through response processing or
+  streaming to release; it excludes queueing and worker startup.
 
 Raise `max_warm` only when `limiting_reason=operator_max`. CPU or memory
 limits require host capacity or smaller function limits; increasing the

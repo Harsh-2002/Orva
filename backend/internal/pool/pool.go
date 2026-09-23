@@ -171,6 +171,9 @@ type AcquireResult struct {
 	// release must never look the pool up by fnID again or an old worker can be
 	// inserted into the replacement generation (an ABA race).
 	pool *functionPool
+	// acquiredAt starts the service-time sample only after queue admission and
+	// the host limiter have handed this worker to the caller.
+	acquiredAt time.Time
 
 	released atomic.Bool
 }
@@ -479,6 +482,7 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		}
 		res.pool = p
 		finishQueue(p, false)
+		res.acquiredAt = time.Now()
 		return res, nil
 	}
 }
@@ -491,15 +495,6 @@ func queueAdmissionError(parent context.Context, err error) error {
 		return ErrInvocationQueueFull
 	}
 	return err
-}
-
-// RecordLatency feeds a per-request service-time sample into the
-// function's rolling p95. Every dispatch path calls it after user code returns
-// or fails. Non-blocking and safe from any goroutine.
-func (m *Manager) RecordLatency(acq *AcquireResult, d time.Duration) {
-	if acq != nil && acq.pool != nil {
-		acq.pool.recordLatency(d)
-	}
 }
 
 // RefreshForDeploy retires the current pool generation so the next Acquire
@@ -588,6 +583,12 @@ func (m *Manager) Release(acq *AcquireResult, reqErr error) {
 			_ = acq.Worker.Kill()
 		}
 		return
+	}
+	// Measure the full lease, including response processing and streaming.
+	// Dispatch alone undercounts busy time and makes Little's-Law scaling
+	// underestimate the workers needed for mixed workloads.
+	if !acq.acquiredAt.IsZero() && acq.Worker != nil {
+		p.recordLatency(time.Since(acq.acquiredAt))
 	}
 	// Always free the per-fn concurrency slot, regardless of whether the
 	// worker exists (Acquire may have errored after taking the slot).

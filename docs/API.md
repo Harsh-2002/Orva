@@ -582,6 +582,10 @@ load test with `response_latency_ms`, not `latency_ms`, and remember that the
 two windows can contain different sets of requests.
 
 Prometheus also scrapes the unauthenticated `GET /metrics` path.
+The per-function `orva_pool_service_p95_ms` gauge and `service_p95_ms` in
+pool telemetry measure worker occupancy from successful acquire to release,
+including response processing and streaming. They exclude queue wait and
+cold-start time; they are not end-to-end HTTP latency.
 
 ### Backup, storage, and firewall administration
 

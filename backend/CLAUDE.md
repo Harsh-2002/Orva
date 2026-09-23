@@ -52,6 +52,10 @@ statement once per batch; HTTP execution baseline/outlier fields are included
 in the execution INSERT instead of a second UPDATE. `metrics.latency_ms` stops
 at proxy return, while `response_latency_ms` measures the complete public
 invoke handler (including admission and record enqueue), not network transit.
+The pool's `service_p95_ms` samples full worker leases from successful acquire
+to release, including response processing and streaming, but excludes queue
+wait and spawn time. `Manager.Release` records it once for every invocation
+path; handlers must not record separate dispatch-only samples.
 
 Each spawned `sandbox.Worker` has one lifetime stdout frame reader. Readiness,
 buffered replies and streaming chunks consume from that reader's channel;

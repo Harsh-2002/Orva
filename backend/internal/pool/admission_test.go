@@ -136,6 +136,9 @@ func TestPoolDoesNotPublishAdapterBeforeReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Release(acq, nil)
+	if acq.acquiredAt.IsZero() || acq.acquiredAt.Before(started) {
+		t.Fatalf("successful acquire did not start worker lease after admission: %v", acq.acquiredAt)
+	}
 	if elapsed := time.Since(started); elapsed < 90*time.Millisecond {
 		t.Fatalf("worker was published before adapter ready: %s", elapsed)
 	}

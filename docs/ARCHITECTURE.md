@@ -257,6 +257,9 @@ DB for actual work.
 Warm worker pools, one per function, autoscaled.
 
 - `pool.go` — `Manager` owns a `sync.Map[fnID]*functionPool`
+- `Manager.Release` records each worker's complete lease once for the
+  controller's service-time signal, including response processing/streaming;
+  queue and cold-start time are separate signals
 - `function_pool.go` — per-fn idle channel + acquire/release/sweep
 - `autoscaler.go` — Knative-KPA-style: 60s stable + 6s panic windows, `dynamicMax` derived from CPU + memory budget
 - `hostmem.go` — global memory budget tracker (refuses spawns past 80% reservation)
