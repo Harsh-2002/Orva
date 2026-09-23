@@ -69,6 +69,45 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- Execution-index pruning also failed the VM acceptance run. Three old
+  execution indexes occupied about 113 MiB of the scratch database and
+  duplicate left-prefixes or have no matching Orva query. A migration test
+  confirmed surviving composite-index query plans. The immediately preceding
+  50,000-request/1,000-client mixed baseline returned 50,000/50,000 HTTP 200
+  at 431/s and exactly 50,000 execution rows. After the index migration,
+  49,402 were HTTP 200 and 598 were pre-execution storage 429 at 374 attempted/s.
+  No critical write or transport failure occurred. Database growth, freed-page
+  layout, and host variability prevent causal attribution of the full delta,
+  but this does not meet the release gate. The migration and test were
+  reverted; profile SQLite wait, page-cache behavior, and actual end-to-end
+  A/B with restored database snapshots before trying another index change.
+
+- A worker-retention experiment removed the immediate dynamic-cap prune in
+  `functionPool.release`, relying on the controller's scale-down grace and
+  demand-driven idle reclaim. It reduced observed spawn/kill churn, but the
+  same 50,000-request/1,000-client mixed VM run returned 49,973 HTTP 200 and
+  27 pre-execution storage 429s at 357 attempted/s, versus 50,000/50,000 at
+  438/s on the preceding unchanged baseline run. The database grew across
+  phases, so this is not a controlled throughput effect size; it nevertheless
+  fails the zero-error acceptance condition. The code and unit test were
+  reverted. Worker churn alone is a misleading target: resource reservations
+  and shared writer headroom must be evaluated together.
+
+- A central, per-function FIFO round-robin dispatcher was tested and
+  **reverted**. It paired a ready worker, host execution slot, function
+  concurrency slot, and SQLite completion lease without holding one while
+  waiting for the others. Unit and race tests passed, including a full-writer
+  test showing a ready worker remained idle. But a 50,000-request/1,000-client
+  mixed Node/Python run on the dedicated 2-vCPU/4-GiB server VM returned
+  47,478 HTTP 200 and 2,522 Python client timeouts at 373 attempted/s.
+  A Python-only 10,000-request run on that binary passed at 614/s. The
+  unchanged committed baseline, rebuilt and run on the same VMs and test
+  functions, returned 50,000/50,000 HTTP 200 at 438/s with no transport
+  errors. Do not ship the dispatcher. Its extra five-second queue allowance
+  could exceed a typical client deadline, and its mixed-workload slowdown
+  needs profiling before another scheduling change. The current branch
+  remains on early completion reservation.
+
 - A discarded dispatch-boundary prototype moved HTTP/MCP completion-slot
   reservation from request entry to just after worker acquisition. The first
   version rejected immediately when no writer slot was free: on the same

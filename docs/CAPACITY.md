@@ -1,5 +1,49 @@
 # Pool Controller v2 capacity validation
 
+An execution-index pruning candidate was **reverted**. Three indexes were
+removed from the scratch VM database: two were left-prefix duplicates of
+composite indexes, and one (`parent_span_id` alone) had no matching Orva
+query. They occupied about 113 MiB of an 820-MiB database; representative
+trace and newest-execution queries still used composite indexes after
+migration. But a 50,000-request/1,000-client mixed test immediately before
+the change returned 50,000 HTTP 200 at 431/s with 50,000 matching rows,
+whereas the post-migration test returned 49,402 HTTP 200 and 598
+pre-execution storage 429s at 374 attempted/s. There were no transport errors
+or critical writer failures. The larger database, freed-page layout, and
+shared host conditions prevent attributing the whole difference to indexes,
+but the candidate failed the zero-error gate. The migration and its test were
+reverted; do not claim that a smaller index set improves this workload.
+
+A separate worker-retention candidate was also **reverted**. It let a healthy
+worker whose host reservation already existed park above a transiently lower
+effective cap, leaving scale-down to the controller's grace period. On the
+same two-VM 50,000-request/1,000-client mixed test it reduced observed worker
+churn but returned 49,973 HTTP 200 and 27 pre-execution
+`STORAGE_BACKPRESSURE` 429s at 357 attempted requests/s (HTTP 200 p99
+4.81 s). The prior committed binary had returned all 50,000 at 438/s in its
+preceding phase. Because the database and host conditions changed between
+runs this is exploratory, not an exact A/B effect size, but the candidate
+failed both zero-error and throughput checks. Fewer cold starts by themselves
+are not a valid optimization if retained reservations obstruct other pools
+or the writer. The change and its unit test were reverted.
+
+A bounded central worker/writer-slot pairing dispatcher was tested and
+**reverted** on 2026-09-23. It passed targeted unit and race tests, and a
+Python-only 10,000-request/1,000-client run returned 10,000 HTTP 200 at
+614/s. The mixed Node/Python 50,000-request/1,000-client run returned
+47,478 HTTP 200 and 2,522 client timeouts (all on Python), at 373 attempted
+requests/s. After drain, 25,000 Node and 22,505 Python execution rows were
+present for that phase; 27 timed-out Python requests had nevertheless run.
+The unchanged committed binary, rebuilt and tested on the same two VMs and
+functions, returned 50,000/50,000 HTTP 200 with no transport errors at 438/s
+and 3.07 s overall HTTP 200 p99. Thus the pairing dispatcher regressed
+mixed-workload fairness and throughput; unit correctness was not enough.
+Its extra five-second queue allowance also exceeded the 15-second client
+deadline and is unsuitable as an overload policy. Keep early completion
+reservation until a replacement beats this controlled baseline. This test
+does not establish whether lock contention, worker wakeups, or changing
+worker availability caused the regression; that requires profiling.
+
 An experimental dispatch-boundary reservation was **reverted**. On a
 2-vCPU/4-GiB server VM with a separate client VM, immediately rejecting after
 worker acquisition gave 1,499 HTTP 200 and 48,501 pre-execution storage 429s
