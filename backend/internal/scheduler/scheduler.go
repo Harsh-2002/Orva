@@ -475,6 +475,7 @@ func (s *Scheduler) recordExecution(execID, fnID, status string, statusCode int,
 	if len(stderr) > 0 {
 		s.db.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: execID,
+			FunctionID:  fnID,
 			Stderr:      string(stderr),
 		})
 	}

@@ -221,6 +221,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		if len(stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: newExecID,
+				FunctionID:  fn.ID,
 				Stderr:      string(stderr),
 			})
 		}
@@ -271,6 +272,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	if len(stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: newExecID,
+			FunctionID:  fn.ID,
 			Stderr:      string(stderr),
 		})
 	}

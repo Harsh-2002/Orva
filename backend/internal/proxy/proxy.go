@@ -292,13 +292,13 @@ type ProxyConfig struct {
 // []byte is the original blob with those lines stripped so they don't
 // double-render in the dashboard. Safe to call with nil DB or empty
 // stderr — falls through with the input unchanged.
-func (p *Proxy) finalizeStderr(r *http.Request, execID string, raw []byte) []byte {
+func (p *Proxy) finalizeStderr(r *http.Request, fnID, execID string, raw []byte) []byte {
 	if p.DB == nil || len(raw) == 0 {
 		return raw
 	}
 	tID := trace.TraceID(r.Context())
 	sID := trace.SpanID(r.Context())
-	return stripNsjailNoise(extractStructuredLogs(p.DB, raw, execID, tID, sID))
+	return stripNsjailNoise(extractStructuredLogs(p.DB, raw, fnID, execID, tID, sID))
 }
 
 // New creates a new Proxy.
@@ -461,7 +461,7 @@ func (p *Proxy) Forward(
 	// best-effort replay-capture write under overload.
 	if p.DB != nil {
 		if enabled, maxBytes := captureSettings(); enabled {
-			p.captureRequest(execID, r.Method, path, r.Header, body, maxBytes)
+			p.captureRequest(fnID, execID, r.Method, path, r.Header, body, maxBytes)
 		}
 	}
 	// Queue admission has its own short budget. The function's configured
@@ -476,7 +476,7 @@ func (p *Proxy) Forward(
 	dres, err := acq.Worker.DispatchEx(ctx, reqJSON)
 	var stderr []byte
 	if dres != nil {
-		stderr = p.finalizeStderr(r, execID, dres.Stderr())
+		stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 	}
 	result := &Result{Stderr: stderr, ColdStart: acq.ColdStart}
 	if err != nil {
@@ -617,7 +617,7 @@ func (p *Proxy) Forward(
 			// execution row as failed but DO NOT try to emit a JSON
 			// envelope (Wrote=true tells invoke.go we're done).
 			result.Wrote = true
-			result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
+			result.Stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 			return result, fmt.Errorf("stream: %w", err)
 		}
 		if kind == "end" {
@@ -645,7 +645,7 @@ func (p *Proxy) Forward(
 			result.StatusCode = sc
 			result.ResponseSize = totalBytes
 			result.Wrote = true
-			result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
+			result.Stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 			return result, fmt.Errorf("stream write: %w", werr)
 		}
 		if flusher != nil {
@@ -656,7 +656,7 @@ func (p *Proxy) Forward(
 	result.StatusCode = sc
 	result.ResponseSize = totalBytes
 	result.Wrote = true
-	result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
+	result.Stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 	return result, nil
 }
 
@@ -677,7 +677,7 @@ func truncate(s string, n int) string {
 //
 // The function never returns an error — capture is best-effort and any
 // failure must not affect the in-flight invocation.
-func (p *Proxy) captureRequest(execID, method, path string, hdr http.Header, body []byte, maxBytes int64) {
+func (p *Proxy) captureRequest(fnID, execID, method, path string, hdr http.Header, body []byte, maxBytes int64) {
 	if maxBytes <= 0 {
 		maxBytes = 1 << 20 // 1MiB safety floor
 	}
@@ -715,6 +715,7 @@ func (p *Proxy) captureRequest(execID, method, path string, hdr http.Header, bod
 
 	p.DB.AsyncInsertExecutionRequest(&database.ExecutionRequest{
 		ExecutionID: execID,
+		FunctionID:  fnID,
 		Method:      method,
 		Path:        path,
 		HeadersJSON: string(headersJSON),

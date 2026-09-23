@@ -513,6 +513,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		if result != nil && len(result.Stderr) > 0 {
 			deps.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,
+				FunctionID:  fn.ID,
 				Stderr:      string(result.Stderr),
 			})
 		}

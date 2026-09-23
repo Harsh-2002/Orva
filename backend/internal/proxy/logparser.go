@@ -24,7 +24,7 @@ const orvaLogMagicPrefix = "__ORVA_LOG_JSON__"
 // onto every entry that doesn't already carry its own. Callers pass them
 // after Forward returns so the writer reuses the trace context that was
 // already set on the request env.
-func extractStructuredLogs(db *database.Database, stderr []byte, execID, traceID, spanID string) []byte {
+func extractStructuredLogs(db *database.Database, stderr []byte, fnID, execID, traceID, spanID string) []byte {
 	if len(stderr) == 0 || !bytes.Contains(stderr, []byte(orvaLogMagicPrefix)) {
 		return stderr
 	}
@@ -71,6 +71,7 @@ func extractStructuredLogs(db *database.Database, stderr []byte, execID, traceID
 			effectiveSpan = spanID
 		}
 		entry := &database.LogEntry{
+			FunctionID:  fnID,
 			ExecutionID: execID,
 			TraceID:     traceID,
 			SpanID:      effectiveSpan,

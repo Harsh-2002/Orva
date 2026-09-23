@@ -62,7 +62,11 @@ Transient retries must copy any alias of the batch before clearing the old
 backing array. Writer shutdown closes the producer
 stop signal, waits for in-flight enqueues under `enqueueMu`, then signals the
 consumer to drain; a late critical producer writes directly while the DB is
-still open. `metrics.latency_ms` stops
+still open. Function deletion takes a writer commit fence and removes
+parentless captured requests, spans, and structured logs by their stored
+function id. Function-tagged jobs processed after deletion are discarded with
+an explicit counter; the live-function cache contains only existing ids, so
+repeated deletions do not accumulate tombstones. `metrics.latency_ms` stops
 at proxy return, while `response_latency_ms` measures the complete public
 invoke handler (including admission and record enqueue), not network transit.
 The pool's `service_p95_ms` samples full worker leases from successful acquire

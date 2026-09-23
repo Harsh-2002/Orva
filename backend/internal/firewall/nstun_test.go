@@ -136,17 +136,23 @@ func TestPublishIsIdempotentForSameGeneration(t *testing.T) {
 	}
 }
 
-func TestPublishGCKeepsRecentGenerations(t *testing.T) {
+func TestRuntimePublishKeepsPathsUntilStartupGC(t *testing.T) {
 	dir := t.TempDir()
-	var last string
+	var paths []string
 	for i := 0; i < generationsKept+4; i++ {
 		rendered := []byte(strings.Repeat("x", i+1) + "\n")
 		p, err := publish(dir, genOf(rendered), rendered)
 		if err != nil {
 			t.Fatalf("publish %d: %v", i, err)
 		}
-		last = p
+		paths = append(paths, p)
 	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("published path removed while a worker may be spawning: %s: %v", path, err)
+		}
+	}
+	gcGenerations(PolicyDir(dir))
 
 	entries, err := os.ReadDir(PolicyDir(dir))
 	if err != nil {
@@ -161,8 +167,8 @@ func TestPublishGCKeepsRecentGenerations(t *testing.T) {
 	if cfgs > generationsKept {
 		t.Errorf("kept %d generations, want <= %d", cfgs, generationsKept)
 	}
-	// The generation currently in use must survive GC unconditionally.
-	if _, err := os.Stat(last); err != nil {
+	// The latest generation remains after startup pruning.
+	if _, err := os.Stat(paths[len(paths)-1]); err != nil {
 		t.Errorf("current generation was garbage collected: %v", err)
 	}
 }

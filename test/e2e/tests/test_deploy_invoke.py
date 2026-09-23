@@ -62,6 +62,16 @@ def wait_active(c, fid, timeout=60):
     return last
 
 
+def deployment_error(c, deploy_response):
+    deployment_id = (deploy_response or {}).get("deployment_id") if isinstance(deploy_response, dict) else None
+    if not deployment_id:
+        return "no deployment id"
+    code, detail = c.req("GET", f"/api/v1/deployments/{deployment_id}", expect=range(200, 599))
+    if code != 200 or not isinstance(detail, dict):
+        return f"deployment lookup status={code}"
+    return str(detail.get("error_message") or detail.get("error") or "no error message")[:300]
+
+
 def main():
     c = OrvaClient()
     if not c.key:
@@ -257,8 +267,7 @@ def handler(event):
                 check("deps deploy accepted", ddc in (200, 202), f"status {ddc}: {str(ddep)[:200]}")
                 dstat = wait_active(c, dep_fid, timeout=180)
                 check("jailed npm install succeeded", dstat == "active",
-                      f"final status={dstat!r} — a Kafel/seccomp failure in the build jail "
-                      f"surfaces here as a failed build")
+                      f"final status={dstat!r}; {deployment_error(c, ddep) if dstat != 'active' else ''}")
                 if dstat == "active":
                     dic, dib = c.req("POST", f"/fn/{dep_fid}", {}, expect=range(200, 599))
                     if isinstance(dib, str):
@@ -297,8 +306,7 @@ def handler(event):
                 check("python deps deploy accepted", pdc2 in (200, 202), f"status {pdc2}: {str(pdep2)[:200]}")
                 pstat2 = wait_active(c, pdep_fid, timeout=180)
                 check("jailed pip install succeeded", pstat2 == "active",
-                      f"final status={pstat2!r} — pip needs listxattr/utimensat/fsync "
-                      f"from the build profile; EPERM on any of them fails the build")
+                      f"final status={pstat2!r}; {deployment_error(c, pdep2) if pstat2 != 'active' else ''}")
                 if pstat2 == "active":
                     pic2, pib2 = c.req("POST", f"/fn/{pdep_fid}", {}, expect=range(200, 599))
                     if isinstance(pib2, str):

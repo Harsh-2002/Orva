@@ -83,6 +83,7 @@ func TestKVMetricsAndWriterSaturationAreExposed(t *testing.T) {
 		"# TYPE orva_writer_critical_failures_total counter",
 		"# TYPE orva_writer_dropped_telemetry_total counter",
 		"# TYPE orva_writer_dropped_activity_total counter",
+		"# TYPE orva_writer_deleted_function_writes_total counter",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics output missing %q", want)

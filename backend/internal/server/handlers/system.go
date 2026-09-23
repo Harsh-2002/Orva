@@ -215,15 +215,16 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["writer"] = map[string]any{
 			"status": writerStatus, "critical_queue_depth": writer.CriticalDepth,
-			"critical_queue_bytes":  writer.CriticalBytes,
-			"activity_queue_bytes":  writer.ActivityBytes,
-			"activity_queue_depth":  writer.ActivityDepth,
-			"telemetry_queue_bytes": writer.TelemetryBytes,
-			"telemetry_queue_depth": writer.TelemetryDepth,
-			"critical_timeouts":     writer.CriticalTimeouts,
-			"critical_failures":     writer.CriticalFailures,
-			"dropped_telemetry":     writer.DroppedTelemetry,
-			"dropped_activity":      writer.DroppedActivity,
+			"critical_queue_bytes":    writer.CriticalBytes,
+			"activity_queue_bytes":    writer.ActivityBytes,
+			"activity_queue_depth":    writer.ActivityDepth,
+			"telemetry_queue_bytes":   writer.TelemetryBytes,
+			"telemetry_queue_depth":   writer.TelemetryDepth,
+			"critical_timeouts":       writer.CriticalTimeouts,
+			"critical_failures":       writer.CriticalFailures,
+			"dropped_telemetry":       writer.DroppedTelemetry,
+			"dropped_activity":        writer.DroppedActivity,
+			"deleted_function_writes": writer.DeletedWrites,
 		}
 	}
 
@@ -308,6 +309,8 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "orva_writer_dropped_telemetry_total %d\n", writer.DroppedTelemetry)
 		promHeader(w, "orva_writer_dropped_activity_total", "counter", "Activity records dropped during enqueue, commit, or shutdown; subset of dropped telemetry.")
 		fmt.Fprintf(w, "orva_writer_dropped_activity_total %d\n", writer.DroppedActivity)
+		promHeader(w, "orva_writer_deleted_function_writes_total", "counter", "Execution-related writes discarded because their function was deleted before commit.")
+		fmt.Fprintf(w, "orva_writer_deleted_function_writes_total %d\n", writer.DeletedWrites)
 		kv := h.DB.KVMetrics()
 		promHeader(w, "orva_kv_operations_total", "counter", "KV operations by type.")
 		promHeader(w, "orva_kv_errors_total", "counter", "KV operation failures by type.")

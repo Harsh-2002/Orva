@@ -231,6 +231,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if result != nil && len(result.Stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,
+				FunctionID:  fn.ID,
 				Stderr:      string(result.Stderr),
 			})
 		}
@@ -265,6 +266,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(result.Stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: execID,
+			FunctionID:  fn.ID,
 			Stderr:      string(result.Stderr),
 		})
 	}

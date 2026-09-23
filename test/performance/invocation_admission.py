@@ -216,10 +216,13 @@ def main():
                                writer_start["dropped_telemetry"])
             activity_delta = (writer_before_delete["dropped_activity"] -
                               writer_start["dropped_activity"])
+            deleted_delta = (writer_before_delete["deleted_function_writes"] -
+                             writer_start["deleted_function_writes"])
             print(f"writer before cleanup: critical_failures={failure_delta} "
                   f"dropped_telemetry={telemetry_delta} "
-                  f"dropped_activity={activity_delta}", flush=True)
-            if failure_delta:
+                  f"dropped_activity={activity_delta} "
+                  f"deleted_function_writes={deleted_delta}", flush=True)
+            if failure_delta or deleted_delta:
                 failures += 1
         except Exception as exc:
             print(f"writer drain check failed: {exc}", flush=True)

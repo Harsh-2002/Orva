@@ -17,6 +17,13 @@ before it.
 
 ### Fixed
 
+- Deleting a function during an invocation no longer produces a foreign-key
+  failure when its asynchronous execution record arrives later. Pending
+  execution-related writes for the deleted function are discarded and counted
+  separately from storage failures, and pre-parent capture/span/log rows are
+  removed with the function.
+- Rapid egress-rule edits no longer prune a policy file while a delayed worker
+  is about to load it. Stale policy generations are pruned at daemon startup.
 - The dashboard's response-time card now uses full public invoke-handler
   latency. Its previous percentile stopped before execution-record enqueue
   and understated what the server spent handling a request, especially under

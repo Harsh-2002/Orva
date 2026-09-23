@@ -34,8 +34,11 @@ The stdlib-only harness deploys temporary Node and Python functions, tests
 handler, and bounded overload; it deletes only the functions it created.
 Before cleanup it waits for active invocation handlers and accepted writer
 bytes to drain, then reports critical-write failures, total best-effort drops,
-and activity-specific drops separately, so deleting the test
-functions does not contaminate the persistence result.
+activity-specific drops, and unexpected deleted-function writes separately,
+so deleting the test functions does not contaminate the persistence result.
+The full E2E suite includes a delete-during-invocation regression module:
+it expects the in-flight response to finish, `critical_failures` to stay
+flat, and `deleted_function_writes` to increase after the writer drains.
 It refuses to run without the explicit `--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create

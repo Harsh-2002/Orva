@@ -116,6 +116,9 @@ This suite is meant to **grow on every change**:
   jobs, kv, webhooks, inbound-webhooks, fixtures, firewall/dns, api-keys, channels,
   traces, system, backup, auth — plus the **AI** assistant (chat, providers,
   settings, conversations, approval, perms).
+- **Deletion fence:** `test_function_delete_race.py` deletes a function while
+  one real sandbox invocation is running, then checks that the writer counts
+  discarded function-owned records without critical SQLite failures.
 - **CLI:** the shared client subcommands (`orva deploy/invoke/functions/logs/kv/…`)
   via `CLIRunner`. Note this does NOT prove slim-CLI parity by itself: `ORVA_BIN`
   defaults to the full server binary, so the same build provides both surfaces

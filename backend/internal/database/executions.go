@@ -56,6 +56,7 @@ type TraceContext struct {
 
 type ExecutionLog struct {
 	ExecutionID string `json:"execution_id"`
+	FunctionID  string `json:"-"`
 	Stdout      string `json:"stdout"`
 	Stderr      string `json:"stderr"`
 }
@@ -68,6 +69,7 @@ type ExecutionLog struct {
 // will refuse those rows with HTTP 410 Gone.
 type ExecutionRequest struct {
 	ExecutionID string `json:"execution_id"`
+	FunctionID  string `json:"-"`
 	Method      string `json:"method"`
 	Path        string `json:"path"`
 	HeadersJSON string `json:"headers_json"`
@@ -128,7 +130,7 @@ func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64,
 		coldStart = 1
 	}
 	startedAt := executionStartTime(exec.StartedAt)
-	db.AsyncExec(`
+	db.asyncExecFunction(exec.FunctionID, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
@@ -228,10 +230,10 @@ func (db *Database) ListBaselineSeed(perFnSamples int) ([]WarmBaselineSeed, erro
 
 // AsyncInsertExecutionLog queues a log row for the batched writer.
 func (db *Database) AsyncInsertExecutionLog(log *ExecutionLog) {
-	db.AsyncExec(`
+	db.asyncExecFunction(log.FunctionID, `
 		INSERT OR REPLACE INTO execution_logs (execution_id, stdout, stderr)
-		VALUES (?, ?, ?)`,
-		log.ExecutionID, log.Stdout, log.Stderr,
+		SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM executions WHERE id = ?)`,
+		log.ExecutionID, log.Stdout, log.Stderr, log.ExecutionID,
 	)
 }
 
@@ -247,11 +249,11 @@ func (db *Database) AsyncInsertExecutionRequest(req *ExecutionRequest) {
 	// ever queues -- a captured request body up to replay_capture_max_bytes
 	// (1 MiB default) -- and capture is explicitly best-effort, so it does
 	// not belong in the queue whose whole point is not losing anything.
-	db.AsyncExecTelemetry(`
+	db.asyncExecFunctionTelemetry(req.FunctionID, `
 		INSERT OR REPLACE INTO execution_requests (
-			execution_id, method, path, headers_json, body, truncated, captured_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		req.ExecutionID, req.Method, req.Path, req.HeadersJSON,
+			execution_id, function_id, method, path, headers_json, body, truncated, captured_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.ExecutionID, nullableString(req.FunctionID), req.Method, req.Path, req.HeadersJSON,
 		req.Body, truncated, req.CapturedAt,
 	)
 }
@@ -286,7 +288,7 @@ func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS 
 		coldStart = 1
 	}
 	startedAt := executionStartTime(exec.StartedAt)
-	db.AsyncExec(`
+	db.asyncExecFunction(exec.FunctionID, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
@@ -720,6 +722,14 @@ func (db *Database) DeleteExecution(id string) (bool, error) {
 // retention left the fastest-growing tables growing.
 var executionChildTables = []string{
 	"execution_logs",
+	"execution_requests",
+	"user_spans",
+	"execution_log_entries",
+}
+
+// These no-FK children can arrive before their execution row. Ownership
+// permits function deletion to remove them even when no parent row exists.
+var executionOwnedChildTables = []string{
 	"execution_requests",
 	"user_spans",
 	"execution_log_entries",

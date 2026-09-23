@@ -13,6 +13,7 @@ import (
 // user_spans rows describe substages inside that execution.
 type UserSpan struct {
 	ID           string    `json:"id"`
+	FunctionID   string    `json:"-"`
 	TraceID      string    `json:"trace_id"`
 	ParentSpanID string    `json:"parent_span_id"`
 	ExecutionID  string    `json:"execution_id"`
@@ -36,12 +37,12 @@ func (db *Database) AsyncInsertUserSpan(s *UserSpan) {
 	if s.Status == "" {
 		s.Status = "ok"
 	}
-	db.AsyncExecTelemetry(`
-		INSERT INTO user_spans (id, trace_id, parent_span_id, execution_id,
+	db.asyncExecFunctionTelemetry(s.FunctionID, `
+		INSERT INTO user_spans (id, function_id, trace_id, parent_span_id, execution_id,
 		                       name, started_at, duration_ms, attributes,
 		                       status, error_message, offset_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.TraceID, s.ParentSpanID, s.ExecutionID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, nullableString(s.FunctionID), s.TraceID, s.ParentSpanID, s.ExecutionID,
 		s.Name, s.StartedAt, s.DurationMS, nullableString(s.Attributes),
 		s.Status, nullableString(s.ErrorMessage), s.OffsetMS,
 	)

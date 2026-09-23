@@ -15,8 +15,9 @@ import (
 
 // writeJob is a single INSERT/UPDATE the batched writer will apply.
 type writeJob struct {
-	sql  string
-	args []any
+	sql        string
+	args       []any
+	functionID string
 	// bytes is the approximate heap this job retains. Queues are bounded by
 	// bytes as well as count because a job can carry a captured request body
 	// (replay_capture_max_bytes, 1 MiB by default) -- 1024 slots of those is
@@ -145,6 +146,7 @@ type asyncWriter struct {
 
 	dropped         atomic.Uint64
 	droppedActivity atomic.Uint64
+	deletedWrites   atomic.Uint64
 	timeouts        atomic.Uint64
 	failed          atomic.Uint64
 	shed            atomic.Uint64
@@ -177,10 +179,24 @@ func (db *Database) AsyncExec(sql string, args ...any) error {
 	return nil
 }
 
+func (db *Database) asyncExecFunction(functionID, statement string, args ...any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.asyncExecCritical(ctx, functionID, statement, args...); err != nil {
+		slog.Warn("critical async write failed", "function_id", functionID, "err", err)
+		return err
+	}
+	return nil
+}
+
 // AsyncExecCritical applies bounded backpressure and reports queue or deadline
 // failures. Once enqueued, the writer owns the job. It never creates an
 // overflow goroutine or makes request latency wait for SQLite fsync.
 func (db *Database) AsyncExecCritical(ctx context.Context, statement string, args ...any) error {
+	return db.asyncExecCritical(ctx, "", statement, args...)
+}
+
+func (db *Database) asyncExecCritical(ctx context.Context, functionID, statement string, args ...any) error {
 	if db.writer == nil {
 		_, err := db.write.ExecContext(ctx, statement, args...)
 		return err
@@ -196,7 +212,7 @@ func (db *Database) AsyncExecCritical(ctx context.Context, statement string, arg
 		return err
 	default:
 	}
-	j := writeJob{sql: statement, args: args, bytes: jobBytes(statement, args)}
+	j := writeJob{sql: statement, args: args, functionID: functionID, bytes: jobBytes(statement, args) + len(functionID)}
 	if !reserveQueueBytes(&a.criticalBytes, int64(j.bytes), maxCriticalQueueBytes) {
 		a.enqueueMu.RUnlock()
 		a.timeouts.Add(1)
@@ -224,16 +240,20 @@ func (db *Database) AsyncExecCritical(ctx context.Context, statement string, arg
 // AsyncExecActivity reserves a lane for operator-visible activity records.
 // Like optional telemetry, it never blocks request completion.
 func (db *Database) AsyncExecActivity(statement string, args ...any) {
-	db.asyncExecBestEffort(writeActivity, statement, args...)
+	db.asyncExecBestEffort(writeActivity, "", statement, args...)
 }
 
 // AsyncExecTelemetry queues optional replay, log, or span data. A full queue
 // drops the record and increments an observable counter.
 func (db *Database) AsyncExecTelemetry(statement string, args ...any) {
-	db.asyncExecBestEffort(writeTelemetry, statement, args...)
+	db.asyncExecBestEffort(writeTelemetry, "", statement, args...)
 }
 
-func (db *Database) asyncExecBestEffort(kind writeKind, statement string, args ...any) {
+func (db *Database) asyncExecFunctionTelemetry(functionID, statement string, args ...any) {
+	db.asyncExecBestEffort(writeTelemetry, functionID, statement, args...)
+}
+
+func (db *Database) asyncExecBestEffort(kind writeKind, functionID, statement string, args ...any) {
 	if db.writer == nil {
 		if _, err := db.write.Exec(statement, args...); err != nil {
 			slog.Warn("direct telemetry write failed", "err", err)
@@ -253,7 +273,7 @@ func (db *Database) asyncExecBestEffort(kind writeKind, statement string, args .
 		return
 	default:
 	}
-	j := writeJob{sql: statement, args: args, bytes: jobBytes(statement, args)}
+	j := writeJob{sql: statement, args: args, functionID: functionID, bytes: jobBytes(statement, args) + len(functionID)}
 	if !reserveQueueBytes(bytes, int64(j.bytes), limit) {
 		a.enqueueMu.RUnlock()
 		a.recordDropped(kind, 1)
@@ -297,6 +317,7 @@ type WriterStats struct {
 	CriticalFailures  uint64
 	DroppedTelemetry  uint64
 	DroppedActivity   uint64
+	DeletedWrites     uint64
 	ShedWrites        uint64
 }
 
@@ -310,7 +331,8 @@ func (db *Database) WriterStats() WriterStats {
 		CriticalBytes: db.writer.criticalBytes.Load(), ActivityBytes: db.writer.activityBytes.Load(), TelemetryBytes: db.writer.telemetryBytes.Load(),
 		CriticalCapBytes: maxCriticalQueueBytes, ActivityCapBytes: maxActivityQueueBytes, TelemetryCapBytes: maxTelemetryQueueBytes,
 		CriticalTimeouts: db.writer.timeouts.Load(), CriticalFailures: db.writer.failed.Load(),
-		DroppedTelemetry: db.writer.dropped.Load(), DroppedActivity: db.writer.droppedActivity.Load(), ShedWrites: db.writer.shed.Load(),
+		DroppedTelemetry: db.writer.dropped.Load(), DroppedActivity: db.writer.droppedActivity.Load(),
+		DeletedWrites: db.writer.deletedWrites.Load(), ShedWrites: db.writer.shed.Load(),
 	}
 }
 
@@ -540,15 +562,27 @@ func nextBackoff(cur time.Duration) time.Duration {
 // and execution_logs row are queued together with an FK between them, so
 // killing batch N also killed batch N+1.
 func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
+	a.db.lifecycleMu.RLock()
+	defer a.db.lifecycleMu.RUnlock()
 	ctx, cancel := context.WithTimeout(context.Background(), txBudget)
 	defer cancel()
+	work, discarded, err := a.filterDeleted(ctx, batch)
+	if err != nil {
+		return batch
+	}
+	if discarded > 0 {
+		a.deletedWrites.Add(uint64(discarded))
+	}
+	if len(work) == 0 {
+		return nil
+	}
 
 	tx, err := a.db.write.BeginTx(ctx, nil)
 	if err != nil {
 		// Could not get the single write connection -- almost always because
 		// a VACUUM or a backup is holding it. Nothing is wrong with the work,
 		// so hand it back to be retried rather than dropping it.
-		return batch
+		return work
 	}
 	stmtCtx := ctx
 	prepared := make(map[string]*sql.Stmt)
@@ -560,7 +594,7 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 
 	failedIdx := -1
 	var failErr error
-	for i, j := range batch {
+	for i, j := range work {
 		stmt := prepared[j.sql]
 		if stmt == nil {
 			stmt, err = tx.PrepareContext(stmtCtx, j.sql)
@@ -580,7 +614,7 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 		if err := tx.Commit(); err != nil {
 			_ = tx.Rollback()
 			slog.Warn("batch commit failed; will retry", "err", err, "jobs", len(batch))
-			return batch
+			return work
 		}
 		return nil
 	}
@@ -589,8 +623,52 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 	// re-apply the batch one job at a time under savepoints so a single bad
 	// statement cannot take its neighbours with it.
 	_ = tx.Rollback()
-	slog.Warn("batch stmt failed; isolating", "err", failErr, "jobs", len(batch))
-	return a.commitIsolated(batch, kind)
+	slog.Warn("batch stmt failed; isolating", "err", failErr, "jobs", len(work))
+	return a.commitIsolated(work, kind)
+}
+
+func (a *asyncWriter) filterDeleted(ctx context.Context, batch []writeJob) ([]writeJob, int, error) {
+	var keep []writeJob
+	var known map[string]bool
+	for i, job := range batch {
+		alive := true
+		if job.functionID != "" {
+			if _, ok := a.db.liveFunctions.Load(job.functionID); !ok {
+				if known == nil {
+					known = make(map[string]bool)
+				}
+				var found bool
+				found, ok = known[job.functionID]
+				if !ok {
+					var exists int
+					if err := a.db.write.QueryRowContext(ctx,
+						"SELECT EXISTS(SELECT 1 FROM functions WHERE id = ?)", job.functionID).Scan(&exists); err != nil {
+						return nil, 0, err
+					}
+					found = exists != 0
+					known[job.functionID] = found
+					if found {
+						a.db.liveFunctions.Store(job.functionID, struct{}{})
+					}
+				}
+				alive = found
+			}
+		}
+		if !alive {
+			if keep == nil {
+				keep = make([]writeJob, 0, len(batch)-1)
+				keep = append(keep, batch[:i]...)
+			}
+			continue
+		}
+		if keep != nil {
+			keep = append(keep, job)
+		}
+	}
+	if keep == nil {
+		return batch, 0, nil
+	}
+	return keep, len(batch) - len(keep), nil
 }
 
 // commitIsolated is the recovery pass: one SAVEPOINT per job so a failure

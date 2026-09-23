@@ -69,8 +69,26 @@ cgroup controllers were not delegated, so hard per-worker memory enforcement
 was not validated. After the E2E suite's create/invoke/delete flows, writer
 health showed four critical execution-row failures: a function was deleted
 after a request returned but before its final async execution insert committed,
-so SQLite rejected the insert's function FK. This lifecycle race remains
-open; the green HTTP/E2E result must not be read as a clean persistence result.
+so SQLite rejected the insert's function FK. The current candidate adds a
+writer commit fence around function deletion, tags execution-related jobs with
+function ownership, and removes pre-parent child rows by function id. Jobs
+whose function was deleted before commit now increment
+`deleted_function_writes`, not `critical_failures`. The four-failure run was
+on the *prior* binary. The rebuilt candidate passed a delete-during-invocation
+regression and the complete 29-module/676-check real-sandbox E2E suite on a
+fresh 2-vCPU/2-GiB Ubuntu smolvm guest using virtio-net. After E2E,
+`critical_failures` and `critical_timeouts` were zero; nine deliberate
+post-deletion jobs were counted separately. A bounded guest-loopback load
+returned 5,000/5,000 Node and 5,000/5,000 Python HTTP 200 at 100 clients,
+then 2,500/2,500 HTTP 200 per runtime in mixed traffic and 1,000/1,000
+HTTP 200 for CPU-bound work. An intentionally slow 500-request phase returned
+224 HTTP 200 and 276 contract-compliant HTTP 429, with no 504 or transport
+errors. Before cleanup, critical failures, dropped telemetry/activity, and
+unexpected deleted-function writes were all zero. These are functional and
+bounded-load checks on a 2-GiB VM, not a controlled 4-GiB capacity curve.
+The first scratch VM used smolvm's TSI networking: its own DNS worked, but
+nested build-jail DNS failed with `EAI_AGAIN`; virtio-net made jailed npm/pip
+installs and the firewall E2E pass. The first VM was deleted after diagnosis.
 
 ## 2026-09-23 independent two-VM follow-up (unreleased candidate)
 

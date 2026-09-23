@@ -593,7 +593,12 @@ lane from optional replay capture, logs, and spans, but can still drop if its
 own bounded lane or the SQLite writer is saturated. The Prometheus metrics
 are `orva_writer_dropped_activity_total` and
 `orva_writer_dropped_telemetry_total`; `orva_writer_queue_depth` has
-`critical`, `activity`, and `telemetry` priority labels.
+`critical`, `activity`, and `telemetry` priority labels. Deleting a function
+removes its execution history, including completions that arrive during the
+delete. `deleted_function_writes` counts function-owned async jobs deliberately
+discarded after deletion; it is separate from `critical_failures` and
+`dropped_telemetry`. Prometheus exposes the same count as
+`orva_writer_deleted_function_writes_total`.
 The per-function `orva_pool_service_p95_ms` gauge and `service_p95_ms` in
 pool telemetry measure worker occupancy from successful acquire to release,
 including response processing and streaming. They exclude queue wait and

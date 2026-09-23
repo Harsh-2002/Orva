@@ -156,7 +156,10 @@ accepted jobs still in the channel, being committed, or awaiting retry; a
 channel depth of zero alone does not mean the writer is drained. Activity
 has a separate best-effort lane from optional replay/log/span records;
 `writer.dropped_activity` counts lost activity rows and is included in
-`writer.dropped_telemetry`.
+`writer.dropped_telemetry`. A function delete removes its execution history;
+`writer.deleted_function_writes` separately counts async execution-related
+jobs discarded because their function was deleted before commit. Such jobs
+are not counted as storage failures.
 
 ---
 

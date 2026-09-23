@@ -84,6 +84,12 @@ func TestMigrationPopulatedDB(t *testing.T) {
 		legacyExecID, legacyFnID)
 	mustExec(`INSERT INTO execution_logs (execution_id, stdout, stderr) VALUES (?, ?, ?)`,
 		legacyExecID, "hello", "")
+	mustExec(`INSERT INTO execution_requests (execution_id, function_id, method, path, headers_json, captured_at)
+		VALUES (?, ?, 'GET', '/', '{}', 1)`, legacyExecID, legacyFnID)
+	mustExec(`INSERT INTO user_spans (id, function_id, trace_id, parent_span_id, execution_id, name, started_at, duration_ms)
+		VALUES ('sp-legacy', ?, 'tr-legacy', 'sp-parent', ?, 'work', datetime('now'), 1)`, legacyFnID, legacyExecID)
+	mustExec(`INSERT INTO execution_log_entries (function_id, execution_id, ts, level, message)
+		VALUES (?, ?, datetime('now'), 'info', 'work')`, legacyFnID, legacyExecID)
 	mustExec(`INSERT INTO routes (function_id, path) VALUES (?, ?)`,
 		legacyFnID, "/api/test")
 	mustExec(`INSERT INTO api_keys (id, key_hash, name, permissions) VALUES (?, ?, ?, ?)`,
@@ -137,12 +143,20 @@ func TestMigrationPopulatedDB(t *testing.T) {
 	for _, table := range []string{"deployments", "executions", "routes"} {
 		var refID string
 		if err := db.read.QueryRow(
-			`SELECT function_id FROM `+table+` LIMIT 1`,
+			`SELECT function_id FROM ` + table + ` LIMIT 1`,
 		).Scan(&refID); err != nil {
 			t.Errorf("%s: %v", table, err)
 			continue
 		}
 		if refID != newFnID {
+			t.Errorf("%s.function_id = %q, want %q", table, refID, newFnID)
+		}
+	}
+	for _, table := range executionOwnedChildTables {
+		var refID string
+		if err := db.read.QueryRow(`SELECT function_id FROM ` + table + ` LIMIT 1`).Scan(&refID); err != nil {
+			t.Errorf("%s: %v", table, err)
+		} else if refID != newFnID {
 			t.Errorf("%s.function_id = %q, want %q", table, refID, newFnID)
 		}
 	}

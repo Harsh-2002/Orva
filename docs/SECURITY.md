@@ -429,6 +429,9 @@ spawned with that file as `--config` (argv[0..1], before any other flag —
 nsjail's config loader overwrites everything set earlier). There is no
 host firewall table, no `nft` invocation, and no packet filter outside the
 sandbox's own network namespace.
+Published generation files stay available until the next daemon startup so a
+worker that captured an older path can still load its policy; stale files are
+pruned before new workers can spawn.
 
 **Rule order is a security control.** NSTUN is default-ALLOW and
 first-match-wins, so the compiler emits carve-outs before rejects:

@@ -69,6 +69,26 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- Function deletion now fences async writer commits and discards tagged
+  execution jobs that arrive after the function is gone, instead of recording
+  expected foreign-key failures as storage failures. Parentless capture,
+  span, and structured-log rows carry function ownership for cleanup. Rapid
+  firewall-policy edits exposed an independent race: runtime generation GC
+  could delete a config path captured by a worker before nsjail opened it.
+  Policy files now remain through the process lifetime and are pruned only
+  before workers spawn on daemon startup. Focused Go and race tests pass.
+  A fresh 2-vCPU/2-GiB Ubuntu smolvm guest using virtio-net passed all
+  29 real-sandbox E2E modules (676 checks, no skips), including jailed npm/pip
+  installs, firewall enforcement, and delete-during-invocation. Writer health
+  showed zero critical failures/timeouts after E2E. Bounded guest-loopback
+  load returned 10,000/10,000 HTTP 200 across Node/Python at 100 clients,
+  5,000/5,000 in a mixed phase, 1,000/1,000 for CPU-bound work, and bounded
+  224 HTTP 200 plus 276 HTTP 429 in an intentionally slow overload phase;
+  there were no client transport errors or 504s. Pre-cleanup writer deltas
+  were zero for critical failures, telemetry/activity drops, and unexpected
+  deleted-function writes. This does not replace the outstanding independent
+  2-vCPU/4-GiB capacity and security-boundary qualification.
+
 - A bounded Go load generator now supports direct-VM mixed-function tests in
   closed-loop and scheduled open-loop modes. It reports offered versus sent
   traffic, transport failures, Orva error codes, and class-specific/per-function latency as

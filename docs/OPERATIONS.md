@@ -107,6 +107,14 @@ adapters and SDK, then restart Orva. Prefer the normal installer for upgrades:
 it refreshes the binary, rootfs, and adapters together. The Docker entrypoint
 refreshes adapters on every container start.
 
+During function deletion, completion records for that function may still be
+queued after the API has returned. The writer now discards those records and
+increments `writer.deleted_function_writes` rather than reporting an SQLite
+foreign-key failure. This counter should rise only alongside deliberate
+function deletion; `writer.critical_failures` remains the storage-failure
+signal. Parentless captured requests, spans, and structured logs for the
+deleted function are removed in the same delete transaction.
+
 ## Symptom: EVERY function returns `WORKER_CRASHED` right after a bare-metal install
 
 **Diagnosis.** If *nothing* invokes (even a trivial handler) and the

@@ -132,6 +132,11 @@ func (m *Manager) SetOnPolicyChange(fn func(gen string)) {
 // sandboxes — the boot-time write below made it look like they were applied.
 func (m *Manager) Start(ctx context.Context) {
 	m.stopCh = make(chan struct{})
+	// This is the only safe point to prune old generations: once spawns begin,
+	// a worker may still be opening a previously published config path.
+	if m.dataDir != "" {
+		gcGenerations(PolicyDir(m.dataDir))
+	}
 
 	m.writeDNSFiles()
 

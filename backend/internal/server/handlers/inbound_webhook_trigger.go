@@ -218,7 +218,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 		if len(stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
-				ExecutionID: execID, Stderr: string(stderr),
+				ExecutionID: execID, FunctionID: fn.ID, Stderr: string(stderr),
 			})
 		}
 		h.publish(execID, fn, "error", 0, durationMS)
@@ -262,7 +262,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if len(stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
-			ExecutionID: execID, Stderr: string(stderr),
+			ExecutionID: execID, FunctionID: fn.ID, Stderr: string(stderr),
 		})
 	}
 	h.publish(execID, fn, execStatus, statusCode, durationMS)

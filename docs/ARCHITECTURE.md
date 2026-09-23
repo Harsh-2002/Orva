@@ -290,7 +290,9 @@ state; enforcement lives inside each sandbox's own network namespace.
   `Policy.Blocks` replays the same rules for orvad's own dialer.
 - `nstun.go` — publishes each compiled policy as an immutable
   `<dataDir>/firewall/policy/egress-<gen>.cfg` (temp+rename), retargets a
-  `current` symlink for operators, and GCs old generations.
+  `current` symlink for operators, and prunes stale generations only at daemon
+  startup. Runtime pruning could delete a config path captured by a worker
+  before nsjail opens it.
 - `manager.go` — poll loop (10 s table poll, 5 min hostname re-resolve),
   generation bookkeeping, `Snapshot()` for the API, and the
   policy-change callback that retires warm egress pools.
@@ -337,8 +339,11 @@ hot.
   request body). A batch that fails is re-applied job-by-job under savepoints
   so one bad statement cannot destroy its neighbours, and a batch that cannot
   commit — a VACUUM holding the single write connection, say — is retained and
-  retried rather than dropped. Shutdown signals through a quit channel that
-  producers select on, so no send can race a closed channel.
+  retried rather than dropped. Function deletion is serialized with batch
+  commits; jobs tagged to a function removed before commit are counted as
+  deleted-function writes instead of failing foreign-key checks. Shutdown
+  signals through a quit channel that producers select on, so no send can race
+  a closed channel.
 - `kv.go` — validated, context-aware per-function JSON KV operations and
   all-or-nothing batches; `kv_metrics.go` records operation latency/errors.
 - One file per resource: `functions.go`, `deployments.go`, `secrets.go`, etc.
