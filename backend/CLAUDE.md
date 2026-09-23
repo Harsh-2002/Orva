@@ -51,9 +51,14 @@ execution-concurrency cap. The async SQLite writer prepares each distinct SQL
 statement once per batch; HTTP execution baseline/outlier fields are included
 in the execution INSERT instead of a second UPDATE. It has separate bounded
 critical execution, operator activity, and optional replay/log/span lanes.
-The consumer selects the critical and activity lanes fairly and only reads
-optional telemetry when both high-priority channels are empty; activity
-remains non-blocking and can still drop if its own lane or SQLite is saturated.
+The consumer prioritizes critical rows when their queue reaches one batch
+(200 jobs); activity is then deferred and optional telemetry is read only
+when both higher-priority channels are empty. Activity remains non-blocking
+and can still drop if its own lane or SQLite is saturated.
+All invocation entrypoints reserve a critical completion slot before executing user code;
+the slot remains owned by a queued/retrying writer job until commit, deletion,
+or an explicit failure. Reject storage pressure before execution with
+`429 STORAGE_BACKPRESSURE` on HTTP paths, never after the sandbox has produced side effects.
 All three queues reserve bytes atomically before publication and return reservations on
 timeout or shedding; do not move accounting after a channel send, because the
 consumer may already have received the job. The reservation remains held while

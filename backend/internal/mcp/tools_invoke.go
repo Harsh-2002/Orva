@@ -432,6 +432,16 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		req.Header.Set("Content-Type", autoCT)
 	}
 	rec := httptest.NewRecorder()
+	if deps.DB == nil {
+		return nil, InvokeFunctionOutput{}, errors.New("execution storage is unavailable")
+	}
+	reserveCtx, cancelReserve := context.WithTimeout(ctx, 5*time.Second)
+	executionLease, reserveErr := deps.DB.ReserveExecution(reserveCtx)
+	cancelReserve()
+	if reserveErr != nil {
+		return nil, InvokeFunctionOutput{}, fmt.Errorf("execution storage is catching up; retry: %w", reserveErr)
+	}
+	defer executionLease.Cancel()
 
 	// Generate execution id.
 	execID := ids.New()
@@ -505,7 +515,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 				TraceID: traceID, SpanID: spanID, Trigger: "mcp",
 				StartedAt: start,
 			},
-			duration.Milliseconds(), rec.Code, errMsg, len(out.Body),
+			duration.Milliseconds(), rec.Code, errMsg, len(out.Body), executionLease,
 		)
 		if deps.Metrics != nil {
 			deps.Metrics.Baselines.FinalizeExecution(deps.DB, execID, fn.ID, execStatus, coldStart, duration.Milliseconds())

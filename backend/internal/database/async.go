@@ -18,6 +18,7 @@ type writeJob struct {
 	sql        string
 	args       []any
 	functionID string
+	lease      *ExecutionLease
 	// bytes is the approximate heap this job retains. Queues are bounded by
 	// bytes as well as count because a job can carry a captured request body
 	// (replay_capture_max_bytes, 1 MiB by default) -- 1024 slots of those is
@@ -123,11 +124,14 @@ const (
 // interval — whichever comes first. That gives bounded per-job latency
 // while amortizing fsync cost across dozens of rows.
 type asyncWriter struct {
-	db        *Database
-	critical  chan writeJob
-	activity  chan writeJob
-	telemetry chan writeJob
-	done      chan struct{}
+	db       *Database
+	critical chan writeJob
+	// criticalSlots covers both queued jobs and invocations that reserved a
+	// completion slot before execution. A slot returns only after commit.
+	criticalSlots chan struct{}
+	activity      chan writeJob
+	telemetry     chan writeJob
+	done          chan struct{}
 
 	// stopRequested wakes producers waiting to enqueue. enqueueMu fences
 	// their final channel sends before quit tells the consumer to drain.
@@ -154,16 +158,70 @@ type asyncWriter struct {
 }
 
 func newAsyncWriter(db *Database) *asyncWriter {
-	return &asyncWriter{
+	a := &asyncWriter{
 		db:            db,
 		critical:      make(chan writeJob, 1024),
+		criticalSlots: make(chan struct{}, 1024),
 		activity:      make(chan writeJob, 1024),
 		telemetry:     make(chan writeJob, 1024),
 		done:          make(chan struct{}),
 		quit:          make(chan struct{}),
 		stopRequested: make(chan struct{}),
-		batchMax:      50,
+		batchMax:      200,
 		flushEvery:    50 * time.Millisecond,
+	}
+	for range cap(a.criticalSlots) {
+		a.criticalSlots <- struct{}{}
+	}
+	return a
+}
+
+// ExecutionLease reserves capacity for the final execution row before user
+// code runs. Cancel only releases an unused lease; once a job is queued, the
+// writer owns it until commit, deletion, or an explicit failed write.
+type ExecutionLease struct {
+	writer *asyncWriter
+	state  atomic.Uint32 // 0: caller-owned, 1: writer-owned, 2: released
+}
+
+var errWriterStopping = errors.New("execution writer is stopping")
+
+func (l *ExecutionLease) Cancel() {
+	if l != nil && l.writer != nil && l.state.CompareAndSwap(0, 2) {
+		l.writer.criticalSlots <- struct{}{}
+	}
+}
+
+func (l *ExecutionLease) transfer() bool {
+	return l != nil && l.state.CompareAndSwap(0, 1)
+}
+
+func (l *ExecutionLease) done() {
+	if l != nil && l.writer != nil && l.state.CompareAndSwap(1, 2) {
+		l.writer.criticalSlots <- struct{}{}
+	}
+}
+
+// ReserveExecution gives an invocation one durable-writer queue slot before
+// it executes. Waiting or rejection here has no function side effects.
+func (db *Database) ReserveExecution(ctx context.Context) (*ExecutionLease, error) {
+	if db.writer == nil {
+		return &ExecutionLease{}, nil
+	}
+	a := db.writer
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-a.stopRequested:
+		return nil, errWriterStopping
+	case <-a.criticalSlots:
+		select {
+		case <-a.stopRequested:
+			a.criticalSlots <- struct{}{}
+			return nil, errWriterStopping
+		default:
+		}
+		return &ExecutionLease{writer: a}, nil
 	}
 }
 
@@ -180,9 +238,13 @@ func (db *Database) AsyncExec(sql string, args ...any) error {
 }
 
 func (db *Database) asyncExecFunction(functionID, statement string, args ...any) error {
+	return db.asyncExecFunctionReserved(functionID, nil, statement, args...)
+}
+
+func (db *Database) asyncExecFunctionReserved(functionID string, lease *ExecutionLease, statement string, args ...any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := db.asyncExecCritical(ctx, functionID, statement, args...); err != nil {
+	if err := db.asyncExecCriticalReserved(ctx, functionID, lease, statement, args...); err != nil {
 		slog.Warn("critical async write failed", "function_id", functionID, "err", err)
 		return err
 	}
@@ -197,31 +259,60 @@ func (db *Database) AsyncExecCritical(ctx context.Context, statement string, arg
 }
 
 func (db *Database) asyncExecCritical(ctx context.Context, functionID, statement string, args ...any) error {
+	return db.asyncExecCriticalReserved(ctx, functionID, nil, statement, args...)
+}
+
+func (db *Database) asyncExecCriticalReserved(ctx context.Context, functionID string, lease *ExecutionLease, statement string, args ...any) error {
 	if db.writer == nil {
+		if lease != nil {
+			lease.Cancel()
+		}
 		_, err := db.write.ExecContext(ctx, statement, args...)
 		return err
 	}
 	a := db.writer
+	if lease == nil {
+		var err error
+		lease, err = db.ReserveExecution(ctx)
+		if err != nil {
+			if errors.Is(err, errWriterStopping) {
+				_, writeErr := db.write.ExecContext(ctx, statement, args...)
+				return writeErr
+			}
+			a.timeouts.Add(1)
+			return err
+		}
+	} else if lease.writer != a {
+		return errors.New("execution lease belongs to another writer")
+	}
 	// A reader keeps publication ahead of the final drain. Shutdown wakes
 	// blocked senders first, then takes the exclusive lock before closing quit.
 	a.enqueueMu.RLock()
 	select {
 	case <-a.stopRequested:
 		a.enqueueMu.RUnlock()
+		lease.Cancel()
 		_, err := db.write.ExecContext(ctx, statement, args...)
 		return err
 	default:
 	}
-	j := writeJob{sql: statement, args: args, functionID: functionID, bytes: jobBytes(statement, args) + len(functionID)}
+	j := writeJob{sql: statement, args: args, functionID: functionID, lease: lease, bytes: jobBytes(statement, args) + len(functionID)}
 	if !reserveQueueBytes(&a.criticalBytes, int64(j.bytes), maxCriticalQueueBytes) {
 		a.enqueueMu.RUnlock()
+		lease.Cancel()
 		a.timeouts.Add(1)
 		return errors.New("critical write queue is over its byte budget")
+	}
+	if !lease.transfer() {
+		a.criticalBytes.Add(int64(-j.bytes))
+		a.enqueueMu.RUnlock()
+		return errors.New("execution lease already used")
 	}
 	select {
 	case <-a.stopRequested:
 		a.criticalBytes.Add(int64(-j.bytes))
 		a.enqueueMu.RUnlock()
+		lease.done()
 		// Shutting down. Fall back to a direct write so work already in
 		// flight still lands, rather than panicking on a closed channel.
 		_, err := db.write.ExecContext(ctx, statement, args...)
@@ -232,6 +323,7 @@ func (db *Database) asyncExecCritical(ctx context.Context, functionID, statement
 	case <-ctx.Done():
 		a.criticalBytes.Add(int64(-j.bytes))
 		a.enqueueMu.RUnlock()
+		lease.done()
 		a.timeouts.Add(1)
 		return ctx.Err()
 	}
@@ -463,6 +555,7 @@ func (a *asyncWriter) run() {
 		if len(criticalBatch) > 0 {
 			if retry := a.commit(criticalBatch, writeCritical); len(retry) > 0 {
 				a.failed.Add(uint64(len(retry)))
+				releaseJobs(retry)
 				slog.Warn("async writer shutting down with unwritten critical jobs",
 					"jobs", len(retry))
 			}
@@ -486,9 +579,16 @@ func (a *asyncWriter) run() {
 	}
 
 	for {
-		// Optional capture cannot displace queued execution or activity
-		// records. The two high lanes remain equally selectable, so sustained
-		// execution traffic does not starve the operator activity feed.
+		// When execution rows are backing up, spend the write connection on
+		// those rows first. Activity is best-effort; flushing it while the
+		// critical queue is full delays completion slots and rejects new
+		// invocations before they can execute.
+		criticalPressure := len(a.critical) >= a.batchMax
+		activityInput := activity
+		if criticalPressure {
+			activityInput = nil
+		}
+		// Optional capture cannot displace queued execution or activity.
 		optional := telemetry
 		if len(a.critical) > 0 || len(a.activity) > 0 {
 			optional = nil
@@ -503,7 +603,7 @@ func (a *asyncWriter) run() {
 			if len(criticalBatch) >= a.batchMax {
 				flushCritical()
 			}
-		case job, ok := <-activity:
+		case job, ok := <-activityInput:
 			if !ok {
 				activity = nil
 				continue
@@ -526,7 +626,7 @@ func (a *asyncWriter) run() {
 			if now.After(criticalUntil) {
 				flushCritical()
 			}
-			if now.After(activityUntil) {
+			if !criticalPressure && now.After(activityUntil) {
 				flushActivity()
 			}
 			if now.After(telemetryUntil) {
@@ -616,6 +716,7 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 			slog.Warn("batch commit failed; will retry", "err", err, "jobs", len(batch))
 			return work
 		}
+		releaseJobs(work)
 		return nil
 	}
 
@@ -627,8 +728,15 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 	return a.commitIsolated(work, kind)
 }
 
+func releaseJobs(jobs []writeJob) {
+	for _, job := range jobs {
+		job.lease.done()
+	}
+}
+
 func (a *asyncWriter) filterDeleted(ctx context.Context, batch []writeJob) ([]writeJob, int, error) {
 	var keep []writeJob
+	var discarded []writeJob
 	var known map[string]bool
 	for i, job := range batch {
 		alive := true
@@ -655,6 +763,7 @@ func (a *asyncWriter) filterDeleted(ctx context.Context, batch []writeJob) ([]wr
 			}
 		}
 		if !alive {
+			discarded = append(discarded, job)
 			if keep == nil {
 				keep = make([]writeJob, 0, len(batch)-1)
 				keep = append(keep, batch[:i]...)
@@ -668,6 +777,7 @@ func (a *asyncWriter) filterDeleted(ctx context.Context, batch []writeJob) ([]wr
 	if keep == nil {
 		return batch, 0, nil
 	}
+	releaseJobs(discarded)
 	return keep, len(batch) - len(keep), nil
 }
 
@@ -685,21 +795,21 @@ func (a *asyncWriter) commitIsolated(batch []writeJob, kind writeKind) []writeJo
 	}
 	stmtCtx := ctx
 
-	var retry []writeJob
-	applied, shed := 0, 0
+	var retry, resolved []writeJob
+	shed := 0
 	for _, j := range batch {
 		if _, err := tx.ExecContext(stmtCtx, "SAVEPOINT job"); err != nil {
-			// Cannot even open a savepoint; treat the remainder as retryable.
+			// The transaction rolled back, including earlier successful jobs.
 			_ = tx.Rollback()
-			return append(retry, batch[applied+shed:]...)
+			return batch
 		}
 		_, execErr := tx.ExecContext(stmtCtx, j.sql, j.args...)
 		if execErr == nil {
 			if _, err := tx.ExecContext(stmtCtx, "RELEASE job"); err != nil {
 				_ = tx.Rollback()
-				return append(retry, batch[applied+shed:]...)
+				return batch
 			}
-			applied++
+			resolved = append(resolved, j)
 			continue
 		}
 		// ROLLBACK TO is what makes this work: database/sql cannot see
@@ -707,7 +817,7 @@ func (a *asyncWriter) commitIsolated(batch []writeJob, kind writeKind) []writeJo
 		// that the transaction is still usable.
 		if _, err := tx.ExecContext(stmtCtx, "ROLLBACK TO job"); err != nil {
 			_ = tx.Rollback()
-			return append(retry, batch[applied+shed:]...)
+			return batch
 		}
 		_, _ = tx.ExecContext(stmtCtx, "RELEASE job")
 
@@ -718,8 +828,8 @@ func (a *asyncWriter) commitIsolated(batch []writeJob, kind writeKind) []writeJo
 			// rather than looping on it.
 			slog.Warn("shedding permanently failing async write",
 				"err", execErr, "attempts", j.attempts, "sql", truncSQL(j.sql))
-			a.shed.Add(1)
 			shed++
+			resolved = append(resolved, j)
 			continue
 		}
 		retry = append(retry, j)
@@ -729,7 +839,9 @@ func (a *asyncWriter) commitIsolated(batch []writeJob, kind writeKind) []writeJo
 		_ = tx.Rollback()
 		return batch
 	}
+	releaseJobs(resolved)
 	if shed > 0 {
+		a.shed.Add(uint64(shed))
 		// Route to the same counter the priority would have used, so
 		// WriterStats keeps meaning what it says: CriticalFailures is
 		// "critical work we could not write", DroppedTelemetry is

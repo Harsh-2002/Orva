@@ -263,6 +263,12 @@ two seconds; a pool that can still grow or has workers starting may wait up to
 the ten-second adapter-readiness budget plus one scaler tick (twelve seconds).
 Exhausted capacity or an expired wait returns `429 INVOCATION_QUEUE_FULL` with
 `Retry-After: 1`; no user code ran.
+HTTP, inbound-webhook, replay, and internal SDK invocations also reserve a
+critical execution-record slot before the sandbox runs. If the SQLite writer
+cannot supply one within five seconds,
+Orva returns `429 STORAGE_BACKPRESSURE` with `Retry-After: 1`; no user code ran.
+This prevents an accepted function's completion record from being lost just
+because the writer queue filled after the function executed.
 The function's `timeout_ms` starts after admission, when a worker is ready.
 Replay capture begins only after a worker has been acquired, so rejected
 requests have no replay body even when capture is enabled.

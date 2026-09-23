@@ -113,6 +113,11 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
 	}
+	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
+	if !admitted {
+		return
+	}
+	defer executionLease.Cancel()
 
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -190,7 +195,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 				Trigger: "f2f", ParentFunctionID: callerFnID,
 				StartedAt: start,
 			},
-			durationMS, http.StatusBadGateway, errMsg, 0,
+			durationMS, http.StatusBadGateway, errMsg, 0, executionLease,
 		)
 		if h.Metrics != nil {
 			// Count the invocation, not just the baseline. These paths fed
@@ -231,7 +236,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 			Trigger: "f2f", ParentFunctionID: callerFnID,
 			StartedAt: start,
 		},
-		durationMS, statusCode, "", respSize,
+		durationMS, statusCode, "", respSize, executionLease,
 	)
 	if h.Metrics != nil {
 		// Count the invocation, not just the baseline. These paths fed
@@ -325,6 +330,11 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
 	}
+	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
+	if !admitted {
+		return
+	}
+	defer executionLease.Cancel()
 
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -387,7 +397,7 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 				Trigger: "f2f", ParentFunctionID: callerFnID,
 				StartedAt: start,
 			},
-			time.Since(start).Milliseconds(), http.StatusBadGateway, errMsg, 0,
+			time.Since(start).Milliseconds(), http.StatusBadGateway, errMsg, 0, executionLease,
 		)
 		respond.Error(w, http.StatusBadGateway, "INVOKE_FAILED", errMsg, reqID)
 		return
@@ -417,7 +427,7 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 				Trigger: "f2f", ParentFunctionID: callerFnID,
 				StartedAt: start,
 			},
-			durationMS, statusCode, "", len(dres.Body),
+			durationMS, statusCode, "", len(dres.Body), executionLease,
 		)
 		if h.Metrics != nil {
 			// Count the invocation, not just the baseline. These paths fed
@@ -484,7 +494,7 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 			Trigger: "f2f", ParentFunctionID: callerFnID,
 			StartedAt: start,
 		},
-		durationMS, statusCode, errMsg, totalBytes,
+		durationMS, statusCode, errMsg, totalBytes, executionLease,
 	)
 	if h.Metrics != nil {
 		// Count the invocation, not just the baseline. These paths fed

@@ -332,7 +332,9 @@ hot.
   and are verified before commit. Also records the functions old→new map so
   `ReconcileFunctionDirs` can rename the on-disk trees to match
 - `async.go` — bounded priority writer: critical execution writes apply
-  deadline-aware backpressure; operator activity has its own non-blocking lane;
+  deadline-aware backpressure; invocation entrypoints reserve a critical slot before
+  sandbox execution and transfer it to their final-row job until commit;
+  operator activity has its own non-blocking lane;
   optional replay capture/logs/spans use a lower-priority telemetry lane.
   All three lanes batch commits and report drops separately for activity, and are
   bounded by **bytes** as well as slots (a single job can carry a captured
@@ -469,7 +471,9 @@ Goroutines do almost everything. Critical concurrency primitives:
 - **Per-fn lock** (`Manager.FunctionLock`): serializes deploy and
   rollback on the same function. Different functions are independent.
 - **Async writer**: single goroutine drains three bounded write-job lanes and
-  batches DB inserts. Replaces the old goroutine-per-call pattern that
+  batches DB inserts. Invocation entrypoints reserve final-row capacity before user
+  code runs; queued, retrying, and in-flight jobs retain that reservation
+  until commit or an explicit failure. Replaces the old goroutine-per-call pattern that
   burned CPU at sustained 500+ req/s.
 - **Autoscaler**: one goroutine per `Manager`, ticks every 2s (`scalerTick`)
   and can be woken early,

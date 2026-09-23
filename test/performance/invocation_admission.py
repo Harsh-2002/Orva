@@ -212,6 +212,8 @@ def main():
             writer_before_delete = wait_writer_drain(base, args.api_key)
             failure_delta = (writer_before_delete["critical_failures"] -
                              writer_start["critical_failures"])
+            timeout_delta = (writer_before_delete["critical_timeouts"] -
+                             writer_start["critical_timeouts"])
             telemetry_delta = (writer_before_delete["dropped_telemetry"] -
                                writer_start["dropped_telemetry"])
             activity_delta = (writer_before_delete["dropped_activity"] -
@@ -219,10 +221,11 @@ def main():
             deleted_delta = (writer_before_delete["deleted_function_writes"] -
                              writer_start["deleted_function_writes"])
             print(f"writer before cleanup: critical_failures={failure_delta} "
+                  f"critical_timeouts={timeout_delta} "
                   f"dropped_telemetry={telemetry_delta} "
                   f"dropped_activity={activity_delta} "
                   f"deleted_function_writes={deleted_delta}", flush=True)
-            if failure_delta or deleted_delta:
+            if failure_delta or timeout_delta or deleted_delta:
                 failures += 1
         except Exception as exc:
             print(f"writer drain check failed: {exc}", flush=True)

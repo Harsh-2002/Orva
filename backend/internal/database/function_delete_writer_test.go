@@ -53,6 +53,9 @@ func TestDeleteFunctionDiscardsQueuedExecutionChildren(t *testing.T) {
 	if got := db.WriterStats().CriticalFailures; got != 0 {
 		t.Errorf("deleted-function execution counted as critical failure: %d", got)
 	}
+	if got := len(db.writer.criticalSlots); got != cap(db.writer.criticalSlots) {
+		t.Errorf("deleted-function jobs leaked completion slots: %d free", got)
+	}
 }
 
 func TestMigrationAddsFunctionOwnershipAfterLegacyCaptureRebuild(t *testing.T) {

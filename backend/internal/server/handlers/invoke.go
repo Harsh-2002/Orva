@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -151,6 +152,14 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Completion capacity is reserved before the sandbox can run. Once user
+	// code has side effects, a full SQLite writer queue cannot safely turn
+	// that invocation into a retryable error or silently lose its record.
+	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
+	if !admitted {
+		return
+	}
+	defer executionLease.Cancel()
 
 	// Generate execution ID — UUIDv7 so executions sort by creation
 	// time naturally (the highest-volume table benefits most from
@@ -227,7 +236,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			StartedAt: start,
 		}
 		h.observeExecutionBaseline(exec, duration.Milliseconds())
-		h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), statusCode, errMsg, 0)
+		h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), statusCode, errMsg, 0, executionLease)
 		if result != nil && len(result.Stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,
@@ -261,7 +270,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		StartedAt: start,
 	}
 	h.observeExecutionBaseline(exec, duration.Milliseconds())
-	h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), result.StatusCode, "", result.ResponseSize)
+	h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), result.StatusCode, "", result.ResponseSize, executionLease)
 	// Persist stderr after the execution row so the FK constraint is satisfied.
 	if len(result.Stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
@@ -271,6 +280,24 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	h.publishExecution(execID, fn, execStatus, result.StatusCode, duration.Milliseconds(), result.ResponseSize, result.ColdStart)
+}
+
+// reserveExecution protects an execution's final row before an HTTP
+// entrypoint can dispatch user code. The bounded wait is separate from the
+// configured function timeout, which begins only after worker acquisition.
+func reserveExecution(w http.ResponseWriter, r *http.Request, db *database.Database, reqID string) (*database.ExecutionLease, bool) {
+	reserveCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	lease, err := db.ReserveExecution(reserveCtx)
+	if err != nil {
+		respond.ErrorWithDetail(w, http.StatusTooManyRequests, respond.ErrorOpts{
+			Code: "STORAGE_BACKPRESSURE", Message: "execution storage is catching up",
+			RequestID: reqID, RetryAfterS: 1,
+			Hint: "back off briefly and retry; no function code ran",
+		})
+		return nil, false
+	}
+	return lease, true
 }
 
 func (h *InvokeHandler) observeExecutionBaseline(exec *database.Execution, durationMS int64) {

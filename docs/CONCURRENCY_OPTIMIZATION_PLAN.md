@@ -69,6 +69,40 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- A new direct-link 2-vCPU/4-GiB server plus 1-vCPU/512-MiB client sweep
+  returned all HTTP 200 at 10, 50, 100, 500 and 1,000 clients, including
+  50,000/50,000 at 1,000. However, post-drain SQLite row counts proved 754
+  accepted invocations had no execution row, matching 754 critical enqueue
+  timeouts. At 500 clients, 497 goroutines were blocked in the five-second
+  post-execution enqueue; a CPU profile attributed about 41% of sampled daemon
+  CPU to the serialized SQLite writer. Activity and optional telemetry also
+  shed records. The current in-progress slice reserves completion capacity
+  before public HTTP execution, returning attributable storage backpressure
+  rather than running user code and losing its final row. Four successive
+  50,000-request, 1,000-client mixed Node/Python VM runs showed exact
+  accepted-response-to-execution-row reconciliation: 42,465/42,465, then
+  46,085/46,085 with critical-first draining, 49,299/49,299 after increasing
+  writer batches to 200, and 50,000/50,000 with a five-second pre-execution
+  wait. The final run had zero transport errors, critical writer failures, or
+  critical timeouts, but only 462 successful requests/s and 4,030 ms HTTP
+  response p99. Activity and optional capture still shed under pressure.
+  Admission still needs extension to all invocation entry points. The sweep
+  is exploratory, not a controlled A/B performance result.
+
+- The reservation now covers inbound webhooks, replay, internal SDK calls,
+  MCP tools, cron, and queued jobs as well as public HTTP. Jobs reserve before
+  `ClaimDueJobs` so a full writer cannot consume a retry attempt. The final
+  binary passed all 29 real-sandbox VM E2E modules and a further mixed
+  50,000-request/1,000-client phase with 50,000 HTTP 200 responses, zero
+  transport errors, 566 successful requests/s, 3,500 ms HTTP 200 p99, and
+  exactly 50,000 new execution rows. These are exploratory results; optional
+  activity/capture shedding and fixed completion-slot capacity remain gaps.
+  An open-loop 650/s follow-up was invalid as a server-capacity measurement:
+  the 1-vCPU client VM marked 3,958 of 20,000 arrivals unsent. A 400/s phase
+  delivered all 10,000 and reconciled 10,000 rows, but its 340/s completion
+  rate and 4,323 ms HTTP 200 p99 show persistent queueing. Do not claim the
+  closed-loop 566/s observation as sustainable offered-load capacity.
+
 - Function deletion now fences async writer commits and discards tagged
   execution jobs that arrive after the function is gone, instead of recording
   expected foreign-key failures as storage failures. Parentless capture,

@@ -33,7 +33,8 @@ The stdlib-only harness deploys temporary Node and Python functions, tests
 5,000 requests at 100 clients per runtime, mixed-function traffic, a CPU-bound
 handler, and bounded overload; it deletes only the functions it created.
 Before cleanup it waits for active invocation handlers and accepted writer
-bytes to drain, then reports critical-write failures, total best-effort drops,
+bytes to drain, then reports critical-write failures and enqueue timeouts,
+total best-effort drops,
 activity-specific drops, and unexpected deleted-function writes separately,
 so deleting the test functions does not contaminate the persistence result.
 The full E2E suite includes a delete-during-invocation regression module:
@@ -100,7 +101,9 @@ summary was printed.
 
 For performance work, capture writer counters before and after each phase,
 not just the final health status: a queue that drains afterward can still
-have dropped telemetry at saturation. `dropped_activity` is included in
+have dropped telemetry or critical execution records at saturation. An HTTP
+200 count alone does not prove execution persistence; `critical_timeouts`
+must remain zero for accepted public invocations. `dropped_activity` is included in
 `dropped_telemetry`; compare both to distinguish operator-feed loss from
 optional replay/log/span loss. Split success, 429, 504, and client
 errors before comparing latency percentiles. Dashboard

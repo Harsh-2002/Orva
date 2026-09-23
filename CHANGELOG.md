@@ -17,6 +17,17 @@ before it.
 
 ### Fixed
 
+- HTTP, inbound webhook, replay, internal SDK, and MCP invocations now reserve
+  execution-record writer capacity before running user code. Cron runs check
+  storage before dispatch, and queued jobs reserve capacity before claiming a
+  retry attempt. Under sustained SQLite pressure, excess HTTP requests receive
+  `429 STORAGE_BACKPRESSURE` with `Retry-After: 1` instead of completing with
+  HTTP 200 while silently losing their execution record.
+- The SQLite writer prioritizes backed-up execution rows and commits up to
+  200 jobs per batch. On an isolated 2-vCPU/4-GiB VM, a mixed Node/Python
+  50,000-request run at 1,000 clients returned 50,000 HTTP 200 responses
+  with exactly 50,000 execution rows after drain; optional activity/capture
+  records can still shed under sustained pressure.
 - Deleting a function during an invocation no longer produces a foreign-key
   failure when its asynchronous execution record arrives later. Pending
   execution-related writes for the deleted function are discarded and counted
@@ -70,7 +81,7 @@ before it.
   waiting for capacity or for a new adapter to load no longer consumes the
   handler's timeout or kills an otherwise healthy worker. Workers run at
   normal scheduler priority instead of nsjail's lowest-priority default.
-  Invocation admission waits up to 2 seconds and
+  Invocation admission waits up to 5 seconds and
   is bounded at 256 pending requests per function and 1,024 globally.
   Saturated requests return `429 INVOCATION_QUEUE_FULL` with `Retry-After: 1`
   before any function code runs. Actual sandbox startup failures, including an

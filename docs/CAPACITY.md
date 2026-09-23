@@ -90,6 +90,84 @@ The first scratch VM used smolvm's TSI networking: its own DNS worked, but
 nested build-jail DNS failed with `EAI_AGAIN`; virtio-net made jailed npm/pip
 installs and the firewall E2E pass. The first VM was deleted after diagnosis.
 
+## 2026-09-23 direct 2-vCPU/4-GiB persistence-pressure finding
+
+A fresh 2-vCPU/4-GiB Ubuntu smolvm server and separate 1-vCPU/512-MiB
+load-generator VM used a private virtio-net link, not host port forwarding.
+Both Node and Python functions returned a constant HTTP 200. Closed-loop
+mixed-function observations on the unreleased `2af901b` build were:
+
+| Clients | Requests | HTTP 200 | Client errors | Successful req/s | HTTP 200 p99 |
+|---:|---:|---:|---:|---:|---:|
+| 10 (cold warm-up) | 200 | 200 | 0 | 107 | 1,626 ms |
+| 50 | 5,000 | 5,000 | 0 | 335 | 328 ms |
+| 100 | 10,000 | 10,000 | 0 | 509 | 463 ms |
+| 500 | 20,000 | 20,000 | 0 | 461 | 3,764 ms |
+| 1,000 | 50,000 | 50,000 | 0 | 429 | 5,135 ms |
+
+The 50,000/50,000 HTTP result **did not mean 50,000 durable execution
+records**. After all 85,200 responses across the sweep and writer drain,
+SQLite contained 84,446 rows for the two test functions: exactly 754 missing,
+matching `writer.critical_timeouts=754`. Health also counted 1,028 dropped
+activity records and 77,794 dropped optional telemetry records. Under 500
+clients, a goroutine snapshot found 497 HTTP handlers blocked in the
+post-execution five-second critical enqueue. A 20-second CPU profile attributed
+about 41% of sampled daemon CPU to the async writer, mostly SQLite
+statement/commit work. During mixed load, the Python pool queued work while
+the Node pool held idle workers and both reported `memory_capacity` despite
+substantial guest memory headroom. These are measured code/storage bottlenecks,
+not evidence that the 4-GiB hardware was exhausted.
+
+The next candidate reserves a critical completion slot **before** a public
+function runs and returns `429 STORAGE_BACKPRESSURE` if no slot is available
+within a bounded wait. Its correctness and goodput are tested below; the table
+above is a baseline, not a claimed gain.
+
+The same two functions were then retested on successive unreleased builds in
+the same VMs, each with 50,000 requests at 1,000 closed-loop clients:
+
+| Writer/admission candidate | HTTP 200 | Pre-execution 429 | Missing execution rows | 200/s | HTTP 200 p99 |
+|---|---:|---:|---:|---:|---:|
+| Reserved slot, 50-row batches, 2-second wait | 42,465 | 7,535 | 0 | 408 | 3,467 ms |
+| Critical-first drain, 50-row batches, 2-second wait | 46,085 | 3,915 | 0 | 456 | 3,433 ms |
+| Critical-first drain, 200-row batches, 2-second wait | 49,299 | 701 | 0 | 507 | 3,187 ms |
+| Critical-first drain, 200-row batches, 5-second wait | 50,000 | 0 | 0 | 462 | 4,030 ms |
+| Final all-entrypoint candidate, same settings after full E2E | 50,000 | 0 | 0 | 566 | 3,500 ms |
+
+Every candidate had zero transport errors, critical writer failures, and
+critical writer timeouts. For each phase, the post-drain SQLite row-count
+increase exactly matched its HTTP 200 count. This fixes the measured silent
+execution-record loss for the public HTTP path at this load. The longer wait
+eliminated pre-execution rejections here, but increased response latency and
+did **not** establish higher sustainable throughput. Activity and optional
+capture still shed records when their queues saturated; those records are not
+covered by the execution-row guarantee. The database grew across phases and
+host contention varied, so these are exploratory observations, not a
+controlled performance regression gate.
+
+The final candidate also passed the full 29-module real-sandbox E2E suite in
+this VM with `ORVA_REQUIRE_SANDBOX=1`, plus race-enabled database, handler,
+and scheduler unit tests. The final closed-loop phase again reconciled exactly
+25,000 Node and 25,000 Python responses to the same number of new rows.
+
+Scheduled-arrival follow-up on that binary was not a throughput victory:
+
+| Target arrivals/s | Scheduled | Attempted | Unsent by client | HTTP 200 | Completion rate | HTTP 200 p99 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 650 | 20,000 | 16,042 | 3,958 | 16,042 | 447/s | 3,435 ms |
+| 400 | 10,000 | 10,000 | 0 | 10,000 | 340/s | 4,323 ms |
+
+Both phases had zero transport errors and exact accepted-response-to-row
+reconciliation. The 650/s phase is **client-limited** because it could not
+send every scheduled arrival; it says nothing reliable about server capacity
+at that offered rate. The 400/s phase delivered its arrivals but completed
+after the schedule ended, so queueing persisted. The SQLite writer and
+duplicated activity/capture writes remain the central throughput bottleneck.
+
+The guest reported `rlimit_only`, so these tests do not qualify hard per-worker
+cgroup enforcement. No alternating A/B or open-loop comparison has yet been
+made.
+
 ## 2026-09-23 independent two-VM follow-up (unreleased candidate)
 
 ### Mixed-function and scheduled-arrival follow-up

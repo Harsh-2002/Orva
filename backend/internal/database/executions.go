@@ -124,13 +124,17 @@ func (db *Database) InsertExecutionFinal(exec *Execution, durationMS int64, stat
 // (parent commits only after the response is sent), so a default-on-insert
 // timestamp would invert causal ordering. Callers measure start time at
 // the top of their handler and pass it down.
-func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int) {
+func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, reservation ...*ExecutionLease) error {
 	coldStart := 0
 	if exec.ColdStart {
 		coldStart = 1
 	}
 	startedAt := executionStartTime(exec.StartedAt)
-	db.asyncExecFunction(exec.FunctionID, `
+	var lease *ExecutionLease
+	if len(reservation) > 0 {
+		lease = reservation[0]
+	}
+	return db.asyncExecFunctionReserved(exec.FunctionID, lease, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
@@ -282,13 +286,17 @@ func (db *Database) GetExecutionRequest(id string) (*ExecutionRequest, error) {
 // also stores the replay_of pointer. Separate function so the hot
 // invoke path doesn't pay the cost of an always-NULL parameter on every
 // call. Trace fields ride along the same as AsyncInsertExecutionFinal.
-func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, replayOf string) {
+func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, replayOf string, reservation ...*ExecutionLease) error {
 	coldStart := 0
 	if exec.ColdStart {
 		coldStart = 1
 	}
 	startedAt := executionStartTime(exec.StartedAt)
-	db.asyncExecFunction(exec.FunctionID, `
+	var lease *ExecutionLease
+	if len(reservation) > 0 {
+		lease = reservation[0]
+	}
+	return db.asyncExecFunctionReserved(exec.FunctionID, lease, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
