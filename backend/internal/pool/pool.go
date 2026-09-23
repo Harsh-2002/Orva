@@ -821,20 +821,21 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	}
 
 	p := &functionPool{
-		fnID:        fnID,
-		min:         minWarm,
-		max:         maxWarm,
-		idleTTL:     idleTTL,
-		maxUses:     m.cfg.DefaultMaxUses,
-		memoryBytes: memoryBytes,
-		cpuUnits:    cpuUnits,
-		scaleToZero: scaleToZero,
-		hostMem:     m.hostMem,
-		idle:        make(chan *sandbox.Worker, maxWarm),
-		spawnSlots:  make(chan struct{}, maxConcurrentSpawnsPerPool),
-		retired:     make(chan struct{}),
-		concSem:     concSem,
-		concPolicy:  concPolicy,
+		fnID:         fnID,
+		min:          minWarm,
+		max:          maxWarm,
+		idleTTL:      idleTTL,
+		maxUses:      m.cfg.DefaultMaxUses,
+		memoryBytes:  memoryBytes,
+		cpuUnits:     cpuUnits,
+		scaleToZero:  scaleToZero,
+		hostMem:      m.hostMem,
+		idle:         make(chan *sandbox.Worker, maxWarm),
+		spawnSlots:   make(chan struct{}, maxConcurrentSpawnsPerPool),
+		retired:      make(chan struct{}),
+		spawnErrorCh: make(chan struct{}),
+		concSem:      concSem,
+		concPolicy:   concPolicy,
 		spawnFn: func(ctx context.Context) (*sandbox.Worker, error) {
 			// Merge env at spawn time: function config + decrypted secrets.
 			// We read the lookup off m (not the local tmpl copy) so that

@@ -24,7 +24,10 @@ before it.
   Invocation admission waits up to 2 seconds and
   is bounded at 256 pending requests per function and 1,024 globally.
   Saturated requests return `429 INVOCATION_QUEUE_FULL` with `Retry-After: 1`
-  before any function code runs. Clients should retry with backoff and jitter.
+  before any function code runs. Actual sandbox startup failures, including an
+  unavailable egress policy, still return their specific server error rather
+  than being misreported as queue saturation. Clients should retry queue
+  overload with backoff and jitter.
 
 ## v2026.09.22
 

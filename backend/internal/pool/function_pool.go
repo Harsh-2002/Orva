@@ -63,6 +63,10 @@ type functionPool struct {
 	closing atomic.Bool
 	retired chan struct{} // closed exactly once when this generation is retired
 	retire  sync.Once
+	// A failed asynchronous spawn must wake current waiters with its real
+	// cause (not let a policy/configuration failure masquerade as queue load).
+	spawnError   error
+	spawnErrorCh chan struct{}
 
 	// Per-function concurrency cap. concSem is a buffered channel acting
 	// as a semaphore: capacity = max_concurrency. nil means unlimited.
@@ -359,6 +363,9 @@ func (p *functionPool) acquireDirect(ctx context.Context) (*AcquireResult, error
 }
 
 func (p *functionPool) waitForIdle(ctx context.Context) (*AcquireResult, error) {
+	p.mu.Lock()
+	spawnErrorCh := p.spawnErrorCh
+	p.mu.Unlock()
 	select {
 	case w := <-p.idle:
 		if p.closing.Load() {
@@ -374,10 +381,30 @@ func (p *functionPool) waitForIdle(ctx context.Context) (*AcquireResult, error) 
 		return &AcquireResult{Worker: w, ColdStart: w.Served.Load() == 0}, nil
 	case <-p.retired:
 		return nil, errPoolRetired
+	case <-spawnErrorCh:
+		p.mu.Lock()
+		spawnError := p.spawnError
+		p.mu.Unlock()
+		if spawnError != nil {
+			return nil, spawnError
+		}
+		return p.acquire(ctx)
 	case <-ctx.Done():
 		p.capacityTimeouts.Add(1)
 		return nil, ErrPoolAtCapacity
 	}
+}
+
+func (p *functionPool) notifySpawnError(err error) {
+	p.mu.Lock()
+	if p.spawnErrorCh == nil {
+		p.spawnErrorCh = make(chan struct{})
+	}
+	if p.spawnError == nil {
+		close(p.spawnErrorCh)
+	}
+	p.spawnError = err
+	p.mu.Unlock()
 }
 
 // markRetired closes the generation notification exactly once. Callers hold

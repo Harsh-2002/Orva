@@ -96,3 +96,38 @@ func TestPoolDoesNotPublishAdapterBeforeReady(t *testing.T) {
 		t.Fatalf("worker was published before adapter ready: %s", elapsed)
 	}
 }
+
+func TestAsyncSpawnFailureWakesQueuedInvocationWithCause(t *testing.T) {
+	want := errors.New("egress policy unavailable")
+	p := testPool("spawn-failure", nil, 0)
+	p.spawnErrorCh = make(chan struct{})
+	p.requestSpawn = func() { p.notifySpawnError(want) }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := p.acquire(ctx)
+	if !errors.Is(err, want) {
+		t.Fatalf("acquire error = %v, want original spawn failure", err)
+	}
+}
+
+func TestManagerPropagatesAsynchronousEgressPolicyFailure(t *testing.T) {
+	m, reg := egressTestManager(t)
+	m.tmpl = fakeSandboxTemplate(t)
+	want := errors.New("policy compile failed")
+	m.SetEgressPolicy(func() (string, string, error) { return "", "", want })
+	hm := &hostMemTracker{totalBytes: 256 << 20, reservationPct: 0.8, cpuWorkers: 8, stop: make(chan struct{})}
+	hm.availBytes.Store(256 << 20)
+	m.hostMem = hm
+	m.scaler = newScaler(m, hm)
+	go m.scaler.run()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = m.Shutdown(ctx)
+	})
+	fn := registerFn(t, reg, "policy-spawn-failure", "egress")
+	_, err := m.Acquire(context.Background(), fn.ID)
+	if !errors.Is(err, want) {
+		t.Fatalf("Acquire = %v, want original policy failure", err)
+	}
+}
