@@ -86,6 +86,21 @@ No production load or configuration change is part of this optimization work.
   shifts pressure to the function queue. A single fair dispatcher must pair
   ready-worker and completion capacity without holding either while waiting.
 
+- A second discarded prototype made each waiting HTTP/MCP request observe
+  writer-slot releases, acquire a worker, try the completion slot, and return
+  the worker on a collision. A deterministic unit test proved that a full
+  writer no longer occupied an idle worker, but the same two-VM
+  50,000-request/1,000-client mixed run returned only 39,490 HTTP 200 and
+  10,510 pre-execution `STORAGE_BACKPRESSURE` 429 responses. It attempted
+  267 requests/s; HTTP 200 p99 was 5.46 s. After writer drain, all 39,490
+  successes reconciled to execution rows, critical failures/timeouts stayed
+  zero, and 26,297 activity records had dropped. The per-request pairing
+  loop was reverted. This is evidence that not holding a resource is
+  insufficient: wakeups also need bounded scheduling, per-function ordering,
+  and admission based on drain time rather than independent five-second
+  races. The measured result does not isolate the exact CPU/lock contribution
+  of wakeups; profile a real dispatcher before claiming that cause.
+
 - A new direct-link 2-vCPU/4-GiB server plus 1-vCPU/512-MiB client sweep
   returned all HTTP 200 at 10, 50, 100, 500 and 1,000 clients, including
   50,000/50,000 at 1,000. However, post-drain SQLite row counts proved 754

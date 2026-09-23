@@ -12,6 +12,17 @@ retains early completion reservation while a shared worker/storage dispatcher
 is designed. These runs do not prove a throughput gain over that candidate;
 the fixed 1,024 writer slots and activity/capture shedding remain open limits.
 
+A follow-up per-request pairing loop was also **reverted**. It waited for
+writer-slot notifications without occupying a worker, then acquired a worker
+and tried to reserve a completion slot, returning the worker on a collision.
+The same two-VM 50,000-request/1,000-client mixed test returned 39,490 HTTP
+200 and 10,510 pre-execution storage 429s, at 267 attempted requests/s and
+5.46 s HTTP 200 p99. After drain, 39,490 execution rows matched the accepted
+responses; critical failures/timeouts were zero, but 26,297 activity rows
+had dropped. A unit test for the no-worker-held invariant passed, but this
+load result disqualifies the loop as an improvement. A bounded central queue
+must replace independent per-request wake-and-retry races.
+
 The current unreleased candidate measures `service_p95_ms` over each complete
 worker lease rather than stopping at the adapter's first response frame. This
 corrects the controller's service-time input but has not yet been benchmarked
