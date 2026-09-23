@@ -338,7 +338,9 @@ hot.
   optional replay capture/logs/spans use a lower-priority telemetry lane.
   All three lanes batch commits and report drops separately for activity, and are
   bounded by **bytes** as well as slots (a single job can carry a captured
-  request body). A batch that fails is re-applied job-by-job under savepoints
+  request body). Adjacent final-execution or activity rows in one batch use
+  a multi-row `VALUES` INSERT; generic jobs keep their individual statements. A batch
+  that fails is re-applied job-by-job under savepoints
   so one bad statement cannot destroy its neighbours, and a batch that cannot
   commit — a VACUUM holding the single write connection, say — is retained and
   retried rather than dropped. Function deletion is serialized with batch

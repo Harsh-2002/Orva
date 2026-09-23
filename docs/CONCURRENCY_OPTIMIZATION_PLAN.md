@@ -103,6 +103,23 @@ No production load or configuration change is part of this optimization work.
   rate and 4,323 ms HTTP 200 p99 show persistent queueing. Do not claim the
   closed-loop 566/s observation as sustainable offered-load capacity.
 
+- A grouped final-execution INSERT prototype, limited to adjacent jobs with
+  the same explicit SQL, halved a synthetic one-column, 200-row SQLite
+  writer-only benchmark
+  (583–588 µs to 290–291 µs; 2,024 to 44 allocations). A 50,000-request
+  VM run maintained exact row reconciliation and zero HTTP errors, but was
+  slower end-to-end (372 successful requests/s) during substantial unrelated
+  host CPU load. Keep this as a writer-path optimization hypothesis; use
+  alternating A/B on an otherwise idle host before claiming overall gain.
+  Grouping activity rows alone did not fix activity loss: with the earlier
+  one-batch critical-priority trigger, a 50,000-request phase shed 45,840
+  activity rows while still returning/persisting all 50,000 executions. The
+  priority trigger is now a critical-queue three-quarter high-water mark. A
+  further 50,000-request VM phase kept all 50,000 execution rows and reduced
+  activity drops to 16,912, but completed at 448 successful requests/s and
+  4,218 ms HTTP 200 p99. One-third of activity history still shed at this
+  offered load; better observability remains a separate design problem.
+
 - Function deletion now fences async writer commits and discards tagged
   execution jobs that arrive after the function is gone, instead of recording
   expected foreign-key failures as storage failures. Parentless capture,

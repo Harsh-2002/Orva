@@ -40,6 +40,11 @@ so deleting the test functions does not contaminate the persistence result.
 The full E2E suite includes a delete-during-invocation regression module:
 it expects the in-flight response to finish, `critical_failures` to stay
 flat, and `deleted_function_writes` to increase after the writer drains.
+For execution-writer changes, `go test ./backend/internal/database -run '^$'
+-bench '^BenchmarkExecutionWriterInsert$' -benchmem -benchtime=2s -count=3`
+compares 200-row per-statement and grouped-INSERT commits on the same host.
+It isolates SQLite work from HTTP and sandboxes; it cannot establish
+end-to-end capacity by itself.
 It refuses to run without the explicit `--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create

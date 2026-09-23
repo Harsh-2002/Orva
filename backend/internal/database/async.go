@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ type writeJob struct {
 	args       []any
 	functionID string
 	lease      *ExecutionLease
+	bulkInsert bool
 	// bytes is the approximate heap this job retains. Queues are bounded by
 	// bytes as well as count because a job can carry a captured request body
 	// (replay_capture_max_bytes, 1 MiB by default) -- 1024 slots of those is
@@ -238,13 +240,13 @@ func (db *Database) AsyncExec(sql string, args ...any) error {
 }
 
 func (db *Database) asyncExecFunction(functionID, statement string, args ...any) error {
-	return db.asyncExecFunctionReserved(functionID, nil, statement, args...)
+	return db.asyncExecFunctionReserved(functionID, nil, false, statement, args...)
 }
 
-func (db *Database) asyncExecFunctionReserved(functionID string, lease *ExecutionLease, statement string, args ...any) error {
+func (db *Database) asyncExecFunctionReserved(functionID string, lease *ExecutionLease, bulkInsert bool, statement string, args ...any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := db.asyncExecCriticalReserved(ctx, functionID, lease, statement, args...); err != nil {
+	if err := db.asyncExecCriticalReserved(ctx, functionID, lease, bulkInsert, statement, args...); err != nil {
 		slog.Warn("critical async write failed", "function_id", functionID, "err", err)
 		return err
 	}
@@ -259,10 +261,10 @@ func (db *Database) AsyncExecCritical(ctx context.Context, statement string, arg
 }
 
 func (db *Database) asyncExecCritical(ctx context.Context, functionID, statement string, args ...any) error {
-	return db.asyncExecCriticalReserved(ctx, functionID, nil, statement, args...)
+	return db.asyncExecCriticalReserved(ctx, functionID, nil, false, statement, args...)
 }
 
-func (db *Database) asyncExecCriticalReserved(ctx context.Context, functionID string, lease *ExecutionLease, statement string, args ...any) error {
+func (db *Database) asyncExecCriticalReserved(ctx context.Context, functionID string, lease *ExecutionLease, bulkInsert bool, statement string, args ...any) error {
 	if db.writer == nil {
 		if lease != nil {
 			lease.Cancel()
@@ -296,7 +298,7 @@ func (db *Database) asyncExecCriticalReserved(ctx context.Context, functionID st
 		return err
 	default:
 	}
-	j := writeJob{sql: statement, args: args, functionID: functionID, lease: lease, bytes: jobBytes(statement, args) + len(functionID)}
+	j := writeJob{sql: statement, args: args, functionID: functionID, lease: lease, bulkInsert: bulkInsert, bytes: jobBytes(statement, args) + len(functionID)}
 	if !reserveQueueBytes(&a.criticalBytes, int64(j.bytes), maxCriticalQueueBytes) {
 		a.enqueueMu.RUnlock()
 		lease.Cancel()
@@ -332,20 +334,24 @@ func (db *Database) asyncExecCriticalReserved(ctx context.Context, functionID st
 // AsyncExecActivity reserves a lane for operator-visible activity records.
 // Like optional telemetry, it never blocks request completion.
 func (db *Database) AsyncExecActivity(statement string, args ...any) {
-	db.asyncExecBestEffort(writeActivity, "", statement, args...)
+	db.asyncExecBestEffort(writeActivity, "", false, statement, args...)
+}
+
+func (db *Database) asyncExecActivityBulk(statement string, args ...any) {
+	db.asyncExecBestEffort(writeActivity, "", true, statement, args...)
 }
 
 // AsyncExecTelemetry queues optional replay, log, or span data. A full queue
 // drops the record and increments an observable counter.
 func (db *Database) AsyncExecTelemetry(statement string, args ...any) {
-	db.asyncExecBestEffort(writeTelemetry, "", statement, args...)
+	db.asyncExecBestEffort(writeTelemetry, "", false, statement, args...)
 }
 
 func (db *Database) asyncExecFunctionTelemetry(functionID, statement string, args ...any) {
-	db.asyncExecBestEffort(writeTelemetry, functionID, statement, args...)
+	db.asyncExecBestEffort(writeTelemetry, functionID, false, statement, args...)
 }
 
-func (db *Database) asyncExecBestEffort(kind writeKind, functionID, statement string, args ...any) {
+func (db *Database) asyncExecBestEffort(kind writeKind, functionID string, bulkInsert bool, statement string, args ...any) {
 	if db.writer == nil {
 		if _, err := db.write.Exec(statement, args...); err != nil {
 			slog.Warn("direct telemetry write failed", "err", err)
@@ -365,7 +371,7 @@ func (db *Database) asyncExecBestEffort(kind writeKind, functionID, statement st
 		return
 	default:
 	}
-	j := writeJob{sql: statement, args: args, functionID: functionID, bytes: jobBytes(statement, args) + len(functionID)}
+	j := writeJob{sql: statement, args: args, functionID: functionID, bulkInsert: bulkInsert, bytes: jobBytes(statement, args) + len(functionID)}
 	if !reserveQueueBytes(bytes, int64(j.bytes), limit) {
 		a.enqueueMu.RUnlock()
 		a.recordDropped(kind, 1)
@@ -579,11 +585,11 @@ func (a *asyncWriter) run() {
 	}
 
 	for {
-		// When execution rows are backing up, spend the write connection on
-		// those rows first. Activity is best-effort; flushing it while the
-		// critical queue is full delays completion slots and rejects new
-		// invocations before they can execute.
-		criticalPressure := len(a.critical) >= a.batchMax
+		// Prefer execution rows only near the critical queue's high-water
+		// mark. Using one-batch pressure here starved the operator activity
+		// feed at ordinary sustained load even after activity INSERTs were
+		// grouped; most rows were shed without any actual writer failure.
+		criticalPressure := len(a.critical) >= cap(a.critical)*3/4
 		activityInput := activity
 		if criticalPressure {
 			activityInput = nil
@@ -694,20 +700,44 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 
 	failedIdx := -1
 	var failErr error
-	for i, j := range work {
-		stmt := prepared[j.sql]
+	for i := 0; i < len(work); {
+		j := work[i]
+		statement := j.sql
+		args := j.args
+		groupEnd := i + 1
+		if j.bulkInsert {
+			argCount := len(j.args)
+			for groupEnd < len(work) && work[groupEnd].bulkInsert && work[groupEnd].sql == j.sql &&
+				(argCount+len(work[groupEnd].args)) <= 30000 {
+				argCount += len(work[groupEnd].args)
+				groupEnd++
+			}
+			if groupEnd > i+1 {
+				if bulk := bulkInsertSQL(j.sql, groupEnd-i); bulk != "" {
+					statement = bulk
+					args = make([]any, 0, argCount)
+					for _, grouped := range work[i:groupEnd] {
+						args = append(args, grouped.args...)
+					}
+				} else {
+					groupEnd = i + 1
+				}
+			}
+		}
+		stmt := prepared[statement]
 		if stmt == nil {
-			stmt, err = tx.PrepareContext(stmtCtx, j.sql)
+			stmt, err = tx.PrepareContext(stmtCtx, statement)
 			if err != nil {
 				failedIdx, failErr = i, err
 				break
 			}
-			prepared[j.sql] = stmt
+			prepared[statement] = stmt
 		}
-		if _, err := stmt.ExecContext(stmtCtx, j.args...); err != nil {
+		if _, err := stmt.ExecContext(stmtCtx, args...); err != nil {
 			failedIdx, failErr = i, err
 			break
 		}
+		i = groupEnd
 	}
 	closePrepared()
 	if failedIdx < 0 {
@@ -726,6 +756,34 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 	_ = tx.Rollback()
 	slog.Warn("batch stmt failed; isolating", "err", failErr, "jobs", len(work))
 	return a.commitIsolated(work, kind)
+}
+
+// bulkInsertSQL repeats the VALUES tuple for INSERT statements explicitly
+// marked by their caller. An unrecognized statement falls back to
+// per-row execution, preserving the generic async writer contract.
+func bulkInsertSQL(statement string, rows int) string {
+	if rows < 2 {
+		return ""
+	}
+	idx := strings.LastIndex(statement, "VALUES (")
+	if idx < 0 {
+		return ""
+	}
+	prefix := statement[:idx+len("VALUES ")]
+	tuple := strings.TrimSpace(statement[idx+len("VALUES "):])
+	if !strings.HasPrefix(tuple, "(") || !strings.HasSuffix(tuple, ")") {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(prefix) + rows*(len(tuple)+1))
+	b.WriteString(prefix)
+	for i := 0; i < rows; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(tuple)
+	}
+	return b.String()
 }
 
 func releaseJobs(jobs []writeJob) {

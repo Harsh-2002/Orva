@@ -134,7 +134,7 @@ func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64,
 	if len(reservation) > 0 {
 		lease = reservation[0]
 	}
-	return db.asyncExecFunctionReserved(exec.FunctionID, lease, `
+	return db.asyncExecFunctionReserved(exec.FunctionID, lease, true, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
@@ -296,7 +296,7 @@ func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS 
 	if len(reservation) > 0 {
 		lease = reservation[0]
 	}
-	return db.asyncExecFunctionReserved(exec.FunctionID, lease, `
+	return db.asyncExecFunctionReserved(exec.FunctionID, lease, true, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,

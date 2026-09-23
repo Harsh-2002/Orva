@@ -164,6 +164,29 @@ at that offered rate. The 400/s phase delivered its arrivals but completed
 after the schedule ended, so queueing persisted. The SQLite writer and
 duplicated activity/capture writes remain the central throughput bottleneck.
 
+An experimental grouped final-execution INSERT reduced a local writer-only
+synthetic one-column, 200-row transaction benchmark from 583–588 µs and
+about 70 KiB/2,024
+allocations to 290–291 µs and about 18 KiB/44 allocations. The matching
+50,000-request VM run still returned 50,000 HTTP 200s with exactly 50,000
+new execution rows, but only 372 successful requests/s and 4,850 ms HTTP
+200 p99. The host had substantial unrelated CPU load and the database had
+grown, so this run does **not** establish an end-to-end improvement; a
+controlled alternating A/B is still needed. A duplicate-row unit test
+confirmed that a grouped-statement failure falls back to per-row isolation
+without losing its valid neighbors or leaking completion reservations.
+Grouping the activity INSERT as well preserved all 50,000 execution rows in
+another 50,000-request VM run (478 successful requests/s, 3,523 ms p99), but
+the then-current priority rule deferred activity whenever the critical queue
+held one batch. It shed 45,840 activity rows, about 92% of the run's requests.
+That is not an acceptable observability result. Moving activity deferral to
+the critical queue's three-quarter high-water mark cut activity drops to
+16,912 in a further 50,000-request phase; all 50,000 responses were HTTP 200
+with exactly 50,000 new execution rows, 448 successful requests/s and
+4,218 ms HTTP 200 p99. This is an observability trade-off, not a demonstrated
+throughput gain; about one-third of activity records still shed at this
+load, and optional capture remains heavily lossy.
+
 The guest reported `rlimit_only`, so these tests do not qualify hard per-worker
 cgroup enforcement. No alternating A/B or open-loop comparison has yet been
 made.

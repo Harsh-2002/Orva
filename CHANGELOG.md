@@ -28,6 +28,10 @@ before it.
   50,000-request run at 1,000 clients returned 50,000 HTTP 200 responses
   with exactly 50,000 execution rows after drain; optional activity/capture
   records can still shed under sustained pressure.
+- Adjacent final-execution and activity rows in a writer batch now use one
+  SQLite multi-row INSERT, with per-row isolation fallback on a constraint error.
+  This reduces writer-only allocations and statement cost; end-to-end
+  throughput remains workload- and host-pressure-dependent.
 - Deleting a function during an invocation no longer produces a foreign-key
   failure when its asynchronous execution record arrives later. Pending
   execution-related writes for the deleted function are discarded and counted
