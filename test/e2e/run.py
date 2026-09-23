@@ -174,7 +174,7 @@ def main():
     if args.url:
         target = args.url.rstrip("/")
         env["ORVA_URL"] = target
-        env["ORVA_API_KEY"] = args.api_key or resolve_admin_key()
+        env["ORVA_API_KEY"] = args.api_key or env.get("ORVA_API_KEY") or resolve_admin_key()
         env.setdefault("MOCK_HOST", "127.0.0.1")
         target_desc = f"external instance {target}"
     else:

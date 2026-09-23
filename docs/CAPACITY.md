@@ -48,6 +48,30 @@ warm-up), confirming some drops affected the operator activity feed, not just
 optional replay capture. This is an undelegated 2-GiB functional/load probe,
 not a controlled A/B or the 2-vCPU/4-GiB capacity target.
 
+The next candidate separates activity from optional replay/log/span writes.
+Execution records still use bounded critical backpressure; activity has its
+own bounded, non-blocking lane selected fairly with critical work, while
+optional telemetry is read only when neither higher-priority channel is
+waiting. Health now exposes `activity_queue_depth`, `activity_queue_bytes`,
+and `dropped_activity` (included in `dropped_telemetry`). This prevents a
+full optional-capture channel from directly displacing activity, but it does
+not promise zero activity loss if the activity lane or SQLite itself saturates.
+The 55 missing rows above are from the *prior* binary. With the lane split,
+a disposable 2-vCPU/2-GiB Ubuntu smolvm guest ran 5,000 Node and 5,000 Python
+requests at 100 clients, 2,500 per runtime in the mixed phase, 1,000
+CPU-bound requests, and a 500-request overload phase. The ordinary phases
+returned HTTP 200 for every request; overload returned 216 HTTP 200 and 284
+bounded HTTP 429. Before cleanup, critical failures, total best-effort drops,
+and activity drops were all zero. The same guest then passed 28 real-sandbox
+E2E modules with zero failures or skips. This is a functional regression
+check, **not** a controlled A/B or the 2-vCPU/4-GiB capacity target. Its
+cgroup controllers were not delegated, so hard per-worker memory enforcement
+was not validated. After the E2E suite's create/invoke/delete flows, writer
+health showed four critical execution-row failures: a function was deleted
+after a request returned but before its final async execution insert committed,
+so SQLite rejected the insert's function FK. This lifecycle race remains
+open; the green HTTP/E2E result must not be read as a clean persistence result.
+
 ## 2026-09-23 independent two-VM follow-up (unreleased candidate)
 
 ### Mixed-function and scheduled-arrival follow-up

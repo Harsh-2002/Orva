@@ -206,19 +206,24 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 		// Slot depth alone under-reports: a queue holding a handful of
 		// captured request bodies is megabytes deep at 1% of its slots.
 		if (writer.CriticalCap > 0 && writer.CriticalDepth*100/writer.CriticalCap >= 80) ||
+			(writer.ActivityCap > 0 && writer.ActivityDepth*100/writer.ActivityCap >= 80) ||
 			(writer.TelemetryCap > 0 && writer.TelemetryDepth*100/writer.TelemetryCap >= 80) ||
 			(writer.CriticalCapBytes > 0 && writer.CriticalBytes*100/writer.CriticalCapBytes >= 80) ||
+			(writer.ActivityCapBytes > 0 && writer.ActivityBytes*100/writer.ActivityCapBytes >= 80) ||
 			(writer.TelemetryCapBytes > 0 && writer.TelemetryBytes*100/writer.TelemetryCapBytes >= 80) {
 			writerStatus = "saturated"
 		}
 		resp["writer"] = map[string]any{
 			"status": writerStatus, "critical_queue_depth": writer.CriticalDepth,
 			"critical_queue_bytes":  writer.CriticalBytes,
+			"activity_queue_bytes":  writer.ActivityBytes,
+			"activity_queue_depth":  writer.ActivityDepth,
 			"telemetry_queue_bytes": writer.TelemetryBytes,
 			"telemetry_queue_depth": writer.TelemetryDepth,
 			"critical_timeouts":     writer.CriticalTimeouts,
 			"critical_failures":     writer.CriticalFailures,
 			"dropped_telemetry":     writer.DroppedTelemetry,
+			"dropped_activity":      writer.DroppedActivity,
 		}
 	}
 
@@ -293,13 +298,16 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		writer := h.DB.WriterStats()
 		promHeader(w, "orva_writer_queue_depth", "gauge", "Pending asynchronous database writes by priority.")
 		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"critical\"} %d\n", writer.CriticalDepth)
+		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"activity\"} %d\n", writer.ActivityDepth)
 		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"telemetry\"} %d\n", writer.TelemetryDepth)
 		promHeader(w, "orva_writer_critical_timeouts_total", "counter", "Critical database writes that exceeded their enqueue deadline.")
 		fmt.Fprintf(w, "orva_writer_critical_timeouts_total %d\n", writer.CriticalTimeouts)
 		promHeader(w, "orva_writer_critical_failures_total", "counter", "Critical database writes lost to transaction failures after enqueue.")
 		fmt.Fprintf(w, "orva_writer_critical_failures_total %d\n", writer.CriticalFailures)
-		promHeader(w, "orva_writer_dropped_telemetry_total", "counter", "Telemetry writes dropped because the bounded queue was full.")
+		promHeader(w, "orva_writer_dropped_telemetry_total", "counter", "Best-effort writes dropped during enqueue, commit, or shutdown, including activity.")
 		fmt.Fprintf(w, "orva_writer_dropped_telemetry_total %d\n", writer.DroppedTelemetry)
+		promHeader(w, "orva_writer_dropped_activity_total", "counter", "Activity records dropped during enqueue, commit, or shutdown; subset of dropped telemetry.")
+		fmt.Fprintf(w, "orva_writer_dropped_activity_total %d\n", writer.DroppedActivity)
 		kv := h.DB.KVMetrics()
 		promHeader(w, "orva_kv_operations_total", "counter", "KV operations by type.")
 		promHeader(w, "orva_kv_errors_total", "counter", "KV operation failures by type.")

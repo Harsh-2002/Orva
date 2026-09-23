@@ -63,6 +63,9 @@ func TestHealthNsjailAbsentStays200(t *testing.T) {
 	if !ok || writer["status"] != "ok" {
 		t.Errorf("writer health missing or unhealthy: %v", body["writer"])
 	}
+	if writer["activity_queue_bytes"] != float64(0) || writer["dropped_activity"] != float64(0) {
+		t.Errorf("activity writer health fields missing or nonzero: %v", writer)
+	}
 }
 
 // TestHealthDBDownReturns503 confirms the hard gate at the handler level.

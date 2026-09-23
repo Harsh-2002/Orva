@@ -49,7 +49,16 @@ func jobBytes(sql string, args []any) int {
 // them, small enough that a stalled writer cannot exhaust the host.
 const (
 	maxCriticalQueueBytes  = 64 << 20 // 64 MiB
+	maxActivityQueueBytes  = 8 << 20  // 8 MiB
 	maxTelemetryQueueBytes = 32 << 20 // 32 MiB
+)
+
+type writeKind uint8
+
+const (
+	writeCritical writeKind = iota
+	writeActivity
+	writeTelemetry
 )
 
 // Reserve before publishing to a channel: the consumer can receive a job
@@ -115,6 +124,7 @@ const (
 type asyncWriter struct {
 	db        *Database
 	critical  chan writeJob
+	activity  chan writeJob
 	telemetry chan writeJob
 	done      chan struct{}
 
@@ -130,19 +140,22 @@ type asyncWriter struct {
 	flushEvery time.Duration
 
 	criticalBytes  atomic.Int64
+	activityBytes  atomic.Int64
 	telemetryBytes atomic.Int64
 
-	dropped  atomic.Uint64
-	timeouts atomic.Uint64
-	failed   atomic.Uint64
-	shed     atomic.Uint64
-	retried  atomic.Uint64
+	dropped         atomic.Uint64
+	droppedActivity atomic.Uint64
+	timeouts        atomic.Uint64
+	failed          atomic.Uint64
+	shed            atomic.Uint64
+	retried         atomic.Uint64
 }
 
 func newAsyncWriter(db *Database) *asyncWriter {
 	return &asyncWriter{
 		db:            db,
 		critical:      make(chan writeJob, 1024),
+		activity:      make(chan writeJob, 1024),
 		telemetry:     make(chan writeJob, 1024),
 		done:          make(chan struct{}),
 		quit:          make(chan struct{}),
@@ -208,9 +221,19 @@ func (db *Database) AsyncExecCritical(ctx context.Context, statement string, arg
 	}
 }
 
-// AsyncExecTelemetry queues best-effort activity, log, or span data. A full
-// queue drops the record and increments an observable counter.
+// AsyncExecActivity reserves a lane for operator-visible activity records.
+// Like optional telemetry, it never blocks request completion.
+func (db *Database) AsyncExecActivity(statement string, args ...any) {
+	db.asyncExecBestEffort(writeActivity, statement, args...)
+}
+
+// AsyncExecTelemetry queues optional replay, log, or span data. A full queue
+// drops the record and increments an observable counter.
 func (db *Database) AsyncExecTelemetry(statement string, args ...any) {
+	db.asyncExecBestEffort(writeTelemetry, statement, args...)
+}
+
+func (db *Database) asyncExecBestEffort(kind writeKind, statement string, args ...any) {
 	if db.writer == nil {
 		if _, err := db.write.Exec(statement, args...); err != nil {
 			slog.Warn("direct telemetry write failed", "err", err)
@@ -218,46 +241,62 @@ func (db *Database) AsyncExecTelemetry(statement string, args ...any) {
 		return
 	}
 	a := db.writer
+	queue, bytes, limit := a.telemetry, &a.telemetryBytes, int64(maxTelemetryQueueBytes)
+	if kind == writeActivity {
+		queue, bytes, limit = a.activity, &a.activityBytes, maxActivityQueueBytes
+	}
 	a.enqueueMu.RLock()
 	select {
 	case <-a.stopRequested:
 		a.enqueueMu.RUnlock()
-		a.dropped.Add(1)
+		a.recordDropped(kind, 1)
 		return
 	default:
 	}
 	j := writeJob{sql: statement, args: args, bytes: jobBytes(statement, args)}
-	if !reserveQueueBytes(&a.telemetryBytes, int64(j.bytes), maxTelemetryQueueBytes) {
+	if !reserveQueueBytes(bytes, int64(j.bytes), limit) {
 		a.enqueueMu.RUnlock()
-		a.dropped.Add(1)
+		a.recordDropped(kind, 1)
 		return
 	}
 	select {
 	case <-a.stopRequested:
-		a.telemetryBytes.Add(int64(-j.bytes))
+		bytes.Add(int64(-j.bytes))
 		a.enqueueMu.RUnlock()
-		a.dropped.Add(1)
-	case a.telemetry <- j:
+		a.recordDropped(kind, 1)
+	case queue <- j:
 		a.enqueueMu.RUnlock()
 	default:
-		a.telemetryBytes.Add(int64(-j.bytes))
+		bytes.Add(int64(-j.bytes))
 		a.enqueueMu.RUnlock()
-		a.dropped.Add(1)
+		a.recordDropped(kind, 1)
+	}
+}
+
+func (a *asyncWriter) recordDropped(kind writeKind, count uint64) {
+	a.dropped.Add(count)
+	if kind == writeActivity {
+		a.droppedActivity.Add(count)
 	}
 }
 
 type WriterStats struct {
 	CriticalDepth     int
+	ActivityDepth     int
 	TelemetryDepth    int
 	CriticalCap       int
+	ActivityCap       int
 	TelemetryCap      int
 	CriticalBytes     int64
+	ActivityBytes     int64
 	TelemetryBytes    int64
 	CriticalCapBytes  int64
+	ActivityCapBytes  int64
 	TelemetryCapBytes int64
 	CriticalTimeouts  uint64
 	CriticalFailures  uint64
 	DroppedTelemetry  uint64
+	DroppedActivity   uint64
 	ShedWrites        uint64
 }
 
@@ -266,12 +305,12 @@ func (db *Database) WriterStats() WriterStats {
 		return WriterStats{}
 	}
 	return WriterStats{
-		CriticalDepth: len(db.writer.critical), TelemetryDepth: len(db.writer.telemetry),
-		CriticalCap: cap(db.writer.critical), TelemetryCap: cap(db.writer.telemetry),
-		CriticalBytes: db.writer.criticalBytes.Load(), TelemetryBytes: db.writer.telemetryBytes.Load(),
-		CriticalCapBytes: maxCriticalQueueBytes, TelemetryCapBytes: maxTelemetryQueueBytes,
+		CriticalDepth: len(db.writer.critical), ActivityDepth: len(db.writer.activity), TelemetryDepth: len(db.writer.telemetry),
+		CriticalCap: cap(db.writer.critical), ActivityCap: cap(db.writer.activity), TelemetryCap: cap(db.writer.telemetry),
+		CriticalBytes: db.writer.criticalBytes.Load(), ActivityBytes: db.writer.activityBytes.Load(), TelemetryBytes: db.writer.telemetryBytes.Load(),
+		CriticalCapBytes: maxCriticalQueueBytes, ActivityCapBytes: maxActivityQueueBytes, TelemetryCapBytes: maxTelemetryQueueBytes,
 		CriticalTimeouts: db.writer.timeouts.Load(), CriticalFailures: db.writer.failed.Load(),
-		DroppedTelemetry: db.writer.dropped.Load(), ShedWrites: db.writer.shed.Load(),
+		DroppedTelemetry: db.writer.dropped.Load(), DroppedActivity: db.writer.droppedActivity.Load(), ShedWrites: db.writer.shed.Load(),
 	}
 }
 
@@ -301,13 +340,15 @@ func (a *asyncWriter) run() {
 	ticker := time.NewTicker(a.flushEvery)
 	defer ticker.Stop()
 	critical := a.critical
+	activity := a.activity
 	telemetry := a.telemetry
 
 	criticalBatch := make([]writeJob, 0, a.batchMax)
+	activityBatch := make([]writeJob, 0, a.batchMax)
 	telemetryBatch := make([]writeJob, 0, a.batchMax)
 
-	var criticalBackoff, telemetryBackoff time.Duration
-	var criticalUntil, telemetryUntil time.Time
+	var criticalBackoff, activityBackoff, telemetryBackoff time.Duration
+	var criticalUntil, activityUntil, telemetryUntil time.Time
 
 	// release zeroes the slice before reslicing. batch[:0] alone keeps the
 	// backing array alive with every job's args still referenced, which for
@@ -328,7 +369,7 @@ func (a *asyncWriter) run() {
 		if len(criticalBatch) == 0 {
 			return
 		}
-		retry := a.commit(criticalBatch, false)
+		retry := a.commit(criticalBatch, writeCritical)
 		a.criticalBytes.Add(batchBytes(retry) - batchBytes(criticalBatch))
 		if len(retry) == 0 {
 			criticalBatch = release(criticalBatch)
@@ -343,11 +384,28 @@ func (a *asyncWriter) run() {
 		slog.Warn("async writer retrying critical batch",
 			"jobs", len(retry), "backoff", criticalBackoff)
 	}
+	flushActivity := func() {
+		if len(activityBatch) == 0 {
+			return
+		}
+		retry := a.commit(activityBatch, writeActivity)
+		a.activityBytes.Add(batchBytes(retry) - batchBytes(activityBatch))
+		if len(retry) == 0 {
+			activityBatch = release(activityBatch)
+			activityBackoff, activityUntil = 0, time.Time{}
+			activity = a.activity
+			return
+		}
+		activityBatch = retainRetryBatch(activityBatch, retry)
+		activityBackoff = nextBackoff(activityBackoff)
+		activityUntil = time.Now().Add(activityBackoff)
+		activity = nil
+	}
 	flushTelemetry := func() {
 		if len(telemetryBatch) == 0 {
 			return
 		}
-		retry := a.commit(telemetryBatch, true)
+		retry := a.commit(telemetryBatch, writeTelemetry)
 		a.telemetryBytes.Add(batchBytes(retry) - batchBytes(telemetryBatch))
 		if len(retry) == 0 {
 			telemetryBatch = release(telemetryBatch)
@@ -369,6 +427,9 @@ func (a *asyncWriter) run() {
 			case job := <-a.critical:
 				criticalBatch = append(criticalBatch, job)
 				continue
+			case job := <-a.activity:
+				activityBatch = append(activityBatch, job)
+				continue
 			case job := <-a.telemetry:
 				telemetryBatch = append(telemetryBatch, job)
 				continue
@@ -376,27 +437,40 @@ func (a *asyncWriter) run() {
 			}
 			break
 		}
-		criticalUntil, telemetryUntil = time.Time{}, time.Time{}
+		criticalUntil, activityUntil, telemetryUntil = time.Time{}, time.Time{}, time.Time{}
 		if len(criticalBatch) > 0 {
-			if retry := a.commit(criticalBatch, false); len(retry) > 0 {
+			if retry := a.commit(criticalBatch, writeCritical); len(retry) > 0 {
 				a.failed.Add(uint64(len(retry)))
 				slog.Warn("async writer shutting down with unwritten critical jobs",
 					"jobs", len(retry))
 			}
 		}
+		if len(activityBatch) > 0 {
+			if retry := a.commit(activityBatch, writeActivity); len(retry) > 0 {
+				a.recordDropped(writeActivity, uint64(len(retry)))
+			}
+		}
 		if len(telemetryBatch) > 0 {
-			if retry := a.commit(telemetryBatch, true); len(retry) > 0 {
-				a.dropped.Add(uint64(len(retry)))
+			if retry := a.commit(telemetryBatch, writeTelemetry); len(retry) > 0 {
+				a.recordDropped(writeTelemetry, uint64(len(retry)))
 			}
 		}
 		// No producer can publish after quit closes. Every retained job has
 		// either been committed or explicitly counted as failed/dropped.
 		a.criticalBytes.Store(0)
+		a.activityBytes.Store(0)
 		a.telemetryBytes.Store(0)
 		close(a.done)
 	}
 
 	for {
+		// Optional capture cannot displace queued execution or activity
+		// records. The two high lanes remain equally selectable, so sustained
+		// execution traffic does not starve the operator activity feed.
+		optional := telemetry
+		if len(a.critical) > 0 || len(a.activity) > 0 {
+			optional = nil
+		}
 		select {
 		case job, ok := <-critical:
 			if !ok {
@@ -407,7 +481,16 @@ func (a *asyncWriter) run() {
 			if len(criticalBatch) >= a.batchMax {
 				flushCritical()
 			}
-		case job, ok := <-telemetry:
+		case job, ok := <-activity:
+			if !ok {
+				activity = nil
+				continue
+			}
+			activityBatch = append(activityBatch, job)
+			if len(activityBatch) >= a.batchMax {
+				flushActivity()
+			}
+		case job, ok := <-optional:
 			if !ok {
 				telemetry = nil
 				continue
@@ -420,6 +503,9 @@ func (a *asyncWriter) run() {
 			now := time.Now()
 			if now.After(criticalUntil) {
 				flushCritical()
+			}
+			if now.After(activityUntil) {
+				flushActivity()
 			}
 			if now.After(telemetryUntil) {
 				flushTelemetry()
@@ -453,7 +539,7 @@ func nextBackoff(cur time.Duration) time.Duration {
 // violation from a function deleted mid-invocation, whose executions row
 // and execution_logs row are queued together with an FK between them, so
 // killing batch N also killed batch N+1.
-func (a *asyncWriter) commit(batch []writeJob, telemetry bool) []writeJob {
+func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 	ctx, cancel := context.WithTimeout(context.Background(), txBudget)
 	defer cancel()
 
@@ -496,7 +582,6 @@ func (a *asyncWriter) commit(batch []writeJob, telemetry bool) []writeJob {
 			slog.Warn("batch commit failed; will retry", "err", err, "jobs", len(batch))
 			return batch
 		}
-		a.finish(batch, telemetry, nil)
 		return nil
 	}
 
@@ -505,14 +590,14 @@ func (a *asyncWriter) commit(batch []writeJob, telemetry bool) []writeJob {
 	// statement cannot take its neighbours with it.
 	_ = tx.Rollback()
 	slog.Warn("batch stmt failed; isolating", "err", failErr, "jobs", len(batch))
-	return a.commitIsolated(batch, telemetry)
+	return a.commitIsolated(batch, kind)
 }
 
 // commitIsolated is the recovery pass: one SAVEPOINT per job so a failure
 // rolls back only itself. Deliberately NOT the hot path -- at ~1500 jobs/s
 // two extra statements per job to guard against a rare event is the wrong
 // trade, so this only runs after a batch has already failed once.
-func (a *asyncWriter) commitIsolated(batch []writeJob, telemetry bool) []writeJob {
+func (a *asyncWriter) commitIsolated(batch []writeJob, kind writeKind) []writeJob {
 	ctx, cancel := context.WithTimeout(context.Background(), txBudget)
 	defer cancel()
 
@@ -571,10 +656,10 @@ func (a *asyncWriter) commitIsolated(batch []writeJob, telemetry bool) []writeJo
 		// WriterStats keeps meaning what it says: CriticalFailures is
 		// "critical work we could not write", DroppedTelemetry is
 		// "best-effort work we gave up on".
-		if telemetry {
-			a.dropped.Add(uint64(shed))
-		} else {
+		if kind == writeCritical {
 			a.failed.Add(uint64(shed))
+		} else {
+			a.recordDropped(kind, uint64(shed))
 		}
 	}
 	if len(retry) > 0 {
@@ -607,14 +692,6 @@ func truncSQL(s string) string {
 	return s
 }
 
-func (a *asyncWriter) finish(batch []writeJob, telemetry bool, err error) {
-	if telemetry && err != nil {
-		a.dropped.Add(uint64(len(batch)))
-	} else if err != nil {
-		a.failed.Add(uint64(len(batch)))
-	}
-}
-
 // stop signals shutdown and waits for the consumer to flush what is queued.
 // Idempotent. The deadline bounds how long a wedged write connection can
 // hold up process exit.
@@ -630,6 +707,6 @@ func (a *asyncWriter) stop(timeout time.Duration) {
 	case <-time.After(timeout):
 		slog.Warn("async writer did not drain before shutdown deadline",
 			"timeout", timeout,
-			"critical_queued", len(a.critical), "telemetry_queued", len(a.telemetry))
+			"critical_queued", len(a.critical), "activity_queued", len(a.activity), "telemetry_queued", len(a.telemetry))
 	}
 }

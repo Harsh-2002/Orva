@@ -25,17 +25,28 @@ orders of magnitude, not SLAs.
 
 For invocation-concurrency changes, use a disposable instance and run
 `python3 test/performance/invocation_admission.py --scratch --url <scratch-url> --api-key <key> --extended`.
+The harness also accepts `ORVA_API_KEY` so a scratch key need not appear in
+the load generator's process arguments.
+The external-instance E2E runner (`test/e2e/run.py --url`) accepts the same
+environment variable for its API key.
 The stdlib-only harness deploys temporary Node and Python functions, tests
 5,000 requests at 100 clients per runtime, mixed-function traffic, a CPU-bound
 handler, and bounded overload; it deletes only the functions it created.
 Before cleanup it waits for active invocation handlers and accepted writer
-bytes to drain, then reports
-critical-write failures and telemetry drops separately, so deleting the test
+bytes to drain, then reports critical-write failures, total best-effort drops,
+and activity-specific drops separately, so deleting the test
 functions does not contaminate the persistence result.
 It refuses to run without the explicit `--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create
-false timeouts. See [CAPACITY.md](CAPACITY.md) for the earlier measured
+false timeouts. When pairing a newly built server binary with an existing
+rootfs, also copy the matching `backend/runtimes/{node,python}` adapters and
+SDK files into the guest rootfs before testing. An older Node adapter without
+the current readiness frame left every worker spawning until its 10-second
+deadline and produced HTTP 429 for every test invocation; that is a fixture
+mismatch, not a valid throughput result. The normal bare-metal installer runs
+`orva setup` to refresh these files on upgrade, and the Docker entrypoint
+refreshes them on startup. See [CAPACITY.md](CAPACITY.md) for the earlier measured
 2-vCPU/4-GiB run and that guest's undelegated cgroups.
 
 An external load generator should be preferred for throughput numbers, but
@@ -86,7 +97,9 @@ summary was printed.
 
 For performance work, capture writer counters before and after each phase,
 not just the final health status: a queue that drains afterward can still
-have dropped telemetry at saturation. Split success, 429, 504, and client
+have dropped telemetry at saturation. `dropped_activity` is included in
+`dropped_telemetry`; compare both to distinguish operator-feed loss from
+optional replay/log/span loss. Split success, 429, 504, and client
 errors before comparing latency percentiles. Dashboard
 `response_latency_ms` covers the full public invoke handler but excludes
 network/TLS/reverse-proxy time; `latency_ms` is the shorter proxy/worker

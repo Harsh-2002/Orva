@@ -97,6 +97,16 @@ entrypoint, or a package with no wheel for the runtime's Python (3.14).
 **Fix.** Redeploy with corrected code; or rollback to the last known
 good version via the Deployments view.
 
+If **every** invocation waits for a cold worker and returns HTTP 429
+`INVOCATION_QUEUE_FULL` after a manual binary-only upgrade, check the
+runtime adapter version before tuning concurrency. A server that expects the
+adapter's startup `ready` frame cannot use an older rootfs adapter that does
+not emit it. For an existing bare-metal rootfs, run the **new binary's**
+`orva setup --skip-nsjail --data-dir /var/lib/orva` to refresh its embedded
+adapters and SDK, then restart Orva. Prefer the normal installer for upgrades:
+it refreshes the binary, rootfs, and adapters together. The Docker entrypoint
+refreshes adapters on every container start.
+
 ## Symptom: EVERY function returns `WORKER_CRASHED` right after a bare-metal install
 
 **Diagnosis.** If *nothing* invokes (even a trivial handler) and the

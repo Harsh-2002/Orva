@@ -49,8 +49,12 @@ The pool's demand history uses sixty one-second arrival buckets instead of a
 timestamp per request; controller wakeups coalesce within 20 ms. Neither is an
 execution-concurrency cap. The async SQLite writer prepares each distinct SQL
 statement once per batch; HTTP execution baseline/outlier fields are included
-in the execution INSERT instead of a second UPDATE. Its critical and telemetry
-queues reserve bytes atomically before publication and return reservations on
+in the execution INSERT instead of a second UPDATE. It has separate bounded
+critical execution, operator activity, and optional replay/log/span lanes.
+The consumer selects the critical and activity lanes fairly and only reads
+optional telemetry when both high-priority channels are empty; activity
+remains non-blocking and can still drop if its own lane or SQLite is saturated.
+All three queues reserve bytes atomically before publication and return reservations on
 timeout or shedding; do not move accounting after a channel send, because the
 consumer may already have received the job. The reservation remains held while
 a batch is in flight or retrying, then is released on commit or explicit shed.

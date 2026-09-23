@@ -79,8 +79,10 @@ func TestKVMetricsAndWriterSaturationAreExposed(t *testing.T) {
 		"orva_kv_operations_total{operation=\"put\"}",
 		"# TYPE orva_kv_batch_rollbacks_total counter",
 		"# TYPE orva_writer_queue_depth gauge",
+		"orva_writer_queue_depth{priority=\"activity\"}",
 		"# TYPE orva_writer_critical_failures_total counter",
 		"# TYPE orva_writer_dropped_telemetry_total counter",
+		"# TYPE orva_writer_dropped_activity_total counter",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics output missing %q", want)

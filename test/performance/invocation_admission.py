@@ -10,6 +10,7 @@ import collections
 import concurrent.futures
 import http.client
 import json
+import os
 import statistics
 import time
 import urllib.error
@@ -116,11 +117,13 @@ def wait_writer_drain(base, key, timeout=30):
         active = api(base, key, "GET", "/api/v1/system/metrics.json")["active_requests"]
         writer = api(base, key, "GET", "/api/v1/system/health")["writer"]
         if (active == 0 and writer["critical_queue_bytes"] == 0 and
+                writer["activity_queue_bytes"] == 0 and
                 writer["telemetry_queue_bytes"] == 0):
             time.sleep(0.1)
             active = api(base, key, "GET", "/api/v1/system/metrics.json")["active_requests"]
             writer = api(base, key, "GET", "/api/v1/system/health")["writer"]
             if (active == 0 and writer["critical_queue_bytes"] == 0 and
+                    writer["activity_queue_bytes"] == 0 and
                     writer["telemetry_queue_bytes"] == 0):
                 return writer
         if time.monotonic() >= deadline:
@@ -132,7 +135,7 @@ def wait_writer_drain(base, key, timeout=30):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
-    parser.add_argument("--api-key", required=True)
+    parser.add_argument("--api-key", default=os.environ.get("ORVA_API_KEY"), required=False)
     parser.add_argument("--scratch", action="store_true",
                         help="confirm the target is a disposable test instance")
     parser.add_argument("--requests", type=int, default=5000)
@@ -140,6 +143,8 @@ def main():
     parser.add_argument("--extended", action="store_true",
                         help="also exercise mixed functions, CPU work, and bounded overload")
     args = parser.parse_args()
+    if not args.api_key:
+        parser.error("--api-key or ORVA_API_KEY is required")
     if not args.scratch:
         parser.error("this is a load test; pass --scratch only for a disposable instance")
     if args.requests <= 0 or args.concurrency <= 0:
@@ -209,8 +214,11 @@ def main():
                              writer_start["critical_failures"])
             telemetry_delta = (writer_before_delete["dropped_telemetry"] -
                                writer_start["dropped_telemetry"])
+            activity_delta = (writer_before_delete["dropped_activity"] -
+                              writer_start["dropped_activity"])
             print(f"writer before cleanup: critical_failures={failure_delta} "
-                  f"dropped_telemetry={telemetry_delta}", flush=True)
+                  f"dropped_telemetry={telemetry_delta} "
+                  f"dropped_activity={activity_delta}", flush=True)
             if failure_delta:
                 failures += 1
         except Exception as exc:

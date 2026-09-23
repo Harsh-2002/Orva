@@ -15,7 +15,7 @@ func TestAsyncWriterCommitRepeatedStatementAndFailureIsolation(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		batch = append(batch, writeJob{sql: statement, args: []any{i, fmt.Sprint(i)}})
 	}
-	if retry := db.writer.commit(batch, false); len(retry) != 0 {
+	if retry := db.writer.commit(batch, writeCritical); len(retry) != 0 {
 		t.Fatalf("repeated prepared statement left %d jobs for retry", len(retry))
 	}
 	var count int
@@ -31,7 +31,7 @@ func TestAsyncWriterCommitRepeatedStatementAndFailureIsolation(t *testing.T) {
 		{sql: statement, args: []any{0, "duplicate"}},
 		{sql: statement, args: []any{51, "after"}},
 	}
-	if retry := db.writer.commit(batch, false); len(retry) != 0 {
+	if retry := db.writer.commit(batch, writeCritical); len(retry) != 0 {
 		t.Fatalf("duplicate key left %d jobs for retry", len(retry))
 	}
 	if err := db.read.QueryRow("SELECT COUNT(*) FROM batch_prepare_test").Scan(&count); err != nil || count != 52 {

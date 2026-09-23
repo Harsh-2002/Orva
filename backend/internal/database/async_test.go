@@ -19,6 +19,40 @@ func TestTelemetryQueueDropsWhenSaturated(t *testing.T) {
 	}
 }
 
+func TestActivityAdmissionSurvivesOptionalTelemetrySaturation(t *testing.T) {
+	db := &Database{writer: newAsyncWriter(nil)}
+	for range cap(db.writer.telemetry) + 1 {
+		db.AsyncExecTelemetry("SELECT 1")
+	}
+	db.AsyncExecActivity("SELECT 2")
+	stats := db.WriterStats()
+	if stats.TelemetryDepth != stats.TelemetryCap || stats.ActivityDepth != 1 ||
+		stats.DroppedTelemetry != 1 || stats.DroppedActivity != 0 {
+		t.Fatalf("optional saturation displaced activity: %+v", stats)
+	}
+	for range cap(db.writer.activity) {
+		db.AsyncExecActivity("SELECT 2")
+	}
+	stats = db.WriterStats()
+	if stats.ActivityDepth != stats.ActivityCap || stats.DroppedActivity != 1 || stats.DroppedTelemetry != 2 {
+		t.Fatalf("activity saturation not counted separately: %+v", stats)
+	}
+}
+
+func TestActivityCommitFailureIsCountedSeparately(t *testing.T) {
+	db := newTestDB(t)
+	db.AsyncExecActivity("invalid activity sql")
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		stats := db.WriterStats()
+		if stats.DroppedActivity == 1 && stats.DroppedTelemetry == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("activity commit failure not counted: %+v", db.WriterStats())
+}
+
 func TestWriterRecordsPostEnqueueFailuresByPriority(t *testing.T) {
 	db := newTestDB(t)
 	if err := db.AsyncExecCritical(context.Background(), "not valid sql"); err != nil {

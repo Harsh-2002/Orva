@@ -582,11 +582,18 @@ load test with `response_latency_ms`, not `latency_ms`, and remember that the
 two windows can contain different sets of requests.
 
 Prometheus also scrapes the unauthenticated `GET /metrics` path.
-In health's writer object, `critical_queue_bytes` and
+In health's writer object, `critical_queue_bytes`, `activity_queue_bytes`, and
 `telemetry_queue_bytes` include admitted jobs currently queued, being
 committed, or held for retry. They return to zero only after those jobs have
 committed or been explicitly failed/shed. The depth fields count channel
-entries only, so depth zero alone is not a drain signal.
+entries only, so depth zero alone is not a drain signal. `dropped_activity`
+counts lost operator activity rows; it is a subset of `dropped_telemetry`,
+which counts all lost best-effort writes. Activity has a separate admission
+lane from optional replay capture, logs, and spans, but can still drop if its
+own bounded lane or the SQLite writer is saturated. The Prometheus metrics
+are `orva_writer_dropped_activity_total` and
+`orva_writer_dropped_telemetry_total`; `orva_writer_queue_depth` has
+`critical`, `activity`, and `telemetry` priority labels.
 The per-function `orva_pool_service_p95_ms` gauge and `service_p95_ms` in
 pool telemetry measure worker occupancy from successful acquire to release,
 including response processing and streaming. They exclude queue wait and

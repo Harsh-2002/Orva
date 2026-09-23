@@ -330,8 +330,9 @@ hot.
   and are verified before commit. Also records the functions old→new map so
   `ReconcileFunctionDirs` can rename the on-disk trees to match
 - `async.go` — bounded priority writer: critical execution writes apply
-  deadline-aware backpressure; droppable logs/spans/activity use a separate
-  telemetry queue with saturation counters. Both queues batch commits, and are
+  deadline-aware backpressure; operator activity has its own non-blocking lane;
+  optional replay capture/logs/spans use a lower-priority telemetry lane.
+  All three lanes batch commits and report drops separately for activity, and are
   bounded by **bytes** as well as slots (a single job can carry a captured
   request body). A batch that fails is re-applied job-by-job under savepoints
   so one bad statement cannot destroy its neighbours, and a batch that cannot
@@ -462,7 +463,7 @@ Goroutines do almost everything. Critical concurrency primitives:
   acquire/release synchronization.
 - **Per-fn lock** (`Manager.FunctionLock`): serializes deploy and
   rollback on the same function. Different functions are independent.
-- **Async writer**: single goroutine drains a `chan writeJob` and
+- **Async writer**: single goroutine drains three bounded write-job lanes and
   batches DB inserts. Replaces the old goroutine-per-call pattern that
   burned CPU at sustained 500+ req/s.
 - **Autoscaler**: one goroutine per `Manager`, ticks every 2s (`scalerTick`)
@@ -486,9 +487,10 @@ deployment, where horizontal scaling is over-engineering.
 **Why SQLite?** The target is single-host. Postgres would force
 operators to run two services and manage credentials between them. Each
 invocation inserts an execution row and may also emit activity, replay
-capture, spans and logs. The async writer batches commits, but on a small
-host that extra telemetry can exceed its write capacity and is then dropped;
-its counters must be watched during a throughput test.
+capture, spans and logs. The async writer batches commits, prioritizing
+execution and activity ahead of optional telemetry. On a small host, any
+best-effort lane can still exceed its write capacity and drop rows; watch
+both the total and activity-specific drop counters during a throughput test.
 
 **Why nsjail per invocation?** Hardware isolation requires either
 process-level (nsjail / gvisor / kata) or VM-level (firecracker)

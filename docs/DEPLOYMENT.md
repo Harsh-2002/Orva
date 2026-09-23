@@ -16,9 +16,18 @@ Measured on a 2-CPU / 12 GB host (see [CAPACITY.md](CAPACITY.md)):
   `429 TOO_MANY_REQUESTS` once the host-wide sandbox concurrency cap is hit. p50 of
   successful invocations: ~500 ms.
 
-For a single-host deploy, **2 CPU + 4 GB RAM** is plenty for ~50
-functions of mixed traffic. Bigger if your functions hold significant
-memory each.
+Treat **2 CPU + 4 GB RAM** as a reference test size, not a promise of a
+particular request rate or function count. The useful worker count depends on
+each function's memory footprint, execution time, and burst pattern; see
+[CAPACITY.md](CAPACITY.md) for measured runs and their limits.
+
+For bare-metal upgrades, use the installer so the server binary, runtime
+rootfs, adapters, and SDK files stay in step. If deliberately swapping only
+the binary for a development build against existing rootfs trees, run that
+new binary's `orva setup --skip-nsjail --data-dir /var/lib/orva` before
+starting it. An old adapter without the server's readiness handshake can
+make every invocation wait for a worker and return HTTP 429 even though the
+server reports a healthy sandbox runtime.
 
 ## Runtime selection
 
@@ -280,10 +289,11 @@ Retry logic at the caller (or the SDK) handles it.
 
 Not supported. Orva is single-host by design. Two patterns to scale:
 
-- **Vertical**: bigger box, more RAM. The host-wide sandbox concurrency
-  ceiling scales automatically with CPU count (`NumCPU × 64`, floor 200),
-  so adding CPUs raises it.
-  This is the easy answer for sub-1000-req/s aggregate workloads.
+- **Vertical**: more memory can support more warm sandboxes, while more CPU
+  can help CPU-bound functions and cold starts. Orva also has a host-wide
+  execution limiter (default `max(200, NumCPU × 64)`), but worker admission
+  can become constrained earlier by detected memory, file-descriptor, and
+  CPU envelopes. Measure your own workload before sizing.
 - **Stamp out copies**: run multiple independent Orva instances,
   shard functions across them at the LB layer (deterministic hash on
   function name → host). Each instance has its own SQLite, its own
