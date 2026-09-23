@@ -56,6 +56,7 @@ type TraceContext struct {
 
 type ExecutionLog struct {
 	ExecutionID string `json:"execution_id"`
+	FunctionID  string `json:"-"`
 	Stdout      string `json:"stdout"`
 	Stderr      string `json:"stderr"`
 }
@@ -68,6 +69,7 @@ type ExecutionLog struct {
 // will refuse those rows with HTTP 410 Gone.
 type ExecutionRequest struct {
 	ExecutionID string `json:"execution_id"`
+	FunctionID  string `json:"-"`
 	Method      string `json:"method"`
 	Path        string `json:"path"`
 	HeadersJSON string `json:"headers_json"`
@@ -112,9 +114,9 @@ func (db *Database) InsertExecutionFinal(exec *Execution, durationMS int64, stat
 // for the bounded critical writer. Enqueue applies deadline-aware backpressure
 // only when saturated; commit remains off the hot request path. Trace fields are
 // taken from exec.TraceID/SpanID/ParentSpanID/Trigger/ParentFunctionID;
-// callers populate them before calling. IsOutlier + BaselineP95MS are NOT
-// written here — the baseline package back-writes them via UpdateOutlier
-// once the execution has been recorded against its function's baseline.
+// callers populate them before calling. IsOutlier and BaselineP95MS are
+// written in this same INSERT when the caller has classified the execution;
+// older entry points may still back-write them via UpdateOutlier.
 //
 // started_at uses exec.StartedAt when non-zero; otherwise CURRENT_TIMESTAMP.
 // Setting it explicitly matters for the trace tree: under the async batch
@@ -122,25 +124,30 @@ func (db *Database) InsertExecutionFinal(exec *Execution, durationMS int64, stat
 // (parent commits only after the response is sent), so a default-on-insert
 // timestamp would invert causal ordering. Callers measure start time at
 // the top of their handler and pass it down.
-func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int) {
+func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, reservation ...*ExecutionLease) error {
 	coldStart := 0
 	if exec.ColdStart {
 		coldStart = 1
 	}
 	startedAt := executionStartTime(exec.StartedAt)
-	db.AsyncExec(`
+	var lease *ExecutionLease
+	if len(reservation) > 0 {
+		lease = reservation[0]
+	}
+	return db.asyncExecFunctionReserved(exec.FunctionID, lease, true, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
 			started_at, finished_at,
-			trace_id, span_id, parent_span_id, trigger, parent_function_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`,
+			trace_id, span_id, parent_span_id, trigger, parent_function_id,
+			is_outlier, baseline_p95_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`,
 		exec.ID, exec.FunctionID, exec.Status, coldStart, exec.ContainerID,
 		durationMS, statusCode, errMsg, responseSize,
 		startedAt,
 		nullableString(exec.TraceID), nullableString(exec.SpanID),
 		nullableString(exec.ParentSpanID), nullableString(exec.Trigger),
-		nullableString(exec.ParentFunctionID),
+		nullableString(exec.ParentFunctionID), exec.IsOutlier, exec.BaselineP95MS,
 	)
 }
 
@@ -227,10 +234,10 @@ func (db *Database) ListBaselineSeed(perFnSamples int) ([]WarmBaselineSeed, erro
 
 // AsyncInsertExecutionLog queues a log row for the batched writer.
 func (db *Database) AsyncInsertExecutionLog(log *ExecutionLog) {
-	db.AsyncExec(`
+	db.asyncExecFunction(log.FunctionID, `
 		INSERT OR REPLACE INTO execution_logs (execution_id, stdout, stderr)
-		VALUES (?, ?, ?)`,
-		log.ExecutionID, log.Stdout, log.Stderr,
+		SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM executions WHERE id = ?)`,
+		log.ExecutionID, log.Stdout, log.Stderr, log.ExecutionID,
 	)
 }
 
@@ -246,11 +253,11 @@ func (db *Database) AsyncInsertExecutionRequest(req *ExecutionRequest) {
 	// ever queues -- a captured request body up to replay_capture_max_bytes
 	// (1 MiB default) -- and capture is explicitly best-effort, so it does
 	// not belong in the queue whose whole point is not losing anything.
-	db.AsyncExecTelemetry(`
+	db.asyncExecFunctionTelemetry(req.FunctionID, `
 		INSERT OR REPLACE INTO execution_requests (
-			execution_id, method, path, headers_json, body, truncated, captured_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		req.ExecutionID, req.Method, req.Path, req.HeadersJSON,
+			execution_id, function_id, method, path, headers_json, body, truncated, captured_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.ExecutionID, nullableString(req.FunctionID), req.Method, req.Path, req.HeadersJSON,
 		req.Body, truncated, req.CapturedAt,
 	)
 }
@@ -279,13 +286,17 @@ func (db *Database) GetExecutionRequest(id string) (*ExecutionRequest, error) {
 // also stores the replay_of pointer. Separate function so the hot
 // invoke path doesn't pay the cost of an always-NULL parameter on every
 // call. Trace fields ride along the same as AsyncInsertExecutionFinal.
-func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, replayOf string) {
+func (db *Database) AsyncInsertExecutionFinalReplay(exec *Execution, durationMS int64, statusCode int, errMsg string, responseSize int, replayOf string, reservation ...*ExecutionLease) error {
 	coldStart := 0
 	if exec.ColdStart {
 		coldStart = 1
 	}
 	startedAt := executionStartTime(exec.StartedAt)
-	db.AsyncExec(`
+	var lease *ExecutionLease
+	if len(reservation) > 0 {
+		lease = reservation[0]
+	}
+	return db.asyncExecFunctionReserved(exec.FunctionID, lease, true, `
 		INSERT INTO executions (
 			id, function_id, status, cold_start, container_id,
 			duration_ms, status_code, error_message, response_size,
@@ -719,6 +730,14 @@ func (db *Database) DeleteExecution(id string) (bool, error) {
 // retention left the fastest-growing tables growing.
 var executionChildTables = []string{
 	"execution_logs",
+	"execution_requests",
+	"user_spans",
+	"execution_log_entries",
+}
+
+// These no-FK children can arrive before their execution row. Ownership
+// permits function deletion to remove them even when no parent row exists.
+var executionOwnedChildTables = []string{
 	"execution_requests",
 	"user_spans",
 	"execution_log_entries",

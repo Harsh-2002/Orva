@@ -33,6 +33,10 @@ python3 run.py --filter ai        # only modules whose filename contains "ai"
 # had no user; an instance you onboarded through the dashboard has no such file.
 # Use a key from `orva keys create` (or ~/.orva/config.yaml) if it is absent.
 python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.admin-key)"
+
+# When the instance is in a VM, point its mock-provider calls back to the
+# host gateway; run.py preserves an explicitly supplied MOCK_HOST.
+MOCK_HOST=<guest-reachable-host-ip> python3 run.py --url http://127.0.0.1:<forwarded-port> --api-key <scratch-key>
 ```
 
 **Requirements:** `docker` (for isolated mode), `python3`, and a built `build/orva`
@@ -53,11 +57,13 @@ python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.
 ### How the isolated environment works (`env.py`)
 `docker build -t orva:e2e .` → `docker run` with `--cap-add SYS_ADMIN` (no
 `NET_ADMIN` — nsjail makes the TAP device inside its own user namespace),
-`--cgroupns=host --pid=host`, `seccomp/apparmor=unconfined`, a `/sys/fs/cgroup`
+`--cgroupns=host --pid=host`, `seccomp/apparmor/systempaths=unconfined`, a `/sys/fs/cgroup`
 mount, and `--add-host host.docker.internal:host-gateway` (so a test's host-side
 mock LLM is reachable from inside the container). A fresh named volume gives each
 run pristine state. The container is removed (with its volume) on teardown unless
-`--keep`.
+`--keep`. Keep these sandbox flags aligned with `docker-compose.yml`: omitting
+`systempaths=unconfined` on a host that masks `/proc/kcore` makes nsjail fail
+its mandatory `/proc` mount before an adapter can start.
 
 ### Keyless AI testing (`mock_llm.py`)
 Bifrost can point a provider at any base URL, so a test configures an Orva
@@ -112,6 +118,9 @@ This suite is meant to **grow on every change**:
   jobs, kv, webhooks, inbound-webhooks, fixtures, firewall/dns, api-keys, channels,
   traces, system, backup, auth — plus the **AI** assistant (chat, providers,
   settings, conversations, approval, perms).
+- **Deletion fence:** `test_function_delete_race.py` deletes a function while
+  one real sandbox invocation is running, then checks that the writer counts
+  discarded function-owned records without critical SQLite failures.
 - **CLI:** the shared client subcommands (`orva deploy/invoke/functions/logs/kv/…`)
   via `CLIRunner`. Note this does NOT prove slim-CLI parity by itself: `ORVA_BIN`
   defaults to the full server binary, so the same build provides both surfaces

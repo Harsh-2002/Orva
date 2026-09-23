@@ -101,6 +101,9 @@ POST /fn/xxx/health
      │
      ▼ Registry.Get(fnID)               ← in-memory cache, SQLite fallback
      │
+     ▼ proxy reserves daemon heap       ← body-size charge before reading it
+     │      └─ rejected? 429 before body allocation or replay capture
+     ▼ proxy reads + encodes request
      ▼ poolMgr.Acquire(fnID, ctx)       ← per-fn pool; autoscaler may spawn
      │      │
      │      ├ idle worker available?    → reuse
@@ -110,7 +113,7 @@ POST /fn/xxx/health
      │                                                  → exec adapter
      ▼ proxy.Forward(worker, req)
      │      │
-     │      ├ JSON-encode request frame
+     │      ├ capture replay request after successful worker admission
      │      ├ write to worker stdin
      │      ├ read response frame from worker stdout (with TimeoutMS)
      │      └ JSON-decode statusCode/headers/body
@@ -254,16 +257,22 @@ DB for actual work.
 Warm worker pools, one per function, autoscaled.
 
 - `pool.go` — `Manager` owns a `sync.Map[fnID]*functionPool`
+- `Manager.Release` records each worker's complete lease once for the
+  controller's service-time signal, including response processing/streaming;
+  queue and cold-start time are separate signals
 - `function_pool.go` — per-fn idle channel + acquire/release/sweep
 - `autoscaler.go` — Knative-KPA-style: 60s stable + 6s panic windows, `dynamicMax` derived from CPU + memory budget
 - `hostmem.go` — global memory budget tracker (refuses spawns past 80% reservation)
+- `request_budget.go` — daemon-memory reservation before HTTP body reads;
+  pending-count ceilings derive from memory and file-descriptor capacity
 
 ### `backend/internal/sandbox/`
 
 nsjail invocation, per-spawn config, host-wide concurrency limiter.
 
 - `sandbox.go` — builds the nsjail argv (chroot, mounts, cgroup, seccomp)
-- `worker.go` — JSON frame protocol over stdin/stdout, expiry tracking
+- `worker.go` — JSON frame protocol over stdin/stdout; one lifetime stdout
+  reader per warm worker, serialized dispatch, expiry tracking
 - `seccomp.go` — Kafel policy (`default`, `strict`, `permissive`)
 - `limiter.go` — host-wide `MaxConcurrent` semaphore with `TryAcquire`
 
@@ -281,7 +290,9 @@ state; enforcement lives inside each sandbox's own network namespace.
   `Policy.Blocks` replays the same rules for orvad's own dialer.
 - `nstun.go` — publishes each compiled policy as an immutable
   `<dataDir>/firewall/policy/egress-<gen>.cfg` (temp+rename), retargets a
-  `current` symlink for operators, and GCs old generations.
+  `current` symlink for operators, and prunes stale generations only at daemon
+  startup. Runtime pruning could delete a config path captured by a worker
+  before nsjail opens it.
 - `manager.go` — poll loop (10 s table poll, 5 min hostname re-resolve),
   generation bookkeeping, `Snapshot()` for the API, and the
   policy-change callback that retires warm egress pools.
@@ -321,14 +332,22 @@ hot.
   and are verified before commit. Also records the functions old→new map so
   `ReconcileFunctionDirs` can rename the on-disk trees to match
 - `async.go` — bounded priority writer: critical execution writes apply
-  deadline-aware backpressure; droppable logs/spans/activity use a separate
-  telemetry queue with saturation counters. Both queues batch commits, and are
+  deadline-aware backpressure; invocation entrypoints reserve a critical slot before
+  sandbox execution and transfer it to their final-row job until commit;
+  operator activity has its own non-blocking lane;
+  optional replay capture/logs/spans use a lower-priority telemetry lane.
+  All three lanes batch commits and report drops separately for activity, and are
   bounded by **bytes** as well as slots (a single job can carry a captured
-  request body). A batch that fails is re-applied job-by-job under savepoints
+  request body). Adjacent final-execution or activity rows in one batch use
+  a multi-row `VALUES` INSERT; generic jobs keep their individual statements. A batch
+  that fails is re-applied job-by-job under savepoints
   so one bad statement cannot destroy its neighbours, and a batch that cannot
   commit — a VACUUM holding the single write connection, say — is retained and
-  retried rather than dropped. Shutdown signals through a quit channel that
-  producers select on, so no send can race a closed channel.
+  retried rather than dropped. Function deletion is serialized with batch
+  commits; jobs tagged to a function removed before commit are counted as
+  deleted-function writes instead of failing foreign-key checks. Shutdown
+  signals through a quit channel that producers select on, so no send can race
+  a closed channel.
 - `kv.go` — validated, context-aware per-function JSON KV operations and
   all-or-nothing batches; `kv_metrics.go` records operation latency/errors.
 - One file per resource: `functions.go`, `deployments.go`, `secrets.go`, etc.
@@ -364,9 +383,12 @@ the data dir's existence; rotation is a future project.
 
 ### `backend/internal/metrics/`
 
-In-memory ring buffer over the last ~8k invocations. Computes p50,
-p95, p99 server-side so the dashboard doesn't recompute on every
-poll.
+Two bounded in-memory rings each retain at most 8,192 samples. `latency_ms`
+measures invocation dispatch through proxy completion; `response_latency_ms`
+measures the whole public invoke handler, including admission failures and
+execution-record enqueue. The dashboard uses the latter for its **Server
+response time** card. Both compute p50/p95/p99 server-side and exclude
+reverse-proxy, network, and client time.
 
 ### `backend/internal/ai/`
 
@@ -450,8 +472,10 @@ Goroutines do almost everything. Critical concurrency primitives:
   acquire/release synchronization.
 - **Per-fn lock** (`Manager.FunctionLock`): serializes deploy and
   rollback on the same function. Different functions are independent.
-- **Async writer**: single goroutine drains a `chan writeJob` and
-  batches DB inserts. Replaces the old goroutine-per-call pattern that
+- **Async writer**: single goroutine drains three bounded write-job lanes and
+  batches DB inserts. Invocation entrypoints reserve final-row capacity before user
+  code runs; queued, retrying, and in-flight jobs retain that reservation
+  until commit or an explicit failure. Replaces the old goroutine-per-call pattern that
   burned CPU at sustained 500+ req/s.
 - **Autoscaler**: one goroutine per `Manager`, ticks every 2s (`scalerTick`)
   and can be woken early,
@@ -472,10 +496,12 @@ of horizontal scaling — but the target is a self-hosted, single-host
 deployment, where horizontal scaling is over-engineering.
 
 **Why SQLite?** The target is single-host. Postgres would force
-operators to run two services and manage credentials between them. The
-write rate is bounded by invocation throughput (one row per
-invocation), and the async writer batches commits. SQLite in WAL mode
-handles thousands of writes per second on commodity hardware.
+operators to run two services and manage credentials between them. Each
+invocation inserts an execution row and may also emit activity, replay
+capture, spans and logs. The async writer batches commits, prioritizing
+execution and activity ahead of optional telemetry. On a small host, any
+best-effort lane can still exceed its write capacity and drop rows; watch
+both the total and activity-specific drop counters during a throughput test.
 
 **Why nsjail per invocation?** Hardware isolation requires either
 process-level (nsjail / gvisor / kata) or VM-level (firecracker)

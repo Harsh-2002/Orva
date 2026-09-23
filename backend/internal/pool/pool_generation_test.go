@@ -194,7 +194,7 @@ func TestRetiredAcquireReleasesToExactGeneration(t *testing.T) {
 	m.pools.Store(fnID, oldPool)
 
 	w := spawnTestWorker(t)
-	acq := &AcquireResult{Worker: w, ColdStart: true, pool: oldPool}
+	acq := &AcquireResult{Worker: w, ColdStart: true, pool: oldPool, acquiredAt: time.Now().Add(-50 * time.Millisecond)}
 
 	// Retire the generation while its worker is busy, then install a new pool
 	// under the same function ID before the old request releases.
@@ -208,6 +208,12 @@ func TestRetiredAcquireReleasesToExactGeneration(t *testing.T) {
 	m.pools.Store(fnID, newPool)
 
 	m.Release(acq, nil)
+	oldPool.sigMu.Lock()
+	samples := append([]time.Duration(nil), oldPool.serviceSamples...)
+	oldPool.sigMu.Unlock()
+	if len(samples) != 1 || samples[0] < 40*time.Millisecond {
+		t.Fatalf("release must record full worker lease once, got %v", samples)
+	}
 
 	if got := oldPool.busy.Load(); got != 0 {
 		t.Fatalf("old generation busy: want 0, got %d", got)
@@ -240,6 +246,12 @@ func TestRetiredAcquireReleasesToExactGeneration(t *testing.T) {
 	// A duplicate defer/release must not corrupt counters or release the host
 	// limiter twice.
 	m.Release(acq, nil)
+	oldPool.sigMu.Lock()
+	if got := len(oldPool.serviceSamples); got != 1 {
+		oldPool.sigMu.Unlock()
+		t.Fatalf("duplicate release recorded %d service samples", got)
+	}
+	oldPool.sigMu.Unlock()
 	if got := oldPool.busy.Load(); got != 0 {
 		t.Fatalf("duplicate release changed busy count: got %d", got)
 	}

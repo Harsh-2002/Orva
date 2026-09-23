@@ -432,6 +432,16 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		req.Header.Set("Content-Type", autoCT)
 	}
 	rec := httptest.NewRecorder()
+	if deps.DB == nil {
+		return nil, InvokeFunctionOutput{}, errors.New("execution storage is unavailable")
+	}
+	reserveCtx, cancelReserve := context.WithTimeout(ctx, 5*time.Second)
+	executionLease, reserveErr := deps.DB.ReserveExecution(reserveCtx)
+	cancelReserve()
+	if reserveErr != nil {
+		return nil, InvokeFunctionOutput{}, fmt.Errorf("execution storage is catching up; retry: %w", reserveErr)
+	}
+	defer executionLease.Cancel()
 
 	// Generate execution id.
 	execID := ids.New()
@@ -453,14 +463,12 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 
 	codeDir := deps.DataDir + "/functions/" + fn.ID + "/code"
 	lang := sandbox.Language(fn.Runtime)
-	seccompPolicy := sandbox.BuildSeccompPolicy("", nil, nil)
-
 	start := time.Now()
 	reqWithCtx := req.WithContext(tCtx)
 	result, ferr := deps.Proxy.Forward(
 		rec, reqWithCtx, codeDir, lang,
 		fn.ID, execID, timeoutMS,
-		fn.CPUs, seccompPolicy,
+		fn.CPUs,
 		"", true, start,
 	)
 	duration := time.Since(start)
@@ -507,7 +515,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 				TraceID: traceID, SpanID: spanID, Trigger: "mcp",
 				StartedAt: start,
 			},
-			duration.Milliseconds(), rec.Code, errMsg, len(out.Body),
+			duration.Milliseconds(), rec.Code, errMsg, len(out.Body), executionLease,
 		)
 		if deps.Metrics != nil {
 			deps.Metrics.Baselines.FinalizeExecution(deps.DB, execID, fn.ID, execStatus, coldStart, duration.Milliseconds())
@@ -515,6 +523,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		if result != nil && len(result.Stderr) > 0 {
 			deps.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,
+				FunctionID:  fn.ID,
 				Stderr:      string(result.Stderr),
 			})
 		}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -168,6 +169,7 @@ type captureCache struct {
 var capCache captureCache
 
 const captureRefreshEvery = 30 * time.Second
+const streamingRefreshEvery = 30 * time.Second
 
 // LoadCaptureConfig seeds the cached replay-capture settings from the
 // database and starts a background refresher. Idempotent — safe to call
@@ -228,10 +230,47 @@ type Proxy struct {
 	// DB is used to persist the captured request envelope for replay
 	// (v0.4 A3). Optional: when nil, capture is skipped silently. Tests
 	// without a DB wired up keep working unchanged.
-	DB      *database.Database
-	SDKAuth *sdkauth.Authenticator
+	DB             *database.Database
+	SDKAuth        *sdkauth.Authenticator
+	streamMu       sync.Mutex
+	streamSettings atomic.Pointer[streamSettings]
 
 	Config ProxyConfig
+}
+
+type streamSettings struct {
+	enabled          int
+	keepaliveSeconds int
+	expiresAt        time.Time
+}
+
+// streamingConfig avoids two SQLite reads on every invocation. A stale value
+// remains usable while one caller refreshes it; the first load is synchronous.
+func (p *Proxy) streamingConfig() (int, int) {
+	if p.DB == nil {
+		return 1, 15
+	}
+	current := p.streamSettings.Load()
+	if current != nil && time.Now().Before(current.expiresAt) {
+		return current.enabled, current.keepaliveSeconds
+	}
+	if current != nil && !p.streamMu.TryLock() {
+		return current.enabled, current.keepaliveSeconds
+	}
+	if current == nil {
+		p.streamMu.Lock()
+	}
+	defer p.streamMu.Unlock()
+	current = p.streamSettings.Load()
+	if current == nil || !time.Now().Before(current.expiresAt) {
+		current = &streamSettings{
+			enabled:          p.DB.GetSystemConfigInt("streaming_enabled", 1),
+			keepaliveSeconds: p.DB.GetSystemConfigInt("stream_keepalive_seconds", 15),
+			expiresAt:        time.Now().Add(streamingRefreshEvery),
+		}
+		p.streamSettings.Store(current)
+	}
+	return current.enabled, current.keepaliveSeconds
 }
 
 // streamMaxFallback is the wall-clock cap for a streaming response when
@@ -242,8 +281,9 @@ const streamMaxFallback = 300 * time.Second
 
 // ProxyConfig holds sandbox paths needed for execution.
 type ProxyConfig struct {
-	NsjailBin string
-	RootfsDir string
+	NsjailBin    string
+	RootfsDir    string
+	MaxBodyBytes int64
 }
 
 // finalizeStderr separates structured log lines (those starting with
@@ -252,13 +292,13 @@ type ProxyConfig struct {
 // []byte is the original blob with those lines stripped so they don't
 // double-render in the dashboard. Safe to call with nil DB or empty
 // stderr — falls through with the input unchanged.
-func (p *Proxy) finalizeStderr(r *http.Request, execID string, raw []byte) []byte {
+func (p *Proxy) finalizeStderr(r *http.Request, fnID, execID string, raw []byte) []byte {
 	if p.DB == nil || len(raw) == 0 {
 		return raw
 	}
 	tID := trace.TraceID(r.Context())
 	sID := trace.SpanID(r.Context())
-	return stripNsjailNoise(extractStructuredLogs(p.DB, raw, execID, tID, sID))
+	return stripNsjailNoise(extractStructuredLogs(p.DB, raw, fnID, execID, tID, sID))
 }
 
 // New creates a new Proxy.
@@ -298,15 +338,20 @@ func (p *Proxy) Forward(
 	fnID, execID string,
 	timeoutMS int64,
 	cpus float64,
-	seccompPolicy string,
 	stripPrefix string, // strip this from r.URL.Path before passing to the function
 	coldStart bool, // ignored; populated from pool Acquire result
 	startTime time.Time,
 ) (*Result, error) {
 	_ = codeDir
 	_ = cpus
-	_ = seccompPolicy
 	_ = coldStart
+	if p.Pool != nil {
+		release, err := p.Pool.ReserveIngress(fnID, r.ContentLength, p.Config.MaxBodyBytes)
+		if err != nil {
+			return &Result{}, fmt.Errorf("ingress admission: %w", err)
+		}
+		defer release()
+	}
 	releaseExecution := p.SDKAuth.BindExecution(
 		execID, fnID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), startTime,
 	)
@@ -375,12 +420,7 @@ func (p *Proxy) Forward(
 	// v0.4 C1: streaming feature flag. Operator-tunable via system_config;
 	// when off the adapters treat generators as buffered single-frame
 	// responses (back-compat fallback). Default on.
-	streamingOn := 1
-	streamKeepaliveS := 15
-	if p.DB != nil {
-		streamingOn = p.DB.GetSystemConfigInt("streaming_enabled", 1)
-		streamKeepaliveS = p.DB.GetSystemConfigInt("stream_keepalive_seconds", 15)
-	}
+	streamingOn, streamKeepaliveS := p.streamingConfig()
 	headers["x-orva-streaming-enabled"] = strconv.Itoa(streamingOn)
 	headers["x-orva-stream-keepalive-seconds"] = strconv.Itoa(streamKeepaliveS)
 
@@ -395,12 +435,6 @@ func (p *Proxy) Forward(
 	// vs. a SELECT-per-invoke that would cost ~50µs at p99. The cap is
 	// likewise cached so the operator can shrink the maximum body size
 	// without redeploying.
-	if p.DB != nil {
-		if enabled, maxBytes := captureSettings(); enabled {
-			p.captureRequest(execID, r.Method, path, r.Header, body, maxBytes)
-		}
-	}
-
 	reqJSON, _ := json.Marshal(request{
 		Method:  r.Method,
 		Path:    path,
@@ -423,6 +457,13 @@ func (p *Proxy) Forward(
 	if err != nil {
 		return &Result{}, fmt.Errorf("pool acquire: %w", err)
 	}
+	// A rejected request never reached a sandbox and must not consume a
+	// best-effort replay-capture write under overload.
+	if p.DB != nil {
+		if enabled, maxBytes := captureSettings(); enabled {
+			p.captureRequest(fnID, execID, r.Method, path, r.Header, body, maxBytes)
+		}
+	}
 	// Queue admission has its own short budget. The function's configured
 	// timeout starts only once a sandbox is actually ready to execute it.
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
@@ -432,16 +473,10 @@ func (p *Proxy) Forward(
 	var reqErr error
 	defer func() { p.Pool.Release(acq, reqErr) }()
 
-	dispatchStart := time.Now()
 	dres, err := acq.Worker.DispatchEx(ctx, reqJSON)
-	// Feed the per-fn EWMA so the autoscaler can compute Little's-Law floor.
-	// (Streaming responses inflate this number — the dispatch "duration"
-	// includes the entire stream wall-clock. The autoscaler treats this as
-	// signal regardless; see pool.go's note near recordAcquire.)
-	p.Pool.RecordLatency(acq, time.Since(dispatchStart))
 	var stderr []byte
 	if dres != nil {
-		stderr = p.finalizeStderr(r, execID, dres.Stderr())
+		stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 	}
 	result := &Result{Stderr: stderr, ColdStart: acq.ColdStart}
 	if err != nil {
@@ -582,7 +617,7 @@ func (p *Proxy) Forward(
 			// execution row as failed but DO NOT try to emit a JSON
 			// envelope (Wrote=true tells invoke.go we're done).
 			result.Wrote = true
-			result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
+			result.Stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 			return result, fmt.Errorf("stream: %w", err)
 		}
 		if kind == "end" {
@@ -610,7 +645,7 @@ func (p *Proxy) Forward(
 			result.StatusCode = sc
 			result.ResponseSize = totalBytes
 			result.Wrote = true
-			result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
+			result.Stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 			return result, fmt.Errorf("stream write: %w", werr)
 		}
 		if flusher != nil {
@@ -621,7 +656,7 @@ func (p *Proxy) Forward(
 	result.StatusCode = sc
 	result.ResponseSize = totalBytes
 	result.Wrote = true
-	result.Stderr = p.finalizeStderr(r, execID, dres.Stderr())
+	result.Stderr = p.finalizeStderr(r, fnID, execID, dres.Stderr())
 	return result, nil
 }
 
@@ -642,7 +677,7 @@ func truncate(s string, n int) string {
 //
 // The function never returns an error — capture is best-effort and any
 // failure must not affect the in-flight invocation.
-func (p *Proxy) captureRequest(execID, method, path string, hdr http.Header, body []byte, maxBytes int64) {
+func (p *Proxy) captureRequest(fnID, execID, method, path string, hdr http.Header, body []byte, maxBytes int64) {
 	if maxBytes <= 0 {
 		maxBytes = 1 << 20 // 1MiB safety floor
 	}
@@ -680,6 +715,7 @@ func (p *Proxy) captureRequest(execID, method, path string, hdr http.Header, bod
 
 	p.DB.AsyncInsertExecutionRequest(&database.ExecutionRequest{
 		ExecutionID: execID,
+		FunctionID:  fnID,
 		Method:      method,
 		Path:        path,
 		HeadersJSON: string(headersJSON),

@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 )
@@ -43,6 +45,28 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	}
 }
 
+func TestMetricsJSONSeparatesHandlerResponseFromWorkerDuration(t *testing.T) {
+	m := metrics.New()
+	m.RecordDuration(7 * time.Millisecond)
+	m.RecordResponseDuration(75 * time.Millisecond)
+	h := &SystemHandler{Metrics: m}
+	w := httptest.NewRecorder()
+	h.GetMetricsJSON(w, httptest.NewRequest("GET", "/api/v1/system/metrics.json", nil))
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var body struct {
+		LatencyMS         latencyBlock `json:"latency_ms"`
+		ResponseLatencyMS latencyBlock `json:"response_latency_ms"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.LatencyMS.P50 != 7 || body.ResponseLatencyMS.P50 != 75 {
+		t.Fatalf("latency=%+v response=%+v", body.LatencyMS, body.ResponseLatencyMS)
+	}
+}
+
 func TestKVMetricsAndWriterSaturationAreExposed(t *testing.T) {
 	db := newTestDB(t)
 	h := &SystemHandler{Metrics: metrics.New(), DB: db}
@@ -55,8 +79,11 @@ func TestKVMetricsAndWriterSaturationAreExposed(t *testing.T) {
 		"orva_kv_operations_total{operation=\"put\"}",
 		"# TYPE orva_kv_batch_rollbacks_total counter",
 		"# TYPE orva_writer_queue_depth gauge",
+		"orva_writer_queue_depth{priority=\"activity\"}",
 		"# TYPE orva_writer_critical_failures_total counter",
 		"# TYPE orva_writer_dropped_telemetry_total counter",
+		"# TYPE orva_writer_dropped_activity_total counter",
+		"# TYPE orva_writer_deleted_function_writes_total counter",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics output missing %q", want)

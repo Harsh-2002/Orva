@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,13 +22,12 @@ import (
 
 // InvokeHandler handles function invocation requests.
 type InvokeHandler struct {
-	Registry       *registry.Registry
-	Proxy          *proxy.Proxy
-	DB             *database.Database
-	Metrics        *metrics.Metrics
-	Secrets        *secrets.Manager
-	DataDir        string
-	DefaultSeccomp string // Global default seccomp policy name
+	Registry *registry.Registry
+	Proxy    *proxy.Proxy
+	DB       *database.Database
+	Metrics  *metrics.Metrics
+	Secrets  *secrets.Manager
+	DataDir  string
 
 	// PublishEvent is fired after every invocation so the SSE event hub can
 	// stream execution rows to live UI clients (Dashboard recent invocations
@@ -48,6 +48,12 @@ type InvokeHandler struct {
 //   - any custom route previously registered via /api/v1/routes that maps
 //     a user-chosen path (e.g. /webhooks/stripe) to a function_id
 func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	responseStart := time.Now()
+	defer func() {
+		if h.Metrics != nil {
+			h.Metrics.RecordResponseDuration(time.Since(responseStart))
+		}
+	}()
 	reqID := r.Header.Get("X-Request-ID")
 
 	var fnID string
@@ -146,6 +152,14 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Completion capacity is reserved before the sandbox can run. Once user
+	// code has side effects, a full SQLite writer queue cannot safely turn
+	// that invocation into a retryable error or silently lose its record.
+	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
+	if !admitted {
+		return
+	}
+	defer executionLease.Cancel()
 
 	// Generate execution ID — UUIDv7 so executions sort by creation
 	// time naturally (the highest-volume table benefits most from
@@ -185,12 +199,6 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Determine language.
 	lang := sandbox.Language(fn.Runtime)
 
-	// Build seccomp policy for this function. An egress function additionally
-	// needs the outbound socket syscalls the base policies withhold — without
-	// them seccomp kills the connect() before the egress policy is consulted.
-	seccompPolicy := sandbox.BuildSeccompPolicy(h.DefaultSeccomp,
-		sandbox.SeccompAllowForNetworkMode(fn.NetworkMode), nil)
-
 	// No env is built here: a warm worker's environment is fixed at spawn, so
 	// pool.buildEnv merges env_vars + decrypted secrets there. Decrypting them
 	// per request only to discard them was pure cost on the hot path.
@@ -200,7 +208,6 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w, r, codeDir, lang,
 		fnID, execID, timeoutMS,
 		fn.CPUs,
-		seccompPolicy,
 		stripPrefix,
 		true, start,
 	)
@@ -223,20 +230,17 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			statusCode = result.StatusCode
 		}
 		coldStart := result != nil && result.ColdStart
-		h.DB.AsyncInsertExecutionFinal(
-			&database.Execution{
-				ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: coldStart,
-				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
-				StartedAt: start,
-			},
-			duration.Milliseconds(), statusCode, errMsg, 0,
-		)
-		if h.Metrics != nil {
-			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", coldStart, duration.Milliseconds())
+		exec := &database.Execution{
+			ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: coldStart,
+			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
+			StartedAt: start,
 		}
+		h.observeExecutionBaseline(exec, duration.Milliseconds())
+		h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), statusCode, errMsg, 0, executionLease)
 		if result != nil && len(result.Stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: execID,
+				FunctionID:  fn.ID,
 				Stderr:      string(result.Stderr),
 			})
 		}
@@ -260,25 +264,51 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if result.StatusCode >= 500 {
 		execStatus = "error"
 	}
-	h.DB.AsyncInsertExecutionFinal(
-		&database.Execution{
-			ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: result.ColdStart,
-			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
-			StartedAt: start,
-		},
-		duration.Milliseconds(), result.StatusCode, "", result.ResponseSize,
-	)
-	if h.Metrics != nil {
-		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, result.ColdStart, duration.Milliseconds())
+	exec := &database.Execution{
+		ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: result.ColdStart,
+		TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpan, Trigger: "http",
+		StartedAt: start,
 	}
+	h.observeExecutionBaseline(exec, duration.Milliseconds())
+	h.DB.AsyncInsertExecutionFinal(exec, duration.Milliseconds(), result.StatusCode, "", result.ResponseSize, executionLease)
 	// Persist stderr after the execution row so the FK constraint is satisfied.
 	if len(result.Stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: execID,
+			FunctionID:  fn.ID,
 			Stderr:      string(result.Stderr),
 		})
 	}
 	h.publishExecution(execID, fn, execStatus, result.StatusCode, duration.Milliseconds(), result.ResponseSize, result.ColdStart)
+}
+
+// reserveExecution protects an execution's final row before an HTTP
+// entrypoint can dispatch user code. The bounded wait is separate from the
+// configured function timeout, which begins only after worker acquisition.
+func reserveExecution(w http.ResponseWriter, r *http.Request, db *database.Database, reqID string) (*database.ExecutionLease, bool) {
+	reserveCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	lease, err := db.ReserveExecution(reserveCtx)
+	if err != nil {
+		respond.ErrorWithDetail(w, http.StatusTooManyRequests, respond.ErrorOpts{
+			Code: "STORAGE_BACKPRESSURE", Message: "execution storage is catching up",
+			RequestID: reqID, RetryAfterS: 1,
+			Hint: "back off briefly and retry; no function code ran",
+		})
+		return nil, false
+	}
+	return lease, true
+}
+
+func (h *InvokeHandler) observeExecutionBaseline(exec *database.Execution, durationMS int64) {
+	if h.Metrics == nil || h.Metrics.Baselines == nil {
+		return
+	}
+	isOutlier, p95 := h.Metrics.Baselines.ObserveExecution(exec.FunctionID, exec.Status, exec.ColdStart, durationMS)
+	exec.IsOutlier = isOutlier
+	if p95 > 0 {
+		exec.BaselineP95MS = &p95
+	}
 }
 
 // publishExecution fires an `event: execution` to the SSE hub so the live

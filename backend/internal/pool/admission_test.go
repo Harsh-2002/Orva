@@ -13,17 +13,61 @@ import (
 
 func TestQueueCounterNeverExceedsBound(t *testing.T) {
 	var counter atomic.Int64
-	for i := int64(0); i < perFunctionQueueLimit; i++ {
-		if !reserveQueueCounter(&counter, perFunctionQueueLimit) {
+	const limit int64 = 7
+	for i := int64(0); i < limit; i++ {
+		if !reserveQueueCounter(&counter, limit) {
 			t.Fatalf("reservation %d rejected below limit", i)
 		}
 	}
-	if reserveQueueCounter(&counter, perFunctionQueueLimit) {
+	if reserveQueueCounter(&counter, limit) {
 		t.Fatal("reservation above function limit accepted")
 	}
-	if got := counter.Load(); got != perFunctionQueueLimit {
-		t.Fatalf("counter = %d, want %d", got, perFunctionQueueLimit)
+	if got := counter.Load(); got != limit {
+		t.Fatalf("counter = %d, want %d", got, limit)
 	}
+}
+
+func TestQueueWaitTracksColdSpawnButNotSaturatedPool(t *testing.T) {
+	p := testPool("cold-queue", nil, 0)
+	p.requestSpawn = func() {}
+	p.dynamicMax.Store(4)
+	if got := queueWaitFor(p); got != adapterReadyTimeout+scalerTick {
+		t.Fatalf("growing pool wait = %s", got)
+	}
+	p.busy.Store(4)
+	if got := queueWaitFor(p); got != invocationQueueWait {
+		t.Fatalf("saturated pool wait = %s", got)
+	}
+	p.spawning.Store(1)
+	if got := queueWaitFor(p); got != adapterReadyTimeout+scalerTick {
+		t.Fatalf("in-flight spawn wait = %s", got)
+	}
+}
+
+func TestGrowingPoolDoesNotExpireBeforePendingWorkerIsReady(t *testing.T) {
+	m, reg := egressTestManager(t)
+	fn := registerFn(t, reg, "cold-queue-readiness", "none")
+	p, err := m.getOrCreatePool(fn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requested atomic.Bool
+	p.requestSpawn = func() {
+		if requested.CompareAndSwap(false, true) {
+			time.AfterFunc(invocationQueueWait+100*time.Millisecond, func() {
+				p.idle <- &sandbox.Worker{}
+			})
+		}
+	}
+	started := time.Now()
+	got, err := m.Acquire(context.Background(), fn.ID)
+	if err != nil {
+		t.Fatalf("growing pool rejected worker that arrived after ordinary overload wait: %v", err)
+	}
+	if got == nil || got.Worker == nil || time.Since(started) < invocationQueueWait {
+		t.Fatalf("worker arrived too early or was missing: %+v", got)
+	}
+	p.busy.Add(-1) // synthetic worker has no process to release/kill
 }
 
 func TestQueuedAcquireDoesNotConsumeHostExecutionSlot(t *testing.T) {
@@ -92,6 +136,9 @@ func TestPoolDoesNotPublishAdapterBeforeReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Release(acq, nil)
+	if acq.acquiredAt.IsZero() || acq.acquiredAt.Before(started) {
+		t.Fatalf("successful acquire did not start worker lease after admission: %v", acq.acquiredAt)
+	}
 	if elapsed := time.Since(started); elapsed < 90*time.Millisecond {
 		t.Fatalf("worker was published before adapter ready: %s", elapsed)
 	}

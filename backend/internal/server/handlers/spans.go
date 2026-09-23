@@ -93,6 +93,7 @@ func (h *SpansHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	span := &database.UserSpan{
+		FunctionID:   callerFnID,
 		TraceID:      traceID,
 		ParentSpanID: parentSpanID,
 		ExecutionID:  execID,

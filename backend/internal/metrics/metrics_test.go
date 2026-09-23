@@ -60,6 +60,21 @@ func TestRecordDuration_Percentile(t *testing.T) {
 	}
 }
 
+func TestResponseDurationPercentilesAreSeparateFromInvocationDuration(t *testing.T) {
+	m := New()
+	for i := 1; i <= 100; i++ {
+		m.RecordDuration(time.Duration(i) * time.Millisecond)
+		m.RecordResponseDuration(time.Duration(i+100) * time.Millisecond)
+	}
+	snap := m.Snapshot()
+	if snap.P50MS != 50 || snap.P95MS != 95 || snap.P99MS != 99 {
+		t.Fatalf("invocation percentiles = %d/%d/%d", snap.P50MS, snap.P95MS, snap.P99MS)
+	}
+	if snap.ResponseP50MS != 150 || snap.ResponseP95MS != 195 || snap.ResponseP99MS != 199 {
+		t.Fatalf("response percentiles = %d/%d/%d", snap.ResponseP50MS, snap.ResponseP95MS, snap.ResponseP99MS)
+	}
+}
+
 func TestPercentile_Empty(t *testing.T) {
 	m := New()
 	if p := m.Percentile(50); p != 0 {

@@ -171,6 +171,31 @@ func TestControllerV2ScaleDownNeedsThirtySecondsAndCapsTwentyPercent(t *testing.
 	}
 }
 
+func TestReleaseDoesNotBypassScaleDownGrace(t *testing.T) {
+	p, hm := controllerTestPool()
+	p.dynamicMax.Store(1)
+	p.idle <- &sandbox.Worker{}
+	p.busy.Store(1)
+	p.release(&sandbox.Worker{}, nil)
+	if got := len(p.idle); got != 2 {
+		t.Fatalf("release parked %d workers, want both healthy workers until controller scale-down", got)
+	}
+	if got := p.killed.Load(); got != 0 {
+		t.Fatalf("release killed %d workers before scale-down grace", got)
+	}
+
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	s.evaluate(p, now)
+	if got := len(p.idle); got != 2 {
+		t.Fatalf("controller pruned %d workers before grace", 2-got)
+	}
+	s.evaluate(p, now.Add(scaleDownGrace))
+	if got := len(p.idle); got != 1 {
+		t.Fatalf("controller retained %d workers after grace, want 1", got)
+	}
+}
+
 func TestControllerV2ScaleUpBreaksBelowTargetContinuity(t *testing.T) {
 	p, hm := controllerTestPool()
 	p.belowTargetSince = time.Now().Add(-time.Minute)
@@ -206,6 +231,34 @@ func TestControllerV2ReclaimCountsBusyWorkersTowardMinimum(t *testing.T) {
 	}
 	if len(donor.idle) != 0 {
 		t.Fatal("reclaimed worker remained idle")
+	}
+}
+
+func TestControllerV2DoesNotStealWorkersNeededByActiveDonor(t *testing.T) {
+	donor, hm := controllerTestPool()
+	donor.fnID = "active-donor"
+	donor.min = 1
+	donor.desired.Store(5)
+	donor.busy.Store(3)
+	for i := 0; i < 2; i++ {
+		donor.idle <- &sandbox.Worker{}
+	}
+	requester, _ := controllerTestPool()
+	requester.fnID = "requester"
+	m := &Manager{hostMem: hm}
+	m.pools.Store(donor.fnID, donor)
+	m.pools.Store(requester.fnID, requester)
+	s := newScaler(m, hm)
+	if s.reclaimBorrowedIdle(requester) {
+		t.Fatal("stole a worker from a donor still using its desired capacity")
+	}
+	if got := len(donor.idle); got != 2 {
+		t.Fatalf("active donor retained %d idle workers, want 2", got)
+	}
+	donor.queued.Store(1)
+	donor.desired.Store(1)
+	if s.reclaimBorrowedIdle(requester) {
+		t.Fatal("stole a worker while the donor had its own queued request")
 	}
 }
 

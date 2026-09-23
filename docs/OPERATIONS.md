@@ -42,7 +42,8 @@ Full catalog in [ERRORS.md](ERRORS.md). The ones operators see most:
 
 | code | what's happening | what to do |
 |---|---|---|
-| `429 INVOCATION_QUEUE_FULL` | the function's 256-request or host's 1,024-request admission bound was reached, or a request waited 2 seconds for a worker/execution slot | retry with backoff and jitter; inspect `queued`, `queue_wait_p95_ms`, `effective_max`, and `limiting_reason`. Sustained pressure requires more host capacity or faster functions |
+| `429 INVOCATION_QUEUE_FULL` | the memory/FD-derived pending budget or pre-body memory reserve was exhausted, or a request waited 2 seconds at a saturated pool (up to 12 seconds while workers can still start) | retry with backoff and jitter; inspect `queued`, `spawning`, `cold_start_p95_ms`, `queue_wait_p95_ms`, `effective_max`, `limiting_reason`, and host memory. Sustained pressure requires more host capacity or faster functions |
+| `429 STORAGE_BACKPRESSURE` | the execution-record writer cannot reserve a completion slot before the function starts | retry with backoff and jitter; inspect writer queue depth, critical timeouts, activity drops, disk latency, and SQLite checkpoint/vacuum activity. No function code ran for this response |
 | `429 TOO_MANY_REQUESTS` | legacy host-wide concurrency-cap response | client should back off + retry |
 | `503 POOL_AT_CAPACITY` | legacy pool-capacity response | inspect `limiting_reason`; normal HTTP queue expiry now returns `429 INVOCATION_QUEUE_FULL` |
 | `503 MEMORY_EXHAUSTED` | host RAM at 80% reservation | scale-down idle pools, increase host RAM, or reduce per-fn `memory_mb` |
@@ -96,6 +97,24 @@ entrypoint, or a package with no wheel for the runtime's Python (3.14).
 
 **Fix.** Redeploy with corrected code; or rollback to the last known
 good version via the Deployments view.
+
+If **every** invocation waits for a cold worker and returns HTTP 429
+`INVOCATION_QUEUE_FULL` after a manual binary-only upgrade, check the
+runtime adapter version before tuning concurrency. A server that expects the
+adapter's startup `ready` frame cannot use an older rootfs adapter that does
+not emit it. For an existing bare-metal rootfs, run the **new binary's**
+`orva setup --skip-nsjail --data-dir /var/lib/orva` to refresh its embedded
+adapters and SDK, then restart Orva. Prefer the normal installer for upgrades:
+it refreshes the binary, rootfs, and adapters together. The Docker entrypoint
+refreshes adapters on every container start.
+
+During function deletion, completion records for that function may still be
+queued after the API has returned. The writer now discards those records and
+increments `writer.deleted_function_writes` rather than reporting an SQLite
+foreign-key failure. This counter should rise only alongside deliberate
+function deletion; `writer.critical_failures` remains the storage-failure
+signal. Parentless captured requests, spans, and structured logs for the
+deleted function are removed in the same delete transaction.
 
 ## Symptom: EVERY function returns `WORKER_CRASHED` right after a bare-metal install
 

@@ -140,6 +140,36 @@ print(r.json())
 > collision-checks against other functions before saving).
 > Reserved prefixes: `/api/` `/auth/` `/fn/` `/mcp/` `/web/` `/webhook/` `/_orva/`.
 
+### Check response latency
+
+`GET {{ORIGIN}}/api/v1/system/metrics.json` (with a read-capable API key)
+returns `response_latency_ms: {p50, p95, p99}` for the most recent 8,192
+public invoke-handler completions, including admission failures and execution
+record enqueue. The dashboard's **Server response time** card uses these
+values. They exclude reverse-proxy, network, and client time. The separate
+`latency_ms` field stops when the sandbox proxy returns, before record enqueue;
+it is not the end-to-end response time seen by an HTTP client.
+HTTP, inbound-webhook, replay, and internal SDK invocations reserve a critical
+execution-record writer slot before user code runs. If storage pressure
+prevents a reservation within five seconds,
+the server returns `429 STORAGE_BACKPRESSURE` with `Retry-After: 1`; the
+function has not run, so retrying cannot duplicate its side effects.
+MCP invocation tools report storage pressure as a tool error before execution.
+Cron dispatch checks the same reservation and records a failed schedule tick
+without running user code; queued jobs reserve before claiming an attempt.
+
+For writer-drain checks, `GET {{ORIGIN}}/api/v1/system/health` reports
+`writer.critical_queue_bytes`, `writer.activity_queue_bytes`, and
+`writer.telemetry_queue_bytes`. These include
+accepted jobs still in the channel, being committed, or awaiting retry; a
+channel depth of zero alone does not mean the writer is drained. Activity
+has a separate best-effort lane from optional replay/log/span records;
+`writer.dropped_activity` counts lost activity rows and is included in
+`writer.dropped_telemetry`. A function delete removes its execution history;
+`writer.deleted_function_writes` separately counts async execution-related
+jobs discarded because their function was deleted before commit. Such jobs
+are not counted as storage failures.
+
 ---
 
 ## Configuration reference
@@ -1294,7 +1324,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
 - orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — `deploy_function_inline` (MCP) and `POST /api/v1/functions/<id>/deploy-inline` return a `warning` field when the import meets `none`; the dashboard's Deploy button does not surface it.
 - When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
-- Concurrency: each warm worker handles one request at a time; simultaneous requests use separate workers in the same function's pool. A worker becomes available only after its adapter has loaded the handler and signalled readiness. Pool Controller v2 sizes workers from arrival rate, queue pressure, service time, and cold-start time, bounded by the function's pool ceiling and effective host CPU/memory capacity. Admission is bounded to 256 pending requests per function and 1,024 globally, with a 2-second wait budget; overload returns `429 INVOCATION_QUEUE_FULL` and `Retry-After: 1` before user code starts. A function's configured execution timeout starts when a ready worker is acquired, not while waiting in the admission queue or while the adapter loads. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
+- Concurrency: each warm worker handles one request at a time; simultaneous requests use separate workers in the same function's pool. A worker becomes available only after its adapter has loaded the handler and signalled readiness. Pool Controller v2 sizes workers from arrival rate, queue pressure, service time, and cold-start time, bounded by the function's pool ceiling and effective host CPU/memory capacity. Pending admission count scales with detected host memory and file descriptors, with a share reserved for other functions. Public HTTP requests reserve daemon memory before body read; unknown-length bodies use the configured body cap for this estimate. A saturated pool waits at most two seconds for a worker; a pool that can still grow or has workers starting may wait up to twelve seconds (adapter-readiness budget plus one scaler tick). Expired worker admission returns `429 INVOCATION_QUEUE_FULL`; a full execution-record writer returns `429 STORAGE_BACKPRESSURE` after a five-second wait. Both carry `Retry-After: 1` and occur before user code starts. A function's configured execution timeout starts when a ready worker is acquired, not while waiting in the admission queue or while the adapter loads. Rejected requests are not replay-captured. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>
 
 <auth_modes>

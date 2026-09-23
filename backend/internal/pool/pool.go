@@ -121,17 +121,20 @@ func workerCPUUnits(cpus float64) int64 {
 
 // Manager owns all function-scoped pools.
 type Manager struct {
-	cfg      ManagerConfig
-	tmpl     SandboxTemplate
-	db       *database.Database
-	reg      *registry.Registry
-	limiter  *sandbox.Limiter // host-wide ceiling
-	pools    sync.Map         // fnID -> *functionPool
-	poolMu   sync.Mutex       // serializes pool generation create/retire
-	closing  atomic.Bool
-	queued   atomic.Int64   // requests waiting for a worker or host execution slot
-	wg       sync.WaitGroup // reaper goroutines
-	shutdown chan struct{}
+	cfg                ManagerConfig
+	tmpl               SandboxTemplate
+	db                 *database.Database
+	reg                *registry.Registry
+	limiter            *sandbox.Limiter // host-wide ceiling
+	pools              sync.Map         // fnID -> *functionPool
+	poolMu             sync.Mutex       // serializes pool generation create/retire
+	closing            atomic.Bool
+	queued             atomic.Int64 // requests waiting for a worker or host execution slot
+	queueGlobalLimit   int64
+	queueFunctionLimit int64
+	requestBudget      *requestBudget
+	wg                 sync.WaitGroup // reaper goroutines
+	shutdown           chan struct{}
 
 	// fnLocks: per-function mutex for serializing deploy + rollback against
 	// each other. Acquired at the top of Queue.runJob and at the start of
@@ -168,6 +171,9 @@ type AcquireResult struct {
 	// release must never look the pool up by fnID again or an old worker can be
 	// inserted into the replacement generation (an ABA race).
 	pool *functionPool
+	// acquiredAt starts the service-time sample only after queue admission and
+	// the host limiter have handed this worker to the caller.
+	acquiredAt time.Time
 
 	released atomic.Bool
 }
@@ -293,10 +299,25 @@ var (
 )
 
 const (
-	invocationQueueWait   = 2 * time.Second
-	perFunctionQueueLimit = 256
-	globalQueueLimit      = 1024
+	invocationQueueWait = 2 * time.Second
+	adapterReadyTimeout = 10 * time.Second
 )
+
+// A cold/growing pool may need to boot and import user code before it can
+// serve a queued request. Do not reject that request at the ordinary overload
+// deadline while a worker is still within its own readiness budget. The
+// scaler tick covers the delay between demand arriving and a spawn starting.
+// Once every possible worker slot is occupied, keep the short overload wait.
+func queueWaitFor(p *functionPool) time.Duration {
+	if p.requestSpawn == nil {
+		return invocationQueueWait
+	}
+	current := p.busy.Load() + p.spawning.Load() + int64(len(p.idle))
+	if p.spawning.Load() > 0 || current < p.dynamicMax.Load() {
+		return adapterReadyTimeout + scalerTick
+	}
+	return invocationQueueWait
+}
 
 func reserveQueueCounter(counter *atomic.Int64, limit int64) bool {
 	for {
@@ -308,6 +329,15 @@ func reserveQueueCounter(counter *atomic.Int64, limit int64) bool {
 			return true
 		}
 	}
+}
+
+func (m *Manager) pendingLimits() (global, perFunction int64) {
+	if m.queueGlobalLimit > 0 && m.queueFunctionLimit > 0 {
+		return m.queueGlobalLimit, m.queueFunctionLimit
+	}
+	// Hand-wired managers in tests and degraded discovery retain a bounded
+	// fallback. Production managers cache the resource-derived pair at boot.
+	return m.requestBudget.queueLimits()
 }
 
 // NewManager creates a pool manager. limiter is the host-wide concurrency
@@ -339,12 +369,14 @@ func NewManager(cfg ManagerConfig, tmpl SandboxTemplate, db *database.Database, 
 	// leaves 20% for OS + Orva heap + SQLite page cache.
 	if hm, err := newHostMemTracker(0.8); err == nil {
 		m.hostMem = hm
+		m.requestBudget = newRequestBudget(hm)
 		m.scaler = newScaler(m, hm)
 		go m.scaler.run()
 	} else {
 		slog.Warn("host memory tracker unavailable; autoscaler disabled",
 			"err", err)
 	}
+	m.queueGlobalLimit, m.queueFunctionLimit = m.requestBudget.queueLimits()
 	return m
 }
 
@@ -361,6 +393,7 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 	}
 	arrivedAt := time.Now()
 	p.recordArrival(arrivedAt)
+	globalQueueLimit, perFunctionQueueLimit := m.pendingLimits()
 	if !reserveQueueCounter(&m.queued, globalQueueLimit) {
 		p.rejections.Add(1)
 		return nil, ErrInvocationQueueFull
@@ -370,7 +403,7 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		p.rejections.Add(1)
 		return nil, ErrInvocationQueueFull
 	}
-	queueCtx, cancelQueue := context.WithTimeout(ctx, invocationQueueWait)
+	queueCtx, cancelQueue := context.WithTimeout(ctx, queueWaitFor(p))
 	defer cancelQueue()
 	finishQueue := func(pool *functionPool, rejected bool) {
 		pool.queued.Add(-1)
@@ -449,6 +482,7 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		}
 		res.pool = p
 		finishQueue(p, false)
+		res.acquiredAt = time.Now()
 		return res, nil
 	}
 }
@@ -461,15 +495,6 @@ func queueAdmissionError(parent context.Context, err error) error {
 		return ErrInvocationQueueFull
 	}
 	return err
-}
-
-// RecordLatency feeds a per-request service-time sample into the
-// function's rolling p95. Every dispatch path calls it after user code returns
-// or fails. Non-blocking and safe from any goroutine.
-func (m *Manager) RecordLatency(acq *AcquireResult, d time.Duration) {
-	if acq != nil && acq.pool != nil {
-		acq.pool.recordLatency(d)
-	}
 }
 
 // RefreshForDeploy retires the current pool generation so the next Acquire
@@ -558,6 +583,12 @@ func (m *Manager) Release(acq *AcquireResult, reqErr error) {
 			_ = acq.Worker.Kill()
 		}
 		return
+	}
+	// Measure the full lease, including response processing and streaming.
+	// Dispatch alone undercounts busy time and makes Little's-Law scaling
+	// underestimate the workers needed for mixed workloads.
+	if !acq.acquiredAt.IsZero() && acq.Worker != nil {
+		p.recordLatency(time.Since(acq.acquiredAt))
 	}
 	// Always free the per-fn concurrency slot, regardless of whether the
 	// worker exists (Acquire may have errored after taking the slot).
@@ -919,7 +950,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			}
 			// Spawn only starts nsjail. The adapters still need to import the
 			// function; don't hand that cold process to a timed invocation.
-			readyCtx, cancelReady := context.WithTimeout(ctx, 10*time.Second)
+			readyCtx, cancelReady := context.WithTimeout(ctx, adapterReadyTimeout)
 			readyErr := w.AwaitReady(readyCtx)
 			cancelReady()
 			if readyErr != nil {

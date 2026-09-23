@@ -41,15 +41,16 @@ type SystemHandler struct {
 // /metrics endpoint stays for Prometheus scrapers; this is the cheaper
 // path for the dashboard so it doesn't have to parse Prom text.
 type MetricsJSONShape struct {
-	UptimeSeconds  int64           `json:"uptime_seconds"`
-	Host           hostBlock       `json:"host"`
-	Totals         totalsBlock     `json:"totals"`
-	Rates          ratesBlock      `json:"rates"`
-	ActiveRequests int64           `json:"active_requests"`
-	LatencyMS      latencyBlock    `json:"latency_ms"`
-	Sandbox        sandboxBlock    `json:"sandbox"`
-	BuildQueue     buildQueueBlock `json:"build_queue"`
-	Pools          []poolBlock     `json:"pools"`
+	UptimeSeconds     int64           `json:"uptime_seconds"`
+	Host              hostBlock       `json:"host"`
+	Totals            totalsBlock     `json:"totals"`
+	Rates             ratesBlock      `json:"rates"`
+	ActiveRequests    int64           `json:"active_requests"`
+	LatencyMS         latencyBlock    `json:"latency_ms"`
+	ResponseLatencyMS latencyBlock    `json:"response_latency_ms"`
+	Sandbox           sandboxBlock    `json:"sandbox"`
+	BuildQueue        buildQueueBlock `json:"build_queue"`
+	Pools             []poolBlock     `json:"pools"`
 }
 
 type hostBlock struct {
@@ -205,19 +206,25 @@ func (h *SystemHandler) Health(w http.ResponseWriter, r *http.Request) {
 		// Slot depth alone under-reports: a queue holding a handful of
 		// captured request bodies is megabytes deep at 1% of its slots.
 		if (writer.CriticalCap > 0 && writer.CriticalDepth*100/writer.CriticalCap >= 80) ||
+			(writer.ActivityCap > 0 && writer.ActivityDepth*100/writer.ActivityCap >= 80) ||
 			(writer.TelemetryCap > 0 && writer.TelemetryDepth*100/writer.TelemetryCap >= 80) ||
 			(writer.CriticalCapBytes > 0 && writer.CriticalBytes*100/writer.CriticalCapBytes >= 80) ||
+			(writer.ActivityCapBytes > 0 && writer.ActivityBytes*100/writer.ActivityCapBytes >= 80) ||
 			(writer.TelemetryCapBytes > 0 && writer.TelemetryBytes*100/writer.TelemetryCapBytes >= 80) {
 			writerStatus = "saturated"
 		}
 		resp["writer"] = map[string]any{
 			"status": writerStatus, "critical_queue_depth": writer.CriticalDepth,
-			"critical_queue_bytes":  writer.CriticalBytes,
-			"telemetry_queue_bytes": writer.TelemetryBytes,
-			"telemetry_queue_depth": writer.TelemetryDepth,
-			"critical_timeouts":     writer.CriticalTimeouts,
-			"critical_failures":     writer.CriticalFailures,
-			"dropped_telemetry":     writer.DroppedTelemetry,
+			"critical_queue_bytes":    writer.CriticalBytes,
+			"activity_queue_bytes":    writer.ActivityBytes,
+			"activity_queue_depth":    writer.ActivityDepth,
+			"telemetry_queue_bytes":   writer.TelemetryBytes,
+			"telemetry_queue_depth":   writer.TelemetryDepth,
+			"critical_timeouts":       writer.CriticalTimeouts,
+			"critical_failures":       writer.CriticalFailures,
+			"dropped_telemetry":       writer.DroppedTelemetry,
+			"dropped_activity":        writer.DroppedActivity,
+			"deleted_function_writes": writer.DeletedWrites,
 		}
 	}
 
@@ -292,13 +299,18 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		writer := h.DB.WriterStats()
 		promHeader(w, "orva_writer_queue_depth", "gauge", "Pending asynchronous database writes by priority.")
 		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"critical\"} %d\n", writer.CriticalDepth)
+		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"activity\"} %d\n", writer.ActivityDepth)
 		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"telemetry\"} %d\n", writer.TelemetryDepth)
 		promHeader(w, "orva_writer_critical_timeouts_total", "counter", "Critical database writes that exceeded their enqueue deadline.")
 		fmt.Fprintf(w, "orva_writer_critical_timeouts_total %d\n", writer.CriticalTimeouts)
 		promHeader(w, "orva_writer_critical_failures_total", "counter", "Critical database writes lost to transaction failures after enqueue.")
 		fmt.Fprintf(w, "orva_writer_critical_failures_total %d\n", writer.CriticalFailures)
-		promHeader(w, "orva_writer_dropped_telemetry_total", "counter", "Telemetry writes dropped because the bounded queue was full.")
+		promHeader(w, "orva_writer_dropped_telemetry_total", "counter", "Best-effort writes dropped during enqueue, commit, or shutdown, including activity.")
 		fmt.Fprintf(w, "orva_writer_dropped_telemetry_total %d\n", writer.DroppedTelemetry)
+		promHeader(w, "orva_writer_dropped_activity_total", "counter", "Activity records dropped during enqueue, commit, or shutdown; subset of dropped telemetry.")
+		fmt.Fprintf(w, "orva_writer_dropped_activity_total %d\n", writer.DroppedActivity)
+		promHeader(w, "orva_writer_deleted_function_writes_total", "counter", "Execution-related writes discarded because their function was deleted before commit.")
+		fmt.Fprintf(w, "orva_writer_deleted_function_writes_total %d\n", writer.DeletedWrites)
 		kv := h.DB.KVMetrics()
 		promHeader(w, "orva_kv_operations_total", "counter", "KV operations by type.")
 		promHeader(w, "orva_kv_errors_total", "counter", "KV operation failures by type.")
@@ -335,7 +347,7 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		promHeader(w, "orva_pool_desired_workers", "gauge", "Controller desired workers per function.")
 		promHeader(w, "orva_pool_effective_max", "gauge", "Effective host and operator capacity per function.")
 		promHeader(w, "orva_pool_queue_wait_p95_ms", "gauge", "Observed queue-wait p95 per function.")
-		promHeader(w, "orva_pool_service_p95_ms", "gauge", "Observed service-time p95 per function.")
+		promHeader(w, "orva_pool_service_p95_ms", "gauge", "Observed worker-lease p95 per function, from acquire to release.")
 		promHeader(w, "orva_pool_cold_start_p95_ms", "gauge", "Observed worker start p95 per function.")
 		promHeader(w, "orva_pool_rejections_total", "counter", "Pool admission rejections per function.")
 		promHeader(w, "orva_pool_capacity_timeouts_total", "counter", "Capacity waits that reached their deadline.")
@@ -406,6 +418,11 @@ func (h *SystemHandler) BuildMetricsSnapshot() MetricsJSONShape {
 			P50: snap.P50MS,
 			P95: snap.P95MS,
 			P99: snap.P99MS,
+		},
+		ResponseLatencyMS: latencyBlock{
+			P50: snap.ResponseP50MS,
+			P95: snap.ResponseP95MS,
+			P99: snap.ResponseP99MS,
 		},
 	}
 

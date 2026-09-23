@@ -135,6 +135,11 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			"target function is not active", reqID)
 		return
 	}
+	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
+	if !admitted {
+		return
+	}
+	defer executionLease.Cancel()
 
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -190,9 +195,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
 	defer releaseExecution()
-	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
-	h.Pool.RecordLatency(acq, time.Since(dispatchStarted))
 	durationMS := time.Since(startedAt).Milliseconds()
 	if err != nil {
 		reqErr = err
@@ -208,7 +211,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 				TraceID: traceID, SpanID: spanID, Trigger: "inbound",
 				StartedAt: startedAt,
 			},
-			durationMS, 0, errMsg, 0,
+			durationMS, 0, errMsg, 0, executionLease,
 		)
 		if h.Metrics != nil {
 			// Count the invocation, not just the baseline. These paths fed
@@ -220,7 +223,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 		if len(stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
-				ExecutionID: execID, Stderr: string(stderr),
+				ExecutionID: execID, FunctionID: fn.ID, Stderr: string(stderr),
 			})
 		}
 		h.publish(execID, fn, "error", 0, durationMS)
@@ -252,7 +255,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			TraceID: traceID, SpanID: spanID, Trigger: "inbound",
 			StartedAt: startedAt,
 		},
-		durationMS, statusCode, "", len(fnResp.Body),
+		durationMS, statusCode, "", len(fnResp.Body), executionLease,
 	)
 	if h.Metrics != nil {
 		// Count the invocation, not just the baseline. These paths fed
@@ -264,7 +267,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if len(stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
-			ExecutionID: execID, Stderr: string(stderr),
+			ExecutionID: execID, FunctionID: fn.ID, Stderr: string(stderr),
 		})
 	}
 	h.publish(execID, fn, execStatus, statusCode, durationMS)

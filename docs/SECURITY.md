@@ -429,6 +429,9 @@ spawned with that file as `--config` (argv[0..1], before any other flag —
 nsjail's config loader overwrites everything set earlier). There is no
 host firewall table, no `nft` invocation, and no packet filter outside the
 sandbox's own network namespace.
+Published generation files stay available until the next daemon startup so a
+worker that captured an older path can still load its policy; stale files are
+pruned before new workers can spawn.
 
 **Rule order is a security control.** NSTUN is default-ALLOW and
 first-match-wins, so the compiler emits carve-outs before rejects:
@@ -538,8 +541,15 @@ compatibility alias — see [`API.md`](API.md#firewall-status).
   *non-loopback* address (from inside the jail, `127.0.0.1` is the jail's
   own loopback) and is normally RFC1918. A narrow control-plane ALLOW —
   exact address, exact port, TCP — now precedes the blocklist. If that
-  address cannot be determined at startup, the policy refuses to compile
-  rather than shipping one that breaks the SDK.
+  address is unavailable at startup, Orva warns and falls back to loopback;
+  set `ORVA_INTERNAL_API_BASE` to a sandbox-reachable address in that case.
+
+  Orva selects the SDK control-plane target only from an address assigned to
+  its own network interfaces (or an explicit operator override). It does not
+  probe the default gateway for any healthy Orva server: another instance can
+  run there, and a healthy response is not an identity check. Per-worker SDK
+  credentials are process-scoped, so a wrong-instance request is rejected, but
+  it must not be routed to that instance in the first place.
 
 **Sharp edge — the RFC1918 suggestions now also apply to orvad.**
 Because the daemon is filtered by the same rules, enabling the shipped
@@ -697,7 +707,13 @@ cgroup `pids.max` (default 32) caps the process tree. Spawning past
 that limit fails with `EAGAIN` inside the sandbox. The orvad scheduler
 also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see
-`internal/pool/hostmem.go`).
+`internal/pool/hostmem.go`). Public HTTP invocations additionally reserve a
+conservative portion of daemon memory **before** reading their bodies; unknown
+lengths are charged as if they reached the configured body cap. The pending
+request count also scales with the detected memory/FD envelope, with a share
+kept for another function. These are daemon overload guards, not substitutes
+for per-sandbox cgroup limits; when cgroup delegation is unavailable, health
+still reports the weaker `rlimit_only` boundary.
 
 > "What can the in-product AI assistant do, and where do its provider
 > keys live?"

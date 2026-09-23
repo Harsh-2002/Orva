@@ -33,7 +33,77 @@ go vet ./...
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
 | `builder` | Deploy pipeline: tarball → `npm install` / `pip install` → optional `tsc` → register. Every one of those commands runs **inside nsjail** via `sandbox.RunBuild`, using the runtime rootfs's own toolchain and the same compiled NSTUN egress policy a worker gets — the installs fail closed without one. A function with no dependencies runs no installer and needs no policy. `buildcache.go` owns the **per-function** npm/pip cache and every path built from a function id; `gc.go` bounds the caches and reclaims orphaned function dirs. |
-| `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; admission is bounded to 256 pending per function and 1,024 globally with a 2-second wait. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. Failed asynchronous spawns wake pending callers with the original error, preserving fail-closed egress-policy responses. |
+| `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; pending counts derive from the detected memory/FD envelope, with a reserved share for other functions. Saturated pools wait at most 2 seconds; a pool that can still grow or is spawning waits up to the 10-second adapter-readiness budget plus one scaler tick. The HTTP proxy reserves a conservative share of daemon memory before body read; unknown-length bodies are charged at the configured cap. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. Failed asynchronous spawns wake pending callers with the original error, preserving fail-closed egress-policy responses. |
+
+`pool/hostmem.go` discovers the process's cgroup-v2 ancestry via
+`/proc/self/cgroup`. It uses the tightest visible ancestor and host memory headroom and
+CPU quota, plus the effective CPU set, for its startup capacity snapshot; a
+1-second poll refreshes memory usage. This is resource discovery, not proof of
+delegated per-worker cgroup enforcement. `proxy.Forward` does not consume a
+seccomp policy; the worker's actual policy is built at spawn in `pool/pool.go`.
+`proxy.Proxy` caches the non-security streaming settings for at most 30 seconds
+per instance; a refresh never blocks concurrent invocations that already have
+a prior snapshot.
+
+Worker release parks a healthy worker even if a transient capacity snapshot is
+below the current pool size; the controller applies its 30-second scale-down
+grace before pruning idle workers. A queued pool may reclaim idle capacity from
+another function, but not from a donor with its own queue or from an active
+donor below its desired worker count. New spawns still require host memory and
+CPU reservations. Do not reintroduce release-path pruning or reclaim from an
+actively demanded pool: both cause repeated nsjail/adapter cold starts under
+mixed load.
+
+The pool's demand history uses sixty one-second arrival buckets instead of a
+timestamp per request; controller wakeups coalesce within 20 ms. Neither is an
+execution-concurrency cap. The async SQLite writer prepares each distinct SQL
+statement once per batch; HTTP execution baseline/outlier fields are included
+in the execution INSERT instead of a second UPDATE. It has separate bounded
+critical execution, operator activity, and optional replay/log/span lanes.
+The consumer prioritizes critical rows when their queue reaches three
+quarters of its capacity; activity is then deferred and optional telemetry
+is read only when both higher-priority channels are empty. Activity remains non-blocking
+and can still drop if its own lane or SQLite is saturated.
+Adjacent final-execution and operator-activity INSERTs in a batch become
+one multi-row VALUES statement; if that statement fails, the transaction
+rolls back and the per-row savepoint fallback isolates the offending row
+without losing its neighbors. Never bulk a generic write job or remove the
+failure fallback.
+All invocation entrypoints reserve a critical completion slot before executing user code;
+the slot remains owned by a queued/retrying writer job until commit, deletion,
+or an explicit failure. Reject storage pressure before execution with
+`429 STORAGE_BACKPRESSURE` on HTTP paths, never after the sandbox has produced side effects.
+All three queues reserve bytes atomically before publication and return reservations on
+timeout or shedding; do not move accounting after a channel send, because the
+consumer may already have received the job. The reservation remains held while
+a batch is in flight or retrying, then is released on commit or explicit shed.
+Transient retries must copy any alias of the batch before clearing the old
+backing array. Writer shutdown closes the producer
+stop signal, waits for in-flight enqueues under `enqueueMu`, then signals the
+consumer to drain; a late critical producer writes directly while the DB is
+still open. Function deletion takes a writer commit fence and removes
+parentless captured requests, spans, and structured logs by their stored
+function id. Function-tagged jobs processed after deletion are discarded with
+an explicit counter; the live-function cache contains only existing ids, so
+repeated deletions do not accumulate tombstones. `metrics.latency_ms` stops
+at proxy return, while `response_latency_ms` measures the complete public
+invoke handler (including admission and record enqueue), not network transit.
+The pool's `service_p95_ms` samples full worker leases from successful acquire
+to release, including response processing and streaming, but excludes queue
+wait and spawn time. `Manager.Release` records it once for every invocation
+path; handlers must not record separate dispatch-only samples.
+
+Each spawned `sandbox.Worker` has one lifetime stdout frame reader. Readiness,
+buffered replies and streaming chunks consume from that reader's channel;
+context cancellation still marks/kills the worker. Do not reintroduce a
+goroutine per response frame on the warm path or allow concurrent dispatch on
+one worker.
+
+`server.detectInternalAPIBase` chooses a local interface IP (default-route
+interface first) for the sandbox SDK control plane. Do not reintroduce a
+gateway or generic health probe: it can select a separate Orva instance before
+this server begins listening. The environment override remains available for
+unusual routing.
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx` |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |

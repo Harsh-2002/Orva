@@ -25,14 +25,98 @@ orders of magnitude, not SLAs.
 
 For invocation-concurrency changes, use a disposable instance and run
 `python3 test/performance/invocation_admission.py --scratch --url <scratch-url> --api-key <key> --extended`.
+The harness also accepts `ORVA_API_KEY` so a scratch key need not appear in
+the load generator's process arguments.
+The external-instance E2E runner (`test/e2e/run.py --url`) accepts the same
+environment variable for its API key.
 The stdlib-only harness deploys temporary Node and Python functions, tests
 5,000 requests at 100 clients per runtime, mixed-function traffic, a CPU-bound
 handler, and bounded overload; it deletes only the functions it created.
+Before cleanup it waits for active invocation handlers and accepted writer
+bytes to drain, then reports critical-write failures and enqueue timeouts,
+total best-effort drops,
+activity-specific drops, and unexpected deleted-function writes separately,
+so deleting the test functions does not contaminate the persistence result.
+The full E2E suite includes a delete-during-invocation regression module:
+it expects the in-flight response to finish, `critical_failures` to stay
+flat, and `deleted_function_writes` to increase after the writer drains.
+For execution-writer changes, `go test ./backend/internal/database -run '^$'
+-bench '^BenchmarkExecutionWriterInsert$' -benchmem -benchtime=2s -count=3`
+compares 200-row per-statement and grouped-INSERT commits on the same host.
+It isolates SQLite work from HTTP and sandboxes; it cannot establish
+end-to-end capacity by itself.
 It refuses to run without the explicit `--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create
-false timeouts. See [CAPACITY.md](CAPACITY.md) for the measured 2-vCPU/4-GiB
-run and the guest's cgroup limitation.
+false timeouts. When pairing a newly built server binary with an existing
+rootfs, also copy the matching `backend/runtimes/{node,python}` adapters and
+SDK files into the guest rootfs before testing. An older Node adapter without
+the current readiness frame left every worker spawning until its 10-second
+deadline and produced HTTP 429 for every test invocation; that is a fixture
+mismatch, not a valid throughput result. The normal bare-metal installer runs
+`orva setup` to refresh these files on upgrade, and the Docker entrypoint
+refreshes them on startup. See [CAPACITY.md](CAPACITY.md) for the earlier measured
+2-vCPU/4-GiB run and that guest's undelegated cgroups.
+
+An external load generator should be preferred for throughput numbers, but
+validate its path independently. In the 2026-09-23 scratch VM check, the
+forwarded host port reset connections under mixed load while guest-loopback
+functional load and health stayed green. A follow-up connected a separate
+load-generator VM directly to the server VM's private interface; it delivered
+50,000 requests at 1,000 clients without transport errors, demonstrating that
+the host forward is unsuitable for this capacity comparison. The direct VM
+address may change after a guest restart, so rediscover it before each run.
+Compare HTTP status classes and writer counters as well as requests/s; see
+[CAPACITY.md](CAPACITY.md) for the measured result and caveats. The harness
+retries deletion of every function it created if transport fails; inspect
+`admission-test-*` names before deleting anything manually after an
+interrupted run.
+
+For repeatable direct-VM traffic, build `go build -o build/orva-loadgen
+./test/performance/loadgen` and mount the resulting binary into a separate
+client VM on the server VM's private network. Supply **scratch function URLs**
+with repeatable `-url` flags; this tool does not deploy, mutate, or delete
+functions. For example, with a reachable private VM address and two previously
+deployed functions:
+
+```bash
+build/orva-loadgen -url http://<vm-ip>:8443/fn/<node-id> \
+  -url http://<vm-ip>:8443/fn/<python-id> -requests 50000 -concurrency 1000
+build/orva-loadgen -url http://<vm-ip>:8443/fn/<python-id> \
+  -requests 50000 -concurrency 1000 -rate 1200
+```
+
+The first run is closed-loop: slow replies lower the offered arrival rate.
+`-rate` schedules open-loop arrivals; it reports `unsent` when the bounded
+client queue cannot keep up, so an overloaded load generator cannot masquerade
+as a healthy server. JSON separates HTTP status counts, transport errors and
+Orva error codes, plus latency percentiles by response code and by function
+URL. Exit code 1 means
+client transport errors or unsent arrivals; non-200 HTTP responses still need
+interpretation from the JSON. Capture writer counters before and after each
+phase and verify the client VM is not CPU/network saturated. The binary's URL
+list is not an authorization to test production.
+
+Do not give a 4-GiB server guest nearly all free host memory just because its
+nominal limit fits: a 3,000-client scratch run on a 7.8-GiB/no-swap host
+globally OOM-killed that guest while other development processes were active.
+Check host **available** memory and leave headroom for both guests, the host,
+and the test runner. A host OOM makes the phase invalid even if a client
+summary was printed.
+
+For performance work, capture writer counters before and after each phase,
+not just the final health status: a queue that drains afterward can still
+have dropped telemetry or critical execution records at saturation. An HTTP
+200 count alone does not prove execution persistence; `critical_timeouts`
+must remain zero for accepted public invocations. `dropped_activity` is included in
+`dropped_telemetry`; compare both to distinguish operator-feed loss from
+optional replay/log/span loss. Split success, 429, 504, and client
+errors before comparing latency percentiles. Dashboard
+`response_latency_ms` covers the full public invoke handler but excludes
+network/TLS/reverse-proxy time; `latency_ms` is the shorter proxy/worker
+interval. Neither substitutes for client-side `hey` percentiles. See
+[CAPACITY.md](CAPACITY.md) for the 2026-09-23 exploratory 100/500/1,000-client
+guest-loopback results and their limitations.
 
 ### 1.1 Ten minutes: does this build and does the sandbox actually execute code
 
@@ -93,17 +177,20 @@ invocation is the isolated Docker mode:
 cd test/e2e && python3 run.py --rebuild
 ```
 
-**`[UNVERIFIED]`** — no surveyor executed a full `run.py` in isolated-Docker
-mode, because it overwrites the tracked `test/e2e/CHECKLIST.md` and requires a
-full image build whose duration was never measured. The isolated path
-(`env.py`) is documented here from source plus verified preconditions, not from
-a run. What *was* verified: on the survey host, nsjail cannot spawn inside that
-container at all (§2.4), so the isolated mode is not usable there — use `--url`
-against a bare-metal instance instead:
+On 2026-09-23, `ORVA_REQUIRE_SANDBOX=1 python3 test/e2e/run.py --rebuild`
+passed all 29 modules against a freshly built isolated Docker image, with no
+failures or skips. This includes real sandboxed Node/Python deploy/invoke.
+The run overwrites the tracked `test/e2e/CHECKLIST.md`; inspect its diff before
+committing. For an already-provisioned scratch instance, use `--url` instead:
 
 ```bash
 cd test/e2e && python3 run.py --url $BASE --api-key "$KEY"
 ```
+
+For an external instance inside a VM, set `MOCK_HOST` to the host address
+reachable from the guest; the test runner uses `127.0.0.1` only when it is not
+set. Without this, the AI test mock's loopback URL points back into the guest
+and its provider calls fail even though the Orva server is healthy.
 
 That is also how CI runs it, and how the last committed `CHECKLIST.md` was
 produced.
@@ -184,7 +271,7 @@ Two distinct failure signatures, both reproduced:
 | Condition | Deploy | Invoke |
 |---|---|---|
 | nsjail binary missing | succeeds, function reaches `active` | **503** `SANDBOX_ERROR` — `pool acquire: start nsjail: fork/exec /usr/local/bin/nsjail: no such file or directory` |
-| nsjail present but cannot spawn (e.g. `/proc` overmounted in a `--pid=host` container) | succeeds, `active` | **502** `WORKER_CRASHED`; nsjail's own stderr says `buildMountTree(): Failed to mount mandatory point: '/proc'` |
+| nsjail present but cannot spawn (e.g. Docker masks `/proc` and `systempaths=unconfined` is missing) | succeeds, `active` | **502** `WORKER_CRASHED`; nsjail's own stderr says `buildMountTree(): Failed to mount mandatory point: '/proc'` |
 
 Note that in both cases the server stays `healthy` and deploys still succeed.
 **`status: active` is not proof the platform works.**
@@ -240,11 +327,9 @@ shell suites' default `BASE_URL`.
 **(2) `docker compose up -d` — host 3000 → container 8443.** `docker compose
 config` validates; the file supplies everything nsjail needs (`cap_add:
 SYS_ADMIN`, `cgroup: host`, `pid: host`, `/sys/fs/cgroup`, `/dev/net/tun`,
-seccomp/apparmor/systempaths unconfined). **`[UNVERIFIED]` end to end** — on
-the survey host the dev instance already owns port 3000, so compose was never
-brought up. Given that the same `--pid=host` + `/sys/fs/cgroup` combination
-broke nsjail's `/proc` mount in the E2E container on that host, do not assume
-compose gives you a working sandbox there without checking with a real invoke.
+seccomp/apparmor/systempaths unconfined). The isolated E2E container with the
+same flags passed real sandboxed deploy/invoke on this host; compose itself
+still needs a direct invoke check after installation.
 
 **(3) The isolated E2E container (`test/e2e/env.py`) — host 8455 → container
 8443.**
@@ -258,8 +343,10 @@ python3 run.py --url URL --api-key KEY  # target an existing instance, skips Doc
 ```
 
 Container `orva-e2e`, volume `orva-e2e-data`, both removed on teardown. Admin
-key via `docker exec orva-e2e cat /var/lib/orva/.admin-key`. **`[UNVERIFIED]`
-as a full run** — see §1.2. Two traps that *were* verified:
+key via `docker exec orva-e2e cat /var/lib/orva/.admin-key`. On 2026-09-23 a
+freshly rebuilt image with the corrected harness passed 29 modules, including
+real Node/Python invocation and firewall checks, with `ORVA_REQUIRE_SANDBOX=1`.
+Two traps were verified:
 
 - **`ensure_image()` silently reuses a stale image.** It returns early whenever
   the `orva:e2e` tag exists, with no staleness check. On the survey host that
@@ -271,11 +358,14 @@ as a full run** — see §1.2. Two traps that *were* verified:
   ```bash
   docker image inspect orva:e2e --format '{{.Created}}'
   ```
-- **Nested sandboxing failed in that container on the survey host.** `--pid=host`
-  plus the host's `/proc` overmounts made nsjail fail
-  `buildMountTree(): Failed to mount mandatory point: '/proc'`, so
-  `test_deploy_invoke.py` skipped (exit 3) — and with `ORVA_REQUIRE_SANDBOX=1`
-  reported `1 FAILED / 6 checks`. If you see that, use option (1).
+- **The E2E harness once omitted `systempaths=unconfined`.** On hosts where
+  Docker masks `/proc/kcore`, nsjail then failed
+  `buildMountTree(): Failed to mount mandatory point: '/proc'`; with
+  `ORVA_REQUIRE_SANDBOX=1`, the suite correctly failed its invocation modules.
+  The harness now passes the flag already used by compose and the documented
+  `docker run` command. Do not disable nsjail's `/proc` mount as a workaround;
+  sandboxed handlers may need `/proc/self/*` and the security contract promises
+  a fresh procfs scoped to their PID namespace.
 
 **(4) A live/shared instance.** Read-only work is fine. Before you point any
 suite at it, read §3.2.5 — one E2E module deletes *every* AI conversation on the

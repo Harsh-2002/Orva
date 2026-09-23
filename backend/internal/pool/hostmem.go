@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,7 +26,7 @@ type hostMemTracker struct {
 	// Static — filled at construction.
 	totalBytes        int64
 	cgroupConstrained bool
-	cgroupCurrentPath string
+	cgroupDirs        []string
 	cpuWorkers        int
 	// Dynamic — refreshed by the poller goroutine.
 	availBytes atomic.Int64 // MemAvailable from /proc/meminfo
@@ -55,15 +56,15 @@ func newHostMemTracker(reservationPct float64) (*hostMemTracker, error) {
 		stop:           make(chan struct{}),
 	}
 	hostTotal, _ := readMeminfo("MemTotal")
-	limit, constrained := readCgroupMemoryLimit(hostTotal)
+	t.cgroupDirs = selfCgroupDirs()
+	limit, constrained := cgroupMemoryCapacity(t.cgroupDirs, hostTotal)
 	if constrained {
 		t.totalBytes = limit
 		t.cgroupConstrained = true
-		t.cgroupCurrentPath = "/sys/fs/cgroup/memory.current"
 	} else {
 		t.totalBytes = hostTotal
 	}
-	t.cpuWorkers = effectiveCPUWorkers()
+	t.cpuWorkers = cgroupCPUWorkers(t.cgroupDirs, runtime.NumCPU())
 	if err := t.refresh(); err != nil {
 		return nil, err
 	}
@@ -99,13 +100,15 @@ func (t *hostMemTracker) close() {
 
 func (t *hostMemTracker) refresh() error {
 	if t.cgroupConstrained {
-		current, err := readIntFile(t.cgroupCurrentPath)
-		if err != nil {
-			return err
+		avail, ok := cgroupMemoryAvailable(t.cgroupDirs, t.totalBytes)
+		if !ok {
+			return errors.New("cgroup memory usage unavailable")
 		}
-		avail := t.totalBytes - current
-		if avail < 0 {
-			avail = 0
+		// A limited service can still share physical RAM with other cgroups.
+		// Treat host pressure as another ceiling rather than assuming the
+		// service's cgroup headroom is backed by free physical memory.
+		if hostAvail, err := readMeminfo("MemAvailable"); err == nil && hostAvail < avail {
+			avail = hostAvail
 		}
 		t.availBytes.Store(avail)
 		return nil
@@ -242,12 +245,79 @@ func readIntFile(path string) (int64, error) {
 	return strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
 }
 
-func readCgroupMemoryLimit(hostTotal int64) (int64, bool) {
-	b, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+// selfCgroupDirs includes the process's leaf and every ancestor up to the
+// visible cgroup root. An ancestor can impose a tighter limit than the leaf.
+func selfCgroupDirs() []string {
+	b, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
-		return 0, false
+		return nil
 	}
-	return parseCgroupMemoryLimit(string(b), hostTotal)
+	for _, line := range strings.Split(string(b), "\n") {
+		if !strings.HasPrefix(line, "0::") {
+			continue
+		}
+		return cgroupDirs("/sys/fs/cgroup", strings.TrimPrefix(line, "0::"))
+	}
+	return nil
+}
+
+func cgroupDirs(root, membership string) []string {
+	root = filepath.Clean(root)
+	path := filepath.Join(root, filepath.Clean("/"+membership))
+	var dirs []string
+	for {
+		dirs = append(dirs, path)
+		if path == root {
+			return dirs
+		}
+		parent := filepath.Dir(path)
+		if parent == path || (parent != root && !strings.HasPrefix(parent, root+string(filepath.Separator))) {
+			return nil
+		}
+		path = parent
+	}
+}
+
+func cgroupMemoryCapacity(dirs []string, hostTotal int64) (int64, bool) {
+	var capacity int64
+	for _, dir := range dirs {
+		b, err := os.ReadFile(filepath.Join(dir, "memory.max"))
+		if err != nil {
+			continue
+		}
+		if limit, ok := parseCgroupMemoryLimit(string(b), hostTotal); ok && (capacity == 0 || limit < capacity) {
+			capacity = limit
+		}
+	}
+	return capacity, capacity > 0
+}
+
+func cgroupMemoryAvailable(dirs []string, hostTotal int64) (int64, bool) {
+	available := hostTotal
+	found := false
+	for _, dir := range dirs {
+		b, err := os.ReadFile(filepath.Join(dir, "memory.max"))
+		if err != nil {
+			continue
+		}
+		limit, ok := parseCgroupMemoryLimit(string(b), 0)
+		if !ok {
+			continue
+		}
+		used, err := readIntFile(filepath.Join(dir, "memory.current"))
+		if err != nil {
+			continue
+		}
+		free := limit - used
+		if free < 0 {
+			free = 0
+		}
+		if free < available {
+			available = free
+		}
+		found = true
+	}
+	return available, found
 }
 
 func parseCgroupMemoryLimit(value string, hostTotal int64) (int64, bool) {
@@ -263,14 +333,55 @@ func parseCgroupMemoryLimit(value string, hostTotal int64) (int64, bool) {
 }
 
 func effectiveCPUWorkers() int {
-	return parseCPUQuota(runtime.NumCPU(), readCPUQuota())
+	return cgroupCPUWorkers(selfCgroupDirs(), runtime.NumCPU())
 }
 
-func readCPUQuota() string {
-	if b, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
-		return string(b)
+func cgroupCPUWorkers(dirs []string, hostCPUs int) int {
+	workers := parseCPUQuota(hostCPUs, "max 100000")
+	for _, dir := range dirs {
+		if b, err := os.ReadFile(filepath.Join(dir, "cpuset.cpus.effective")); err == nil {
+			if cpus, ok := parseCPUSet(string(b)); ok {
+				if limit := cpus * workerSlotsPerCPU; limit < workers {
+					workers = limit
+				}
+			}
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, "cpu.max")); err == nil {
+			if limit := parseCPUQuota(hostCPUs, string(b)); limit < workers {
+				workers = limit
+			}
+		}
 	}
-	return "max 100000"
+	return workers
+}
+
+// parseCPUSet counts distinct CPUs in the kernel's comma-separated cpuset
+// format. Invalid or implausibly large values are ignored rather than
+// silently treated as a one-CPU limit.
+func parseCPUSet(value string) (int, bool) {
+	seen := make(map[int]struct{})
+	for _, part := range strings.Split(strings.TrimSpace(value), ",") {
+		if part == "" {
+			return 0, false
+		}
+		first, last := part, part
+		if strings.Contains(part, "-") {
+			var ok bool
+			first, last, ok = strings.Cut(part, "-")
+			if !ok {
+				return 0, false
+			}
+		}
+		start, startErr := strconv.Atoi(first)
+		end, endErr := strconv.Atoi(last)
+		if startErr != nil || endErr != nil || start < 0 || end < start || end > 1<<16 {
+			return 0, false
+		}
+		for cpu := start; cpu <= end; cpu++ {
+			seen[cpu] = struct{}{}
+		}
+	}
+	return len(seen), len(seen) > 0
 }
 
 func parseCPUQuota(hostCPUs int, value string) int {

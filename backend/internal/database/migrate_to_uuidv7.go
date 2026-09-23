@@ -74,6 +74,9 @@ var rewrites = []idRewrite{
 			// but this list keeps them pointing at a real function.
 			{"executions", "parent_function_id"},
 			{"jobs", "enqueued_by_function_id"},
+			{"execution_requests", "function_id"},
+			{"user_spans", "function_id"},
+			{"execution_log_entries", "function_id"},
 		},
 	},
 	{

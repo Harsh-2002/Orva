@@ -254,12 +254,24 @@ the handler throws or returns an AWS-shape `{statusCode, body}`.
 Custom routes (e.g. `/webhooks/stripe`) reach the same handler — see
 the routes section below.
 
-Admission allows at most 256 pending invocations for one function and 1,024
-pending invocations on the host, with a 2-second wait for a worker and host
-execution slot. If either bound is reached, the response is `429
-INVOCATION_QUEUE_FULL` with `Retry-After: 1`; no user code ran. The function's
-`timeout_ms` starts after admission, when a worker is ready, so waiting in the
-queue does not consume its execution budget.
+Pending invocation capacity is derived from detected memory and file-descriptor
+limits rather than a fixed request count. One function can use at most three
+quarters of that pending budget, leaving room for another function. The server
+also reserves memory before reading a public request body (unknown-length
+bodies are charged at the configured body cap). A saturated pool waits at most
+two seconds; a pool that can still grow or has workers starting may wait up to
+the ten-second adapter-readiness budget plus one scaler tick (twelve seconds).
+Exhausted capacity or an expired wait returns `429 INVOCATION_QUEUE_FULL` with
+`Retry-After: 1`; no user code ran.
+HTTP, inbound-webhook, replay, and internal SDK invocations also reserve a
+critical execution-record slot before the sandbox runs. If the SQLite writer
+cannot supply one within five seconds,
+Orva returns `429 STORAGE_BACKPRESSURE` with `Retry-After: 1`; no user code ran.
+This prevents an accepted function's completion record from being lost just
+because the writer queue filled after the function executed.
+The function's `timeout_ms` starts after admission, when a worker is ready.
+Replay capture begins only after a worker has been acquired, so rejected
+requests have no replay body even when capture is enabled.
 
 **Response headers.** Every invoke carries `X-Orva-Execution-ID`, including a
 timeout or a sandbox failure, which answer from the invoke handler rather than
@@ -565,9 +577,38 @@ flap while the dashboard explains the reduced resource-limit mode.
 Prometheus text format.
 
 ### `GET /api/v1/system/metrics.json`
-Same data, JSON shape, used by the dashboard.
+Structured metrics used by the dashboard. `latency_ms` contains p50/p95/p99
+for the dispatch/proxy interval of recent invocations; it stops before
+execution-record enqueue and does not represent the full HTTP response.
+`response_latency_ms` contains p50/p95/p99 for the complete public invoke
+handler, including admission rejection and record enqueue. Both are rolling
+windows of at most 8,192 samples across functions, in integer milliseconds.
+Neither includes reverse-proxy, network, or client-side time. Compare a public
+load test with `response_latency_ms`, not `latency_ms`, and remember that the
+two windows can contain different sets of requests.
 
 Prometheus also scrapes the unauthenticated `GET /metrics` path.
+In health's writer object, `critical_queue_bytes`, `activity_queue_bytes`, and
+`telemetry_queue_bytes` include admitted jobs currently queued, being
+committed, or held for retry. They return to zero only after those jobs have
+committed or been explicitly failed/shed. The depth fields count channel
+entries only, so depth zero alone is not a drain signal. `dropped_activity`
+counts lost operator activity rows; it is a subset of `dropped_telemetry`,
+which counts all lost best-effort writes. Activity has a separate admission
+lane from optional replay capture, logs, and spans, but can still drop if its
+own bounded lane or the SQLite writer is saturated. The Prometheus metrics
+are `orva_writer_dropped_activity_total` and
+`orva_writer_dropped_telemetry_total`; `orva_writer_queue_depth` has
+`critical`, `activity`, and `telemetry` priority labels. Deleting a function
+removes its execution history, including completions that arrive during the
+delete. `deleted_function_writes` counts function-owned async jobs deliberately
+discarded after deletion; it is separate from `critical_failures` and
+`dropped_telemetry`. Prometheus exposes the same count as
+`orva_writer_deleted_function_writes_total`.
+The per-function `orva_pool_service_p95_ms` gauge and `service_p95_ms` in
+pool telemetry measure worker occupancy from successful acquire to release,
+including response processing and streaming. They exclude queue wait and
+cold-start time; they are not end-to-end HTTP latency.
 
 ### Backup, storage, and firewall administration
 

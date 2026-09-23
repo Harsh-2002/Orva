@@ -11,6 +11,7 @@ import (
 // during stderr drain and queues an insert here.
 type LogEntry struct {
 	ID          int64     `json:"id"`
+	FunctionID  string    `json:"-"`
 	ExecutionID string    `json:"execution_id"`
 	TraceID     string    `json:"trace_id,omitempty"`
 	SpanID      string    `json:"span_id,omitempty"`
@@ -30,11 +31,11 @@ func (db *Database) AsyncInsertLogEntry(e *LogEntry) {
 	if e.Level == "" {
 		e.Level = "info"
 	}
-	db.AsyncExecTelemetry(`
-		INSERT INTO execution_log_entries (execution_id, trace_id, span_id, ts,
+	db.asyncExecFunctionTelemetry(e.FunctionID, `
+		INSERT INTO execution_log_entries (execution_id, function_id, trace_id, span_id, ts,
 		                                   level, message, fields)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.ExecutionID, nullableString(e.TraceID), nullableString(e.SpanID),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ExecutionID, nullableString(e.FunctionID), nullableString(e.TraceID), nullableString(e.SpanID),
 		e.TS, e.Level, e.Message, nullableString(e.Fields),
 	)
 }

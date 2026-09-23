@@ -356,6 +356,16 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	reserveCtx, cancelReserve := context.WithTimeout(parent, 5*time.Second)
+	executionLease, reserveErr := s.db.ReserveExecution(reserveCtx)
+	cancelReserve()
+	if reserveErr != nil {
+		errMsg := "execution storage backpressure: " + reserveErr.Error()
+		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		s.publishCron("failed", row, fn.Name, errMsg)
+		return
+	}
+	defer executionLease.Cancel()
 
 	acq, err := s.pool.Acquire(parent, row.FunctionID)
 	if err != nil {
@@ -398,16 +408,14 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 
 	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, ranAt)
 	defer releaseExecution()
-	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
-	s.pool.RecordLatency(acq, time.Since(dispatchStarted))
 	if err != nil {
 		reqErr = err
 		errMsg := err.Error()
 		if errors.Is(err, context.DeadlineExceeded) {
 			errMsg = "function timed out"
 		}
-		s.recordExecution(execID, fn.ID, "error", 0, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
+		s.recordExecution(executionLease, execID, fn.ID, "error", 0, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, fn.Name, errMsg)
 		return
@@ -426,13 +434,13 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 
 	if statusCode >= 500 {
 		errMsg := "function returned " + http3xxLabel(statusCode)
-		s.recordExecution(execID, fn.ID, "error", statusCode, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
+		s.recordExecution(executionLease, execID, fn.ID, "error", statusCode, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
 
-	s.recordExecution(execID, fn.ID, "success", statusCode, ranAt, stderr, "", traceID, spanID, "", "cron", "")
+	s.recordExecution(executionLease, execID, fn.ID, "success", statusCode, ranAt, stderr, "", traceID, spanID, "", "cron", "")
 	s.persistResult(row.ID, ranAt, nextAt, "ok", "")
 }
 
@@ -448,7 +456,7 @@ func (s *Scheduler) persistResult(id string, ranAt, nextAt time.Time, status, er
 // trigger is the cause (cron / job / etc); traceID/spanID/parentSpanID
 // link the row into a causal chain. parentFnID is empty for cron roots
 // and set to the enqueuing function for jobs.
-func (s *Scheduler) recordExecution(execID, fnID, status string, statusCode int, startedAt time.Time, stderr []byte, errMsg, traceID, spanID, parentSpanID, trigger, parentFnID string) {
+func (s *Scheduler) recordExecution(lease *database.ExecutionLease, execID, fnID, status string, statusCode int, startedAt time.Time, stderr []byte, errMsg, traceID, spanID, parentSpanID, trigger, parentFnID string) {
 	durationMS := time.Since(startedAt).Milliseconds()
 	exec := &database.Execution{
 		ID:               execID,
@@ -462,7 +470,7 @@ func (s *Scheduler) recordExecution(execID, fnID, status string, statusCode int,
 		ParentFunctionID: parentFnID,
 		StartedAt:        startedAt,
 	}
-	s.db.AsyncInsertExecutionFinal(exec, durationMS, statusCode, errMsg, 0)
+	s.db.AsyncInsertExecutionFinal(exec, durationMS, statusCode, errMsg, 0, lease)
 	if s.metrics != nil {
 		// Feed the invocation counters too, not just the baselines. Only the
 		// HTTP paths did this, so orva_invocations_total, the cold/warm
@@ -477,6 +485,7 @@ func (s *Scheduler) recordExecution(execID, fnID, status string, statusCode int,
 	if len(stderr) > 0 {
 		s.db.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: execID,
+			FunctionID:  fnID,
 			Stderr:      string(stderr),
 		})
 	}
@@ -612,28 +621,45 @@ func (s *Scheduler) jobsTick(parent context.Context) {
 	if free <= 0 {
 		return
 	}
-	jobs, err := s.db.ClaimDueJobs(time.Now().UTC(), free)
+	// Claiming increments attempts. Reserve completion capacity first so
+	// storage pressure cannot consume a retry without running user code.
+	leases := make([]*database.ExecutionLease, 0, free)
+	for range free {
+		reserveCtx, cancel := context.WithTimeout(parent, 50*time.Millisecond)
+		lease, err := s.db.ReserveExecution(reserveCtx)
+		cancel()
+		if err != nil {
+			break
+		}
+		leases = append(leases, lease)
+	}
+	if len(leases) == 0 {
+		return
+	}
+	jobs, err := s.db.ClaimDueJobs(time.Now().UTC(), len(leases))
 	if err != nil {
+		for _, lease := range leases {
+			lease.Cancel()
+		}
 		slog.Warn("jobs: claim failed", "err", err)
 		return
 	}
-	for _, job := range jobs {
-		select {
-		case s.jobsSem <- struct{}{}:
-		default:
-			// Shouldn't happen since we sized to `free`, but be safe.
-			continue
-		}
+	for i := len(jobs); i < len(leases); i++ {
+		leases[i].Cancel()
+	}
+	for i, job := range jobs {
+		s.jobsSem <- struct{}{}
 		s.inflightWG.Add(1)
-		go func(j *database.Job) {
+		go func(j *database.Job, lease *database.ExecutionLease) {
 			defer s.inflightWG.Done()
 			defer func() { <-s.jobsSem }()
-			s.runJob(parent, j)
-		}(job)
+			s.runJob(parent, j, lease)
+		}(job, leases[i])
 	}
 }
 
-func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
+func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *database.ExecutionLease) {
+	defer lease.Cancel()
 	startedAt := time.Now()
 
 	// finalize handles the dual concerns of (a) persisting the
@@ -714,12 +740,10 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 
 	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
 	defer releaseExecution()
-	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
-	s.pool.RecordLatency(acq, time.Since(dispatchStarted))
 	if err != nil {
 		reqErr = err
-		s.recordExecution(execID, fn.ID, "error", 0, startedAt, stderr, err.Error(),
+		s.recordExecution(lease, execID, fn.ID, "error", 0, startedAt, stderr, err.Error(),
 			traceID, spanID, j.ParentSpanID, "job", j.EnqueuedByFunctionID)
 		finalize(fn.Name, err.Error(), false)
 		return
@@ -731,7 +755,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	}
 	_ = json.Unmarshal(respJSON, &resp)
 	if resp.StatusCode >= 500 {
-		s.recordExecution(execID, fn.ID, "error", resp.StatusCode, startedAt, stderr,
+		s.recordExecution(lease, execID, fn.ID, "error", resp.StatusCode, startedAt, stderr,
 			"function returned 5xx", traceID, spanID, j.ParentSpanID, "job",
 			j.EnqueuedByFunctionID)
 		finalize(fn.Name, "function returned 5xx", false)
@@ -741,7 +765,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	if statusCode == 0 {
 		statusCode = 200
 	}
-	s.recordExecution(execID, fn.ID, "success", statusCode, startedAt, stderr, "",
+	s.recordExecution(lease, execID, fn.ID, "success", statusCode, startedAt, stderr, "",
 		traceID, spanID, j.ParentSpanID, "job", j.EnqueuedByFunctionID)
 	finalize(fn.Name, "", true)
 }

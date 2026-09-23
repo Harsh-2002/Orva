@@ -23,6 +23,11 @@ type Database struct {
 	// (so tests that create a Database without migrating still work).
 	writer *asyncWriter
 	kv     kvMetrics
+	// lifecycleMu serializes function deletion with the async writer's
+	// commit pass, not with request enqueues. liveFunctions caches only
+	// existing ids, so deleting functions does not grow a tombstone map.
+	lifecycleMu   sync.RWMutex
+	liveFunctions sync.Map
 
 	// asyncWG tracks fire-and-forget goroutines (log inserts, last-used
 	// updates) so Close() can wait for them to finish before tearing the

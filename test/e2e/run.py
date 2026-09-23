@@ -174,8 +174,8 @@ def main():
     if args.url:
         target = args.url.rstrip("/")
         env["ORVA_URL"] = target
-        env["ORVA_API_KEY"] = args.api_key or resolve_admin_key()
-        env["MOCK_HOST"] = "127.0.0.1"
+        env["ORVA_API_KEY"] = args.api_key or env.get("ORVA_API_KEY") or resolve_admin_key()
+        env.setdefault("MOCK_HOST", "127.0.0.1")
         target_desc = f"external instance {target}"
     else:
         import env as envmod
@@ -188,7 +188,7 @@ def main():
             inst.wait_healthy()
             env["ORVA_URL"] = inst.base_url
             env["ORVA_API_KEY"] = inst.admin_key()
-            env["MOCK_HOST"] = "host.docker.internal"
+            env.setdefault("MOCK_HOST", "host.docker.internal")
             target_desc = f"isolated Docker image `{envmod.IMAGE}` ({inst.base_url})"
         except Exception as e:
             print(f"failed to bring up isolated instance: {e}", file=sys.stderr)

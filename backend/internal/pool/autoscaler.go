@@ -11,6 +11,7 @@ import (
 
 const (
 	scalerTick                 = 2 * time.Second
+	minScalerEvaluateInterval  = 20 * time.Millisecond
 	stableWindow               = 60 * time.Second
 	panicWindow                = 6 * time.Second
 	utilFactor                 = 0.70
@@ -53,17 +54,41 @@ func (s *scaler) run() {
 	defer t.Stop()
 	defer close(s.runDone)
 	slog.Info("pool controller v2 started", "tick", s.tick, "stable_window", stableWindow, "burst_window", panicWindow)
+	var lastEvaluation time.Time
 	for {
 		select {
 		case <-t.C:
 			s.evaluateAll()
+			lastEvaluation = time.Now()
 		case <-s.wake:
+			// The first shortage is evaluated immediately. A saturated pool
+			// can then nudge once per request; coalesce that burst so sorting
+			// rolling demand samples never consumes a core by itself.
+			if wait := scalerEvaluationWait(lastEvaluation, time.Now()); wait > 0 {
+				select {
+				case <-time.After(wait):
+				case <-s.stop:
+					slog.Info("pool controller v2 stopped")
+					return
+				}
+			}
 			s.evaluateAll()
+			lastEvaluation = time.Now()
 		case <-s.stop:
 			slog.Info("pool controller v2 stopped")
 			return
 		}
 	}
+}
+
+func scalerEvaluationWait(last, now time.Time) time.Duration {
+	if last.IsZero() {
+		return 0
+	}
+	if remaining := minScalerEvaluateInterval - now.Sub(last); remaining > 0 {
+		return remaining
+	}
+	return 0
 }
 
 func (s *scaler) nudge() {
@@ -337,9 +362,9 @@ func (s *scaler) startSpawn(p *functionPool, reason string) bool {
 	return true
 }
 
-// reclaimBorrowedIdle frees one worker above a pool's configured active
-// minimum, choosing the largest borrower first. Busy workers are never
-// touched and configured minimums are never crossed.
+// reclaimBorrowedIdle frees one worker that another pool is not actively
+// using. A momentarily idle worker in a busy donor pool is not surplus: the
+// next request will need it, and stealing it causes cross-pool spawn churn.
 func (s *scaler) reclaimBorrowedIdle(requester *functionPool) bool {
 	var donor *functionPool
 	bestBorrowed := 0
@@ -348,8 +373,17 @@ func (s *scaler) reclaimBorrowedIdle(requester *functionPool) bool {
 		if p == requester || p.closing.Load() {
 			return true
 		}
+		if p.queued.Load() > 0 {
+			return true
+		}
 		current := int(p.busy.Load()+p.spawning.Load()) + len(p.idle)
-		borrowed := current - p.min
+		protected := p.min
+		if p.busy.Load() > 0 || p.spawning.Load() > 0 {
+			if desired := int(p.desired.Load()); desired > protected {
+				protected = desired
+			}
+		}
+		borrowed := current - protected
 		if borrowed > len(p.idle) {
 			borrowed = len(p.idle)
 		}

@@ -39,7 +39,7 @@ type functionPool struct {
 
 	// Autoscaler signal state — guarded by sigMu.
 	sigMu            sync.Mutex
-	arrivals         []time.Time
+	arrivals         [60]arrivalBucket
 	serviceSamples   []time.Duration
 	spawnSamples     []time.Duration
 	queueWaitSamples []time.Duration
@@ -80,6 +80,14 @@ type functionPool struct {
 	spawnFn      func(ctx context.Context) (*sandbox.Worker, error)
 	reclaimFn    func() bool
 	requestSpawn func()
+}
+
+// arrivalBucket keeps request-rate accounting constant-space regardless of
+// traffic volume. Second-level resolution is sufficient for the 6s burst and
+// 60s stable controller windows; admission itself remains event-driven.
+type arrivalBucket struct {
+	second int64
+	count  uint64
 }
 
 // acquireSlot tries to occupy a concurrency slot. Returns nil on success
@@ -135,9 +143,18 @@ func (p *functionPool) releaseSlot() {
 func (p *functionPool) recordArrival(now time.Time) {
 	p.arrivalsTotal.Add(1)
 	p.sigMu.Lock()
-	p.arrivals = append(p.arrivals, now)
+	second := now.Unix()
+	index := second % int64(len(p.arrivals))
+	if index < 0 {
+		index += int64(len(p.arrivals))
+	}
+	bucket := &p.arrivals[index]
+	if bucket.second != second {
+		bucket.second = second
+		bucket.count = 0
+	}
+	bucket.count++
 	p.lastArrival = now
-	p.pruneArrivalsLocked(now)
 	p.sigMu.Unlock()
 }
 
@@ -183,17 +200,6 @@ func durationP95(samples []time.Duration) time.Duration {
 	return copyOf[idx]
 }
 
-func (p *functionPool) pruneArrivalsLocked(now time.Time) {
-	cutoff := now.Add(-stableWindow)
-	i := 0
-	for i < len(p.arrivals) && p.arrivals[i].Before(cutoff) {
-		i++
-	}
-	if i > 0 {
-		p.arrivals = append([]time.Time(nil), p.arrivals[i:]...)
-	}
-}
-
 type demandSnapshot struct {
 	StableRate                         float64
 	BurstRate                          float64
@@ -210,12 +216,15 @@ type workerReservation struct {
 func (p *functionPool) snapshotDemand(now time.Time) demandSnapshot {
 	p.sigMu.Lock()
 	defer p.sigMu.Unlock()
-	p.pruneArrivalsLocked(now)
-	burstCutoff := now.Add(-panicWindow)
-	burst := 0
-	for _, at := range p.arrivals {
-		if !at.Before(burstCutoff) {
-			burst++
+	second := now.Unix()
+	var stable, burst uint64
+	for _, bucket := range p.arrivals {
+		age := second - bucket.second
+		if age >= 0 && age < int64(len(p.arrivals)) {
+			stable += bucket.count
+			if age < int64(panicWindow/time.Second) {
+				burst += bucket.count
+			}
 		}
 	}
 	mem := append([]int64(nil), p.memSamples...)
@@ -225,7 +234,7 @@ func (p *functionPool) snapshotDemand(now time.Time) demandSnapshot {
 		memP95 = mem[(95*len(mem)+99)/100-1]
 	}
 	return demandSnapshot{
-		StableRate: float64(len(p.arrivals)) / stableWindow.Seconds(),
+		StableRate: float64(stable) / stableWindow.Seconds(),
 		BurstRate:  float64(burst) / panicWindow.Seconds(),
 		ServiceP95: durationP95(p.serviceSamples), SpawnP95: durationP95(p.spawnSamples),
 		QueueWaitP95: durationP95(p.queueWaitSamples), LastArrival: p.lastArrival,
@@ -416,9 +425,9 @@ func (p *functionPool) markRetired() {
 }
 
 // release returns the worker to the pool unless it errored or is unusable.
-// Also kills the worker when the idle channel already holds at least the
-// effective host/operator cap, preventing a completed burst from parking
-// workers that the controller can no longer admit.
+// Capacity changes are handled by the controller's hysteretic scale-down.
+// Killing on every release when dynamicMax briefly falls below the current
+// worker count causes a spawn/kill loop under fluctuating memory headroom.
 func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	p.busy.Add(-1)
 
@@ -447,23 +456,8 @@ func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 		return
 	}
 
-	// Aggressive prune: don't park excess workers above the autoscaler's
-	// current cap. dynamicMax==0 only at first boot (autoscaler hasn't
-	// computed yet) — fall through to the original cap-only check there.
-	// dyn is a TOTAL-worker ceiling, so compare the same total startSpawn
-	// gates on. Comparing len(idle) alone was masked by cap(idle) being the
-	// smaller number; now that the channel holds max_warm, a shrinking
-	// dynamicMax would otherwise settle the pool above effective_max and
-	// break the idle+busy+spawning <= effective_max invariant.
-	dyn := int(p.dynamicMax.Load())
-	if dyn > 0 && int(p.busy.Load()+p.spawning.Load())+len(p.idle) >= dyn {
-		p.mu.Unlock()
-		p.killWorker(w)
-		return
-	}
-
 	// Non-blocking push to the idle channel. If the channel is full we're
-	// shrinking (pool max was reduced, or race) — kill the worker.
+	// shrinking the configured pool max or racing another release — kill it.
 	select {
 	case p.idle <- w:
 		p.mu.Unlock()

@@ -128,6 +128,8 @@ func ValidAuthMode(s string) bool {
 }
 
 func (db *Database) InsertFunction(fn *Function) error {
+	db.lifecycleMu.Lock()
+	defer db.lifecycleMu.Unlock()
 	envJSON, err := json.Marshal(fn.EnvVars)
 	if err != nil {
 		return fmt.Errorf("marshal env vars: %w", err)
@@ -143,6 +145,9 @@ func (db *Database) InsertFunction(fn *Function) error {
 		fn.AuthMode, fn.RateLimitPerMin,
 		fn.Version, fn.Status, fn.CodeHash, fn.ImageSize, fn.ActiveDeploymentID, fn.RunEntrypoint,
 	).Scan(&fn.CreatedAt, &fn.UpdatedAt)
+	if err == nil {
+		db.liveFunctions.Store(fn.ID, struct{}{})
+	}
 	return err
 }
 
@@ -245,6 +250,8 @@ func (db *Database) UpdateFunction(fn *Function) error {
 // their FK for async insert ordering are unreachable once that row goes, so
 // they are deleted first — same transaction, same shared list as the purge.
 func (db *Database) DeleteFunction(id string) error {
+	db.lifecycleMu.Lock()
+	defer db.lifecycleMu.Unlock()
 	tx, err := db.write.Begin()
 	if err != nil {
 		return err
@@ -257,10 +264,19 @@ func (db *Database) DeleteFunction(id string) error {
 			return fmt.Errorf("delete %s: %w", t, err)
 		}
 	}
+	for _, t := range executionOwnedChildTables {
+		if _, err := tx.Exec("DELETE FROM "+t+" WHERE function_id = ?", id); err != nil {
+			return fmt.Errorf("delete orphan %s: %w", t, err)
+		}
+	}
 	if _, err := tx.Exec("DELETE FROM functions WHERE id = ?", id); err != nil {
 		return fmt.Errorf("delete function: %w", err)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	db.liveFunctions.Delete(id)
+	return nil
 }
 
 func scanFunction(row *sql.Row) (*Function, error) {

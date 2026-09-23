@@ -319,6 +319,7 @@ CREATE INDEX IF NOT EXISTS idx_activity_actor ON activity_log(actor_id, ts DESC)
 -- cleanup paths in PurgeOldExecutions and DeleteExecution.
 CREATE TABLE IF NOT EXISTS execution_requests (
     execution_id  TEXT PRIMARY KEY,
+    function_id   TEXT,
     method        TEXT NOT NULL,
     path          TEXT NOT NULL,
     headers_json  TEXT NOT NULL,
@@ -762,6 +763,7 @@ PRAGMA foreign_keys = ON;
 		// frontend waterfall can render without a join.
 		`CREATE TABLE IF NOT EXISTS user_spans (
 			id              TEXT PRIMARY KEY,
+			function_id     TEXT,
 			trace_id        TEXT NOT NULL,
 			parent_span_id  TEXT NOT NULL,
 			execution_id    TEXT NOT NULL,
@@ -784,6 +786,7 @@ PRAGMA foreign_keys = ON;
 		`CREATE TABLE IF NOT EXISTS execution_log_entries (
 			id              INTEGER PRIMARY KEY AUTOINCREMENT,
 			execution_id    TEXT NOT NULL,
+			function_id     TEXT,
 			trace_id        TEXT,
 			span_id         TEXT,
 			ts              DATETIME NOT NULL,
@@ -833,6 +836,16 @@ PRAGMA foreign_keys = ON;
 	// already lacks the FK and the rebuild is skipped.
 	if err := dropExecutionRequestsFK(db); err != nil {
 		slog.Warn("execution_requests FK drop failed", "err", err)
+	}
+	for _, table := range executionOwnedChildTables {
+		if _, err := db.write.Exec("ALTER TABLE " + table + " ADD COLUMN function_id TEXT"); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("add %s.function_id: %w", table, err)
+		}
+		if _, err := db.write.Exec("CREATE INDEX IF NOT EXISTS idx_" + table +
+			"_function_id ON " + table + "(function_id)"); err != nil {
+			return fmt.Errorf("index %s.function_id: %w", table, err)
+		}
 	}
 
 	// Backfill deployment snapshots for the most-recent succeeded deploy

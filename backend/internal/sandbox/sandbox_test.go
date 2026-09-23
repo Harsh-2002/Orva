@@ -35,6 +35,116 @@ func TestWorkerReadyHandshake(t *testing.T) {
 	}
 }
 
+func TestWorkerLifetimeReaderPreservesFramesAndStopsOnCancellation(t *testing.T) {
+	reader, writer := io.Pipe()
+	w := &Worker{
+		stdout:   io.NopCloser(reader),
+		frames:   make(chan frameRead),
+		readStop: make(chan struct{}),
+		waitDone: make(chan struct{}),
+	}
+	go w.readLoop()
+	produced := make(chan error, 1)
+	go func() {
+		if err := writeFrame(writer, []byte(`{"type":"ready"}`)); err != nil {
+			produced <- err
+			return
+		}
+		produced <- writeFrame(writer, []byte(`{"type":"response","body":"ok"}`))
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := w.AwaitReady(ctx); err != nil {
+		t.Fatalf("ready frame: %v", err)
+	}
+	frame, err := w.readNext(ctx)
+	if err != nil || !bytes.Contains(frame, []byte(`"body":"ok"`)) {
+		t.Fatalf("response frame = %s, %v", frame, err)
+	}
+	if err := <-produced; err != nil {
+		t.Fatalf("write frames: %v", err)
+	}
+	cancel()
+	if _, err := w.readNext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled read = %v", err)
+	}
+	w.markDead()
+	_ = writer.Close()
+	for {
+		select {
+		case got, ok := <-w.frames:
+			if !ok {
+				return
+			}
+			if got.err == nil {
+				t.Fatal("read loop published another protocol frame after being stopped")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("read loop did not stop after worker death")
+		}
+	}
+}
+
+func TestWorkerLifetimeReaderHandlesStreamThenBufferedReply(t *testing.T) {
+	requestReader, requestWriter := io.Pipe()
+	responseReader, responseWriter := io.Pipe()
+	w := &Worker{
+		stdin: requestWriter, stdout: responseReader,
+		frames: make(chan frameRead), readStop: make(chan struct{}),
+		waitDone: make(chan struct{}), errBuf: newRingBuffer(1024),
+	}
+	go w.readLoop()
+	defer func() {
+		w.markDead()
+		_ = requestReader.Close()
+		_ = responseWriter.Close()
+		_ = responseReader.Close()
+	}()
+	adapterDone := make(chan error, 1)
+	go func() {
+		if _, err := readFrame(requestReader); err != nil {
+			adapterDone <- err
+			return
+		}
+		for _, frame := range []string{
+			`{"type":"response_start","statusCode":200}`,
+			`{"type":"chunk","data":"aGk="}`,
+			`{"type":"response_end"}`,
+		} {
+			if err := writeFrame(responseWriter, []byte(frame)); err != nil {
+				adapterDone <- err
+				return
+			}
+		}
+		if _, err := readFrame(requestReader); err != nil {
+			adapterDone <- err
+			return
+		}
+		adapterDone <- writeFrame(responseWriter, []byte(`{"type":"response","statusCode":201,"body":"done"}`))
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	first, err := w.DispatchEx(ctx, []byte(`{}`))
+	if err != nil || !first.Streaming {
+		t.Fatalf("stream response = %+v, %v", first, err)
+	}
+	kind, data, err := first.NextFrame(ctx)
+	if err != nil || kind != "chunk" || string(data) != "hi" {
+		t.Fatalf("chunk = %q %q %v", kind, data, err)
+	}
+	kind, _, err = first.NextFrame(ctx)
+	if err != nil || kind != "end" {
+		t.Fatalf("stream end = %q %v", kind, err)
+	}
+	second, err := w.DispatchEx(ctx, []byte(`{}`))
+	if err != nil || second.Streaming || second.StatusCode != 201 || second.Body != "done" {
+		t.Fatalf("buffered response = %+v, %v", second, err)
+	}
+	if err := <-adapterDone; err != nil {
+		t.Fatalf("fake adapter: %v", err)
+	}
+}
+
 // containsArg returns true if any element in args equals s — useful for
 // asserting flag presence regardless of position.
 func containsArg(args []string, s string) bool {

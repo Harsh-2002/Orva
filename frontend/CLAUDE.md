@@ -50,6 +50,7 @@ change.
 | `src/views/InvocationsLog.vue` | Execution history drawer + request panel + replay button + suggest-fix |
 | `src/views/Settings.vue` | System settings, backup/restore card, storage card |
 | `src/views/InboundWebhooks.vue` | Inbound webhook trigger management |
+| `src/views/Dashboard.vue` | System overview; its Server response time card uses `response_latency_ms` (full public invoke handler), not the shorter `latency_ms` proxy interval |
 | `src/views/Traces.vue` | Trace list with filters + outlier badges |
 | `src/views/TraceDetail.vue` | Single-trace waterfall + span detail |
 | `src/views/FunctionDiff.vue` | Side-by-side / unified source diff between two deployments (CodeMirror merge) + rollback CTA |

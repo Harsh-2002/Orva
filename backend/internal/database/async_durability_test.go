@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -222,5 +224,156 @@ func TestJobBytesCountsPayload(t *testing.T) {
 	}
 	if b := jobBytes("SELECT 1", []any{[]byte("abcd")}); b < 4 {
 		t.Errorf("[]byte payload not counted: %d", b)
+	}
+}
+
+func TestConcurrentAsyncQueueReservationsStayWithinByteBudgets(t *testing.T) {
+	db := &Database{writer: newAsyncWriter(nil)}
+	payload := string(make([]byte, 1<<20))
+	const producers = 128
+	var accepted atomic.Int64
+	var wg sync.WaitGroup
+	for range producers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := db.AsyncExecCritical(context.Background(), "INSERT INTO t VALUES (?)", payload); err == nil {
+				accepted.Add(1)
+			}
+			db.AsyncExecTelemetry("INSERT INTO t VALUES (?)", payload)
+		}()
+	}
+	wg.Wait()
+	jobSize := int64(jobBytes("INSERT INTO t VALUES (?)", []any{payload}))
+	if got := db.writer.criticalBytes.Load(); got != accepted.Load()*jobSize || got > maxCriticalQueueBytes {
+		t.Fatalf("critical bytes=%d accepted=%d budget=%d", got, accepted.Load(), maxCriticalQueueBytes)
+	}
+	if got := db.writer.telemetryBytes.Load(); got < 0 || got > maxTelemetryQueueBytes || got != int64(len(db.writer.telemetry))*jobSize {
+		t.Fatalf("telemetry bytes=%d depth=%d budget=%d", got, len(db.writer.telemetry), maxTelemetryQueueBytes)
+	}
+	if got := int64(len(db.writer.critical)); got != accepted.Load() {
+		t.Fatalf("critical depth=%d accepted=%d", got, accepted.Load())
+	}
+}
+
+func TestCriticalQueueTimeoutReturnsByteReservation(t *testing.T) {
+	db := &Database{writer: newAsyncWriter(nil)}
+	for range cap(db.writer.critical) {
+		if err := db.AsyncExecCritical(context.Background(), "SELECT 1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := db.writer.criticalBytes.Load()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := db.AsyncExecCritical(ctx, "SELECT 1"); err == nil {
+		t.Fatal("full queue accepted an extra critical write")
+	}
+	if got := db.writer.criticalBytes.Load(); got != before {
+		t.Fatalf("timed-out enqueue retained %d bytes; before=%d", got, before)
+	}
+}
+
+func TestWriterShutdownDrainsConcurrentCriticalEnqueues(t *testing.T) {
+	db := newTestDB(t)
+	if _, err := db.write.Exec(`CREATE TABLE writer_shutdown_test (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	const producers = 128
+	start := make(chan struct{})
+	errCh := make(chan error, producers)
+	var wg sync.WaitGroup
+	for i := range producers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			errCh <- db.AsyncExecCritical(ctx, `INSERT INTO writer_shutdown_test (id) VALUES (?)`, i)
+		}()
+	}
+	close(start)
+	stopDone := make(chan struct{})
+	go func() {
+		db.writer.stop(5 * time.Second)
+		close(stopDone)
+	}()
+	wg.Wait()
+	<-stopDone
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent critical enqueue failed during shutdown: %v", err)
+		}
+	}
+	if got := countQuery(t, db, `SELECT COUNT(*) FROM writer_shutdown_test`); got != producers {
+		t.Fatalf("shutdown stranded critical writes: got %d of %d", got, producers)
+	}
+	if got := db.writer.criticalBytes.Load(); got != 0 {
+		t.Fatalf("shutdown left %d reserved critical bytes", got)
+	}
+}
+
+func TestRetryBatchPreservesAliasedJobs(t *testing.T) {
+	expectedSQL := []string{"INSERT first", "INSERT second"}
+	expectedArgs := []string{"first", "second"}
+	for _, offset := range []int{0, 1} {
+		batch := []writeJob{
+			{sql: "INSERT first", args: []any{"first"}, bytes: 12},
+			{sql: "INSERT second", args: []any{"second"}, bytes: 13},
+		}
+		retry := retainRetryBatch(batch, batch[offset:])
+		if len(retry) != 2-offset || retry[0].sql != expectedSQL[offset] || retry[0].args[0] != expectedArgs[offset] {
+			t.Fatalf("aliased retry at offset %d was cleared: %+v", offset, retry)
+		}
+		if batch[0].sql != "" || batch[1].sql != "" {
+			t.Fatalf("discarded batch retained SQL at offset %d: %+v", offset, batch)
+		}
+	}
+}
+
+func TestInFlightBatchKeepsByteReservation(t *testing.T) {
+	db := newTestDB(t)
+	if _, err := db.write.Exec(`CREATE TABLE writer_inflight_test (body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := db.write.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+		_ = conn.Close()
+	}()
+	if _, err := tx.ExecContext(context.Background(), `INSERT INTO writer_inflight_test (body) VALUES ('holder')`); err != nil {
+		t.Fatal(err)
+	}
+	payload := string(make([]byte, 1<<20))
+	if err := db.AsyncExecCritical(context.Background(), `INSERT INTO writer_inflight_test (body) VALUES (?)`, payload); err != nil {
+		t.Fatal(err)
+	}
+	want := int64(jobBytes(`INSERT INTO writer_inflight_test (body) VALUES (?)`, []any{payload}))
+	if !waitFor(t, time.Second, func() bool { return db.WriterStats().CriticalDepth == 0 }) {
+		t.Fatal("writer did not take the critical job into its batch")
+	}
+	if got := db.WriterStats().CriticalBytes; got != want {
+		t.Fatalf("in-flight batch reservation=%d, want %d", got, want)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool { return db.WriterStats().CriticalBytes == 0 }) {
+		t.Fatal("committed batch did not release its byte reservation")
+	}
+	if got := countQuery(t, db, `SELECT COUNT(*) FROM writer_inflight_test WHERE body <> 'holder'`); got != 1 {
+		t.Fatalf("in-flight job was not committed: got %d rows", got)
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -141,16 +140,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			ReapInterval:   30 * time.Second,
 			EagerWarmup:    true,
 		},
-		pool.SandboxTemplate{
-			NsjailBin:      cfg.Sandbox.NsjailBin,
-			RootfsDir:      cfg.Sandbox.RootfsDir,
-			DataDir:        cfg.Data.Dir,
-			DefaultSeccomp: cfg.Sandbox.SeccompPolicy,
-			DefaultMaxPids: cfg.Functions.DefaultMaxPids,
-			SDKToken:       sdkAuth.Mint,
-			APIBaseURL:     apiBase,
-			Metrics:        met,
-		},
+		newSandboxTemplate(cfg, met, sdkAuth.Mint, apiBase),
 		db, reg, limiter,
 	)
 
@@ -161,8 +151,9 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		DB:      db,
 		SDKAuth: sdkAuth,
 		Config: proxy.ProxyConfig{
-			NsjailBin: cfg.Sandbox.NsjailBin,
-			RootfsDir: cfg.Sandbox.RootfsDir,
+			NsjailBin:    cfg.Sandbox.NsjailBin,
+			RootfsDir:    cfg.Sandbox.RootfsDir,
+			MaxBodyBytes: cfg.Server.MaxBodyBytes,
 		},
 	}
 
@@ -332,6 +323,19 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	}
 }
 
+func newSandboxTemplate(cfg *config.Config, met *metrics.Metrics, sdkToken func(string) (string, func()), apiBase string) pool.SandboxTemplate {
+	return pool.SandboxTemplate{
+		NsjailBin:      cfg.Sandbox.NsjailBin,
+		RootfsDir:      cfg.Sandbox.RootfsDir,
+		DataDir:        cfg.Data.Dir,
+		DefaultSeccomp: cfg.Sandbox.SeccompPolicy,
+		DefaultMaxPids: cfg.Functions.DefaultMaxPids,
+		SDKToken:       sdkToken,
+		APIBaseURL:     apiBase,
+		Metrics:        met,
+	}
+}
+
 // bootstrapAdminKey ensures a "bootstrap-admin" API key exists. It persists
 // the plaintext key to ${dataDir}/.admin-key (mode 0600) so operators can
 // recover it after restarts without re-onboarding — the same trust boundary
@@ -438,132 +442,62 @@ func printBootstrapKey(key, note string) {
 	fmt.Println("========================================")
 }
 
-// detectInternalAPIBase returns the URL a sandboxed worker should use
-// to reach the orva server. Has to work on every deployment shape we
-// support — Docker default-bridge, Docker user-defined network,
-// Docker `network_mode: host`, bare-metal systemd, `make run`. Each
-// shape has different "where am I, how do I reach orvad" answers, so
-// we don't try to guess from `/proc/net/route` alone — we PROBE.
-//
-// Resolution order:
-//
-//  1. Operator override via env var: `ORVA_INTERNAL_API_BASE`. When
-//     set, used verbatim. Operators behind exotic network setups
-//     (overlay networks, swarm, k8s) can pin this without us
-//     guessing wrong.
-//
-//  2. Probe a list of candidate IPs against orvad's own health
-//     endpoint at the configured port. First candidate that returns
-//     200 within a short timeout wins. Candidates, in order:
-//     - "127.0.0.1" — works on bare-metal AND
-//     `network_mode: host`. Cheapest probe.
-//     - every non-loopback non-link-local IPv4 on the host —
-//     inside Docker this enumerates bridge / user-defined
-//     network interfaces; bare-metal it's the host's NICs.
-//     - the default-route gateway from /proc/net/route — last
-//     resort for old-style `8443:8443` mappings where orvad
-//     and the host share a port.
-//
-//  3. Fallback: if every probe fails (orvad isn't listening yet,
-//     network stack confused), default to `127.0.0.1` so the SDK
-//     surfaces a clear "ECONNREFUSED" rather than hanging on a
-//     totally unreachable IP.
-//
-// The probe runs once at startup; the result is baked into the worker
-// env. No per-spawn overhead.
+// detectInternalAPIBase selects a local address for sandbox-to-daemon SDK
+// calls. Never probe the default gateway for an arbitrary healthy Orva: a
+// different instance can be running there, and a 200 from its health route
+// says nothing about where this process is listening.
 func detectInternalAPIBase(port int) string {
 	if v := os.Getenv("ORVA_INTERNAL_API_BASE"); v != "" {
 		return strings.TrimRight(v, "/")
 	}
-
-	// Probe order matters because sandboxes (nsjail + pasta) have
-	// their OWN network namespace. From inside the sandbox:
-	//   - 127.0.0.1 is the sandbox's own loopback — does NOT cross
-	//     into orvad's namespace via pasta.
-	//   - Bridge / non-loopback IPs from orvad's namespace ARE
-	//     reachable through pasta's NAT.
-	// So even though 127.0.0.1 would succeed when probed from
-	// orvad's process (which we are), it would FAIL when the
-	// sandbox tries to use it. Probe non-loopback first; only fall
-	// back to loopback when nothing else exists (true bare-metal).
-	var candidates []string
+	if route, err := os.ReadFile("/proc/net/route"); err == nil {
+		if iface := parseDefaultRouteInterface(string(route)); iface != "" {
+			if addrs, err := net.InterfaceByName(iface); err == nil {
+				if ips, err := addrs.Addrs(); err == nil {
+					if base, ok := localInternalAPIBase(ips, port); ok {
+						return base
+					}
+				}
+			}
+		}
+	}
 	if addrs, err := net.InterfaceAddrs(); err == nil {
-		for _, a := range addrs {
-			ipnet, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			ip := ipnet.IP.To4()
-			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-				continue
-			}
-			candidates = append(candidates, ip.String())
-		}
-	}
-	if gw := defaultRouteGatewayIPv4(); gw != "" {
-		candidates = append(candidates, gw)
-	}
-	// Last-ditch loopback. Only useful in odd configs (nsjail+
-	// pasta with `--map-host-loopback`, or test environments where
-	// the worker shares the parent namespace).
-	candidates = append(candidates, "127.0.0.1")
-
-	client := &http.Client{Timeout: 300 * time.Millisecond}
-	for _, ip := range candidates {
-		base := fmt.Sprintf("http://%s:%d", ip, port)
-		resp, err := client.Get(base + "/api/v1/system/health")
-		if err != nil {
-			continue
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
+		if base, ok := localInternalAPIBase(addrs, port); ok {
 			return base
 		}
 	}
-	// Worst case: orvad isn't listening yet (we run this BEFORE the
-	// HTTP server starts on bare-metal). Default to the first
-	// non-loopback candidate if we have one — it's the most likely
-	// to actually work from inside a sandbox. If we have nothing,
-	// fall back to loopback and let the SDK surface a clear error
-	// at first use.
-	if len(candidates) > 1 {
-		return fmt.Sprintf("http://%s:%d", candidates[0], port)
-	}
+	// No non-loopback IPv4 is visible. This may be unusable from a network
+	// namespace; the operator can set ORVA_INTERNAL_API_BASE explicitly.
+	slog.Warn("no non-loopback IPv4 for sandbox SDK; set ORVA_INTERNAL_API_BASE if SDK calls fail")
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
-// defaultRouteGatewayIPv4 reads /proc/net/route and returns the IPv4
-// gateway for the default route, or "" if it can't be determined.
-// Only useful as a fallback candidate — see detectInternalAPIBase
-// for the resolution order.
-func defaultRouteGatewayIPv4() string {
-	data, err := os.ReadFile("/proc/net/route")
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(data), "\n")[1:] {
+func parseDefaultRouteInterface(route string) string {
+	for _, line := range strings.Split(route, "\n")[1:] {
 		fields := strings.Fields(line)
 		if len(fields) < 3 {
 			continue
 		}
-		if fields[1] != "00000000" {
-			continue
+		if fields[1] == "00000000" {
+			return fields[0]
 		}
-		gwHex := fields[2]
-		if len(gwHex) != 8 {
-			return ""
-		}
-		b := make([]byte, 4)
-		for i := 0; i < 4; i++ {
-			v, err := strconv.ParseUint(gwHex[i*2:i*2+2], 16, 8)
-			if err != nil {
-				return ""
-			}
-			b[3-i] = byte(v)
-		}
-		return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
 	}
 	return ""
+}
+
+func localInternalAPIBase(addrs []net.Addr, port int) (string, bool) {
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP.To4()
+		if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			continue
+		}
+		return fmt.Sprintf("http://%s:%d", ip, port), true
+	}
+	return "", false
 }
 
 // generateSDKSigningKey returns a fresh 32-byte signing key. It is regenerated

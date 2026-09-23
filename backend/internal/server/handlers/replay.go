@@ -118,6 +118,11 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 			"function is not active (status="+fn.Status+")", reqID)
 		return
 	}
+	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
+	if !admitted {
+		return
+	}
+	defer executionLease.Cancel()
 
 	// Generate the new execution ID up-front so the captured event-JSON
 	// carries the new id (function code that logs `execution_id` shows
@@ -189,9 +194,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 
 	releaseExecution := h.SDKAuth.BindExecution(newExecID, fn.ID, traceID, spanID, start)
 	defer releaseExecution()
-	dispatchStarted := time.Now()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
-	h.Pool.RecordLatency(acq, time.Since(dispatchStarted))
 	duration := time.Since(start)
 	if h.Metrics != nil {
 		h.Metrics.RecordDuration(duration)
@@ -215,7 +218,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 				Trigger:    "replay",
 				StartedAt:  start,
 			},
-			duration.Milliseconds(), 0, errMsg, 0, origID,
+			duration.Milliseconds(), 0, errMsg, 0, origID, executionLease,
 		)
 		if h.Metrics != nil {
 			h.Metrics.Baselines.FinalizeExecution(h.DB, newExecID, fn.ID, "error", acq.ColdStart, duration.Milliseconds())
@@ -223,6 +226,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		if len(stderr) > 0 {
 			h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 				ExecutionID: newExecID,
+				FunctionID:  fn.ID,
 				Stderr:      string(stderr),
 			})
 		}
@@ -241,6 +245,15 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	var resp adapterResponse
 	if err := json.Unmarshal(respJSON, &resp); err != nil {
 		reqErr = err
+		h.DB.AsyncInsertExecutionFinalReplay(
+			&database.Execution{
+				ID: newExecID, FunctionID: fn.ID, Status: "error",
+				ColdStart: acq.ColdStart, TraceID: traceID, SpanID: spanID,
+				Trigger: "replay", StartedAt: start,
+			},
+			duration.Milliseconds(), http.StatusBadGateway,
+			"adapter returned invalid response: "+err.Error(), 0, origID, executionLease,
+		)
 		respond.Error(w, http.StatusBadGateway, "INVALID_RESPONSE",
 			"adapter returned invalid response: "+err.Error(), reqID)
 		return
@@ -265,7 +278,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 			Trigger:    "replay",
 			StartedAt:  start,
 		},
-		duration.Milliseconds(), sc, "", len(resp.Body), origID,
+		duration.Milliseconds(), sc, "", len(resp.Body), origID, executionLease,
 	)
 	if h.Metrics != nil {
 		h.Metrics.Baselines.FinalizeExecution(h.DB, newExecID, fn.ID, execStatus, acq.ColdStart, duration.Milliseconds())
@@ -273,6 +286,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	if len(stderr) > 0 {
 		h.DB.AsyncInsertExecutionLog(&database.ExecutionLog{
 			ExecutionID: newExecID,
+			FunctionID:  fn.ID,
 			Stderr:      string(stderr),
 		})
 	}

@@ -81,6 +81,7 @@ class Instance:
             "--cap-add", "SYS_ADMIN",
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
+            "--security-opt", "systempaths=unconfined",
             "--cgroupns=host", "--pid=host",
             "-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw",
         ]

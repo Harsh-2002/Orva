@@ -16,9 +16,9 @@ import (
 	"strings"
 )
 
-// generationsKept bounds the policy directory. nsjail reads the config once at
-// startup and never reopens it, so once Spawn has returned an old generation
-// file is dead weight. A few are kept for operator forensics.
+// generationsKept bounds stale files at daemon startup, before workers can
+// spawn. Runtime publication cannot safely delete an older generation: a
+// worker may have captured its path but not yet opened it in nsjail.
 const generationsKept = 5
 
 // PolicyDir is where compiled policy generations live, alongside the generated
@@ -74,32 +74,28 @@ func publish(dataDir, gen string, rendered []byte) (string, error) {
 		_ = os.Rename(tmpLink, link)
 	}
 
-	gcGenerations(dir, filepath.Base(target))
 	return target, nil
 }
 
-// gcGenerations keeps the newest generationsKept policy files plus the one
-// currently in use, removing the rest. Failures are ignored: leaving a stale
-// file behind is harmless, and refusing to publish over it would not be.
-func gcGenerations(dir, keep string) {
+// gcGenerations runs only before the first policy is published at startup.
+// Every file from the prior process is safe to discard; active process
+// generations remain immutable and available for delayed worker spawns.
+func gcGenerations(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
+	current, _ := os.Readlink(filepath.Join(dir, "current"))
+	current = filepath.Base(current)
 
 	type gen struct {
 		name string
 		mod  int64
 	}
-	// The in-use generation is excluded from the candidate set outright rather
-	// than skipped during deletion. Generations published in the same
-	// millisecond can share an mtime, which makes the ordering ambiguous; if
-	// the kept file landed in the delete tail and were merely skipped, the
-	// directory would retain one file more than the bound every time.
 	var gens []gen
 	for _, e := range entries {
 		n := e.Name()
-		if e.IsDir() || n == keep ||
+		if e.IsDir() || n == current ||
 			!strings.HasPrefix(n, "egress-") || !strings.HasSuffix(n, ".cfg") {
 			continue
 		}
@@ -110,8 +106,10 @@ func gcGenerations(dir, keep string) {
 		gens = append(gens, gen{name: n, mod: info.ModTime().UnixNano()})
 	}
 
-	// keep itself occupies one slot of the budget.
-	budget := generationsKept - 1
+	budget := generationsKept
+	if current != "." && current != "" {
+		budget--
+	}
 	if len(gens) <= budget {
 		return
 	}
