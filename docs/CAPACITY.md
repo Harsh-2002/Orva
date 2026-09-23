@@ -1,5 +1,43 @@
 # Pool Controller v2 capacity validation
 
+An additional 2026-09-23 diagnostic rules out two tempting but incomplete
+explanations for the low cold-run rate. A 10,000-row, 200-row-batch execution
+INSERT probe using Orva's actual pure-Go SQLite driver completed at 10,860
+rows/s on the host's 934,202-execution snapshot and 6,130 rows/s directly
+inside a 2-vCPU/2-GiB scratch VM on its existing ~1.2-GiB database. The
+probe used the same execution columns, foreign keys, WAL/NORMAL mode, 64-MiB
+connection cache, and 200-row grouped transaction shape; it did **not** run
+HTTP workers, activity/capture writes, or the rest of Orva. Database sizes
+and cache state differed, so this is an isolation probe, not a throughput
+ratio to apply to the product. Both offline rates are far above warm mixed
+HTTP success rates; the driver and virtual disk alone cannot account for
+all of the end-to-end gap. The probe deleted its 10,000 test rows after its
+measurement. A separate attempt to drop six trace-related indexes from a
+million-row offline copy exceeded a three-minute safety timeout. No index
+migration or reduced-index throughput result came from that attempt.
+
+To test whether best-effort writes were consuming the critical writer, a
+temporary scratch-only build stopped draining activity/capture during live
+traffic, but still drained accepted queued work on shutdown. On the same
+2-GiB VM at 500 closed-loop mixed clients, normal Orva first returned
+18,311/20,000 HTTP 200 and 1,689 pre-execution storage 429 at 140
+successful/s; the critical-only diagnostic then returned 20,000/20,000 at
+317/s; restoring the **unchanged normal writer** returned 20,000/20,000 at
+367/s. The reversal beats the diagnostic, so the large apparent first-to-
+second gain is not attributable to suppressing activity. This does not make
+activity loss acceptable: the normal first phase dropped over 10,000
+activity records under pressure. The critical-only code was reverted, and
+the final normal binary passed database tests. These 2-GiB phases are
+diagnostics only, **not** the 4-GiB capacity qualification.
+
+The same shared test host OOM-killed the scratch server VM during an offline
+database-copy experiment at 16:20 UTC. The failed VM phase supplies no
+performance result; the temporary ~2.8-GiB database copies were deleted and
+can be recreated from the retained 939-MiB snapshot. Host memory headroom
+must be checked before further 4-GiB VM stress. The remaining investigation
+is concurrent worker/request-path CPU, memory and I/O behavior during live
+traffic—not an assertion that SQLite alone is the hardware ceiling.
+
 Further 2026-09-23 writer tracing split each committed critical batch into
 bulk-SQL construction, prepare, execute, close, and commit time. Three
 successive 20,000-request mixed Node/Python phases at 1,000 clients on the
