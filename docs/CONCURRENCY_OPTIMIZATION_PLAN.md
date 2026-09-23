@@ -69,6 +69,23 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- A discarded dispatch-boundary prototype moved HTTP/MCP completion-slot
+  reservation from request entry to just after worker acquisition. The first
+  version rejected immediately when no writer slot was free: on the same
+  2-vCPU/4-GiB server and separate client VMs, a 50,000-request/1,000-client
+  mixed run returned only 1,499 HTTP 200 and 48,501 pre-execution
+  `STORAGE_BACKPRESSURE` 429 responses. Waiting up to five seconds while
+  holding the ready worker produced 49,983 HTTP 200 and 17
+  `INVOCATION_QUEUE_FULL` 429 responses at 408 attempted requests/s, with
+  HTTP 200 p99 5.83 s. Its 49,983 successes reconciled to exactly 49,983
+  new execution rows after drain; critical failures/timeouts stayed zero,
+  but 17,116 activity records dropped. The prior committed candidate had
+  delivered 50,000/50,000 HTTP 200 in a comparable but not controlled run.
+  The prototype was reverted: moving one semaphore later without a shared
+  dispatcher either creates a storage-rejection storm or parks workers and
+  shifts pressure to the function queue. A single fair dispatcher must pair
+  ready-worker and completion capacity without holding either while waiting.
+
 - A new direct-link 2-vCPU/4-GiB server plus 1-vCPU/512-MiB client sweep
   returned all HTTP 200 at 10, 50, 100, 500 and 1,000 clients, including
   50,000/50,000 at 1,000. However, post-drain SQLite row counts proved 754
@@ -455,6 +472,18 @@ representative throughput/latency improve beyond run-to-run noise.
   receive service. Do not promise equal requests/sec for unequal-cost functions.
 - At dispatch, atomically lease a ready worker, execution capacity and completion
   record capacity. Avoid holding a worker while waiting for another semaphore.
+  The rejected prototype above fixes the concrete coordination rule: with the
+  scheduler lock held, choose an eligible request and ready worker, then try
+  a completion lease; if unavailable, leave both queued/idle and wait for a
+  writer-capacity event. Do not turn one failed try into an HTTP 429. On a
+  lease, transfer all three ownerships together and dispatch outside the
+  lock. Worker returns, writer lease releases, new arrivals, and cancellations
+  all wake the dispatcher; after every wake it drains all currently feasible
+  pairs before sleeping. Recheck state before sleep so a released lease cannot
+  be lost between the check and the notification. A bounded pending-byte and
+  drain-time budget, not the writer's channel count, determines rejection.
+  Preserve the lease through final-row enqueue/commit and return it exactly
+  once on cancellation, worker-start failure, function deletion, and shutdown.
   Worker returns wake dispatch immediately; control-loop sampling is separate.
 - Adapt execution concurrency through conservative probes: increase when useful
   demand exists and completed goodput improves without rising CPU throttling,

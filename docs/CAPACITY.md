@@ -1,5 +1,17 @@
 # Pool Controller v2 capacity validation
 
+An experimental dispatch-boundary reservation was **reverted**. On a
+2-vCPU/4-GiB server VM with a separate client VM, immediately rejecting after
+worker acquisition gave 1,499 HTTP 200 and 48,501 pre-execution storage 429s
+for 50,000 mixed Node/Python requests at 1,000 clients. Waiting up to five
+seconds while holding the worker gave 49,983 HTTP 200 and 17 function-queue
+429s (408 attempted requests/s; HTTP 200 p99 5.83 s). After drain, its
+49,983 successes matched 49,983 execution rows; critical failures/timeouts
+were zero, but 17,116 activity records dropped. The committed candidate
+retains early completion reservation while a shared worker/storage dispatcher
+is designed. These runs do not prove a throughput gain over that candidate;
+the fixed 1,024 writer slots and activity/capture shedding remain open limits.
+
 The current unreleased candidate measures `service_p95_ms` over each complete
 worker lease rather than stopping at the adapter's first response frame. This
 corrects the controller's service-time input but has not yet been benchmarked
