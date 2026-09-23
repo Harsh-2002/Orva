@@ -1,5 +1,38 @@
 # Pool Controller v2 capacity validation
 
+Further 2026-09-23 writer tracing split each committed critical batch into
+bulk-SQL construction, prepare, execute, close, and commit time. Three
+successive 20,000-request mixed Node/Python phases at 1,000 clients on the
+same running 2-vCPU/4-GiB VM returned respectively 9,586/20,000 HTTP 200
+(10,414 pre-execution storage 429; 100 successful/s), 15,296/20,000 HTTP
+200 (4,704 storage 429; 186 successful/s), and 20,000/20,000 HTTP 200
+(352 successful/s). Restarting **only Orva**, not the VM, then returned
+20,000/20,000 at 391 successful/s. In the first 80 logged critical batches,
+7,482 jobs spent 74.6 s in SQLite `ExecContext`, 0.45 s in preparation, and
+3.9 s in commit; after the Orva-only restart, the first 100 batches put
+9,288 jobs through `ExecContext` in 13.8 s, with 0.41 s prepare and 4.5 s
+commit. The timing code was temporary and has been removed. SQL string
+construction/preparation is not the dominant cost in these runs. Their
+strong warmup effect is consistent with guest/host page-cache and shared
+virtual-disk variation, but this experiment does not isolate those causes.
+The physical test host itself exposes a rotational-flagged QEMU virtual disk;
+Orva's test VM adds another storage virtualization layer. Do not infer a
+hardware-independent Orva capacity from these results.
+
+Two more timing-build A–B–A probes on the already warm VM failed to justify
+simple writer tuning. Raising only the writer connection's SQLite page-cache
+ceiling from 64 to 256 MiB yielded 20,000/20,000 HTTP 200 at 409/s,
+between the unchanged 64-MiB runs at 391/s and 451/s. Raising the writer
+batch ceiling from 200 to 400 yielded 20,000/20,000 at 460/s, versus the
+adjacent 200-row runs at 451/s and 445/s. Each phase grew the database, and
+the shared disk conditions were uncontrolled; neither experiment demonstrates
+a reproducible throughput gain or fixes cold-storage backpressure. Both
+changes and the temporary cache-budget unit test were reverted. The first
+two cold phases did drop optional activity/capture rows, but writer health
+reported no critical commit failures. Further work should isolate indexed
+execution-write I/O and storage working-set growth, not cache SQL text or
+raise memory/batch ceilings based on a single warm result.
+
 On 2026-09-23, a verified 934,202-execution SQLite snapshot was used for
 repeat runs in the 2-vCPU/4-GiB server VM, driven by a separate client VM at
 1,000 closed-loop clients. An unchanged, disk-backed server run returned
