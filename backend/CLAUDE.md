@@ -33,7 +33,7 @@ go vet ./...
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
 | `builder` | Deploy pipeline: tarball → `npm install` / `pip install` → optional `tsc` → register. Every one of those commands runs **inside nsjail** via `sandbox.RunBuild`, using the runtime rootfs's own toolchain and the same compiled NSTUN egress policy a worker gets — the installs fail closed without one. A function with no dependencies runs no installer and needs no policy. `buildcache.go` owns the **per-function** npm/pip cache and every path built from a function id; `gc.go` bounds the caches and reclaims orphaned function dirs. |
-| `pool` | Warm-sandbox pool manager (`pool.Manager`) per function |
+| `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; admission is bounded to 256 pending per function and 1,024 globally with a 2-second wait. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx` |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |

@@ -118,9 +118,6 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
 	// v0.5 trace context. The SDK forwards X-Orva-Trace-Id /
 	// X-Orva-Span-Id from the caller's env (set by proxy.Forward when the
 	// caller was started). traceID may be empty for legacy calls; we
@@ -130,7 +127,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	parentSpanID := callerSpanID
 	spanID := trace.NewSpanID()
 
-	acq, err := h.Pool.Acquire(ctx, fn.ID)
+	acq, err := h.Pool.Acquire(r.Context(), fn.ID)
 	if err != nil {
 		// Use the shared taxonomy rather than flattening everything to a
 		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
@@ -143,6 +140,8 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
 
@@ -333,14 +332,11 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
 	traceID := callerTraceID
 	parentSpanID := callerSpanID
 	spanID := trace.NewSpanID()
 
-	acq, err := h.Pool.Acquire(ctx, fn.ID)
+	acq, err := h.Pool.Acquire(r.Context(), fn.ID)
 	if err != nil {
 		// Use the shared taxonomy rather than flattening everything to a
 		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
@@ -353,6 +349,8 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
 

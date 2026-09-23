@@ -1,5 +1,51 @@
 # Pool Controller v2 capacity validation
 
+> The historical measurements below predate bounded invocation admission.
+> Current admission caps pending requests at 256 per function and 1,024
+> globally, waits at most 2 seconds, and returns `429 INVOCATION_QUEUE_FULL`
+> on saturation. The function timeout starts only when a worker is acquired.
+> These older throughput numbers are not evidence that the new admission path
+> meets a 100-client target; rerun an isolated load test before claiming one.
+
+## 2026-09-23 invocation-admission validation
+
+The revised pool was built from the working tree and run as the unprivileged
+`orva` user in a disposable smolvm KVM guest with 2 vCPUs and 4 GiB RAM.
+Node and Python runtime trees were copied to guest-local storage; using the
+shared host mount for runtime imports produced severe artificial I/O wait.
+The guest's `/dev/net/tun` permissions were set to permit the unprivileged
+build jail for the dependency-install E2E checks. It had no delegated cgroup
+controllers, so this measurement validates invocation concurrency and sandbox
+execution, **not** per-worker cgroup CPU/memory enforcement.
+
+The safe, self-cleaning harness is
+`python3 test/performance/invocation_admission.py --scratch --url <scratch-url> --api-key <key> --extended`.
+It creates uniquely named functions and deletes only those functions. The
+following were observed on the guest with a 5-second function timeout:
+
+| Scenario | Result | Wall time |
+|---|---:|---:|
+| Node trivial handler, 5,000 requests / 100 clients | 5,000 HTTP 200, 0 errors | 8.80s |
+| Python trivial handler, 5,000 / 100 | 5,000 HTTP 200, 0 errors | 11.44s |
+| Mixed Node + Python, 2,500 each / 50 clients each | 5,000 HTTP 200, 0 errors | 14.65s (slower leg) |
+| CPU-bound Node, 1,000 / 100 | 1,000 HTTP 200, 0 errors | 6.89s |
+| Slow 1-second Node, 500 / 100 | 314 HTTP 200, 186 HTTP 429, **0 HTTP 504** | 14.42s |
+
+The earlier candidate, before the adapter-ready handshake, returned only
+400/5,000 successful Python responses; 967 were 504 and 3,633 were 429.
+The adapter was still importing after the pool handed it to a timed request,
+so startup contention caused execution timeouts, killed workers, and drove a
+spawn/kill loop. nsjail's default nice level 19 amplified the problem. The
+new handshake waits for the adapter to load the handler before publishing a
+worker, and the launch argv sets nice level 0. Bounded admission then makes
+genuine overload a retryable 429 rather than a function timeout.
+
+The same guest passed the real-sandbox deploy/invoke E2E module: 31/31 checks,
+including jailed npm and pip installs. The initial attempt failed those two
+dependency checks because the guest's tun device was root-only; after fixing
+the *test guest* device permissions, both passed. No production instance was
+used for these measurements.
+
 This document records reproducible measurements, not estimated capacity.
 Numbers are a comparison aid for this host; they are not a universal sizing
 promise.

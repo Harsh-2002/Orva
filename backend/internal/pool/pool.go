@@ -129,6 +129,7 @@ type Manager struct {
 	pools    sync.Map         // fnID -> *functionPool
 	poolMu   sync.Mutex       // serializes pool generation create/retire
 	closing  atomic.Bool
+	queued   atomic.Int64   // requests waiting for a worker or host execution slot
 	wg       sync.WaitGroup // reaper goroutines
 	shutdown chan struct{}
 
@@ -263,6 +264,9 @@ func (m *Manager) EffectiveMemoryCapacity() int64 {
 }
 
 var (
+	// ErrInvocationQueueFull means bounded admission could not accept or serve
+	// the request within its short queue budget. User code never started.
+	ErrInvocationQueueFull = errors.New("invocation queue full or wait expired")
 	// ErrManagerClosed is returned from Acquire after Shutdown.
 	ErrManagerClosed = errors.New("pool manager closed")
 	// ErrNoFunction is returned when the requested function doesn't exist.
@@ -287,6 +291,24 @@ var (
 	// transient failure to the caller.
 	errPoolRetired = errors.New("pool generation retired")
 )
+
+const (
+	invocationQueueWait   = 2 * time.Second
+	perFunctionQueueLimit = 256
+	globalQueueLimit      = 1024
+)
+
+func reserveQueueCounter(counter *atomic.Int64, limit int64) bool {
+	for {
+		current := counter.Load()
+		if current >= limit {
+			return false
+		}
+		if counter.CompareAndSwap(current, current+1) {
+			return true
+		}
+	}
+}
 
 // NewManager creates a pool manager. limiter is the host-wide concurrency
 // ceiling (may be nil to disable host-level capping).
@@ -339,7 +361,17 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 	}
 	arrivedAt := time.Now()
 	p.recordArrival(arrivedAt)
-	p.queued.Add(1)
+	if !reserveQueueCounter(&m.queued, globalQueueLimit) {
+		p.rejections.Add(1)
+		return nil, ErrInvocationQueueFull
+	}
+	defer m.queued.Add(-1)
+	if !reserveQueueCounter(&p.queued, perFunctionQueueLimit) {
+		p.rejections.Add(1)
+		return nil, ErrInvocationQueueFull
+	}
+	queueCtx, cancelQueue := context.WithTimeout(ctx, invocationQueueWait)
+	defer cancelQueue()
 	finishQueue := func(pool *functionPool, rejected bool) {
 		pool.queued.Add(-1)
 		pool.recordQueueWait(time.Since(arrivedAt))
@@ -348,79 +380,87 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		}
 	}
 
-	// Respect the host-wide concurrency ceiling after recording demand.
-	// sum of every pool's max_warm from overwhelming the box even if each
-	// pool is within its own limit. TryAcquire returns ErrTooManyRequests
-	// after a 250ms grace — long enough to ride out micro-spikes, short
-	// enough to fail fast under sustained saturation.
-	if m.limiter != nil {
-		if err := m.limiter.TryAcquire(ctx, 250*time.Millisecond); err != nil {
-			p.capacityTimeouts.Add(1)
-			finishQueue(p, true)
-			return nil, err
-		}
-	}
-
 	for {
-		if err := ctx.Err(); err != nil {
+		if err := queueCtx.Err(); err != nil {
 			finishQueue(p, true)
-			if m.limiter != nil {
-				m.limiter.Release()
-			}
-			return nil, err
+			return nil, queueAdmissionError(ctx, err)
 		}
 
 		// Per-function concurrency gate. Runs *before* worker acquire so a
 		// busy function doesn't pull workers from the pool only to error
 		// out. A generation retired while waiting is retried transparently.
-		if err := p.acquireSlot(ctx); err != nil {
+		if err := p.acquireSlot(queueCtx); err != nil {
 			if errors.Is(err, errPoolRetired) {
 				p.queued.Add(-1)
 				p, err = m.getOrCreatePool(fnID)
 				if err != nil {
-					if m.limiter != nil {
-						m.limiter.Release()
-					}
 					return nil, err
 				}
-				p.queued.Add(1)
+				if !reserveQueueCounter(&p.queued, perFunctionQueueLimit) {
+					p.rejections.Add(1)
+					return nil, ErrInvocationQueueFull
+				}
 				continue
 			}
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				p.capacityTimeouts.Add(1)
 			}
 			finishQueue(p, true)
-			if m.limiter != nil {
-				m.limiter.Release()
-			}
-			return nil, err
+			return nil, queueAdmissionError(ctx, err)
 		}
 
-		res, err := p.acquire(ctx)
+		res, err := p.acquire(queueCtx)
 		if err != nil {
 			p.releaseSlot()
 			if errors.Is(err, errPoolRetired) {
 				p.queued.Add(-1)
 				p, err = m.getOrCreatePool(fnID)
 				if err != nil {
-					if m.limiter != nil {
-						m.limiter.Release()
-					}
 					return nil, err
 				}
-				p.queued.Add(1)
+				if !reserveQueueCounter(&p.queued, perFunctionQueueLimit) {
+					p.rejections.Add(1)
+					return nil, ErrInvocationQueueFull
+				}
 				continue
 			}
 			finishQueue(p, true)
+			return nil, queueAdmissionError(ctx, err)
+		}
+		// A queued request must not hold a host execution slot while it is
+		// waiting for a sandbox to spawn or another invocation to finish.
+		if m.limiter != nil {
+			if err := m.limiter.Acquire(queueCtx); err != nil {
+				p.release(res.Worker, nil)
+				p.releaseSlot()
+				p.capacityTimeouts.Add(1)
+				finishQueue(p, true)
+				return nil, queueAdmissionError(ctx, err)
+			}
+		}
+		if err := queueCtx.Err(); err != nil {
 			if m.limiter != nil {
 				m.limiter.Release()
 			}
-			return nil, err
+			p.release(res.Worker, nil)
+			p.releaseSlot()
+			finishQueue(p, true)
+			return nil, queueAdmissionError(ctx, err)
 		}
 		res.pool = p
 		finishQueue(p, false)
 		return res, nil
 	}
+}
+
+func queueAdmissionError(parent context.Context, err error) error {
+	if parent.Err() != nil {
+		return parent.Err()
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrPoolAtCapacity) {
+		return ErrInvocationQueueFull
+	}
+	return err
 }
 
 // RecordLatency feeds a per-request service-time sample into the
@@ -875,6 +915,15 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				// No process, so nothing will ever call OnExit for it.
 				releaseSDKToken()
 				return nil, err
+			}
+			// Spawn only starts nsjail. The adapters still need to import the
+			// function; don't hand that cold process to a timed invocation.
+			readyCtx, cancelReady := context.WithTimeout(ctx, 10*time.Second)
+			readyErr := w.AwaitReady(readyCtx)
+			cancelReady()
+			if readyErr != nil {
+				_ = w.Kill() // OnExit owns credential revocation after reap.
+				return nil, readyErr
 			}
 			if m.tmpl.Metrics != nil {
 				m.tmpl.Metrics.RecordSpawnDuration(time.Since(start))

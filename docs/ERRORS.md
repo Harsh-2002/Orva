@@ -53,7 +53,8 @@ OOM it should not.
 | `CHECKPOINT_BUSY` | 409 | `POST /system/vacuum` could not checkpoint the WAL because another connection holds a read lock. Previously the checkpoint's busy result was discarded and VACUUM ran against a stale WAL. | yes — retry shortly |
 | `CONFLICT` | 409 | `PUT /functions/{id}` renaming onto a name that already exists. Used to surface as a 500. | no — pick another name |
 | `NOT_FOUND` | 404 | `DELETE /executions/{id}` for an id that does not exist. Used to report success. | no |
-| `TOO_MANY_REQUESTS` | 429 | host-wide concurrency cap reached during TryAcquire grace | **yes** — back off briefly |
+| `TOO_MANY_REQUESTS` | 429 | legacy host-wide concurrency-cap response | **yes** — back off briefly |
+| `INVOCATION_QUEUE_FULL` | 429 | bounded admission reached 256 waiting requests for one function, 1,024 globally, or the 2-second queue budget expired before execution | **yes** — `Retry-After: 1`; no function code ran |
 | `RATE_LIMITED` | 429 | rate limit exceeded — per-function invoke limit (`rate_limit_per_min`, per client IP) or too many login attempts (per client IP). “Client IP” is the TCP peer address unless `ORVA_TRUSTED_PROXY=true`; see `docs/CONFIG.md` | **yes** — `Retry-After: 60` |
 | `FUNCTION_BUSY` | 429 | function at its own `max_concurrency` cap under the `reject` policy | **yes** — `Retry-After: 1`, or raise `max_concurrency` / switch the policy to `queue` |
 
@@ -66,7 +67,7 @@ OOM it should not.
 | `WORKER_CRASHED` | 502 | adapter exited unexpectedly (`process.exit`, OOM-kill, syntax error in handler, or an older/manual nsjail host-policy setup) | no — inspect the execution log and sandbox health |
 | `BUILDING` | 503 | first deploy in flight; no prior code to serve | **yes** — `Retry-After: 5` |
 | `BUILD_QUEUE_FULL` | 503 | build queue at channel capacity | yes — `Retry-After: depth × 30s` |
-| `POOL_AT_CAPACITY` | 503 | function pool at `dynamicMax` and ctx fired waiting | yes — `Retry-After: 5` |
+| `POOL_AT_CAPACITY` | 503 | legacy pool-capacity response; normal HTTP admission expiry now returns `INVOCATION_QUEUE_FULL` | yes — `Retry-After: 5` |
 | `MEMORY_EXHAUSTED` | 503 | host memory budget at 80% reservation | yes — `Retry-After: 30` |
 | `EGRESS_POLICY_UNAVAILABLE` | 503 | a `network_mode=egress` function was invoked while no sandbox egress policy had compiled; the spawn is refused rather than run unfiltered | yes — `Retry-After: 10` (the manager recompiles every 10s), but a bad rule must be fixed first |
 | `KV_UNAVAILABLE` | 503 | an atomic KV batch could not commit; no batch writes were retained | yes — retry the complete batch |

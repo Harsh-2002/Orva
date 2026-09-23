@@ -149,9 +149,6 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
 	if h.Pool == nil {
 		respond.Error(w, http.StatusServiceUnavailable, "POOL_ERROR",
 			"pool manager not configured", reqID)
@@ -164,7 +161,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	acq, err := h.Pool.Acquire(ctx, fn.ID)
+	acq, err := h.Pool.Acquire(r.Context(), fn.ID)
 	if err != nil {
 		// Use the shared taxonomy rather than flattening everything to a
 		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
@@ -177,6 +174,8 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
 

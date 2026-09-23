@@ -42,8 +42,9 @@ Full catalog in [ERRORS.md](ERRORS.md). The ones operators see most:
 
 | code | what's happening | what to do |
 |---|---|---|
-| `429 TOO_MANY_REQUESTS` | host-wide concurrency cap hit | client should back off + retry. The ceiling is derived from CPU count (`NumCPU × 64`, floor 200) and is not operator-tunable today — add CPUs to raise it |
-| `503 POOL_AT_CAPACITY` | this function reached its effective host/operator ceiling and the queue deadline expired | inspect `limiting_reason`; raise `max_warm` only when it says `operator_max`, otherwise add host capacity or reduce worker limits |
+| `429 INVOCATION_QUEUE_FULL` | the function's 256-request or host's 1,024-request admission bound was reached, or a request waited 2 seconds for a worker/execution slot | retry with backoff and jitter; inspect `queued`, `queue_wait_p95_ms`, `effective_max`, and `limiting_reason`. Sustained pressure requires more host capacity or faster functions |
+| `429 TOO_MANY_REQUESTS` | legacy host-wide concurrency-cap response | client should back off + retry |
+| `503 POOL_AT_CAPACITY` | legacy pool-capacity response | inspect `limiting_reason`; normal HTTP queue expiry now returns `429 INVOCATION_QUEUE_FULL` |
 | `503 MEMORY_EXHAUSTED` | host RAM at 80% reservation | scale-down idle pools, increase host RAM, or reduce per-fn `memory_mb` |
 | `502 WORKER_CRASHED` | function process exited mid-request (panic, OOM kill, syntax error) | check the execution's stderr in the dashboard or `execution_logs` table |
 | `504 TIMEOUT` | exceeded fn `timeout_ms` | raise it (`PUT /api/v1/functions/{id}` with `{"timeout_ms": 60000}`) or optimize the handler |

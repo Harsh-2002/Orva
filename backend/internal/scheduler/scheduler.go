@@ -357,16 +357,15 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 		timeout = 30 * time.Second
 	}
 
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-
-	acq, err := s.pool.Acquire(ctx, row.FunctionID)
+	acq, err := s.pool.Acquire(parent, row.FunctionID)
 	if err != nil {
 		errMsg := "pool acquire: " + err.Error()
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	var reqErr error
 	defer func() { s.pool.Release(acq, reqErr) }()
 
@@ -670,14 +669,13 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job) {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-
-	acq, err := s.pool.Acquire(ctx, j.FunctionID)
+	acq, err := s.pool.Acquire(parent, j.FunctionID)
 	if err != nil {
 		finalize(fn.Name, "pool acquire: "+err.Error(), false)
 		return
 	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	var reqErr error
 	defer func() { s.pool.Release(acq, reqErr) }()
 

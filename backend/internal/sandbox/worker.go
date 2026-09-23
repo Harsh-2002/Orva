@@ -215,6 +215,35 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	return w, nil
 }
 
+// AwaitReady consumes the adapter's startup handshake. The pool calls this
+// before publishing a worker, so importing user code is cold-start work and
+// never consumes the function's execution timeout. On failure the caller must
+// kill the worker; that also unblocks the read goroutine on context expiry.
+func (w *Worker) AwaitReady(ctx context.Context) error {
+	type result struct {
+		frame []byte
+		err   error
+	}
+	ready := make(chan result, 1)
+	go func() {
+		frame, err := readFrame(w.stdout)
+		ready <- result{frame: frame, err: err}
+	}()
+	select {
+	case got := <-ready:
+		if got.err != nil {
+			return fmt.Errorf("%w: adapter startup: %v", ErrWorkerExited, got.err)
+		}
+		var frame frameResponse
+		if err := json.Unmarshal(got.frame, &frame); err != nil || frame.Type != "ready" {
+			return fmt.Errorf("%w: invalid adapter startup frame", ErrWorkerExited)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Dispatch writes a request frame and reads the response frame. Returns
 // (respBody, stderrSnapshot, err). On context cancellation or protocol
 // error the worker is marked dead and must not be reused.

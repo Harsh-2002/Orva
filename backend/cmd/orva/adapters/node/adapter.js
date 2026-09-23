@@ -445,6 +445,11 @@ async function readFrame() {
   }
 }
 
+// The pool must not publish this process as executable until imports and the
+// handler have loaded. A ready frame is consumed by Worker.AwaitReady, not by
+// the first invocation, so cold-start CPU cannot burn the function timeout.
+writeFrame({ type: 'ready' });
+
 (async () => {
   // Worker recycling is owned by the pool (SandboxTemplate DefaultMaxUses →
   // functionPool.maxUses), which retires a worker after N dispatches. This
