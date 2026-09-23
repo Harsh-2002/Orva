@@ -34,6 +34,22 @@ go vet ./...
 | `registry` | In-memory function registry wrapping DB |
 | `builder` | Deploy pipeline: tarball → `npm install` / `pip install` → optional `tsc` → register. Every one of those commands runs **inside nsjail** via `sandbox.RunBuild`, using the runtime rootfs's own toolchain and the same compiled NSTUN egress policy a worker gets — the installs fail closed without one. A function with no dependencies runs no installer and needs no policy. `buildcache.go` owns the **per-function** npm/pip cache and every path built from a function id; `gc.go` bounds the caches and reclaims orphaned function dirs. |
 | `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; admission is bounded to 256 pending per function and 1,024 globally with a 2-second wait. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. Failed asynchronous spawns wake pending callers with the original error, preserving fail-closed egress-policy responses. |
+
+`pool/hostmem.go` discovers the process's cgroup-v2 ancestry via
+`/proc/self/cgroup`. It uses the tightest visible ancestor and host memory headroom and
+CPU quota, plus the effective CPU set, for its startup capacity snapshot; a
+1-second poll refreshes memory usage. This is resource discovery, not proof of
+delegated per-worker cgroup enforcement. `proxy.Forward` does not consume a
+seccomp policy; the worker's actual policy is built at spawn in `pool/pool.go`.
+`proxy.Proxy` caches the non-security streaming settings for at most 30 seconds
+per instance; a refresh never blocks concurrent invocations that already have
+a prior snapshot.
+
+`server.detectInternalAPIBase` chooses a local interface IP (default-route
+interface first) for the sandbox SDK control plane. Do not reintroduce a
+gateway or generic health probe: it can select a separate Orva instance before
+this server begins listening. The environment override remains available for
+unusual routing.
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx` |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |

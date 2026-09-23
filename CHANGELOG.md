@@ -13,6 +13,25 @@ pruned with their releases — so `git log v2026.09.23..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
+## Unreleased
+
+### Fixed
+
+- Sandbox SDK calls now target a local Orva interface, not any healthy Orva
+  found by probing the default gateway. On hosts with another Orva instance at
+  that gateway, KV/jobs/F2F calls could reach the wrong instance and fail 401;
+  its per-process credentials prevented authentication there. An explicit
+  `ORVA_INTERNAL_API_BASE` remains available for unusual network topologies.
+- Worker capacity discovery now respects visible ancestor cgroup memory/CPU
+  constraints, the effective CPU set, and host physical memory pressure.
+
+### Changed
+
+- HTTP and MCP invocations no longer build an unused seccomp policy per
+  request. Streaming settings are cached for up to 30 seconds instead of
+  causing two SQLite reads on every invocation; worker-spawn security policy
+  is unchanged.
+
 ## v2026.09.23
 
 ### Changed

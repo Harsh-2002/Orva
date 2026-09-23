@@ -33,6 +33,10 @@ python3 run.py --filter ai        # only modules whose filename contains "ai"
 # had no user; an instance you onboarded through the dashboard has no such file.
 # Use a key from `orva keys create` (or ~/.orva/config.yaml) if it is absent.
 python3 run.py --url http://127.0.0.1:8443 --api-key "$(sudo cat /var/lib/orva/.admin-key)"
+
+# When the instance is in a VM, point its mock-provider calls back to the
+# host gateway; run.py preserves an explicitly supplied MOCK_HOST.
+MOCK_HOST=<guest-reachable-host-ip> python3 run.py --url http://127.0.0.1:<forwarded-port> --api-key <scratch-key>
 ```
 
 **Requirements:** `docker` (for isolated mode), `python3`, and a built `build/orva`

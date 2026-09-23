@@ -208,13 +208,12 @@ func (r *Router) setupRoutes() {
 
 	// Invoke route (catch-all for invoke paths AND custom user routes).
 	invokeHandler := &handlers.InvokeHandler{
-		Registry:       r.registry,
-		Proxy:          r.proxy,
-		DB:             r.db,
-		Metrics:        r.metrics,
-		Secrets:        r.secrets,
-		DataDir:        r.cfg.Data.Dir,
-		DefaultSeccomp: r.cfg.Sandbox.SeccompPolicy,
+		Registry: r.registry,
+		Proxy:    r.proxy,
+		DB:       r.db,
+		Metrics:  r.metrics,
+		Secrets:  r.secrets,
+		DataDir:  r.cfg.Data.Dir,
 	}
 	if r.eventHub != nil {
 		invokeHandler.PublishEvent = r.eventHub.Publish

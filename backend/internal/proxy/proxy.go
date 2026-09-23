@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -168,6 +169,7 @@ type captureCache struct {
 var capCache captureCache
 
 const captureRefreshEvery = 30 * time.Second
+const streamingRefreshEvery = 30 * time.Second
 
 // LoadCaptureConfig seeds the cached replay-capture settings from the
 // database and starts a background refresher. Idempotent — safe to call
@@ -228,10 +230,47 @@ type Proxy struct {
 	// DB is used to persist the captured request envelope for replay
 	// (v0.4 A3). Optional: when nil, capture is skipped silently. Tests
 	// without a DB wired up keep working unchanged.
-	DB      *database.Database
-	SDKAuth *sdkauth.Authenticator
+	DB             *database.Database
+	SDKAuth        *sdkauth.Authenticator
+	streamMu       sync.Mutex
+	streamSettings atomic.Pointer[streamSettings]
 
 	Config ProxyConfig
+}
+
+type streamSettings struct {
+	enabled          int
+	keepaliveSeconds int
+	expiresAt        time.Time
+}
+
+// streamingConfig avoids two SQLite reads on every invocation. A stale value
+// remains usable while one caller refreshes it; the first load is synchronous.
+func (p *Proxy) streamingConfig() (int, int) {
+	if p.DB == nil {
+		return 1, 15
+	}
+	current := p.streamSettings.Load()
+	if current != nil && time.Now().Before(current.expiresAt) {
+		return current.enabled, current.keepaliveSeconds
+	}
+	if current != nil && !p.streamMu.TryLock() {
+		return current.enabled, current.keepaliveSeconds
+	}
+	if current == nil {
+		p.streamMu.Lock()
+	}
+	defer p.streamMu.Unlock()
+	current = p.streamSettings.Load()
+	if current == nil || !time.Now().Before(current.expiresAt) {
+		current = &streamSettings{
+			enabled:          p.DB.GetSystemConfigInt("streaming_enabled", 1),
+			keepaliveSeconds: p.DB.GetSystemConfigInt("stream_keepalive_seconds", 15),
+			expiresAt:        time.Now().Add(streamingRefreshEvery),
+		}
+		p.streamSettings.Store(current)
+	}
+	return current.enabled, current.keepaliveSeconds
 }
 
 // streamMaxFallback is the wall-clock cap for a streaming response when
@@ -298,14 +337,12 @@ func (p *Proxy) Forward(
 	fnID, execID string,
 	timeoutMS int64,
 	cpus float64,
-	seccompPolicy string,
 	stripPrefix string, // strip this from r.URL.Path before passing to the function
 	coldStart bool, // ignored; populated from pool Acquire result
 	startTime time.Time,
 ) (*Result, error) {
 	_ = codeDir
 	_ = cpus
-	_ = seccompPolicy
 	_ = coldStart
 	releaseExecution := p.SDKAuth.BindExecution(
 		execID, fnID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), startTime,
@@ -375,12 +412,7 @@ func (p *Proxy) Forward(
 	// v0.4 C1: streaming feature flag. Operator-tunable via system_config;
 	// when off the adapters treat generators as buffered single-frame
 	// responses (back-compat fallback). Default on.
-	streamingOn := 1
-	streamKeepaliveS := 15
-	if p.DB != nil {
-		streamingOn = p.DB.GetSystemConfigInt("streaming_enabled", 1)
-		streamKeepaliveS = p.DB.GetSystemConfigInt("stream_keepalive_seconds", 15)
-	}
+	streamingOn, streamKeepaliveS := p.streamingConfig()
 	headers["x-orva-streaming-enabled"] = strconv.Itoa(streamingOn)
 	headers["x-orva-stream-keepalive-seconds"] = strconv.Itoa(streamKeepaliveS)
 

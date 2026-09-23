@@ -21,13 +21,12 @@ import (
 
 // InvokeHandler handles function invocation requests.
 type InvokeHandler struct {
-	Registry       *registry.Registry
-	Proxy          *proxy.Proxy
-	DB             *database.Database
-	Metrics        *metrics.Metrics
-	Secrets        *secrets.Manager
-	DataDir        string
-	DefaultSeccomp string // Global default seccomp policy name
+	Registry *registry.Registry
+	Proxy    *proxy.Proxy
+	DB       *database.Database
+	Metrics  *metrics.Metrics
+	Secrets  *secrets.Manager
+	DataDir  string
 
 	// PublishEvent is fired after every invocation so the SSE event hub can
 	// stream execution rows to live UI clients (Dashboard recent invocations
@@ -185,12 +184,6 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Determine language.
 	lang := sandbox.Language(fn.Runtime)
 
-	// Build seccomp policy for this function. An egress function additionally
-	// needs the outbound socket syscalls the base policies withhold — without
-	// them seccomp kills the connect() before the egress policy is consulted.
-	seccompPolicy := sandbox.BuildSeccompPolicy(h.DefaultSeccomp,
-		sandbox.SeccompAllowForNetworkMode(fn.NetworkMode), nil)
-
 	// No env is built here: a warm worker's environment is fixed at spawn, so
 	// pool.buildEnv merges env_vars + decrypted secrets there. Decrypting them
 	// per request only to discard them was pure cost on the hot path.
@@ -200,7 +193,6 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w, r, codeDir, lang,
 		fnID, execID, timeoutMS,
 		fn.CPUs,
-		seccompPolicy,
 		stripPrefix,
 		true, start,
 	)

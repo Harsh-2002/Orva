@@ -453,14 +453,12 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 
 	codeDir := deps.DataDir + "/functions/" + fn.ID + "/code"
 	lang := sandbox.Language(fn.Runtime)
-	seccompPolicy := sandbox.BuildSeccompPolicy("", nil, nil)
-
 	start := time.Now()
 	reqWithCtx := req.WithContext(tCtx)
 	result, ferr := deps.Proxy.Forward(
 		rec, reqWithCtx, codeDir, lang,
 		fn.ID, execID, timeoutMS,
-		fn.CPUs, seccompPolicy,
+		fn.CPUs,
 		"", true, start,
 	)
 	duration := time.Since(start)

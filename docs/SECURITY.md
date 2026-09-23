@@ -538,8 +538,15 @@ compatibility alias — see [`API.md`](API.md#firewall-status).
   *non-loopback* address (from inside the jail, `127.0.0.1` is the jail's
   own loopback) and is normally RFC1918. A narrow control-plane ALLOW —
   exact address, exact port, TCP — now precedes the blocklist. If that
-  address cannot be determined at startup, the policy refuses to compile
-  rather than shipping one that breaks the SDK.
+  address is unavailable at startup, Orva warns and falls back to loopback;
+  set `ORVA_INTERNAL_API_BASE` to a sandbox-reachable address in that case.
+
+  Orva selects the SDK control-plane target only from an address assigned to
+  its own network interfaces (or an explicit operator override). It does not
+  probe the default gateway for any healthy Orva server: another instance can
+  run there, and a healthy response is not an identity check. Per-worker SDK
+  credentials are process-scoped, so a wrong-instance request is rejected, but
+  it must not be routed to that instance in the first place.
 
 **Sharp edge — the RFC1918 suggestions now also apply to orvad.**
 Because the daemon is filtered by the same rules, enabling the shipped

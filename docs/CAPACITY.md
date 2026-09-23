@@ -1,5 +1,37 @@
 # Pool Controller v2 capacity validation
 
+The current optimization work improves cgroup-v2 resource *discovery*:
+capacity checks walk visible ancestors and account for parent and host physical
+memory pressure, CPU quotas, and the effective CPU set. This does not enable missing cgroup
+delegation or raise a verified throughput ceiling. Limits changed after startup
+still require an Orva restart to update the initial capacity snapshot; live
+reconciliation is planned separately. The historical throughput comparisons
+below have not been repeated under identical external-client conditions.
+
+## 2026-09-23 optimization work-in-progress check
+
+A fresh 2-vCPU/4-GiB smolvm guest with the candidate binary passed the full
+real-sandbox E2E suite: 28 modules, 660 checks, zero failures or skips. Its
+firewall status named its **own** `100.96.0.2` interface for internal SDK calls,
+not the host gateway's separate Orva instance. The firewall suite's SDK KV
+test passed with RFC1918 blocking enabled.
+
+The first scratch admission harness run **inside** the guest (loopback, 100
+clients, 1,000 requests per single-runtime phase) returned 1,000/1,000 HTTP
+200 for both Node and Python, 2,500/2,500 per runtime in the mixed phase, and
+1,000/1,000 for the CPU phase. A 500-request slow-handler overload returned
+376 HTTP 200 and 124 expected HTTP 429, with no 504 or transport error. A run
+on the final binary still passed each single-runtime and CPU phase but the
+mixed Python phase returned 2,467 HTTP 200 and 33 retryable HTTP 429; the
+harness correctly failed that phase. This is not yet a consistently passing
+mixed-concurrency acceptance check.
+This is functional regression evidence, **not** an external throughput result:
+the load generator shared the guest's two CPUs. A separate host-side run through
+smolvm's forwarded port passed 5,000/5,000 for each single runtime, then
+experienced connection resets during mixed traffic while the guest remained
+healthy. The reset source is not yet attributed; no before/after performance
+claim is made from these runs.
+
 > The historical measurements below predate bounded invocation admission.
 > Current admission caps pending requests at 256 per function and 1,024
 > globally, waits at most 2 seconds, and returns `429 INVOCATION_QUEUE_FULL`

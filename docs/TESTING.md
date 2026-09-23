@@ -31,8 +31,16 @@ handler, and bounded overload; it deletes only the functions it created.
 It refuses to run without the explicit `--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create
-false timeouts. See [CAPACITY.md](CAPACITY.md) for the measured 2-vCPU/4-GiB
-run and the guest's cgroup limitation.
+false timeouts. See [CAPACITY.md](CAPACITY.md) for the earlier measured
+2-vCPU/4-GiB run and that guest's undelegated cgroups.
+
+An external load generator should be preferred for throughput numbers, but
+validate its path independently. In the 2026-09-23 scratch VM check, the
+forwarded host port reset connections under mixed load while guest-loopback
+functional load and health stayed green; the source of those resets is not yet
+attributed. The harness now retries deletion of every function it created if
+transport fails; inspect `admission-test-*` names before deleting anything
+manually after an interrupted run.
 
 ### 1.1 Ten minutes: does this build and does the sandbox actually execute code
 
@@ -104,6 +112,11 @@ against a bare-metal instance instead:
 ```bash
 cd test/e2e && python3 run.py --url $BASE --api-key "$KEY"
 ```
+
+For an external instance inside a VM, set `MOCK_HOST` to the host address
+reachable from the guest; the test runner uses `127.0.0.1` only when it is not
+set. Without this, the AI test mock's loopback URL points back into the guest
+and its provider calls fail even though the Orva server is healthy.
 
 That is also how CI runs it, and how the last committed `CHECKLIST.md` was
 produced.

@@ -12,6 +12,7 @@ import http.client
 import json
 import statistics
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -27,7 +28,7 @@ def api(base, key, method, path, payload=None):
         return json.load(response)
 
 
-def deploy(base, key, runtime, code_override=None):
+def deploy(base, key, runtime, owned, code_override=None):
     suffix = uuid.uuid4().hex[:12]
     fn = api(base, key, "POST", "/api/v1/functions", {
         "name": f"admission-test-{runtime}-{suffix}", "runtime": runtime,
@@ -36,6 +37,7 @@ def deploy(base, key, runtime, code_override=None):
         "network_mode": "none", "auth_mode": "none",
     })
     fid = fn["id"]
+    owned.append(fid)  # Own it even if the deploy call or readiness poll fails.
     code = code_override or (
         'exports.handler = async () => ({statusCode: 200, body: "ok"});'
         if runtime == "node" else
@@ -122,9 +124,10 @@ def main():
     base = args.url.rstrip("/")
     failures = 0
     functions = {}
+    owned = []
     try:
         for runtime in ("node", "python"):
-            fid = deploy(base, args.api_key, runtime)
+            fid = deploy(base, args.api_key, runtime, owned)
             functions[runtime] = fid
             warm = run_load(base, fid, 100, 10)
             print(f"{runtime} warm-up: {dict(warm[1])}", flush=True)
@@ -151,7 +154,7 @@ def main():
             cpu_code = ('exports.handler = async () => {'
                         'const end = Date.now() + 20; while (Date.now() < end) {} '
                         'return {statusCode: 200, body: "ok"}; };')
-            cpu_id = deploy(base, args.api_key, "node", cpu_code)
+            cpu_id = deploy(base, args.api_key, "node", owned, cpu_code)
             functions["cpu"] = cpu_id
             elapsed, statuses, *_ = run_load(base, cpu_id, 1000, 100)
             print(f"CPU-bound: {elapsed:.2f}s {dict(statuses)}", flush=True)
@@ -161,7 +164,7 @@ def main():
             slow_code = ('exports.handler = async () => {'
                          'await new Promise(resolve => setTimeout(resolve, 1000)); '
                          'return {statusCode: 200, body: "ok"}; };')
-            slow_id = deploy(base, args.api_key, "node", slow_code)
+            slow_id = deploy(base, args.api_key, "node", owned, slow_code)
             functions["slow"] = slow_id
             elapsed, statuses, *_ = run_load(base, slow_id, 500, 100)
             print(f"overload: {elapsed:.2f}s {dict(statuses)}", flush=True)
@@ -173,8 +176,22 @@ def main():
                 print("overload did not saturate admission; check test rig capacity", flush=True)
                 failures += 1
     finally:
-        for fid in functions.values():
-            api(base, args.api_key, "DELETE", f"/api/v1/functions/{fid}")
+        for fid in owned:
+            for attempt in range(3):
+                try:
+                    api(base, args.api_key, "DELETE", f"/api/v1/functions/{fid}")
+                    break
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 404:
+                        break
+                    error = exc
+                except Exception as exc:  # Cleanup must not hide the load failure.
+                    error = exc
+                if attempt < 2:
+                    time.sleep(1)
+            else:
+                print(f"cleanup failed for scratch function {fid}: {error}", flush=True)
+                failures += 1
     return failures != 0
 
 
