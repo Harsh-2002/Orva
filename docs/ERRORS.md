@@ -5,15 +5,11 @@ Every API error returns the same envelope:
 ```json
 {
   "error": {
-    "code": "POOL_AT_CAPACITY",
-    "message": "function pool at capacity for 019df200-7b00-7e00-9c00-aab1cd2e3f40",
+    "code": "INVOCATION_QUEUE_FULL",
+    "message": "invocation queue is full or its wait budget expired",
     "request_id": "019df210-7b00-7e00-9c00-aab1cd2e3f42",
-    "hint": "inspect pool limiting_reason; raise max_warm only for operator_max",
-    "retry_after_s": 5,
-    "details": {
-      "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
-      "function_name": "stripe-webhook"
-    }
+    "hint": "back off briefly and retry; sustained overload requires more host capacity or a faster handler",
+    "retry_after_s": 1
   }
 }
 ```
