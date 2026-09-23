@@ -250,6 +250,10 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) (args, childEnv []stri
 		"--chroot", rootfs,
 		"-R", cfg.CodeDir+":/code",
 		"-T", "/tmp",
+		// nsjail defaults children to nice 19. Under parallel load that
+		// starves every function worker behind the nice-0 control plane and
+		// turns fast handlers into 5-second timeouts and worker churn.
+		"--nice_level", "0",
 		"--rlimit_as", "max",
 		// -q (WARNING), not -Q (FATAL): nsjail gates rule-compilation errors
 		// behind ERROR, so -Q made every malformed-policy diagnostic invisible.

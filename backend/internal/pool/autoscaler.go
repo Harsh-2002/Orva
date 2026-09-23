@@ -274,6 +274,10 @@ func (s *scaler) startSpawn(p *functionPool, reason string) bool {
 	select {
 	case p.spawnSlots <- struct{}{}:
 		p.spawning.Add(1) // publish before launch: repeated ticks see it
+		if p.spawnError != nil {
+			p.spawnError = nil
+			p.spawnErrorCh = make(chan struct{})
+		}
 	default:
 		p.mu.Unlock()
 		return false
@@ -300,6 +304,7 @@ func (s *scaler) startSpawn(p *functionPool, reason string) bool {
 		p.spawning.Add(-1)
 		if err != nil {
 			s.hostMem.release(reservation.memoryBytes, reservation.cpuUnits)
+			p.notifySpawnError(err)
 			p.sigMu.Lock()
 			p.limitingReason = "spawn_error"
 			p.sigMu.Unlock()
@@ -310,6 +315,10 @@ func (s *scaler) startSpawn(p *functionPool, reason string) bool {
 		p.spawned.Add(1)
 		p.workerReservations.Store(w, reservation)
 		p.mu.Lock()
+		if p.spawnError != nil {
+			p.spawnError = nil
+			p.spawnErrorCh = make(chan struct{})
+		}
 		parked := false
 		if !p.closing.Load() {
 			select {

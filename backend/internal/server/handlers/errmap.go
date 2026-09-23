@@ -55,6 +55,7 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 				details["max_concurrency"] = fn.MaxConcurrency
 			}
 		}
+
 		return http.StatusTooManyRequests, respond.ErrorOpts{
 			Code:        "FUNCTION_BUSY",
 			Message:     fmt.Sprintf("function %s is at its concurrency cap", funcLabel(fn)),
@@ -62,6 +63,15 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 			Hint:        "raise functions.max_concurrency or switch the policy to 'queue' to wait for a slot",
 			RetryAfterS: 1,
 			Details:     details,
+		}
+
+	case errors.Is(err, pool.ErrInvocationQueueFull):
+		return http.StatusTooManyRequests, respond.ErrorOpts{
+			Code:        "INVOCATION_QUEUE_FULL",
+			Message:     "invocation queue is full or its wait budget expired",
+			RequestID:   requestID,
+			Hint:        "back off briefly and retry; sustained overload requires more host capacity or a faster handler",
+			RetryAfterS: 1,
 		}
 
 	case errors.Is(err, pool.ErrPoolAtCapacity):

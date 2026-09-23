@@ -140,10 +140,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
-	acq, err := h.Pool.Acquire(ctx, fn.ID)
+	acq, err := h.Pool.Acquire(r.Context(), fn.ID)
 	if err != nil {
 		// Shared taxonomy, as on the HTTP invoke path: a webhook sender
 		// retrying needs FUNCTION_BUSY + Retry-After to be distinguishable
@@ -152,6 +149,8 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
 

@@ -23,12 +23,11 @@ Error envelope (every 4xx/5xx):
 ```json
 {
   "error": {
-    "code": "POOL_AT_CAPACITY",
-    "message": "function pool at capacity for 019df200-7b00-7e00-9c00-aab1cd2e3f40",
+    "code": "INVOCATION_QUEUE_FULL",
+    "message": "invocation queue is full or its wait budget expired",
     "request_id": "019df210-7b00-7e00-9c00-aab1cd2e3f42",
-    "hint": "inspect pool limiting_reason; raise max_warm only for operator_max",
-    "retry_after_s": 5,
-    "details": {"function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40", "current": 16, "limit": 16}
+    "hint": "back off briefly and retry; sustained overload requires more host capacity or a faster handler",
+    "retry_after_s": 1
   }
 }
 ```
@@ -254,6 +253,13 @@ the handler throws or returns an AWS-shape `{statusCode, body}`.
 
 Custom routes (e.g. `/webhooks/stripe`) reach the same handler — see
 the routes section below.
+
+Admission allows at most 256 pending invocations for one function and 1,024
+pending invocations on the host, with a 2-second wait for a worker and host
+execution slot. If either bound is reached, the response is `429
+INVOCATION_QUEUE_FULL` with `Retry-After: 1`; no user code ran. The function's
+`timeout_ms` starts after admission, when a worker is ready, so waiting in the
+queue does not consume its execution budget.
 
 **Response headers.** Every invoke carries `X-Orva-Execution-ID`, including a
 timeout or a sandbox failure, which answer from the invoke handler rather than

@@ -419,13 +419,14 @@ func (p *Proxy) Forward(
 		return &Result{}, fmt.Errorf("pool manager not configured")
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
-	acq, err := p.Pool.Acquire(ctx, fnID)
+	acq, err := p.Pool.Acquire(r.Context(), fnID)
 	if err != nil {
 		return &Result{}, fmt.Errorf("pool acquire: %w", err)
 	}
+	// Queue admission has its own short budget. The function's configured
+	// timeout starts only once a sandbox is actually ready to execute it.
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 	// reqErr is the error we pass back to Release — determines whether the
 	// worker gets returned to the pool or killed.
 	var reqErr error

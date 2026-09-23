@@ -1,15 +1,39 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestWorkerReadyHandshake(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		wantErr bool
+	}{
+		{"ready", `{"type":"ready"}`, false},
+		{"unexpected", `{"type":"response"}`, true},
+		{"invalid", `not-json-16-byte`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte(tc.payload)
+			frame := append([]byte{0, 0, 0, byte(len(payload))}, payload...)
+			w := &Worker{stdout: io.NopCloser(bytes.NewReader(frame))}
+			err := w.AwaitReady(context.Background())
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("AwaitReady error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
 
 // containsArg returns true if any element in args equals s — useful for
 // asserting flag presence regardless of position.
@@ -20,6 +44,25 @@ func containsArg(args []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildArgsGivesWorkersNormalSchedulerPriority(t *testing.T) {
+	for _, language := range []Language{Node, Python} {
+		args, _, err := buildArgs(ExecConfig{Language: language, CodeDir: "/tmp/code"}, "/tmp/rootfs", "/tmp/code/handler")
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "--nice_level" && args[i+1] == "0" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s worker inherits nsjail's nice-19 default: %v", language, args)
+		}
+	}
 }
 
 // TestBuildArgs_NoEgressByDefault asserts that the default (and explicit

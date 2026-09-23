@@ -628,6 +628,8 @@ def _dispatch_and_emit(event, streaming_enabled, keepalive_s):
 # single lifecycle authority, and a worker that exits on its own schedule races
 # the pool's accounting.
 
+_write_frame({"type": "ready"})
+
 try:
     while True:
         frame = _read_frame()

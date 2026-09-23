@@ -13,6 +13,22 @@ pruned with their releases — so `git log v2026.09.22..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
+## v2026.09.23
+
+### Changed
+
+- Function execution timeouts now start when a sandbox worker is acquired;
+  waiting for capacity or for a new adapter to load no longer consumes the
+  handler's timeout or kills an otherwise healthy worker. Workers run at
+  normal scheduler priority instead of nsjail's lowest-priority default.
+  Invocation admission waits up to 2 seconds and
+  is bounded at 256 pending requests per function and 1,024 globally.
+  Saturated requests return `429 INVOCATION_QUEUE_FULL` with `Retry-After: 1`
+  before any function code runs. Actual sandbox startup failures, including an
+  unavailable egress policy, still return their specific server error rather
+  than being misreported as queue saturation. Clients should retry queue
+  overload with backoff and jitter.
+
 ## v2026.09.22
 
 ### Fixed

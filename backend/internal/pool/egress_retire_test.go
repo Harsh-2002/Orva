@@ -98,7 +98,7 @@ func fakeSandboxTemplate(t *testing.T) SandboxTemplate {
 		t.Fatal(err)
 	}
 	nsjail := filepath.Join(tmp, "fake-nsjail")
-	if err := os.WriteFile(nsjail, []byte("#!/bin/sh\ncat >/dev/null\n"), 0o755); err != nil {
+	if err := os.WriteFile(nsjail, []byte("#!/bin/sh\nprintf '\\000\\000\\000\\020{\"type\":\"ready\"}'\ncat >/dev/null\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return SandboxTemplate{
