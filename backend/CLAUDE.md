@@ -49,7 +49,16 @@ The pool's demand history uses sixty one-second arrival buckets instead of a
 timestamp per request; controller wakeups coalesce within 20 ms. Neither is an
 execution-concurrency cap. The async SQLite writer prepares each distinct SQL
 statement once per batch; HTTP execution baseline/outlier fields are included
-in the execution INSERT instead of a second UPDATE. `metrics.latency_ms` stops
+in the execution INSERT instead of a second UPDATE. Its critical and telemetry
+queues reserve bytes atomically before publication and return reservations on
+timeout or shedding; do not move accounting after a channel send, because the
+consumer may already have received the job. The reservation remains held while
+a batch is in flight or retrying, then is released on commit or explicit shed.
+Transient retries must copy any alias of the batch before clearing the old
+backing array. Writer shutdown closes the producer
+stop signal, waits for in-flight enqueues under `enqueueMu`, then signals the
+consumer to drain; a late critical producer writes directly while the DB is
+still open. `metrics.latency_ms` stops
 at proxy return, while `response_latency_ms` measures the complete public
 invoke handler (including admission and record enqueue), not network transit.
 The pool's `service_p95_ms` samples full worker leases from successful acquire

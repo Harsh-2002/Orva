@@ -106,6 +106,29 @@ def run_load(base, fid, count, concurrency):
     return elapsed, statuses, p50, p95, p99
 
 
+def wait_writer_drain(base, key, timeout=30):
+    """Wait for accepted writes, including in-flight batches, before cleanup."""
+    deadline = time.monotonic() + timeout
+    while True:
+        # A client can finish reading before InvokeHandler enqueues its final
+        # execution row. First wait for handler completion, then for the
+        # writer's queued/in-flight bytes to reach zero.
+        active = api(base, key, "GET", "/api/v1/system/metrics.json")["active_requests"]
+        writer = api(base, key, "GET", "/api/v1/system/health")["writer"]
+        if (active == 0 and writer["critical_queue_bytes"] == 0 and
+                writer["telemetry_queue_bytes"] == 0):
+            time.sleep(0.1)
+            active = api(base, key, "GET", "/api/v1/system/metrics.json")["active_requests"]
+            writer = api(base, key, "GET", "/api/v1/system/health")["writer"]
+            if (active == 0 and writer["critical_queue_bytes"] == 0 and
+                    writer["telemetry_queue_bytes"] == 0):
+                return writer
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"invocations/writer did not drain before scratch cleanup: "
+                               f"active={active}, writer={writer}")
+        time.sleep(0.05)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
@@ -125,6 +148,7 @@ def main():
     failures = 0
     functions = {}
     owned = []
+    writer_start = api(base, args.api_key, "GET", "/api/v1/system/health")["writer"]
     try:
         for runtime in ("node", "python"):
             fid = deploy(base, args.api_key, runtime, owned)
@@ -176,6 +200,22 @@ def main():
                 print("overload did not saturate admission; check test rig capacity", flush=True)
                 failures += 1
     finally:
+        # Deleting a function cascades its execution rows. Wait for accepted
+        # completion/capture jobs before deletion so the load result cannot
+        # mistake the harness's own cleanup race for a persistence failure.
+        try:
+            writer_before_delete = wait_writer_drain(base, args.api_key)
+            failure_delta = (writer_before_delete["critical_failures"] -
+                             writer_start["critical_failures"])
+            telemetry_delta = (writer_before_delete["dropped_telemetry"] -
+                               writer_start["dropped_telemetry"])
+            print(f"writer before cleanup: critical_failures={failure_delta} "
+                  f"dropped_telemetry={telemetry_delta}", flush=True)
+            if failure_delta:
+                failures += 1
+        except Exception as exc:
+            print(f"writer drain check failed: {exc}", flush=True)
+            failures += 1
         for fid in owned:
             for attempt in range(3):
                 try:

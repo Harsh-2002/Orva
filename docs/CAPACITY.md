@@ -9,6 +9,44 @@ invocations required on a disposable 2-vCPU/2-GiB Ubuntu smolvm guest; no
 module failed or skipped. That guest used the verified nsjail file-capability
 fallback but reported `rlimit_only` because cgroup controllers were not
 delegated, so this pass does not validate hard per-worker cgroup limits.
+The next writer-safety change makes its critical and best-effort telemetry
+byte ceilings atomic under concurrent enqueues. A job now reserves its
+estimated bytes before entering a channel and releases that reservation if
+the enqueue times out or is shed. This prevents queue-memory overshoot; it
+does not increase SQLite's measured sustainable write rate or recover
+telemetry already dropped under overload.
+Writer shutdown also fences queue publishers before the final drain. Critical
+records accepted just as shutdown begins can no longer be stranded behind the
+consumer's exit; late critical calls use the direct-write fallback while the
+database remains open. This does not add power-loss durability beyond the
+existing acknowledged-in-memory contract.
+The bounded writer now keeps a job's byte reservation through commit and
+transient retry, rather than releasing it merely when the consumer takes it
+out of the channel. A retry is copied before clearing its old batch storage;
+the prior aliasing path could zero the SQL and arguments of an accepted batch.
+The health `*_queue_bytes` counters therefore include in-flight work; channel
+depth alone cannot prove that it is safe to delete a just-loaded test function.
+A 100-client, 10,000-invocation Node/Python scratch run on the prior writer
+binary returned 10,000 HTTP 200 but the harness's immediate function deletion
+was followed by 34 critical failures and 883 dropped telemetry records. The
+same harness, changed to wait for writer drain before deleting functions,
+returned another 10,000 HTTP 200 with **zero new critical failures before
+cleanup** and 1,029 new telemetry drops; the critical-failure total did not
+increase after deletion. The secondary-write loss is real under this load;
+the initial critical-failure increment was a test-cleanup race, not evidence
+that ordinary successful invocations lost their completion records.
+After the retry-alias and in-flight reservation fix, the same 2-vCPU/2-GiB
+scratch VM passed all 28 real-sandbox E2E modules (668 checks, no failures or
+skips). Three sequential 10,000-request Node/Python harness runs at 100
+clients each returned every HTTP 200; pre-cleanup critical-failure deltas
+were 0/0/0 and telemetry-drop deltas were 0/113/0. The first cleanup still
+added three critical failures because client response completion preceded the
+handler's final enqueue; waiting for `active_requests=0` as well as writer
+bytes to drain kept that total unchanged in the following two runs. Activity
+rows missing from the middle run were 55 of 10,200 expected (including
+warm-up), confirming some drops affected the operator activity feed, not just
+optional replay capture. This is an undelegated 2-GiB functional/load probe,
+not a controlled A/B or the 2-vCPU/4-GiB capacity target.
 
 ## 2026-09-23 independent two-VM follow-up (unreleased candidate)
 

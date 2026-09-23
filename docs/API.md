@@ -582,6 +582,11 @@ load test with `response_latency_ms`, not `latency_ms`, and remember that the
 two windows can contain different sets of requests.
 
 Prometheus also scrapes the unauthenticated `GET /metrics` path.
+In health's writer object, `critical_queue_bytes` and
+`telemetry_queue_bytes` include admitted jobs currently queued, being
+committed, or held for retry. They return to zero only after those jobs have
+committed or been explicitly failed/shed. The depth fields count channel
+entries only, so depth zero alone is not a drain signal.
 The per-function `orva_pool_service_p95_ms` gauge and `service_p95_ms` in
 pool telemetry measure worker occupancy from successful acquire to release,
 including response processing and streaming. They exclude queue wait and

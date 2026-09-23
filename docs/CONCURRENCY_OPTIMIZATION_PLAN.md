@@ -115,6 +115,41 @@ No production load or configuration change is part of this optimization work.
   suite on a disposable 2-vCPU/2-GiB VM (zero failures/skips). Its nsjail
   capability fallback worked, but cgroup controllers were not delegated;
   this is a functional result, not a hard-limit or throughput result.
+- The async writer's byte limits used a load-then-send-then-add sequence.
+  Concurrent producers could exceed the cap, and a consumer receiving before
+  the add could drive the reported count negative. The current candidate
+  reserves bytes with compare-and-swap before publishing, rolls them back on
+  timeout or telemetry shedding, and tests concurrent budget adherence. This
+  closes a memory-safety hole; it is not a claim that telemetry throughput
+  has improved.
+- Writer shutdown previously let a select choose the send branch after the
+  consumer had chosen its stop branch, silently stranding a critical job.
+  The current candidate closes a producer stop signal first, fences in-flight
+  publishers, and only then tells the consumer to drain. Concurrent-shutdown
+  race tests verify every accepted critical write is applied or sent through
+  the direct-write fallback.
+- A bounded 10,000-invocation Node/Python load pass on the 2-vCPU/2-GiB
+  scratch guest returned 10,000 HTTP 200 and no client errors, but health
+  after immediate harness cleanup showed 883 telemetry drops and 34 critical
+  failures. Repeating with a writer-drain wait **before** function deletion
+  returned another 10,000/10,000 HTTP 200, zero *new* critical failures before
+  cleanup, and 1,029 new telemetry drops; the critical-failure total stayed
+  at 34 after deletion. This attributes the first run's critical failures to
+  cleanup racing accepted execution inserts, while confirming that even this
+  100-client load still sheds secondary records. Review found an independent
+  definite data-loss bug: transient commit retries could alias the original
+  batch, which the writer cleared before appending the retry. The current
+  candidate copies retries before clearing and holds byte reservations through
+  in-flight/retry work. Tests pin the alias and stalled-batch accounting cases.
+  The changed binary then passed 28/28 real-sandbox E2E modules (668 checks)
+  and three consecutive 10,000-request, 100-client Node/Python scratch runs
+  with all HTTP 200. Pre-cleanup critical-failure deltas were 0/0/0 and
+  telemetry-drop deltas were 0/113/0. A further harness correction waits
+  for `active_requests=0` before writer drain, because the client can read
+  the response before final execution-row enqueue; two runs after that
+  correction added no cleanup failures. The middle run missed 55/10,200
+  expected function activity rows, so optional-write prioritization remains
+  architectural work, not a completed optimization.
 
 - A direct **inter-VM** link now supplies an independent load generator, so
   smolvm's host port-forward resets are outside the measured request path.

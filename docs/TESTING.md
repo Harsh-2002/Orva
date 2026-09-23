@@ -28,6 +28,10 @@ For invocation-concurrency changes, use a disposable instance and run
 The stdlib-only harness deploys temporary Node and Python functions, tests
 5,000 requests at 100 clients per runtime, mixed-function traffic, a CPU-bound
 handler, and bounded overload; it deletes only the functions it created.
+Before cleanup it waits for active invocation handlers and accepted writer
+bytes to drain, then reports
+critical-write failures and telemetry drops separately, so deleting the test
+functions does not contaminate the persistence result.
 It refuses to run without the explicit `--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create

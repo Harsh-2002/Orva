@@ -52,6 +52,33 @@ const (
 	maxTelemetryQueueBytes = 32 << 20 // 32 MiB
 )
 
+// Reserve before publishing to a channel: the consumer can receive a job
+// immediately, so incrementing after send can make the counter negative and
+// concurrent load-then-add checks can exceed the queue's memory budget.
+func reserveQueueBytes(counter *atomic.Int64, n, limit int64) bool {
+	if n < 0 || n > limit {
+		return false
+	}
+	for {
+		current := counter.Load()
+		if current < 0 || current > limit-n {
+			return false
+		}
+		if counter.CompareAndSwap(current, current+n) {
+			return true
+		}
+	}
+}
+
+// retainRetryBatch copies before clearing because commit may return batch or
+// a sub-slice of it. Failure is rare, so allocating here is preferable to
+// holding references to completed jobs or silently zeroing retry payloads.
+func retainRetryBatch(batch, retry []writeJob) []writeJob {
+	next := append(make([]writeJob, 0, len(retry)), retry...)
+	clear(batch)
+	return next
+}
+
 // Commit budgets.
 //
 // The old code gave the whole BeginTx+Exec+Commit 5s and dropped the batch
@@ -91,13 +118,13 @@ type asyncWriter struct {
 	telemetry chan writeJob
 	done      chan struct{}
 
-	// quit is closed to signal shutdown. Producers select on it, so a send
-	// can never race a closed channel -- closing the job channels as the
-	// stop signal made "send on closed channel" reachable from any handler
-	// or cron that outlived the drain, and a select does not save you: a
-	// send to a closed channel is ready, not blocked.
-	quit      chan struct{}
-	closeOnce sync.Once
+	// stopRequested wakes producers waiting to enqueue. enqueueMu fences
+	// their final channel sends before quit tells the consumer to drain.
+	// The job channels stay open: closing them could panic a late producer.
+	quit          chan struct{}
+	stopRequested chan struct{}
+	enqueueMu     sync.RWMutex
+	closeOnce     sync.Once
 
 	batchMax   int
 	flushEvery time.Duration
@@ -114,13 +141,14 @@ type asyncWriter struct {
 
 func newAsyncWriter(db *Database) *asyncWriter {
 	return &asyncWriter{
-		db:         db,
-		critical:   make(chan writeJob, 1024),
-		telemetry:  make(chan writeJob, 1024),
-		done:       make(chan struct{}),
-		quit:       make(chan struct{}),
-		batchMax:   50,
-		flushEvery: 50 * time.Millisecond,
+		db:            db,
+		critical:      make(chan writeJob, 1024),
+		telemetry:     make(chan writeJob, 1024),
+		done:          make(chan struct{}),
+		quit:          make(chan struct{}),
+		stopRequested: make(chan struct{}),
+		batchMax:      50,
+		flushEvery:    50 * time.Millisecond,
 	}
 }
 
@@ -144,22 +172,38 @@ func (db *Database) AsyncExecCritical(ctx context.Context, statement string, arg
 		_, err := db.write.ExecContext(ctx, statement, args...)
 		return err
 	}
-	if db.writer.criticalBytes.Load() > maxCriticalQueueBytes {
-		db.writer.timeouts.Add(1)
-		return errors.New("critical write queue is over its byte budget")
+	a := db.writer
+	// A reader keeps publication ahead of the final drain. Shutdown wakes
+	// blocked senders first, then takes the exclusive lock before closing quit.
+	a.enqueueMu.RLock()
+	select {
+	case <-a.stopRequested:
+		a.enqueueMu.RUnlock()
+		_, err := db.write.ExecContext(ctx, statement, args...)
+		return err
+	default:
 	}
 	j := writeJob{sql: statement, args: args, bytes: jobBytes(statement, args)}
+	if !reserveQueueBytes(&a.criticalBytes, int64(j.bytes), maxCriticalQueueBytes) {
+		a.enqueueMu.RUnlock()
+		a.timeouts.Add(1)
+		return errors.New("critical write queue is over its byte budget")
+	}
 	select {
-	case <-db.writer.quit:
+	case <-a.stopRequested:
+		a.criticalBytes.Add(int64(-j.bytes))
+		a.enqueueMu.RUnlock()
 		// Shutting down. Fall back to a direct write so work already in
 		// flight still lands, rather than panicking on a closed channel.
 		_, err := db.write.ExecContext(ctx, statement, args...)
 		return err
-	case db.writer.critical <- j:
-		db.writer.criticalBytes.Add(int64(j.bytes))
+	case a.critical <- j:
+		a.enqueueMu.RUnlock()
 		return nil
 	case <-ctx.Done():
-		db.writer.timeouts.Add(1)
+		a.criticalBytes.Add(int64(-j.bytes))
+		a.enqueueMu.RUnlock()
+		a.timeouts.Add(1)
 		return ctx.Err()
 	}
 }
@@ -173,18 +217,32 @@ func (db *Database) AsyncExecTelemetry(statement string, args ...any) {
 		}
 		return
 	}
-	if db.writer.telemetryBytes.Load() > maxTelemetryQueueBytes {
-		db.writer.dropped.Add(1)
+	a := db.writer
+	a.enqueueMu.RLock()
+	select {
+	case <-a.stopRequested:
+		a.enqueueMu.RUnlock()
+		a.dropped.Add(1)
 		return
+	default:
 	}
 	j := writeJob{sql: statement, args: args, bytes: jobBytes(statement, args)}
+	if !reserveQueueBytes(&a.telemetryBytes, int64(j.bytes), maxTelemetryQueueBytes) {
+		a.enqueueMu.RUnlock()
+		a.dropped.Add(1)
+		return
+	}
 	select {
-	case <-db.writer.quit:
-		db.writer.dropped.Add(1)
-	case db.writer.telemetry <- j:
-		db.writer.telemetryBytes.Add(int64(j.bytes))
+	case <-a.stopRequested:
+		a.telemetryBytes.Add(int64(-j.bytes))
+		a.enqueueMu.RUnlock()
+		a.dropped.Add(1)
+	case a.telemetry <- j:
+		a.enqueueMu.RUnlock()
 	default:
-		db.writer.dropped.Add(1)
+		a.telemetryBytes.Add(int64(-j.bytes))
+		a.enqueueMu.RUnlock()
+		a.dropped.Add(1)
 	}
 }
 
@@ -258,19 +316,27 @@ func (a *asyncWriter) run() {
 		clear(b)
 		return b[:0]
 	}
+	batchBytes := func(b []writeJob) int64 {
+		var n int64
+		for _, job := range b {
+			n += int64(job.bytes)
+		}
+		return n
+	}
 
 	flushCritical := func() {
 		if len(criticalBatch) == 0 {
 			return
 		}
 		retry := a.commit(criticalBatch, false)
+		a.criticalBytes.Add(batchBytes(retry) - batchBytes(criticalBatch))
 		if len(retry) == 0 {
 			criticalBatch = release(criticalBatch)
 			criticalBackoff, criticalUntil = 0, time.Time{}
 			critical = a.critical
 			return
 		}
-		criticalBatch = append(release(criticalBatch), retry...)
+		criticalBatch = retainRetryBatch(criticalBatch, retry)
 		criticalBackoff = nextBackoff(criticalBackoff)
 		criticalUntil = time.Now().Add(criticalBackoff)
 		critical = nil // stop draining: let the channel fill and push back
@@ -282,13 +348,14 @@ func (a *asyncWriter) run() {
 			return
 		}
 		retry := a.commit(telemetryBatch, true)
+		a.telemetryBytes.Add(batchBytes(retry) - batchBytes(telemetryBatch))
 		if len(retry) == 0 {
 			telemetryBatch = release(telemetryBatch)
 			telemetryBackoff, telemetryUntil = 0, time.Time{}
 			telemetry = a.telemetry
 			return
 		}
-		telemetryBatch = append(release(telemetryBatch), retry...)
+		telemetryBatch = retainRetryBatch(telemetryBatch, retry)
 		telemetryBackoff = nextBackoff(telemetryBackoff)
 		telemetryUntil = time.Now().Add(telemetryBackoff)
 		telemetry = nil
@@ -300,11 +367,9 @@ func (a *asyncWriter) run() {
 		for {
 			select {
 			case job := <-a.critical:
-				a.criticalBytes.Add(int64(-job.bytes))
 				criticalBatch = append(criticalBatch, job)
 				continue
 			case job := <-a.telemetry:
-				a.telemetryBytes.Add(int64(-job.bytes))
 				telemetryBatch = append(telemetryBatch, job)
 				continue
 			default:
@@ -324,6 +389,10 @@ func (a *asyncWriter) run() {
 				a.dropped.Add(uint64(len(retry)))
 			}
 		}
+		// No producer can publish after quit closes. Every retained job has
+		// either been committed or explicitly counted as failed/dropped.
+		a.criticalBytes.Store(0)
+		a.telemetryBytes.Store(0)
 		close(a.done)
 	}
 
@@ -334,7 +403,6 @@ func (a *asyncWriter) run() {
 				critical = nil
 				continue
 			}
-			a.criticalBytes.Add(int64(-job.bytes))
 			criticalBatch = append(criticalBatch, job)
 			if len(criticalBatch) >= a.batchMax {
 				flushCritical()
@@ -344,7 +412,6 @@ func (a *asyncWriter) run() {
 				telemetry = nil
 				continue
 			}
-			a.telemetryBytes.Add(int64(-job.bytes))
 			telemetryBatch = append(telemetryBatch, job)
 			if len(telemetryBatch) >= a.batchMax {
 				flushTelemetry()
@@ -552,7 +619,12 @@ func (a *asyncWriter) finish(batch []writeJob, telemetry bool, err error) {
 // Idempotent. The deadline bounds how long a wedged write connection can
 // hold up process exit.
 func (a *asyncWriter) stop(timeout time.Duration) {
-	a.closeOnce.Do(func() { close(a.quit) })
+	a.closeOnce.Do(func() {
+		close(a.stopRequested)
+		a.enqueueMu.Lock()
+		close(a.quit)
+		a.enqueueMu.Unlock()
+	})
 	select {
 	case <-a.done:
 	case <-time.After(timeout):

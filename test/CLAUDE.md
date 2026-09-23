@@ -81,7 +81,7 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 - `cli/` — CLI-only harnesses: build matrix, install-cli, upgrade round-trip, command-tree golden diff.
 - `install/` — server-install e2e (privileged systemd-in-docker across distros + Kata flow).
 - `kata-bench/` — benchmarks runc vs kata vs kata-clh (cold-start + ceiling ramp); includes `aggregate.py` + `extended-functional.sh`.
-- `performance/` — stdlib-only, explicit-scratch invocation-admission load harness; deploys and cleans up only its own functions, covering 100-client Node/Python, mixed traffic, CPU work, and overload. `performance/loadgen/` is a separate Go binary for direct-VM closed-loop or scheduled open-loop load; it only calls supplied URLs, bounds client concurrency, and emits JSON with per-status and per-URL latency.
+- `performance/` — stdlib-only, explicit-scratch invocation-admission load harness; deploys and cleans up only its own functions, covering 100-client Node/Python, mixed traffic, CPU work, and overload. It waits for active invocation handlers and writer bytes (including in-flight/retry batches) to drain and reports critical failures and telemetry drops before deleting its functions, so cleanup cannot masquerade as a load-path failure. `performance/loadgen/` is a separate Go binary for direct-VM closed-loop or scheduled open-loop load; it only calls supplied URLs, bounds client concurrency, and emits JSON with per-status and per-URL latency.
 - `fixtures/` — reusable function handler sources (`node-*/handler.js`, `python-*/handler.py`) deployed by the suites.
 
 ## Notes

@@ -149,6 +149,10 @@ record enqueue. The dashboard's **Server response time** card uses these
 values. They exclude reverse-proxy, network, and client time. The separate
 `latency_ms` field stops when the sandbox proxy returns, before record enqueue;
 it is not the end-to-end response time seen by an HTTP client.
+For writer-drain checks, `GET {{ORIGIN}}/api/v1/system/health` reports
+`writer.critical_queue_bytes` and `writer.telemetry_queue_bytes`. These include
+accepted jobs still in the channel, being committed, or awaiting retry; a
+channel depth of zero alone does not mean the writer is drained.
 
 ---
 
