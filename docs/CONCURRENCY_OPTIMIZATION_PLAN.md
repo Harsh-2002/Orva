@@ -69,6 +69,20 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- A separate-connection PASSIVE WAL-checkpoint experiment was reverted.
+  SQLite's automatic checkpoint can stall the committing writer; this
+  candidate ran a background checkpoint above an 8-MiB WAL-size threshold
+  while leaving the existing 10,000-page automatic checkpoint as fallback.
+  Its unit/database tests passed. In the 2-vCPU/4-GiB server plus separate
+  client VM, the 50,000-request/1,000-client mixed run returned 47,813 HTTP
+  200 and 2,187 pre-execution storage 429 at 326 attempted/s, versus the
+  preceding baseline's 50,000 HTTP 200 at 431/s. All 47,813 accepted responses
+  had execution rows after drain, but the writer recorded one other critical
+  enqueue timeout. The checkpoint competed for the same storage I/O and did
+  not improve this workload. It was removed from the source. A future attempt
+  needs I/O latency and checkpoint-duration telemetry and a disk-safe
+  policy, not another unmeasured checkpoint schedule.
+
 - Execution-index pruning also failed the VM acceptance run. Three old
   execution indexes occupied about 113 MiB of the scratch database and
   duplicate left-prefixes or have no matching Orva query. A migration test

@@ -1,5 +1,20 @@
 # Pool Controller v2 capacity validation
 
+A separate SQLite PASSIVE background-checkpoint candidate was **reverted**.
+SQLite runs the automatic checkpoint on the committing writer thread; the
+candidate added a second connection that checkpointed at an 8-MiB WAL-size
+threshold while retaining the existing 10,000-page automatic checkpoint as
+fallback. Its unit and database tests passed, including shutdown idempotence
+and preservation of committed rows. On the same two-VM 50,000-request,
+1,000-client mixed test it returned 47,813 HTTP 200 and 2,187 pre-execution
+storage 429s at 326 attempted/s (312 successful/s), versus the preceding
+baseline's 50,000 HTTP 200 at 431/s. After drain, the 47,813 accepted
+responses matched 47,813 execution rows; however writer health also recorded
+one critical enqueue timeout on an ancillary write. Background checkpoint I/O
+competed with, rather than relieved, this saturated single-node workload.
+The code and test were reverted. Do not disable automatic checkpoints or
+promise a WAL/throughput benefit from this experiment.
+
 An execution-index pruning candidate was **reverted**. Three indexes were
 removed from the scratch VM database: two were left-prefix duplicates of
 composite indexes, and one (`parent_span_id` alone) had no matching Orva
