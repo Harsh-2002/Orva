@@ -1,5 +1,33 @@
 # Pool Controller v2 capacity validation
 
+On 2026-09-23, a verified 934,202-execution SQLite snapshot was used for
+repeat runs in the 2-vCPU/4-GiB server VM, driven by a separate client VM at
+1,000 closed-loop clients. An unchanged, disk-backed server run returned
+46,682 HTTP 200 and 3,318 pre-execution `STORAGE_BACKPRESSURE` 429 responses
+for 50,000 mixed Node/Python attempts (264 attempts/s). A temporary
+transaction-timing build, started from that same snapshot with the two saved
+functions checked before load, returned 50,000 HTTP 200 at 273 attempts/s,
+with zero critical writer failures or timeouts. It dropped 21,541 activity
+and 70,209 total best-effort records under saturation. Earlier disk-backed
+runs returned 50,000 HTTP 200 at 431–438/s. These results establish large
+run-to-run throughput variation, not a stable 1,000-client capacity figure;
+the timing build and host load also differed, so none is a controlled
+performance win over another.
+
+The temporary timing build logged every tenth critical batch and every batch
+over 200 ms. Across 277 logged batches containing 46,164 jobs, cumulative
+time was 92.9 s inside SQL statement preparation/execution and 44.3 s in
+commit, versus 0.4 s acquiring the write connection; the slowest logged
+batch took 2.05 s. This is a biased sample of slow batches, not a full-run
+profile, but it directs the next investigation toward SQLite statement and
+commit I/O rather than connection-pool wait. The instrumentation was removed
+after the run. A proposed RAM-backed database diagnostic did not complete:
+copying the 939-MiB snapshot into guest tmpfs exhausted the shared 8-GiB
+test host, whose OOM killer stopped the scratch VM. No RAM-backed throughput
+claim is valid. The disk-backed database recovered on restart and both test
+functions invoked successfully. Do not use guest tmpfs for this comparison
+on this host without first reserving adequate host memory.
+
 A separate SQLite PASSIVE background-checkpoint candidate was **reverted**.
 SQLite runs the automatic checkpoint on the committing writer thread; the
 candidate added a second connection that checkpointed at an 8-MiB WAL-size
