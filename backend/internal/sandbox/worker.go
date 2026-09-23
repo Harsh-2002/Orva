@@ -67,6 +67,13 @@ type Worker struct {
 	// failures can exit before Dispatch begins, so dead-path snapshots wait
 	// briefly for this signal rather than racing an empty ring buffer.
 	stderrDone chan struct{}
+	// Spawn starts one stdout reader for the lifetime of the process. A warm
+	// worker can serve thousands of requests; a goroutine and response channel
+	// per frame made that reuse unnecessarily expensive. Tests that construct
+	// a Worker without Spawn use the fallback read path below.
+	frames       chan frameRead
+	readStop     chan struct{}
+	readStopOnce sync.Once
 
 	errBuf *ringBuffer
 }
@@ -89,6 +96,11 @@ type frameResponse struct {
 	// upset some intermediaries). v0.4 C1 — see proxy.Forward + adapter.py
 	// / adapter.js for the producer/consumer.
 	Data string `json:"data,omitempty"`
+}
+
+type frameRead struct {
+	payload []byte
+	err     error
 }
 
 // Spawn boots a fresh nsjail+adapter process. Caller owns the returned
@@ -147,7 +159,10 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		errBuf:     newRingBuffer(64 * 1024),
 		waitDone:   make(chan struct{}),
 		stderrDone: make(chan struct{}),
+		frames:     make(chan frameRead),
+		readStop:   make(chan struct{}),
 	}
+	go w.readLoop()
 
 	// Start draining before Wait. exec.Cmd.Wait closes its parent-side pipes
 	// after process exit, so reversing this order can lose stderr from a fast
@@ -220,27 +235,60 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 // never consumes the function's execution timeout. On failure the caller must
 // kill the worker; that also unblocks the read goroutine on context expiry.
 func (w *Worker) AwaitReady(ctx context.Context) error {
-	type result struct {
-		frame []byte
-		err   error
+	payload, err := w.readNext(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: adapter startup: %v", ErrWorkerExited, err)
 	}
-	ready := make(chan result, 1)
-	go func() {
-		frame, err := readFrame(w.stdout)
-		ready <- result{frame: frame, err: err}
-	}()
+	var frame frameResponse
+	if err := json.Unmarshal(payload, &frame); err != nil || frame.Type != "ready" {
+		return fmt.Errorf("%w: invalid adapter startup frame", ErrWorkerExited)
+	}
+	return nil
+}
+
+func (w *Worker) readLoop() {
+	defer close(w.frames)
+	for {
+		payload, err := readFrame(w.stdout)
+		select {
+		case w.frames <- frameRead{payload: payload, err: err}:
+		case <-w.readStop:
+			return
+		case <-w.waitDone:
+			return
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (w *Worker) readNext(ctx context.Context) ([]byte, error) {
+	if w.frames == nil {
+		// Unit tests may build a Worker around an in-memory stdout stream.
+		ch := make(chan frameRead, 1)
+		go func() {
+			payload, err := readFrame(w.stdout)
+			ch <- frameRead{payload: payload, err: err}
+		}()
+		select {
+		case got := <-ch:
+			return got.payload, got.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	select {
-	case got := <-ready:
-		if got.err != nil {
-			return fmt.Errorf("%w: adapter startup: %v", ErrWorkerExited, got.err)
+	case got, ok := <-w.frames:
+		if !ok {
+			return nil, io.EOF
 		}
-		var frame frameResponse
-		if err := json.Unmarshal(got.frame, &frame); err != nil || frame.Type != "ready" {
-			return fmt.Errorf("%w: invalid adapter startup frame", ErrWorkerExited)
-		}
-		return nil
+		return got.payload, got.err
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 }
 
@@ -363,26 +411,23 @@ func (r *DispatchResult) NextFrame(ctx context.Context) (kind string, data []byt
 		return "", nil, r.readErr
 	}
 
-	// Read the next frame from worker stdout, with ctx cancellation.
-	type framePayload struct {
-		payload []byte
-		err     error
-	}
-	ch := make(chan framePayload, 1)
-	go func() {
-		p, err := readFrame(r.w.stdout)
-		ch <- framePayload{p, err}
-	}()
-	select {
-	case fp := <-ch:
-		if fp.err != nil {
+	// The worker's lifetime reader supplies frames; no per-chunk goroutine.
+	payload, readErr := r.w.readNext(ctx)
+	if readErr != nil {
+		if ctx.Err() != nil {
 			r.w.markDead()
-			r.readErr = fmt.Errorf("%w: read chunk frame: %v", ErrWorkerExited, fp.err)
+			r.readErr = ctx.Err()
 			r.finalize()
 			return "", nil, r.readErr
 		}
+		r.w.markDead()
+		r.readErr = fmt.Errorf("%w: read chunk frame: %v", ErrWorkerExited, readErr)
+		r.finalize()
+		return "", nil, r.readErr
+	}
+	{
 		var f frameResponse
-		if err := json.Unmarshal(fp.payload, &f); err != nil {
+		if err := json.Unmarshal(payload, &f); err != nil {
 			r.w.markDead()
 			r.readErr = fmt.Errorf("%w: invalid chunk frame: %v", ErrWorkerExited, err)
 			r.finalize()
@@ -421,11 +466,6 @@ func (r *DispatchResult) NextFrame(ctx context.Context) (kind string, data []byt
 			r.finalize()
 			return "", nil, r.readErr
 		}
-	case <-ctx.Done():
-		r.w.markDead()
-		r.readErr = ctx.Err()
-		r.finalize()
-		return "", nil, r.readErr
 	}
 }
 
@@ -495,19 +535,6 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 		writeErrCh <- writeFrame(w.stdin, reqFrame)
 	}()
 
-	// Read FIRST response frame on another goroutine so ctx cancel can
-	// break us out.
-	respCh := make(chan []byte, 1)
-	readErrCh := make(chan error, 1)
-	go func() {
-		payload, err := readFrame(w.stdout)
-		if err != nil {
-			readErrCh <- err
-			return
-		}
-		respCh <- payload
-	}()
-
 	select {
 	case err := <-writeErrCh:
 		if err != nil {
@@ -522,8 +549,17 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 		return &DispatchResult{w: w, errBefore: errBefore}, ctx.Err()
 	}
 
-	select {
-	case payload := <-respCh:
+	payload, readErr := w.readNext(ctx)
+	if readErr != nil {
+		w.markDead()
+		unlock()
+		if ctx.Err() != nil {
+			return &DispatchResult{w: w, errBefore: errBefore}, ctx.Err()
+		}
+		return &DispatchResult{w: w, errBefore: errBefore},
+			fmt.Errorf("%w: read frame: %v", ErrWorkerExited, readErr)
+	}
+	{
 		var resp frameResponse
 		if err := json.Unmarshal(payload, &resp); err != nil {
 			w.markDead()
@@ -583,15 +619,6 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 		unlock()
 		return &DispatchResult{w: w, errBefore: errBefore},
 			fmt.Errorf("%w: unexpected frame type %q", ErrWorkerExited, resp.Type)
-	case err := <-readErrCh:
-		w.markDead()
-		unlock()
-		return &DispatchResult{w: w, errBefore: errBefore},
-			fmt.Errorf("%w: read frame: %v", ErrWorkerExited, err)
-	case <-ctx.Done():
-		w.markDead()
-		unlock()
-		return &DispatchResult{w: w, errBefore: errBefore}, ctx.Err()
 	}
 }
 
@@ -703,8 +730,13 @@ func (w *Worker) IsExpired(ttl time.Duration, maxUses int64) bool {
 
 func (w *Worker) markDead() {
 	w.dead.Store(true)
+	if w.readStop != nil {
+		w.readStopOnce.Do(func() { close(w.readStop) })
+	}
 	// Close stdin so a blocked read on the adapter side unblocks and exits.
-	_ = w.stdin.Close()
+	if w.stdin != nil {
+		_ = w.stdin.Close()
+	}
 }
 
 // ── Framing helpers ────────────────────────────────────────────────────

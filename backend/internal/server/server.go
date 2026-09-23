@@ -151,8 +151,9 @@ func New(cfg *config.Config, db *database.Database) *Server {
 		DB:      db,
 		SDKAuth: sdkAuth,
 		Config: proxy.ProxyConfig{
-			NsjailBin: cfg.Sandbox.NsjailBin,
-			RootfsDir: cfg.Sandbox.RootfsDir,
+			NsjailBin:    cfg.Sandbox.NsjailBin,
+			RootfsDir:    cfg.Sandbox.RootfsDir,
+			MaxBodyBytes: cfg.Server.MaxBodyBytes,
 		},
 	}
 

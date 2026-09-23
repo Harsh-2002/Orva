@@ -101,6 +101,9 @@ POST /fn/xxx/health
      │
      ▼ Registry.Get(fnID)               ← in-memory cache, SQLite fallback
      │
+     ▼ proxy reserves daemon heap       ← body-size charge before reading it
+     │      └─ rejected? 429 before body allocation or replay capture
+     ▼ proxy reads + encodes request
      ▼ poolMgr.Acquire(fnID, ctx)       ← per-fn pool; autoscaler may spawn
      │      │
      │      ├ idle worker available?    → reuse
@@ -110,7 +113,7 @@ POST /fn/xxx/health
      │                                                  → exec adapter
      ▼ proxy.Forward(worker, req)
      │      │
-     │      ├ JSON-encode request frame
+     │      ├ capture replay request after successful worker admission
      │      ├ write to worker stdin
      │      ├ read response frame from worker stdout (with TimeoutMS)
      │      └ JSON-decode statusCode/headers/body
@@ -257,13 +260,16 @@ Warm worker pools, one per function, autoscaled.
 - `function_pool.go` — per-fn idle channel + acquire/release/sweep
 - `autoscaler.go` — Knative-KPA-style: 60s stable + 6s panic windows, `dynamicMax` derived from CPU + memory budget
 - `hostmem.go` — global memory budget tracker (refuses spawns past 80% reservation)
+- `request_budget.go` — daemon-memory reservation before HTTP body reads;
+  pending-count ceilings derive from memory and file-descriptor capacity
 
 ### `backend/internal/sandbox/`
 
 nsjail invocation, per-spawn config, host-wide concurrency limiter.
 
 - `sandbox.go` — builds the nsjail argv (chroot, mounts, cgroup, seccomp)
-- `worker.go` — JSON frame protocol over stdin/stdout, expiry tracking
+- `worker.go` — JSON frame protocol over stdin/stdout; one lifetime stdout
+  reader per warm worker, serialized dispatch, expiry tracking
 - `seccomp.go` — Kafel policy (`default`, `strict`, `permissive`)
 - `limiter.go` — host-wide `MaxConcurrent` semaphore with `TryAcquire`
 
@@ -475,10 +481,11 @@ of horizontal scaling — but the target is a self-hosted, single-host
 deployment, where horizontal scaling is over-engineering.
 
 **Why SQLite?** The target is single-host. Postgres would force
-operators to run two services and manage credentials between them. The
-write rate is bounded by invocation throughput (one row per
-invocation), and the async writer batches commits. SQLite in WAL mode
-handles thousands of writes per second on commodity hardware.
+operators to run two services and manage credentials between them. Each
+invocation inserts an execution row and may also emit activity, replay
+capture, spans and logs. The async writer batches commits, but on a small
+host that extra telemetry can exceed its write capacity and is then dropped;
+its counters must be watched during a throughput test.
 
 **Why nsjail per invocation?** Hardware isolation requires either
 process-level (nsjail / gvisor / kata) or VM-level (firecracker)

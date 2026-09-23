@@ -32,6 +32,17 @@ before it.
 
 ### Changed
 
+- Public invocation admission now sizes its pending count from detected memory
+  and file-descriptor capacity instead of fixed 256-per-function/1,024-host
+  counts. It reserves daemon memory before reading request bodies, including a
+  conservative charge for chunked bodies, and leaves a share for other
+  functions. The two-second worker wait and `429 INVOCATION_QUEUE_FULL` retry
+  contract remain; requests rejected before worker acquisition no longer
+  enqueue replay-capture telemetry.
+- Warm sandbox workers now read adapter response frames through one lifetime
+  reader instead of creating a new goroutine and channel for every invoke or
+  streaming chunk. The one-request-at-a-time worker contract and timeout
+  cancellation remain unchanged.
 - The pool controller now keeps bounded request-rate buckets and coalesces
   burst wakeups. The execution writer prepares repeated SQL once per batch,
   and HTTP execution rows carry baseline/outlier fields in their first INSERT

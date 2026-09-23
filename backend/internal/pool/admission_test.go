@@ -13,16 +13,17 @@ import (
 
 func TestQueueCounterNeverExceedsBound(t *testing.T) {
 	var counter atomic.Int64
-	for i := int64(0); i < perFunctionQueueLimit; i++ {
-		if !reserveQueueCounter(&counter, perFunctionQueueLimit) {
+	const limit int64 = 7
+	for i := int64(0); i < limit; i++ {
+		if !reserveQueueCounter(&counter, limit) {
 			t.Fatalf("reservation %d rejected below limit", i)
 		}
 	}
-	if reserveQueueCounter(&counter, perFunctionQueueLimit) {
+	if reserveQueueCounter(&counter, limit) {
 		t.Fatal("reservation above function limit accepted")
 	}
-	if got := counter.Load(); got != perFunctionQueueLimit {
-		t.Fatalf("counter = %d, want %d", got, perFunctionQueueLimit)
+	if got := counter.Load(); got != limit {
+		t.Fatalf("counter = %d, want %d", got, limit)
 	}
 }
 

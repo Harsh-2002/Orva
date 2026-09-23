@@ -37,10 +37,16 @@ false timeouts. See [CAPACITY.md](CAPACITY.md) for the earlier measured
 An external load generator should be preferred for throughput numbers, but
 validate its path independently. In the 2026-09-23 scratch VM check, the
 forwarded host port reset connections under mixed load while guest-loopback
-functional load and health stayed green; the source of those resets is not yet
-attributed. The harness now retries deletion of every function it created if
-transport fails; inspect `admission-test-*` names before deleting anything
-manually after an interrupted run.
+functional load and health stayed green. A follow-up connected a separate
+load-generator VM directly to the server VM's private interface; it delivered
+50,000 requests at 1,000 clients without transport errors, demonstrating that
+the host forward is unsuitable for this capacity comparison. The direct VM
+address may change after a guest restart, so rediscover it before each run.
+Compare HTTP status classes and writer counters as well as requests/s; see
+[CAPACITY.md](CAPACITY.md) for the measured result and caveats. The harness
+retries deletion of every function it created if transport fails; inspect
+`admission-test-*` names before deleting anything manually after an
+interrupted run.
 
 For performance work, capture writer counters before and after each phase,
 not just the final health status: a queue that drains afterward can still

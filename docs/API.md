@@ -254,12 +254,16 @@ the handler throws or returns an AWS-shape `{statusCode, body}`.
 Custom routes (e.g. `/webhooks/stripe`) reach the same handler — see
 the routes section below.
 
-Admission allows at most 256 pending invocations for one function and 1,024
-pending invocations on the host, with a 2-second wait for a worker and host
-execution slot. If either bound is reached, the response is `429
-INVOCATION_QUEUE_FULL` with `Retry-After: 1`; no user code ran. The function's
-`timeout_ms` starts after admission, when a worker is ready, so waiting in the
-queue does not consume its execution budget.
+Pending invocation capacity is derived from detected memory and file-descriptor
+limits rather than a fixed request count. One function can use at most three
+quarters of that pending budget, leaving room for another function. The server
+also reserves memory before reading a public request body (unknown-length
+bodies are charged at the configured body cap). A request waits at most two
+seconds for a worker and host execution slot. Exhausted capacity or an expired
+wait returns `429 INVOCATION_QUEUE_FULL` with `Retry-After: 1`; no user code ran.
+The function's `timeout_ms` starts after admission, when a worker is ready.
+Replay capture begins only after a worker has been acquired, so rejected
+requests have no replay body even when capture is enabled.
 
 **Response headers.** Every invoke carries `X-Orva-Execution-ID`, including a
 timeout or a sandbox failure, which answer from the invoke handler rather than

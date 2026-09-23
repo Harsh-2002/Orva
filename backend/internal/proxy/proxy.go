@@ -281,8 +281,9 @@ const streamMaxFallback = 300 * time.Second
 
 // ProxyConfig holds sandbox paths needed for execution.
 type ProxyConfig struct {
-	NsjailBin string
-	RootfsDir string
+	NsjailBin    string
+	RootfsDir    string
+	MaxBodyBytes int64
 }
 
 // finalizeStderr separates structured log lines (those starting with
@@ -344,6 +345,13 @@ func (p *Proxy) Forward(
 	_ = codeDir
 	_ = cpus
 	_ = coldStart
+	if p.Pool != nil {
+		release, err := p.Pool.ReserveIngress(fnID, r.ContentLength, p.Config.MaxBodyBytes)
+		if err != nil {
+			return &Result{}, fmt.Errorf("ingress admission: %w", err)
+		}
+		defer release()
+	}
 	releaseExecution := p.SDKAuth.BindExecution(
 		execID, fnID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), startTime,
 	)
@@ -427,12 +435,6 @@ func (p *Proxy) Forward(
 	// vs. a SELECT-per-invoke that would cost ~50µs at p99. The cap is
 	// likewise cached so the operator can shrink the maximum body size
 	// without redeploying.
-	if p.DB != nil {
-		if enabled, maxBytes := captureSettings(); enabled {
-			p.captureRequest(execID, r.Method, path, r.Header, body, maxBytes)
-		}
-	}
-
 	reqJSON, _ := json.Marshal(request{
 		Method:  r.Method,
 		Path:    path,
@@ -454,6 +456,13 @@ func (p *Proxy) Forward(
 	acq, err := p.Pool.Acquire(r.Context(), fnID)
 	if err != nil {
 		return &Result{}, fmt.Errorf("pool acquire: %w", err)
+	}
+	// A rejected request never reached a sandbox and must not consume a
+	// best-effort replay-capture write under overload.
+	if p.DB != nil {
+		if enabled, maxBytes := captureSettings(); enabled {
+			p.captureRequest(execID, r.Method, path, r.Header, body, maxBytes)
+		}
 	}
 	// Queue admission has its own short budget. The function's configured
 	// timeout starts only once a sandbox is actually ready to execute it.

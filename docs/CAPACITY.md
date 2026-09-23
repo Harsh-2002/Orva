@@ -1,5 +1,39 @@
 # Pool Controller v2 capacity validation
 
+## 2026-09-23 independent two-VM follow-up (unreleased candidate)
+
+The load generator and Orva server ran in separate disposable smolvm guests
+on a direct virtual network. The server had 2 vCPUs, 4 GiB RAM, real nsjail
+and cgroup-v2 worker enforcement; the client had 2 vCPUs and 1 GiB RAM. This
+avoided both a generator sharing the server's CPU quota and the unreliable
+host port-forward path. The function was a warm Python handler returning
+`"ok"`. The database was persistent and grew across sequential phases;
+therefore these are exploratory capacity results, not controlled A/B proof.
+
+| Build and phase | HTTP 200 | HTTP 429 | Transport errors | Total req/s | Client p99 |
+|---|---:|---:|---:|---:|---:|
+| `d5a1fd6`, 20,000 requests, 500 clients | 13,004 | 6,996 | 0 | 1,673 | 816 ms mixed |
+| Candidate with resource-aware ingress, before lifetime reader, 20,000, 500 | 20,000 | 0 | 0 | 849 | 1.44 s |
+| Candidate with lifetime reader, repeated 20,000, 500 | 20,000 | 0 | 0 | 1,323 | 484 ms |
+| `d5a1fd6`, 50,000, 1,000 | 31,385 | 18,615 | 0 | 1,366 | 1.17 s mixed |
+| Candidate with lifetime reader, 50,000, 1,000 | 50,000 | 0 | 0 | 1,102 | 1.53 s |
+
+Successful throughput at 1,000 clients rose from about 858/s to 1,102/s,
+while total response throughput fell because the baseline quickly rejected
+many requests. All client p99 values include connection/network time and
+must not be compared with dashboard handler latency. In the last candidate
+phase, best-effort telemetry drops increased by 49,407; critical failures
+and timeouts remained zero. The profile still attributes about one third of
+CPU samples to the async SQLite writer. This candidate is not a complete
+persistence or capacity solution, and the results are not a universal sizing
+claim.
+
+The candidate also passed 28 real-sandbox E2E modules (664 checks, zero
+failures or skips) on the server VM, including Node and Python deploy/invoke,
+and a separate warm Node run returned 5,000/5,000 HTTP 200 at 100 clients
+over the direct inter-VM link. These functional results do not close the
+mixed-function or persistence-throughput acceptance work.
+
 ## 2026-09-23 profiled concurrency follow-up (candidate, not released)
 
 A separate disposable 2-vCPU/4-GiB smolvm guest ran the current candidate with
@@ -87,8 +121,9 @@ healthy. The reset source is not yet attributed; no before/after performance
 claim is made from these runs.
 
 > The historical measurements below predate bounded invocation admission.
-> Current admission caps pending requests at 256 per function and 1,024
-> globally, waits at most 2 seconds, and returns `429 INVOCATION_QUEUE_FULL`
+> The current candidate derives pending-request limits from the detected
+> memory and file-descriptor envelope, waits at most 2 seconds, and returns
+> `429 INVOCATION_QUEUE_FULL`
 > on saturation. The function timeout starts only when a worker is acquired.
 > These older throughput numbers are not evidence that the new admission path
 > meets a 100-client target; rerun an isolated load test before claiming one.

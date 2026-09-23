@@ -46,13 +46,13 @@ Code and read-only instance inspection establish the following:
 
 | Finding | Evidence | Implication |
 |---|---|---|
-| Several independent capacity ceilings | `pool/pool.go`: 256 pending/function, 1,024 global, 2-second wait; `server/server.go`: default 50 workers/function; `config/defaults.go`: host concurrency `max(200, NumCPU*64)` | One hardware-aware controller must replace conflicting defaults. Preserve deliberate operator limits. |
+| Several independent capacity ceilings (baseline) | `pool/pool.go` previously had 256 pending/function, 1,024 global, 2-second wait; `server/server.go`: default 50 workers/function; `config/defaults.go`: host concurrency `max(200, NumCPU*64)` | Pending count now derives from memory/FD resources; worker and host ceilings still need reconciliation. Preserve deliberate operator limits. |
 | CPU sizing is heuristic | `pool/hostmem.go`: eight nominal worker slots per CPU, divided by declared worker CPU | Declared CPU caps do not measure actual CPU consumption or I/O wait. |
 | Resource discovery assumes cgroup mount-root files | `pool/hostmem.go` reads `/sys/fs/cgroup/{cpu.max,memory.max,memory.current}` | Nested systemd/cgroup limits and ancestor constraints can be missed. |
 | Production resource enforcement is degraded | Health: `rlimit_only`; service `Delegate=yes`; controllers available but `cgroup.subtree_control` empty | Establish usable delegation before using aggressive density or claiming hard resource isolation. |
 | Missing cgroups also remove adaptive memory samples | `function_pool.go:release` samples only when the worker has a cgroup path | The reported effective maximum of 31 is not proof of the hardware's actual worker capacity. |
 | Memory accounting can be overly conservative | `hostmem.go:availableForWorkers` subtracts all reservations from physical available memory, including reservations for already-resident workers | Model live resident memory and outstanding future growth separately; avoid double-counting while preserving headroom. |
-| Admission happens after expensive preparation | `proxy/proxy.go:Forward` reads the complete body, copies/encodes it and performs capture before `Pool.Acquire` | A request-count queue does not bound pre-admission memory or rejected-request work. |
+| Admission happened after expensive preparation (baseline) | `proxy/proxy.go:Forward` read the complete body, copied/encoded it and captured before `Pool.Acquire` | Candidate now reserves daemon body memory before read and captures only admitted requests; it still serializes before worker acquisition. |
 | Scheduler bookkeeping scales with traffic/history | `function_pool.go` retains arrival timestamps, copies rolling samples, sorts under `sigMu`; scaler wake evaluates/sorts all pools | Measure and replace with bounded structures and targeted scheduling. |
 | Request-path work is avoidable | Proxy reads two streaming settings through SQL each invocation; invoke handler builds an unused seccomp policy; worker dispatch creates read/write goroutines and channels each request | Cache immutable settings/policy and profile transport allocation costs. |
 | Timing samples are inconsistent | Streaming proxy records `DispatchEx` time at first response frame, although worker ownership continues through the stream | Separate time-to-first-byte, handler/worker occupancy, queueing and client response drain. |
@@ -68,6 +68,48 @@ Package paths above are relative to `backend/internal/`; `runtimes/` is under
 No production load or configuration change is part of this optimization work.
 
 ## Implementation log
+
+- A direct **inter-VM** link now supplies an independent load generator, so
+  smolvm's host port-forward resets are outside the measured request path.
+  On a fresh 2-vCPU/4-GiB server running `d5a1fd6`, a Python `"ok"` handler
+  returned 5,000/5,000 HTTP 200 at 100 clients (1,079 req/s), then 13,004
+  HTTP 200 and 6,996 HTTP 429 at 500 clients (20,000 requests, 1,673 total
+  responses/s). A later 50,000-request/1,000-client run returned 31,385 HTTP
+  200 and 18,615 HTTP 429 at 1,366 total responses/s. No client transport
+  errors were reported. After the first 500-client phase, dropped telemetry
+  had risen to 19,358, while critical failures/timeouts stayed zero. This
+  validates the direct network rig and establishes an exploratory baseline;
+  the growing database and warm state still preclude a controlled A/B claim.
+- The next candidate replaces fixed pending counts with a memory/FD-derived
+  budget and reserves body memory before public HTTP reads (including a
+  conservative unknown-length charge). It defers replay capture until worker
+  acquisition. Unit tests cover resource scaling, per-function headroom,
+  pressure/recovery and charge accounting. Its two-VM stress result is still
+  measured on the two-VM link: at 500 clients it returned 19,057 HTTP 200
+  and 943 HTTP 429 over 25.04 s versus the baseline's 13,004/6,996 over
+  11.96 s; at 1,000 clients it returned 48,832/1,168 over 68.70 s versus
+  31,385/18,615 over 36.60 s. The candidate accepts much more work but
+  delivers fewer *successful requests per second* and higher latency, so it
+  is **not a performance win** on its own. The server remained healthy and
+  critical writer failures/timeouts were zero; telemetry still dropped.
+  This motivates reducing per-invocation IPC and write cost before changing
+  admission again. The next slice replaces per-frame stdout reader goroutines
+  with one reader per warm worker. On the same candidate VM after that change,
+  20,000/20,000 requests at 500 clients completed in 15.11 s (1,323 req/s,
+  client p99 484 ms); 50,000/50,000 at 1,000 clients completed in 45.36 s
+  (1,102 req/s, client p99 1.53 s), with no 429, 504, or transport errors.
+  The database grew between runs, so these are exploratory observations, not
+  an isolated causal estimate. During the 1,000-client run, best-effort
+  telemetry drops grew by 49,407 while critical write failures/timeouts
+  remained zero. SQLite persistence is the remaining measured bottleneck.
+  A 50-row insert microbenchmark found multi-row SQL only about 2% faster
+  than the current prepared-per-row transaction, so it does not justify
+  replacing per-row error isolation with a more complex write shape. The
+  current candidate also passed all 28 real-sandbox E2E modules (664 checks,
+  no skips) and host `go vet`, Go tests and focused Go race tests. A warm
+  Node handler returned 5,000/5,000 HTTP 200 at 100 clients on the direct
+  two-VM link. Mixed-function sustained load and telemetry durability remain
+  open acceptance work.
 
 - A disposable 2-vCPU/4-GiB smolvm with real nsjail and cgroup-v2 limits
   identified the async SQLite writer and per-arrival pool-controller work as

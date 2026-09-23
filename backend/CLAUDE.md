@@ -33,7 +33,7 @@ go vet ./...
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
 | `builder` | Deploy pipeline: tarball → `npm install` / `pip install` → optional `tsc` → register. Every one of those commands runs **inside nsjail** via `sandbox.RunBuild`, using the runtime rootfs's own toolchain and the same compiled NSTUN egress policy a worker gets — the installs fail closed without one. A function with no dependencies runs no installer and needs no policy. `buildcache.go` owns the **per-function** npm/pip cache and every path built from a function id; `gc.go` bounds the caches and reclaims orphaned function dirs. |
-| `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; admission is bounded to 256 pending per function and 1,024 globally with a 2-second wait. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. Failed asynchronous spawns wake pending callers with the original error, preserving fail-closed egress-policy responses. |
+| `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; pending counts derive from the detected memory/FD envelope, with a reserved share for other functions and a 2-second worker wait. The HTTP proxy reserves a conservative share of daemon memory before body read; unknown-length bodies are charged at the configured cap. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. Failed asynchronous spawns wake pending callers with the original error, preserving fail-closed egress-policy responses. |
 
 `pool/hostmem.go` discovers the process's cgroup-v2 ancestry via
 `/proc/self/cgroup`. It uses the tightest visible ancestor and host memory headroom and
@@ -52,6 +52,12 @@ statement once per batch; HTTP execution baseline/outlier fields are included
 in the execution INSERT instead of a second UPDATE. `metrics.latency_ms` stops
 at proxy return, while `response_latency_ms` measures the complete public
 invoke handler (including admission and record enqueue), not network transit.
+
+Each spawned `sandbox.Worker` has one lifetime stdout frame reader. Readiness,
+buffered replies and streaming chunks consume from that reader's channel;
+context cancellation still marks/kills the worker. Do not reintroduce a
+goroutine per response frame on the warm path or allow concurrent dispatch on
+one worker.
 
 `server.detectInternalAPIBase` chooses a local interface IP (default-route
 interface first) for the sandbox SDK control plane. Do not reintroduce a

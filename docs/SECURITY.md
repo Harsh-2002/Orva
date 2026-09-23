@@ -704,7 +704,13 @@ cgroup `pids.max` (default 32) caps the process tree. Spawning past
 that limit fails with `EAGAIN` inside the sandbox. The orvad scheduler
 also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see
-`internal/pool/hostmem.go`).
+`internal/pool/hostmem.go`). Public HTTP invocations additionally reserve a
+conservative portion of daemon memory **before** reading their bodies; unknown
+lengths are charged as if they reached the configured body cap. The pending
+request count also scales with the detected memory/FD envelope, with a share
+kept for another function. These are daemon overload guards, not substitutes
+for per-sandbox cgroup limits; when cgroup delegation is unavailable, health
+still reports the weaker `rlimit_only` boundary.
 
 > "What can the in-product AI assistant do, and where do its provider
 > keys live?"

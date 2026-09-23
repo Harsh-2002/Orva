@@ -121,17 +121,20 @@ func workerCPUUnits(cpus float64) int64 {
 
 // Manager owns all function-scoped pools.
 type Manager struct {
-	cfg      ManagerConfig
-	tmpl     SandboxTemplate
-	db       *database.Database
-	reg      *registry.Registry
-	limiter  *sandbox.Limiter // host-wide ceiling
-	pools    sync.Map         // fnID -> *functionPool
-	poolMu   sync.Mutex       // serializes pool generation create/retire
-	closing  atomic.Bool
-	queued   atomic.Int64   // requests waiting for a worker or host execution slot
-	wg       sync.WaitGroup // reaper goroutines
-	shutdown chan struct{}
+	cfg                ManagerConfig
+	tmpl               SandboxTemplate
+	db                 *database.Database
+	reg                *registry.Registry
+	limiter            *sandbox.Limiter // host-wide ceiling
+	pools              sync.Map         // fnID -> *functionPool
+	poolMu             sync.Mutex       // serializes pool generation create/retire
+	closing            atomic.Bool
+	queued             atomic.Int64 // requests waiting for a worker or host execution slot
+	queueGlobalLimit   int64
+	queueFunctionLimit int64
+	requestBudget      *requestBudget
+	wg                 sync.WaitGroup // reaper goroutines
+	shutdown           chan struct{}
 
 	// fnLocks: per-function mutex for serializing deploy + rollback against
 	// each other. Acquired at the top of Queue.runJob and at the start of
@@ -293,9 +296,7 @@ var (
 )
 
 const (
-	invocationQueueWait   = 2 * time.Second
-	perFunctionQueueLimit = 256
-	globalQueueLimit      = 1024
+	invocationQueueWait = 2 * time.Second
 )
 
 func reserveQueueCounter(counter *atomic.Int64, limit int64) bool {
@@ -308,6 +309,15 @@ func reserveQueueCounter(counter *atomic.Int64, limit int64) bool {
 			return true
 		}
 	}
+}
+
+func (m *Manager) pendingLimits() (global, perFunction int64) {
+	if m.queueGlobalLimit > 0 && m.queueFunctionLimit > 0 {
+		return m.queueGlobalLimit, m.queueFunctionLimit
+	}
+	// Hand-wired managers in tests and degraded discovery retain a bounded
+	// fallback. Production managers cache the resource-derived pair at boot.
+	return m.requestBudget.queueLimits()
 }
 
 // NewManager creates a pool manager. limiter is the host-wide concurrency
@@ -339,12 +349,14 @@ func NewManager(cfg ManagerConfig, tmpl SandboxTemplate, db *database.Database, 
 	// leaves 20% for OS + Orva heap + SQLite page cache.
 	if hm, err := newHostMemTracker(0.8); err == nil {
 		m.hostMem = hm
+		m.requestBudget = newRequestBudget(hm)
 		m.scaler = newScaler(m, hm)
 		go m.scaler.run()
 	} else {
 		slog.Warn("host memory tracker unavailable; autoscaler disabled",
 			"err", err)
 	}
+	m.queueGlobalLimit, m.queueFunctionLimit = m.requestBudget.queueLimits()
 	return m
 }
 
@@ -361,6 +373,7 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 	}
 	arrivedAt := time.Now()
 	p.recordArrival(arrivedAt)
+	globalQueueLimit, perFunctionQueueLimit := m.pendingLimits()
 	if !reserveQueueCounter(&m.queued, globalQueueLimit) {
 		p.rejections.Add(1)
 		return nil, ErrInvocationQueueFull
