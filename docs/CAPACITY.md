@@ -2,6 +2,44 @@
 
 ## 2026-09-23 independent two-VM follow-up (unreleased candidate)
 
+### Mixed-function and scheduled-arrival follow-up
+
+The new `test/performance/loadgen` binary was built and run from a separate
+2-vCPU/1-GiB client VM against a 2-vCPU/4-GiB server VM over their private
+link. It reports `unsent` arrivals as client-rig failure, separately from
+HTTP status and transport errors. Node and Python functions were both trivial
+warm handlers returning HTTP 200. A cold-ramp 10,000-request mixed run at
+100 clients had 9,846 successes and 154 Python queue 429s; two sequential
+repeats had 9,949/51, then 10,000/0. Writer telemetry drops were zero after
+the first run. The scheduler's live snapshot during later load showed Python
+with one busy worker, four spawning workers and 469 queued while spawn p95
+was several seconds: the fixed two-second queue wait can expire before cold
+workers become ready. Once warm, the same 100-client mixed workload can pass.
+The next local candidate changes that mismatch: a pool that can still grow or
+is spawning waits up to its ten-second adapter-readiness budget plus one
+scaler tick, while a fully occupied pool retains the two-second overload
+wait. A focused race-tested unit case confirms a worker arriving after two
+seconds is acquired. The changed binary passed all 28 real-sandbox E2E
+modules (660 checks, no failures or skips) on a smaller 2-vCPU/2-GiB scratch
+VM. Four optional trace-detail checks were absent because this fresh instance
+had no trace to inspect. A Python handler with a three-second module-import
+sleep returned its first HTTP 200 in 4.57 seconds — a direct real-sandbox
+check of waiting beyond the former two-second cutoff. This proves functional
+cold admission, **not** 4-GiB throughput or sustained mixed-function capacity;
+do not attribute the observations above to this change.
+
+A scheduled 800 requests/s, 20,000-arrival run with 1,000 client slots sent
+all 20,000 arrivals and returned 16,276 HTTP 200 and 3,724
+`INVOCATION_QUEUE_FULL` responses, with no transport errors. This is **not**
+a sustainable-throughput claim: the server was warming/recycling workers and
+the two functions did not receive equal service. Another phase at 3,000
+client slots triggered a **global host OOM kill of the server VM**, not a
+normal Orva rejection. The Linux journal recorded `libkrun VM` PID 485558
+killed at 10:32:21 UTC with about 3.0 GiB resident. That phase is invalid as
+a capacity measurement and should not be repeated on this 7.8-GiB/no-swap
+development host while other workloads are active. The scratch VMs were
+stopped; no production instance was used.
+
 The load generator and Orva server ran in separate disposable smolvm guests
 on a direct virtual network. The server had 2 vCPUs, 4 GiB RAM, real nsjail
 and cgroup-v2 worker enforcement; the client had 2 vCPUs and 1 GiB RAM. This
@@ -122,7 +160,8 @@ claim is made from these runs.
 
 > The historical measurements below predate bounded invocation admission.
 > The current candidate derives pending-request limits from the detected
-> memory and file-descriptor envelope, waits at most 2 seconds, and returns
+> memory and file-descriptor envelope, waits 2 seconds at a saturated pool
+> (up to 12 seconds while the pool can still grow or is spawning), and returns
 > `429 INVOCATION_QUEUE_FULL`
 > on saturation. The function timeout starts only when a worker is acquired.
 > These older throughput numbers are not evidence that the new admission path

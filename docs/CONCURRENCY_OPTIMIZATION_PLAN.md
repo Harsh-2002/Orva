@@ -69,6 +69,42 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- A bounded Go load generator now supports direct-VM mixed-function tests in
+  closed-loop and scheduled open-loop modes. It reports offered versus sent
+  traffic, transport failures, Orva error codes, and class-specific/per-function latency as
+  JSON. Race-tested synthetic-server cases cover response-class attribution,
+  mixed URLs, and generator saturation. On a direct two-VM scratch test with
+  the current candidate, an initially cold 10,000-request/100-client mixed
+  Node/Python run returned 9,846 HTTP 200 and 154 Python
+  `INVOCATION_QUEUE_FULL` responses; a warm repeat returned 9,949/51, and a
+  later warm repeat returned 10,000/0. Live metrics during a scheduled
+  800-request/s phase showed Python with one busy worker, four spawning and
+  469 queued, while the startup p95 was several seconds and queue admission
+  expired at two seconds. This identifies cold-ramp time as a distinct
+  bottleneck; zero telemetry drops in the initial mixed run rule out the
+  SQLite writer as the cause of those first 429s. A 20,000-request,
+  1,000-client scheduled phase sent all arrivals but returned 16,276 200 and
+  3,724 queue 429, with no transport errors. These runs are exploratory and
+  sequential, not a controlled baseline/candidate comparison.
+- A later 3,000-client scheduled phase **invalidated its own capacity result**:
+  the host kernel globally OOM-killed the 4-GiB server VM at 10:32:21 UTC
+  (guest process RSS about 3.0 GiB). The host has 7.8 GiB and no swap, with
+  other development processes active. The test guest did not survive, so no
+  Orva throughput conclusion may be drawn from that phase. Stop high-client
+  stress until the host has enough proven headroom or a dedicated target is
+  available; preserve this failure as a load-rig safety lesson.
+- The next candidate aligns cold admission with adapter startup: a pool with
+  unused capacity or in-flight spawns waits for the ten-second readiness budget
+  plus one scaler tick; a saturated pool keeps the two-second overload wait.
+  This remains bounded by the existing resource-derived ingress and pending
+  budgets, and the function execution timeout still begins only after worker
+  acquisition. Unit/race tests cover both paths and a worker arriving after
+  the former two-second cutoff. On a smaller 2-vCPU/2-GiB VM, the changed
+  binary passed 28 real-sandbox E2E modules (660 checks, zero failures or
+  skips), and a Python handler sleeping three seconds during module import
+  returned its first HTTP 200 in 4.57 seconds. Because host OOM ended the
+  4-GiB stress guest, no 4-GiB throughput claim is attached to this change.
+
 - A direct **inter-VM** link now supplies an independent load generator, so
   smolvm's host port-forward resets are outside the measured request path.
   On a fresh 2-vCPU/4-GiB server running `d5a1fd6`, a Python `"ok"` handler

@@ -27,6 +27,49 @@ func TestQueueCounterNeverExceedsBound(t *testing.T) {
 	}
 }
 
+func TestQueueWaitTracksColdSpawnButNotSaturatedPool(t *testing.T) {
+	p := testPool("cold-queue", nil, 0)
+	p.requestSpawn = func() {}
+	p.dynamicMax.Store(4)
+	if got := queueWaitFor(p); got != adapterReadyTimeout+scalerTick {
+		t.Fatalf("growing pool wait = %s", got)
+	}
+	p.busy.Store(4)
+	if got := queueWaitFor(p); got != invocationQueueWait {
+		t.Fatalf("saturated pool wait = %s", got)
+	}
+	p.spawning.Store(1)
+	if got := queueWaitFor(p); got != adapterReadyTimeout+scalerTick {
+		t.Fatalf("in-flight spawn wait = %s", got)
+	}
+}
+
+func TestGrowingPoolDoesNotExpireBeforePendingWorkerIsReady(t *testing.T) {
+	m, reg := egressTestManager(t)
+	fn := registerFn(t, reg, "cold-queue-readiness", "none")
+	p, err := m.getOrCreatePool(fn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requested atomic.Bool
+	p.requestSpawn = func() {
+		if requested.CompareAndSwap(false, true) {
+			time.AfterFunc(invocationQueueWait+100*time.Millisecond, func() {
+				p.idle <- &sandbox.Worker{}
+			})
+		}
+	}
+	started := time.Now()
+	got, err := m.Acquire(context.Background(), fn.ID)
+	if err != nil {
+		t.Fatalf("growing pool rejected worker that arrived after ordinary overload wait: %v", err)
+	}
+	if got == nil || got.Worker == nil || time.Since(started) < invocationQueueWait {
+		t.Fatalf("worker arrived too early or was missing: %+v", got)
+	}
+	p.busy.Add(-1) // synthetic worker has no process to release/kill
+}
+
 func TestQueuedAcquireDoesNotConsumeHostExecutionSlot(t *testing.T) {
 	m, reg := egressTestManager(t)
 	m.limiter = sandbox.NewLimiter(1)

@@ -297,7 +297,24 @@ var (
 
 const (
 	invocationQueueWait = 2 * time.Second
+	adapterReadyTimeout = 10 * time.Second
 )
+
+// A cold/growing pool may need to boot and import user code before it can
+// serve a queued request. Do not reject that request at the ordinary overload
+// deadline while a worker is still within its own readiness budget. The
+// scaler tick covers the delay between demand arriving and a spawn starting.
+// Once every possible worker slot is occupied, keep the short overload wait.
+func queueWaitFor(p *functionPool) time.Duration {
+	if p.requestSpawn == nil {
+		return invocationQueueWait
+	}
+	current := p.busy.Load() + p.spawning.Load() + int64(len(p.idle))
+	if p.spawning.Load() > 0 || current < p.dynamicMax.Load() {
+		return adapterReadyTimeout + scalerTick
+	}
+	return invocationQueueWait
+}
 
 func reserveQueueCounter(counter *atomic.Int64, limit int64) bool {
 	for {
@@ -383,7 +400,7 @@ func (m *Manager) Acquire(ctx context.Context, fnID string) (*AcquireResult, err
 		p.rejections.Add(1)
 		return nil, ErrInvocationQueueFull
 	}
-	queueCtx, cancelQueue := context.WithTimeout(ctx, invocationQueueWait)
+	queueCtx, cancelQueue := context.WithTimeout(ctx, queueWaitFor(p))
 	defer cancelQueue()
 	finishQueue := func(pool *functionPool, rejected bool) {
 		pool.queued.Add(-1)
@@ -932,7 +949,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			}
 			// Spawn only starts nsjail. The adapters still need to import the
 			// function; don't hand that cold process to a timed invocation.
-			readyCtx, cancelReady := context.WithTimeout(ctx, 10*time.Second)
+			readyCtx, cancelReady := context.WithTimeout(ctx, adapterReadyTimeout)
 			readyErr := w.AwaitReady(readyCtx)
 			cancelReady()
 			if readyErr != nil {

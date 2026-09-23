@@ -4,10 +4,10 @@
 > overwrites it. When a module FAILs, fix the code or harden the test;
 > when you add a feature, add a module here.
 
-- **Last run:** 2026-09-23 10:09:14Z
+- **Last run:** 2026-09-23 10:41:30Z
 - **Target:** external instance http://127.0.0.1:18448
 - **Modules:** 28 passed, 0 failed, 0 skipped
-- **Checks:** 664 passed, 0 failed
+- **Checks:** 660 passed, 0 failed
 
 | Module | Status | Checks (pass/fail) |
 |---|---|---|
@@ -37,5 +37,5 @@
 | `test_secrets.py` | ✅ PASS | 18/0 |
 | `test_security.py` | ✅ PASS | 8/0 |
 | `test_system.py` | ✅ PASS | 7/0 |
-| `test_traces.py` | ✅ PASS | 26/0 |
+| `test_traces.py` | ✅ PASS | 22/0 |
 | `test_webhooks.py` | ✅ PASS | 25/0 |

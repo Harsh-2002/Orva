@@ -48,6 +48,38 @@ retries deletion of every function it created if transport fails; inspect
 `admission-test-*` names before deleting anything manually after an
 interrupted run.
 
+For repeatable direct-VM traffic, build `go build -o build/orva-loadgen
+./test/performance/loadgen` and mount the resulting binary into a separate
+client VM on the server VM's private network. Supply **scratch function URLs**
+with repeatable `-url` flags; this tool does not deploy, mutate, or delete
+functions. For example, with a reachable private VM address and two previously
+deployed functions:
+
+```bash
+build/orva-loadgen -url http://<vm-ip>:8443/fn/<node-id> \
+  -url http://<vm-ip>:8443/fn/<python-id> -requests 50000 -concurrency 1000
+build/orva-loadgen -url http://<vm-ip>:8443/fn/<python-id> \
+  -requests 50000 -concurrency 1000 -rate 1200
+```
+
+The first run is closed-loop: slow replies lower the offered arrival rate.
+`-rate` schedules open-loop arrivals; it reports `unsent` when the bounded
+client queue cannot keep up, so an overloaded load generator cannot masquerade
+as a healthy server. JSON separates HTTP status counts, transport errors and
+Orva error codes, plus latency percentiles by response code and by function
+URL. Exit code 1 means
+client transport errors or unsent arrivals; non-200 HTTP responses still need
+interpretation from the JSON. Capture writer counters before and after each
+phase and verify the client VM is not CPU/network saturated. The binary's URL
+list is not an authorization to test production.
+
+Do not give a 4-GiB server guest nearly all free host memory just because its
+nominal limit fits: a 3,000-client scratch run on a 7.8-GiB/no-swap host
+globally OOM-killed that guest while other development processes were active.
+Check host **available** memory and leave headroom for both guests, the host,
+and the test runner. A host OOM makes the phase invalid even if a client
+summary was printed.
+
 For performance work, capture writer counters before and after each phase,
 not just the final health status: a queue that drains afterward can still
 have dropped telemetry at saturation. Split success, 429, 504, and client

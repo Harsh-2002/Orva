@@ -258,9 +258,11 @@ Pending invocation capacity is derived from detected memory and file-descriptor
 limits rather than a fixed request count. One function can use at most three
 quarters of that pending budget, leaving room for another function. The server
 also reserves memory before reading a public request body (unknown-length
-bodies are charged at the configured body cap). A request waits at most two
-seconds for a worker and host execution slot. Exhausted capacity or an expired
-wait returns `429 INVOCATION_QUEUE_FULL` with `Retry-After: 1`; no user code ran.
+bodies are charged at the configured body cap). A saturated pool waits at most
+two seconds; a pool that can still grow or has workers starting may wait up to
+the ten-second adapter-readiness budget plus one scaler tick (twelve seconds).
+Exhausted capacity or an expired wait returns `429 INVOCATION_QUEUE_FULL` with
+`Retry-After: 1`; no user code ran.
 The function's `timeout_ms` starts after admission, when a worker is ready.
 Replay capture begins only after a worker has been acquired, so rejected
 requests have no replay body even when capture is enabled.

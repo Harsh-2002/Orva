@@ -42,7 +42,7 @@ Full catalog in [ERRORS.md](ERRORS.md). The ones operators see most:
 
 | code | what's happening | what to do |
 |---|---|---|
-| `429 INVOCATION_QUEUE_FULL` | the memory/FD-derived pending budget or pre-body memory reserve was exhausted, or a request waited 2 seconds for a worker/execution slot | retry with backoff and jitter; inspect `queued`, `queue_wait_p95_ms`, `effective_max`, `limiting_reason`, and host memory. Sustained pressure requires more host capacity or faster functions |
+| `429 INVOCATION_QUEUE_FULL` | the memory/FD-derived pending budget or pre-body memory reserve was exhausted, or a request waited 2 seconds at a saturated pool (up to 12 seconds while workers can still start) | retry with backoff and jitter; inspect `queued`, `spawning`, `cold_start_p95_ms`, `queue_wait_p95_ms`, `effective_max`, `limiting_reason`, and host memory. Sustained pressure requires more host capacity or faster functions |
 | `429 TOO_MANY_REQUESTS` | legacy host-wide concurrency-cap response | client should back off + retry |
 | `503 POOL_AT_CAPACITY` | legacy pool-capacity response | inspect `limiting_reason`; normal HTTP queue expiry now returns `429 INVOCATION_QUEUE_FULL` |
 | `503 MEMORY_EXHAUSTED` | host RAM at 80% reservation | scale-down idle pools, increase host RAM, or reduce per-fn `memory_mb` |
