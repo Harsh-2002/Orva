@@ -508,6 +508,17 @@ below must be measured against it.
   subtree, enable available controllers on the appropriate empty parents, and
   verify child control files with a real jailed process. Respect systemd ownership
   and the no-internal-process rule. Do not walk into an unrelated writable ancestor.
+  **Implemented in the current candidate:** auto-detection is confined to the
+  process's own non-root cgroup, and `orva.daemon` / `orva.workers` are created
+  there. A 2-vCPU/4-GiB smolvm guest verified actual nsjail `memory.max`,
+  `pids.max`, `cpu.max`, and an `oom_kill` delta for both root and unprivileged
+  daemon launches. The unprivileged guest needed the installer's already
+  supported `ORVA_DISABLE_USERNS=1` capability fallback because that guest
+  denied `/proc/<pid>/setgroups`. A disposable Docker container passed 20/20
+  real deploy/invoke/rollback assertions, reported `cgroup_v2`, remained
+  healthy with `docker exec` working, and showed a worker-subtree `oom_kill`
+  delta of 0→1 under the same probe. Native systemd and CPU/PID-specific
+  checks remain required; this is not phase completion.
 - Provision the same contract through supported systemd, OpenRC and Docker paths.
   Check exact CPU/memory/PID enforcement, not merely writable directories. Use an
   aggregate worker memory/PID budget plus individual sandbox limits; keep headroom

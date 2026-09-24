@@ -55,17 +55,10 @@ For each platform we ran:
   and the function row reaches `status=active`.
 - Everything that doesn't actually execute user code in nsjail works fine.
 
-The Docker entrypoint logs one informational warning that doesn't gate
-anything:
-
-```
->> WARN: cannot create cgroup at /sys/fs/cgroup/orva-sandboxes — nsjail CPU/memory limits disabled
-   (requires cgroup: host and - /sys/fs/cgroup:/sys/fs/cgroup:rw)
-```
-
-This is the entrypoint's existing cgroup-delegate probe failing because
-gVisor's cgroup view is a virtual one. nsjail would fall back to host-wide
-rlimits — not the failure mode that breaks invocation.
+The daemon may report `rlimit_only` because gVisor's cgroup view does not
+delegate writable CPU/memory/PID controls. The Docker entrypoint no longer
+tries to create a worker cgroup at the host root. This resource-limit warning
+is separate from the namespace failure that breaks invocation below.
 
 ---
 

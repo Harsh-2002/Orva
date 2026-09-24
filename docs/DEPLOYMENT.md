@@ -217,6 +217,16 @@ docker run -d --name orva -p 8443:8443 \
 `--pid host` + `--cgroupns host` are required on the runc runtime: nsjail
 enrolls each sandbox PID in the host cgroup hierarchy, and omitting them
 makes every invocation fail with `Launching child process failed`.
+The entrypoint moves its known `tini` supervisor and short-lived CLI helper
+into `orva.supervisor`; the daemon creates `orva.daemon` and `orva.workers` as
+sibling leaves beneath its own container cgroup. That leaves the parent empty
+so cgroup-v2 domain controllers can be enabled, while Docker's CPU/memory
+budget still contains the sandboxes. No worker group is created at the host
+cgroup root. Docker health checks and `docker exec` continue to work from the
+supervisor leaf. Check system health:
+`sandbox.resource_limits=cgroup_v2` means the child controls were verified;
+`rlimit_only` means hard per-function CPU/memory/PID caps are unavailable on
+this host and should be fixed before treating them as a security boundary.
 
 The DB schema migrations are idempotent additive ALTERs, so running a newer
 image on an older volume is safe — with one carve-out. The **UUIDv7 id

@@ -67,33 +67,24 @@ fi
 
 touch /var/lib/orva/.setup-complete
 
-# Cgroup v2 delegation for nsjail per-sandbox resource limits.
-# Creates /sys/fs/cgroup/orva-sandboxes with memory+cpu+pids controllers
-# enabled so nsjail can set memory.max / cpu.max on each NSJAIL.<pid>
-# child cgroup. Requires cgroupns=host and /sys/fs/cgroup:rw in
-# docker-compose.yml. Failure is non-fatal: sandboxes still run with
-# namespace + seccomp isolation, but without kernel-level resource caps.
-setup_nsjail_cgroups() {
-  ORVA_CG=/sys/fs/cgroup/orva-sandboxes
-
-  # Create the orva-sandboxes cgroup. On cgroupfs you can't create regular
-  # files — only cgroup directories via mkdir. If mkdir succeeds AND the
-  # kernel auto-creates cgroup.procs inside it, we have a valid delegate.
-  if ! mkdir -p "$ORVA_CG" 2>/dev/null || [ ! -f "$ORVA_CG/cgroup.procs" ]; then
-    echo ">> WARN: cannot create cgroup at $ORVA_CG — nsjail CPU/memory limits disabled"
-    echo "         (requires cgroup: host and - /sys/fs/cgroup:/sys/fs/cgroup:rw)"
-    return
-  fi
-
-  if echo "+memory +cpu +pids" > "$ORVA_CG/cgroup.subtree_control" 2>/dev/null; then
-    echo ">> nsjail cgroup delegation ready: $ORVA_CG"
-    export ORVA_CGROUPV2_MOUNT="$ORVA_CG"
-  else
-    echo ">> WARN: $ORVA_CG/cgroup.subtree_control write failed — cgroup limits disabled"
-    rmdir "$ORVA_CG" 2>/dev/null || true
-  fi
-}
-setup_nsjail_cgroups || true
+# The daemon prepares its own daemon/worker leaves inside this container's
+# cgroup. Move only the known tini supervisor into a sibling leaf first:
+# cgroup-v2 domain controllers cannot be enabled while tini shares the parent
+# with the daemon. Never create a group at the host cgroup root.
+SUPERVISOR_CGROUP=
+if [ "${1:-}" = /usr/local/bin/orva ] && [ "${2:-}" = serve ] &&
+   [ -r /proc/self/cgroup ] && [ "$(cat "/proc/$PPID/comm" 2>/dev/null)" = tini ]; then
+  cgroup_rel=$(sed -n 's/^0:://p' /proc/self/cgroup)
+  case "$cgroup_rel" in
+    /*) if [ "$cgroup_rel" != / ]; then
+          cgroup_base=/sys/fs/cgroup$cgroup_rel
+          if mkdir "$cgroup_base/orva.supervisor" 2>/dev/null &&
+             printf '%s\n' "$PPID" > "$cgroup_base/orva.supervisor/cgroup.procs" 2>/dev/null; then
+            SUPERVISOR_CGROUP=$cgroup_base/orva.supervisor
+          fi
+        fi ;;
+  esac
+fi
 
 # Pre-configure the in-container CLI so `docker exec orva orva functions list`
 # works without the operator hunting for the bootstrap key.
@@ -137,5 +128,10 @@ EOF
     echo ">> wrote CLI config to $cfg_path (endpoint=http://localhost:8443)"
 )
 write_cli_config &
+cli_helper_pid=$!
+if [ -n "$SUPERVISOR_CGROUP" ]; then
+  # The helper belongs to this entrypoint and may finish before the move.
+  printf '%s\n' "$cli_helper_pid" > "$SUPERVISOR_CGROUP/cgroup.procs" 2>/dev/null || true
+fi
 
 exec "$@"

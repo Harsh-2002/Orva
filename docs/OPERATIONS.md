@@ -134,12 +134,14 @@ service environment. Check these known causes:
   unit (`scripts/install.sh`) no longer sets this; if you have an older
   unit, remove the `ProtectKernelTunables=true` line and
   `systemctl daemon-reload && systemctl restart orva`.
-- **cgroup controllers not delegated.** When systemd doesn't delegate
-  the cgroup v2 controllers to the service (constrained/cloud VMs),
-  Orva now logs `cgroup v2 controllers not delegated; per-sandbox
-  memory/pid/cpu caps disabled (rlimit-only fallback)` at startup and
-  runs functions **without** hard per-sandbox memory caps rather than
-  crashing. Older builds crashed every worker here — upgrade to fix.
+- **cgroup controllers not delegated.** When the service/container has no
+  writable `cpu`, `memory` and `pids` delegation, or its visible membership
+  is `/`, Orva logs `cgroup v2 controls unavailable; per-sandbox
+  memory/pid/cpu caps disabled (rlimit-only fallback)` with a reason and
+  runs functions **without** hard per-sandbox caps rather than crashing.
+  Check `systemctl cat orva` for `Delegate=yes` and inspect the service's
+  `cgroup.controllers`. Orva creates its own daemon and worker leaves only
+  below that service cgroup; it will not claim the host root as a delegate.
 - **nsjail capabilities excluded by systemd.** If the API returns
   `SANDBOX_ERROR` immediately and nsjail produces no stderr, inspect
   `systemctl cat orva`. The bounding set must retain every capability the

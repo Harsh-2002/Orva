@@ -382,6 +382,19 @@ That retains process address-space protection but does **not** enforce the
 function's declared CPU, pid, or hard-memory limits; delegate cgroup v2
 controllers for the full resource boundary.
 
+Automatic detection stays inside the daemon's own service/container cgroup.
+Orva moves only itself into `orva.daemon`, enables the delegated controllers on
+the now-empty parent, and puts nsjail children under `orva.workers`. It does
+not climb to a writable host ancestor or create worker groups outside the
+service/container budget. If the visible cgroup is `/`, contains another
+process, or lacks writable child limit files, it reports `rlimit_only` instead
+of claiming hard enforcement. `ORVA_CGROUPV2_MOUNT` is an explicit operator
+override and must point at an already delegated worker subtree **inside that
+same service/container cgroup**; a host-root or sibling override is rejected.
+The Docker entrypoint first moves its known `tini` parent and CLI bootstrap
+helper into a sibling `orva.supervisor` leaf inside that same container cgroup;
+otherwise they would occupy the parent and prevent controller enablement.
+
 The host-wide concurrency cap (`cfg.Sandbox.MaxConcurrent`, see the
 `TOO_MANY_REQUESTS` error) is enforced at the Go layer in
 `internal/sandbox/limiter.go` — sandbox spawns wait or fail-fast there

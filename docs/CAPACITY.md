@@ -899,3 +899,23 @@ automatic capacity. `effective_max` remains the live ceiling, recomputed
 each tick from observed memory use and current host headroom. This removes a
 code-level 50/1,024 cap on larger hosts; the two-core storage-limited scratch
 run above does not prove a throughput gain from the change.
+
+## 2026-09-24 scoped cgroup enforcement check
+
+In the disposable 2-vCPU/4-GiB smolvm guest, a candidate server launched
+inside its own delegated cgroup created `orva.daemon` and `orva.workers` beneath
+that group. Actual nsjail child cgroups exposed `memory.max`, `pids.max`, and
+`cpu.max`; a temporary 80-MiB Node function allocating 512 MiB returned 502
+and incremented the worker subtree's `memory.events:oom_kill` from 0 to 1.
+The same proof passed with the daemon running as an unprivileged service user,
+using the installer's existing `ORVA_DISABLE_USERNS=1` fallback because this
+guest denied `/proc/<pid>/setgroups` under user namespaces. The probe creates
+and deletes only its own function. This establishes hard-memory containment in
+the scoped guest, not throughput, CPU throttling, PID enforcement, systemd
+service installation, or Docker regression. A following disposable Docker
+container did pass 20/20 real TypeScript deploy/invoke/rollback assertions,
+remained healthy with `docker exec` working, reported `cgroup_v2`, and returned
+502 with worker-subtree `oom_kill` 0→1 in the same memory probe. The Docker
+entrypoint placed `tini` and its CLI helper in `orva.supervisor` inside the
+container cgroup to satisfy the kernel's no-internal-process rule. Native
+systemd, CPU/PID-limit tests, and comparative throughput remain open gates.

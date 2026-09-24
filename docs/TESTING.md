@@ -25,6 +25,15 @@ orders of magnitude, not SLAs.
 
 For invocation-concurrency changes, use a disposable instance and run
 `python3 test/performance/invocation_admission.py --scratch --url <scratch-url> --api-key <key> --extended`.
+For cgroup enforcement, run `python3 test/performance/cgroup_hard_limit.py
+--endpoint http://127.0.0.1:8443 --key-file /var/lib/orva/.admin-key
+--worker-cgroup /sys/fs/cgroup/<service-group>/orva.workers` **only in a
+disposable delegated Linux VM**. It deploys and deletes its own Node function,
+intentionally OOM-kills the worker, and requires both an HTTP failure and an
+increase in that worker subtree's `memory.events:oom_kill`. A 502 alone is not
+proof of a working hard cap. Health must report `cgroup_v2` first. The script
+does not validate CPU or PID enforcement, and its path must match the tested
+instance's actual service cgroup.
 The harness also accepts `ORVA_API_KEY` so a scratch key need not appear in
 the load generator's process arguments.
 The external-instance E2E runner (`test/e2e/run.py --url`) accepts the same
@@ -1895,16 +1904,19 @@ assertion written against `.code` gets `null`; the path is `.error.code`.
 | 8 MB request body | **413** `PAYLOAD_TOO_LARGE` (the JSON cap is 6 MB) |
 | ~7 MB `deploy-inline` | **not** 413 — the deploy reader is deliberately exempt from the JSON cap (`test_security.py` M4) |
 | pool saturated under contention | `POOL_AT_CAPACITY` |
-| exceed `memory_mb` | **`[UNVERIFIED]`** — see below |
+| exceed `memory_mb` | **502** `WORKER_CRASHED` in the 2026-09-24 delegated smolvm test; the worker subtree's `oom_kill` counter increased |
 
 **`memory_mb` and `cpus` are not enforced on a bare-metal host without cgroup
-delegation.** Confirmed two ways on the survey host: the server logs
-`cgroup v2 controllers not delegated; per-sandbox memory/pid/cpu caps disabled
-(rlimit-only fallback)`, and no `--cgroup_mem_max` appears in the nsjail argv.
-An allocation loop hit the 504 timeout instead of OOMing. OOM and CPU-throttle
-tests are only meaningful in the Docker image (which bind-mounts
-`/sys/fs/cgroup`) or on a host where systemd genuinely delegates the
-controllers — the unit had `Delegate=yes` and it still was not delegated.
+delegation.** On the earlier survey host, the server reported `rlimit_only`,
+no `--cgroup_mem_max` appeared in nsjail's argv, and an allocation loop hit a
+504 timeout instead of OOMing. A later 2-vCPU/4-GiB smolvm test created a
+scoped delegated cgroup for Orva: actual child `memory.max`, `pids.max` and
+`cpu.max` files existed, and the scratch OOM probe above observed `oom_kill`
+increase for both root and unprivileged daemon launches. The unprivileged
+guest needed the installer's supported user-namespace capability fallback;
+without it nsjail failed at `/proc/<pid>/setgroups` *before* starting a worker.
+This manual guest proof does not replace the native systemd/Docker checks or
+establish CPU-throttle and PID-exhaustion outcomes.
 
 ### 5.3 Auth and authorization
 

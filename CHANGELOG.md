@@ -17,6 +17,13 @@ before it.
 
 ### Fixed
 
+- Cgroup-v2 worker setup now stays inside Orva's own delegated service/container
+  cgroup. It creates separate daemon and worker leaves, verifies writable child
+  CPU/memory/PID controls, and reports `rlimit_only` when unavailable instead of
+  walking into a writable host ancestor. Docker keeps its supervisor in a
+  sibling container cgroup and no longer creates workers at the host root.
+  `ORVA_CGROUPV2_MOUNT` values outside Orva's own cgroup now fall back to
+  `rlimit_only`; remove a stale host-root override to restore automatic setup.
 - Startup outlier-baseline warmup now reads a bounded, indexed recent window
   per function instead of ranking the entire execution history before the
   HTTP listener opens. Very old successes after a long failure streak no

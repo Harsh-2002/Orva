@@ -41,6 +41,11 @@ CPU quota, plus the effective CPU set, for its startup capacity snapshot; a
 1-second poll refreshes memory usage. This is resource discovery, not proof of
 delegated per-worker cgroup enforcement. `proxy.Forward` does not consume a
 seccomp policy; the worker's actual policy is built at spawn in `pool/pool.go`.
+`sandbox.cgroupv2Delegate` separately creates `orva.daemon` and `orva.workers`
+inside the process's own delegated cgroup, never a writable ancestor. It moves
+only the daemon into its leaf before enabling domain controllers, and verifies
+child `memory.max`, `pids.max` and `cpu.max`; an unavailable delegate yields
+`rlimit_only`, not a false hard-limit claim.
 No pool override means an automatic maximum from CPU slots, the 16-MiB
 minimum worker reservation, and function concurrency. `max_warm=0` restores
 that mode; a positive value only lowers the resource ceiling. The idle channel
