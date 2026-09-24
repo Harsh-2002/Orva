@@ -17,6 +17,12 @@ before it.
 
 ### Fixed
 
+- Successful-execution history now avoids sorting the entire matching table
+  when the newest page contains only successes. Mixed pages and rare statuses
+  retain the original query; no SQLite index or migration changes. On a
+  1.47-million-execution scratch VM, the same 50-row HTTP page improved from
+  about 7.1 s to about 0.2 s with identical results. This is a history-read
+  improvement, not a claimed invocation-throughput increase.
 - Cgroup-v2 worker setup now stays inside Orva's own delegated service/container
   cgroup. It creates separate daemon and worker leaves, verifies writable child
   CPU/memory/PID controls, and reports `rlimit_only` when unavailable instead of

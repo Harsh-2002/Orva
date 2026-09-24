@@ -84,6 +84,28 @@ Before considering a schema change, repeat the comparison using Orva's
 actual driver and same-snapshot sustained VM HTTP load, including read-heavy
 and status-filtered workloads. No index change is in the candidate.
 
+### Success-history read path on the same scratch database
+
+The existing `GET /api/v1/executions?status=success&limit=50` query used the
+status index to find about 1.47 million matching rows, then sorted them to
+return 50. Read-only SQLite probes on the 2-vCPU/4-GiB guest measured 2.63 s
+for that sort, versus 0.21 ms to read the newest 50 directly through the
+`started_at` index. Forcing that latter index for **all** statuses would be
+wrong: only 19 rows had `status=error`, and a forced `started_at` scan took
+66.5 s to find them versus 14.7 ms on the status index.
+
+The candidate therefore probes only the newest unfiltered page when listing
+successful executions with no date/search filter or offset. If every row on
+that bounded page succeeded, it is exactly the requested page; if not, the
+old filtered query runs. No index, migration, or result contract changes.
+On the same VM and database, the immediately preceding `ba4d310` server
+binary took 7.07–7.16 s across three warm HTTP reads; the candidate took
+0.193–0.219 s across three. An alternating baseline/candidate check found
+identical totals (1,470,032) and identical SHA-256 hashes of the 50 returned
+execution IDs. The count query still scans the success index and accounts
+for much of the candidate's remaining ~0.2 s. These are history-page
+measurements, **not** invocation throughput or writer-capacity gains.
+
 A new benchmark uses the production 18-column final-execution INSERT, foreign
 key, and current execution indexes instead of a one-column toy table. On the
 same local host, three 200-row batch repetitions measured prepared per-row

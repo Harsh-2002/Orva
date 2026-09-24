@@ -208,6 +208,17 @@ No production load or configuration change is part of this optimization work.
   Admission still needs extension to all invocation entry points. The sweep
   is exploratory, not a controlled A/B performance result.
 
+- A separate large-history read bottleneck was found on the same 1.47-million
+  execution scratch database: sorting `status=success` history for a 50-row
+  page took about seven seconds through the Orva HTTP API. A bounded exact
+  fast path now reads the newest unfiltered page and uses it only when all
+  rows are successful; a mixed page falls back to the original status-index
+  query. A same-VM baseline/candidate comparison gave 7.07–7.16 s versus
+  0.193–0.219 s for three warm reads, with identical totals and page-ID
+  hashes. Rare-error lookup still uses the original path. This improves
+  dashboard read responsiveness; it is not evidence of higher invocation
+  goodput or a reason to remove an index.
+
 - The reservation now covers inbound webhooks, replay, internal SDK calls,
   MCP tools, cron, and queued jobs as well as public HTTP. Jobs reserve before
   `ClaimDueJobs` so a full writer cannot consume a retry attempt. The final

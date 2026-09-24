@@ -55,6 +55,12 @@ the fail-closed memory/CPU gate.
 Startup baseline warmup reads only a bounded recent execution window per
 function through `idx_executions_function`; do not restore a whole-table
 `ROW_NUMBER` rank, which delays the HTTP listener as history grows.
+Successful-execution history uses a bounded newest-page probe when there is
+no date/search filter or offset; only an all-success page can bypass the
+status-index query. Rare/mixed statuses fall back rather than scanning old
+history through `idx_executions_started`. Do not force that index for all
+statuses: a 1.47-million-row scratch database had only 19 error rows, and a
+forced oldest-reaching scan took 66.5 seconds.
 `proxy.Proxy` caches the non-security streaming settings for at most 30 seconds
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.

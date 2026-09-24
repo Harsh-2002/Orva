@@ -678,6 +678,50 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 		return nil, err
 	}
 
+	// The status index finds every successful execution and then sorts them.
+	// On a long-lived, mostly-successful instance that can sort millions of
+	// rows merely to show the newest page. The newest unfiltered page is an
+	// exact answer if every row on it succeeded; otherwise use the original
+	// filtered query. This bounded probe never scans old history looking for
+	// a rare status and adds no write-amplifying index.
+	if params.Status == "success" && params.Offset == 0 &&
+		params.Since == "" && params.Until == "" && params.Search == "" {
+		fastQuery := "SELECT " + executionSelectColumns + " FROM executions"
+		var fastArgs []any
+		if params.FunctionID != "" {
+			fastQuery += " WHERE function_id = ?"
+			fastArgs = append(fastArgs, params.FunctionID)
+		}
+		fastQuery += " ORDER BY started_at DESC LIMIT ?"
+		fastArgs = append(fastArgs, params.Limit)
+		rows, err := db.read.Query(fastQuery, fastArgs...)
+		if err != nil {
+			return nil, err
+		}
+		var recent []*Execution
+		allSuccess := true
+		for rows.Next() {
+			exec, scanErr := scanExecutionRows(rows)
+			if scanErr != nil {
+				_ = rows.Close()
+				return nil, scanErr
+			}
+			if exec.Status != "success" {
+				allSuccess = false
+				break
+			}
+			recent = append(recent, exec)
+		}
+		readErr := rows.Err()
+		_ = rows.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if allSuccess {
+			return &ListExecutionsResult{Executions: recent, Total: total}, nil
+		}
+	}
+
 	query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
 	args = append(args, params.Limit, params.Offset)
 
