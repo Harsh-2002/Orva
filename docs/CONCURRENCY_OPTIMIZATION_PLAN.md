@@ -812,6 +812,13 @@ CI should keep deterministic scheduler/resource/race/compatibility tests and a
 bounded real-sandbox concurrency/fairness smoke within `ci.yml`. Large comparative
 benchmarks remain reproducible isolated qualification runs; hosted-runner RPS noise
 must not create brittle universal throughput assertions. No extra workflow is needed.
+The direct-VM load generator can now opt into same-origin writer observation:
+it samples queue and retained-byte peaks, reports counter deltas only after
+in-flight drain, and refuses to treat missing telemetry or a reset counter as
+zero. A 1,000-request scratch phase found a 6.16-second writer drain after a
+2.67-second client run despite all HTTP 200, and a 5,000-request phase
+recorded full optional queues and best-effort drops. Row counts are still
+checked independently because committed writer jobs include other work.
 
 This project is complete when these gates pass and measured capacity curves explain
 the remaining hardware/runtime/storage limits. It establishes a durable optimization

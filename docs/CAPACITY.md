@@ -173,6 +173,27 @@ test command's pipe and reconciled all 10,000 final rows. A read-only
 `PRAGMA quick_check` of the scratch database after the abrupt exit returned
 `ok`.
 
+The direct-VM Go load generator now has an opt-in same-origin writer
+observer. It samples critical/activity/telemetry queue and byte peaks,
+waits for zero active requests and zero in-flight writer bytes after the
+client phase, and emits counter deltas in the same JSON as response classes.
+On the 2-vCPU/4-GiB scratch guest with hard cgroup-v2 sandbox limits, its
+first 1,000-request/100-client mixed check returned/persisted all 1,000 HTTP
+200 with zero drops, but measured a 6.16-second writer drain after the
+2.67-second client phase and queue peaks of 869/871/896. A following
+5,000-request/250-client phase returned/persisted all 5,000 HTTP 200 while
+the activity and telemetry queues each peaked at 1,024, with 1,730 activity
+and 5,667 total best-effort drops. Critical failures/timeouts remained zero.
+These short phases validate the observer against independent read-only row
+counts; they do not establish sustainable capacity or a throughput gain.
+After the missing-in-flight-field guard was added, the exact final tree was
+built and rerun in the same isolated guest: 1,000/1,000 HTTP 200, 500 Node
+and 500 Python execution rows in the timestamp window, cgroup-v2 limits,
+`observation_complete=true`, zero writer failures/timeouts/drops, and a
+7.52-second writer drain following a 2.58-second client phase. The variation
+in drain time is another reason not to infer steady-state capacity from a
+single short phase.
+
 Do **not** use this short two-copy probe to justify index pruning or a larger
 cache. A valid next comparison needs controlled filesystem-cache residency,
 sustained read/write traffic on restored snapshots, and independent direct-VM

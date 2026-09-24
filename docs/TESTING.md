@@ -106,7 +106,7 @@ retries deletion of every function it created if transport fails; inspect
 `admission-test-*` names before deleting anything manually after an
 interrupted run.
 
-For repeatable direct-VM traffic, build `go build -o build/orva-loadgen
+For repeatable direct-VM traffic, build `CGO_ENABLED=0 go build -o build/orva-loadgen
 ./test/performance/loadgen` and mount the resulting binary into a separate
 client VM on the server VM's private network. Supply **scratch function URLs**
 with repeatable `-url` flags; this tool does not deploy, mutate, or delete
@@ -115,9 +115,11 @@ deployed functions:
 
 ```bash
 build/orva-loadgen -url http://<vm-ip>:8443/fn/<node-id> \
-  -url http://<vm-ip>:8443/fn/<python-id> -requests 50000 -concurrency 1000
+  -url http://<vm-ip>:8443/fn/<python-id> -requests 50000 -concurrency 1000 \
+  -observe-url http://<vm-ip>:8443 -require-cgroup-v2
 build/orva-loadgen -url http://<vm-ip>:8443/fn/<python-id> \
-  -requests 50000 -concurrency 1000 -rate 1200
+  -requests 50000 -concurrency 1000 -rate 1200 \
+  -observe-url http://<vm-ip>:8443 -require-cgroup-v2
 ```
 
 The first run is closed-loop: slow replies lower the offered arrival rate.
@@ -125,11 +127,22 @@ The first run is closed-loop: slow replies lower the offered arrival rate.
 client queue cannot keep up, so an overloaded load generator cannot masquerade
 as a healthy server. JSON separates HTTP status counts, transport errors and
 Orva error codes, plus latency percentiles by response code and by function
-URL. Exit code 1 means
-client transport errors or unsent arrivals; non-200 HTTP responses still need
-interpretation from the JSON. Capture writer counters before and after each
-phase and verify the client VM is not CPU/network saturated. The binary's URL
-list is not an authorization to test production.
+URL. `-observe-url` must have the same origin as the function URLs; it adds
+sampled queue/byte peaks, sandbox limit mode, writer counter deltas, and time
+to drain all in-flight writer bytes after the client phase. The default drain
+budget is 45 seconds (`-drain-timeout`). Missing metrics, a counter reset,
+an observation failure, or a drain timeout fails the phase instead of
+silently reporting zero loss. `-require-cgroup-v2` rejects an unenforced
+scratch sandbox **before** sending load. Exit code 1 means a post-start
+observation failure, client transport errors, or unsent arrivals; code 2
+means validation or preflight failure. Non-200 HTTP responses still need
+interpretation from the JSON. Committed-job counts can include non-execution
+writes: reconcile accepted responses with read-only execution-row counts
+separately. Verify the client VM is not CPU/network saturated. Keep the
+foreground server's request-log output drained or disconnect it from the
+test command's pipe; a closed stdout pipe can terminate the daemon with
+SIGPIPE and invalidate the phase. The binary's URL list is not an
+authorization to test production.
 
 Do not give a 4-GiB server guest nearly all free host memory just because its
 nominal limit fits: a 3,000-client scratch run on a 7.8-GiB/no-swap host

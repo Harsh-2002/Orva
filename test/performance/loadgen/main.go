@@ -31,11 +31,14 @@ func (u *urlsFlag) Set(value string) error {
 }
 
 type config struct {
-	URLs        []string
-	Requests    int
-	Concurrency int
-	Rate        float64 // scheduled requests/second; zero selects closed-loop
-	Timeout     time.Duration
+	URLs            []string
+	Requests        int
+	Concurrency     int
+	Rate            float64 // scheduled requests/second; zero selects closed-loop
+	Timeout         time.Duration
+	ObserveURL      string
+	DrainTimeout    time.Duration
+	RequireCgroupV2 bool
 }
 
 type sample struct {
@@ -73,6 +76,7 @@ type report struct {
 	LatencyByStatus    map[int]latencyStats `json:"latency_by_status"`
 	TransportLatency   latencyStats         `json:"transport_latency"`
 	ByURL              map[string]urlReport `json:"by_url"`
+	Writer             *writerReport        `json:"writer,omitempty"`
 }
 
 type urlReport struct {
@@ -100,6 +104,26 @@ func validate(c config) error {
 		parsed, err := url.ParseRequestURI(target)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("URL must use http or https: %q", target)
+		}
+	}
+	if c.RequireCgroupV2 && c.ObserveURL == "" {
+		return errors.New("-require-cgroup-v2 needs -observe-url")
+	}
+	if c.ObserveURL != "" {
+		if c.DrainTimeout <= 0 {
+			return errors.New("-drain-timeout must be positive when observing the writer")
+		}
+		observer, err := url.ParseRequestURI(c.ObserveURL)
+		if err != nil || observer.Host == "" || (observer.Scheme != "http" && observer.Scheme != "https") ||
+			(observer.Path != "" && observer.Path != "/") || observer.RawQuery != "" ||
+			observer.Fragment != "" || observer.User != nil {
+			return errors.New("-observe-url must be a bare http(s) origin")
+		}
+		for _, target := range c.URLs {
+			parsed, _ := url.Parse(target)
+			if parsed.Scheme != observer.Scheme || parsed.Host != observer.Host {
+				return errors.New("observed server and function URLs must have the same origin")
+			}
 		}
 	}
 	return nil
@@ -314,20 +338,26 @@ func main() {
 	concurrency := flag.Int("concurrency", 100, "maximum concurrent clients")
 	rate := flag.Float64("rate", 0, "scheduled requests/second; 0 selects closed-loop")
 	timeout := flag.Duration("timeout", 15*time.Second, "per-request timeout")
+	observeURL := flag.String("observe-url", "", "scratch server origin for writer and sandbox measurements")
+	drainTimeout := flag.Duration("drain-timeout", 45*time.Second, "maximum time to wait for accepted writes after load")
+	requireCgroupV2 := flag.Bool("require-cgroup-v2", false, "fail if the observed server lacks hard cgroup-v2 sandbox limits")
 	flag.Parse()
-	out, err := run(context.Background(), config{
+	out, err := runObserved(context.Background(), config{
 		URLs: targets, Requests: *requests, Concurrency: *concurrency,
-		Rate: *rate, Timeout: *timeout,
+		Rate: *rate, Timeout: *timeout, ObserveURL: *observeURL,
+		DrainTimeout: *drainTimeout, RequireCgroupV2: *requireCgroupV2,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		if out.Scheduled == 0 {
+			os.Exit(2)
+		}
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if len(out.TransportErrors) > 0 || out.Unsent > 0 {
+	if err != nil || len(out.TransportErrors) > 0 || out.Unsent > 0 {
 		os.Exit(1)
 	}
 }
