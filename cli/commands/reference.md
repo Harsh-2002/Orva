@@ -1597,6 +1597,11 @@ The local root is the earliest execution whose parent is absent from the same
 trace. Externally parented W3C traces therefore remain visible and preserve the
 upstream ID as `external_parent_span_id`.
 
+New traces started by Orva retain the `tr_` plus 32-hex format. The leading
+12 hex characters encode Unix milliseconds; the trailing 20 are
+cryptographically random. Incoming W3C trace IDs are preserved unchanged.
+Trace IDs identify and correlate requests; they are not authentication secrets.
+
 ### What user code sees
 
 Two env vars are stamped per invocation. Read them only if you want to
@@ -1604,7 +1609,7 @@ log the trace_id alongside your own messages — they're optional.
 
 ```text
 # Available inside every running function — refresh per-invocation:
-ORVA_TRACE_ID=tr_3e39f6991c66f140577c6021da7dd13b   # one per causal chain
+ORVA_TRACE_ID=tr_01a0d0b64000f140577c6021da7dd13b   # one per causal chain
 ORVA_SPAN_ID=sp_4ceba57f6b1c982e                    # this execution
 
 # Python:        os.environ["ORVA_TRACE_ID"]

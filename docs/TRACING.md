@@ -9,10 +9,18 @@ parent via `parent_span_id`. The dashboard renders the result as a waterfall.
 
 | Field | Format | Example |
 |---|---|---|
-| `trace_id` | `tr_` + 32 hex chars | `tr_3e39f6991c66f140577c6021da7dd13b` |
+| `trace_id` | `tr_` + 32 hex chars | `tr_01a0d0b64000f140577c6021da7dd13b` |
 | `span_id` | `sp_` + 16 hex chars | `sp_e0febab07c8a3915` |
 | `parent_span_id` | span_id of caller (empty for standalone roots; may name an external W3C parent) | `sp_4ceba57f6b1c982e` |
 | `trigger` | how this span started | `http` / `cron` / `job` / `f2f` / `webhook` / `inbound` / `replay` / `mcp` |
+
+For a trace started by Orva, the first 12 hex characters encode Unix
+milliseconds and the remaining 20 hex characters are cryptographically random.
+This keeps nearby trace-index inserts local as execution history grows while
+retaining 80 random bits, including the rightmost seven bytes recommended by
+[W3C Trace Context Level 2](https://www.w3.org/TR/trace-context-2/).
+Incoming W3C trace IDs are preserved exactly, whatever their generation method.
+Trace IDs are correlation identifiers, not authentication secrets.
 
 Causality covered today:
 

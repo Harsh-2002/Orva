@@ -29,6 +29,7 @@ invoke-only (least privilege) — pass --permissions to widen the scope. Use
 Examples:
   orva keys create --name ci
   orva keys create --name deploy-bot --permissions invoke,read
+  orva keys create --name terminal-ai --permissions read,write,invoke,admin
   orva keys create --name temp --expires-in-days 30
   orva keys create --name ci -o json | jq -r .key`,
 	RunE: runKeysCreate,

@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Context-key type. Distinct underlying type means our keys never collide
@@ -30,12 +31,28 @@ const (
 	triggerKey
 )
 
-// NewTraceID returns a fresh top-level trace identifier. The "tr_" prefix
-// distinguishes it from span IDs at a glance in logs.
+// NewTraceID returns a fresh top-level trace identifier. The leading 48 bits
+// are Unix milliseconds, keeping locally originated trace-index writes near
+// each other; the trailing 80 bits remain cryptographically random, including
+// the rightmost seven bytes used by W3C trace sampling. Incoming trace IDs
+// are propagated unchanged. The "tr_" prefix distinguishes this from spans.
 func NewTraceID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return "tr_" + hex.EncodeToString(b[:])
+	var random [10]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		panic("trace: NewTraceID: " + err.Error())
+	}
+	return traceIDAt(time.Now(), random)
+}
+
+func traceIDAt(at time.Time, random [10]byte) string {
+	millis := uint64(at.UnixMilli())
+	var raw [16]byte
+	for i := 5; i >= 0; i-- {
+		raw[i] = byte(millis)
+		millis >>= 8
+	}
+	copy(raw[6:], random[:])
+	return "tr_" + hex.EncodeToString(raw[:])
 }
 
 // NewSpanID returns a fresh per-execution span identifier.

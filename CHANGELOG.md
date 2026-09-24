@@ -9,14 +9,32 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.09.23..HEAD` is the range for
-anything unreleased, and the sections below are the record for everything
-before it.
+pruned with their releases — so use `git log <current-tag>..HEAD` for the
+unreleased range, and the sections below as the record for everything before it.
 
-## Unreleased
+## v2026.09.24
 
 ### Fixed
 
+- Warm-pool burst sizing no longer treats every steady-state request as if it
+  needed a new cold start. Measured service latency and queued demand drive
+  capacity; speculative cold starts are bounded to one per-pool spawn wave,
+  while a resource-derived rotation spare and rate-aware early replacements
+  protect hot functions from a cold gap at worker max-use retirement.
+  A 30-minute isolated-VM 200/s mixed-runtime soak returned and persisted all
+  360,000 calls; this is workload-specific validation, not a universal rate
+  guarantee. Mixed-load fairness and optional telemetry under overload remain
+  visible in the capacity guide.
+- Locally generated trace IDs now retain 80 cryptographically random trailing
+  bits behind a time-ordered prefix. The `tr_` + 32-hex API shape and incoming
+  W3C trace propagation are unchanged; new trace-index writes have better
+  locality on a large single-node SQLite database. Restored-snapshot,
+  opposite-order direct-VM tests measured higher mixed-runtime throughput;
+  incoming IDs and durable-record accounting remained intact.
+- `orva chat` now explains when a valid invoke-only CLI key lacks access to
+  the admin-only AI operator surface, and guides users to create a dedicated
+  terminal key in Dashboard → API keys and log in without putting the secret
+  in shell history. AI permissions were not broadened.
 - Successful-execution history now avoids sorting the entire matching table
   when a bounded recent window contains enough successes, even if some recent
   executions failed. Sparse successes and rare statuses retain the original

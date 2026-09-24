@@ -56,12 +56,28 @@ discount the reservation: all workers may grow to their hard bounds at once.
 Startup baseline warmup reads only a bounded recent execution window per
 function through `idx_executions_function`; do not restore a whole-table
 `ROW_NUMBER` rank, which delays the HTTP listener as history grows.
-Successful-execution history uses a bounded newest-page probe when there is
-no date/search filter or offset; only an all-success page can bypass the
-status-index query. Rare/mixed statuses fall back rather than scanning old
-history through `idx_executions_started`. Do not force that index for all
-statuses: a 1.47-million-row scratch database had only 19 error rows, and a
+Successful-execution history uses a bounded newest-window probe when there is
+no date/search filter or offset; a few recent failures no longer force the
+status-index sort. Sparse successes fall back after at most four page widths
+rather than scanning old history through `idx_executions_started`. Do not force
+that index for all statuses: a 1.47-million-row scratch database had only 19 error rows, and a
 forced oldest-reaching scan took 66.5 seconds.
+Locally generated trace IDs keep the W3C-compatible 32-hex shape, with a
+48-bit millisecond prefix and 80 cryptographically random trailing bits. This
+clusters new trace-index writes without changing incoming W3C IDs or reducing
+the randomness of the rightmost seven bytes. Do not use trace IDs as secrets.
+The pool controller's steady/burst targets use measured service time, not
+cold-start time multiplied by every arrival. That multiplication fills idle
+pools to their resource caps and can starve another function. A bounded
+speculative burst is limited to one wave of the existing per-pool spawn slots
+plus rotation spares; current queue pressure can still request more workers
+up to the resource ceiling. A hot pool expected to hit its max-use limit
+inside the stable window keeps a bounded rotation spare derived from measured
+spawn time. The controller also counts live workers within a rate-aware
+max-use lead window and temporarily requests warm replacements before a
+same-generation cohort retires together; those reservations remain under the
+normal host ceiling. This controller variant is still being qualified on
+mixed-runtime long-soak and cross-pool fairness workloads.
 `proxy.Proxy` caches the non-security streaming settings for at most 30 seconds
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.

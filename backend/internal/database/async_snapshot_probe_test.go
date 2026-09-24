@@ -1,6 +1,9 @@
 package database
 
 import (
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +17,32 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
+
+// snapshotOrderedTraceID isolates trace-index locality from schema, SQL, and
+// execution-ID changes. The rightmost 80 bits remain cryptographically random.
+func snapshotOrderedTraceID(t *testing.T, at time.Time) string {
+	t.Helper()
+	var raw [16]byte
+	binary.BigEndian.PutUint64(raw[:8], uint64(at.UnixMilli())<<16)
+	if _, err := rand.Read(raw[6:]); err != nil {
+		t.Fatal(err)
+	}
+	return "tr_" + hex.EncodeToString(raw[:])
+}
+
+func TestSnapshotOrderedTraceIDFormat(t *testing.T) {
+	before := snapshotOrderedTraceID(t, time.UnixMilli(1_800_000_000_000))
+	after := snapshotOrderedTraceID(t, time.UnixMilli(1_800_000_000_001))
+	if len(before) != 35 || !strings.HasPrefix(before, "tr_") || len(after) != 35 || before >= after {
+		t.Fatalf("ordered trace IDs are not 32-hex time-prefixed values: %q %q", before, after)
+	}
+	if _, err := hex.DecodeString(before[3:]); err != nil {
+		t.Fatal(err)
+	}
+	if before == snapshotOrderedTraceID(t, time.UnixMilli(1_800_000_000_000)) {
+		t.Fatal("same-millisecond trace IDs collided")
+	}
+}
 
 // snapshotProbePaths accepts only the two database copies created by the
 // explicit-scratch Python harness. A typo must not benchmark-write or DROP an
@@ -125,6 +154,10 @@ func TestExecutionWriterSnapshotProbe(t *testing.T) {
 	if err != nil || batchSize < 1 || batchSize > 200 {
 		t.Fatal("ORVA_BENCH_BATCH_SIZE must be an integer from 1 to 200")
 	}
+	orderedTraceMode := os.Getenv("ORVA_BENCH_CANDIDATE_ORDERED_TRACE")
+	if orderedTraceMode != "" && orderedTraceMode != "1" {
+		t.Fatal("ORVA_BENCH_CANDIDATE_ORDERED_TRACE must be 1 when set")
+	}
 	paths := []string{baselinePath, candidatePath}
 	var dbs [2]*Database
 	var writers [2]*asyncWriter
@@ -164,20 +197,32 @@ func TestExecutionWriterSnapshotProbe(t *testing.T) {
 		{Samples: make([]snapshotProbeSample, 0, batches)},
 	}
 	for iteration := range batches {
-		batch := make([]writeJob, batchSize)
 		startedAt := time.Now().UTC()
-		for row := range batch {
-			args := []any{ids.New(), functionID, "success", 0, "benchmark-worker",
-				int64(10), 200, "", 12, startedAt, trace.NewTraceID(),
-				trace.NewSpanID(), nil, "http", nil, false, nil}
-			batch[row] = writeJob{sql: finalExecutionInsertSQL, args: args,
-				functionID: functionID, bulkInsert: true}
+		idsForBatch := make([]string, batchSize)
+		spansForBatch := make([]string, batchSize)
+		tracesForBatch := make([]string, batchSize)
+		for row := range idsForBatch {
+			idsForBatch[row] = ids.New()
+			spansForBatch[row] = trace.NewSpanID()
+			tracesForBatch[row] = trace.NewTraceID()
 		}
 		order := [2]int{0, 1}
 		if iteration%2 == 1 {
 			order = [2]int{1, 0}
 		}
 		for _, variant := range order {
+			batch := make([]writeJob, batchSize)
+			for row := range batch {
+				traceID := tracesForBatch[row]
+				if variant == 1 && orderedTraceMode == "1" {
+					traceID = snapshotOrderedTraceID(t, time.Now())
+				}
+				args := []any{idsForBatch[row], functionID, "success", 0, "benchmark-worker",
+					int64(10), 200, "", 12, startedAt, traceID,
+					spansForBatch[row], nil, "http", nil, false, nil}
+				batch[row] = writeJob{sql: finalExecutionInsertSQL, args: args,
+					functionID: functionID, bulkInsert: true}
+			}
 			before := &writers[variant].timing[writeCritical]
 			statementBefore, commitBefore := before.statementNS.Load(), before.commitNS.Load()
 			connectionBefore := before.connectionNS.Load()
@@ -214,12 +259,13 @@ func TestExecutionWriterSnapshotProbe(t *testing.T) {
 		}
 	}
 	result := struct {
-		SourceRows int64                `json:"source_rows"`
-		BatchSize  int                  `json:"batch_size"`
-		Batches    int                  `json:"batches"`
-		Baseline   snapshotProbeVariant `json:"baseline"`
-		Candidate  snapshotProbeVariant `json:"candidate"`
-	}{sourceRows[0], batchSize, batches, variants[0], variants[1]}
+		SourceRows            int64                `json:"source_rows"`
+		BatchSize             int                  `json:"batch_size"`
+		Batches               int                  `json:"batches"`
+		CandidateOrderedTrace bool                 `json:"candidate_ordered_trace"`
+		Baseline              snapshotProbeVariant `json:"baseline"`
+		Candidate             snapshotProbeVariant `json:"candidate"`
+	}{sourceRows[0], batchSize, batches, orderedTraceMode == "1", variants[0], variants[1]}
 	payload, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Compare execution-index write/read cost on consistent disposable DB copies.
 
-This never modifies the source database. It requires --scratch, creates two
-SQLite-backup copies in a temporary directory, and drops selected indexes only
-from the candidate copy. Results are diagnostic, not a production migration.
+This never modifies the source database. It requires --scratch and creates two
+SQLite-backup copies in a temporary directory. Candidate changes affect only
+one copy or its probe-generated rows. Results are diagnostic, not a migration.
 """
 
 import argparse
@@ -130,26 +130,40 @@ def main():
                         help="compiled database Go test binary; uses Orva's real writer instead of Python writes")
     parser.add_argument("--candidate-write-cache-kib", type=int,
                         help="Go-driver-only candidate write-connection cache size in KiB")
+    parser.add_argument("--candidate-ordered-trace", action="store_true",
+                        help="Go-driver-only candidate uses time-prefixed trace IDs with random suffixes")
     parser.add_argument("--identical-control", action="store_true",
                         help="compare unchanged copies to expose benchmark-order and page-cache bias")
     parser.add_argument("--reverse-copy-order", action="store_true",
                         help="back up candidate first, then copy baseline; exposes filesystem-cache bias")
     parser.add_argument("--evict-copy-cache", action="store_true",
                         help="ask Linux to evict only both disposable DB copies before the Go probe")
+    parser.add_argument("--skip-read-profile", action="store_true",
+                        help="skip expensive read queries for same-schema writer-only hypotheses")
     args = parser.parse_args()
 
     if not args.scratch:
         parser.error("refusing to copy or mutate a database without --scratch")
-    if min(args.batches, args.batch_size, args.read_repetitions) < 1:
+    if min(args.batches, args.batch_size) < 1 or (not args.skip_read_profile and args.read_repetitions < 1):
         parser.error("batch and repetition counts must be positive")
-    if args.identical_control and (args.drop_index or args.candidate_write_cache_kib is not None):
+    if args.identical_control and (args.drop_index or args.candidate_write_cache_kib is not None
+                                   or args.candidate_ordered_trace):
         parser.error("--identical-control cannot be combined with candidate changes")
-    if not args.identical_control and not args.drop_index and args.candidate_write_cache_kib is None:
+    if (not args.identical_control and not args.drop_index and
+            args.candidate_write_cache_kib is None and not args.candidate_ordered_trace):
         parser.error("specify at least one candidate change or --identical-control")
     if args.candidate_write_cache_kib is not None and not args.driver_test_binary:
         parser.error("--candidate-write-cache-kib requires --driver-test-binary")
     if args.evict_copy_cache and not args.driver_test_binary:
         parser.error("--evict-copy-cache requires --driver-test-binary")
+    if args.candidate_ordered_trace and not args.driver_test_binary:
+        parser.error("--candidate-ordered-trace requires --driver-test-binary")
+    if args.candidate_ordered_trace and (args.drop_index or args.candidate_write_cache_kib is not None):
+        parser.error("--candidate-ordered-trace must be tested as the only candidate change")
+    if args.skip_read_profile and args.drop_index:
+        parser.error("read-query profiling is required for an index change")
+    if args.skip_read_profile and not args.driver_test_binary:
+        parser.error("--skip-read-profile requires --driver-test-binary")
     if args.candidate_write_cache_kib is not None and not 1024 <= args.candidate_write_cache_kib <= 524288:
         parser.error("--candidate-write-cache-kib must be 1024..524288")
     if len(set(args.drop_index)) != len(args.drop_index):
@@ -199,6 +213,7 @@ def main():
                     "source": str(source), "source_rows": source_rows,
                     "source_bytes": size, "candidate_dropped_indexes": args.drop_index,
                     "candidate_write_cache_kib": args.candidate_write_cache_kib,
+                    "candidate_ordered_trace": args.candidate_ordered_trace,
                     "reverse_copy_order": args.reverse_copy_order,
                     "identical_control": args.identical_control,
                     "batches": args.batches, "batch_size": args.batch_size,
@@ -222,6 +237,8 @@ def main():
                                ORVA_BENCH_BATCH_SIZE=str(args.batch_size))
                     if args.candidate_write_cache_kib is not None:
                         env["ORVA_BENCH_CANDIDATE_CACHE_KIB"] = str(args.candidate_write_cache_kib)
+                    if args.candidate_ordered_trace:
+                        env["ORVA_BENCH_CANDIDATE_ORDERED_TRACE"] = "1"
                     result = subprocess.run(
                         [str(binary), "-test.run", "^TestExecutionWriterSnapshotProbe$", "-test.v"],
                         env=env, capture_output=True, text=True, check=False, timeout=300)
@@ -235,14 +252,15 @@ def main():
                     output["driver_write"] = json.loads(matches[0])
                     output["copy_cache_eviction_requested"] = args.evict_copy_cache
                     output["copy_cache_files_advised"] = evicted
-                    baseline = sqlite3.connect(baseline_path)
-                    candidate = sqlite3.connect(candidate_path)
-                    output["read"] = {
-                        "baseline": read_profile(baseline, function_id, trace_id,
-                                                 args.read_repetitions),
-                        "candidate": read_profile(candidate, function_id, trace_id,
-                                                  args.read_repetitions),
-                    }
+                    if not args.skip_read_profile:
+                        baseline = sqlite3.connect(baseline_path)
+                        candidate = sqlite3.connect(candidate_path)
+                        output["read"] = {
+                            "baseline": read_profile(baseline, function_id, trace_id,
+                                                     args.read_repetitions),
+                            "candidate": read_profile(candidate, function_id, trace_id,
+                                                      args.read_repetitions),
+                        }
                     output["caveat"] = ("Real Orva SQLite driver and writer on copied data; "
                                         "DONTNEED is advisory; identical controls and reversed copy order "
                                         "are required; not a sustained HTTP capacity or migration result")

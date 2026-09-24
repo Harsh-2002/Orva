@@ -128,6 +128,19 @@ class SQLiteIndexABTest(unittest.TestCase):
         self.assertIn("requires --driver-test-binary", result.stderr)
         self.assertFalse(list(self.directory.glob("orva-index-ab-*")))
 
+    def test_ordered_trace_and_read_skip_require_real_driver(self):
+        for flag in ("--candidate-ordered-trace", "--skip-read-profile"):
+            with self.subTest(flag=flag):
+                command = [sys.executable, str(SCRIPT), "--db", str(self.source),
+                           "--workdir", str(self.directory), "--scratch", flag]
+                if flag == "--skip-read-profile":
+                    command.append("--identical-control")
+                result = subprocess.run(command,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("requires --driver-test-binary", result.stderr)
+                self.assertFalse(list(self.directory.glob("orva-index-ab-*")))
+
     def test_driver_probe_with_cache_advice_uses_disposable_files(self):
         if not hasattr(os, "posix_fadvise"):
             self.skipTest("POSIX fadvise unavailable")
@@ -146,6 +159,24 @@ class SQLiteIndexABTest(unittest.TestCase):
         self.assertTrue(output["copy_cache_eviction_requested"])
         self.assertEqual(len(output["copy_cache_files_advised"]), 2)
         self.assertIn("status_history", output["read"]["candidate"])
+        with closing(sqlite3.connect(f"file:{self.source}?mode=ro", uri=True)) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM executions").fetchone()[0], 1)
+        self.assertFalse(list(self.directory.glob("orva-index-ab-*")))
+
+    def test_ordered_trace_probe_skips_reads_without_changing_source(self):
+        fake = self.directory / "fake-probe"
+        fake.write_text("#!/usr/bin/env python3\nprint('SNAPSHOT_AB_JSON={\"fake\":true}')\n")
+        fake.chmod(0o700)
+        command = [sys.executable, str(SCRIPT), "--db", str(self.source),
+                   "--workdir", str(self.directory), "--scratch",
+                   "--candidate-ordered-trace", "--skip-read-profile",
+                   "--driver-test-binary", str(fake), "--batches", "1",
+                   "--batch-size", "1"]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertTrue(output["candidate_ordered_trace"])
+        self.assertNotIn("read", output)
         with closing(sqlite3.connect(f"file:{self.source}?mode=ro", uri=True)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM executions").fetchone()[0], 1)
         self.assertFalse(list(self.directory.glob("orva-index-ab-*")))

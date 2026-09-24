@@ -78,6 +78,121 @@ func TestControllerV2DemandFormula(t *testing.T) {
 	}
 }
 
+func TestControllerV2ColdStartDoesNotReserveOneWorkerPerArrival(t *testing.T) {
+	p, hm := controllerTestPool()
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 59; second >= 0; second-- {
+		for range 100 {
+			p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+		}
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(6 * time.Second)
+	p.maxUses = 1000
+	if desired, reason := s.computeDesiredAt(p, now); desired != 2 || reason != "stable_rate" {
+		t.Fatalf("steady 100/s with 2ms service and 6s spawn reserved %d workers (%s), want one plus rotation spare", desired, reason)
+	}
+	p.queued.Store(20)
+	if desired, reason := s.computeDesiredAt(p, now); desired != 29 || reason != "immediate_pressure" {
+		t.Fatalf("queued demand requested %d workers (%s), want 29/immediate_pressure", desired, reason)
+	}
+	p.queued.Store(0)
+	p.recordLatency(20 * time.Millisecond)
+	for range 500 {
+		p.recordArrival(now)
+	}
+	if desired, reason := s.computeDesiredAt(p, now); desired <= 2 || reason != "burst_rate" {
+		t.Fatalf("rising service demand requested %d workers (%s), want burst headroom", desired, reason)
+	}
+	idleDesired, idleReason := s.computeDesiredAt(p, now.Add(7*time.Second))
+	p.maxUses = 0
+	withoutRotation, _ := s.computeDesiredAt(p, now.Add(7*time.Second))
+	if idleDesired != withoutRotation || idleReason != "stable_rate" {
+		t.Fatalf("idle pool retained %d workers (%s) after rotation horizon; no-rotation demand=%d", idleDesired, idleReason, withoutRotation)
+	}
+}
+
+func TestControllerV2RotationSpareRequiresActiveFrequentTurnover(t *testing.T) {
+	p, hm := controllerTestPool()
+	p.maxUses = 1000
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 0; second < 60; second++ {
+		p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(6 * time.Second)
+	if desired, _ := s.computeDesiredAt(p, now); desired != 1 {
+		t.Fatalf("low-rate function reserved %d workers, want configured minimum only", desired)
+	}
+	if desired, _ := s.computeDesiredAt(p, now.Add(7*time.Second)); desired != 1 {
+		t.Fatalf("inactive function retained %d rotation workers", desired)
+	}
+}
+
+func TestControllerV2ShortRateFluctuationDoesNotMultiplyColdStart(t *testing.T) {
+	p, hm := controllerTestPool()
+	p.maxUses = 1000
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 59; second >= 0; second-- {
+		for range 100 {
+			p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+		}
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(6 * time.Second)
+	for range 100 {
+		p.recordArrival(now)
+	}
+	if desired, reason := s.computeDesiredAt(p, now); desired != 6 || reason != "burst_rate" {
+		t.Fatalf("one-second scheduling fluctuation requested %d workers (%s), want one bounded spawn wave plus rotation spare", desired, reason)
+	}
+}
+
+func TestControllerV2PrewarmsSynchronizedWorkerRotation(t *testing.T) {
+	p, hm := controllerTestPool()
+	p.maxUses = 1000
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 59; second >= 0; second-- {
+		for range 100 {
+			p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+		}
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(2500 * time.Millisecond)
+	workers := make([]*sandbox.Worker, 5)
+	for i := range workers {
+		workers[i] = &sandbox.Worker{}
+		workers[i].Served.Store(799)
+		p.idle <- workers[i]
+		p.workerReservations.Store(workers[i], workerReservation{})
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now), now); got != 0 {
+		t.Fatalf("workers below the lead window requested %d replacements", got)
+	}
+	for _, w := range workers {
+		w.Served.Store(800)
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now), now); got != 5 {
+		t.Fatalf("synchronized near-expiry workers requested %d replacements, want 5", got)
+	}
+	if desired, reason := s.computeDesiredAt(p, now); desired != 7 || reason != "worker_rotation" {
+		t.Fatalf("rotation target=%d/%s, want 7/worker_rotation", desired, reason)
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now.Add(7*time.Second)), now.Add(7*time.Second)); got != 0 {
+		t.Fatalf("inactive pool requested %d replacements", got)
+	}
+	for _, w := range workers {
+		w.Served.Store(1000)
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now), now); got != 0 {
+		t.Fatalf("already-expired workers requested %d replacements", got)
+	}
+}
+
 func TestControllerV2ScaleToZeroHonorsIdleTTL(t *testing.T) {
 	p, hm := controllerTestPool()
 	p.min = 0

@@ -95,6 +95,10 @@ The advice is not a guarantee of equal residency, so identical controls in
 both copy orders and physical-read deltas remain required. Neither a
 Python-driver microbenchmark nor this Go probe
 proves sustained Orva HTTP capacity or authorizes a production migration.
+For the no-schema trace-locality hypothesis, use `--candidate-ordered-trace`
+with the Go probe and `--skip-read-profile`; the latter is refused when an
+index is changed. Both modes remain scratch-only and still require unchanged
+controls plus a real direct-VM HTTP A/B before any capacity claim.
 `test/e2e/unit/test_sqlite_index_ab.py` checks scratch refusal, source
 immutability, copy cleanup, cache-advice safety, and control/reverse modes.
 

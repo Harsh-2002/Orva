@@ -880,6 +880,12 @@
         and preserve the upstream ID as
         <code class="doc-chip">external_parent_span_id</code>.
       </p>
+      <p class="doc-prose">
+        New traces started by Orva retain the <code class="doc-chip">tr_</code>
+        plus 32-hex format. The first 12 hex characters encode Unix milliseconds;
+        the last 20 are cryptographically random. Incoming W3C trace IDs remain
+        unchanged. Trace IDs are correlation identifiers, not secrets.
+      </p>
 
       <TraceTreeDiagram />
 
@@ -1854,7 +1860,7 @@ app.post('/webhooks/orva', (req, res) => {
 
 // ── Tracing ──────────────────────────────────────────────────────
 const traceEnvExample = `# Available inside every running function — refresh per-invocation:
-ORVA_TRACE_ID=tr_3e39f6991c66f140577c6021da7dd13b   # one per causal chain
+ORVA_TRACE_ID=tr_01a0d0b64000f140577c6021da7dd13b   # one per causal chain
 ORVA_SPAN_ID=sp_4ceba57f6b1c982e                    # this execution
 
 # Python:        os.environ["ORVA_TRACE_ID"]

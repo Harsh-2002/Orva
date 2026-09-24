@@ -83,6 +83,66 @@ func TestDriveSSE(t *testing.T) {
 	}
 }
 
+func TestEnsureProviderExplainsAdminKeyRequirement(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if got := r.Header.Get("X-Orva-API-Key"); got != "invoke-only-key" {
+			t.Errorf("API key = %q, want invoke-only-key", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"code":"FORBIDDEN","message":"insufficient permissions, requires: admin"}}`)
+	}))
+	defer srv.Close()
+
+	s, _, _ := newTestSession(cli.NewClient(srv.URL, "invoke-only-key"))
+	err := s.ensureProvider()
+	if err == nil {
+		t.Fatal("ensureProvider succeeded with an invoke-only key")
+	}
+	for _, want := range []string{
+		"requires an admin API key",
+		"dashboard uses your admin web session",
+		"Dashboard → API keys",
+		"read,write,invoke,admin",
+		"--api-key - --test",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
+	}
+	if got, want := strings.Join(paths, ","), "/api/v1/ai/providers"; got != want {
+		t.Errorf("requests = %q, want providers-first probe only", got)
+	}
+}
+
+func TestChatStreamExplainsAdminKeyRequirement(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/chat" {
+			t.Errorf("path = %q, want /api/v1/ai/chat", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"code":"FORBIDDEN","message":"insufficient permissions, requires: admin"}}`)
+	}))
+	defer srv.Close()
+
+	s, _, _ := newTestSession(cli.NewClient(srv.URL, "revoked-admin-key"))
+	resp, err := s.postChat(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("postChat: %v", err)
+	}
+	_, err = s.drive(resp)
+	if err == nil {
+		t.Fatal("drive succeeded after the server denied chat")
+	}
+	err = s.classify(err)
+	if !strings.Contains(err.Error(), "requires an admin API key") {
+		t.Errorf("error = %q, want the AI permission remediation", err)
+	}
+}
+
 // TestDrivePrematureEOF asserts the PR-C guard: a stream that ends (clean EOF)
 // without a terminal frame (done / awaiting_approval / error) is surfaced as an
 // error, not silently accepted as a successful (truncated) turn.
