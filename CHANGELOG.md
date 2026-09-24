@@ -24,6 +24,10 @@ before it.
 - `/metrics` now exposes per-priority SQLite writer batch, connection-wait,
   statement, commit, and writer-submit-to-commit counters for diagnosing storage
   saturation without changing worker or queue ceilings.
+- Grouped execution-record INSERTs now cap statement width at 850 bound values
+  while preserving the 200-job transaction batch. On a local full-schema
+  writer benchmark, four 50-row statements beat one 200-row statement;
+  end-to-end capacity remains under validation.
 - A function without a pool override now derives its maximum worker count
   from host CPU/memory and function concurrency instead of stopping at 50.
   Explicit `max_warm` values remain upper bounds, but the former universal

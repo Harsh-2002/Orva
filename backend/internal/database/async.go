@@ -58,6 +58,10 @@ const (
 	maxCriticalQueueBytes  = 64 << 20 // 64 MiB
 	maxActivityQueueBytes  = 8 << 20  // 8 MiB
 	maxTelemetryQueueBytes = 32 << 20 // 32 MiB
+	// Wide multi-row statements cost more to parse than they save in SQLite
+	// execution time. 850 binds groups 50 final-execution rows (17 binds each)
+	// but still lets narrow rows fill the normal 200-job writer batch.
+	maxBulkInsertArgs = 850
 )
 
 type writeKind uint8
@@ -746,12 +750,8 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 		args := j.args
 		groupEnd := i + 1
 		if j.bulkInsert {
-			argCount := len(j.args)
-			for groupEnd < len(work) && work[groupEnd].bulkInsert && work[groupEnd].sql == j.sql &&
-				(argCount+len(work[groupEnd].args)) <= 30000 {
-				argCount += len(work[groupEnd].args)
-				groupEnd++
-			}
+			var argCount int
+			groupEnd, argCount = bulkGroupEnd(work, i)
 			if groupEnd > i+1 {
 				if bulk := bulkInsertSQL(j.sql, groupEnd-i); bulk != "" {
 					statement = bulk
@@ -811,6 +811,20 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 	_ = tx.Rollback()
 	slog.Warn("batch stmt failed; isolating", "err", failErr, "jobs", len(work))
 	return a.commitIsolated(work, kind)
+}
+
+// bulkGroupEnd bounds SQL statement width without limiting writer batch size.
+// The first job always remains eligible, even if its own bind count exceeds
+// the grouping budget; that case falls back to its original one-row SQL.
+func bulkGroupEnd(work []writeJob, start int) (end, argCount int) {
+	first := work[start]
+	end, argCount = start+1, len(first.args)
+	for end < len(work) && work[end].bulkInsert && work[end].sql == first.sql &&
+		argCount+len(work[end].args) <= maxBulkInsertArgs {
+		argCount += len(work[end].args)
+		end++
+	}
+	return end, argCount
 }
 
 // bulkInsertSQL repeats the VALUES tuple for INSERT statements explicitly

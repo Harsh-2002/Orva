@@ -14,6 +14,26 @@ samples, so reconcile accepted HTTP responses with execution rows and monitor
 critical failure counters separately. No pool cap or SQLite durability setting
 was changed on the basis of the isolated insert microbenchmark alone.
 
+A new benchmark uses the production 18-column final-execution INSERT, foreign
+key, and current execution indexes instead of a one-column toy table. On the
+same local host, three 200-row batch repetitions measured prepared per-row
+INSERT at 16.0–16.5 ms/batch and one grouped 200-row INSERT at 17.4–21.9
+ms/batch. Capping grouped statements to 850 bound values (four 50-row
+statements per transaction) measured 9.6–10.7 ms/batch in three runs; 25-row
+groups were 10.8–12.0 ms and 100-row groups 14.9–17.0 ms in two exploratory
+runs each. The change retains the 200-job transaction batch and allows narrow
+rows to group more densely. This isolates indexed write-shape cost on one host;
+it does **not** establish an HTTP throughput gain, disk-independent optimum,
+or a reason to increase admissions before a controlled VM comparison.
+The changed binary also passed all 29 real-sandbox E2E modules (676 checks,
+no failures or skips). In a direct-link 2-vCPU/2.5-GiB scratch server plus
+512-MiB client VM, 1,000 and then 5,000 mixed Node/Python requests at 100
+closed-loop clients all returned HTTP 200 with no transport errors. The
+5,000-request phase took 47.18s (106 successful/s); after writer drain,
+exactly 5,000 new status-200 execution rows appeared, with zero critical
+writer failures or timeouts. This is a functional validation; shared-host
+storage and database growth make it an unsuitable throughput comparison.
+
 The first scratch boot against an existing 1.4-GiB database had no HTTP
 listener after 2m35s. `EXPLAIN QUERY PLAN` for baseline warmup showed an
 index lookup by execution status followed by a temporary B-tree for a

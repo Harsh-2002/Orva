@@ -48,3 +48,27 @@ func TestAsyncWriterCommitRepeatedStatementAndFailureIsolation(t *testing.T) {
 		t.Fatalf("critical failures = %d, want %d", got, failedBefore+1)
 	}
 }
+
+func TestBulkGroupEndBoundsWideStatementsWithoutCappingNarrowBatches(t *testing.T) {
+	wide := make([]writeJob, 200)
+	for i := range wide {
+		wide[i] = writeJob{sql: "INSERT INTO executions VALUES (?)", args: make([]any, 17), bulkInsert: true}
+	}
+	for start := 0; start < len(wide); start += 50 {
+		end, binds := bulkGroupEnd(wide, start)
+		if end != start+50 || binds != 850 {
+			t.Fatalf("wide group from %d ended at %d with %d binds", start, end, binds)
+		}
+	}
+	narrow := make([]writeJob, 200)
+	for i := range narrow {
+		narrow[i] = writeJob{sql: "INSERT INTO activity VALUES (?)", args: []any{i}, bulkInsert: true}
+	}
+	if end, binds := bulkGroupEnd(narrow, 0); end != 200 || binds != 200 {
+		t.Fatalf("narrow batch ended at %d with %d binds", end, binds)
+	}
+	wide[1].sql = "INSERT INTO other VALUES (?)"
+	if end, _ := bulkGroupEnd(wide, 0); end != 1 {
+		t.Fatalf("group crossed SQL boundary: %d", end)
+	}
+}

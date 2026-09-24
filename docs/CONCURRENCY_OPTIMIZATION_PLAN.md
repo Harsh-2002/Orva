@@ -69,6 +69,19 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- A real-schema writer benchmark corrected the misleading one-column grouped
+  INSERT result. The production 18-column execution row with foreign key and
+  indexes took 17.4–21.9 ms for one 200-row grouped statement versus 16.0–16.5
+  ms for prepared per-row inserts in three local repetitions. Splitting the
+  same transaction into four 50-row statements took 9.6–10.7 ms. The candidate
+  now bounds grouped SQL to 850 bind values, retaining the 200-job transaction
+  and permitting denser groups for narrow rows. End-to-end VM A/B and telemetry
+  loss remain open; this benchmark is not a capacity claim. The candidate
+  passed 29/29 real-sandbox E2E modules (676 checks), and a direct-link
+  2-vCPU/2.5-GiB VM run returned 5,000/5,000 mixed Node/Python HTTP 200 with
+  exactly 5,000 new execution rows after drain and zero critical writer
+  failures/timeouts. That VM run is correctness evidence, not an A/B gain.
+
 - The current candidate replaces the default 50-worker and universal
   1,024-worker pool caps with a fixed idle-channel ceiling derived from the
   discovered CPU slots, minimum 16-MiB worker reservation, and function
