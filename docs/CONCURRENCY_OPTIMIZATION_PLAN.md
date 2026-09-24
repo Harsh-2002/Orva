@@ -674,6 +674,11 @@ changing supported handler behavior, per-invocation attribution or timeout isola
   history and retention use distinct execution indexes; trace ordering and
   status-filtered history still create temporary sort trees. Index drops
   remain excluded from production by the additive-only migration contract.
+  A scratch-only backup-copy A/B without two trace indexes measured 4.82 ms
+  versus 3.49 ms median per 200-row commit in six short Python-driver
+  batches, but does not contradict the earlier real-server regression: driver,
+  duration, read mix and whole-system behavior differ. Repeat with the actual
+  driver and controlled sustained VM traffic before making a schema proposal.
 - Reserve critical completion-record space before execution. On storage pressure,
   reduce admissions before running side-effecting code; do not return a retryable
   pre-execution error after a function already ran. Completion uses its reservation,

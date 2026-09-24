@@ -66,6 +66,24 @@ schema is unchanged. A scratch-only same-snapshot write/read comparison is
 still required before proposing index changes; the additive-only migration
 contract separately rules out shipping an unapproved destructive drop.
 
+The new scratch-only `test/performance/sqlite_index_ab.py` harness used
+SQLite's backup API to make two consistent, temporary copies of that VM
+database. It dropped `idx_executions_trace_id` and
+`idx_executions_parent_span_id` from **the candidate copy only**. Six
+alternated 200-row production-shaped insert batches measured median commit
+times of 4.82 ms with all indexes and 3.49 ms without those two indexes.
+The sampled function/global/status/trace/retention reads kept usable plans;
+the candidate's trace lookup chose `idx_executions_trace_parent` instead of
+`idx_executions_trace_id`. Status-filtered history still needed a full
+temporary sort and took roughly 2.6 seconds per warm read on both copies,
+which is a separate read-path concern. This experiment used Python's SQLite
+driver, only six short batches, and no live Orva traffic; it cannot override
+the earlier end-to-end index-pruning regression. The source stayed at
+1,470,051 execution rows, and both copies were removed after the run.
+Before considering a schema change, repeat the comparison using Orva's
+actual driver and same-snapshot sustained VM HTTP load, including read-heavy
+and status-filtered workloads. No index change is in the candidate.
+
 A new benchmark uses the production 18-column final-execution INSERT, foreign
 key, and current execution indexes instead of a one-column toy table. On the
 same local host, three 200-row batch repetitions measured prepared per-row

@@ -58,7 +58,8 @@ For execution-writer changes, `go test ./backend/internal/database -run '^$'
 compares 200-row per-statement and grouped-INSERT commits on the same host.
 It isolates SQLite work from HTTP and sandboxes; it cannot establish
 end-to-end capacity by itself.
-It refuses to run without the explicit `--scratch` confirmation. On a smolvm
+The invocation-admission harness refuses to run without the explicit
+`--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create
 false timeouts. When pairing a newly built server binary with an existing
@@ -70,6 +71,17 @@ mismatch, not a valid throughput result. The normal bare-metal installer runs
 `orva setup` to refresh these files on upgrade, and the Docker entrypoint
 refreshes them on startup. See [CAPACITY.md](CAPACITY.md) for the earlier measured
 2-vCPU/4-GiB run and that guest's undelegated cgroups.
+
+For a read/write index hypothesis on a large existing dataset, use
+`python3 test/performance/sqlite_index_ab.py --scratch --db <scratch-db>
+--workdir <guest-local-disk-dir> --drop-index <execution-index>` **only in a
+disposable VM**. It backs up the source read-only into two temporary copies,
+changes only the candidate copy, alternates production-shaped write batches,
+and reports representative read plans/timings as JSON. The work directory
+needs free space for two full database copies plus WAL headroom; `/tmp` may be
+a smaller tmpfs. A Python-driver microbenchmark is diagnostic, not an Orva
+HTTP throughput or production migration proof. `test/e2e/unit/test_sqlite_index_ab.py`
+checks refusal without `--scratch`, source immutability, and copy cleanup.
 
 An external load generator should be preferred for throughput numbers, but
 validate its path independently. In the 2026-09-23 scratch VM check, the
