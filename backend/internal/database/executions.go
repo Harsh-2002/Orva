@@ -78,6 +78,17 @@ type ExecutionRequest struct {
 	CapturedAt  int64  `json:"captured_at"` // unix millis
 }
 
+// Shared with the same-snapshot writer probe so its SQL shape cannot drift
+// from the live non-replay completion path.
+const finalExecutionInsertSQL = `
+		INSERT INTO executions (
+			id, function_id, status, cold_start, container_id,
+			duration_ms, status_code, error_message, response_size,
+			started_at, finished_at,
+			trace_id, span_id, parent_span_id, trigger, parent_function_id,
+			is_outlier, baseline_p95_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`
+
 func (db *Database) InsertExecution(exec *Execution) error {
 	coldStart := 0
 	if exec.ColdStart {
@@ -134,14 +145,7 @@ func (db *Database) AsyncInsertExecutionFinal(exec *Execution, durationMS int64,
 	if len(reservation) > 0 {
 		lease = reservation[0]
 	}
-	return db.asyncExecFunctionReserved(exec.FunctionID, lease, true, `
-		INSERT INTO executions (
-			id, function_id, status, cold_start, container_id,
-			duration_ms, status_code, error_message, response_size,
-			started_at, finished_at,
-			trace_id, span_id, parent_span_id, trigger, parent_function_id,
-			is_outlier, baseline_p95_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`,
+	return db.asyncExecFunctionReserved(exec.FunctionID, lease, true, finalExecutionInsertSQL,
 		exec.ID, exec.FunctionID, exec.Status, coldStart, exec.ContainerID,
 		durationMS, statusCode, errMsg, responseSize,
 		startedAt,

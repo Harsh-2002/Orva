@@ -57,7 +57,8 @@ benchmark cannot establish an end-to-end gain or justify a new batch limit.
 A read-only `EXPLAIN QUERY PLAN` audit on the same 1,470,051-row scratch
 database found that `idx_executions_function` serves baseline seeding and
 per-function history, `idx_executions_started` serves global history and
-retention, and `idx_executions_trace_started` finds trace members. Trace
+retention, and `idx_executions_trace_id` finds trace members on this snapshot
+(`idx_executions_trace_parent` can do so if the former is absent). Trace
 member ordering still needs a temporary B-tree because it normalizes mixed
 timestamp formats with `julianday(replace(...))`; status-filtered history
 also needs a temporary sort. Thus apparent left-prefix overlap does not
@@ -66,23 +67,38 @@ schema is unchanged. A scratch-only same-snapshot write/read comparison is
 still required before proposing index changes; the additive-only migration
 contract separately rules out shipping an unapproved destructive drop.
 
-The new scratch-only `test/performance/sqlite_index_ab.py` harness used
-SQLite's backup API to make two consistent, temporary copies of that VM
-database. It dropped `idx_executions_trace_id` and
-`idx_executions_parent_span_id` from **the candidate copy only**. Six
-alternated 200-row production-shaped insert batches measured median commit
-times of 4.82 ms with all indexes and 3.49 ms without those two indexes.
-The sampled function/global/status/trace/retention reads kept usable plans;
-the candidate's trace lookup chose `idx_executions_trace_parent` instead of
-`idx_executions_trace_id`. Status-filtered history still needed a full
-temporary sort and took roughly 2.6 seconds per warm read on both copies,
-which is a separate read-path concern. This experiment used Python's SQLite
-driver, only six short batches, and no live Orva traffic; it cannot override
-the earlier end-to-end index-pruning regression. The source stayed at
-1,470,051 execution rows, and both copies were removed after the run.
-Before considering a schema change, repeat the comparison using Orva's
-actual driver and same-snapshot sustained VM HTTP load, including read-heavy
-and status-filtered workloads. No index change is in the candidate.
+The scratch-only `test/performance/sqlite_index_ab.py` harness uses
+[SQLite's backup API](https://www.sqlite.org/backup.html) to make two consistent,
+temporary copies of that VM database. It can omit indexes from **the candidate
+copy only**, or compare a write-connection cache setting. A compiled Go test
+binary can then call Orva's actual `asyncWriter.commit` on both copies,
+alternating 200-row batches with the production SQL and UUIDv7/trace/span ID
+shapes. It verifies exact new-row counts and reports wall time, SQL time,
+commit time, and physical `read_bytes`/`write_bytes`. Sampled
+function/global/status/trace/retention query plans are also captured.
+
+The initial Python-driver run reported 4.82 ms with all indexes versus
+3.49 ms without `idx_executions_trace_id` and
+`idx_executions_parent_span_id`; its trace/span IDs were incorrectly
+UUID-shaped, so that result is **withdrawn**. A first actual-driver run then
+appeared to show 423 ms versus 33 ms per 200-row batch, and a 256-MiB cache
+experiment appeared to show 541 ms versus 36 ms. Those apparent wins were
+also **invalid**: reversing which copy was made last reversed both results.
+An identical-schema, identical-cache control proved the artifact. With the
+baseline copied first it took 581 ms median and read about 3.3 MiB from disk
+per batch, versus 41 ms and almost no disk reads for the candidate copied
+last. With copy order reversed, the unchanged baseline took 39 ms and the
+unchanged candidate took 721 ms, the latter reading about 4.4 MiB per batch.
+The later copy was resident in the guest page cache; changing indexes or
+SQLite cache size was not the cause of these large differences. All copies
+were discarded and the 1,470,051-row source was unchanged.
+
+Do **not** use this short two-copy probe to justify index pruning or a larger
+cache. A valid next comparison needs controlled filesystem-cache residency,
+sustained read/write traffic on restored snapshots, and independent direct-VM
+HTTP load with critical-row reconciliation and telemetry accounting. The
+earlier live-server index-pruning regression remains the release evidence;
+the production schema and cache policy are unchanged.
 
 ### Success-history read path on the same scratch database
 

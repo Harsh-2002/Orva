@@ -75,13 +75,22 @@ refreshes them on startup. See [CAPACITY.md](CAPACITY.md) for the earlier measur
 For a read/write index hypothesis on a large existing dataset, use
 `python3 test/performance/sqlite_index_ab.py --scratch --db <scratch-db>
 --workdir <guest-local-disk-dir> --drop-index <execution-index>` **only in a
-disposable VM**. It backs up the source read-only into two temporary copies,
-changes only the candidate copy, alternates production-shaped write batches,
-and reports representative read plans/timings as JSON. The work directory
-needs free space for two full database copies plus WAL headroom; `/tmp` may be
-a smaller tmpfs. A Python-driver microbenchmark is diagnostic, not an Orva
-HTTP throughput or production migration proof. `test/e2e/unit/test_sqlite_index_ab.py`
-checks refusal without `--scratch`, source immutability, and copy cleanup.
+disposable VM**. For Orva's actual writer/driver, first build
+`go test -c -o build/orva-db-probe ./backend/internal/database`, copy that
+binary into the guest, and add `--driver-test-binary <guest-probe-path>`.
+The harness backs up the source read-only into two temporary copies, changes
+only the candidate copy, and reports read plans plus alternating 200-row
+commit timings, physical disk-I/O deltas, and exact row reconciliation.
+`--identical-control` compares unchanged copies; repeat with
+`--reverse-copy-order` before interpreting any candidate result. A short
+copy-based probe can be dominated by which file was copied last: on the
+1.47-million-row scratch VM, an identical-copy control flipped from 581/41
+ms to 39/721 ms per batch when copy order reversed. The work directory needs
+free space for two full database copies plus WAL headroom; `/tmp` may be a
+smaller tmpfs. Neither a Python-driver microbenchmark nor this Go probe
+proves sustained Orva HTTP capacity or authorizes a production migration.
+`test/e2e/unit/test_sqlite_index_ab.py` checks scratch refusal, source
+immutability, copy cleanup, and control/reverse modes.
 
 An external load generator should be preferred for throughput numbers, but
 validate its path independently. In the 2026-09-23 scratch VM check, the

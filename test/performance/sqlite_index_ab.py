@@ -9,11 +9,14 @@ from the candidate copy. Results are diagnostic, not a production migration.
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import random
+import secrets
 import shutil
 import sqlite3
 import statistics
+import subprocess
 import tempfile
 import time
 import uuid
@@ -44,7 +47,7 @@ def configure(conn):
 
 
 def v7_like(sequence):
-    # Orva's primary/trace keys are time-ordered UUIDv7, not random UUIDv4.
+    # Execution IDs are time-ordered UUIDv7; trace/span IDs are not.
     millis = int(time.time() * 1000) & ((1 << 48) - 1)
     bits = (millis << 80) | (0x7 << 76) | ((sequence & 0xFFF) << 64)
     bits |= (0x2 << 62) | random.getrandbits(62)
@@ -56,8 +59,10 @@ def rows(function_id, batch_size, sequence):
     result = []
     for offset in range(batch_size):
         key = v7_like(sequence + offset)
+        trace_id = "tr_" + secrets.token_hex(16)
+        span_id = "sp_" + secrets.token_hex(8)
         result.append((key, function_id, "success", 0, "benchmark-worker",
-                       10, 200, "", 12, now, now, key, key, None,
+                       10, 200, "", 12, now, now, trace_id, span_id, None,
                        "http", None, 0, None))
     return result
 
@@ -95,18 +100,34 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True, help="source Orva SQLite database")
     parser.add_argument("--scratch", action="store_true", help="confirm disposable test environment")
-    parser.add_argument("--drop-index", action="append", required=True,
+    parser.add_argument("--drop-index", action="append", default=[],
                         help="execution index name to omit from candidate copy; repeatable")
     parser.add_argument("--batches", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=200)
     parser.add_argument("--read-repetitions", type=int, default=3)
     parser.add_argument("--workdir", type=Path, help="temporary-copy parent; defaults to system temp")
+    parser.add_argument("--driver-test-binary", type=Path,
+                        help="compiled database Go test binary; uses Orva's real writer instead of Python writes")
+    parser.add_argument("--candidate-write-cache-kib", type=int,
+                        help="Go-driver-only candidate write-connection cache size in KiB")
+    parser.add_argument("--identical-control", action="store_true",
+                        help="compare unchanged copies to expose benchmark-order and page-cache bias")
+    parser.add_argument("--reverse-copy-order", action="store_true",
+                        help="back up candidate first, then copy baseline; exposes filesystem-cache bias")
     args = parser.parse_args()
 
     if not args.scratch:
         parser.error("refusing to copy or mutate a database without --scratch")
     if min(args.batches, args.batch_size, args.read_repetitions) < 1:
         parser.error("batch and repetition counts must be positive")
+    if args.identical_control and (args.drop_index or args.candidate_write_cache_kib is not None):
+        parser.error("--identical-control cannot be combined with candidate changes")
+    if not args.identical_control and not args.drop_index and args.candidate_write_cache_kib is None:
+        parser.error("specify at least one candidate change or --identical-control")
+    if args.candidate_write_cache_kib is not None and not args.driver_test_binary:
+        parser.error("--candidate-write-cache-kib requires --driver-test-binary")
+    if args.candidate_write_cache_kib is not None and not 1024 <= args.candidate_write_cache_kib <= 524288:
+        parser.error("--candidate-write-cache-kib must be 1024..524288")
     if len(set(args.drop_index)) != len(args.drop_index):
         parser.error("duplicate --drop-index")
     source = args.db.resolve(strict=True)
@@ -134,12 +155,14 @@ def main():
         with tempfile.TemporaryDirectory(prefix="orva-index-ab-", dir=parent) as directory:
             baseline_path = Path(directory) / "baseline.db"
             candidate_path = Path(directory) / "candidate.db"
-            baseline_copy = sqlite3.connect(baseline_path)
+            first_path, second_path = (candidate_path, baseline_path) if args.reverse_copy_order else (
+                baseline_path, candidate_path)
+            first_copy = sqlite3.connect(first_path)
             try:
-                source_conn.backup(baseline_copy)
+                source_conn.backup(first_copy)
             finally:
-                baseline_copy.close()
-            shutil.copyfile(baseline_path, candidate_path)
+                first_copy.close()
+            shutil.copyfile(first_path, second_path)
             baseline = sqlite3.connect(baseline_path)
             candidate = sqlite3.connect(candidate_path)
             try:
@@ -154,30 +177,62 @@ def main():
                     "candidate": read_profile(candidate, function_id, trace_id,
                                               args.read_repetitions),
                 }
-                write_ms = {"baseline": [], "candidate": []}
-                for batch in range(args.batches):
-                    # Alternate run order; both copies start from the same backup.
-                    order = ("baseline", "candidate") if batch % 2 == 0 else (
-                        "candidate", "baseline")
-                    for variant in order:
-                        conn = baseline if variant == "baseline" else candidate
-                        values = rows(function_id, args.batch_size,
-                                      batch * args.batch_size + (0 if variant == "baseline" else 2048))
-                        start = time.perf_counter()
-                        with conn:
-                            conn.executemany(INSERT, values)
-                        write_ms[variant].append((time.perf_counter() - start) * 1000)
                 output = {
                     "source": str(source), "source_rows": source_rows,
                     "source_bytes": size, "candidate_dropped_indexes": args.drop_index,
+                    "candidate_write_cache_kib": args.candidate_write_cache_kib,
+                    "reverse_copy_order": args.reverse_copy_order,
+                    "identical_control": args.identical_control,
                     "batches": args.batches, "batch_size": args.batch_size,
                     "read": profiles,
-                    "write": {name: {"samples_ms": samples,
-                                     "median_ms": statistics.median(samples)}
-                              for name, samples in write_ms.items()},
-                    "caveat": "Exploratory SQLite/Python-driver test on copied data; "
-                              "not a sustained Orva HTTP capacity or migration result",
                 }
+                if args.driver_test_binary:
+                    # The Go probe opens the same copies through modernc.org/sqlite
+                    # and calls asyncWriter.commit. Close Python handles first.
+                    baseline.close()
+                    candidate.close()
+                    binary = args.driver_test_binary.resolve(strict=True)
+                    env = dict(os.environ,
+                               ORVA_BENCH_SCRATCH="1",
+                               ORVA_BENCH_BASELINE_DB=str(baseline_path),
+                               ORVA_BENCH_CANDIDATE_DB=str(candidate_path),
+                               ORVA_BENCH_BATCHES=str(args.batches),
+                               ORVA_BENCH_BATCH_SIZE=str(args.batch_size))
+                    if args.candidate_write_cache_kib is not None:
+                        env["ORVA_BENCH_CANDIDATE_CACHE_KIB"] = str(args.candidate_write_cache_kib)
+                    result = subprocess.run(
+                        [str(binary), "-test.run", "^TestExecutionWriterSnapshotProbe$", "-test.v"],
+                        env=env, capture_output=True, text=True, check=False, timeout=300)
+                    if result.returncode:
+                        raise RuntimeError("Go driver probe failed: " + result.stdout + result.stderr)
+                    marker = "SNAPSHOT_AB_JSON="
+                    matches = [line[len(marker):] for line in result.stdout.splitlines()
+                               if line.startswith(marker)]
+                    if len(matches) != 1:
+                        raise RuntimeError("Go driver probe returned no unique JSON result: " + result.stdout)
+                    output["driver_write"] = json.loads(matches[0])
+                    output["caveat"] = ("Real Orva SQLite driver and writer on copied data; "
+                                        "not a sustained HTTP capacity or migration result")
+                else:
+                    write_ms = {"baseline": [], "candidate": []}
+                    for batch in range(args.batches):
+                        # Alternate run order; both copies start from the same backup.
+                        order = ("baseline", "candidate") if batch % 2 == 0 else (
+                            "candidate", "baseline")
+                        for variant in order:
+                            conn = baseline if variant == "baseline" else candidate
+                            values = rows(function_id, args.batch_size,
+                                          batch * args.batch_size + (0 if variant == "baseline" else 2048))
+                            start = time.perf_counter()
+                            with conn:
+                                conn.executemany(INSERT, values)
+                            write_ms[variant].append((time.perf_counter() - start) * 1000)
+                    output["write"] = {
+                        name: {"samples_ms": samples,
+                               "median_ms": statistics.median(samples)}
+                        for name, samples in write_ms.items()}
+                    output["caveat"] = ("Exploratory SQLite/Python-driver test on copied data; "
+                                        "not a sustained Orva HTTP capacity or migration result")
                 print(json.dumps(output, indent=2))
             finally:
                 baseline.close()
