@@ -9,9 +9,77 @@ upgrading to.**
 
 Entries describe what changes *for an operator*. Implementation detail lives in
 the commit messages. Only the current release's tag exists — older tags are
-pruned with their releases — so `git log v2026.09.23..HEAD` is the range for
-anything unreleased, and the sections below are the record for everything
-before it.
+pruned with their releases — so use `git log <current-tag>..HEAD` for the
+unreleased range, and the sections below as the record for everything before it.
+
+## v2026.09.24
+
+### Fixed
+
+- Warm-pool burst sizing no longer treats every steady-state request as if it
+  needed a new cold start. Measured service latency and queued demand drive
+  capacity; speculative cold starts are bounded to one per-pool spawn wave,
+  while a resource-derived rotation spare and rate-aware early replacements
+  protect hot functions from a cold gap at worker max-use retirement.
+  A 30-minute isolated-VM 200/s mixed-runtime soak returned and persisted all
+  360,000 calls; this is workload-specific validation, not a universal rate
+  guarantee. Mixed-load fairness and optional telemetry under overload remain
+  visible in the capacity guide.
+- Locally generated trace IDs now retain 80 cryptographically random trailing
+  bits behind a time-ordered prefix. The `tr_` + 32-hex API shape and incoming
+  W3C trace propagation are unchanged; new trace-index writes have better
+  locality on a large single-node SQLite database. Restored-snapshot,
+  opposite-order direct-VM tests measured higher mixed-runtime throughput;
+  incoming IDs and durable-record accounting remained intact.
+- `orva chat` now explains when a valid invoke-only CLI key lacks access to
+  the admin-only AI operator surface, and guides users to create a dedicated
+  terminal key in Dashboard → API keys and log in without putting the secret
+  in shell history. AI permissions were not broadened.
+- Successful-execution history now avoids sorting the entire matching table
+  when a bounded recent window contains enough successes, even if some recent
+  executions failed. Sparse successes and rare statuses retain the original
+  exact query; no SQLite index or migration changes. On a
+  1.47-million-execution scratch VM, the same 50-row HTTP page improved from
+  about 7.1 s to about 0.2 s with identical results. This is a history-read
+  improvement, not a claimed invocation-throughput increase.
+- Cgroup-v2 worker setup now stays inside Orva's own delegated service/container
+  cgroup. It creates separate daemon and worker leaves, verifies writable child
+  CPU/memory/PID controls, and reports `rlimit_only` when unavailable instead of
+  walking into a writable host ancestor. Docker keeps its supervisor in a
+  sibling container cgroup and no longer creates workers at the host root.
+  `ORVA_CGROUPV2_MOUNT` values outside Orva's own cgroup now fall back to
+  `rlimit_only`; remove a stale host-root override to restore automatic setup.
+- Startup outlier-baseline warmup now reads a bounded, indexed recent window
+  per function instead of ranking the entire execution history before the
+  HTTP listener opens. Very old successes after a long failure streak no
+  longer seed the fresh in-memory baseline.
+- `/metrics` now exposes per-priority SQLite writer batch, connection-wait,
+  statement, commit, and writer-submit-to-commit counters for diagnosing storage
+  saturation without changing worker or queue ceilings.
+- Grouped execution-record INSERTs now cap statement width at 850 bound values
+  while preserving the 200-job transaction batch. On a local full-schema
+  writer benchmark, four 50-row statements beat one 200-row statement;
+  end-to-end capacity remains under validation.
+- Pool latency sampling now overwrites a bounded ring instead of allocating
+  and copying its full history for each warm invocation. Percentile sorting
+  runs outside the pool signal lock; the reported percentile calculation is
+  unchanged.
+- A function without a pool override now derives its maximum worker count
+  from host CPU/memory and function concurrency instead of stopping at 50.
+  Explicit `max_warm` values remain upper bounds, but the former universal
+  1,024-worker cap no longer constrains larger hosts; resource admission
+  still applies to every spawn.
+- Worker admission now reserves each worker's full `memory.max` budget. A
+  recent low RSS percentile can no longer allow several workers to grow
+  together beyond Orva's host worker-memory budget.
+
+### Upgrade notes
+
+- Existing positive `max_warm` override rows are preserved. Set an override
+  to `0` through the pool-config API or MCP tool to use automatic capacity.
+- Memory-heavy functions may show a lower `effective_max` after upgrade.
+  Check `limiting_reason=memory_capacity`; lower `memory_mb` only if the
+  function actually fits that smaller sandbox limit, or add host memory.
 
 ## v2026.09.23
 

@@ -1324,7 +1324,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
 - orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — `deploy_function_inline` (MCP) and `POST /api/v1/functions/<id>/deploy-inline` return a `warning` field when the import meets `none`; the dashboard's Deploy button does not surface it.
 - When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
-- Concurrency: each warm worker handles one request at a time; simultaneous requests use separate workers in the same function's pool. A worker becomes available only after its adapter has loaded the handler and signalled readiness. Pool Controller v2 sizes workers from arrival rate, queue pressure, service time, and cold-start time, bounded by the function's pool ceiling and effective host CPU/memory capacity. Pending admission count scales with detected host memory and file descriptors, with a share reserved for other functions. Public HTTP requests reserve daemon memory before body read; unknown-length bodies use the configured body cap for this estimate. A saturated pool waits at most two seconds for a worker; a pool that can still grow or has workers starting may wait up to twelve seconds (adapter-readiness budget plus one scaler tick). Expired worker admission returns `429 INVOCATION_QUEUE_FULL`; a full execution-record writer returns `429 STORAGE_BACKPRESSURE` after a five-second wait. Both carry `Retry-After: 1` and occur before user code starts. A function's configured execution timeout starts when a ready worker is acquired, not while waiting in the admission queue or while the adapter loads. Rejected requests are not replay-captured. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
+- Concurrency: each warm worker handles one request at a time; simultaneous requests use separate workers in the same function's pool. A worker becomes available only after its adapter has loaded the handler and signalled readiness. Pool Controller v2 sizes workers from arrival rate, queue pressure, service time, and cold-start time, bounded by effective host CPU/memory and function concurrency. With no override, the pool maximum is automatic; `max_warm=0` restores that behavior and a positive value can only lower it. Pending admission count scales with detected host memory and file descriptors, with a share reserved for other functions. Public HTTP requests reserve daemon memory before body read; unknown-length bodies use the configured body cap for this estimate. A saturated pool waits at most two seconds for a worker; a pool that can still grow or has workers starting may wait up to twelve seconds (adapter-readiness budget plus one scaler tick). Expired worker admission returns `429 INVOCATION_QUEUE_FULL`; a full execution-record writer returns `429 STORAGE_BACKPRESSURE` after a five-second wait. Both carry `Retry-After: 1` and occur before user code starts. A function's configured execution timeout starts when a ready worker is acquired, not while waiting in the admission queue or while the adapter loads. Rejected requests are not replay-captured. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>
 
 <auth_modes>
@@ -1597,6 +1597,11 @@ The local root is the earliest execution whose parent is absent from the same
 trace. Externally parented W3C traces therefore remain visible and preserve the
 upstream ID as `external_parent_span_id`.
 
+New traces started by Orva retain the `tr_` plus 32-hex format. The leading
+12 hex characters encode Unix milliseconds; the trailing 20 are
+cryptographically random. Incoming W3C trace IDs are preserved unchanged.
+Trace IDs identify and correlate requests; they are not authentication secrets.
+
 ### What user code sees
 
 Two env vars are stamped per invocation. Read them only if you want to
@@ -1604,7 +1609,7 @@ log the trace_id alongside your own messages — they're optional.
 
 ```text
 # Available inside every running function — refresh per-invocation:
-ORVA_TRACE_ID=tr_3e39f6991c66f140577c6021da7dd13b   # one per causal chain
+ORVA_TRACE_ID=tr_01a0d0b64000f140577c6021da7dd13b   # one per causal chain
 ORVA_SPAN_ID=sp_4ceba57f6b1c982e                    # this execution
 
 # Python:        os.environ["ORVA_TRACE_ID"]
@@ -1678,6 +1683,9 @@ exceeds **P95 × 2**. Cold starts and errors are excluded from the
 baseline so a flapping function can't drag it down. The flag and
 baseline P95 are stored on the execution row and rendered as an amber
 flag icon next to the span.
+After a restart, Orva seeds the baseline from at most the 1,000 most recent
+executions per function; older successes are not used after a long run of
+failures.
 
 ### Where to look
 

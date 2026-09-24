@@ -224,7 +224,7 @@ valid key that lacks the `read` permission is still accepted — the server
 authenticated it, it just cannot read:
 
 ```bash
-orva login --endpoint https://orva.example.com --api-key orva_… --test
+printf %s "$ORVA_KEY" | orva login --endpoint https://orva.example.com --api-key - --test
 ```
 
 ---
@@ -459,6 +459,8 @@ orva routes delete /webhooks/stripe
 ```bash
 # Long-lived bearer for CI / a script / an AI agent.
 orva keys create --name ci-deploy --permissions invoke,write
+# Full instance operator key for `orva chat` (keep separate from CI keys).
+orva keys create --name terminal-ai --permissions read,write,invoke,admin
 # Auto-expiring key (0 = never).
 orva keys create --name temp-agent --permissions invoke --expires-in-days 30
 orva keys list
@@ -640,7 +642,11 @@ The same AI assistant as the dashboard's **AI** sidebar, in the terminal. It can
 operate your instance end-to-end (list/deploy functions, read logs, manage
 secrets, …). Providers, API keys, the default model, and the approval policy are
 configured in the web UI under **Settings → AI**; the CLI uses that saved
-selection.
+selection. Chat is an operator surface: it needs an API key carrying all four
+permissions (`read,write,invoke,admin`) so its tool catalog can match the
+dashboard. A valid invoke-only deployment key is intentionally rejected. The
+dashboard works with your admin web session; that browser session is not shared
+with the CLI.
 
 ```bash
 # Interactive streaming REPL (banner shows the active provider/model).
@@ -654,6 +660,17 @@ echo "what failed today?" | orva chat -p @-
 
 # Per-session overrides (don't change the saved default):
 orva chat --model gpt-4o --thinking deep -p "summarize recent errors"
+```
+
+In **Dashboard → API keys**, choose **New key**, name a separate terminal/agent
+credential, and select **read**, **write**, **invoke**, and **admin**. Do not
+reuse a deployment key. An administrator already authenticated through the CLI
+can create the equivalent key with the command below. Pass the newly shown secret
+to `login` over stdin (not on the command line):
+
+```bash
+orva keys create --name terminal-ai --permissions read,write,invoke,admin
+printf %s "$ORVA_KEY" | orva login --endpoint https://orva.example.com --api-key - --test
 ```
 
 Write/destructive tools pause for a `[y/N]` approval per the server's policy;

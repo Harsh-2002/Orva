@@ -1,5 +1,561 @@
 # Pool Controller v2 capacity validation
 
+## 2026-09-24 writer-path measurement instrumentation
+
+The writer now exposes per-priority cumulative counters for normal-path batch
+attempts, committed jobs, SQLite connection acquisition time, statement time,
+commit time, and writer-submit-to-commit time/samples at `/metrics`. The counters
+are diagnostic instruments, **not** a measured throughput improvement. Compare
+counter deltas over identical load windows to distinguish writer wait from
+SQL/commit work; the submit-to-commit measurement includes admission wait and
+the latter two.
+Savepoint failure recovery is excluded from committed-job and queue-wait
+samples, so reconcile accepted HTTP responses with execution rows and monitor
+critical failure counters separately. No pool cap or SQLite durability setting
+was changed on the basis of the isolated insert microbenchmark alone.
+
+### Direct-VM writer saturation profile (same date)
+
+A later direct-link run used a 2-vCPU/4-GiB smolvm server with its disk-backed
+database (about 1.45 million existing executions), a separate 1-vCPU/512-MiB
+client VM, and two already-deployed Node/Python functions. At 250 closed-loop
+clients, 20,000 requests took 98.36 seconds: 19,953 returned HTTP 200 and 47
+returned pre-execution `STORAGE_BACKPRESSURE` 429; there were no transport
+errors or 504s. After writer drain, a timestamp-and-function query found
+exactly 19,953 new successful execution rows. The 429s are real capacity
+pressure, not lost post-execution records.
+
+During that run the critical writer committed 19,967 jobs in 195 batch
+attempts, with 85.884 seconds cumulative statement time, 9.115 seconds commit
+time, and 0.032 seconds connection wait. The additional jobs include
+non-final-row critical work, so committed-job count is not the HTTP-200 count.
+Its submit-to-commit total was 98,121 seconds across jobs (about 4.9 seconds
+per job); this is an **asynchronous persistence delay**, not the public HTTP
+response latency. Critical failures and timeouts stayed at zero. Activity
+and optional telemetry dropped 12,067 and 30,898 records respectively under
+this overload, so the run does not meet the plan's ordinary-load telemetry
+gate.
+
+A 30-second loopback-only CPU profile collected during the same run had 7.70
+seconds of on-CPU samples. The writer run/commit call stack accounted for 5.08
+seconds cumulative (66%); SQLite's B-tree insertion for 4.45 seconds (58%),
+with page reads in that call tree accounting for 3.02 seconds (39%). These
+call stacks overlap; the percentages must not be added. After the run the
+database held 1,470,051 executions and was 1.55 GB on disk; nine explicit
+execution indexes occupied about 1.06 GB by `dbstat`. Index maintenance and
+page reads are therefore concrete hypotheses, **not** permission to prune
+indexes without a same-snapshot A/B plus read-query-plan and correctness
+checks. The earlier index-pruning attempt in this document was reverted.
+
+The repeated production-schema microbenchmark on the current host measured
+9.31–9.85 ms per 200-row batch for prepared per-row inserts and 8.29–9.43 ms
+for grouped inserts across three runs. The ranges overlap; grouped inserts
+used about 308 versus 3,024 allocations per batch but more allocated bytes.
+This differs from the earlier run below and reinforces that the isolated
+benchmark cannot establish an end-to-end gain or justify a new batch limit.
+
+A read-only `EXPLAIN QUERY PLAN` audit on the same 1,470,051-row scratch
+database found that `idx_executions_function` serves baseline seeding and
+per-function history, `idx_executions_started` serves global history and
+retention, and `idx_executions_trace_id` finds trace members on this snapshot
+(`idx_executions_trace_parent` can do so if the former is absent). Trace
+member ordering still needs a temporary B-tree because it normalizes mixed
+timestamp formats with `julianday(replace(...))`; status-filtered history
+also needs a temporary sort. Thus apparent left-prefix overlap does not
+prove an index is removable without changing read cost. The production
+schema is unchanged. A scratch-only same-snapshot write/read comparison is
+still required before proposing index changes; the additive-only migration
+contract separately rules out shipping an unapproved destructive drop.
+
+The scratch-only `test/performance/sqlite_index_ab.py` harness uses
+[SQLite's backup API](https://www.sqlite.org/backup.html) to make two consistent,
+temporary copies of that VM database. It can omit indexes from **the candidate
+copy only**, or compare a write-connection cache setting. A compiled Go test
+binary can then call Orva's actual `asyncWriter.commit` on both copies,
+alternating 200-row batches with the production SQL and UUIDv7/trace/span ID
+shapes. It verifies exact new-row counts and reports wall time, SQL time,
+commit time, and physical `read_bytes`/`write_bytes`. Sampled
+function/global/status/trace/retention query plans are also captured.
+
+The initial Python-driver run reported 4.82 ms with all indexes versus
+3.49 ms without `idx_executions_trace_id` and
+`idx_executions_parent_span_id`; its trace/span IDs were incorrectly
+UUID-shaped, so that result is **withdrawn**. A first actual-driver run then
+appeared to show 423 ms versus 33 ms per 200-row batch, and a 256-MiB cache
+experiment appeared to show 541 ms versus 36 ms. Those apparent wins were
+also **invalid**: reversing which copy was made last reversed both results.
+An identical-schema, identical-cache control proved the artifact. With the
+baseline copied first it took 581 ms median and read about 3.3 MiB from disk
+per batch, versus 41 ms and almost no disk reads for the candidate copied
+last. With copy order reversed, the unchanged baseline took 39 ms and the
+unchanged candidate took 721 ms, the latter reading about 4.4 MiB per batch.
+The later copy was resident in the guest page cache; changing indexes or
+SQLite cache size was not the cause of these large differences. All copies
+were discarded and the 1,470,051-row source was unchanged.
+
+Two subsequent **unchanged-binary**, direct-link mixed Node/Python runs used
+the same 2-vCPU/4-GiB sandbox-required server VM and separate 1-vCPU/512-MiB
+client VM, with 20,000 requests at 250 closed-loop clients each. The first
+returned 20,000 HTTP 200 in 64.66 s (309/s; HTTP-200 p99 2.18 s); the second
+returned 20,000 HTTP 200 in 34.98 s (572/s; p99 1.12 s). Neither had a
+transport error, storage 429, critical write failure, or critical timeout.
+After each writer drain, read-only per-function counts increased by exactly
+10,000 Node and 10,000 Python successful execution rows. These are successive
+runs on a growing database, not a baseline/candidate comparison.
+
+The server process physically read about 429 MiB during the first run and
+120 MiB during the second, while writing about 1.00 and 1.01 GiB. Its
+delegated cgroup's file cache grew from about 143 MiB before the first run to
+594 MiB after it and 735 MiB after the second; major faults rose by 2,291,
+then 84. The critical writer spent 55.68/26.32 s in statements and
+8.11/6.37 s in commits; connection wait remained negligible. This supports
+page-cache residency and disk I/O as **material contributors** to the large
+throughput swing, not proof that they are the only limits or that a larger
+SQLite connection cache/index change would help. The pre-run row-count query
+itself warmed some pages, so even the first phase was not a cold-cache test.
+Activity lost 9,037/8,509 records and total best-effort telemetry lost
+27,852/27,438 under these loads. Both optional lanes reached their 1,024-job
+channel limits during the first run. Exact critical-row accounting therefore
+passes, but the telemetry/ordinary-load and controlled-performance gates do
+not. No schema or cache policy was changed.
+
+An optional-telemetry scheduling experiment then made that lane eligible
+whenever both higher-priority queues were below three-quarter occupancy,
+instead of only when both were empty. A 5,000-request/100-client
+baseline–candidate–baseline sequence on the same running VMs produced all
+HTTP 200 in 22.50/14.72/12.61 s; total best-effort drops were
+5,974/5,367/5,387 and activity drops 2,051/1,820/1,629. The later
+unchanged baseline was faster than the candidate and its drop count was
+essentially the same. The three phases added exactly 7,500 successful rows
+per test function after drain. Database growth,
+cache warming, and other run-order effects remain uncontrolled, but this
+short test supplies no defensible benefit for changing critical-write
+priority. The experiment was **reverted**; persistent optional loss remains
+an open admission/storage-accounting problem.
+
+An exploratory **open-loop** direct-VM sweep then scheduled 3,000 mixed
+requests each at 100, 200, 300, 400, and 500 requests/s, with a separate
+client VM and a 500-client ceiling. Every arrival was sent and returned HTTP
+200. The first four short phases dropped no activity or optional telemetry;
+the 500/s phase dropped 841 optional records. Short success is not a
+sustainable-rate claim: a 10,000-request 400/s phase later dropped 1,506
+optional records, while another 400/s phase on the same unchanged binary
+did not. Cache state and shared-host I/O varied across phases.
+
+| 10,000-request phase | HTTP 200 | Client errors | HTTP-200 p99 | Activity drops | Total best-effort drops |
+|---|---:|---:|---:|---:|---:|
+| 400/s, first | 10,000 | 0 | 635 ms | 0 | 1,506 |
+| 300/s | 10,000 | 0 | 72 ms | 0 | 0 |
+| 400/s, repeat | 10,000 | 0 | 142 ms | 0 | 0 |
+| 500/s, output-pipe-safe rerun | 10,000 | 0 | 1,509 ms | 172 | 3,105 |
+
+All four long phases were on the same 2-vCPU/4-GiB scratch server and
+separate 1-vCPU/512-MiB client, with real nsjail and delegated cgroup-v2
+limits. Read-only time-window queries after writer drain found exactly 5,000
+new successful Node rows and 5,000 Python rows for **each** phase. The final
+500/s run had zero critical failures/timeouts and no cgroup OOM/PID-limit
+events; it committed 9,828 activity and 7,067 optional telemetry jobs while
+its critical lane committed 10,002 jobs (the additional two were not final
+execution rows). This demonstrates that public HTTP success can coexist with
+unreported best-effort loss, and that the loss boundary is not a stable RPS
+constant. Live writer demand and drain time must inform admission and
+telemetry policy; no fixed operator concurrency knob follows from this sweep.
+
+One intermediate 500/s phase is **excluded**: the foreground `smolvm exec`
+output pipe closed after accumulating per-request logs, and the daemon
+exited with SIGPIPE (141), not an OOM (`memory.events: oom_kill 0`). It
+returned 7,620 HTTP 200 before the pipe failure, but only 6,791 matching
+execution rows had committed when the process died abruptly. This is a
+test-harness termination, not a throughput result; it also illustrates
+Orva's documented acknowledged-in-memory versus persisted-record boundary
+on an ungraceful process exit. The valid rerun disconnected stdout from the
+test command's pipe and reconciled all 10,000 final rows. A read-only
+`PRAGMA quick_check` of the scratch database after the abrupt exit returned
+`ok`.
+
+The direct-VM Go load generator now has an opt-in same-origin writer
+observer. It samples critical/activity/telemetry queue and byte peaks,
+waits for zero active requests and zero in-flight writer bytes after the
+client phase, and emits counter deltas in the same JSON as response classes.
+On the 2-vCPU/4-GiB scratch guest with hard cgroup-v2 sandbox limits, its
+first 1,000-request/100-client mixed check returned/persisted all 1,000 HTTP
+200 with zero drops, but measured a 6.16-second writer drain after the
+2.67-second client phase and queue peaks of 869/871/896. A following
+5,000-request/250-client phase returned/persisted all 5,000 HTTP 200 while
+the activity and telemetry queues each peaked at 1,024, with 1,730 activity
+and 5,667 total best-effort drops. Critical failures/timeouts remained zero.
+These short phases validate the observer against independent read-only row
+counts; they do not establish sustainable capacity or a throughput gain.
+After the missing-in-flight-field guard was added, the exact final tree was
+built and rerun in the same isolated guest: 1,000/1,000 HTTP 200, 500 Node
+and 500 Python execution rows in the timestamp window, cgroup-v2 limits,
+`observation_complete=true`, zero writer failures/timeouts/drops, and a
+7.52-second writer drain following a 2.58-second client phase. The variation
+in drain time is another reason not to infer steady-state capacity from a
+single short phase.
+
+The observer's next revision added batch attempts and critical
+submit-to-commit time. On the later, larger scratch database, a 1,000/100
+mixed phase returned and persisted all 1,000 executions with zero drops:
+1,005 critical jobs in 12 batch attempts, 5.74 seconds of SQL statement
+time, 0.88 seconds committing, and 3,988 seconds of aggregate queue wait
+across 1,005 sampled jobs. A following 5,000/250 phase returned and
+persisted all 5,000 executions, but shed 5,920 optional writes. Its
+critical lane committed 5,007 jobs in 46 attempts (about 109 jobs per
+attempt), spent 18.32 seconds in statements versus 1.92 seconds committing,
+and accumulated 19,432 seconds of queue wait across 5,007 jobs (about
+3.88 seconds mean). Attempts include retries and some non-execution jobs,
+so jobs/attempt is a diagnostic ratio, not an exact successful batch size.
+The measurement argues against simply enlarging batches or queues as the
+first response to this particular saturation; SQLite statement work
+dominates. It does not identify which index or page-cache cost is causal.
+
+The disposable-copy A/B harness now optionally applies file-scoped
+`POSIX_FADV_DONTNEED` to both temporary database copies and runs the Go
+writer probe before the expensive read-query profile. This removed the
+earlier tenfold copy-order artifact, but an unchanged-schema/unchanged-cache
+control still differed: with read profiling before writes, the candidate
+copy's median was 0.93 s per 200-row batch versus the baseline's 1.13 s,
+and reversing copy order gave 0.93 s versus 1.08 s. Moving reads after writes
+left another unchanged control at 1.06 s versus 1.35 s. Each paired batch
+had matching physical read-byte counts, but individual timings varied widely.
+This **fails the A/B validity gate**; the harness remains diagnostic only, and
+no index, cache, or durability change is justified by it. The source VM
+database and production Orva instance were not modified by these probes.
+
+### Time-local trace-ID write hypothesis
+
+Every locally initiated invocation used a 128-bit fully random trace ID.
+`executions` has multiple indexes led by `trace_id`; with 1.67 million rows,
+each new root touched dispersed B-tree pages even though execution primary
+keys were already time-ordered. A candidate keeps the external `tr_` plus
+32-hex shape and 80 cryptographically random trailing bits, while prefixing
+48 bits of Unix milliseconds. Incoming W3C trace IDs are not rewritten.
+This is compatible with the [W3C Trace Context Level 2](https://www.w3.org/TR/trace-context-2/)
+recommendation that at least the rightmost seven bytes be random.
+
+An opt-in real-driver probe on two consistent disposable copies of the same
+1,671,976-row VM database changed only the trace IDs generated for candidate
+inserts. Across eight 200-row batches, a same-input unchanged control took
+770 ms versus 677 ms median and read 106.5 versus 106.5 MiB in total; this
+sets a roughly 14% timing noise floor. The ordered-ID candidate took 13.6 ms
+median and read 2.0 MiB, versus 923 ms and 106.1 MiB for random IDs. Reversing
+which copy was made first preserved the contrast: 16.8 ms and 2.0 MiB versus
+658 ms and 104.6 MiB. Both copies committed exactly 1,600 new rows per phase.
+The index schema, SQL, execution IDs, cache size, and SQLite durability
+settings were identical. This is strong evidence of cold trace-index-page
+locality on that dataset, **not** by itself a sustained HTTP throughput result.
+
+The follow-up used a real sandbox-required server in a 2-vCPU/4-GiB isolated
+VM and a separate 1-vCPU/512-MiB client VM. Baseline and ordered-ID binaries
+ran against independent SQLite-backup copies of the **same** source snapshot;
+both hosted the same Node and Python functions. The test restored both copies
+and reversed run order. Each phase warmed with 1,000 requests at 100 clients,
+then sent 5,000 mixed requests at 250 clients. After writer drain, each phase
+had exactly 3,000 new successful execution rows **per function** (warmup plus
+measurement), with no critical writer failures, timeouts, or cgroup OOM events.
+
+| Run order | Binary | HTTP 200 / 5,000 | Successful req/s | HTTP-200 p99 | Critical SQL time | Activity drops | Optional telemetry drops |
+|---|---|---:|---:|---:|---:|---:|---:|
+| First | Random trace ID | 5,000 | 241 | 2,484 ms | 21.032 s | 2,464 | 6,279 |
+| Second | Ordered trace ID | 5,000 | 1,122 | 478 ms | 1.635 s | 0 | 0 |
+| First, after restore | Ordered trace ID | 5,000 | 1,346 | 415 ms | 1.205 s | 0 | 29 |
+| Second, after restore | Random trace ID | 5,000 | 314 | 2,186 ms | 15.715 s | 2,171 | 5,932 |
+
+This is a controlled end-to-end gain on this **large-DB, cold-copy** workload,
+not a hardware-independent capacity promise. A further ordered-ID run at
+50,000 requests / 1,000 closed-loop clients returned 50,000 HTTP 200 in
+34.08 seconds (1,467/s, p99 1,328 ms), with exact accepted-row accounting,
+no activity drops, and no critical writer failures/timeouts. It still lost
+748 best-effort telemetry records. That does **not** satisfy a zero-loss
+ordinary-load or sustained-soak gate; no production instance was touched.
+
+A later scheduled-arrival sweep on the **grown** ordered-ID scratch copy
+shows why closed-loop peak goodput is not a sustainable-rate promise. A
+5,000-request mixed Node/Python phase at 150 offered requests/s sent all
+arrivals and returned all HTTP 200 (p99 21 ms). At 200/s, 10,000/10,000
+returned HTTP 200 with p99 174 ms. Both had zero writer failures and zero
+optional drops. At 250/s, 9,996/10,000 returned HTTP 200 and four Python
+requests returned `INVOCATION_QUEUE_FULL` 429; successful p99 was 2,005 ms.
+At 300/s, the 500-client load generator itself missed 604 of 10,000 scheduled
+arrivals, while 8,882 of 9,396 attempted calls returned HTTP 200 and 514
+Python calls returned pool-queue 429. That last run is **not** a valid
+server-only capacity estimate: the client was overloaded too. In both
+degraded phases, critical write failures/timeouts and optional drops remained
+zero, so this cliff is in the Python pool/admission path rather than the
+SQLite writer. Python's observed effective pool max was six workers and its
+cold-start p95 was 6.43 s; Node's effective max was 26. Source inspection
+found a concrete controller error: its burst target multiplied **the entire
+steady arrival rate** by spawn p95, even though only excess/rising demand
+needs a cold-start horizon. At 100/s and a 6-second spawn, that term alone
+requests hundreds of workers and clamps the pool at its resource ceiling.
+This can strand idle reservations and starve another function, but has not
+yet been isolated as the sole cause of the measured 250/s cliff. A corrected
+controller candidate uses the spawn horizon only for burst rate above stable
+rate and retains actual queued demand. An initial no-spare version shrank hot
+pools to one worker and regressed the 90-second warmup's Python p99 from
+12 to 1,124 ms when that worker recycled at the 1,000-use bound. That version
+was discarded. The follow-up keeps a resource-derived replacement spare when
+traffic predicts a recycle within the controller's stable window.
+
+On restored 1.67-million-row copies, opposite copy and run orders, both the
+original and spare-controller binaries sent all 18,000 warmup arrivals at
+200/s and all 10,000 measured arrivals at 250/s per phase, returned all HTTP
+200, and committed exactly 14,000 successful rows **per function** after each
+paired phase. No critical writer failures, optional drops, or cgroup OOMs
+occurred. The original controller held about 32 idle workers for this trivial
+Node/Python mix; the spare policy targeted two per function and reached two
+during continuous steady load. The two measured 250/s p99 pairs (original
+versus spare) were 1,910 versus 26.6 ms and 16.35 versus 16.74 ms. The
+apparent first-order latency win **did not reproduce**. Warmup p99 for the
+spare candidate was 81/22 ms versus original 13.5/14 ms, so transition
+latency may regress. Two later continuous 10,000-request phases at 200/s on
+the spare candidate returned all HTTP 200 with p99 12.5/10.7 ms and no
+writer loss. A 30-minute soak and transition attribution are still required;
+neither this controller result nor the earlier trace-ID gain authorizes
+release yet.
+
+In a 30-minute open-loop 200/s run of that spare binary, all 360,000 arrivals
+were sent and returned HTTP 200, with no transport errors, writer
+failures/timeouts/drops, pool rejections, or cgroup OOMs. Writer drain
+completed, the database gained exactly 180,000 successful rows for each
+function, and `PRAGMA quick_check` returned `ok`. Overall p99 was 293 ms;
+Python p99 was 1,018 ms and Node p99 56.7 ms. The target remained two or
+three workers per function, but idle reservations intermittently rose toward
+2–3 GiB without queued work. A short fluctuation in the six-second arrival
+window was still multiplied by multi-second spawn p95, resulting in
+speculative spawns and a 30-second scale-down grace. A service-time-only
+follow-up was tested on a copied **2.2-GiB post-soak snapshot**. It returned
+all 18,000 warmup and 10,000 measured calls with exact final rows and no
+writer loss, but warmup/250/s p99 were 702/1,688 ms overall (Python
+1,494/1,955 ms), with peak active requests 226/254. The matched prior spare
+binary, run second on the other copy, achieved 18.7/14.8 ms p99 and peak
+active 14/4. The service-only formula is **rejected**: low idle memory is not
+a gain if it creates cold-worker gaps. The next candidate bounded speculative
+prewarming to one wave of the existing four spawn slots plus rotation spares;
+real busy/queued demand remained uncapped up to host capacity. On two
+independent restored copies of the same 1.67-million-row snapshot, the prior
+spare controller and bounded candidate each completed 18,000 requests at
+200/s plus 10,000 at 250/s in both run orders. Every response was HTTP 200,
+each copy gained exactly 14,000 successful rows per function, and there were
+no critical failures, optional drops, or cgroup OOMs. The bounded candidate
+reserved about 960 MiB at 200/s instead of the prior controller's roughly
+3 GiB. However, its 250/s p99 was **13.5 ms when run first and 154 ms when
+run second** (Python 477 ms in the second phase), versus the prior
+controller's 49.3/18.7 ms. Its second 200/s warmup reached 138 ms p99 and
+peak 106 active requests. This is a warm-worker retirement regression, so
+the bounded-only version is **rejected** despite the memory saving.
+
+The current controller candidate additionally prewarms replacements for live
+workers approaching their 1,000-use retirement limit. It counts only workers
+inside a rate-aware lead window during active traffic and remains subject to
+the same host resource cap. On the grown scratch copy it returned HTTP 200 for
+18,000/18,000 at 200/s (p99 11.4 ms) and two successive 10,000/10,000
+250/s phases (p99 60.2 and 88.6 ms), with no critical failures, timeouts,
+or best-effort drops. A pool-state sample showed a brief rotation target of
+about 10–11 workers per function and up to 2 GiB of aggregate reservations,
+then contraction toward the lower steady target. These are successive phases
+on a growing copy, not a controlled before/after latency gain. The second
+250/s phase had a critical queue peak of 791 and a higher p50, so SQLite
+I/O/checkpoint variability is still material.
+
+At 50,000 mixed closed-loop requests with 1,000 clients on that same candidate,
+all 50,000 returned HTTP 200 (1,073/s, p99 2.91 s) and the writer recorded
+no critical failure or timeout. It dropped 4,849 optional telemetry records,
+so this is **not** a zero-loss capacity claim. A live sample showed Node holding
+18 idle workers while Python had 489 queued calls under a roughly 3-GiB worker
+reservation. The cross-pool reclaim rule still protects a donor's predicted
+target even when a peer has actual queued demand; multi-function fairness
+remains an open gate.
+
+The same candidate then completed a **30-minute open-loop 200/s soak** on the
+2-vCPU/4-GiB scratch server with a separate client VM. All 360,000 scheduled
+arrivals were attempted and returned HTTP 200; there were no unsent calls,
+transport errors, critical writer failures/timeouts, activity drops,
+telemetry drops, or cgroup OOMs. HTTP-200 p50/p95/p99 were 3.41/13.22/30.41
+ms (Node p99 31.04 ms, Python 29.73 ms); writer drain took 0.12 s. An indexed
+read-only query from the recorded pre-candidate high-water ID found exactly
+224,000 new successful rows **per function**: 44,000 per function from the
+earlier 18k+10k+10k+50k phases and 180,000 from this soak. There were no
+other statuses. `PRAGMA quick_check` returned `ok`. After idle contraction
+the process had one warm worker per function, 192 MiB in guaranteed worker
+reservations, and 34 goroutines. This establishes reliability and bounded
+steady-state behavior for this particular mix and storage state, not a
+universal sustainable-rate guarantee or a controlled controller speedup.
+
+Finally, the original-controller binary and this prewarm candidate, both with
+ordered trace IDs, ran 50,000 mixed requests at 1,000 closed-loop clients on
+independent copies of the same restored snapshot in both run orders. All four
+phases returned HTTP 200 for every request and each copy gained exactly
+25,000 new successful rows per function; critical failures/timeouts and
+activity drops were zero throughout.
+
+| Run order | Controller | Successes/s | HTTP-200 p99 | Optional drops |
+|---|---|---:|---:|---:|
+| First | Original | 1,188 | 4,226 ms | 1,431 |
+| Second | Prewarm | 1,189 | 3,640 ms | 295 |
+| First, after restore | Prewarm | 1,215 | 4,256 ms | 1,022 |
+| Second, after restore | Original | 1,257 | 3,686 ms | 214 |
+
+The throughput and p99 differences do **not** reproduce across order. Do not
+claim a controller speedup or better optional retention from this table. Both
+controllers retain the existing resource-derived hard ceiling; the prewarm
+candidate's supported gain remains lower *steady* idle reservations, while
+the 1,000-client mixed-load fairness and optional-loss limitations remain.
+
+We also tested allowing optional telemetry to drain while higher-priority
+queues were below 75% occupancy. In two same-snapshot, opposite-order
+50,000/1,000 comparisons it cut telemetry drops but reduced successful
+throughput roughly 10–17% and still lost records; one phase returned 120
+pool-queue 429s. The scheduler change was **reverted**. Optional telemetry
+retention remains a separate admission and writer-budget problem, not a reason
+to weaken critical-write priority or SQLite durability.
+
+Do **not** use this short two-copy probe to justify index pruning or a larger
+cache. A valid next comparison needs controlled filesystem-cache residency,
+sustained read/write traffic on restored snapshots, and independent direct-VM
+HTTP load with critical-row reconciliation and telemetry accounting. The
+earlier live-server index-pruning regression remains the release evidence;
+the production schema and cache policy are unchanged.
+
+### Success-history read path on the same scratch database
+
+The existing `GET /api/v1/executions?status=success&limit=50` query used the
+status index to find about 1.47 million matching rows, then sorted them to
+return 50. Read-only SQLite probes on the 2-vCPU/4-GiB guest measured 2.63 s
+for that sort, versus 0.21 ms to read the newest 50 directly through the
+`started_at` index. Forcing that latter index for **all** statuses would be
+wrong: only 19 rows had `status=error`, and a forced `started_at` scan took
+66.5 s to find them versus 14.7 ms on the status index.
+
+The candidate initially probed only the newest unfiltered page when listing
+successful executions with no date/search filter or offset. If every row on
+that bounded page succeeded, it was exactly the requested page; otherwise the
+old filtered query ran. A later change scans up to four times the requested
+page size (at most 4,000 rows) in `started_at` order, keeps successful rows,
+and returns once the page is full. A few recent failures no longer trigger a
+full success-index sort. If the bounded window is exhausted before filling
+the page, the old exact filtered query still runs. Function-scoped probes use
+the existing `(function_id, started_at DESC)` index. No index, migration, or
+result contract changes.
+On the same VM and database, the immediately preceding `ba4d310` server
+binary took 7.07–7.16 s across three warm HTTP reads; the candidate took
+0.193–0.219 s across three. An alternating baseline/candidate check found
+identical totals (1,470,032) and identical SHA-256 hashes of the 50 returned
+execution IDs. The count query still scans the success index and accounts
+for much of the candidate's remaining ~0.2 s. These are history-page
+measurements, **not** invocation throughput or writer-capacity gains.
+
+On a later 1.67-million-row disposable VM database, the scratch comparison's
+raw success-status query took 58–67 seconds on cold copies while making a
+temporary sort. That query is a worst-case diagnostic, not the normal fast
+API path; it exposed how a single recent error could previously send the API
+back to the expensive plan. The bounded indexed 50-ID query on the original
+scratch DB returned 50 rows in 0.10 ms with `EXPLAIN QUERY PLAN` confirming
+`idx_executions_started`. This query probe is not an end-to-end HTTP latency
+claim. Unit tests cover mixed recent results, an incomplete bounded window
+that must fall back, function filtering, and sparse statuses.
+
+A new benchmark uses the production 18-column final-execution INSERT, foreign
+key, and current execution indexes instead of a one-column toy table. On the
+same local host, three 200-row batch repetitions measured prepared per-row
+INSERT at 16.0–16.5 ms/batch and one grouped 200-row INSERT at 17.4–21.9
+ms/batch. Capping grouped statements to 850 bound values (four 50-row
+statements per transaction) measured 9.6–10.7 ms/batch in three runs; 25-row
+groups were 10.8–12.0 ms and 100-row groups 14.9–17.0 ms in two exploratory
+runs each. The change retains the 200-job transaction batch and allows narrow
+rows to group more densely. This isolates indexed write-shape cost on one host;
+it does **not** establish an HTTP throughput gain, disk-independent optimum,
+or a reason to increase admissions before a controlled VM comparison.
+The changed binary also passed all 29 real-sandbox E2E modules (676 checks,
+no failures or skips). In a direct-link 2-vCPU/2.5-GiB scratch server plus
+512-MiB client VM, 1,000 and then 5,000 mixed Node/Python requests at 100
+closed-loop clients all returned HTTP 200 with no transport errors. The
+5,000-request phase took 47.18s (106 successful/s); after writer drain,
+exactly 5,000 new status-200 execution rows appeared, with zero critical
+writer failures or timeouts. This is a functional validation; shared-host
+storage and database growth make it an unsuitable throughput comparison.
+
+The next candidate removes allocation/copy work from each full pool service,
+queue-wait and spawn sample window. A full-ring local microbenchmark records
+service samples in 16.9–18.8 ns with zero allocations (three 1-second runs),
+and focused pool race tests pass. Percentiles still use the newest 512 service
+and queue samples or 256 spawn samples; their sorting now runs after releasing
+the signal mutex. The changed binary passed all 29 real-sandbox E2E modules
+(676 checks, no failures or skips). In a separate direct-link 2-vCPU/2.5-GiB
+scratch server and 512-MiB client, 5,000 mixed Node/Python requests at 100
+closed-loop clients returned 5,000 HTTP 200 with no transport errors in
+26.12s (191 successful/s). After drain, all 5,000 had status-200 execution
+rows; critical writer failures and timeouts remained zero. The earlier
+unchanged VM phase was 106/s, but storage/cache and database state changed,
+so this is **not** a controlled throughput gain. The guest test binary was
+removed, both scratch VMs stopped, and server memory restored to 4 GiB.
+
+The first scratch boot against an existing 1.4-GiB database had no HTTP
+listener after 2m35s. `EXPLAIN QUERY PLAN` for baseline warmup showed an
+index lookup by execution status followed by a temporary B-tree for a
+whole-history `ROW_NUMBER` ordering. Baseline seeding now reads at most ten
+sample-windows per function through the existing `(function_id, started_at
+DESC)` index; the replacement query plan showed an index search by
+`function_id` without a temporary sort. The replacement boot reached health
+rapidly on the same VM,
+but the second boot had warmer guest/host caches, so these observations do
+not establish a controlled startup speedup. A regression test covers the
+bounded recent-window semantics.
+
+On the 2-vCPU/2.5-GiB scratch server with a separate 512-MiB client VM,
+5,000 mixed Node/Python requests at 100 closed-loop clients all returned
+HTTP 200 in 23.08s (217/s); p50/p95/p99 were 105/1,243/1,647ms. Critical
+writer failures and timeouts stayed zero. Over that window, 5,005 normal
+critical jobs committed in 44 batches; connection acquisition increased
+0.011s, SQL statement time 23.816s, and commit time 1.991s. The cumulative
+enqueue-to-commit sum rose about 24,333s across those jobs (~4.9s/job),
+which can outlast the HTTP response because the final row commits
+asynchronously. Activity dropped 1,969 rows and total best-effort telemetry
+dropped 5,870. This is one diagnostic phase on a smaller guest, **not**
+a 4-GiB controlled A/B or evidence that SQLite itself is the universal
+bottleneck. It does show that raising worker/queue ceilings on this guest
+would increase an already saturated storage backlog.
+
+The same running 2.5-GiB guest then received 10,000 mixed requests at 500
+closed-loop clients. It returned 9,676 HTTP 200 and 324 pre-execution
+`STORAGE_BACKPRESSURE` 429 responses in 64.24s (150.6 successful/s), with no
+transport errors. HTTP 200 p50/p95/p99 were 2,942/4,789/5,602ms. A read-only
+query over execution IDs newer than the pre-run maximum found exactly 9,676
+status-200 rows for the two test functions after writer drain. Critical
+failures/timeouts remained zero; activity drops increased by 5,230 and all
+best-effort drops by 13,665. During the run all three writer queues filled,
+while guest memory still had headroom. The writer's critical SQL-statement
+time increased by 57.81s and commit time by 5.78s, versus only 0.014s of
+connection acquisition. This shows the current scratch storage/write path
+cannot sustain that offered load; it does **not** identify whether SQLite
+index work, guest block I/O, or the underlying shared host disk dominates
+inside `ExecContext`. Raising queue or worker counts would hide the pressure
+temporarily, not increase sustainable throughput.
+
+An attempted smolvm `block_io=async` comparison did not produce a usable
+load phase: after the scratch guest restart, even an idle health request timed
+out twice while the daemon showed negligible CPU and I/O progress. The VM
+was stopped, returned to its original synchronous block-I/O mode and 4-GiB
+configuration, and both scratch machines were left stopped. No Orva result
+is inferred from this failed infrastructure experiment.
+
+After the resource-derived pool-cap candidate was built, a fresh 2.5-GiB
+scratch-VM boot with no saved pool overrides reported `effective_max=20`
+for each test function and successfully ran 1,000/1,000 mixed requests at
+100 clients (234/s). Its critical writer drained with zero failures/timeouts.
+A subsequent 5,000-request/100-client run on the same binary and VM returned
+all HTTP 200 at 129/s, p50/p95/p99 168/1,882/3,868ms. Critical statement
+time reached 40.17s, commit time 3.38s, and connection wait only 0.009s;
+critical failures/timeouts remained zero, but activity drops reached 2,345.
+Across a `/proc/stat` sample window encompassing this load, iowait rose by
+2,288 of 10,770 aggregate CPU jiffies (~21%); `/proc/diskstats` for the
+guest's `vda` added 32.95s of I/O-busy time. The sample window includes
+lead-in and writer drain, so these are diagnostic indicators, not exact
+fractions of the 38.85s client run. Throughput varied materially from the
+earlier 217/s phase, and the two-core pool ceiling was below both removed
+constants. No larger-host pool-throughput improvement is claimed.
+
 ## 2026-09-23 live worker-churn diagnosis
 
 The same isolated 2-vCPU/4-GiB server and separate 512-MiB client VM drove
@@ -707,8 +1263,9 @@ After correcting the unobserved-memory fallback, a separate 5-second
 concurrency-32 check produced 1,205.28 req/s with zero failures. It reserved
 6,144 MiB for 32 workers (32 × the 192 MiB declared cgroup hard bound), with
 `queued=0`, `spawning=0`, and zero capacity timeouts after the run. Once
-`memory.current` samples exist, admission uses observed worker memory p95,
-clamped to the declared bound.
+At that candidate stage, admission used observed worker memory p95 after
+`memory.current` samples existed. This was later removed: a historical p95
+cannot guarantee that all workers will not grow to `memory.max` together.
 
 ## KV control measurement
 
@@ -737,7 +1294,8 @@ Automated tests cover:
 - 30 seconds continuously below desired capacity before scale-down;
 - no more than 20% shrink per evaluation and idle workers only;
 - cgroup memory headroom and pending-reservation admission;
-- declared memory as the safe fallback before an observed p95 exists;
+- the full per-worker hard memory bound for every reservation, even after low
+  observed RSS samples;
 - migration of legacy pool rows, removal of `target_concurrency`, preservation
   of values and foreign-key cascade behavior;
 - rejection of stale configuration with `400 VALIDATION` migration guidance;
@@ -764,8 +1322,9 @@ Use these Pool Controller v2 signals together:
   cgroup headroom and worker reservations; `host.effective_cpu_workers` is
   the ceiling derived from the active CPU quota.
 - `limiting_reason` says whether the active bound is stable demand, burst
-  demand, immediate pressure, configured minimum, idle TTL, operator maximum,
-  function concurrency, CPU capacity, or memory capacity.
+  demand, temporary worker rotation, immediate pressure, configured minimum,
+  idle TTL, operator maximum, function concurrency, CPU capacity, or memory
+  capacity.
 - `cold_start_p95_ms` and `service_p95_ms` explain why two functions with the
   same request rate can require different worker counts. Service p95 measures
   the full worker lease, from acquisition through response processing or
@@ -775,7 +1334,98 @@ Raise `max_warm` only when `limiting_reason=operator_max`. CPU or memory
 limits require host capacity or smaller function limits; increasing the
 operator ceiling cannot override the effective host maximum.
 
-`max_warm` also sizes the pool's idle-worker storage, so it is capped at
-**1024** — a larger value is rejected with a 400 rather than clamped
-silently. `effective_max` remains the live host/operator ceiling, recomputed
-each tick from *observed* memory use; `max_warm` is only its upper bound.
+`max_warm=0` (the default without an override) uses an automatic maximum
+derived from host CPU slots, each function's full per-worker `memory.max`
+budget (at least 16 MiB), and function concurrency. A positive `max_warm` can
+only lower that bound.
+The fixed idle-worker channel is sized to the derived bound, so even an
+enormous configured value cannot allocate an enormous channel. Existing
+positive overrides remain in place on upgrade; set them to `0` to opt into
+automatic capacity. `effective_max` remains the live ceiling, recomputed
+each tick from guaranteed worker reservations and current host headroom. This removes a
+code-level 50/1,024 cap on larger hosts; the two-core storage-limited scratch
+run above does not prove a throughput gain from the change.
+
+The older observed-RSS admission rule could reserve 16–40 MiB for a worker
+whose cgroup allowed substantially more, so several quiet workers could later
+grow together past Orva's 80% host worker budget. The current candidate
+reserves the full `memory.max` amount for every worker and sizes the idle
+channel by the same amount. This may lower `effective_max` for functions with
+large declared memory; it prevents a percentile from masquerading as a hard
+resource bound. Measured overcommit would require an aggregate enforced
+boundary and simultaneous-growth tests before it could be enabled safely.
+
+The hard-bound candidate passed the full Docker sandbox suite (29 modules,
+676 checks) and isolated direct-VM mixed Node/Python checks on the existing
+2-vCPU/4-GiB scratch guest. At 1,000 requests/100 clients it returned and
+persisted 500 executions for each runtime, with zero critical failures or
+best-effort drops. At 5,000 requests/250 clients it returned and persisted
+2,500 per runtime with zero critical failures, though 5,684 optional writes
+were dropped. During the latter run, 32 worker child cgroups had a combined
+`memory.max` of 3 GiB, below the guest's roughly 3.2-GiB worker budget;
+their combined `memory.current` was about 548 MiB. Low current usage is not
+permission to count only 548 MiB against possible simultaneous growth.
+
+An alternating 5,000-request/250-client comparison on that growing scratch
+database returned and persisted all 5,000 executions in every phase:
+
+| Phase | Accepted/s | HTTP 200 p95 | Optional writer drops |
+|---|---:|---:|---:|
+| Previous binary | 286 | 1,632 ms | 5,357 |
+| Hard-bound candidate | 422 | 1,185 ms | 5,012 |
+| Previous binary again | 388 | 1,035 ms | 5,361 |
+
+The returning baseline changed substantially without a code change. The
+phases do **not** establish a throughput gain or regression from hard-bound
+admission; filesystem-cache residency, database growth, and shared-host I/O
+remain uncontrolled. They do show no functional regression or new critical
+record loss at this load. Optional-writer pressure remains unsolved.
+
+The same hard-bound candidate was then exercised at 50,000 mixed requests
+and 1,000 clients on the scratch VM. It returned 49,114 HTTP 200 and 886
+HTTP 429. A read-only indexed execution-row query found exactly 24,558 Node
+and 24,556 Python rows in that phase: 49,114 total, matching accepted
+responses. Pool rejection and capacity-timeout counters stayed at zero;
+critical writer failures stayed at zero, but the critical queue peaked at
+987/1,024 and four critical enqueue timeouts were recorded. Optional writes
+shed 72,374 records (24,402 activity). The 429 response latency clustered
+around the five-second storage-reservation deadline. During load, 32 worker
+cgroups summed to 3 GiB of `memory.max`, with no worker-subtree OOM events.
+This is a **failed 1,000-client capacity gate** despite intact accepted-row
+durability; the short green phases must not be used to justify release.
+The phase ran on a grown scratch database and is not a controlled A/B
+attribution to the memory-accounting change. Writer-aware admission and
+SQLite write-demand/throughput work remain necessary.
+
+## 2026-09-24 scoped cgroup enforcement check
+
+In the disposable 2-vCPU/4-GiB smolvm guest, a candidate server launched
+inside its own delegated cgroup created `orva.daemon` and `orva.workers` beneath
+that group. Actual nsjail child cgroups exposed `memory.max`, `pids.max`, and
+`cpu.max`; a temporary 80-MiB Node function allocating 512 MiB returned 502
+and incremented the worker subtree's `memory.events:oom_kill` from 0 to 1.
+The same proof passed with the daemon running as an unprivileged service user,
+using the installer's existing `ORVA_DISABLE_USERNS=1` fallback because this
+guest denied `/proc/<pid>/setgroups` under user namespaces. The probe creates
+and deletes only its own function. This establishes hard-memory containment in
+the scoped guest, not throughput, CPU throttling, PID enforcement, systemd
+service installation, or Docker regression. A following disposable Docker
+container did pass 20/20 real TypeScript deploy/invoke/rollback assertions,
+remained healthy with `docker exec` working, reported `cgroup_v2`, and returned
+502 with worker-subtree `oom_kill` 0→1 in the same memory probe. The Docker
+entrypoint placed `tini` and its CLI helper in `orva.supervisor` inside the
+container cgroup to satisfy the kernel's no-internal-process rule. Native
+systemd and comparative throughput remain open gates.
+
+An expanded disposable cgroup probe then exercised the kernel limits directly
+in both Docker and the same 2-vCPU/4-GiB guest. A Node handler configured for
+0.25 CPU completed with HTTP 200 and increased its own jailed child's
+`cpu.stat:nr_throttled` by 10 in Docker and 8 in the guest. A Python handler
+attempted 64 fork-like clones without exec or extra pipes; it completed with
+HTTP 200 and increased that child's `pids.events:max` by 33 in each setup.
+These are enforcement proofs, **not** sustainable throughput or fairness
+measurements. The arm64 branch of the PID probe and the native systemd service
+remain unexecuted locally. An initial Node child-process probe was invalid:
+nsjail's default 32-open-file limit produced `EMFILE` before `pids.max` was
+reached. That low per-worker FD limit is a separate workload-density hypothesis
+to measure under safe aggregate FD accounting, not evidence of a PID cap.

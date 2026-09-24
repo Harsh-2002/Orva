@@ -410,57 +410,40 @@ func egressNetArgs(mode, resolvConfPath, hostsPath string) []string {
 var (
 	cgroupOnce  sync.Once
 	cgroupMount string
+	cgroupErr   error
 )
 
-// cgroupv2Delegate returns a cgroup v2 path this process can create children
-// under, or "" if no suitable delegate exists. Detects the cgroup from
-// /proc/self/cgroup and walks up until it finds a writable directory.
-// An explicit override via ORVA_CGROUPV2_MOUNT takes precedence.
+// cgroupv2Delegate returns only an explicitly configured delegate or a
+// worker subtree beneath this process's own cgroup. Never walk writable
+// ancestors: root inside a container can often write the host cgroup tree,
+// but doing so would place sandboxes outside the container/service budget.
 func cgroupv2Delegate() string {
 	cgroupOnce.Do(func() {
-		if v := os.Getenv("ORVA_CGROUPV2_MOUNT"); v != "" {
-			if _, err := os.Stat(v); err == nil {
-				cgroupMount = v
-			}
-			return
-		}
-
 		data, err := os.ReadFile("/proc/self/cgroup")
 		if err != nil {
+			cgroupErr = err
 			return
 		}
-		// cgroup v2 line: "0::/user.slice/...".
-		var rel string
-		for _, line := range strings.Split(string(data), "\n") {
-			parts := strings.SplitN(line, ":", 3)
-			if len(parts) == 3 && parts[0] == "0" && parts[1] == "" {
-				rel = parts[2]
-				break
-			}
-		}
-		if rel == "" {
+		base, err := selfCgroupBase("/sys/fs/cgroup", string(data))
+		if err != nil {
+			cgroupErr = err
 			return
 		}
-		// Walk up from the current cgroup until we find a writable dir that
-		// actually has the controllers we need delegated to children.
-		p := filepath.Join("/sys/fs/cgroup", rel)
-		for p != "/sys/fs/cgroup" && p != "/" {
-			if isWritableDir(p) {
-				cgroupMount = p
-				return
+		if v := os.Getenv("ORVA_CGROUPV2_MOUNT"); v != "" {
+			if err := validateCgroupOverride(base, v); err != nil {
+				cgroupErr = err
+			} else if isWritableDir(v) {
+				cgroupMount = v
+			} else {
+				cgroupErr = fmt.Errorf("ORVA_CGROUPV2_MOUNT=%q is not a writable delegate with memory, cpu and pids controls", v)
 			}
-			p = filepath.Dir(p)
+			return
 		}
+		cgroupMount, cgroupErr = prepareOwnedCgroup(base)
 	})
 	if cgroupMount == "" {
-		// One-time heads-up: no usable cgroup-v2 delegate, so per-sandbox
-		// memory/pid/cpu caps are NOT enforced (we fall back to rlimits). This
-		// is normal on hosts where systemd doesn't delegate controllers to the
-		// service (e.g. constrained VMs/containers); functions still run fully
-		// isolated via nsjail. Set Delegate=yes + delegate the controllers, or
-		// ORVA_CGROUPV2_MOUNT, to enable hard caps.
 		cgroupWarnOnce.Do(func() {
-			slog.Warn("cgroup v2 controllers not delegated; per-sandbox memory/pid/cpu caps disabled (rlimit-only fallback)")
+			slog.Warn("cgroup v2 controls unavailable; per-sandbox memory/pid/cpu caps disabled (rlimit-only fallback)", "reason", cgroupErr)
 		})
 	}
 	return cgroupMount
@@ -479,6 +462,134 @@ func getenvOr(m map[string]string, k, def string) string {
 // child cgroup (memory.max / pids.max / cpu.max). They only appear in a child
 // when the parent delegates them via cgroup.subtree_control.
 var cgroupNeededControllers = []string{"memory", "pids", "cpu"}
+
+func selfCgroupBase(root, cgroupFile string) (string, error) {
+	for _, line := range strings.Split(cgroupFile, "\n") {
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) != 3 || parts[0] != "0" || parts[1] != "" {
+			continue
+		}
+		rel := filepath.Clean(parts[2])
+		if rel == "." || rel == "/" || !filepath.IsAbs(rel) {
+			return "", errors.New("cgroup-v2 membership is the visible root; an Orva-owned service/container subgroup is required")
+		}
+		base := filepath.Join(root, strings.TrimPrefix(rel, "/"))
+		if within, err := filepath.Rel(root, base); err != nil || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+			return "", errors.New("cgroup-v2 membership escapes its mount")
+		}
+		return base, nil
+	}
+	return "", errors.New("no unified cgroup-v2 membership in /proc/self/cgroup")
+}
+
+// An explicit override is still inside the daemon's own budget. Rejecting an
+// ancestor or sibling prevents an old host-root override from silently moving
+// sandboxes outside Docker's or systemd's limits.
+func validateCgroupOverride(base, override string) error {
+	if !filepath.IsAbs(override) {
+		return errors.New("ORVA_CGROUPV2_MOUNT must be an absolute path")
+	}
+	rel, err := filepath.Rel(base, override)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("ORVA_CGROUPV2_MOUNT=%q must be a child of the daemon cgroup %q", override, base)
+	}
+	return nil
+}
+
+// prepareOwnedCgroup creates daemon and worker leaves only inside Orva's
+// current delegated group. Domain controllers cannot be enabled on a
+// non-root cgroup containing a process, so move only this daemon to its own
+// leaf first. Other processes are never moved or modified.
+func prepareOwnedCgroup(base string) (string, error) {
+	available, err := controllerSet(filepath.Join(base, "cgroup.controllers"))
+	if err != nil {
+		return "", err
+	}
+	if missing := missingControllers(available); len(missing) != 0 {
+		return "", fmt.Errorf("cgroup controllers not delegated to %s: %s", base, strings.Join(missing, ", "))
+	}
+	enabled, err := controllerSet(filepath.Join(base, "cgroup.subtree_control"))
+	if err != nil {
+		return "", err
+	}
+	if missing := missingControllers(enabled); len(missing) != 0 {
+		leaf := filepath.Join(base, "orva.daemon")
+		if err := os.Mkdir(leaf, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("create daemon cgroup: %w", err)
+		}
+		if occupied, err := os.ReadFile(filepath.Join(leaf, "cgroup.procs")); err != nil || len(strings.TrimSpace(string(occupied))) != 0 {
+			return "", fmt.Errorf("daemon cgroup is occupied or unreadable: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(leaf, "cgroup.procs"), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+			return "", fmt.Errorf("move daemon into its own cgroup: %w", err)
+		}
+		if remaining, err := os.ReadFile(filepath.Join(base, "cgroup.procs")); err != nil {
+			return "", fmt.Errorf("read service cgroup processes: %w", err)
+		} else if len(strings.TrimSpace(string(remaining))) != 0 {
+			return "", errors.New("service cgroup still has other processes; cannot enable domain controllers")
+		}
+		if err := enableControllers(base, missing); err != nil {
+			return "", err
+		}
+	}
+	workers := filepath.Join(base, "orva.workers")
+	if err := os.Mkdir(workers, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", fmt.Errorf("create worker cgroup: %w", err)
+	}
+	workerAvailable, err := controllerSet(filepath.Join(workers, "cgroup.controllers"))
+	if err != nil {
+		return "", err
+	}
+	if missing := missingControllers(workerAvailable); len(missing) != 0 {
+		return "", fmt.Errorf("worker cgroup lacks controls: %s", strings.Join(missing, ", "))
+	}
+	workerEnabled, err := controllerSet(filepath.Join(workers, "cgroup.subtree_control"))
+	if err != nil {
+		return "", err
+	}
+	if missing := missingControllers(workerEnabled); len(missing) != 0 {
+		if err := enableControllers(workers, missing); err != nil {
+			return "", err
+		}
+	}
+	if !isWritableDir(workers) {
+		return "", errors.New("worker cgroup cannot create a child with writable memory.max, pids.max and cpu.max")
+	}
+	return workers, nil
+}
+
+func controllerSet(path string) (map[string]bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool)
+	for _, name := range strings.Fields(string(data)) {
+		set[name] = true
+	}
+	return set, nil
+}
+
+func missingControllers(have map[string]bool) []string {
+	var missing []string
+	for _, name := range cgroupNeededControllers {
+		if !have[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func enableControllers(dir string, names []string) error {
+	requested := make([]string, len(names))
+	for i, name := range names {
+		requested[i] = "+" + name
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.subtree_control"), []byte(strings.Join(requested, " ")), 0o644); err != nil {
+		return fmt.Errorf("enable cgroup controllers under %s: %w", dir, err)
+	}
+	return nil
+}
 
 func isWritableDir(p string) bool {
 	// cgroupfs does not allow creating regular files — probe by creating a
@@ -501,7 +612,7 @@ func isWritableDir(p string) bool {
 	// actually carries the controllers we need; if not, report no-delegate so
 	// the caller falls back to rlimit-only (functions run, just without the
 	// per-sandbox cgroup memory/pid caps) instead of crashing.
-	return childHasControllers(probe)
+	return childHasControllers(probe) && childLimitFilesWritable(probe)
 }
 
 // childHasControllers reports whether a freshly-created child cgroup exposes all
@@ -517,6 +628,17 @@ func childHasControllers(child string) bool {
 	}
 	for _, need := range cgroupNeededControllers {
 		if !have[need] {
+			return false
+		}
+	}
+	return true
+}
+
+func childLimitFilesWritable(child string) bool {
+	for _, name := range []string{"memory.max", "pids.max", "cpu.max"} {
+		path := filepath.Join(child, name)
+		value, err := os.ReadFile(path)
+		if err != nil || os.WriteFile(path, value, 0o644) != nil {
 			return false
 		}
 	}

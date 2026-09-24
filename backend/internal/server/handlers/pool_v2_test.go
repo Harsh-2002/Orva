@@ -89,3 +89,30 @@ func TestPoolConfigScaleContract(t *testing.T) {
 		t.Fatalf("active min zero status=%d", w.Code)
 	}
 }
+
+func TestPoolConfigAutoMaxAndResourceBoundOverride(t *testing.T) {
+	h, fn := poolV2Handler(t)
+	w := putPoolConfig(t, h, map[string]any{"function_id": fn.ID, "min_warm": 1})
+	if w.Code != http.StatusOK {
+		t.Fatalf("auto default: %d %s", w.Code, w.Body.String())
+	}
+	var cfg database.PoolConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxWarm != 0 {
+		t.Fatalf("default max_warm=%d, want automatic 0", cfg.MaxWarm)
+	}
+	w = putPoolConfig(t, h, map[string]any{"function_id": fn.ID, "max_warm": 1_000_000})
+	if w.Code != http.StatusOK {
+		t.Fatalf("resource-bound override: %d %s", w.Code, w.Body.String())
+	}
+	w = putPoolConfig(t, h, map[string]any{"function_id": fn.ID, "max_warm": 0})
+	if w.Code != http.StatusOK {
+		t.Fatalf("return to automatic: %d %s", w.Code, w.Body.String())
+	}
+	w = putPoolConfig(t, h, map[string]any{"function_id": fn.ID, "max_warm": -1})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("negative max_warm accepted: %d %s", w.Code, w.Body.String())
+	}
+}

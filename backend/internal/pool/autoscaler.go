@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
 const (
@@ -18,14 +20,6 @@ const (
 	scaleDownStep              = 0.20
 	scaleDownGrace             = 30 * time.Second
 	maxConcurrentSpawnsPerPool = 4
-
-	// MaxWarmLimit bounds the per-pool idle-channel allocation. max_warm is
-	// operator-supplied and the channel is now sized from it directly, so an
-	// absurd value would allocate an absurd channel. It clamps p.max too, or
-	// cap(p.idle) >= p.max breaks and the spawn/kill churn returns. The REST
-	// and MCP pool-config writers reject anything above it so operators get a
-	// 400 rather than a silent clamp.
-	MaxWarmLimit = 1024
 )
 
 // scaler is the global admission scheduler. It evaluates pools in a rotating
@@ -180,13 +174,41 @@ func (s *scaler) evaluate(p *functionPool, now time.Time) {
 
 // computeDesiredAt implements the controller's documented signals. Workers
 // are single-request processes, so Little's Law gives required concurrency as
-// arrival-rate × wall time. Dividing by 70% leaves deliberate burst headroom.
+// arrival-rate × service time. Dividing by 70% leaves burst headroom. Cold
+// start is not per-request service time: multiplying arrivals by a
+// multi-second spawn p95 fills idle pools to their hard maxima even when
+// a warm worker can serve the entire rate. Burst demand uses warm service
+// time. A bounded number of speculative starts can cover a rising rate;
+// actual busy/queued pressure can request more up to the resource ceiling.
 func (s *scaler) computeDesiredAt(p *functionPool, now time.Time) (int, string) {
 	d := p.snapshotDemand(now)
 	serviceSeconds := d.ServiceP95.Seconds()
-	spawnSeconds := d.SpawnP95.Seconds()
 	stable := int(math.Ceil(d.StableRate * serviceSeconds / utilFactor))
-	burst := int(math.Ceil(d.BurstRate * (serviceSeconds + spawnSeconds) / utilFactor))
+	// A hot pool whose workers will cross maxUses inside the stable window
+	// needs a replacement already warm. Otherwise its last worker retires and
+	// the next request waits for a cold sandbox. Size that spare from the
+	// expected number of retirements during one measured spawn, not from all
+	// arriving requests. Low-rate functions retain their configured minimum.
+	rotationSpare := 0
+	if p.maxUses > 0 && d.StableRate*stableWindow.Seconds() >= float64(p.maxUses) &&
+		!d.LastArrival.IsZero() && now.Sub(d.LastArrival) <= panicWindow {
+		rotationSpare = int(math.Ceil(d.StableRate * d.SpawnP95.Seconds() / float64(p.maxUses)))
+		if rotationSpare < 1 {
+			rotationSpare = 1
+		}
+		stable += rotationSpare
+	}
+	// A short arrival-rate fluctuation is not proof that every arrival needs
+	// its own cold worker. Speculate at most one wave of the existing four
+	// per-pool spawn slots plus replacement spares. Real queue pressure below
+	// may request additional workers without this speculative cap.
+	predictiveCap := maxConcurrentSpawnsPerPool + rotationSpare
+	predictiveFloat := math.Ceil(math.Max(0, d.BurstRate-d.StableRate) * d.SpawnP95.Seconds() / utilFactor)
+	predictive := predictiveCap
+	if predictiveFloat < float64(predictiveCap) {
+		predictive = int(predictiveFloat)
+	}
+	burst := int(math.Ceil(d.BurstRate*serviceSeconds/utilFactor)) + predictive
 	pressure := int(math.Ceil(float64(p.busy.Load()+p.queued.Load()) / utilFactor))
 
 	desired := stable
@@ -196,6 +218,10 @@ func (s *scaler) computeDesiredAt(p *functionPool, now time.Time) (int, string) 
 	}
 	if pressure > desired {
 		desired, reason = pressure, "immediate_pressure"
+	}
+	if replacements := p.nearExpiryWorkers(d, now); replacements > 0 {
+		desired += replacements
+		reason = "worker_rotation"
 	}
 	minWarm := p.min
 	if !p.scaleToZero && minWarm < 1 {
@@ -214,7 +240,7 @@ func (s *scaler) computeDesiredAt(p *functionPool, now time.Time) (int, string) 
 		}
 	}
 
-	cap, capReason := s.dynamicMax(p, d.MemoryP95)
+	cap, capReason := s.dynamicMax(p)
 	p.dynamicMax.Store(int64(cap))
 	if desired > cap {
 		desired, reason = cap, capReason
@@ -225,11 +251,52 @@ func (s *scaler) computeDesiredAt(p *functionPool, now time.Time) (int, string) 
 	return desired, reason
 }
 
+// nearExpiryWorkers starts replacements before a group of equally aged warm
+// workers reaches maxUses together. Keeping only one aggregate rotation spare
+// is insufficient when a small pool's workers were started in the same wave:
+// all of them can retire during one sandbox-start interval. Count only live
+// workers already within a conservative, rate-aware lead window. These are
+// temporary reservations, still subject to the normal resource ceiling.
+func (p *functionPool) nearExpiryWorkers(d demandSnapshot, now time.Time) int {
+	if p.maxUses < 10 || d.LastArrival.IsZero() || now.Sub(d.LastArrival) > panicWindow ||
+		math.Max(d.StableRate, d.BurstRate)*stableWindow.Seconds() < float64(p.maxUses) {
+		return 0
+	}
+	workers := int(p.busy.Load()) + len(p.idle)
+	if workers < 1 {
+		return 0
+	}
+	perWorkerRate := math.Max(d.StableRate, d.BurstRate) / float64(workers)
+	lead := int64(math.Ceil(perWorkerRate * (d.SpawnP95.Seconds() + scalerTick.Seconds()) * 2))
+	if floor := p.maxUses / 5; lead < floor {
+		lead = floor
+	}
+	if cap := p.maxUses / 2; lead > cap {
+		lead = cap
+	}
+	if lead < 1 {
+		lead = 1
+	}
+	threshold := p.maxUses - lead
+	count := 0
+	p.workerReservations.Range(func(key, _ any) bool {
+		w, ok := key.(*sandbox.Worker)
+		if ok && !w.IsDead() {
+			served := w.Served.Load()
+			if served >= threshold && served < p.maxUses {
+				count++
+			}
+		}
+		return true
+	})
+	return count
+}
+
 func (s *scaler) computeDesired(p *functionPool) (int, string) {
 	return s.computeDesiredAt(p, time.Now())
 }
 
-func (s *scaler) dynamicMax(p *functionPool, observedMemoryP95 int64) (int, string) {
+func (s *scaler) dynamicMax(p *functionPool) (int, string) {
 	opCap := p.max
 	if opCap < 1 {
 		opCap = 1
@@ -243,17 +310,17 @@ func (s *scaler) dynamicMax(p *functionPool, observedMemoryP95 int64) (int, stri
 	if cpuCap < 1 {
 		cpuCap = 1
 	}
-	effectiveCap, reason := opCap, "operator_max"
+	effectiveCap, reason := opCap, p.maxReason
+	if reason == "" {
+		reason = "operator_max"
+	}
 	if p.concSem != nil && cap(p.concSem) < effectiveCap {
 		effectiveCap, reason = cap(p.concSem), "function_concurrency"
 	}
 	if cpuCap < effectiveCap {
 		effectiveCap, reason = cpuCap, "cpu_capacity"
 	}
-	workerBytes := p.memoryBytes
-	if observedMemoryP95 > 0 && observedMemoryP95 < workerBytes {
-		workerBytes = observedMemoryP95
-	}
+	workerBytes := p.admissionBytes()
 	if workerBytes > 0 {
 		fit := int((s.hostMem.availableForWorkers() + current*workerBytes) / workerBytes)
 		if fit < effectiveCap {

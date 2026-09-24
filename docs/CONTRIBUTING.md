@@ -215,6 +215,6 @@ The dashboard, error messages, and docs share a tone:
   previously-deployed iteration."
 - **Honest.** "Active development. Not for production yet." not
   "Enterprise-ready serverless platform."
-- **Specific.** "p50 ~500ms at c=500 on 2 CPUs" not "blazing fast."
+- **Specific.** "In this documented 2-CPU test, p99 was 30 ms at 200 offered requests/s" not "blazing fast."
 
 The README and About description set the tone; new copy should match.

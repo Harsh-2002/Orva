@@ -33,7 +33,7 @@ names that stopped doing anything are deleted rather than deprecated.
 | `ORVA_PPROF_ADDR` | (unset; direct runtime input) | When set (e.g. `127.0.0.1:6060`), starts a Go `net/http/pprof` debug listener on that address. Bind to loopback only — it exposes goroutine/heap profiles. Off by default. |
 | `ORVA_IMAGE` | (image-stamped; direct runtime input) | The image reference this instance runs from, echoed at `GET /api/v1/system/health` and in Settings → Build info. The published image stamps it; set it yourself only for a mirrored or re-tagged copy. A bare-metal install leaves it unset and reports no image. |
 | `ORVA_DISABLE_USERNS` | installer-selected; `0` in Docker (direct runtime input) | `0` keeps nsjail's preferred user namespace; `1` uses its file-capability fallback when the host blocks user-namespace setup. The bare-metal installer execution-tests the selected mode as the `orva` service user. Set only `0` or `1`: an explicit choice is verified and fails installation if it cannot run. |
-| `ORVA_CGROUPV2_MOUNT` | (auto-detected; direct runtime input) | Delegated cgroup v2 subtree used for per-sandbox CPU, memory, and process limits. The Docker entrypoint creates and exports it when delegation succeeds; override only when the service manager delegates a different subtree. If unset and no writable delegated subtree is found, Orva reports the `rlimit_only` fallback in system health. |
+| `ORVA_CGROUPV2_MOUNT` | (auto-detected; direct runtime input) | Explicit worker cgroup v2 subtree for per-sandbox CPU, memory, and process limits. Normally leave unset: Orva creates `orva.daemon` and `orva.workers` inside its own delegated service/container cgroup and verifies the child limit files. The override must be an absolute, already delegated and writable **child of Orva's own cgroup**; old host-root overrides are rejected. Orva never searches writable ancestors. If no safe subtree is available, health reports `rlimit_only`. |
 | `ORVA_INTERNAL_API_BASE` | (auto-detected; direct runtime input) | The base URL sandboxed functions use to reach Orva's own internal SDK endpoints (KV, jobs, function-to-function). Orva selects a non-loopback IPv4 **assigned to its own default-route interface**, or another local interface if there is no default route. It never selects a gateway or accepts a different server's health response as proof of identity. From inside a sandbox `127.0.0.1` is the sandbox's own loopback. Set this explicitly as `http://host:port` only when the chosen local address cannot be reached from sandboxes (unusual network setups). The compiled egress policy allows exactly this address and port so private-range blocks do not cut off the SDK. |
 
 ---
@@ -105,7 +105,7 @@ Edited via `PUT /api/v1/pool/config` — no restart needed.
 | field | default | what |
 |-------|---------|------|
 | `min_warm` | 1 | Idle workers floor — pool never shrinks below this |
-| `max_warm` | 50 | Hard ceiling on warm pool size |
+| `max_warm` | 0 (automatic) | Optional warm-pool ceiling. `0` derives the maximum from host CPU/memory and function concurrency; a positive value can only lower it. |
 | `idle_ttl_seconds` | 600 | No-demand interval before an opted-in pool scales to zero |
 | `scale_to_zero` | `false` | `true` = pool can drain to 0 (cold-start on next request) |
 
@@ -118,6 +118,11 @@ with migration guidance.
 Admission is global across functions: the host CPU quota supplies eight
 I/O-overlap worker slots per CPU, weighted by each function's declared `cpus`,
 and memory uses cgroup v2 headroom plus per-worker reservations.
+The fixed idle-worker channel is bounded by the maximum workers the host
+could admit at the 16-MiB minimum reservation, so an enormous configured
+`max_warm` cannot allocate an enormous channel. Existing positive pool
+overrides are preserved on upgrade; set `max_warm` to `0` to return one to
+automatic capacity.
 
 `scale_to_zero=true` owns `min_warm=0`. Turning it off restores a minimum of
 at least one. Sending both fields with an incompatible pair is rejected.

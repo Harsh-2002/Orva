@@ -34,7 +34,7 @@ func TestControllerV2CPUCapacityIsGlobalAndFunctionWeighted(t *testing.T) {
 	p.cpuUnits = 500
 	p.max = 50
 	s := newScaler(&Manager{hostMem: hm}, hm)
-	if got, reason := s.dynamicMax(p, 0); got != 2 || reason != "cpu_capacity" {
+	if got, reason := s.dynamicMax(p); got != 2 || reason != "cpu_capacity" {
 		t.Fatalf("weighted global CPU cap=%d/%s, want 2/cpu_capacity", got, reason)
 	}
 }
@@ -43,7 +43,7 @@ func TestControllerV2RespectsFunctionConcurrency(t *testing.T) {
 	p, hm := controllerTestPool()
 	p.concSem = make(chan struct{}, 3)
 	s := newScaler(&Manager{hostMem: hm}, hm)
-	if got, reason := s.dynamicMax(p, 0); got != 3 || reason != "function_concurrency" {
+	if got, reason := s.dynamicMax(p); got != 3 || reason != "function_concurrency" {
 		t.Fatalf("function concurrency cap=%d/%s, want 3/function_concurrency", got, reason)
 	}
 }
@@ -78,6 +78,121 @@ func TestControllerV2DemandFormula(t *testing.T) {
 	}
 }
 
+func TestControllerV2ColdStartDoesNotReserveOneWorkerPerArrival(t *testing.T) {
+	p, hm := controllerTestPool()
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 59; second >= 0; second-- {
+		for range 100 {
+			p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+		}
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(6 * time.Second)
+	p.maxUses = 1000
+	if desired, reason := s.computeDesiredAt(p, now); desired != 2 || reason != "stable_rate" {
+		t.Fatalf("steady 100/s with 2ms service and 6s spawn reserved %d workers (%s), want one plus rotation spare", desired, reason)
+	}
+	p.queued.Store(20)
+	if desired, reason := s.computeDesiredAt(p, now); desired != 29 || reason != "immediate_pressure" {
+		t.Fatalf("queued demand requested %d workers (%s), want 29/immediate_pressure", desired, reason)
+	}
+	p.queued.Store(0)
+	p.recordLatency(20 * time.Millisecond)
+	for range 500 {
+		p.recordArrival(now)
+	}
+	if desired, reason := s.computeDesiredAt(p, now); desired <= 2 || reason != "burst_rate" {
+		t.Fatalf("rising service demand requested %d workers (%s), want burst headroom", desired, reason)
+	}
+	idleDesired, idleReason := s.computeDesiredAt(p, now.Add(7*time.Second))
+	p.maxUses = 0
+	withoutRotation, _ := s.computeDesiredAt(p, now.Add(7*time.Second))
+	if idleDesired != withoutRotation || idleReason != "stable_rate" {
+		t.Fatalf("idle pool retained %d workers (%s) after rotation horizon; no-rotation demand=%d", idleDesired, idleReason, withoutRotation)
+	}
+}
+
+func TestControllerV2RotationSpareRequiresActiveFrequentTurnover(t *testing.T) {
+	p, hm := controllerTestPool()
+	p.maxUses = 1000
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 0; second < 60; second++ {
+		p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(6 * time.Second)
+	if desired, _ := s.computeDesiredAt(p, now); desired != 1 {
+		t.Fatalf("low-rate function reserved %d workers, want configured minimum only", desired)
+	}
+	if desired, _ := s.computeDesiredAt(p, now.Add(7*time.Second)); desired != 1 {
+		t.Fatalf("inactive function retained %d rotation workers", desired)
+	}
+}
+
+func TestControllerV2ShortRateFluctuationDoesNotMultiplyColdStart(t *testing.T) {
+	p, hm := controllerTestPool()
+	p.maxUses = 1000
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 59; second >= 0; second-- {
+		for range 100 {
+			p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+		}
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(6 * time.Second)
+	for range 100 {
+		p.recordArrival(now)
+	}
+	if desired, reason := s.computeDesiredAt(p, now); desired != 6 || reason != "burst_rate" {
+		t.Fatalf("one-second scheduling fluctuation requested %d workers (%s), want one bounded spawn wave plus rotation spare", desired, reason)
+	}
+}
+
+func TestControllerV2PrewarmsSynchronizedWorkerRotation(t *testing.T) {
+	p, hm := controllerTestPool()
+	p.maxUses = 1000
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	now := time.Now()
+	for second := 59; second >= 0; second-- {
+		for range 100 {
+			p.recordArrival(now.Add(-time.Duration(second) * time.Second))
+		}
+	}
+	p.recordLatency(2 * time.Millisecond)
+	p.recordSpawn(2500 * time.Millisecond)
+	workers := make([]*sandbox.Worker, 5)
+	for i := range workers {
+		workers[i] = &sandbox.Worker{}
+		workers[i].Served.Store(799)
+		p.idle <- workers[i]
+		p.workerReservations.Store(workers[i], workerReservation{})
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now), now); got != 0 {
+		t.Fatalf("workers below the lead window requested %d replacements", got)
+	}
+	for _, w := range workers {
+		w.Served.Store(800)
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now), now); got != 5 {
+		t.Fatalf("synchronized near-expiry workers requested %d replacements, want 5", got)
+	}
+	if desired, reason := s.computeDesiredAt(p, now); desired != 7 || reason != "worker_rotation" {
+		t.Fatalf("rotation target=%d/%s, want 7/worker_rotation", desired, reason)
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now.Add(7*time.Second)), now.Add(7*time.Second)); got != 0 {
+		t.Fatalf("inactive pool requested %d replacements", got)
+	}
+	for _, w := range workers {
+		w.Served.Store(1000)
+	}
+	if got := p.nearExpiryWorkers(p.snapshotDemand(now), now); got != 0 {
+		t.Fatalf("already-expired workers requested %d replacements", got)
+	}
+}
+
 func TestControllerV2ScaleToZeroHonorsIdleTTL(t *testing.T) {
 	p, hm := controllerTestPool()
 	p.min = 0
@@ -94,16 +209,23 @@ func TestControllerV2ScaleToZeroHonorsIdleTTL(t *testing.T) {
 	}
 }
 
-func TestAdmissionUsesDeclaredLimitUntilMemoryP95Exists(t *testing.T) {
+func TestAdmissionReservesSimultaneousHardMemoryGrowth(t *testing.T) {
+	hm := &hostMemTracker{totalBytes: 1 << 30, reservationPct: 0.8, cpuWorkers: 128}
+	hm.availBytes.Store(1 << 30)
 	p, _ := controllerTestPool()
-	if got := p.admissionBytes(); got != p.memoryBytes {
-		t.Fatalf("unobserved admission=%d, want declared limit %d", got, p.memoryBytes)
+	p.hostMem = hm
+	p.memoryBytes = 192 << 20 // memory.max for a 128-MiB function
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	if got, reason := s.dynamicMax(p); got != 4 || reason != "memory_capacity" {
+		t.Fatalf("hard-bound ceiling=%d/%s, want 4/memory_capacity", got, reason)
 	}
-	p.sigMu.Lock()
-	p.memSamples = []int64{24 << 20, 32 << 20, 40 << 20}
-	p.sigMu.Unlock()
-	if got := p.admissionBytes(); got != 40<<20 {
-		t.Fatalf("observed admission=%d, want p95 40 MiB", got)
+	for i := 0; i < 4; i++ {
+		if !hm.reserve(p.admissionBytes(), p.cpuUnits) {
+			t.Fatalf("hard-bound reservation %d unexpectedly failed", i+1)
+		}
+	}
+	if hm.reserve(p.admissionBytes(), p.cpuUnits) {
+		t.Fatal("fifth worker could grow to memory.max beyond the 80% host budget")
 	}
 }
 

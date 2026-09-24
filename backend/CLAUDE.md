@@ -41,6 +41,43 @@ CPU quota, plus the effective CPU set, for its startup capacity snapshot; a
 1-second poll refreshes memory usage. This is resource discovery, not proof of
 delegated per-worker cgroup enforcement. `proxy.Forward` does not consume a
 seccomp policy; the worker's actual policy is built at spawn in `pool/pool.go`.
+`sandbox.cgroupv2Delegate` separately creates `orva.daemon` and `orva.workers`
+inside the process's own delegated cgroup, never a writable ancestor. It moves
+only the daemon into its leaf before enabling domain controllers, and verifies
+child `memory.max`, `pids.max` and `cpu.max`; an unavailable delegate yields
+`rlimit_only`, not a false hard-limit claim.
+No pool override means an automatic maximum from CPU slots, the full
+per-worker `memory.max` budget (with a 16-MiB floor), and function concurrency. `max_warm=0` restores
+that mode; a positive value only lowers the resource ceiling. The idle channel
+is sized to this derived bound so `cap(idle) >= p.max >= dynamicMax` still
+holds without a universal worker count cap. Live spawn reservation remains
+the fail-closed memory/CPU gate. A recent low `memory.current` sample cannot
+discount the reservation: all workers may grow to their hard bounds at once.
+Startup baseline warmup reads only a bounded recent execution window per
+function through `idx_executions_function`; do not restore a whole-table
+`ROW_NUMBER` rank, which delays the HTTP listener as history grows.
+Successful-execution history uses a bounded newest-window probe when there is
+no date/search filter or offset; a few recent failures no longer force the
+status-index sort. Sparse successes fall back after at most four page widths
+rather than scanning old history through `idx_executions_started`. Do not force
+that index for all statuses: a 1.47-million-row scratch database had only 19 error rows, and a
+forced oldest-reaching scan took 66.5 seconds.
+Locally generated trace IDs keep the W3C-compatible 32-hex shape, with a
+48-bit millisecond prefix and 80 cryptographically random trailing bits. This
+clusters new trace-index writes without changing incoming W3C IDs or reducing
+the randomness of the rightmost seven bytes. Do not use trace IDs as secrets.
+The pool controller's steady/burst targets use measured service time, not
+cold-start time multiplied by every arrival. That multiplication fills idle
+pools to their resource caps and can starve another function. A bounded
+speculative burst is limited to one wave of the existing per-pool spawn slots
+plus rotation spares; current queue pressure can still request more workers
+up to the resource ceiling. A hot pool expected to hit its max-use limit
+inside the stable window keeps a bounded rotation spare derived from measured
+spawn time. The controller also counts live workers within a rate-aware
+max-use lead window and temporarily requests warm replacements before a
+same-generation cohort retires together; those reservations remain under the
+normal host ceiling. This controller variant is still being qualified on
+mixed-runtime long-soak and cross-pool fairness workloads.
 `proxy.Proxy` caches the non-security streaming settings for at most 30 seconds
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.
@@ -55,11 +92,19 @@ actively demanded pool: both cause repeated nsjail/adapter cold starts under
 mixed load.
 
 The pool's demand history uses sixty one-second arrival buckets instead of a
-timestamp per request; controller wakeups coalesce within 20 ms. Neither is an
-execution-concurrency cap. The async SQLite writer prepares each distinct SQL
-statement once per batch; HTTP execution baseline/outlier fields are included
+timestamp per request. Service, queue-wait and spawn durations use bounded
+overwrite rings; a full ring records without allocation, and percentile sorting
+uses a snapshot outside the signal lock. Controller wakeups coalesce within
+20 ms. None of these is an execution-concurrency cap. The async SQLite writer
+prepares each distinct SQL statement once per batch; HTTP execution
+baseline/outlier fields are included
 in the execution INSERT instead of a second UPDATE. It has separate bounded
 critical execution, operator activity, and optional replay/log/span lanes.
+Per-priority cumulative writer timing counters expose connection acquisition,
+SQL execution, commit, and submit-to-commit latency for the normal batch path;
+the savepoint failure-recovery path is intentionally excluded from committed
+job and queue-wait samples. Use deltas over the same scrape interval when
+diagnosing saturation, because cumulative values mix idle and busy periods.
 The consumer prioritizes critical rows when their queue reaches three
 quarters of its capacity; activity is then deferred and optional telemetry
 is read only when both higher-priority channels are empty. Activity remains non-blocking

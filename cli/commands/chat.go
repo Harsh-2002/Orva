@@ -45,6 +45,10 @@ Providers, API keys, the default model, and the approval policy are configured
 in the web UI under Settings → AI. The CLI uses the saved selection; override
 just for this session with --provider/--model/--thinking.
 
+Chat is an operator surface and requires an API key with read,write,invoke,admin
+permissions. The dashboard uses your admin web session; that session is not
+shared with the CLI.
+
 Examples:
   orva chat                          # interactive REPL
   orva chat -p "list my functions"   # one-shot, prints to stdout
@@ -249,7 +253,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 func (s *chatSession) ensureProvider() error {
 	provs, err := s.fetchProviders()
 	if err != nil {
-		return fmt.Errorf("load AI providers: %w", err)
+		return fmt.Errorf("load AI providers: %w", s.aiAccessError(err))
 	}
 	usable := 0
 	for _, p := range provs {
@@ -472,7 +476,15 @@ func (s *chatSession) classify(err error) error {
 		fmt.Fprintln(s.errOut, s.styles.Muted.Render("\n(interrupted)"))
 		return err
 	}
-	return err
+	return s.aiAccessError(err)
+}
+
+func (s *chatSession) aiAccessError(err error) error {
+	var statusErr *httpStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusForbidden {
+		return err
+	}
+	return errors.New("AI chat requires an admin API key. This key is valid, but it cannot access the AI operator surface. The dashboard uses your admin web session; that session is not available to the CLI. In Dashboard → API keys, create a separate terminal key with read,write,invoke,admin selected (or ask an administrator), then save it without exposing it in shell history: `printf %s \"$ORVA_KEY\" | orva login --endpoint <URL> --api-key - --test`")
 }
 
 func (s *chatSession) postChat(ctx context.Context, content string) (*http.Response, error) {
@@ -900,7 +912,7 @@ func (s *chatSession) fetchSettings() (*aiSettings, error) {
 		return nil, err
 	}
 	if err := checkResponse(resp); err != nil {
-		return nil, err
+		return nil, s.aiAccessError(err)
 	}
 	var out struct {
 		Settings aiSettings `json:"settings"`
@@ -917,7 +929,7 @@ func (s *chatSession) fetchProviders() ([]providerView, error) {
 		return nil, err
 	}
 	if err := checkResponse(resp); err != nil {
-		return nil, err
+		return nil, s.aiAccessError(err)
 	}
 	var out struct {
 		Providers []providerView `json:"providers"`
@@ -934,7 +946,7 @@ func (s *chatSession) fetchModels(providerID string) ([]modelInfo, string, error
 		return nil, "", err
 	}
 	if err := checkResponse(resp); err != nil {
-		return nil, "", err
+		return nil, "", s.aiAccessError(err)
 	}
 	var out struct {
 		Models []modelInfo `json:"models"`
@@ -965,5 +977,5 @@ func (s *chatSession) putSelection(providerID, provider, model, thinking string)
 		return err
 	}
 	defer resp.Body.Close()
-	return checkResponse(resp)
+	return s.aiAccessError(checkResponse(resp))
 }

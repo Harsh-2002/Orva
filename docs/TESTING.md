@@ -25,6 +25,19 @@ orders of magnitude, not SLAs.
 
 For invocation-concurrency changes, use a disposable instance and run
 `python3 test/performance/invocation_admission.py --scratch --url <scratch-url> --api-key <key> --extended`.
+For cgroup enforcement, run `python3 test/performance/cgroup_hard_limit.py --scratch
+--endpoint http://127.0.0.1:8443 --key-file /var/lib/orva/.admin-key
+--worker-cgroup /sys/fs/cgroup/<service-group>/orva.workers` **only in a
+disposable delegated Linux VM or container**. It deploys and deletes its own
+Node/Python functions: a Node allocation must OOM-kill a worker; a CPU-bound
+Node handler must increment its own jailed child's `cpu.stat:nr_throttled`;
+and Python clone attempts must increment that child's `pids.events:max`.
+The Python PID probe includes x86_64 and aarch64 Linux syscall numbers, but
+the aarch64 path has not been executed locally. HTTP failure alone is
+not proof of a hard cap. Health must report `cgroup_v2` first, and the path
+must match the tested instance's actual worker subtree. `cpu.stat` and
+`pids.events` must be read from the jailed child, not `orva.workers`: the
+parent's counters did not aggregate these child-specific events in the test.
 The harness also accepts `ORVA_API_KEY` so a scratch key need not appear in
 the load generator's process arguments.
 The external-instance E2E runner (`test/e2e/run.py --url`) accepts the same
@@ -45,7 +58,8 @@ For execution-writer changes, `go test ./backend/internal/database -run '^$'
 compares 200-row per-statement and grouped-INSERT commits on the same host.
 It isolates SQLite work from HTTP and sandboxes; it cannot establish
 end-to-end capacity by itself.
-It refuses to run without the explicit `--scratch` confirmation. On a smolvm
+The invocation-admission harness refuses to run without the explicit
+`--scratch` confirmation. On a smolvm
 guest, copy the runtime rootfs trees onto guest-local disk before measuring:
 importing Python through a shared host mount can dominate latency and create
 false timeouts. When pairing a newly built server binary with an existing
@@ -57,6 +71,36 @@ mismatch, not a valid throughput result. The normal bare-metal installer runs
 `orva setup` to refresh these files on upgrade, and the Docker entrypoint
 refreshes them on startup. See [CAPACITY.md](CAPACITY.md) for the earlier measured
 2-vCPU/4-GiB run and that guest's undelegated cgroups.
+
+For a read/write index hypothesis on a large existing dataset, use
+`python3 test/performance/sqlite_index_ab.py --scratch --db <scratch-db>
+--workdir <guest-local-disk-dir> --drop-index <execution-index>` **only in a
+disposable VM**. For Orva's actual writer/driver, first build
+`go test -c -o build/orva-db-probe ./backend/internal/database`, copy that
+binary into the guest, and add `--driver-test-binary <guest-probe-path>`.
+The harness backs up the source read-only into two temporary copies, changes
+only the candidate copy, and reports read plans plus alternating 200-row
+commit timings, physical disk-I/O deltas, and exact row reconciliation.
+`--identical-control` compares unchanged copies; repeat with
+`--reverse-copy-order` before interpreting any candidate result. A short
+copy-based probe can be dominated by which file was copied last: on the
+1.47-million-row scratch VM, an identical-copy control flipped from 581/41
+ms to 39/721 ms per batch when copy order reversed. The work directory needs
+free space for two full database copies plus WAL headroom; `/tmp` may be a
+smaller tmpfs. Add `--evict-copy-cache` with the Go-driver probe to request
+file-scoped Linux `POSIX_FADV_DONTNEED` on both disposable copies before the
+write probe; it never drops the host-wide page cache. Read-query profiling
+runs afterward so a full-table scan cannot prewarm only one write sample.
+The advice is not a guarantee of equal residency, so identical controls in
+both copy orders and physical-read deltas remain required. Neither a
+Python-driver microbenchmark nor this Go probe
+proves sustained Orva HTTP capacity or authorizes a production migration.
+For the no-schema trace-locality hypothesis, use `--candidate-ordered-trace`
+with the Go probe and `--skip-read-profile`; the latter is refused when an
+index is changed. Both modes remain scratch-only and still require unchanged
+controls plus a real direct-VM HTTP A/B before any capacity claim.
+`test/e2e/unit/test_sqlite_index_ab.py` checks scratch refusal, source
+immutability, copy cleanup, cache-advice safety, and control/reverse modes.
 
 An external load generator should be preferred for throughput numbers, but
 validate its path independently. In the 2026-09-23 scratch VM check, the
@@ -72,7 +116,7 @@ retries deletion of every function it created if transport fails; inspect
 `admission-test-*` names before deleting anything manually after an
 interrupted run.
 
-For repeatable direct-VM traffic, build `go build -o build/orva-loadgen
+For repeatable direct-VM traffic, build `CGO_ENABLED=0 go build -o build/orva-loadgen
 ./test/performance/loadgen` and mount the resulting binary into a separate
 client VM on the server VM's private network. Supply **scratch function URLs**
 with repeatable `-url` flags; this tool does not deploy, mutate, or delete
@@ -81,9 +125,11 @@ deployed functions:
 
 ```bash
 build/orva-loadgen -url http://<vm-ip>:8443/fn/<node-id> \
-  -url http://<vm-ip>:8443/fn/<python-id> -requests 50000 -concurrency 1000
+  -url http://<vm-ip>:8443/fn/<python-id> -requests 50000 -concurrency 1000 \
+  -observe-url http://<vm-ip>:8443 -require-cgroup-v2
 build/orva-loadgen -url http://<vm-ip>:8443/fn/<python-id> \
-  -requests 50000 -concurrency 1000 -rate 1200
+  -requests 50000 -concurrency 1000 -rate 1200 \
+  -observe-url http://<vm-ip>:8443 -require-cgroup-v2
 ```
 
 The first run is closed-loop: slow replies lower the offered arrival rate.
@@ -91,11 +137,27 @@ The first run is closed-loop: slow replies lower the offered arrival rate.
 client queue cannot keep up, so an overloaded load generator cannot masquerade
 as a healthy server. JSON separates HTTP status counts, transport errors and
 Orva error codes, plus latency percentiles by response code and by function
-URL. Exit code 1 means
-client transport errors or unsent arrivals; non-200 HTTP responses still need
-interpretation from the JSON. Capture writer counters before and after each
-phase and verify the client VM is not CPU/network saturated. The binary's URL
-list is not an authorization to test production.
+URL. `-observe-url` must have the same origin as the function URLs; it adds
+sampled queue/byte peaks, sandbox limit mode, writer counter deltas, and time
+to drain all in-flight writer bytes after the client phase. The report also
+includes batch-attempt deltas by lane and the critical lane's submit-to-commit
+time and sample count. Batch attempts include retries, so
+`critical_committed_jobs / critical_batch_attempts` is a diagnostic ratio,
+not necessarily the exact mean successful batch size. Queue-wait seconds
+divided by samples is a mean for committed jobs, not a tail percentile. The
+default drain budget is 45 seconds (`-drain-timeout`). Missing metrics, a counter reset,
+an observation failure, or a drain timeout fails the phase instead of
+silently reporting zero loss. `-require-cgroup-v2` rejects an unenforced
+scratch sandbox **before** sending load. Exit code 1 means a post-start
+observation failure, client transport errors, or unsent arrivals; code 2
+means validation or preflight failure. Non-200 HTTP responses still need
+interpretation from the JSON. Committed-job counts can include non-execution
+writes: reconcile accepted responses with read-only execution-row counts
+separately. Verify the client VM is not CPU/network saturated. Keep the
+foreground server's request-log output drained or disconnect it from the
+test command's pipe; a closed stdout pipe can terminate the daemon with
+SIGPIPE and invalidate the phase. The binary's URL list is not an
+authorization to test production.
 
 Do not give a 4-GiB server guest nearly all free host memory just because its
 nominal limit fits: a 3,000-client scratch run on a 7.8-GiB/no-swap host
@@ -1895,16 +1957,24 @@ assertion written against `.code` gets `null`; the path is `.error.code`.
 | 8 MB request body | **413** `PAYLOAD_TOO_LARGE` (the JSON cap is 6 MB) |
 | ~7 MB `deploy-inline` | **not** 413 — the deploy reader is deliberately exempt from the JSON cap (`test_security.py` M4) |
 | pool saturated under contention | `POOL_AT_CAPACITY` |
-| exceed `memory_mb` | **`[UNVERIFIED]`** — see below |
+| exceed `memory_mb` | **502** `WORKER_CRASHED` in the 2026-09-24 delegated smolvm test; the worker subtree's `oom_kill` counter increased |
 
 **`memory_mb` and `cpus` are not enforced on a bare-metal host without cgroup
-delegation.** Confirmed two ways on the survey host: the server logs
-`cgroup v2 controllers not delegated; per-sandbox memory/pid/cpu caps disabled
-(rlimit-only fallback)`, and no `--cgroup_mem_max` appears in the nsjail argv.
-An allocation loop hit the 504 timeout instead of OOMing. OOM and CPU-throttle
-tests are only meaningful in the Docker image (which bind-mounts
-`/sys/fs/cgroup`) or on a host where systemd genuinely delegates the
-controllers — the unit had `Delegate=yes` and it still was not delegated.
+delegation.** On the earlier survey host, the server reported `rlimit_only`,
+no `--cgroup_mem_max` appeared in nsjail's argv, and an allocation loop hit a
+504 timeout instead of OOMing. A later 2-vCPU/4-GiB smolvm test created a
+scoped delegated cgroup for Orva: actual child `memory.max`, `pids.max` and
+`cpu.max` files existed, and the scratch OOM probe above observed `oom_kill`
+increase for both root and unprivileged daemon launches. The unprivileged
+guest needed the installer's supported user-namespace capability fallback;
+without it nsjail failed at `/proc/<pid>/setgroups` *before* starting a worker.
+The expanded probe later passed on the same guest and on a disposable Docker
+container: CPU `nr_throttled` and PID `max` counters increased while handlers
+returned HTTP 200. The PID case uses clone without exec or pipes; Node child
+processes hit nsjail's default 32-open-file rlimit first (`EMFILE`), and an
+exec attempt returned `ENOENT`, neither of which proves `pids.max`.
+This manual guest proof does not replace the native systemd service check,
+arm64 execution of the PID probe, or comparative throughput qualification.
 
 ### 5.3 Auth and authorization
 

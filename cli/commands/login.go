@@ -18,8 +18,8 @@ var loginCmd = &cobra.Command{
 commands. Pass --test to verify the credentials against the server before
 they are written to disk.
 
-  orva login --endpoint https://orva.example.com --api-key orva_...
-  orva login --endpoint https://orva.example.com --api-key orva_... --test`,
+  printf %s "$ORVA_KEY" | orva login --endpoint https://orva.example.com --api-key -
+  printf %s "$ORVA_KEY" | orva login --endpoint https://orva.example.com --api-key - --test`,
 	Args: cobra.NoArgs,
 	RunE: runLogin,
 }

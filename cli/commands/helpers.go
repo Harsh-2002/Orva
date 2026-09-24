@@ -11,6 +11,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type httpStatusError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *httpStatusError) Error() string { return e.Message }
+
 // getClient creates an API client using flags or config.
 func getClient(cmd *cobra.Command) (*cli.Client, error) {
 	cfg, err := cli.LoadCLIConfig()
@@ -47,9 +54,15 @@ func checkResponse(resp *http.Response) error {
 	// instead of a bare "API error (401)".
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("not authenticated (HTTP 401) — run `orva login`, or pass --endpoint/--api-key (or set ORVA_ENDPOINT / ORVA_API_KEY)")
+		return &httpStatusError{
+			StatusCode: resp.StatusCode,
+			Message:    "not authenticated (HTTP 401) — run `orva login`, or pass --endpoint/--api-key (or set ORVA_ENDPOINT / ORVA_API_KEY)",
+		}
 	case http.StatusForbidden:
-		return fmt.Errorf("not authorized (HTTP 403) — the API key is valid but lacks the required permission for this command")
+		return &httpStatusError{
+			StatusCode: resp.StatusCode,
+			Message:    "not authorized (HTTP 403) — the API key is valid but lacks the required permission for this command",
+		}
 	}
 
 	var errResp struct {

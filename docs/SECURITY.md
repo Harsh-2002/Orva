@@ -382,6 +382,19 @@ That retains process address-space protection but does **not** enforce the
 function's declared CPU, pid, or hard-memory limits; delegate cgroup v2
 controllers for the full resource boundary.
 
+Automatic detection stays inside the daemon's own service/container cgroup.
+Orva moves only itself into `orva.daemon`, enables the delegated controllers on
+the now-empty parent, and puts nsjail children under `orva.workers`. It does
+not climb to a writable host ancestor or create worker groups outside the
+service/container budget. If the visible cgroup is `/`, contains another
+process, or lacks writable child limit files, it reports `rlimit_only` instead
+of claiming hard enforcement. `ORVA_CGROUPV2_MOUNT` is an explicit operator
+override and must point at an already delegated worker subtree **inside that
+same service/container cgroup**; a host-root or sibling override is rejected.
+The Docker entrypoint first moves its known `tini` parent and CLI bootstrap
+helper into a sibling `orva.supervisor` leaf inside that same container cgroup;
+otherwise they would occupy the parent and prevent controller enablement.
+
 The host-wide concurrency cap (`cfg.Sandbox.MaxConcurrent`, see the
 `TOO_MANY_REQUESTS` error) is enforced at the Go layer in
 `internal/sandbox/limiter.go` — sandbox spawns wait or fail-fast there
@@ -707,7 +720,9 @@ cgroup `pids.max` (default 32) caps the process tree. Spawning past
 that limit fails with `EAGAIN` inside the sandbox. The orvad scheduler
 also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see
-`internal/pool/hostmem.go`). Public HTTP invocations additionally reserve a
+`internal/pool/hostmem.go`). It reserves each worker's full cgroup
+`memory.max` budget, not its recent RSS percentile: every worker could grow
+at once. Public HTTP invocations additionally reserve a
 conservative portion of daemon memory **before** reading their bodies; unknown
 lengths are charged as if they reached the configured body cap. The pending
 request count also scales with the detected memory/FD envelope, with a share

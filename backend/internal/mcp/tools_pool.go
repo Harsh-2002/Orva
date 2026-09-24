@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -48,7 +47,7 @@ func registerPoolTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "get_pool_config",
 			Title:       "Get Pool Config",
-			Description: "Get the Pool Controller v2 config for a function (min_warm, max_warm, idle_ttl, scale_to_zero). Returns defaults if no override is configured.",
+			Description: "Get the Pool Controller v2 config for a function (min_warm, max_warm, idle_ttl, scale_to_zero). max_warm=0 means automatic CPU/memory-derived capacity. Returns defaults if no override is configured.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in GetPoolConfigInput) (*mcpsdk.CallToolResult, PoolConfigView, error) {
@@ -60,7 +59,7 @@ func registerPoolTools(rc *regCtx) {
 			if err != nil {
 				// no row = use defaults
 				return nil, PoolConfigView{
-					FunctionID: fn.ID, MinWarm: 1, MaxWarm: 50,
+					FunctionID: fn.ID, MinWarm: 1, MaxWarm: 0,
 					IdleTTLSeconds: 600,
 				}, nil
 			}
@@ -72,7 +71,7 @@ func registerPoolTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "set_pool_config",
 			Title:       "Set Pool Config",
-			Description: "Tune the autoscaler for a function. Any field omitted retains its current value. Changes apply to new sandbox spawns; existing warm workers keep their behavior until recycled.",
+			Description: "Tune the autoscaler for a function. max_warm=0 uses automatic CPU/memory-derived capacity. Any field omitted retains its current value. Changes apply after the pool refresh; existing warm workers are recycled.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in SetPoolConfigInput) (*mcpsdk.CallToolResult, PoolConfigView, error) {
@@ -83,7 +82,7 @@ func registerPoolTools(rc *regCtx) {
 			cfg, err := deps.DB.GetPoolConfig(fn.ID)
 			if err != nil {
 				cfg = &database.PoolConfig{
-					FunctionID: fn.ID, MinWarm: 1, MaxWarm: 50,
+					FunctionID: fn.ID, MinWarm: 1, MaxWarm: 0,
 					IdleTTLS: 600,
 				}
 			}
@@ -114,12 +113,8 @@ func registerPoolTools(rc *regCtx) {
 					cfg.MinWarm = 1
 				}
 			}
-			if cfg.MaxWarm < 1 || cfg.MinWarm > cfg.MaxWarm || cfg.IdleTTLS < 0 {
-				return nil, PoolConfigView{}, fmt.Errorf("require min_warm <= max_warm, max_warm >= 1, and idle_ttl_seconds >= 0")
-			}
-			// max_warm sizes the pool's idle channel; reject rather than clamp.
-			if cfg.MaxWarm > pool.MaxWarmLimit {
-				return nil, PoolConfigView{}, fmt.Errorf("max_warm must be <= %d", pool.MaxWarmLimit)
+			if cfg.MinWarm < 0 || cfg.MaxWarm < 0 || (cfg.MaxWarm > 0 && cfg.MinWarm > cfg.MaxWarm) || cfg.IdleTTLS < 0 {
+				return nil, PoolConfigView{}, fmt.Errorf("require min_warm >= 0, max_warm >= min_warm or max_warm=0 for automatic capacity, and idle_ttl_seconds >= 0")
 			}
 			if err := deps.DB.UpsertPoolConfig(cfg); err != nil {
 				return nil, PoolConfigView{}, err
