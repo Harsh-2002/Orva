@@ -121,6 +121,13 @@ No production load or configuration change is part of this optimization work.
   286/422/388 accepted requests per second; the baseline's movement rules
   out a causal throughput claim. Optional writer drops remained near 5,000
   per phase, so writer-aware admission is still required.
+  The subsequent 50,000-request/1,000-client candidate phase returned
+  49,114 HTTP 200 and 886 pre-execution HTTP 429, with exactly 49,114
+  execution rows after drain. Pool rejections/timeouts were zero, while the
+  critical writer queue peaked at 987/1,024, four critical enqueue timeouts
+  accumulated, and 72,374 optional records dropped. No worker cgroup OOM
+  occurred. This fails the large-load gate and keeps the PR draft; neither
+  the memory fix nor the earlier short runs resolve SQLite pressure.
 
 - A separate-connection PASSIVE WAL-checkpoint experiment was reverted.
   SQLite's automatic checkpoint can stall the committing writer; this

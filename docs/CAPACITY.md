@@ -1147,6 +1147,22 @@ admission; filesystem-cache residency, database growth, and shared-host I/O
 remain uncontrolled. They do show no functional regression or new critical
 record loss at this load. Optional-writer pressure remains unsolved.
 
+The same hard-bound candidate was then exercised at 50,000 mixed requests
+and 1,000 clients on the scratch VM. It returned 49,114 HTTP 200 and 886
+HTTP 429. A read-only indexed execution-row query found exactly 24,558 Node
+and 24,556 Python rows in that phase: 49,114 total, matching accepted
+responses. Pool rejection and capacity-timeout counters stayed at zero;
+critical writer failures stayed at zero, but the critical queue peaked at
+987/1,024 and four critical enqueue timeouts were recorded. Optional writes
+shed 72,374 records (24,402 activity). The 429 response latency clustered
+around the five-second storage-reservation deadline. During load, 32 worker
+cgroups summed to 3 GiB of `memory.max`, with no worker-subtree OOM events.
+This is a **failed 1,000-client capacity gate** despite intact accepted-row
+durability; the short green phases must not be used to justify release.
+The phase ran on a grown scratch database and is not a controlled A/B
+attribution to the memory-accounting change. Writer-aware admission and
+SQLite write-demand/throughput work remain necessary.
+
 ## 2026-09-24 scoped cgroup enforcement check
 
 In the disposable 2-vCPU/4-GiB smolvm guest, a candidate server launched
