@@ -54,6 +54,18 @@ used about 308 versus 3,024 allocations per batch but more allocated bytes.
 This differs from the earlier run below and reinforces that the isolated
 benchmark cannot establish an end-to-end gain or justify a new batch limit.
 
+A read-only `EXPLAIN QUERY PLAN` audit on the same 1,470,051-row scratch
+database found that `idx_executions_function` serves baseline seeding and
+per-function history, `idx_executions_started` serves global history and
+retention, and `idx_executions_trace_started` finds trace members. Trace
+member ordering still needs a temporary B-tree because it normalizes mixed
+timestamp formats with `julianday(replace(...))`; status-filtered history
+also needs a temporary sort. Thus apparent left-prefix overlap does not
+prove an index is removable without changing read cost. The production
+schema is unchanged. A scratch-only same-snapshot write/read comparison is
+still required before proposing index changes; the additive-only migration
+contract separately rules out shipping an unapproved destructive drop.
+
 A new benchmark uses the production 18-column final-execution INSERT, foreign
 key, and current execution indexes instead of a one-column toy table. On the
 same local host, three 200-row batch repetitions measured prepared per-row

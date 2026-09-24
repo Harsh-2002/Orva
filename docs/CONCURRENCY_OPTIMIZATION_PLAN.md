@@ -669,7 +669,11 @@ changing supported handler behavior, per-invocation attribution or timeout isola
   66% of sampled CPU to the writer call stack, dominated by SQLite B-tree
   insertion/page reads. Nine explicit execution indexes occupied about 1.06 GB
   at 1.47 million rows. This points to a same-snapshot index/write A/B with
-  read-query-plan checks, not a blind checkpoint or batch-size change.
+  read-query-plan checks, not a blind checkpoint or batch-size change. A
+  read-only plan audit confirmed that baseline seeding, function/global
+  history and retention use distinct execution indexes; trace ordering and
+  status-filtered history still create temporary sort trees. Index drops
+  remain excluded from production by the additive-only migration contract.
 - Reserve critical completion-record space before execution. On storage pressure,
   reduce admissions before running side-effecting code; do not return a retryable
   pre-execution error after a function already ran. Completion uses its reservation,
