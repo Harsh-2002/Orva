@@ -702,6 +702,12 @@ changing supported handler behavior, per-invocation attribution or timeout isola
   near 1 GiB and optional telemetry dropped over 27,000 records in each phase.
   This reinforces the storage/cache hypothesis and invalidates one-off RPS
   comparisons; it does not establish a safe index or cache-size optimization.
+  A proposed optional-lane scheduling relaxation also failed an alternating
+  baseline–candidate–baseline check: 5,000-request/100-client phases had
+  5,974/5,367/5,387 total best-effort drops while the unchanged return
+  baseline was faster than the candidate. The code was reverted; improving
+  telemetry requires measured total write demand and admission, not assuming
+  that idle-looking priority selection is spare SQLite capacity.
 - Reserve critical completion-record space before execution. On storage pressure,
   reduce admissions before running side-effecting code; do not return a retryable
   pre-execution error after a function already ran. Completion uses its reservation,

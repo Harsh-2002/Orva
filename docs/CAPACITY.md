@@ -119,6 +119,20 @@ channel limits during the first run. Exact critical-row accounting therefore
 passes, but the telemetry/ordinary-load and controlled-performance gates do
 not. No schema or cache policy was changed.
 
+An optional-telemetry scheduling experiment then made that lane eligible
+whenever both higher-priority queues were below three-quarter occupancy,
+instead of only when both were empty. A 5,000-request/100-client
+baseline–candidate–baseline sequence on the same running VMs produced all
+HTTP 200 in 22.50/14.72/12.61 s; total best-effort drops were
+5,974/5,367/5,387 and activity drops 2,051/1,820/1,629. The later
+unchanged baseline was faster than the candidate and its drop count was
+essentially the same. The three phases added exactly 7,500 successful rows
+per test function after drain. Database growth,
+cache warming, and other run-order effects remain uncontrolled, but this
+short test supplies no defensible benefit for changing critical-write
+priority. The experiment was **reverted**; persistent optional loss remains
+an open admission/storage-accounting problem.
+
 Do **not** use this short two-copy probe to justify index pruning or a larger
 cache. A valid next comparison needs controlled filesystem-cache residency,
 sustained read/write traffic on restored snapshots, and independent direct-VM
