@@ -684,44 +684,47 @@ func (db *Database) ListExecutions(params ListExecutionsParams) (*ListExecutions
 
 	// The status index finds every successful execution and then sorts them.
 	// On a long-lived, mostly-successful instance that can sort millions of
-	// rows merely to show the newest page. The newest unfiltered page is an
-	// exact answer if every row on it succeeded; otherwise use the original
-	// filtered query. This bounded probe never scans old history looking for
-	// a rare status and adds no write-amplifying index.
+	// rows merely to show the newest page. Scan a bounded recent window in
+	// timestamp order instead. A few recent errors must not force that costly
+	// status-index sort; if the window cannot fill the requested page, fall
+	// back to the exact filtered query. This adds no write-amplifying index.
 	if params.Status == "success" && params.Offset == 0 &&
 		params.Since == "" && params.Until == "" && params.Search == "" {
-		fastQuery := "SELECT " + executionSelectColumns + " FROM executions"
+		fastQuery := "SELECT " + executionSelectColumns + " FROM executions INDEXED BY idx_executions_started"
 		var fastArgs []any
 		if params.FunctionID != "" {
-			fastQuery += " WHERE function_id = ?"
+			fastQuery = "SELECT " + executionSelectColumns + " FROM executions INDEXED BY idx_executions_function WHERE function_id = ?"
 			fastArgs = append(fastArgs, params.FunctionID)
 		}
 		fastQuery += " ORDER BY started_at DESC LIMIT ?"
-		fastArgs = append(fastArgs, params.Limit)
+		probeLimit := params.Limit * 4 // at most 4,000 rows after the public limit clamp
+		fastArgs = append(fastArgs, probeLimit)
 		rows, err := db.read.Query(fastQuery, fastArgs...)
 		if err != nil {
 			return nil, err
 		}
 		var recent []*Execution
-		allSuccess := true
+		scanned := 0
 		for rows.Next() {
 			exec, scanErr := scanExecutionRows(rows)
 			if scanErr != nil {
 				_ = rows.Close()
 				return nil, scanErr
 			}
-			if exec.Status != "success" {
-				allSuccess = false
+			scanned++
+			if exec.Status == "success" {
+				recent = append(recent, exec)
+			}
+			if len(recent) == params.Limit {
 				break
 			}
-			recent = append(recent, exec)
 		}
 		readErr := rows.Err()
 		_ = rows.Close()
 		if readErr != nil {
 			return nil, readErr
 		}
-		if allSuccess {
+		if len(recent) == params.Limit || scanned < probeLimit {
 			return &ListExecutionsResult{Executions: recent, Total: total}, nil
 		}
 	}

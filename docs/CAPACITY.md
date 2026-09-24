@@ -210,6 +210,19 @@ The measurement argues against simply enlarging batches or queues as the
 first response to this particular saturation; SQLite statement work
 dominates. It does not identify which index or page-cache cost is causal.
 
+The disposable-copy A/B harness now optionally applies file-scoped
+`POSIX_FADV_DONTNEED` to both temporary database copies and runs the Go
+writer probe before the expensive read-query profile. This removed the
+earlier tenfold copy-order artifact, but an unchanged-schema/unchanged-cache
+control still differed: with read profiling before writes, the candidate
+copy's median was 0.93 s per 200-row batch versus the baseline's 1.13 s,
+and reversing copy order gave 0.93 s versus 1.08 s. Moving reads after writes
+left another unchanged control at 1.06 s versus 1.35 s. Each paired batch
+had matching physical read-byte counts, but individual timings varied widely.
+This **fails the A/B validity gate**; the harness remains diagnostic only, and
+no index, cache, or durability change is justified by it. The source VM
+database and production Orva instance were not modified by these probes.
+
 Do **not** use this short two-copy probe to justify index pruning or a larger
 cache. A valid next comparison needs controlled filesystem-cache residency,
 sustained read/write traffic on restored snapshots, and independent direct-VM
@@ -227,10 +240,16 @@ for that sort, versus 0.21 ms to read the newest 50 directly through the
 wrong: only 19 rows had `status=error`, and a forced `started_at` scan took
 66.5 s to find them versus 14.7 ms on the status index.
 
-The candidate therefore probes only the newest unfiltered page when listing
+The candidate initially probed only the newest unfiltered page when listing
 successful executions with no date/search filter or offset. If every row on
-that bounded page succeeded, it is exactly the requested page; if not, the
-old filtered query runs. No index, migration, or result contract changes.
+that bounded page succeeded, it was exactly the requested page; otherwise the
+old filtered query ran. A later change scans up to four times the requested
+page size (at most 4,000 rows) in `started_at` order, keeps successful rows,
+and returns once the page is full. A few recent failures no longer trigger a
+full success-index sort. If the bounded window is exhausted before filling
+the page, the old exact filtered query still runs. Function-scoped probes use
+the existing `(function_id, started_at DESC)` index. No index, migration, or
+result contract changes.
 On the same VM and database, the immediately preceding `ba4d310` server
 binary took 7.07–7.16 s across three warm HTTP reads; the candidate took
 0.193–0.219 s across three. An alternating baseline/candidate check found
@@ -238,6 +257,16 @@ identical totals (1,470,032) and identical SHA-256 hashes of the 50 returned
 execution IDs. The count query still scans the success index and accounts
 for much of the candidate's remaining ~0.2 s. These are history-page
 measurements, **not** invocation throughput or writer-capacity gains.
+
+On a later 1.67-million-row disposable VM database, the scratch comparison's
+raw success-status query took 58–67 seconds on cold copies while making a
+temporary sort. That query is a worst-case diagnostic, not the normal fast
+API path; it exposed how a single recent error could previously send the API
+back to the expensive plan. The bounded indexed 50-ID query on the original
+scratch DB returned 50 rows in 0.10 ms with `EXPLAIN QUERY PLAN` confirming
+`idx_executions_started`. This query probe is not an end-to-end HTTP latency
+claim. Unit tests cover mixed recent results, an incomplete bounded window
+that must fall back, function filtering, and sparse statuses.
 
 A new benchmark uses the production 18-column final-execution INSERT, foreign
 key, and current execution indexes instead of a one-column toy table. On the

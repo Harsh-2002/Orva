@@ -87,10 +87,16 @@ copy-based probe can be dominated by which file was copied last: on the
 1.47-million-row scratch VM, an identical-copy control flipped from 581/41
 ms to 39/721 ms per batch when copy order reversed. The work directory needs
 free space for two full database copies plus WAL headroom; `/tmp` may be a
-smaller tmpfs. Neither a Python-driver microbenchmark nor this Go probe
+smaller tmpfs. Add `--evict-copy-cache` with the Go-driver probe to request
+file-scoped Linux `POSIX_FADV_DONTNEED` on both disposable copies before the
+write probe; it never drops the host-wide page cache. Read-query profiling
+runs afterward so a full-table scan cannot prewarm only one write sample.
+The advice is not a guarantee of equal residency, so identical controls in
+both copy orders and physical-read deltas remain required. Neither a
+Python-driver microbenchmark nor this Go probe
 proves sustained Orva HTTP capacity or authorizes a production migration.
 `test/e2e/unit/test_sqlite_index_ab.py` checks scratch refusal, source
-immutability, copy cleanup, and control/reverse modes.
+immutability, copy cleanup, cache-advice safety, and control/reverse modes.
 
 An external load generator should be preferred for throughput numbers, but
 validate its path independently. In the 2026-09-23 scratch VM check, the

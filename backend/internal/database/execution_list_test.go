@@ -81,3 +81,22 @@ func TestListExecutionsSuccessFallsBackWhenRecentPageIsMixed(t *testing.T) {
 		t.Fatalf("rare status result=%+v, err=%v", errors, err)
 	}
 }
+
+func TestListExecutionsSuccessProbeFallsBackAfterBoundedErrorWindow(t *testing.T) {
+	db := newTestDB(t)
+	seedListExecution(t, db, "old-success", "fn-a", "success", 1)
+	for second := 2; second <= 5; second++ {
+		seedListExecution(t, db, fmt.Sprintf("recent-error-%d", second), "fn-a", "error", second)
+	}
+	seedListExecution(t, db, "other-function-success", "fn-b", "success", 6)
+
+	result, err := db.ListExecutions(ListExecutionsParams{
+		FunctionID: "fn-a", Status: "success", Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || len(result.Executions) != 1 || result.Executions[0].ID != "old-success" {
+		t.Fatalf("bounded probe lost an older success: %+v", result)
+	}
+}

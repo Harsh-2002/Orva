@@ -3,6 +3,7 @@
 from contextlib import closing
 from pathlib import Path
 import json
+import os
 import re
 import runpy
 import sqlite3
@@ -104,6 +105,49 @@ class SQLiteIndexABTest(unittest.TestCase):
         output = json.loads(result.stdout)
         self.assertTrue(output["identical_control"])
         self.assertEqual(output["candidate_dropped_indexes"], [])
+        self.assertFalse(list(self.directory.glob("orva-index-ab-*")))
+
+    def test_file_scoped_cache_advice_keeps_copy_bytes(self):
+        namespace = runpy.run_path(str(SCRIPT))
+        if not hasattr(os, "posix_fadvise"):
+            self.skipTest("POSIX fadvise unavailable")
+        baseline = self.directory / "baseline.db"
+        candidate = self.directory / "candidate.db"
+        baseline.write_bytes(b"baseline")
+        candidate.write_bytes(b"candidate")
+        advised = namespace["evict_copy_cache"]((baseline, candidate))
+        self.assertEqual(advised, [str(baseline), str(candidate)])
+        self.assertEqual(baseline.read_bytes(), b"baseline")
+        self.assertEqual(candidate.read_bytes(), b"candidate")
+        self.assertGreater(self.source.stat().st_size, 0)
+
+    def test_cache_advice_requires_real_driver_probe(self):
+        result = subprocess.run(self.command("--scratch", "--evict-copy-cache"),
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires --driver-test-binary", result.stderr)
+        self.assertFalse(list(self.directory.glob("orva-index-ab-*")))
+
+    def test_driver_probe_with_cache_advice_uses_disposable_files(self):
+        if not hasattr(os, "posix_fadvise"):
+            self.skipTest("POSIX fadvise unavailable")
+        fake = self.directory / "fake-probe"
+        fake.write_text("#!/usr/bin/env python3\nprint('SNAPSHOT_AB_JSON={\"fake\":true}')\n")
+        fake.chmod(0o700)
+        command = [sys.executable, str(SCRIPT), "--db", str(self.source),
+                   "--workdir", str(self.directory), "--scratch",
+                   "--identical-control", "--evict-copy-cache",
+                   "--driver-test-binary", str(fake), "--batches", "1",
+                   "--batch-size", "1", "--read-repetitions", "1"]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual(output["driver_write"], {"fake": True})
+        self.assertTrue(output["copy_cache_eviction_requested"])
+        self.assertEqual(len(output["copy_cache_files_advised"]), 2)
+        self.assertIn("status_history", output["read"]["candidate"])
+        with closing(sqlite3.connect(f"file:{self.source}?mode=ro", uri=True)) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM executions").fetchone()[0], 1)
         self.assertFalse(list(self.directory.glob("orva-index-ab-*")))
 
 

@@ -96,6 +96,26 @@ def read_profile(conn, function_id, trace_id, repetitions):
     return result
 
 
+def evict_copy_cache(paths):
+    """Ask Linux to discard cached pages for the disposable copies only.
+
+    This is deliberately file-scoped: dropping the guest's global page cache
+    would perturb unrelated workloads and is never appropriate on a host.
+    DONTNEED is advisory, so identical-copy controls are still mandatory.
+    """
+    if not hasattr(os, "posix_fadvise") or not hasattr(os, "POSIX_FADV_DONTNEED"):
+        raise RuntimeError("file-scoped cache eviction requires POSIX fadvise")
+    evicted = []
+    for base in paths:
+        for path in (base, Path(str(base) + "-wal"), Path(str(base) + "-shm")):
+            if not path.exists():
+                continue
+            with path.open("rb") as file:
+                os.posix_fadvise(file.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+            evicted.append(str(path))
+    return evicted
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True, help="source Orva SQLite database")
@@ -114,6 +134,8 @@ def main():
                         help="compare unchanged copies to expose benchmark-order and page-cache bias")
     parser.add_argument("--reverse-copy-order", action="store_true",
                         help="back up candidate first, then copy baseline; exposes filesystem-cache bias")
+    parser.add_argument("--evict-copy-cache", action="store_true",
+                        help="ask Linux to evict only both disposable DB copies before the Go probe")
     args = parser.parse_args()
 
     if not args.scratch:
@@ -126,6 +148,8 @@ def main():
         parser.error("specify at least one candidate change or --identical-control")
     if args.candidate_write_cache_kib is not None and not args.driver_test_binary:
         parser.error("--candidate-write-cache-kib requires --driver-test-binary")
+    if args.evict_copy_cache and not args.driver_test_binary:
+        parser.error("--evict-copy-cache requires --driver-test-binary")
     if args.candidate_write_cache_kib is not None and not 1024 <= args.candidate_write_cache_kib <= 524288:
         parser.error("--candidate-write-cache-kib must be 1024..524288")
     if len(set(args.drop_index)) != len(args.drop_index):
@@ -171,12 +195,6 @@ def main():
                 for name in args.drop_index:
                     candidate.execute('DROP INDEX "' + name.replace('"', '""') + '"')
                 candidate.commit()
-                profiles = {
-                    "baseline": read_profile(baseline, function_id, trace_id,
-                                             args.read_repetitions),
-                    "candidate": read_profile(candidate, function_id, trace_id,
-                                              args.read_repetitions),
-                }
                 output = {
                     "source": str(source), "source_rows": source_rows,
                     "source_bytes": size, "candidate_dropped_indexes": args.drop_index,
@@ -184,13 +202,17 @@ def main():
                     "reverse_copy_order": args.reverse_copy_order,
                     "identical_control": args.identical_control,
                     "batches": args.batches, "batch_size": args.batch_size,
-                    "read": profiles,
                 }
                 if args.driver_test_binary:
                     # The Go probe opens the same copies through modernc.org/sqlite
-                    # and calls asyncWriter.commit. Close Python handles first.
+                    # and calls asyncWriter.commit. Read profiling must follow
+                    # the write probe: a full-table status query on the first
+                    # copy otherwise warms the host block cache for the second.
+                    baseline.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+                    candidate.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
                     baseline.close()
                     candidate.close()
+                    evicted = evict_copy_cache((baseline_path, candidate_path)) if args.evict_copy_cache else []
                     binary = args.driver_test_binary.resolve(strict=True)
                     env = dict(os.environ,
                                ORVA_BENCH_SCRATCH="1",
@@ -211,9 +233,26 @@ def main():
                     if len(matches) != 1:
                         raise RuntimeError("Go driver probe returned no unique JSON result: " + result.stdout)
                     output["driver_write"] = json.loads(matches[0])
+                    output["copy_cache_eviction_requested"] = args.evict_copy_cache
+                    output["copy_cache_files_advised"] = evicted
+                    baseline = sqlite3.connect(baseline_path)
+                    candidate = sqlite3.connect(candidate_path)
+                    output["read"] = {
+                        "baseline": read_profile(baseline, function_id, trace_id,
+                                                 args.read_repetitions),
+                        "candidate": read_profile(candidate, function_id, trace_id,
+                                                  args.read_repetitions),
+                    }
                     output["caveat"] = ("Real Orva SQLite driver and writer on copied data; "
-                                        "not a sustained HTTP capacity or migration result")
+                                        "DONTNEED is advisory; identical controls and reversed copy order "
+                                        "are required; not a sustained HTTP capacity or migration result")
                 else:
+                    output["read"] = {
+                        "baseline": read_profile(baseline, function_id, trace_id,
+                                                 args.read_repetitions),
+                        "candidate": read_profile(candidate, function_id, trace_id,
+                                                  args.read_repetitions),
+                    }
                     write_ms = {"baseline": [], "candidate": []}
                     for batch in range(args.batches):
                         # Alternate run order; both copies start from the same backup.

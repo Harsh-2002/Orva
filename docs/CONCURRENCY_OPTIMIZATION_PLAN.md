@@ -25,6 +25,15 @@ all invocation entry points, scheduler, sandbox lifecycle, persistence, telemetr
 installation/upgrade, and documentation. Kubernetes, distributed scheduling,
 external brokers, and a database replacement are outside this project.
 
+SQLite remains the single-node database. Its [WAL concurrency model](https://www.sqlite.org/wal.html)
+lets readers proceed beside the writer but permits only one writer at a time;
+adding application writer goroutines would contend for that same write lock.
+The [query planner guidance](https://www.sqlite.org/queryplanner.html) also
+explains why overlapping indexes can add write cost, but Orva's existing
+additive-only migration contract and read-query plans prevent untested index
+deletion. Cache and checkpoint settings must be treated as measured policies,
+not universal presets; see [SQLite PRAGMAs](https://www.sqlite.org/pragma.html).
+
 ## Evidence and uncertainties
 
 The operator's public-URL tests on the 2-vCPU/~4-GiB VM produced:
@@ -68,6 +77,15 @@ Package paths above are relative to `backend/internal/`; `runtimes/` is under
 No production load or configuration change is part of this optimization work.
 
 ## Implementation log
+
+- The success-history read path now scans a bounded recent window and filters
+  out occasional errors before falling back to the status-index sort. The
+  previous fast path required every row in the first page to succeed. On the
+  1.67-million-row scratch VM, a raw status-sort diagnostic took 58–67 seconds
+  on cold copies; a direct indexed 50-ID query took 0.10 ms. This closes a
+  read-side pathological case without another write-amplifying index, but is
+  **not** a measured invocation-throughput gain or a solution to writer
+  saturation. Mixed-result and fallback unit tests pass.
 
 - The pool's full latency sample slices allocated and copied 512 durations
   for every completed warm invocation. Bounded overwrite rings now retain the
