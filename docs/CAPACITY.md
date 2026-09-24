@@ -1030,8 +1030,9 @@ After correcting the unobserved-memory fallback, a separate 5-second
 concurrency-32 check produced 1,205.28 req/s with zero failures. It reserved
 6,144 MiB for 32 workers (32 × the 192 MiB declared cgroup hard bound), with
 `queued=0`, `spawning=0`, and zero capacity timeouts after the run. Once
-`memory.current` samples exist, admission uses observed worker memory p95,
-clamped to the declared bound.
+At that candidate stage, admission used observed worker memory p95 after
+`memory.current` samples existed. This was later removed: a historical p95
+cannot guarantee that all workers will not grow to `memory.max` together.
 
 ## KV control measurement
 
@@ -1060,7 +1061,8 @@ Automated tests cover:
 - 30 seconds continuously below desired capacity before scale-down;
 - no more than 20% shrink per evaluation and idle workers only;
 - cgroup memory headroom and pending-reservation admission;
-- declared memory as the safe fallback before an observed p95 exists;
+- the full per-worker hard memory bound for every reservation, even after low
+  observed RSS samples;
 - migration of legacy pool rows, removal of `target_concurrency`, preservation
   of values and foreign-key cascade behavior;
 - rejection of stale configuration with `400 VALIDATION` migration guidance;
@@ -1099,15 +1101,51 @@ limits require host capacity or smaller function limits; increasing the
 operator ceiling cannot override the effective host maximum.
 
 `max_warm=0` (the default without an override) uses an automatic maximum
-derived from host CPU slots, the 16-MiB minimum per-worker memory reservation,
-and function concurrency. A positive `max_warm` can only lower that bound.
+derived from host CPU slots, each function's full per-worker `memory.max`
+budget (at least 16 MiB), and function concurrency. A positive `max_warm` can
+only lower that bound.
 The fixed idle-worker channel is sized to the derived bound, so even an
 enormous configured value cannot allocate an enormous channel. Existing
 positive overrides remain in place on upgrade; set them to `0` to opt into
 automatic capacity. `effective_max` remains the live ceiling, recomputed
-each tick from observed memory use and current host headroom. This removes a
+each tick from guaranteed worker reservations and current host headroom. This removes a
 code-level 50/1,024 cap on larger hosts; the two-core storage-limited scratch
 run above does not prove a throughput gain from the change.
+
+The older observed-RSS admission rule could reserve 16–40 MiB for a worker
+whose cgroup allowed substantially more, so several quiet workers could later
+grow together past Orva's 80% host worker budget. The current candidate
+reserves the full `memory.max` amount for every worker and sizes the idle
+channel by the same amount. This may lower `effective_max` for functions with
+large declared memory; it prevents a percentile from masquerading as a hard
+resource bound. Measured overcommit would require an aggregate enforced
+boundary and simultaneous-growth tests before it could be enabled safely.
+
+The hard-bound candidate passed the full Docker sandbox suite (29 modules,
+676 checks) and isolated direct-VM mixed Node/Python checks on the existing
+2-vCPU/4-GiB scratch guest. At 1,000 requests/100 clients it returned and
+persisted 500 executions for each runtime, with zero critical failures or
+best-effort drops. At 5,000 requests/250 clients it returned and persisted
+2,500 per runtime with zero critical failures, though 5,684 optional writes
+were dropped. During the latter run, 32 worker child cgroups had a combined
+`memory.max` of 3 GiB, below the guest's roughly 3.2-GiB worker budget;
+their combined `memory.current` was about 548 MiB. Low current usage is not
+permission to count only 548 MiB against possible simultaneous growth.
+
+An alternating 5,000-request/250-client comparison on that growing scratch
+database returned and persisted all 5,000 executions in every phase:
+
+| Phase | Accepted/s | HTTP 200 p95 | Optional writer drops |
+|---|---:|---:|---:|
+| Previous binary | 286 | 1,632 ms | 5,357 |
+| Hard-bound candidate | 422 | 1,185 ms | 5,012 |
+| Previous binary again | 388 | 1,035 ms | 5,361 |
+
+The returning baseline changed substantially without a code change. The
+phases do **not** establish a throughput gain or regression from hard-bound
+admission; filesystem-cache residency, database growth, and shared-host I/O
+remain uncontrolled. They do show no functional regression or new critical
+record loss at this load. Optional-writer pressure remains unsolved.
 
 ## 2026-09-24 scoped cgroup enforcement check
 

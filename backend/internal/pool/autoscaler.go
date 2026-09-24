@@ -206,7 +206,7 @@ func (s *scaler) computeDesiredAt(p *functionPool, now time.Time) (int, string) 
 		}
 	}
 
-	cap, capReason := s.dynamicMax(p, d.MemoryP95)
+	cap, capReason := s.dynamicMax(p)
 	p.dynamicMax.Store(int64(cap))
 	if desired > cap {
 		desired, reason = cap, capReason
@@ -221,7 +221,7 @@ func (s *scaler) computeDesired(p *functionPool) (int, string) {
 	return s.computeDesiredAt(p, time.Now())
 }
 
-func (s *scaler) dynamicMax(p *functionPool, observedMemoryP95 int64) (int, string) {
+func (s *scaler) dynamicMax(p *functionPool) (int, string) {
 	opCap := p.max
 	if opCap < 1 {
 		opCap = 1
@@ -245,10 +245,7 @@ func (s *scaler) dynamicMax(p *functionPool, observedMemoryP95 int64) (int, stri
 	if cpuCap < effectiveCap {
 		effectiveCap, reason = cpuCap, "cpu_capacity"
 	}
-	workerBytes := p.memoryBytes
-	if observedMemoryP95 > 0 && observedMemoryP95 < workerBytes {
-		workerBytes = observedMemoryP95
-	}
+	workerBytes := p.admissionBytes()
 	if workerBytes > 0 {
 		fit := int((s.hostMem.availableForWorkers() + current*workerBytes) / workerBytes)
 		if fit < effectiveCap {

@@ -34,7 +34,7 @@ func TestControllerV2CPUCapacityIsGlobalAndFunctionWeighted(t *testing.T) {
 	p.cpuUnits = 500
 	p.max = 50
 	s := newScaler(&Manager{hostMem: hm}, hm)
-	if got, reason := s.dynamicMax(p, 0); got != 2 || reason != "cpu_capacity" {
+	if got, reason := s.dynamicMax(p); got != 2 || reason != "cpu_capacity" {
 		t.Fatalf("weighted global CPU cap=%d/%s, want 2/cpu_capacity", got, reason)
 	}
 }
@@ -43,7 +43,7 @@ func TestControllerV2RespectsFunctionConcurrency(t *testing.T) {
 	p, hm := controllerTestPool()
 	p.concSem = make(chan struct{}, 3)
 	s := newScaler(&Manager{hostMem: hm}, hm)
-	if got, reason := s.dynamicMax(p, 0); got != 3 || reason != "function_concurrency" {
+	if got, reason := s.dynamicMax(p); got != 3 || reason != "function_concurrency" {
 		t.Fatalf("function concurrency cap=%d/%s, want 3/function_concurrency", got, reason)
 	}
 }
@@ -94,16 +94,23 @@ func TestControllerV2ScaleToZeroHonorsIdleTTL(t *testing.T) {
 	}
 }
 
-func TestAdmissionUsesDeclaredLimitUntilMemoryP95Exists(t *testing.T) {
+func TestAdmissionReservesSimultaneousHardMemoryGrowth(t *testing.T) {
+	hm := &hostMemTracker{totalBytes: 1 << 30, reservationPct: 0.8, cpuWorkers: 128}
+	hm.availBytes.Store(1 << 30)
 	p, _ := controllerTestPool()
-	if got := p.admissionBytes(); got != p.memoryBytes {
-		t.Fatalf("unobserved admission=%d, want declared limit %d", got, p.memoryBytes)
+	p.hostMem = hm
+	p.memoryBytes = 192 << 20 // memory.max for a 128-MiB function
+	s := newScaler(&Manager{hostMem: hm}, hm)
+	if got, reason := s.dynamicMax(p); got != 4 || reason != "memory_capacity" {
+		t.Fatalf("hard-bound ceiling=%d/%s, want 4/memory_capacity", got, reason)
 	}
-	p.sigMu.Lock()
-	p.memSamples = []int64{24 << 20, 32 << 20, 40 << 20}
-	p.sigMu.Unlock()
-	if got := p.admissionBytes(); got != 40<<20 {
-		t.Fatalf("observed admission=%d, want p95 40 MiB", got)
+	for i := 0; i < 4; i++ {
+		if !hm.reserve(p.admissionBytes(), p.cpuUnits) {
+			t.Fatalf("hard-bound reservation %d unexpectedly failed", i+1)
+		}
+	}
+	if hm.reserve(p.admissionBytes(), p.cpuUnits) {
+		t.Fatal("fifth worker could grow to memory.max beyond the 80% host budget")
 	}
 }
 

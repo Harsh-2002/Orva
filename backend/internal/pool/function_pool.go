@@ -47,7 +47,6 @@ type functionPool struct {
 	lastArrival      time.Time
 	belowTargetSince time.Time
 	limitingReason   string
-	memSamples       []int64
 
 	// Lifetime counters for metrics.
 	spawned          atomic.Int64
@@ -215,7 +214,6 @@ type demandSnapshot struct {
 	BurstRate                          float64
 	ServiceP95, SpawnP95, QueueWaitP95 time.Duration
 	LastArrival                        time.Time
-	MemoryP95                          int64
 }
 
 type workerReservation struct {
@@ -236,40 +234,24 @@ func (p *functionPool) snapshotDemand(now time.Time) demandSnapshot {
 			}
 		}
 	}
-	mem := append([]int64(nil), p.memSamples...)
 	service := append([]time.Duration(nil), p.serviceSamples.samples...)
 	spawn := append([]time.Duration(nil), p.spawnSamples.samples...)
 	queueWait := append([]time.Duration(nil), p.queueWaitSamples.samples...)
 	lastArrival := p.lastArrival
 	p.sigMu.Unlock()
 
-	sort.Slice(mem, func(i, j int) bool { return mem[i] < mem[j] })
-	var memP95 int64
-	if len(mem) > 0 {
-		memP95 = mem[(95*len(mem)+99)/100-1]
-	}
 	return demandSnapshot{
 		StableRate: float64(stable) / stableWindow.Seconds(),
 		BurstRate:  float64(burst) / panicWindow.Seconds(),
 		ServiceP95: durationP95(service), SpawnP95: durationP95(spawn),
 		QueueWaitP95: durationP95(queueWait), LastArrival: lastArrival,
-		MemoryP95: memP95,
 	}
 }
 
 func (p *functionPool) admissionBytes() int64 {
-	d := p.snapshotDemand(time.Now())
-	if d.MemoryP95 <= 0 {
-		return p.memoryBytes
-	}
-	bytes := d.MemoryP95
-	if bytes < 16<<20 {
-		bytes = 16 << 20
-	}
-	if bytes > p.memoryBytes {
-		bytes = p.memoryBytes
-	}
-	return bytes
+	// A recent RSS percentile is not a bound on arbitrary user code. Every
+	// worker can grow to memory.max concurrently, so reserve that guarantee.
+	return p.memoryBytes
 }
 
 // acquire returns an idle worker or asks the global coordinator to admit one.
@@ -445,20 +427,6 @@ func (p *functionPool) markRetired() {
 // worker count causes a spawn/kill loop under fluctuating memory headroom.
 func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 	p.busy.Add(-1)
-
-	// Sample cgroup v2 memory for observed worker-memory p95 admission.
-	cgPath := w.GetCgroupPath()
-	if cgPath != "" {
-		memCur := sandbox.ReadCgroupMemCurrent(cgPath)
-		p.sigMu.Lock()
-		if memCur > 0 {
-			p.memSamples = append(p.memSamples, memCur)
-			if len(p.memSamples) > 256 {
-				p.memSamples = append([]int64(nil), p.memSamples[len(p.memSamples)-256:]...)
-			}
-		}
-		p.sigMu.Unlock()
-	}
 
 	// Serialize the closing check and idle publication with retirement. If
 	// release checked closing and then parked lock-free, retirePool could mark

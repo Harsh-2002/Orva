@@ -95,13 +95,32 @@ No production load or configuration change is part of this optimization work.
 
 - The current candidate replaces the default 50-worker and universal
   1,024-worker pool caps with a fixed idle-channel ceiling derived from the
-  discovered CPU slots, minimum 16-MiB worker reservation, and function
+  discovered CPU slots, each function's full per-worker memory.max budget
+  (minimum 16 MiB), and function
   concurrency. A positive saved `max_warm` still lowers that ceiling;
   `max_warm=0` means automatic. Unit tests cover a synthetic host whose safe
   ceiling exceeds 1,024 and the REST validation contract. This removes a
   code-level cap, not the storage bottleneck seen in the 2.5-GiB scratch VM;
   no larger-host throughput gain is claimed yet. The host execution limiter,
   writer admission, and fair dispatcher remain open work.
+
+- A safety audit found that using recent `memory.current` p95 as a worker
+  reservation allowed several quiet workers to later grow together to their
+  much larger `memory.max` limits, exceeding the intended 80% aggregate
+  worker budget. The candidate now reserves the full hard per-worker limit,
+  sizes the idle channel from that same bound, and removes the per-request
+  cgroup-memory read and sample sort that only fed unsafe admission. This is
+  a containment correction, not a throughput claim. An observed-memory
+  borrowing policy remains excluded until an aggregate enforced boundary
+  and simultaneous-growth tests exist.
+  The candidate passed 29/29 Docker sandbox E2E modules (676 checks). In the
+  isolated 2-vCPU/4-GiB VM, 32 live worker cgroups summed to 3 GiB of hard
+  memory limits under the approximately 3.2-GiB worker budget, and the
+  1,000/100 and 5,000/250 mixed checks returned and persisted every execution.
+  An alternating 5,000/250 previous–candidate–previous run yielded
+  286/422/388 accepted requests per second; the baseline's movement rules
+  out a causal throughput claim. Optional writer drops remained near 5,000
+  per phase, so writer-aware admission is still required.
 
 - A separate-connection PASSIVE WAL-checkpoint experiment was reverted.
   SQLite's automatic checkpoint can stall the committing writer; this

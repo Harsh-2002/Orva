@@ -46,12 +46,13 @@ inside the process's own delegated cgroup, never a writable ancestor. It moves
 only the daemon into its leaf before enabling domain controllers, and verifies
 child `memory.max`, `pids.max` and `cpu.max`; an unavailable delegate yields
 `rlimit_only`, not a false hard-limit claim.
-No pool override means an automatic maximum from CPU slots, the 16-MiB
-minimum worker reservation, and function concurrency. `max_warm=0` restores
+No pool override means an automatic maximum from CPU slots, the full
+per-worker `memory.max` budget (with a 16-MiB floor), and function concurrency. `max_warm=0` restores
 that mode; a positive value only lowers the resource ceiling. The idle channel
 is sized to this derived bound so `cap(idle) >= p.max >= dynamicMax` still
 holds without a universal worker count cap. Live spawn reservation remains
-the fail-closed memory/CPU gate.
+the fail-closed memory/CPU gate. A recent low `memory.current` sample cannot
+discount the reservation: all workers may grow to their hard bounds at once.
 Startup baseline warmup reads only a bounded recent execution window per
 function through `idx_executions_function`; do not restore a whole-table
 `ROW_NUMBER` rank, which delays the HTTP listener as history grows.

@@ -50,11 +50,17 @@ before it.
   Explicit `max_warm` values remain upper bounds, but the former universal
   1,024-worker cap no longer constrains larger hosts; resource admission
   still applies to every spawn.
+- Worker admission now reserves each worker's full `memory.max` budget. A
+  recent low RSS percentile can no longer allow several workers to grow
+  together beyond Orva's host worker-memory budget.
 
 ### Upgrade notes
 
 - Existing positive `max_warm` override rows are preserved. Set an override
   to `0` through the pool-config API or MCP tool to use automatic capacity.
+- Memory-heavy functions may show a lower `effective_max` after upgrade.
+  Check `limiting_reason=memory_capacity`; lower `memory_mb` only if the
+  function actually fits that smaller sandbox limit, or add host memory.
 
 ## v2026.09.23
 

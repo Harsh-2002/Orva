@@ -720,7 +720,9 @@ cgroup `pids.max` (default 32) caps the process tree. Spawning past
 that limit fails with `EAGAIN` inside the sandbox. The orvad scheduler
 also tracks per-pool memory reservations and refuses to admit new
 workers when host memory budget is exhausted (see
-`internal/pool/hostmem.go`). Public HTTP invocations additionally reserve a
+`internal/pool/hostmem.go`). It reserves each worker's full cgroup
+`memory.max` budget, not its recent RSS percentile: every worker could grow
+at once. Public HTTP invocations additionally reserve a
 conservative portion of daemon memory **before** reading their bodies; unknown
 lengths are charged as if they reached the configured body cap. The pending
 request count also scales with the detected memory/FD envelope, with a share
