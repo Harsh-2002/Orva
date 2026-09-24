@@ -72,3 +72,38 @@ func TestBulkGroupEndBoundsWideStatementsWithoutCappingNarrowBatches(t *testing.
 		t.Fatalf("group crossed SQL boundary: %d", end)
 	}
 }
+
+func TestAsyncWriterWideBulkInsertRecoversAcrossGroupBoundary(t *testing.T) {
+	db := newTestDB(t)
+	if _, err := db.write.Exec(`INSERT INTO functions (id, name, runtime, entrypoint)
+		VALUES ('wide-batch-fn', 'wide-batch-fn', 'node', 'handler.js')`); err != nil {
+		t.Fatal(err)
+	}
+	const statement = `INSERT INTO executions (
+		id, function_id, status, cold_start, container_id,
+		duration_ms, status_code, error_message, response_size,
+		started_at, finished_at, trace_id, span_id, parent_span_id,
+		trigger, parent_function_id, is_outlier, baseline_p95_ms
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`
+	batch := make([]writeJob, 101)
+	for i := range batch {
+		id := fmt.Sprintf("wide-batch-%03d", i)
+		if i == 50 {
+			id = "wide-batch-000" // First row of the second group is invalid.
+		}
+		batch[i] = writeJob{sql: statement, bulkInsert: true, args: []any{
+			id, "wide-batch-fn", "success", 0, "worker", int64(1), 200,
+			"", 1, time.Now().UTC(), "trace", id, nil, "http", nil, false, nil,
+		}}
+	}
+	if retry := db.writer.commit(batch, writeCritical); len(retry) != 0 {
+		t.Fatalf("wide batch left %d jobs for retry", len(retry))
+	}
+	var count int
+	if err := db.read.QueryRow(`SELECT COUNT(*) FROM executions WHERE function_id = 'wide-batch-fn'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 100 || db.WriterStats().CriticalFailures != 1 {
+		t.Fatalf("wide group recovery: rows=%d failures=%d, want 100 and 1", count, db.WriterStats().CriticalFailures)
+	}
+}
