@@ -8,18 +8,16 @@
 
 ## Sizing
 
-Measured on a 2-CPU / 12 GB host (see [CAPACITY.md](CAPACITY.md)):
-
-- **Idle**: ~50 MB RSS for the orvad process. Each warm worker takes
-  ~18 MB when idle. 20 deployed-but-unused functions cost ~50 MB total.
-- **Under sustained c=500**: ~880 req/s aggregate, 35% returning fast
-  `429 TOO_MANY_REQUESTS` once the host-wide sandbox concurrency cap is hit. p50 of
-  successful invocations: ~500 ms.
-
 Treat **2 CPU + 4 GB RAM** as a reference test size, not a promise of a
-particular request rate or function count. The useful worker count depends on
-each function's memory footprint, execution time, and burst pattern; see
-[CAPACITY.md](CAPACITY.md) for measured runs and their limits.
+particular request rate or function count. A 30-minute isolated-VM test at
+200 offered requests/s across one Node and one Python function returned and
+persisted all 360,000 calls without writer loss or cgroup OOM. A separate
+50,000-request burst at 1,000 clients returned every call but shed optional
+telemetry, so its peak rate is not a sustainable-capacity guarantee. The
+useful worker count depends on each function's memory footprint, execution
+time, storage working set, and burst pattern; see [CAPACITY.md](CAPACITY.md)
+for the measured runs and their limits. Watch `orva system metrics` on your
+own workload before deciding how much headroom to reserve.
 
 For bare-metal upgrades, use the installer so the server binary, runtime
 rootfs, adapters, and SDK files stay in step. If deliberately swapping only
