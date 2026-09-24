@@ -357,6 +357,11 @@ def handler(event):
             class="num">logger</span
           >.
         </p>
+        <p>
+          Traces started by Orva keep the <span class="num">tr_</span> plus 32-hex format. The leading 12 hex characters
+          encode Unix milliseconds and the remaining 20 are cryptographically random; incoming W3C trace IDs are
+          preserved. A trace ID is for correlation, not authentication.
+        </p>
         <CodeBlock
           label="Python"
           lang="python"

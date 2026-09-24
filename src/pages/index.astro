@@ -338,9 +338,10 @@ def handler(event):
           <dt class="spec__i">04</dt>
           <dt class="spec__t">Not a horizontal cluster</dt>
           <dd class="spec__d">
-            One node, one SQLite file. Measured on a 2-CPU, 12 GB host it sustains roughly
-            <span class="num">880 req/s</span> under heavy concurrency, and sheds the excess rather than falling
-            over.
+            One node, one SQLite file. Capacity depends on the function runtime, the database working set,
+            storage speed and available CPU and memory. Orva bounds admission under pressure and reports
+            rejections and telemetry shedding; measure your own workload instead of relying on a universal
+            requests-per-second figure.
           </dd>
         </div>
       </dl>
