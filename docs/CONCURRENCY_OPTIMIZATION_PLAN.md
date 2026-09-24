@@ -845,6 +845,16 @@ another optimization opportunity.
 - [SQLite WAL](https://sqlite.org/wal.html): concurrent readers coexist with a
   serialized writer; checkpoint behavior supports batching and explicit storage
   pressure measurement instead of adding write connections.
+- [SQLite's appropriate-uses guide](https://www.sqlite.org/whentouse.html):
+  one database file has one active writer, while local single-node storage is
+  a strong fit. More CPU and more admitted workers do not by themselves make
+  indexed writes on that file scale linearly; keep SQLite and measure the
+  writer/storage working set instead of claiming an unlimited write rate.
+- [SQLite PRAGMA reference](https://www.sqlite.org/pragma.html):
+  `cache_size` is a suggested connection page-cache size and `mmap_size` a
+  mapped-I/O limit, not guarantees that the relevant index pages remain
+  resident. The reversed-copy controls above are required before attributing
+  a result to either setting.
 - [k6 open and closed workload models](https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/):
   closed-loop clients reduce offered traffic as latency rises, motivating independent
   arrival-rate tests alongside the operator's fixed-concurrency `hey` measurements.
