@@ -194,6 +194,22 @@ and 500 Python execution rows in the timestamp window, cgroup-v2 limits,
 in drain time is another reason not to infer steady-state capacity from a
 single short phase.
 
+The observer's next revision added batch attempts and critical
+submit-to-commit time. On the later, larger scratch database, a 1,000/100
+mixed phase returned and persisted all 1,000 executions with zero drops:
+1,005 critical jobs in 12 batch attempts, 5.74 seconds of SQL statement
+time, 0.88 seconds committing, and 3,988 seconds of aggregate queue wait
+across 1,005 sampled jobs. A following 5,000/250 phase returned and
+persisted all 5,000 executions, but shed 5,920 optional writes. Its
+critical lane committed 5,007 jobs in 46 attempts (about 109 jobs per
+attempt), spent 18.32 seconds in statements versus 1.92 seconds committing,
+and accumulated 19,432 seconds of queue wait across 5,007 jobs (about
+3.88 seconds mean). Attempts include retries and some non-execution jobs,
+so jobs/attempt is a diagnostic ratio, not an exact successful batch size.
+The measurement argues against simply enlarging batches or queues as the
+first response to this particular saturation; SQLite statement work
+dominates. It does not identify which index or page-cache cost is causal.
+
 Do **not** use this short two-copy probe to justify index pruning or a larger
 cache. A valid next comparison needs controlled filesystem-cache residency,
 sustained read/write traffic on restored snapshots, and independent direct-VM

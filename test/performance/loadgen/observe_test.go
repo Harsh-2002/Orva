@@ -160,6 +160,42 @@ func TestWriterDeltaRejectsCounterReset(t *testing.T) {
 	}
 }
 
+func TestWriterDeltaReportsBatchAndQueueWait(t *testing.T) {
+	beforeMetrics, err := parseWriterMetrics([]byte(metricFixture(map[string]float64{
+		"orva_writer_batch_attempts_total{priority=\"critical\"}":     5,
+		"orva_writer_committed_jobs_total{priority=\"critical\"}":     20,
+		"orva_writer_queue_wait_seconds_total{priority=\"critical\"}": 10,
+		"orva_writer_queue_wait_samples_total{priority=\"critical\"}": 20,
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterMetrics, err := parseWriterMetrics([]byte(metricFixture(map[string]float64{
+		"orva_writer_batch_attempts_total{priority=\"critical\"}":     15,
+		"orva_writer_batch_attempts_total{priority=\"activity\"}":     3,
+		"orva_writer_batch_attempts_total{priority=\"telemetry\"}":    2,
+		"orva_writer_committed_jobs_total{priority=\"critical\"}":     120,
+		"orva_writer_queue_wait_seconds_total{priority=\"critical\"}": 35,
+		"orva_writer_queue_wait_samples_total{priority=\"critical\"}": 120,
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := writerSnapshot{metrics: beforeMetrics}
+	after := writerSnapshot{metrics: afterMetrics}
+	after.health.Sandbox.ResourceLimits = "cgroup_v2"
+	report, err := writerDelta(before, after, writerPeaks{}, time.Second, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.CriticalBatchAttempts != 10 || report.ActivityBatchAttempts != 3 ||
+		report.TelemetryBatchAttempts != 2 || report.CriticalCommittedJobs != 100 ||
+		report.CriticalQueueWaitSecs != 25 || report.CriticalQueueWaitCount != 100 ||
+		!report.ObservationComplete {
+		t.Fatalf("writer delta=%+v", report)
+	}
+}
+
 func TestValidateObserverOriginAndDrainBudget(t *testing.T) {
 	base := config{URLs: []string{"http://scratch.example/fn/test"}, Requests: 1,
 		Concurrency: 1, Timeout: time.Second, ObserveURL: "http://scratch.example",

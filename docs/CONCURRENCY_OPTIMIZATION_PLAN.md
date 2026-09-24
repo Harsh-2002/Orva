@@ -845,6 +845,17 @@ zero. A 1,000-request scratch phase found a 6.16-second writer drain after a
 2.67-second client run despite all HTTP 200, and a 5,000-request phase
 recorded full optional queues and best-effort drops. Row counts are still
 checked independently because committed writer jobs include other work.
+Its next revision includes per-lane batch attempts and critical
+submit-to-commit time/sample deltas so a saturated run can separate small
+batches and queue residence from SQL statement and commit cost; these
+counters are not themselves a throughput optimization.
+The first isolated-VM checks with these counters persisted 1,000/1,000
+and 5,000/5,000 mixed executions. At 5,000/250, 5,007 critical jobs used
+46 batch attempts, with 18.32 seconds in SQL statements and 1.92 seconds
+in commit. Critical mean submit-to-commit time was about 3.88 seconds;
+5,920 optional writes dropped. Increasing batch size or queue count is not
+the first supported intervention; the statement/page-cache/index path
+needs controlled attribution, and writer-aware admission remains open.
 
 This project is complete when these gates pass and measured capacity curves explain
 the remaining hardware/runtime/storage limits. It establishes a durable optimization

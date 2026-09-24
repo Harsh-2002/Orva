@@ -20,12 +20,17 @@ var observedMetrics = []string{
 	"orva_writer_queue_depth{priority=\"critical\"}",
 	"orva_writer_queue_depth{priority=\"activity\"}",
 	"orva_writer_queue_depth{priority=\"telemetry\"}",
+	"orva_writer_batch_attempts_total{priority=\"critical\"}",
+	"orva_writer_batch_attempts_total{priority=\"activity\"}",
+	"orva_writer_batch_attempts_total{priority=\"telemetry\"}",
 	"orva_writer_committed_jobs_total{priority=\"critical\"}",
 	"orva_writer_committed_jobs_total{priority=\"activity\"}",
 	"orva_writer_committed_jobs_total{priority=\"telemetry\"}",
 	"orva_writer_connection_wait_seconds_total{priority=\"critical\"}",
 	"orva_writer_statement_seconds_total{priority=\"critical\"}",
 	"orva_writer_commit_seconds_total{priority=\"critical\"}",
+	"orva_writer_queue_wait_seconds_total{priority=\"critical\"}",
+	"orva_writer_queue_wait_samples_total{priority=\"critical\"}",
 	"orva_writer_critical_timeouts_total",
 	"orva_writer_critical_failures_total",
 	"orva_writer_dropped_telemetry_total",
@@ -68,6 +73,9 @@ type writerReport struct {
 	DrainSeconds           float64     `json:"drain_seconds"`
 	ObservationErrors      int         `json:"observation_errors"`
 	Peak                   writerPeaks `json:"peak"`
+	CriticalBatchAttempts  int64       `json:"critical_batch_attempts"`
+	ActivityBatchAttempts  int64       `json:"activity_batch_attempts"`
+	TelemetryBatchAttempts int64       `json:"telemetry_batch_attempts"`
 	CriticalCommittedJobs  int64       `json:"critical_committed_jobs"`
 	ActivityCommittedJobs  int64       `json:"activity_committed_jobs"`
 	TelemetryCommittedJobs int64       `json:"telemetry_committed_jobs"`
@@ -78,6 +86,8 @@ type writerReport struct {
 	CriticalConnectionSecs float64     `json:"critical_connection_seconds"`
 	CriticalStatementSecs  float64     `json:"critical_statement_seconds"`
 	CriticalCommitSecs     float64     `json:"critical_commit_seconds"`
+	CriticalQueueWaitSecs  float64     `json:"critical_queue_wait_seconds"`
+	CriticalQueueWaitCount int64       `json:"critical_queue_wait_samples"`
 }
 
 func (p *writerPeaks) update(s writerSnapshot) {
@@ -236,6 +246,9 @@ func writerDelta(before, after writerSnapshot, peaks writerPeaks, elapsed time.D
 		DrainSeconds:           elapsed.Seconds(),
 		ObservationErrors:      observationErrors,
 		Peak:                   peaks,
+		CriticalBatchAttempts:  int64(value("orva_writer_batch_attempts_total{priority=\"critical\"}")),
+		ActivityBatchAttempts:  int64(value("orva_writer_batch_attempts_total{priority=\"activity\"}")),
+		TelemetryBatchAttempts: int64(value("orva_writer_batch_attempts_total{priority=\"telemetry\"}")),
 		CriticalCommittedJobs:  int64(value("orva_writer_committed_jobs_total{priority=\"critical\"}")),
 		ActivityCommittedJobs:  int64(value("orva_writer_committed_jobs_total{priority=\"activity\"}")),
 		TelemetryCommittedJobs: int64(value("orva_writer_committed_jobs_total{priority=\"telemetry\"}")),
@@ -246,6 +259,8 @@ func writerDelta(before, after writerSnapshot, peaks writerPeaks, elapsed time.D
 		CriticalConnectionSecs: value("orva_writer_connection_wait_seconds_total{priority=\"critical\"}"),
 		CriticalStatementSecs:  value("orva_writer_statement_seconds_total{priority=\"critical\"}"),
 		CriticalCommitSecs:     value("orva_writer_commit_seconds_total{priority=\"critical\"}"),
+		CriticalQueueWaitSecs:  value("orva_writer_queue_wait_seconds_total{priority=\"critical\"}"),
+		CriticalQueueWaitCount: int64(value("orva_writer_queue_wait_samples_total{priority=\"critical\"}")),
 	}, nil
 }
 

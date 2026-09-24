@@ -129,8 +129,13 @@ as a healthy server. JSON separates HTTP status counts, transport errors and
 Orva error codes, plus latency percentiles by response code and by function
 URL. `-observe-url` must have the same origin as the function URLs; it adds
 sampled queue/byte peaks, sandbox limit mode, writer counter deltas, and time
-to drain all in-flight writer bytes after the client phase. The default drain
-budget is 45 seconds (`-drain-timeout`). Missing metrics, a counter reset,
+to drain all in-flight writer bytes after the client phase. The report also
+includes batch-attempt deltas by lane and the critical lane's submit-to-commit
+time and sample count. Batch attempts include retries, so
+`critical_committed_jobs / critical_batch_attempts` is a diagnostic ratio,
+not necessarily the exact mean successful batch size. Queue-wait seconds
+divided by samples is a mean for committed jobs, not a tail percentile. The
+default drain budget is 45 seconds (`-drain-timeout`). Missing metrics, a counter reset,
 an observation failure, or a drain timeout fails the phase instead of
 silently reporting zero loss. `-require-cgroup-v2` rejects an unenforced
 scratch sandbox **before** sending load. Exit code 1 means a post-start
