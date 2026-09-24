@@ -93,6 +93,32 @@ The later copy was resident in the guest page cache; changing indexes or
 SQLite cache size was not the cause of these large differences. All copies
 were discarded and the 1,470,051-row source was unchanged.
 
+Two subsequent **unchanged-binary**, direct-link mixed Node/Python runs used
+the same 2-vCPU/4-GiB sandbox-required server VM and separate 1-vCPU/512-MiB
+client VM, with 20,000 requests at 250 closed-loop clients each. The first
+returned 20,000 HTTP 200 in 64.66 s (309/s; HTTP-200 p99 2.18 s); the second
+returned 20,000 HTTP 200 in 34.98 s (572/s; p99 1.12 s). Neither had a
+transport error, storage 429, critical write failure, or critical timeout.
+After each writer drain, read-only per-function counts increased by exactly
+10,000 Node and 10,000 Python successful execution rows. These are successive
+runs on a growing database, not a baseline/candidate comparison.
+
+The server process physically read about 429 MiB during the first run and
+120 MiB during the second, while writing about 1.00 and 1.01 GiB. Its
+delegated cgroup's file cache grew from about 143 MiB before the first run to
+594 MiB after it and 735 MiB after the second; major faults rose by 2,291,
+then 84. The critical writer spent 55.68/26.32 s in statements and
+8.11/6.37 s in commits; connection wait remained negligible. This supports
+page-cache residency and disk I/O as **material contributors** to the large
+throughput swing, not proof that they are the only limits or that a larger
+SQLite connection cache/index change would help. The pre-run row-count query
+itself warmed some pages, so even the first phase was not a cold-cache test.
+Activity lost 9,037/8,509 records and total best-effort telemetry lost
+27,852/27,438 under these loads. Both optional lanes reached their 1,024-job
+channel limits during the first run. Exact critical-row accounting therefore
+passes, but the telemetry/ordinary-load and controlled-performance gates do
+not. No schema or cache policy was changed.
+
 Do **not** use this short two-copy probe to justify index pruning or a larger
 cache. A valid next comparison needs controlled filesystem-cache residency,
 sustained read/write traffic on restored snapshots, and independent direct-VM

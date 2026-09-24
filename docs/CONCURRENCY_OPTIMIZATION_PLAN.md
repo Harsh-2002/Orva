@@ -694,7 +694,14 @@ changing supported handler behavior, per-invocation attribution or timeout isola
   accepts either copy order, and reconciles actual-driver inserted rows.
   Control filesystem-cache residency and run sustained same-snapshot/HTTP A/B
   before any schema or cache policy proposal; no performance gain from either
-  candidate is established.
+  candidate is established. Two unchanged-binary 20,000-request/250-client
+  direct-VM phases then returned all 20,000 HTTP 200 with exact execution-row
+  reconciliation, but their goodput changed from 309/s to 572/s as physical
+  reads fell from about 429 MiB to 120 MiB and major faults from 2,291 to
+  84. Critical statement time fell from 55.68 to 26.32 s, while writes stayed
+  near 1 GiB and optional telemetry dropped over 27,000 records in each phase.
+  This reinforces the storage/cache hypothesis and invalidates one-off RPS
+  comparisons; it does not establish a safe index or cache-size optimization.
 - Reserve critical completion-record space before execution. On storage pressure,
   reduce admissions before running side-effecting code; do not return a retryable
   pre-execution error after a function already ran. Completion uses its reservation,
