@@ -14,6 +14,46 @@ samples, so reconcile accepted HTTP responses with execution rows and monitor
 critical failure counters separately. No pool cap or SQLite durability setting
 was changed on the basis of the isolated insert microbenchmark alone.
 
+### Direct-VM writer saturation profile (same date)
+
+A later direct-link run used a 2-vCPU/4-GiB smolvm server with its disk-backed
+database (about 1.45 million existing executions), a separate 1-vCPU/512-MiB
+client VM, and two already-deployed Node/Python functions. At 250 closed-loop
+clients, 20,000 requests took 98.36 seconds: 19,953 returned HTTP 200 and 47
+returned pre-execution `STORAGE_BACKPRESSURE` 429; there were no transport
+errors or 504s. After writer drain, a timestamp-and-function query found
+exactly 19,953 new successful execution rows. The 429s are real capacity
+pressure, not lost post-execution records.
+
+During that run the critical writer committed 19,967 jobs in 195 batch
+attempts, with 85.884 seconds cumulative statement time, 9.115 seconds commit
+time, and 0.032 seconds connection wait. The additional jobs include
+non-final-row critical work, so committed-job count is not the HTTP-200 count.
+Its submit-to-commit total was 98,121 seconds across jobs (about 4.9 seconds
+per job); this is an **asynchronous persistence delay**, not the public HTTP
+response latency. Critical failures and timeouts stayed at zero. Activity
+and optional telemetry dropped 12,067 and 30,898 records respectively under
+this overload, so the run does not meet the plan's ordinary-load telemetry
+gate.
+
+A 30-second loopback-only CPU profile collected during the same run had 7.70
+seconds of on-CPU samples. The writer run/commit call stack accounted for 5.08
+seconds cumulative (66%); SQLite's B-tree insertion for 4.45 seconds (58%),
+with page reads in that call tree accounting for 3.02 seconds (39%). These
+call stacks overlap; the percentages must not be added. After the run the
+database held 1,470,051 executions and was 1.55 GB on disk; nine explicit
+execution indexes occupied about 1.06 GB by `dbstat`. Index maintenance and
+page reads are therefore concrete hypotheses, **not** permission to prune
+indexes without a same-snapshot A/B plus read-query-plan and correctness
+checks. The earlier index-pruning attempt in this document was reverted.
+
+The repeated production-schema microbenchmark on the current host measured
+9.31–9.85 ms per 200-row batch for prepared per-row inserts and 8.29–9.43 ms
+for grouped inserts across three runs. The ranges overlap; grouped inserts
+used about 308 versus 3,024 allocations per batch but more allocated bytes.
+This differs from the earlier run below and reinforces that the isolated
+benchmark cannot establish an end-to-end gain or justify a new batch limit.
+
 A new benchmark uses the production 18-column final-execution INSERT, foreign
 key, and current execution indexes instead of a one-column toy table. On the
 same local host, three 200-row batch repetitions measured prepared per-row

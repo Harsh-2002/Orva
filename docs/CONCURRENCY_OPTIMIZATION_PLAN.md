@@ -662,6 +662,14 @@ changing supported handler behavior, per-invocation attribution or timeout isola
   transaction sizes, commit latency, read-connection waits and checkpoint stalls.
   Tune bounded batch size/time from measurements; keep critical work ahead of
   optional telemetry and avoid unbounded batches or a new writer per request.
+  **Current evidence:** a direct-VM 20,000-request/250-client mixed run produced
+  19,953 successful responses/rows and 47 pre-execution storage 429s. The
+  critical writer spent 85.9 seconds in SQL statements, 9.1 seconds committing,
+  and 0.03 seconds acquiring connections; a simultaneous CPU profile attributed
+  66% of sampled CPU to the writer call stack, dominated by SQLite B-tree
+  insertion/page reads. Nine explicit execution indexes occupied about 1.06 GB
+  at 1.47 million rows. This points to a same-snapshot index/write A/B with
+  read-query-plan checks, not a blind checkpoint or batch-size change.
 - Reserve critical completion-record space before execution. On storage pressure,
   reduce admissions before running side-effecting code; do not return a retryable
   pre-execution error after a function already ran. Completion uses its reservation,
