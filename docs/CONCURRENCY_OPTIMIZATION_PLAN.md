@@ -708,6 +708,16 @@ changing supported handler behavior, per-invocation attribution or timeout isola
   baseline was faster than the candidate. The code was reverted; improving
   telemetry requires measured total write demand and admission, not assuming
   that idle-looking priority selection is spare SQLite capacity.
+  An open-loop sweep on the unchanged 2-vCPU/4-GiB direct-VM setup then
+  showed why the controller must use live feedback: two 10,000-request
+  400/s phases each returned and persisted all 10,000 executions, but one
+  lost 1,506 optional records and the other lost none. A 300/s phase had no
+  loss; a 500/s phase returned/persisted all 10,000 while shedding 172
+  activity and 3,105 total best-effort records. These are exploratory
+  sequential phases on a growing database, not a fixed sustainable-rate
+  curve. One separate 500/s phase ended when the foreground VM command's
+  per-request-log output pipe closed (SIGPIPE, cgroup OOM count zero); its
+  partial 7,620 HTTP-200 responses are excluded from capacity comparisons.
 - Reserve critical completion-record space before execution. On storage pressure,
   reduce admissions before running side-effecting code; do not return a retryable
   pre-execution error after a function already ran. Completion uses its reservation,

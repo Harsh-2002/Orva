@@ -133,6 +133,46 @@ short test supplies no defensible benefit for changing critical-write
 priority. The experiment was **reverted**; persistent optional loss remains
 an open admission/storage-accounting problem.
 
+An exploratory **open-loop** direct-VM sweep then scheduled 3,000 mixed
+requests each at 100, 200, 300, 400, and 500 requests/s, with a separate
+client VM and a 500-client ceiling. Every arrival was sent and returned HTTP
+200. The first four short phases dropped no activity or optional telemetry;
+the 500/s phase dropped 841 optional records. Short success is not a
+sustainable-rate claim: a 10,000-request 400/s phase later dropped 1,506
+optional records, while another 400/s phase on the same unchanged binary
+did not. Cache state and shared-host I/O varied across phases.
+
+| 10,000-request phase | HTTP 200 | Client errors | HTTP-200 p99 | Activity drops | Total best-effort drops |
+|---|---:|---:|---:|---:|---:|
+| 400/s, first | 10,000 | 0 | 635 ms | 0 | 1,506 |
+| 300/s | 10,000 | 0 | 72 ms | 0 | 0 |
+| 400/s, repeat | 10,000 | 0 | 142 ms | 0 | 0 |
+| 500/s, output-pipe-safe rerun | 10,000 | 0 | 1,509 ms | 172 | 3,105 |
+
+All four long phases were on the same 2-vCPU/4-GiB scratch server and
+separate 1-vCPU/512-MiB client, with real nsjail and delegated cgroup-v2
+limits. Read-only time-window queries after writer drain found exactly 5,000
+new successful Node rows and 5,000 Python rows for **each** phase. The final
+500/s run had zero critical failures/timeouts and no cgroup OOM/PID-limit
+events; it committed 9,828 activity and 7,067 optional telemetry jobs while
+its critical lane committed 10,002 jobs (the additional two were not final
+execution rows). This demonstrates that public HTTP success can coexist with
+unreported best-effort loss, and that the loss boundary is not a stable RPS
+constant. Live writer demand and drain time must inform admission and
+telemetry policy; no fixed operator concurrency knob follows from this sweep.
+
+One intermediate 500/s phase is **excluded**: the foreground `smolvm exec`
+output pipe closed after accumulating per-request logs, and the daemon
+exited with SIGPIPE (141), not an OOM (`memory.events: oom_kill 0`). It
+returned 7,620 HTTP 200 before the pipe failure, but only 6,791 matching
+execution rows had committed when the process died abruptly. This is a
+test-harness termination, not a throughput result; it also illustrates
+Orva's documented acknowledged-in-memory versus persisted-record boundary
+on an ungraceful process exit. The valid rerun disconnected stdout from the
+test command's pipe and reconciled all 10,000 final rows. A read-only
+`PRAGMA quick_check` of the scratch database after the abrupt exit returned
+`ok`.
+
 Do **not** use this short two-copy probe to justify index pruning or a larger
 cache. A valid next comparison needs controlled filesystem-cache residency,
 sustained read/write traffic on restored snapshots, and independent direct-VM
