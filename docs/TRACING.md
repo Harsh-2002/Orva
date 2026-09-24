@@ -72,6 +72,11 @@ when:
 - The function has at least 20 samples in its window, AND
 - The execution's duration exceeds **P95 × 2**.
 
+On restart, Orva seeds that window from at most the 1,000 most recent
+executions per function using its function/time index. Older successes are
+not revived after a long failure streak; this keeps startup bounded even
+when the history table is large.
+
 Cold starts and errors are excluded from the baseline so a flapping
 function can't drag P95 down. The flag and the baseline_p95_ms ride along
 on the execution row.

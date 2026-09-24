@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
@@ -83,7 +81,7 @@ func (h *PoolConfigHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	if err != nil || cfg == nil {
 		cfg = &database.PoolConfig{
 			FunctionID: body.FunctionID,
-			MinWarm:    1, MaxWarm: 50, IdleTTLS: 600, ScaleToZero: false,
+			MinWarm:    1, MaxWarm: 0, IdleTTLS: 600, ScaleToZero: false,
 		}
 	}
 
@@ -117,15 +115,8 @@ func (h *PoolConfigHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if cfg.MinWarm < 0 || cfg.MaxWarm < 1 || cfg.MinWarm > cfg.MaxWarm {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "require 0 <= min_warm <= max_warm and max_warm >= 1", reqID)
-		return
-	}
-	// max_warm sizes the pool's idle channel, so reject an absurd value here
-	// rather than clamping it silently — effective_max is a published number.
-	if cfg.MaxWarm > pool.MaxWarmLimit {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION",
-			fmt.Sprintf("max_warm must be <= %d", pool.MaxWarmLimit), reqID)
+	if cfg.MinWarm < 0 || cfg.MaxWarm < 0 || (cfg.MaxWarm > 0 && cfg.MinWarm > cfg.MaxWarm) {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "require min_warm >= 0 and max_warm >= min_warm, or max_warm=0 for automatic capacity", reqID)
 		return
 	}
 	if cfg.IdleTTLS < 0 {

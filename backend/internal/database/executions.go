@@ -194,42 +194,72 @@ type WarmBaselineSeed struct {
 	DurationMS int64
 }
 
-// ListBaselineSeed returns up to baselineSamples × functions worth of
-// recent successful warm executions, suitable for warming the per-fn
-// rolling P95 buffers at startup. We pull only successful warm
-// executions (cold_start = 0, status = 'success', duration_ms NOT NULL)
-// because cold starts and errors are excluded from the baseline at
-// runtime — warming with them would skew the first few minutes of
-// post-start outlier classification.
+// ListBaselineSeed returns recent successful warm executions for the per-fn
+// rolling P95 buffers at startup. Only the latest ten sample-windows of each
+// function are examined: ancient successes must not seed a baseline after a
+// long run of failures, and boot must not rank the entire executions table.
+// The (function_id, started_at DESC) index makes each read bounded.
 func (db *Database) ListBaselineSeed(perFnSamples int) ([]WarmBaselineSeed, error) {
 	if perFnSamples <= 0 {
 		perFnSamples = 100
 	}
-	// Window-function-style: take the most recent N rows per function.
-	// SQLite supports ROW_NUMBER() since 3.25 and modernc/sqlite is
-	// well past that.
-	rows, err := db.read.Query(`
-		SELECT function_id, duration_ms FROM (
-			SELECT function_id, duration_ms,
-				ROW_NUMBER() OVER (PARTITION BY function_id ORDER BY started_at DESC) AS rn
-			FROM executions
-			WHERE status = 'success' AND cold_start = 0 AND duration_ms IS NOT NULL
-		) WHERE rn <= ?
-	`, perFnSamples)
+	ids, err := db.read.Query(`SELECT id FROM functions`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var seed []WarmBaselineSeed
-	for rows.Next() {
-		var s WarmBaselineSeed
-		if err := rows.Scan(&s.FunctionID, &s.DurationMS); err != nil {
+	var functionIDs []string
+	for ids.Next() {
+		var id string
+		if err := ids.Scan(&id); err != nil {
+			_ = ids.Close()
 			return nil, err
 		}
-		seed = append(seed, s)
+		functionIDs = append(functionIDs, id)
 	}
-	return seed, rows.Err()
+	if err := ids.Err(); err != nil {
+		_ = ids.Close()
+		return nil, err
+	}
+	if err := ids.Close(); err != nil {
+		return nil, err
+	}
+	// The inner LIMIT prevents SQLite from flattening this into a
+	// whole-history scan when recent invocations all failed.
+	scanLimit := perFnSamples * 10
+	if scanLimit/perFnSamples != 10 {
+		scanLimit = perFnSamples
+	}
+	var seed []WarmBaselineSeed
+	for _, functionID := range functionIDs {
+		rows, err := db.read.Query(`
+			SELECT duration_ms FROM (
+				SELECT duration_ms, status, cold_start
+				FROM executions INDEXED BY idx_executions_function
+				WHERE function_id = ?
+				ORDER BY started_at DESC LIMIT ?
+			) WHERE status = 'success' AND cold_start = 0
+				AND duration_ms IS NOT NULL LIMIT ?
+		`, functionID, scanLimit, perFnSamples)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var duration int64
+			if err := rows.Scan(&duration); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			seed = append(seed, WarmBaselineSeed{FunctionID: functionID, DurationMS: duration})
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return seed, nil
 }
 
 // AsyncInsertExecutionLog queues a log row for the batched writer.

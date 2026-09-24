@@ -18,14 +18,6 @@ const (
 	scaleDownStep              = 0.20
 	scaleDownGrace             = 30 * time.Second
 	maxConcurrentSpawnsPerPool = 4
-
-	// MaxWarmLimit bounds the per-pool idle-channel allocation. max_warm is
-	// operator-supplied and the channel is now sized from it directly, so an
-	// absurd value would allocate an absurd channel. It clamps p.max too, or
-	// cap(p.idle) >= p.max breaks and the spawn/kill churn returns. The REST
-	// and MCP pool-config writers reject anything above it so operators get a
-	// 400 rather than a silent clamp.
-	MaxWarmLimit = 1024
 )
 
 // scaler is the global admission scheduler. It evaluates pools in a rotating
@@ -243,7 +235,10 @@ func (s *scaler) dynamicMax(p *functionPool, observedMemoryP95 int64) (int, stri
 	if cpuCap < 1 {
 		cpuCap = 1
 	}
-	effectiveCap, reason := opCap, "operator_max"
+	effectiveCap, reason := opCap, p.maxReason
+	if reason == "" {
+		reason = "operator_max"
+	}
 	if p.concSem != nil && cap(p.concSem) < effectiveCap {
 		effectiveCap, reason = cap(p.concSem), "function_concurrency"
 	}

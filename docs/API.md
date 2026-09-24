@@ -463,8 +463,11 @@ Read the row.
 ```
 
 Fields are partial — unspecified ones keep the prior value (or default
-for new rows). Defaults are min 1, max 50, idle TTL 600 seconds, and
-scale-to-zero off. Pool Controller v2 derives desired capacity from demand;
+for new rows). Defaults are min 1, max 0 (automatic host-derived capacity),
+idle TTL 600 seconds, and scale-to-zero off. A positive `max_warm` is an
+operator upper bound, never permission to exceed host CPU/memory or function
+concurrency; `0` removes that operator cap. Existing positive overrides remain
+unchanged on upgrade. Pool Controller v2 derives desired capacity from demand;
 the removed `target_concurrency` field returns `400 VALIDATION`.
 
 ## API keys
@@ -605,6 +608,18 @@ delete. `deleted_function_writes` counts function-owned async jobs deliberately
 discarded after deletion; it is separate from `critical_failures` and
 `dropped_telemetry`. Prometheus exposes the same count as
 `orva_writer_deleted_function_writes_total`.
+The `orva_writer_batch_attempts_total`, `orva_writer_committed_jobs_total`,
+`orva_writer_connection_wait_seconds_total`,
+`orva_writer_statement_seconds_total`, `orva_writer_commit_seconds_total`,
+`orva_writer_queue_wait_seconds_total`, and
+`orva_writer_queue_wait_samples_total` counters are split by `priority`
+(`critical`, `activity`, `telemetry`). They measure the normal batched writer
+path only; failure-isolation savepoint recovery is excluded from committed-job
+and queue-wait counts. Divide each cumulative time by its matching attempt or
+sample count over the same scrape interval, not by process uptime. Queue wait
+starts when the writer job is submitted for admission, so it can include
+waiting for a channel slot as well as SQL and commit time; it is not a
+SQLite-only execution timer.
 The per-function `orva_pool_service_p95_ms` gauge and `service_p95_ms` in
 pool telemetry measure worker occupancy from successful acquire to release,
 including response processing and streaming. They exclude queue wait and

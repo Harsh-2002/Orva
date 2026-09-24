@@ -13,6 +13,28 @@ pruned with their releases — so `git log v2026.09.23..HEAD` is the range for
 anything unreleased, and the sections below are the record for everything
 before it.
 
+## Unreleased
+
+### Fixed
+
+- Startup outlier-baseline warmup now reads a bounded, indexed recent window
+  per function instead of ranking the entire execution history before the
+  HTTP listener opens. Very old successes after a long failure streak no
+  longer seed the fresh in-memory baseline.
+- `/metrics` now exposes per-priority SQLite writer batch, connection-wait,
+  statement, commit, and writer-submit-to-commit counters for diagnosing storage
+  saturation without changing worker or queue ceilings.
+- A function without a pool override now derives its maximum worker count
+  from host CPU/memory and function concurrency instead of stopping at 50.
+  Explicit `max_warm` values remain upper bounds, but the former universal
+  1,024-worker cap no longer constrains larger hosts; resource admission
+  still applies to every spawn.
+
+### Upgrade notes
+
+- Existing positive `max_warm` override rows are preserved. Set an override
+  to `0` through the pool-config API or MCP tool to use automatic capacity.
+
 ## v2026.09.23
 
 ### Fixed

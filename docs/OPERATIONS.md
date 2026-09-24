@@ -68,6 +68,11 @@ pgrep -c nsjail   # from the HOST: the container runs with pid: host,
 If total workers (`idle + busy + spawning`) exceeds `effective_max`, capture
 the metrics snapshot and logs: Pool Controller v2 publishes spawning before
 launch specifically to prevent overlapping evaluations from over-spawning.
+With no override, the pool maximum is CPU/memory-derived; `max_warm=0` means
+automatic. A positive saved override can still be the limiting reason after
+an upgrade. Raise or clear it only when telemetry says `operator_max`;
+`cpu_capacity`, `memory_capacity`, and `function_concurrency` need different
+remedies.
 
 **Recovery.** The controller waits 30 seconds below desired capacity, then removes no
 more than 20% of workers per evaluation. It should converge without dropping

@@ -149,18 +149,18 @@ func TestNoSpawnKillChurnAtRest(t *testing.T) {
 	}
 }
 
-// max_warm sizes the idle channel, so an absurd value must be clamped rather
-// than allocating an absurd channel.
-func TestMaxWarmClampedToLimit(t *testing.T) {
+// Even an absurd configured max cannot allocate a larger idle channel than
+// the host could ever fill under its CPU and minimum-memory reservations.
+func TestMaxWarmClampedToResourceEnvelope(t *testing.T) {
 	m, reg := egressTestManager(t)
 	m.tmpl = fakeSandboxTemplate(t)
-	hm := &hostMemTracker{totalBytes: 64 << 30, reservationPct: 0.8, cpuWorkers: 128}
+	hm := &hostMemTracker{totalBytes: 64 << 30, reservationPct: 0.8, cpuWorkers: 2048}
 	hm.availBytes.Store(64 << 30)
 	m.hostMem = hm
 
 	fn := registerFn(t, reg, "absurd-max", "none")
 	if err := m.db.UpsertPoolConfig(&database.PoolConfig{
-		FunctionID: fn.ID, MinWarm: 1, MaxWarm: MaxWarmLimit * 10, IdleTTLS: 600,
+		FunctionID: fn.ID, MinWarm: 1, MaxWarm: 1_000_000, IdleTTLS: 600,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +169,51 @@ func TestMaxWarmClampedToLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.max != MaxWarmLimit {
-		t.Errorf("p.max = %d, want it clamped to %d", p.max, MaxWarmLimit)
+	if p.max != 2048 || p.maxReason != "cpu_capacity" {
+		t.Errorf("p.max = %d/%s, want 2048/cpu_capacity", p.max, p.maxReason)
 	}
-	if cap(p.idle) != MaxWarmLimit {
-		t.Errorf("cap(idle) = %d, want %d", cap(p.idle), MaxWarmLimit)
+	if cap(p.idle) != 2048 {
+		t.Errorf("cap(idle) = %d, want 2048", cap(p.idle))
+	}
+}
+
+func TestAutoMaxTracksResourceEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mem  int64
+		cpu  int
+		fn   int
+		want int
+		why  string
+	}{
+		{"cpu", 64 << 30, 2048, 0, 2048, "cpu_capacity"},
+		{"memory", 1 << 30, 2048, 0, 51, "memory_capacity"},
+		{"function", 64 << 30, 2048, 7, 7, "function_concurrency"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hm := &hostMemTracker{totalBytes: tc.mem, reservationPct: 0.8, cpuWorkers: tc.cpu}
+			got, reason := poolResourceCeiling(hm, 1000, tc.fn)
+			if got != tc.want || reason != tc.why {
+				t.Fatalf("ceiling=%d/%s, want %d/%s", got, reason, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+func TestPoolWithoutOverrideUsesResourceCeiling(t *testing.T) {
+	m, reg := egressTestManager(t)
+	m.cfg.DefaultMax = 0
+	m.tmpl = fakeSandboxTemplate(t)
+	hm := &hostMemTracker{totalBytes: 64 << 30, reservationPct: 0.8, cpuWorkers: 256}
+	hm.availBytes.Store(64 << 30)
+	m.hostMem = hm
+	fn := registerFn(t, reg, "auto-max", "none")
+	p, err := m.getOrCreatePool(fn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.max != 256 || p.maxReason != "cpu_capacity" || cap(p.idle) != 256 {
+		t.Fatalf("automatic pool ceiling=%d/%s idle=%d, want 256/cpu_capacity/256",
+			p.max, p.maxReason, cap(p.idle))
 	}
 }

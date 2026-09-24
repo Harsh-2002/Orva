@@ -13,11 +13,12 @@ import (
 // functionPool holds the idle workers and live counters for one function.
 // All methods are safe for concurrent use.
 type functionPool struct {
-	fnID    string
-	min     int
-	max     int // operator hard cap (from pool_config.max_warm)
-	idleTTL time.Duration
-	maxUses int64
+	fnID      string
+	min       int
+	max       int    // resource-derived channel ceiling, possibly lowered by max_warm
+	maxReason string // source of max for limiting_reason telemetry
+	idleTTL   time.Duration
+	maxUses   int64
 
 	// Autoscaler inputs — set at creation time, read by scaler evaluate().
 	memoryBytes int64 // per-worker memory.max budget for admission accounting

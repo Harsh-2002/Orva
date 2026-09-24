@@ -41,6 +41,15 @@ CPU quota, plus the effective CPU set, for its startup capacity snapshot; a
 1-second poll refreshes memory usage. This is resource discovery, not proof of
 delegated per-worker cgroup enforcement. `proxy.Forward` does not consume a
 seccomp policy; the worker's actual policy is built at spawn in `pool/pool.go`.
+No pool override means an automatic maximum from CPU slots, the 16-MiB
+minimum worker reservation, and function concurrency. `max_warm=0` restores
+that mode; a positive value only lowers the resource ceiling. The idle channel
+is sized to this derived bound so `cap(idle) >= p.max >= dynamicMax` still
+holds without a universal worker count cap. Live spawn reservation remains
+the fail-closed memory/CPU gate.
+Startup baseline warmup reads only a bounded recent execution window per
+function through `idx_executions_function`; do not restore a whole-table
+`ROW_NUMBER` rank, which delays the HTTP listener as history grows.
 `proxy.Proxy` caches the non-security streaming settings for at most 30 seconds
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.
@@ -60,6 +69,11 @@ execution-concurrency cap. The async SQLite writer prepares each distinct SQL
 statement once per batch; HTTP execution baseline/outlier fields are included
 in the execution INSERT instead of a second UPDATE. It has separate bounded
 critical execution, operator activity, and optional replay/log/span lanes.
+Per-priority cumulative writer timing counters expose connection acquisition,
+SQL execution, commit, and submit-to-commit latency for the normal batch path;
+the savepoint failure-recovery path is intentionally excluded from committed
+job and queue-wait samples. Use deltas over the same scrape interval when
+diagnosing saturation, because cumulative values mix idle and busy periods.
 The consumer prioritizes critical rows when their queue reaches three
 quarters of its capacity; activity is then deferred and optional telemetry
 is read only when both higher-priority channels are empty. Activity remains non-blocking

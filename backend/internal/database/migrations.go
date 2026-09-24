@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS execution_logs (
 CREATE TABLE IF NOT EXISTS pool_config (
     function_id        TEXT PRIMARY KEY,
     min_warm           INTEGER NOT NULL DEFAULT 1,
-    max_warm           INTEGER NOT NULL DEFAULT 50,
+    max_warm           INTEGER NOT NULL DEFAULT 0,
     idle_ttl_s         INTEGER NOT NULL DEFAULT 600,
     max_use_count      INTEGER NOT NULL DEFAULT 1000,
     scale_to_zero      INTEGER NOT NULL DEFAULT 0,
@@ -1049,7 +1049,7 @@ func migratePoolConfigV2(db *Database) error {
 		`CREATE TABLE pool_config_v2 (
 			function_id   TEXT PRIMARY KEY,
 			min_warm      INTEGER NOT NULL DEFAULT 1,
-			max_warm      INTEGER NOT NULL DEFAULT 50,
+			max_warm      INTEGER NOT NULL DEFAULT 0,
 			idle_ttl_s    INTEGER NOT NULL DEFAULT 600,
 			max_use_count INTEGER NOT NULL DEFAULT 1000,
 			scale_to_zero INTEGER NOT NULL DEFAULT 0,

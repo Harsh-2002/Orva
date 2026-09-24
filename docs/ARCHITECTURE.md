@@ -260,7 +260,9 @@ Warm worker pools, one per function, autoscaled.
 - `Manager.Release` records each worker's complete lease once for the
   controller's service-time signal, including response processing/streaming;
   queue and cold-start time are separate signals
-- `function_pool.go` — per-fn idle channel + acquire/release/sweep
+- `function_pool.go` — per-fn idle channel + acquire/release/sweep; the channel
+  ceiling is derived from the host's maximum CPU/memory-admissible workers,
+  optionally lowered by a positive `max_warm` override
 - `autoscaler.go` — Knative-KPA-style: 60s stable + 6s panic windows, `dynamicMax` derived from CPU + memory budget
 - `hostmem.go` — global memory budget tracker (refuses spawns past 80% reservation)
 - `request_budget.go` — daemon-memory reservation before HTTP body reads;

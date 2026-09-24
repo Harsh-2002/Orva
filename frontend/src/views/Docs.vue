@@ -971,6 +971,9 @@
         baseline so a flapping function can't drag it down. The flag and
         baseline P95 are stored on the execution row and rendered as an amber
         flag icon next to the span.
+        After a restart, Orva seeds the baseline from at most the 1,000 most
+        recent executions per function; older successes are not used after a
+        long run of failures.
       </p>
 
       <h3 class="doc-h3">

@@ -105,7 +105,7 @@ Edited via `PUT /api/v1/pool/config` — no restart needed.
 | field | default | what |
 |-------|---------|------|
 | `min_warm` | 1 | Idle workers floor — pool never shrinks below this |
-| `max_warm` | 50 | Hard ceiling on warm pool size |
+| `max_warm` | 0 (automatic) | Optional warm-pool ceiling. `0` derives the maximum from host CPU/memory and function concurrency; a positive value can only lower it. |
 | `idle_ttl_seconds` | 600 | No-demand interval before an opted-in pool scales to zero |
 | `scale_to_zero` | `false` | `true` = pool can drain to 0 (cold-start on next request) |
 
@@ -118,6 +118,11 @@ with migration guidance.
 Admission is global across functions: the host CPU quota supplies eight
 I/O-overlap worker slots per CPU, weighted by each function's declared `cpus`,
 and memory uses cgroup v2 headroom plus per-worker reservations.
+The fixed idle-worker channel is bounded by the maximum workers the host
+could admit at the 16-MiB minimum reservation, so an enormous configured
+`max_warm` cannot allocate an enormous channel. Existing positive pool
+overrides are preserved on upgrade; set `max_warm` to `0` to return one to
+automatic capacity.
 
 `scale_to_zero=true` owns `min_warm=0`. Turning it off restores a minimum of
 at least one. Sending both fields with an incompatible pair is rejected.

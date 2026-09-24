@@ -1,5 +1,68 @@
 # Pool Controller v2 capacity validation
 
+## 2026-09-24 writer-path measurement instrumentation
+
+The writer now exposes per-priority cumulative counters for normal-path batch
+attempts, committed jobs, SQLite connection acquisition time, statement time,
+commit time, and writer-submit-to-commit time/samples at `/metrics`. The counters
+are diagnostic instruments, **not** a measured throughput improvement. Compare
+counter deltas over identical load windows to distinguish writer wait from
+SQL/commit work; the submit-to-commit measurement includes admission wait and
+the latter two.
+Savepoint failure recovery is excluded from committed-job and queue-wait
+samples, so reconcile accepted HTTP responses with execution rows and monitor
+critical failure counters separately. No pool cap or SQLite durability setting
+was changed on the basis of the isolated insert microbenchmark alone.
+
+The first scratch boot against an existing 1.4-GiB database had no HTTP
+listener after 2m35s. `EXPLAIN QUERY PLAN` for baseline warmup showed an
+index lookup by execution status followed by a temporary B-tree for a
+whole-history `ROW_NUMBER` ordering. Baseline seeding now reads at most ten
+sample-windows per function through the existing `(function_id, started_at
+DESC)` index; the replacement query plan showed an index search by
+`function_id` without a temporary sort. The replacement boot reached health
+rapidly on the same VM,
+but the second boot had warmer guest/host caches, so these observations do
+not establish a controlled startup speedup. A regression test covers the
+bounded recent-window semantics.
+
+On the 2-vCPU/2.5-GiB scratch server with a separate 512-MiB client VM,
+5,000 mixed Node/Python requests at 100 closed-loop clients all returned
+HTTP 200 in 23.08s (217/s); p50/p95/p99 were 105/1,243/1,647ms. Critical
+writer failures and timeouts stayed zero. Over that window, 5,005 normal
+critical jobs committed in 44 batches; connection acquisition increased
+0.011s, SQL statement time 23.816s, and commit time 1.991s. The cumulative
+enqueue-to-commit sum rose about 24,333s across those jobs (~4.9s/job),
+which can outlast the HTTP response because the final row commits
+asynchronously. Activity dropped 1,969 rows and total best-effort telemetry
+dropped 5,870. This is one diagnostic phase on a smaller guest, **not**
+a 4-GiB controlled A/B or evidence that SQLite itself is the universal
+bottleneck. It does show that raising worker/queue ceilings on this guest
+would increase an already saturated storage backlog.
+
+The same running 2.5-GiB guest then received 10,000 mixed requests at 500
+closed-loop clients. It returned 9,676 HTTP 200 and 324 pre-execution
+`STORAGE_BACKPRESSURE` 429 responses in 64.24s (150.6 successful/s), with no
+transport errors. HTTP 200 p50/p95/p99 were 2,942/4,789/5,602ms. A read-only
+query over execution IDs newer than the pre-run maximum found exactly 9,676
+status-200 rows for the two test functions after writer drain. Critical
+failures/timeouts remained zero; activity drops increased by 5,230 and all
+best-effort drops by 13,665. During the run all three writer queues filled,
+while guest memory still had headroom. The writer's critical SQL-statement
+time increased by 57.81s and commit time by 5.78s, versus only 0.014s of
+connection acquisition. This shows the current scratch storage/write path
+cannot sustain that offered load; it does **not** identify whether SQLite
+index work, guest block I/O, or the underlying shared host disk dominates
+inside `ExecContext`. Raising queue or worker counts would hide the pressure
+temporarily, not increase sustainable throughput.
+
+An attempted smolvm `block_io=async` comparison did not produce a usable
+load phase: after the scratch guest restart, even an idle health request timed
+out twice while the daemon showed negligible CPU and I/O progress. The VM
+was stopped, returned to its original synchronous block-I/O mode and 4-GiB
+configuration, and both scratch machines were left stopped. No Orva result
+is inferred from this failed infrastructure experiment.
+
 ## 2026-09-23 live worker-churn diagnosis
 
 The same isolated 2-vCPU/4-GiB server and separate 512-MiB client VM drove
@@ -775,7 +838,13 @@ Raise `max_warm` only when `limiting_reason=operator_max`. CPU or memory
 limits require host capacity or smaller function limits; increasing the
 operator ceiling cannot override the effective host maximum.
 
-`max_warm` also sizes the pool's idle-worker storage, so it is capped at
-**1024** — a larger value is rejected with a 400 rather than clamped
-silently. `effective_max` remains the live host/operator ceiling, recomputed
-each tick from *observed* memory use; `max_warm` is only its upper bound.
+`max_warm=0` (the default without an override) uses an automatic maximum
+derived from host CPU slots, the 16-MiB minimum per-worker memory reservation,
+and function concurrency. A positive `max_warm` can only lower that bound.
+The fixed idle-worker channel is sized to the derived bound, so even an
+enormous configured value cannot allocate an enormous channel. Existing
+positive overrides remain in place on upgrade; set them to `0` to opt into
+automatic capacity. `effective_max` remains the live ceiling, recomputed
+each tick from observed memory use and current host headroom. This removes a
+code-level 50/1,024 cap on larger hosts; the two-core storage-limited scratch
+run above does not prove a throughput gain from the change.

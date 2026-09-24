@@ -134,7 +134,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			// + CPU headroom at runtime. Was 5 (static dumb default); the
 			// autoscaler now reads load signals so this only matters as a
 			// defensive ceiling when operators have set no pool_config row.
-			DefaultMax:     50,
+			DefaultMax:     0, // automatic: resource-derived pool ceiling
 			DefaultIdleTTL: 10 * time.Minute,
 			DefaultMaxUses: 1000,
 			ReapInterval:   30 * time.Second,

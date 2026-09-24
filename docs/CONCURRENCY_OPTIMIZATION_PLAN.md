@@ -46,7 +46,7 @@ Code and read-only instance inspection establish the following:
 
 | Finding | Evidence | Implication |
 |---|---|---|
-| Several independent capacity ceilings (baseline) | `pool/pool.go` previously had 256 pending/function, 1,024 global, 2-second wait; `server/server.go`: default 50 workers/function; `config/defaults.go`: host concurrency `max(200, NumCPU*64)` | Pending count now derives from memory/FD resources; worker and host ceilings still need reconciliation. Preserve deliberate operator limits. |
+| Several independent capacity ceilings (baseline) | `pool/pool.go` previously had 256 pending/function, 1,024 global, 2-second wait; `server/server.go`: default 50 workers/function; `config/defaults.go`: host concurrency `max(200, NumCPU*64)` | Pending count and the default pool maximum now derive from resources; the host execution limiter and writer queues still need reconciliation. Preserve deliberate operator limits. |
 | CPU sizing is heuristic | `pool/hostmem.go`: eight nominal worker slots per CPU, divided by declared worker CPU | Declared CPU caps do not measure actual CPU consumption or I/O wait. |
 | Resource discovery assumes cgroup mount-root files | `pool/hostmem.go` reads `/sys/fs/cgroup/{cpu.max,memory.max,memory.current}` | Nested systemd/cgroup limits and ancestor constraints can be missed. |
 | Production resource enforcement is degraded | Health: `rlimit_only`; service `Delegate=yes`; controllers available but `cgroup.subtree_control` empty | Establish usable delegation before using aggressive density or claiming hard resource isolation. |
@@ -68,6 +68,16 @@ Package paths above are relative to `backend/internal/`; `runtimes/` is under
 No production load or configuration change is part of this optimization work.
 
 ## Implementation log
+
+- The current candidate replaces the default 50-worker and universal
+  1,024-worker pool caps with a fixed idle-channel ceiling derived from the
+  discovered CPU slots, minimum 16-MiB worker reservation, and function
+  concurrency. A positive saved `max_warm` still lowers that ceiling;
+  `max_warm=0` means automatic. Unit tests cover a synthetic host whose safe
+  ceiling exceeds 1,024 and the REST validation contract. This removes a
+  code-level cap, not the storage bottleneck seen in the 2.5-GiB scratch VM;
+  no larger-host throughput gain is claimed yet. The host execution limiter,
+  writer admission, and fair dispatcher remain open work.
 
 - A separate-connection PASSIVE WAL-checkpoint experiment was reverted.
   SQLite's automatic checkpoint can stall the committing writer; this

@@ -21,6 +21,9 @@ type writeJob struct {
 	functionID string
 	lease      *ExecutionLease
 	bulkInsert bool
+	// enqueuedAt starts before channel admission, so queue-wait telemetry
+	// includes any time spent waiting for a slot as well as commit time.
+	enqueuedAt int64
 	// bytes is the approximate heap this job retains. Queues are bounded by
 	// bytes as well as count because a job can carry a captured request body
 	// (replay_capture_max_bytes, 1 MiB by default) -- 1024 slots of those is
@@ -157,6 +160,17 @@ type asyncWriter struct {
 	failed          atomic.Uint64
 	shed            atomic.Uint64
 	retried         atomic.Uint64
+	timing          [3]writerTiming
+}
+
+type writerTiming struct {
+	attempts       atomic.Uint64
+	committedJobs  atomic.Uint64
+	connectionNS   atomic.Uint64
+	statementNS    atomic.Uint64
+	commitNS       atomic.Uint64
+	queueWaitNS    atomic.Uint64
+	queueWaitCount atomic.Uint64
 }
 
 func newAsyncWriter(db *Database) *asyncWriter {
@@ -298,7 +312,7 @@ func (db *Database) asyncExecCriticalReserved(ctx context.Context, functionID st
 		return err
 	default:
 	}
-	j := writeJob{sql: statement, args: args, functionID: functionID, lease: lease, bulkInsert: bulkInsert, bytes: jobBytes(statement, args) + len(functionID)}
+	j := writeJob{sql: statement, args: args, functionID: functionID, lease: lease, bulkInsert: bulkInsert, bytes: jobBytes(statement, args) + len(functionID), enqueuedAt: time.Now().UnixNano()}
 	if !reserveQueueBytes(&a.criticalBytes, int64(j.bytes), maxCriticalQueueBytes) {
 		a.enqueueMu.RUnlock()
 		lease.Cancel()
@@ -371,7 +385,7 @@ func (db *Database) asyncExecBestEffort(kind writeKind, functionID string, bulkI
 		return
 	default:
 	}
-	j := writeJob{sql: statement, args: args, functionID: functionID, bulkInsert: bulkInsert, bytes: jobBytes(statement, args) + len(functionID)}
+	j := writeJob{sql: statement, args: args, functionID: functionID, bulkInsert: bulkInsert, bytes: jobBytes(statement, args) + len(functionID), enqueuedAt: time.Now().UnixNano()}
 	if !reserveQueueBytes(bytes, int64(j.bytes), limit) {
 		a.enqueueMu.RUnlock()
 		a.recordDropped(kind, 1)
@@ -417,13 +431,24 @@ type WriterStats struct {
 	DroppedActivity   uint64
 	DeletedWrites     uint64
 	ShedWrites        uint64
+	Timing            [3]WriterTimingStats
+}
+
+type WriterTimingStats struct {
+	Attempts       uint64
+	CommittedJobs  uint64
+	ConnectionNS   uint64
+	StatementNS    uint64
+	CommitNS       uint64
+	QueueWaitNS    uint64
+	QueueWaitCount uint64
 }
 
 func (db *Database) WriterStats() WriterStats {
 	if db == nil || db.writer == nil {
 		return WriterStats{}
 	}
-	return WriterStats{
+	stats := WriterStats{
 		CriticalDepth: len(db.writer.critical), ActivityDepth: len(db.writer.activity), TelemetryDepth: len(db.writer.telemetry),
 		CriticalCap: cap(db.writer.critical), ActivityCap: cap(db.writer.activity), TelemetryCap: cap(db.writer.telemetry),
 		CriticalBytes: db.writer.criticalBytes.Load(), ActivityBytes: db.writer.activityBytes.Load(), TelemetryBytes: db.writer.telemetryBytes.Load(),
@@ -432,6 +457,16 @@ func (db *Database) WriterStats() WriterStats {
 		DroppedTelemetry: db.writer.dropped.Load(), DroppedActivity: db.writer.droppedActivity.Load(),
 		DeletedWrites: db.writer.deletedWrites.Load(), ShedWrites: db.writer.shed.Load(),
 	}
+	for i := range stats.Timing {
+		t := &db.writer.timing[i]
+		stats.Timing[i] = WriterTimingStats{
+			Attempts: t.attempts.Load(), CommittedJobs: t.committedJobs.Load(),
+			ConnectionNS: t.connectionNS.Load(), StatementNS: t.statementNS.Load(),
+			CommitNS: t.commitNS.Load(), QueueWaitNS: t.queueWaitNS.Load(),
+			QueueWaitCount: t.queueWaitCount.Load(),
+		}
+	}
+	return stats
 }
 
 // start launches the consumer goroutine. Idempotent — called at most once
@@ -683,7 +718,11 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 		return nil
 	}
 
+	timing := &a.timing[kind]
+	timing.attempts.Add(1)
+	connectionStart := time.Now()
 	tx, err := a.db.write.BeginTx(ctx, nil)
+	timing.connectionNS.Add(uint64(time.Since(connectionStart)))
 	if err != nil {
 		// Could not get the single write connection -- almost always because
 		// a VACUUM or a backup is holding it. Nothing is wrong with the work,
@@ -700,6 +739,7 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 
 	failedIdx := -1
 	var failErr error
+	statementStart := time.Now()
 	for i := 0; i < len(work); {
 		j := work[i]
 		statement := j.sql
@@ -739,13 +779,28 @@ func (a *asyncWriter) commit(batch []writeJob, kind writeKind) []writeJob {
 		}
 		i = groupEnd
 	}
+	timing.statementNS.Add(uint64(time.Since(statementStart)))
 	closePrepared()
 	if failedIdx < 0 {
+		commitStart := time.Now()
 		if err := tx.Commit(); err != nil {
+			timing.commitNS.Add(uint64(time.Since(commitStart)))
 			_ = tx.Rollback()
 			slog.Warn("batch commit failed; will retry", "err", err, "jobs", len(batch))
 			return work
 		}
+		timing.commitNS.Add(uint64(time.Since(commitStart)))
+		timing.committedJobs.Add(uint64(len(work)))
+		committedAt := time.Now().UnixNano()
+		var queueWaitNS, queueWaitCount uint64
+		for _, job := range work {
+			if job.enqueuedAt > 0 && committedAt >= job.enqueuedAt {
+				queueWaitNS += uint64(committedAt - job.enqueuedAt)
+				queueWaitCount++
+			}
+		}
+		timing.queueWaitNS.Add(queueWaitNS)
+		timing.queueWaitCount.Add(queueWaitCount)
 		releaseJobs(work)
 		return nil
 	}

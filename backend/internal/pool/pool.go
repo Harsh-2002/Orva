@@ -29,7 +29,8 @@ import (
 type ManagerConfig struct {
 	// DefaultMin applies when a function has no pool_config row.
 	DefaultMin int
-	// DefaultMax applies when a function has no pool_config row.
+	// DefaultMax is an optional operator cap when a function has no pool_config
+	// row. Zero derives the cap from detected CPU and memory capacity.
 	DefaultMax int
 	// DefaultIdleTTL applies when a function has no pool_config row.
 	DefaultIdleTTL time.Duration
@@ -117,6 +118,42 @@ func workerCPUUnits(cpus float64) int64 {
 		return 1
 	}
 	return units
+}
+
+// poolResourceCeiling sizes the fixed idle channel from the host's maximum
+// physically admissible worker count, not from an arbitrary worker constant.
+// Actual spawns still pass the live reservation gates and dynamicMax. The
+// 16-MiB floor matches functionPool.admissionBytes, so the channel cannot be
+// larger than a pool could ever fill under the memory budget. When capacity
+// discovery fails, use a small bounded fallback rather than trusting an
+// unbounded operator value with no memory tracker to defend it.
+func poolResourceCeiling(hm *hostMemTracker, cpuUnits int64, functionMax int) (int, string) {
+	if hm == nil {
+		return 50, "capacity_unknown"
+	}
+	if cpuUnits < 1 {
+		cpuUnits = 1000
+	}
+	max := int(int64(hm.effectiveCPUWorkers()) * 1000 / cpuUnits)
+	if max < 1 {
+		max = 1
+	}
+	reason := "cpu_capacity"
+	pct := hm.reservationPct
+	if pct <= 0 || pct > 1 {
+		pct = 0.8
+	}
+	memCap := int(int64(float64(hm.totalBytes)*pct) / (16 << 20))
+	if memCap < 1 {
+		memCap = 1
+	}
+	if memCap < max {
+		max, reason = memCap, "memory_capacity"
+	}
+	if functionMax > 0 && functionMax < max {
+		max, reason = functionMax, "function_concurrency"
+	}
+	return max, reason
 }
 
 // Manager owns all function-scoped pools.
@@ -345,9 +382,6 @@ func (m *Manager) pendingLimits() (global, perFunction int64) {
 func NewManager(cfg ManagerConfig, tmpl SandboxTemplate, db *database.Database, reg *registry.Registry, limiter *sandbox.Limiter) *Manager {
 	if cfg.DefaultMin <= 0 {
 		cfg.DefaultMin = 1
-	}
-	if cfg.DefaultMax <= 0 {
-		cfg.DefaultMax = 50
 	}
 	if cfg.DefaultIdleTTL <= 0 {
 		// Public/default contract: ten minutes before an opted-in
@@ -769,9 +803,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	scaleToZero := false
 	if cfg, err := m.db.GetPoolConfig(fnID); err == nil && cfg != nil {
 		minWarm = cfg.MinWarm
-		if cfg.MaxWarm > 0 {
-			maxWarm = cfg.MaxWarm
-		}
+		maxWarm = cfg.MaxWarm
 		idleTTL = time.Duration(cfg.IdleTTLS) * time.Second
 		scaleToZero = cfg.ScaleToZero
 	}
@@ -807,14 +839,13 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	// Memory safety never rested on this allocation and does not now:
 	// hostMem.reserve() is a fail-closed, live, global gate on every spawn
 	// path, backed by real MemAvailable rather than a boot-time estimate.
-	if maxWarm > MaxWarmLimit {
-		slog.Warn("max_warm clamped to the idle-channel ceiling",
-			"function", fn.ID, "requested", maxWarm, "clamped", MaxWarmLimit)
-		maxWarm = MaxWarmLimit
+	resourceMax, resourceReason := poolResourceCeiling(m.hostMem, cpuUnits, fn.MaxConcurrency)
+	maxReason := resourceReason
+	if maxWarm > 0 && maxWarm < resourceMax {
+		resourceMax = maxWarm
+		maxReason = "operator_max"
 	}
-	if maxWarm < 1 {
-		maxWarm = 1
-	}
+	maxWarm = resourceMax
 	if minWarm > maxWarm {
 		minWarm = maxWarm
 	}
@@ -855,6 +886,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 		fnID:         fnID,
 		min:          minWarm,
 		max:          maxWarm,
+		maxReason:    maxReason,
 		idleTTL:      idleTTL,
 		maxUses:      m.cfg.DefaultMaxUses,
 		memoryBytes:  memoryBytes,

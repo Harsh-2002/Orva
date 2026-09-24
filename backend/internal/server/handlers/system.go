@@ -301,6 +301,24 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"critical\"} %d\n", writer.CriticalDepth)
 		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"activity\"} %d\n", writer.ActivityDepth)
 		fmt.Fprintf(w, "orva_writer_queue_depth{priority=\"telemetry\"} %d\n", writer.TelemetryDepth)
+		priorities := [...]string{"critical", "activity", "telemetry"}
+		promHeader(w, "orva_writer_batch_attempts_total", "counter", "Normal-path SQLite batch attempts by priority, including retries.")
+		promHeader(w, "orva_writer_committed_jobs_total", "counter", "Jobs committed through the normal batched writer path by priority.")
+		promHeader(w, "orva_writer_connection_wait_seconds_total", "counter", "Time spent acquiring the SQLite write connection for normal batches.")
+		promHeader(w, "orva_writer_statement_seconds_total", "counter", "Time spent preparing and executing SQL for normal batches.")
+		promHeader(w, "orva_writer_commit_seconds_total", "counter", "Time spent committing normal batches.")
+		promHeader(w, "orva_writer_queue_wait_seconds_total", "counter", "Time from writer job submission through normal-path commit, including channel admission wait.")
+		promHeader(w, "orva_writer_queue_wait_samples_total", "counter", "Normal-path jobs with an enqueue-to-commit timing sample.")
+		for i, priority := range priorities {
+			t := writer.Timing[i]
+			fmt.Fprintf(w, "orva_writer_batch_attempts_total{priority=%q} %d\n", priority, t.Attempts)
+			fmt.Fprintf(w, "orva_writer_committed_jobs_total{priority=%q} %d\n", priority, t.CommittedJobs)
+			fmt.Fprintf(w, "orva_writer_connection_wait_seconds_total{priority=%q} %.6f\n", priority, float64(t.ConnectionNS)/float64(time.Second))
+			fmt.Fprintf(w, "orva_writer_statement_seconds_total{priority=%q} %.6f\n", priority, float64(t.StatementNS)/float64(time.Second))
+			fmt.Fprintf(w, "orva_writer_commit_seconds_total{priority=%q} %.6f\n", priority, float64(t.CommitNS)/float64(time.Second))
+			fmt.Fprintf(w, "orva_writer_queue_wait_seconds_total{priority=%q} %.6f\n", priority, float64(t.QueueWaitNS)/float64(time.Second))
+			fmt.Fprintf(w, "orva_writer_queue_wait_samples_total{priority=%q} %d\n", priority, t.QueueWaitCount)
+		}
 		promHeader(w, "orva_writer_critical_timeouts_total", "counter", "Critical database writes that exceeded their enqueue deadline.")
 		fmt.Fprintf(w, "orva_writer_critical_timeouts_total %d\n", writer.CriticalTimeouts)
 		promHeader(w, "orva_writer_critical_failures_total", "counter", "Critical database writes lost to transaction failures after enqueue.")
