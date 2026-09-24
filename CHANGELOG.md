@@ -28,6 +28,10 @@ before it.
   while preserving the 200-job transaction batch. On a local full-schema
   writer benchmark, four 50-row statements beat one 200-row statement;
   end-to-end capacity remains under validation.
+- Pool latency sampling now overwrites a bounded ring instead of allocating
+  and copying its full history for each warm invocation. Percentile sorting
+  runs outside the pool signal lock; the reported percentile calculation is
+  unchanged.
 - A function without a pool override now derives its maximum worker count
   from host CPU/memory and function concurrency instead of stopping at 50.
   Explicit `max_warm` values remain upper bounds, but the former universal

@@ -64,9 +64,12 @@ actively demanded pool: both cause repeated nsjail/adapter cold starts under
 mixed load.
 
 The pool's demand history uses sixty one-second arrival buckets instead of a
-timestamp per request; controller wakeups coalesce within 20 ms. Neither is an
-execution-concurrency cap. The async SQLite writer prepares each distinct SQL
-statement once per batch; HTTP execution baseline/outlier fields are included
+timestamp per request. Service, queue-wait and spawn durations use bounded
+overwrite rings; a full ring records without allocation, and percentile sorting
+uses a snapshot outside the signal lock. Controller wakeups coalesce within
+20 ms. None of these is an execution-concurrency cap. The async SQLite writer
+prepares each distinct SQL statement once per batch; HTTP execution
+baseline/outlier fields are included
 in the execution INSERT instead of a second UPDATE. It has separate bounded
 critical execution, operator activity, and optional replay/log/span lanes.
 Per-priority cumulative writer timing counters expose connection acquisition,

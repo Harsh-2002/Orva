@@ -41,9 +41,9 @@ type functionPool struct {
 	// Autoscaler signal state — guarded by sigMu.
 	sigMu            sync.Mutex
 	arrivals         [60]arrivalBucket
-	serviceSamples   []time.Duration
-	spawnSamples     []time.Duration
-	queueWaitSamples []time.Duration
+	serviceSamples   durationRing
+	spawnSamples     durationRing
+	queueWaitSamples durationRing
 	lastArrival      time.Time
 	belowTargetSince time.Time
 	limitingReason   string
@@ -161,44 +161,53 @@ func (p *functionPool) recordArrival(now time.Time) {
 
 func (p *functionPool) recordLatency(d time.Duration) {
 	p.sigMu.Lock()
-	p.serviceSamples = appendDurationSample(p.serviceSamples, d, 512)
+	p.serviceSamples.add(d, 512)
 	p.sigMu.Unlock()
 }
 
 func (p *functionPool) recordQueueWait(d time.Duration) {
 	p.sigMu.Lock()
-	p.queueWaitSamples = appendDurationSample(p.queueWaitSamples, d, 512)
+	p.queueWaitSamples.add(d, 512)
 	p.sigMu.Unlock()
 }
 
 func (p *functionPool) recordSpawn(d time.Duration) {
 	p.sigMu.Lock()
-	p.spawnSamples = appendDurationSample(p.spawnSamples, d, 256)
+	p.spawnSamples.add(d, 256)
 	p.sigMu.Unlock()
 }
 
-func appendDurationSample(samples []time.Duration, d time.Duration, limit int) []time.Duration {
+// durationRing retains the newest bounded sample window. Once full, recording
+// overwrites one slot instead of allocating and copying the entire window on
+// every completed invocation. Percentiles do not depend on sample order.
+type durationRing struct {
+	samples []time.Duration
+	next    int
+}
+
+func (r *durationRing) add(d time.Duration, limit int) {
 	if d < 0 {
 		d = 0
 	}
-	samples = append(samples, d)
-	if len(samples) > limit {
-		samples = append([]time.Duration(nil), samples[len(samples)-limit:]...)
+	if len(r.samples) < limit {
+		r.samples = append(r.samples, d)
+		return
 	}
-	return samples
+	r.samples[r.next] = d
+	r.next = (r.next + 1) % limit
 }
 
 func durationP95(samples []time.Duration) time.Duration {
 	if len(samples) == 0 {
 		return 0
 	}
-	copyOf := append([]time.Duration(nil), samples...)
-	sort.Slice(copyOf, func(i, j int) bool { return copyOf[i] < copyOf[j] })
-	idx := (95*len(copyOf)+99)/100 - 1
+	// snapshotDemand owns this copy, so sorting cannot delay recorders.
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	idx := (95*len(samples)+99)/100 - 1
 	if idx < 0 {
 		idx = 0
 	}
-	return copyOf[idx]
+	return samples[idx]
 }
 
 type demandSnapshot struct {
@@ -216,7 +225,6 @@ type workerReservation struct {
 
 func (p *functionPool) snapshotDemand(now time.Time) demandSnapshot {
 	p.sigMu.Lock()
-	defer p.sigMu.Unlock()
 	second := now.Unix()
 	var stable, burst uint64
 	for _, bucket := range p.arrivals {
@@ -229,6 +237,12 @@ func (p *functionPool) snapshotDemand(now time.Time) demandSnapshot {
 		}
 	}
 	mem := append([]int64(nil), p.memSamples...)
+	service := append([]time.Duration(nil), p.serviceSamples.samples...)
+	spawn := append([]time.Duration(nil), p.spawnSamples.samples...)
+	queueWait := append([]time.Duration(nil), p.queueWaitSamples.samples...)
+	lastArrival := p.lastArrival
+	p.sigMu.Unlock()
+
 	sort.Slice(mem, func(i, j int) bool { return mem[i] < mem[j] })
 	var memP95 int64
 	if len(mem) > 0 {
@@ -237,8 +251,8 @@ func (p *functionPool) snapshotDemand(now time.Time) demandSnapshot {
 	return demandSnapshot{
 		StableRate: float64(stable) / stableWindow.Seconds(),
 		BurstRate:  float64(burst) / panicWindow.Seconds(),
-		ServiceP95: durationP95(p.serviceSamples), SpawnP95: durationP95(p.spawnSamples),
-		QueueWaitP95: durationP95(p.queueWaitSamples), LastArrival: p.lastArrival,
+		ServiceP95: durationP95(service), SpawnP95: durationP95(spawn),
+		QueueWaitP95: durationP95(queueWait), LastArrival: lastArrival,
 		MemoryP95: memP95,
 	}
 }

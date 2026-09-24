@@ -4,7 +4,7 @@
 > overwrites it. When a module FAILs, fix the code or harden the test;
 > when you add a feature, add a module here.
 
-- **Last run:** 2026-09-24 07:06:20Z
+- **Last run:** 2026-09-24 07:22:47Z
 - **Target:** isolated Docker image `orva:e2e` (http://127.0.0.1:8455)
 - **Modules:** 29 passed, 0 failed, 0 skipped
 - **Checks:** 676 passed, 0 failed

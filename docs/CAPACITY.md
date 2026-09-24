@@ -34,6 +34,21 @@ exactly 5,000 new status-200 execution rows appeared, with zero critical
 writer failures or timeouts. This is a functional validation; shared-host
 storage and database growth make it an unsuitable throughput comparison.
 
+The next candidate removes allocation/copy work from each full pool service,
+queue-wait and spawn sample window. A full-ring local microbenchmark records
+service samples in 16.9–18.8 ns with zero allocations (three 1-second runs),
+and focused pool race tests pass. Percentiles still use the newest 512 service
+and queue samples or 256 spawn samples; their sorting now runs after releasing
+the signal mutex. The changed binary passed all 29 real-sandbox E2E modules
+(676 checks, no failures or skips). In a separate direct-link 2-vCPU/2.5-GiB
+scratch server and 512-MiB client, 5,000 mixed Node/Python requests at 100
+closed-loop clients returned 5,000 HTTP 200 with no transport errors in
+26.12s (191 successful/s). After drain, all 5,000 had status-200 execution
+rows; critical writer failures and timeouts remained zero. The earlier
+unchanged VM phase was 106/s, but storage/cache and database state changed,
+so this is **not** a controlled throughput gain. The guest test binary was
+removed, both scratch VMs stopped, and server memory restored to 4 GiB.
+
 The first scratch boot against an existing 1.4-GiB database had no HTTP
 listener after 2m35s. `EXPLAIN QUERY PLAN` for baseline warmup showed an
 index lookup by execution status followed by a temporary B-tree for a

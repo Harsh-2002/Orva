@@ -69,6 +69,17 @@ No production load or configuration change is part of this optimization work.
 
 ## Implementation log
 
+- The pool's full latency sample slices allocated and copied 512 durations
+  for every completed warm invocation. Bounded overwrite rings now retain the
+  same newest sample windows, and snapshot percentile sorting runs outside the
+  signal lock. A local full-ring benchmark measured 16.9–18.8 ns/sample with
+  zero allocations; focused pool race tests pass. The candidate passed all
+  29 real-sandbox E2E modules (676 checks) and a 5,000/5,000 mixed
+  Node/Python direct-link 2-vCPU/2.5-GiB VM run with exact execution-row
+  reconciliation and zero critical writer failures/timeouts. A controlled
+  end-to-end A/B remains outstanding; shared-host state makes the observed
+  191/s versus an earlier 106/s an invalid causal comparison.
+
 - A real-schema writer benchmark corrected the misleading one-column grouped
   INSERT result. The production 18-column execution row with foreign key and
   indexes took 17.4–21.9 ms for one 200-row grouped statement versus 16.0–16.5

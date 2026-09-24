@@ -209,7 +209,7 @@ func TestRetiredAcquireReleasesToExactGeneration(t *testing.T) {
 
 	m.Release(acq, nil)
 	oldPool.sigMu.Lock()
-	samples := append([]time.Duration(nil), oldPool.serviceSamples...)
+	samples := append([]time.Duration(nil), oldPool.serviceSamples.samples...)
 	oldPool.sigMu.Unlock()
 	if len(samples) != 1 || samples[0] < 40*time.Millisecond {
 		t.Fatalf("release must record full worker lease once, got %v", samples)
@@ -247,7 +247,7 @@ func TestRetiredAcquireReleasesToExactGeneration(t *testing.T) {
 	// limiter twice.
 	m.Release(acq, nil)
 	oldPool.sigMu.Lock()
-	if got := len(oldPool.serviceSamples); got != 1 {
+	if got := len(oldPool.serviceSamples.samples); got != 1 {
 		oldPool.sigMu.Unlock()
 		t.Fatalf("duplicate release recorded %d service samples", got)
 	}
