@@ -25,15 +25,19 @@ orders of magnitude, not SLAs.
 
 For invocation-concurrency changes, use a disposable instance and run
 `python3 test/performance/invocation_admission.py --scratch --url <scratch-url> --api-key <key> --extended`.
-For cgroup enforcement, run `python3 test/performance/cgroup_hard_limit.py
+For cgroup enforcement, run `python3 test/performance/cgroup_hard_limit.py --scratch
 --endpoint http://127.0.0.1:8443 --key-file /var/lib/orva/.admin-key
 --worker-cgroup /sys/fs/cgroup/<service-group>/orva.workers` **only in a
-disposable delegated Linux VM**. It deploys and deletes its own Node function,
-intentionally OOM-kills the worker, and requires both an HTTP failure and an
-increase in that worker subtree's `memory.events:oom_kill`. A 502 alone is not
-proof of a working hard cap. Health must report `cgroup_v2` first. The script
-does not validate CPU or PID enforcement, and its path must match the tested
-instance's actual service cgroup.
+disposable delegated Linux VM or container**. It deploys and deletes its own
+Node/Python functions: a Node allocation must OOM-kill a worker; a CPU-bound
+Node handler must increment its own jailed child's `cpu.stat:nr_throttled`;
+and Python clone attempts must increment that child's `pids.events:max`.
+The Python PID probe includes x86_64 and aarch64 Linux syscall numbers, but
+the aarch64 path has not been executed locally. HTTP failure alone is
+not proof of a hard cap. Health must report `cgroup_v2` first, and the path
+must match the tested instance's actual worker subtree. `cpu.stat` and
+`pids.events` must be read from the jailed child, not `orva.workers`: the
+parent's counters did not aggregate these child-specific events in the test.
 The harness also accepts `ORVA_API_KEY` so a scratch key need not appear in
 the load generator's process arguments.
 The external-instance E2E runner (`test/e2e/run.py --url`) accepts the same
@@ -1915,8 +1919,13 @@ scoped delegated cgroup for Orva: actual child `memory.max`, `pids.max` and
 increase for both root and unprivileged daemon launches. The unprivileged
 guest needed the installer's supported user-namespace capability fallback;
 without it nsjail failed at `/proc/<pid>/setgroups` *before* starting a worker.
-This manual guest proof does not replace the native systemd/Docker checks or
-establish CPU-throttle and PID-exhaustion outcomes.
+The expanded probe later passed on the same guest and on a disposable Docker
+container: CPU `nr_throttled` and PID `max` counters increased while handlers
+returned HTTP 200. The PID case uses clone without exec or pipes; Node child
+processes hit nsjail's default 32-open-file rlimit first (`EMFILE`), and an
+exec attempt returned `ENOENT`, neither of which proves `pids.max`.
+This manual guest proof does not replace the native systemd service check,
+arm64 execution of the PID probe, or comparative throughput qualification.
 
 ### 5.3 Auth and authorization
 

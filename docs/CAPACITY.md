@@ -918,4 +918,17 @@ remained healthy with `docker exec` working, reported `cgroup_v2`, and returned
 502 with worker-subtree `oom_kill` 0→1 in the same memory probe. The Docker
 entrypoint placed `tini` and its CLI helper in `orva.supervisor` inside the
 container cgroup to satisfy the kernel's no-internal-process rule. Native
-systemd, CPU/PID-limit tests, and comparative throughput remain open gates.
+systemd and comparative throughput remain open gates.
+
+An expanded disposable cgroup probe then exercised the kernel limits directly
+in both Docker and the same 2-vCPU/4-GiB guest. A Node handler configured for
+0.25 CPU completed with HTTP 200 and increased its own jailed child's
+`cpu.stat:nr_throttled` by 10 in Docker and 8 in the guest. A Python handler
+attempted 64 fork-like clones without exec or extra pipes; it completed with
+HTTP 200 and increased that child's `pids.events:max` by 33 in each setup.
+These are enforcement proofs, **not** sustainable throughput or fairness
+measurements. The arm64 branch of the PID probe and the native systemd service
+remain unexecuted locally. An initial Node child-process probe was invalid:
+nsjail's default 32-open-file limit produced `EMFILE` before `pids.max` was
+reached. That low per-worker FD limit is a separate workload-density hypothesis
+to measure under safe aggregate FD accounting, not evidence of a PID cap.

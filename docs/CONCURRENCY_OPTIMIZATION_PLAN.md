@@ -517,8 +517,12 @@ below must be measured against it.
   denied `/proc/<pid>/setgroups`. A disposable Docker container passed 20/20
   real deploy/invoke/rollback assertions, reported `cgroup_v2`, remained
   healthy with `docker exec` working, and showed a worker-subtree `oom_kill`
-  delta of 0→1 under the same probe. Native systemd and CPU/PID-specific
-  checks remain required; this is not phase completion.
+  delta of 0→1 under the same probe. An expanded disposable probe then
+  exercised actual CPU throttling and PID exhaustion in Docker and the same
+  2-vCPU/4-GiB guest: the jailed child's `cpu.stat:nr_throttled` increased by
+  10/8 and `pids.events:max` by 33/33, respectively. Native systemd,
+  arm64 PID execution, and aggregate resource accounting remain open; this is
+  not phase completion.
 - Provision the same contract through supported systemd, OpenRC and Docker paths.
   Check exact CPU/memory/PID enforcement, not merely writable directories. Use an
   aggregate worker memory/PID budget plus individual sandbox limits; keep headroom
