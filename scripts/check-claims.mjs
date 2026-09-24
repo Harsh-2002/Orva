@@ -77,9 +77,9 @@ const CLAIMS = [
     want: /~50[–-]500\s*ms[\s\S]{0,200}~2[–-]15\s*ms/,
   },
   {
-    what: 'A warm worker costs ~18 MB idle',
+    what: 'The 2-CPU / 4-GB size is a reference, not a rate guarantee',
     file: 'docs/DEPLOYMENT.md',
-    want: /~18\s*MB when idle/,
+    want: /2 CPU \+ 4 GB RAM\*\* as a reference test size, not a promise of a\s+particular request rate/,
   },
   {
     what: 'nsjail is hardcoded at /usr/local/bin/nsjail',
