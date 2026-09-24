@@ -63,6 +63,22 @@ was stopped, returned to its original synchronous block-I/O mode and 4-GiB
 configuration, and both scratch machines were left stopped. No Orva result
 is inferred from this failed infrastructure experiment.
 
+After the resource-derived pool-cap candidate was built, a fresh 2.5-GiB
+scratch-VM boot with no saved pool overrides reported `effective_max=20`
+for each test function and successfully ran 1,000/1,000 mixed requests at
+100 clients (234/s). Its critical writer drained with zero failures/timeouts.
+A subsequent 5,000-request/100-client run on the same binary and VM returned
+all HTTP 200 at 129/s, p50/p95/p99 168/1,882/3,868ms. Critical statement
+time reached 40.17s, commit time 3.38s, and connection wait only 0.009s;
+critical failures/timeouts remained zero, but activity drops reached 2,345.
+Across a `/proc/stat` sample window encompassing this load, iowait rose by
+2,288 of 10,770 aggregate CPU jiffies (~21%); `/proc/diskstats` for the
+guest's `vda` added 32.95s of I/O-busy time. The sample window includes
+lead-in and writer drain, so these are diagnostic indicators, not exact
+fractions of the 38.85s client run. Throughput varied materially from the
+earlier 217/s phase, and the two-core pool ceiling was below both removed
+constants. No larger-host pool-throughput improvement is claimed.
+
 ## 2026-09-23 live worker-churn diagnosis
 
 The same isolated 2-vCPU/4-GiB server and separate 512-MiB client VM drove
