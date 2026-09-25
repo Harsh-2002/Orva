@@ -23,6 +23,7 @@ ORVA_REQUIRE_SANDBOX=1 python3 run.py --url http://127.0.0.1:8443 --api-key "$(s
 
 Requirements: `docker`, `python3`, and `build/orva` (`make build`) for CLI tests.
 
-Results land in **`CHECKLIST.md`** (regenerated every run). Adding a scenario:
+Results land in the local, gitignored **`CHECKLIST.md`** (regenerated every run;
+CI publishes the result in its job summary). Adding a scenario:
 copy a `tests/test_*.py`, use the `harness` helpers, clean up after yourself —
 `run.py` auto-discovers it. The suite is meant to grow on every change.

@@ -1,10 +1,9 @@
 # Hardware-aware concurrency optimization plan
 
-Status: implementation in progress. Baseline: `17cfd00`, 2026-09-23. The first
-resource-discovery and invocation-path slice passed isolated functional
-verification; it does not establish a performance gain or full-plan completion.
-Release publication remains paused pending the scheduler/admission work,
-attributed capacity curves, and the operator's test of a final candidate.
+Historical design and implementation log. Baseline: `17cfd00`, 2026-09-23.
+This is not a live release gate or operator sizing guide: see [CAPACITY.md](CAPACITY.md)
+for dated measurements and [CHANGELOG.md](../CHANGELOG.md) for what shipped.
+Unfinished ideas here remain proposals until separately implemented and verified.
 
 ## Objective and boundaries
 

@@ -52,7 +52,7 @@ MOCK_HOST=<guest-reachable-host-ip> python3 run.py --url http://127.0.0.1:<forwa
 | `env.py` | Builds `orva:e2e` from source and runs an **isolated** container (nsjail caps, `host.docker.internal` for the mock, fresh volume), with health-wait + admin-key + teardown. |
 | `run.py` | Orchestrator: spin env → run each `tests/test_*.py` as an isolated subprocess → aggregate → write `CHECKLIST.md` → tear down. |
 | `tests/test_*.py` | One module per domain. Auto-discovered by `run.py`. |
-| `CHECKLIST.md` | Living result record — regenerated every run. |
+| `CHECKLIST.md` | Local, gitignored result record — regenerated every run; CI publishes it in the job summary. |
 
 ### How the isolated environment works (`env.py`)
 `docker build -t orva:e2e .` → `docker run` with `--cap-add SYS_ADMIN` (no

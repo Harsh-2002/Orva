@@ -524,8 +524,7 @@ jobs:
         env:
           ORVA_REQUIRE_SANDBOX: "1"
         run: |
-          # Never let a tracked checklist from an earlier run impersonate the
-          # diagnostics for a runner/process failure before aggregation.
+          # Clear prior diagnostics so a runner failure cannot show a stale report.
           : > test/e2e/CHECKLIST.md
           ADMIN_KEY="$(cat "$RUNNER_TEMP/orva-data/.admin-key")"
           python3 test/e2e/run.py --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"

@@ -16,7 +16,8 @@ execute it.**
 |---|---|
 | `API.md` | Full REST API reference — every endpoint, request/response shapes, error codes |
 | `ARCHITECTURE.md` | System design, component diagram, request lifecycle |
-| `CAPACITY.md` | Sizing guide, pool tuning, resource limits per runtime |
+| `CAPACITY.md` | Current capacity signals plus dated validation evidence; not a request-rate guarantee |
+| `CONCURRENCY_OPTIMIZATION_PLAN.md` | Historical design and implementation log, not a live release gate |
 | `CLI.md` | `orva` CLI reference — every subcommand, flags, examples |
 | `CONFIG.md` | All configuration keys, environment variables, and defaults |
 | `CONTRIBUTING.md` | Dev environment setup, PR process, code style conventions |

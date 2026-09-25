@@ -53,6 +53,7 @@ orva-backup-*
 *.tar.gz
 
 # Test artifacts (point-in-time outputs from running harnesses — regenerable)
+test/e2e/CHECKLIST.md
 test/*.tsv
 test/*.log
 test/*-results.tsv

@@ -1,4 +1,12 @@
-# Pool Controller v2 capacity validation
+# Capacity signals and validation record
+
+This document preserves dated capacity experiments; their request rates are
+measurements on specific hosts, not throughput promises. For a new installation,
+start with [deployment sizing](DEPLOYMENT.md), then use the live pool signals in
+[Operational interpretation](#operational-interpretation) to identify whether
+worker demand, host resources, or storage pressure is the current limit. The
+configuration reference is [CONFIG.md](CONFIG.md). The sections below are a
+research record, not a live implementation checklist.
 
 ## 2026-09-24 writer-path measurement instrumentation
 
