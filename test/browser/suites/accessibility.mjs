@@ -74,6 +74,8 @@ const PROBE = () => {
     if (placeholder && placeholder.trim()) return placeholder.trim()
     const title = el.getAttribute('title')
     if (title && title.trim()) return title.trim()
+    // A contenteditable textbox's code is its value, not its accessible name.
+    if (el.getAttribute('role') === 'textbox' || el.isContentEditable) return ''
     if (el.tagName === 'INPUT' && ['submit', 'button', 'reset'].includes(el.type)) {
       if (el.value && el.value.trim()) return el.value.trim()
     }
@@ -81,7 +83,7 @@ const PROBE = () => {
   }
 
   // 4.1.2 Name, Role, Value / 1.3.1 Info and Relationships.
-  for (const el of document.querySelectorAll('input, select, textarea, button, a[href], [role="button"]')) {
+  for (const el of document.querySelectorAll('input, select, textarea, button, a[href], [role="button"], [role="textbox"], [contenteditable="true"]')) {
     if (!visible(el)) continue
     if (el.tagName === 'INPUT' && el.type === 'hidden') continue
     if (!accessibleName(el)) out.unnamed.push(describe(el))

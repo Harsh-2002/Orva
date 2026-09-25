@@ -2,18 +2,23 @@
   <div
     ref="editorRef"
     class="h-full w-full"
-  />
+  >
+    <span
+      class="sr-only"
+      role="status"
+    >{{ syntaxAnnouncement }}</span>
+  </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment, Prec } from '@codemirror/state'
-import { javascript } from '@codemirror/lang-javascript'
-import { python } from '@codemirror/lang-python'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { linter, lintGutter, forceLinting } from '@codemirror/lint'
 import { tags } from '@lezer/highlight'
+import { editorLanguage, syntaxDiagnostics, syntaxIssueAnnouncement } from '@/utils/editorSyntax'
 
 // one-dark paints names, property names and characters in #e06c75, which is
 // 4.38:1 on the editor's #282c34 and lower still over the active-line tint --
@@ -42,6 +47,10 @@ const props = defineProps({
     type: String,
     default: 'javascript'
   },
+  filename: {
+    type: String,
+    default: ''
+  },
   readOnly: {
     type: Boolean,
     default: false
@@ -51,28 +60,37 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const editorRef = ref(null)
+const syntaxAnnouncement = ref('')
 let view = null
+let wrappingMedia = null
 const languageCompartment = new Compartment()
+const wrappingCompartment = new Compartment()
 
-const getLanguageExtension = (lang) => {
-  if (lang?.startsWith('python')) return python()
-  // typescript: true on every JS-family document, deliberately. TypeScript
-  // functions deploy under runtime "node" (the platform ships two generic
-  // runtimes and runs tsc at build time), so the language id never says
-  // "typescript" and .ts source was getting the plain-JS grammar: annotations,
-  // interfaces and generics all highlighted as syntax errors in a file the
-  // platform fully supports. TS is a superset, so plain .js still parses
-  // correctly under it, which makes this the right default rather than a
-  // special case that needs the filename plumbed down from the editor.
-  return javascript({ typescript: true })
+const syntaxLinter = linter((editor) => {
+  const diagnostics = syntaxDiagnostics(editor.state)
+  syntaxAnnouncement.value = syntaxIssueAnnouncement(editor.state, diagnostics)
+  return diagnostics || []
+}, { delay: 500, tooltipFilter: () => [] })
+
+const syncLineWrapping = () => {
+  if (view && wrappingMedia) {
+    view.dispatch({
+      effects: wrappingCompartment.reconfigure(wrappingMedia.matches ? EditorView.lineWrapping : []),
+    })
+  }
 }
 
 onMounted(() => {
+  wrappingMedia = window.matchMedia?.('(max-width: 639px)') || null
   const startState = EditorState.create({
     doc: props.modelValue,
     extensions: [
       basicSetup,
-      languageCompartment.of(getLanguageExtension(props.language)),
+      languageCompartment.of(editorLanguage(props.language, props.filename)),
+      wrappingCompartment.of(wrappingMedia?.matches ? EditorView.lineWrapping : []),
+      EditorView.contentAttributes.of({ 'aria-label': 'Function source code' }),
+      syntaxLinter,
+      lintGutter({ tooltipFilter: () => [] }),
       oneDark,
       contrastPatch,
       EditorView.updateListener.of((update) => {
@@ -112,9 +130,12 @@ onMounted(() => {
     state: startState,
     parent: editorRef.value,
   })
+  wrappingMedia?.addEventListener?.('change', syncLineWrapping)
+  forceLinting(view)
 })
 
 onUnmounted(() => {
+  wrappingMedia?.removeEventListener?.('change', syncLineWrapping)
   if (view) {
     view.destroy()
   }
@@ -135,11 +156,12 @@ watch(() => props.modelValue, (newValue) => {
 
 // Watch for language changes — swap only the language extension via the
 // Compartment, so theme, listeners, and read-only state are preserved.
-watch(() => props.language, (newLang) => {
+watch(() => [props.language, props.filename], ([newLang, newFilename]) => {
   if (view) {
     view.dispatch({
-      effects: languageCompartment.reconfigure(getLanguageExtension(newLang)),
+      effects: languageCompartment.reconfigure(editorLanguage(newLang, newFilename)),
     })
+    forceLinting(view)
   }
 })
 </script>

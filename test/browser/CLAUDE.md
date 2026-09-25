@@ -45,7 +45,7 @@ clear iOS's 16px focus-zoom threshold. Neither is visible in the class name.
 | `consistency` | controls agree with their neighbours: siblings, the same label across views, and the size of the radius/icon populations |
 | `edge-guard` | a horizontal strip stops at its ends instead of dragging the page with it |
 | `accessibility` | accessible names, keyboard reachability, AA contrast, heading order, duplicate ids |
-| `journeys` | real multi-step flows (nav drawer, destructive-dialog keyboard safety) |
+| `journeys` | real multi-step flows (editor syntax issue/correction and screen-reader location, phone code wrapping, nav drawer, destructive-dialog keyboard safety) |
 
 `control-scale` is the one that was missing while the app grew to **at least
 twenty distinct button heights** on a fine pointer against `Button.vue`'s four.
@@ -160,6 +160,8 @@ right, fix the check and write down why here.
   from a component boundary, and a heuristic that cries wolf gets ignored.
 - CodeMirror's internals (generated class names like `ͼq`) surface in contrast
   and keyboard findings. The editor manages its own keyboard model, so those are
-  reported but are not defects in this codebase's markup.
+  reported but are not defects in this codebase's markup. Its contenteditable
+  textbox still needs an accessible name; the name probe includes `[role="textbox"]`
+  because testing native inputs alone missed that regression.
 - `--destructive` flows mutate the instance. Point them at a scratch instance —
   `test/container/run.sh` brings one up for exactly this purpose.

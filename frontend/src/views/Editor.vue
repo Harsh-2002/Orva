@@ -262,15 +262,15 @@
          so the card is one instrument: name, surface, result. -->
     <div class="flex-1 flex flex-col min-h-0 mt-3 bg-background border border-border rounded-lg overflow-hidden shadow-sm">
       <div class="h-9 border-b border-border flex items-center justify-between px-4 bg-surface shrink-0">
-        <div class="text-xs font-mono text-foreground-muted flex items-center gap-2">
-          <FileCode class="w-3 h-3" />
-          <span class="text-foreground-strong">{{ fileName }}</span>
+        <div class="text-xs font-mono text-foreground-muted flex items-center gap-2 min-w-0">
+          <FileCode class="w-3 h-3 shrink-0" />
+          <span class="text-foreground-strong truncate">{{ fileName }}</span>
           <span
             v-if="templateId"
-            class="text-foreground-muted"
+            class="text-foreground-muted hidden sm:inline"
           >· template: {{ templateId }}</span>
         </div>
-        <div class="flex items-center gap-3 shrink-0">
+        <div class="flex items-center gap-2 sm:gap-3 shrink-0">
           <!-- A failure survives the modal being dismissed. Without this, the
                only record of a failed deploy was a dialog you had just closed. -->
           <button
@@ -295,7 +295,7 @@
             v-else-if="lastBuild?.version"
             class="text-[10px] text-success-fg font-medium"
           >v{{ lastBuild.version }} live</span>
-          <span class="text-[10px] text-foreground-muted font-mono">
+          <span class="text-[10px] text-foreground-muted font-mono hidden md:inline">
             {{ code.length }} chars
           </span>
         </div>
@@ -309,6 +309,7 @@
         <CodeEditor
           v-model="code"
           :language="form.runtime"
+          :filename="fileName"
           class="flex-1 min-h-0"
         />
       </div>

@@ -14,6 +14,7 @@ from harness import OrvaClient, latest_execution_stderr, section, check, summary
 
 NAME = "e2e-deploy-invoke"
 PYTHON_NAME = "e2e-deploy-invoke-python"
+TYPESCRIPT_NAME = "e2e-deploy-invoke-typescript"
 REQUIRE_SANDBOX = os.environ.get("ORVA_REQUIRE_SANDBOX", "") in ("1", "true", "yes")
 
 
@@ -43,7 +44,7 @@ HANDLER_JS = """exports.handler = async (event) => {
 def cleanup(c):
     lst = c.get("/api/v1/functions?limit=10000") or {}
     for f in (lst.get("functions") or []):
-        if f.get("name") in (NAME, PYTHON_NAME):
+        if f.get("name") in (NAME, PYTHON_NAME, TYPESCRIPT_NAME):
             c.req("DELETE", f"/api/v1/functions/{f['id']}", expect=(200, 204, 404))
 
 
@@ -70,6 +71,17 @@ def deployment_error(c, deploy_response):
     if code != 200 or not isinstance(detail, dict):
         return f"deployment lookup status={code}"
     return str(detail.get("error_message") or detail.get("error") or "no error message")[:300]
+
+
+def wait_failed_deployment(c, deploy_response, timeout=30):
+    dep_id = (deploy_response or {}).get("deployment_id")
+    deadline = time.time() + timeout
+    while dep_id and time.time() < deadline:
+        _, detail = c.req("GET", f"/api/v1/deployments/{dep_id}", expect=range(200, 599))
+        if isinstance(detail, dict) and detail.get("status") == "failed":
+            return str(detail.get("error_message") or detail.get("error") or "")
+        time.sleep(0.2)
+    return ""
 
 
 def main():
@@ -168,6 +180,17 @@ def main():
         check("defaults to World", isinstance(p2, dict) and p2.get("message") == "Hello World!",
               str(p2)[:160])
 
+        section("invalid JavaScript fails build without replacing live code")
+        badc, baddep = c.req("POST", f"/api/v1/functions/{fid}/deploy-inline",
+                              {"code": "const broken = ;", "filename": "handler.js"},
+                              expect=range(200, 599))
+        check("invalid JavaScript is accepted into async build", badc == 202)
+        baderr = wait_failed_deployment(c, baddep)
+        check("runtime syntax error has filename", "handler.js" in baderr and "SyntaxError" in baderr,
+              baderr[:300])
+        oldc, _ = c.req("POST", f"/fn/{fid}", {}, expect=range(200, 599))
+        check("previous JavaScript version remains invokable", oldc == 200, f"status {oldc}")
+
         section("executions recorded")
         # Give the async execution writer a moment to flush its batch.
         recorded = False
@@ -228,8 +251,32 @@ def handler(event):
                 check("python handler executed",
                       isinstance(pib, dict) and pib == {"runtime": "python", "echo": "Orva"},
                       str(pib)[:200])
+                badp, badpdep = c.req("POST", f"/api/v1/functions/{pyfid}/deploy-inline",
+                                        {"code": "def handler(:\n    pass", "filename": "handler.py"},
+                                        expect=range(200, 599))
+                check("invalid Python is accepted into async build", badp == 202)
+                pyerr = wait_failed_deployment(c, badpdep)
+                check("Python syntax error has filename", "handler.py" in pyerr and "SyntaxError" in pyerr,
+                      pyerr[:300])
+                oldpy, _ = c.req("POST", f"/fn/{pyfid}", {}, expect=range(200, 599))
+                check("previous Python version remains invokable", oldpy == 200, f"status {oldpy}")
             pdel, _ = c.req("DELETE", f"/api/v1/functions/{pyfid}", expect=range(200, 599))
             check("delete python -> 2xx", pdel in (200, 204), f"status {pdel}")
+
+        section("TypeScript requires its compiler configuration")
+        tsc, tsfn = c.req("POST", "/api/v1/functions",
+                           {"name": TYPESCRIPT_NAME, "runtime": "node", "entrypoint": "handler.ts",
+                            "memory_mb": 128, "network_mode": "none"}, expect=range(200, 599))
+        tsfid = (tsfn or {}).get("id") if isinstance(tsfn, dict) else None
+        check("TypeScript function created", tsc in (200, 201) and bool(tsfid))
+        if tsfid:
+            tdc, tdep = c.req("POST", f"/api/v1/functions/{tsfid}/deploy-inline",
+                               {"code": "export function handler() { return 200 }", "filename": "handler.ts"},
+                               expect=range(200, 599))
+            check("TypeScript source accepted into async build", tdc == 202)
+            terr = wait_failed_deployment(c, tdep)
+            check("missing tsconfig fails clearly", "tsconfig.json" in terr, terr[:300])
+            c.req("DELETE", f"/api/v1/functions/{tsfid}", expect=range(200, 599))
 
         # ── dependency installs run inside the build jail ──────────────
         #
