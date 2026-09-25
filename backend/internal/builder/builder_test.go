@@ -3,6 +3,7 @@ package builder
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,7 +55,7 @@ func TestBuild_ExtractAndValidate(t *testing.T) {
 		"handler.py": "def handler(event): return {'statusCode': 200}",
 	})
 
-	b := &Builder{DataDir: t.TempDir()}
+	b := &Builder{DataDir: t.TempDir(), checkSyntaxHook: func(context.Context, string, string, string) error { return nil }}
 	fn := &database.Function{
 		ID:         "fn_test123",
 		Name:       "test-fn",

@@ -50,6 +50,49 @@ export async function run({ context, base, report, destructive }) {
   const page = await context.newPage()
   const where = 'laptop'
 
+  await page.goto(`${base}/web/functions/new`, { waitUntil: 'networkidle', timeout: 30000 })
+  const editor = page.locator('.cm-content').first()
+  await editor.waitFor({ timeout: 10000 })
+  report.record('journeys', where, 'code textbox has an accessible name',
+    await editor.getAttribute('aria-label') === 'Function source code'
+      ? [] : ['CodeMirror textbox has no accessible name'])
+  await editor.fill('def handler(:\n    pass')
+  const issue = page.locator('.cm-lint-marker-error').first()
+  const issueVisible = await issue.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false)
+  report.record('journeys', where, 'invalid Python marks the error in the gutter',
+    issueVisible ? [] : ['editor did not mark the syntax error'])
+  const announcement = page.locator('.sr-only[role="status"]').first()
+  const errorAnnouncement = await announcement.textContent()
+  report.record('journeys', where, 'screen readers get the first error location',
+    /^Syntax error at line \d+, column \d+\.$/.test(errorAnnouncement?.trim() || '')
+      ? [] : [`missing error location: ${errorAnnouncement}`])
+  report.record('journeys', where, 'syntax hint has no separate status or problems panel',
+    await page.locator('.cm-panel-lint').count() === 0 &&
+      await page.getByText('No syntax issues', { exact: true }).count() === 0
+      ? [] : ['an extra syntax status or panel is visible'])
+  await editor.fill('def handler(event):\n    return 200')
+  const cleared = await issue.waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false)
+  report.record('journeys', where, 'corrected Python clears the gutter marker',
+    cleared ? [] : ['editor did not clear the syntax marker after correction'])
+  report.record('journeys', where, 'corrected code clears the screen-reader error',
+    (await announcement.textContent())?.trim() === ''
+      ? [] : ['the screen-reader error remained after correction'])
+
+  const mobileCodePage = await context.newPage()
+  await mobileCodePage.setViewportSize({ width: 390, height: 844 })
+  await mobileCodePage.goto(`${base}/web/functions/new`, { waitUntil: 'networkidle', timeout: 30000 })
+  const mobileEditor = mobileCodePage.locator('.cm-content').first()
+  await mobileEditor.waitFor({ timeout: 10000 })
+  await mobileEditor.fill(`def handler(event):\n    return "${'x'.repeat(200)}"`)
+  const phoneOverflow = await mobileCodePage.locator('.cm-scroller').evaluate((el) => el.scrollWidth - el.clientWidth)
+  report.record('journeys', 'phone', 'long code lines soft-wrap instead of clipping',
+    phoneOverflow <= 1 ? [] : [`editor still scrolls horizontally by ${phoneOverflow}px`])
+  await mobileCodePage.setViewportSize({ width: 1280, height: 800 })
+  const desktopOverflow = await mobileCodePage.locator('.cm-scroller').evaluate((el) => el.scrollWidth - el.clientWidth)
+  report.record('journeys', where, 'desktop restores horizontal code scrolling',
+    desktopOverflow > 1 ? [] : ['long code line remained wrapped after resizing to desktop'])
+  await mobileCodePage.close()
+
   // The detail-view check runs BEFORE the destructive block on purpose: that
   // block deletes a function, and deleting one cascades away its executions,
   // so the invocations table this check needs would be empty by the time it

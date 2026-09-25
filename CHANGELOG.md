@@ -12,6 +12,20 @@ the commit messages. Only the current release's tag exists — older tags are
 pruned with their releases — so use `git log <current-tag>..HEAD` for the
 unreleased range, and the sections below as the record for everything before it.
 
+## Unreleased
+
+### Added
+
+- The dashboard editor now marks local syntax errors inline and in the gutter
+  for JavaScript, TypeScript, and Python, with filename-aware JS/TS grammar.
+  Valid code gets no extra status text or panel. Deployments
+  check JavaScript and Python entrypoints using the shipped runtime in a
+  network-disabled build jail before installing dependencies. Invalid source
+  fails the build without replacing an earlier live version; TypeScript
+  continues through jailed `tsc` and now requires `tsconfig.json` explicitly.
+- The code editor is now named for screen readers, announces a syntax error's
+  line and column without adding visible UI, and soft-wraps long lines on phones.
+
 ## v2026.09.24
 
 ### Fixed

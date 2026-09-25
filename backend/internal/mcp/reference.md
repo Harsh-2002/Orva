@@ -82,6 +82,12 @@ Orva offers two runtimes, latest-stable only. The ID is generic (`node` /
 The dashboard handles day-to-day work; these calls are for CI and
 automation. Builds run async — poll `/api/v1/deployments/<id>` or
 stream `/api/v1/deployments/<id>/stream` until `phase: done`.
+The dashboard editor shows advisory syntax hints while you type. During a
+deploy, Orva checks JavaScript and Python entrypoints with the shipped runtime
+inside a network-disabled build jail before dependency installation; TypeScript
+uses the existing jailed `tsc` step. Syntax errors fail the build with a file
+location in its log and do not replace an earlier live version. The editor's
+absence of hints is not a guarantee that a build or invocation will succeed.
 
 ### 1. Create the function row
 

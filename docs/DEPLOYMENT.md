@@ -27,6 +27,13 @@ starting it. An old adapter without the server's readiness handshake can
 make every invocation wait for a worker and return HTTP 429 even though the
 server reports a healthy sandbox runtime.
 
+Builds now use the shipped runtime inside the build jail to reject invalid
+JavaScript and Python entrypoints before installing dependencies. A TypeScript
+entrypoint requires `tsconfig.json` and still compiles with `tsc`. Read the
+deployment log for the file and line when a syntax check fails; the previous
+live version remains in service. An unavailable jail or runtime fails the
+build rather than silently bypassing the check.
+
 ## Runtime selection
 
 The shipped `docker-compose.yml` uses Docker's default container

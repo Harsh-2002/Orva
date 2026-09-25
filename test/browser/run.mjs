@@ -142,7 +142,7 @@ try {
     page.on('pageerror', (e) => errors.push(`uncaught: ${String(e)}`))
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
 
-    for (const route of routes) {
+    for (const route of (pageSuites.length || SHOT_DIR ? routes : [])) {
       errors.length = 0
       const where = `${viewport.name} ${route.name}`
       try {

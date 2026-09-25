@@ -177,6 +177,12 @@
             <code class="doc-chip">/api/v1/deployments/&lt;id&gt;/stream</code>
             until <code class="doc-chip">phase: done</code>.
           </p>
+          <p class="doc-lede mt-2">
+            Editor syntax hints are advisory. Deploy checks JavaScript and Python
+            entrypoints with the shipped runtime before installing dependencies;
+            TypeScript uses the jailed compiler. A syntax failure appears in the
+            build log and leaves the previous live version serving.
+          </p>
         </div>
       </div>
 

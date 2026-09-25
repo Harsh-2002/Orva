@@ -88,7 +88,8 @@ type Builder struct {
 	// carry on": an install reaches a package registry, so running it without
 	// a policy is precisely the unfiltered egress this exists to prevent.
 	// Builds that install nothing never consult it.
-	EgressPolicy func() (path, gen string, err error)
+	EgressPolicy    func() (path, gen string, err error)
+	checkSyntaxHook func(context.Context, string, string, string) error
 }
 
 // New creates a new Builder.
@@ -168,6 +169,13 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	}
 	if err := ValidateArchive(scratchDir, fn.Runtime, fn.Entrypoint); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
+	}
+	checkSyntax := b.checkSyntax
+	if b.checkSyntaxHook != nil {
+		checkSyntax = b.checkSyntaxHook
+	}
+	if err := checkSyntax(ctx, scratchDir, fn.Runtime, resolveSourceEntrypoint(scratchDir, fn.Entrypoint)); err != nil {
+		return nil, fmt.Errorf("syntax check: %w", err)
 	}
 	resolvedEntrypoint, err := b.installDependencies(ctx, fn.ID, scratchDir, fn.Runtime, fn.Entrypoint)
 	if err != nil {

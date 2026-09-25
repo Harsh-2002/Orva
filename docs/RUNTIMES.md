@@ -11,6 +11,18 @@ stdin/stdout to the parent `orvad` process.
 | `node`   | node:24-slim     | `handler.js`       | `package.json`     |
 | `python` | python:3.14-slim | `handler.py`       | `requirements.txt` |
 
+The dashboard editor marks likely syntax issues after typing pauses. These are
+local hints, not a complete compiler or a guarantee that a function will run.
+On phones, long code lines soft-wrap in the editor; desktop keeps horizontal
+code scrolling. Screen readers receive the first marked error's line and column.
+Every deployment path checks a JavaScript (`.js`, `.mjs`, `.cjs`) or Python
+(`.py`) entrypoint with the matching shipped runtime inside a network-disabled
+build jail, before dependency installation. A syntax failure appears in the
+deployment log and leaves an earlier live version serving. TypeScript is
+checked by the existing jailed `tsc` project build. The author code is not
+executed by these checks; import, dependency, and runtime failures can still
+surface later.
+
 ## The `event` object
 
 When a request arrives, the adapter calls your handler with a
@@ -54,6 +66,8 @@ TypeScript is a first-class deploy path on the `node` runtime — there is no
 separate TS runtime. Include a `tsconfig.json` and declare `typescript` in your
 `package.json` dependencies or devDependencies, and the build runs
 `tsc --project tsconfig.json` after the install step.
+An entrypoint ending in `.ts` without `tsconfig.json` now
+fails deployment instead of publishing source Node cannot execute.
 
 `compilerOptions.outDir` decides where the output lands (default `dist`, and
 `"."` means "beside the sources"). It must stay inside your code directory: a
