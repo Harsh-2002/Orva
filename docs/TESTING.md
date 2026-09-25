@@ -266,7 +266,7 @@ Say these out loud before you claim a change is verified:
 | `make test` | anything about nsjail, deploys, invokes, HTTP, or the UI |
 | the shell suites | anything about arm64, installers, the CLI as a shipped artifact, or a virgin-DB onboarding flow |
 | `test/e2e/run.py` **without** `ORVA_REQUIRE_SANDBOX=1` | that deploy/invoke works — the sandbox modules skip silently and the run still exits 0 |
-| `install-matrix` green | that invocation works — `smoke-flow.sh` downgrades `WORKER_CRASHED`/`SANDBOX_ERROR` to warnings |
+| `install-matrix` green | that invocation works — `smoke-flow.sh` downgrades `WORKER_CRASHED`/`SANDBOX_ERROR`, or a build blocked by the exact nested-container nsjail clone denial, to warnings; native-engine CI must prove real deploy/invoke |
 | everything on amd64 | that the build jail's seccomp policy compiles on arm64 (Kafel treats an unknown syscall name as a compile error) |
 
 ---
