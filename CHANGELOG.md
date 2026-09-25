@@ -14,6 +14,8 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+## v2026.09.25
+
 ### Added
 
 - The dashboard editor now marks local syntax errors inline and in the gutter
