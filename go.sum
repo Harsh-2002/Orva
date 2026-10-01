@@ -167,8 +167,8 @@ github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI
 github.com/mattn/go-runewidth v0.0.12/go.mod h1:RAqKPSqVFrSLVXbA8x7dzmKdmGzieGRCM46jaSJTDAk=
 github.com/mattn/go-runewidth v0.0.17 h1:78v8ZlW0bP43XfmAfPsdXcoNCelfMHsDmd/pkENfrjQ=
 github.com/mattn/go-runewidth v0.0.17/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
-github.com/maximhq/bifrost/core v1.9.1 h1:CF7TTj63htKQbuBL7eAGzou5yoe4XiQ0YMWpAO/atnw=
-github.com/maximhq/bifrost/core v1.9.1/go.mod h1:bgTt5CsqB7duKiy/pC0uUMTxIRnvjj0t2OvH7Tlvuz0=
+github.com/maximhq/bifrost/core v1.10.4 h1:oER4FpoGfOIk/73N8UnnUr5mr98fM6HuuIe8AmeIDr0=
+github.com/maximhq/bifrost/core v1.10.4/go.mod h1:bgTt5CsqB7duKiy/pC0uUMTxIRnvjj0t2OvH7Tlvuz0=
 github.com/microcosm-cc/bluemonday v1.0.27 h1:MpEUotklkwCSLeH+Qdx1VJgNqLlpY2KXwXFM08ygZfk=
 github.com/microcosm-cc/bluemonday v1.0.27/go.mod h1:jFi9vgW+H7c3V0lb6nR74Ib/DIB5OBs92Dimizgw2cA=
 github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtwfBpOTAI+Urx4=

@@ -11,7 +11,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hexops/gotextdiff v1.0.3
 	github.com/matoous/go-nanoid/v2 v2.1.0
-	github.com/maximhq/bifrost/core v1.9.1
+	github.com/maximhq/bifrost/core v1.10.4
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
