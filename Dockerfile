@@ -40,9 +40,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates git make gcc g++ autoconf bison flex libtool pkg-config \
       libprotobuf-dev libnl-route-3-dev protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
+COPY scripts/patch-nsjail.sh /nsjail-tools/
+COPY scripts/nsjail/nstun-partial-write.patch /nsjail-tools/nsjail/
 RUN git clone --filter=blob:none https://github.com/google/nsjail.git /nsjail \
     && git -C /nsjail checkout "$NSJAIL_REF" \
-    && cd /nsjail && make -j"$(nproc)" && strip nsjail
+    && bash /nsjail-tools/patch-nsjail.sh /nsjail \
+    && cd /nsjail && make -j"$(nproc)"
+COPY scripts/test-nsjail.sh /nsjail-tools/
+COPY scripts/nsjail/tcp-regression.cc /nsjail-tools/nsjail/
+RUN bash /nsjail-tools/test-nsjail.sh /nsjail && strip /nsjail/nsjail
 
 # Orva offers two runtimes, latest-stable only: node (Node.js 24) and
 # python (Python 3.14). Bump the base image here to track a newer stable.

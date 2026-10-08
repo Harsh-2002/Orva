@@ -58,6 +58,7 @@ also accept `ORVA_ENDPOINT`/`ORVA_API_KEY` and fall back to `~/.orva/config.yaml
 | File | What it covers |
 |---|---|
 | `api-smoke.sh` | Fast smoke of public REST endpoints: system health/metrics, auth/status, functions CRUD, deploy-inline, invoke, deployments, keys, routes — status-family checks, not deep coverage |
+| `nstun-https.py` | Disposable-VM-only NSTUN HTTPS PUT/GET byte equality/DELETE with verified TLS, 1 KiB through 4 MiB, sequential and eight-client traffic; source CI runs it on its scratch runner. Requires `--scratch`, root/nsjail, Python and OpenSSL; creates only its own in-memory sink and temporary certificate. |
 | `auth-test.sh` | Per-function `auth_mode` (none / platform_key / signed HMAC), `rate_limit_per_min` (429 + Retry-After), invalid auth_mode → 400 VALIDATION |
 | `rollback-test.sh` | Version history, rollback endpoint, redeploy after rollback |
 | `routes-test.sh` | Custom route registration, path-matching, method filtering |

@@ -115,6 +115,9 @@ jobs:
             server_install:
               - 'scripts/install.sh'
               - 'scripts/build-nsjail-static.sh'
+              - 'scripts/patch-nsjail.sh'
+              - 'scripts/test-nsjail.sh'
+              - 'scripts/nsjail/**'
               - 'test/install/**'
               - 'test/release/**'
               - '.github/workflows/ci.yml'
@@ -242,10 +245,14 @@ jobs:
           bash -n scripts/entrypoint.sh
           bash -n scripts/build-rootfs.sh
           bash -n scripts/build-nsjail-static.sh
+          bash -n scripts/patch-nsjail.sh
+          bash -n scripts/test-nsjail.sh
           shellcheck -S warning \
             scripts/entrypoint.sh \
             scripts/build-rootfs.sh \
             scripts/build-nsjail-static.sh \
+            scripts/patch-nsjail.sh \
+            scripts/test-nsjail.sh \
             test/*.sh \
             test/install/*.sh \
             test/install/lib/*.sh \
@@ -463,12 +470,20 @@ jobs:
             git make gcc g++ autoconf bison flex libtool pkg-config \
             libcap-dev libcap2-bin libprotobuf-dev libnl-route-3-dev protobuf-compiler
           git clone --filter=blob:none https://github.com/google/nsjail.git "$RUNNER_TEMP/nsjail-src"
-          git -C "$RUNNER_TEMP/nsjail-src" checkout 5ebcc30bef4af60d6e28f012dd8bf7b99b8b0acf
+          git -C "$RUNNER_TEMP/nsjail-src" checkout "$NSJAIL_REF"
+          bash scripts/patch-nsjail.sh "$RUNNER_TEMP/nsjail-src"
           make -C "$RUNNER_TEMP/nsjail-src" -j"$(nproc)"
+          bash scripts/test-nsjail.sh "$RUNNER_TEMP/nsjail-src"
           sudo install -m 0755 "$RUNNER_TEMP/nsjail-src/nsjail" /usr/local/bin/nsjail
           sudo setcap cap_sys_admin,cap_setuid,cap_setgid,cap_net_admin,cap_net_bind_service=eip \
             /usr/local/bin/nsjail
           getcap /usr/local/bin/nsjail
+
+      - name: NSTUN sandbox HTTPS upload regression
+        run: |
+          sudo modprobe tun
+          test -c /dev/net/tun
+          sudo python3 test/nstun-https.py --scratch --disable-userns
 
       - name: Provision runtime rootfs trees
         run: |

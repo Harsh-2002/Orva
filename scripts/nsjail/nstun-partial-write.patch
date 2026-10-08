@@ -1,0 +1,104 @@
+diff --git a/nstun/tcp.cc b/nstun/tcp.cc
+index 3f31f2a..76f3ec9 100644
+--- a/nstun/tcp.cc
++++ b/nstun/tcp.cc
+@@ -293,46 +293,54 @@ void push_to_guest(Context* ctx, TcpFlow* flow) {
+ 
+ /* Returns true if the flow was destroyed (caller must not use flow afterward) */
+ bool flush_to_host(Context* ctx, TcpFlow* flow) {
+-	if (flow->rx_sent_offset >= flow->rx_buffer.size()) {
+-		return false;
++	bool progressed = false;
++	if (flow->rx_sent_offset < flow->rx_buffer.size()) {
++		size_t to_send = flow->rx_buffer.size() - flow->rx_sent_offset;
++		ssize_t written;
++		unsigned int attempts = 0;
++		do {
++			written = send(flow->host_fd,
++			    flow->rx_buffer.data() + flow->rx_sent_offset, to_send, MSG_NOSIGNAL);
++		} while (written < 0 && errno == EINTR && ++attempts < 16);
++
++		if (written > 0) {
++			flow->rx_sent_offset += written;
++			progressed = true;
++		} else if (written == 0 ||
++			   (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
++			tcp_rst_and_destroy(ctx, flow);
++			return true;
++		}
+ 	}
+ 
+-	size_t to_send = flow->rx_buffer.size() - flow->rx_sent_offset;
+-	ssize_t written = send(
+-	    flow->host_fd, flow->rx_buffer.data() + flow->rx_sent_offset, to_send, MSG_NOSIGNAL);
+-
+-	if (written > 0) {
+-		flow->rx_sent_offset += written;
+-		if (flow->rx_sent_offset >= flow->rx_buffer.size()) {
+-			flow->rx_buffer.clear();
+-			flow->rx_sent_offset = 0;
+-		}
++	bool pending = flow->rx_sent_offset < flow->rx_buffer.size();
++	if (!pending) {
++		flow->rx_buffer.clear();
++		flow->rx_sent_offset = 0;
++	}
+ 
+-		/* We made progress, remove EPOLLOUT if empty */
+-		if (flow->rx_buffer.empty() && flow->epoll_out_registered) {
+-			struct epoll_event ev = {
+-			    .events = EPOLLIN | EPOLLERR | EPOLLHUP, .data = {.fd = flow->host_fd}};
+-			epoll_ctl(ctx->epoll_fd, EPOLL_CTL_MOD, flow->host_fd, &ev);
+-			flow->epoll_out_registered = false;
++	/* Positive short writes need the same writable wakeup as EAGAIN. */
++	if (pending != flow->epoll_out_registered) {
++		struct epoll_event ev = {
++		    .events = EPOLLERR | EPOLLHUP |
++			      (flow->epoll_in_disabled ? 0 : (uint32_t)EPOLLIN) |
++			      (pending ? (uint32_t)EPOLLOUT : 0),
++		    .data = {.fd = flow->host_fd}};
++		if (epoll_ctl(ctx->epoll_fd, EPOLL_CTL_MOD, flow->host_fd, &ev) < 0) {
++			PLOG_E("epoll_ctl(EPOLL_CTL_MOD) failed in flush_to_host");
++			tcp_rst_and_destroy(ctx, flow);
++			return true;
+ 		}
++		flow->epoll_out_registered = pending;
++	}
+ 
++	if (!pending && flow->guest_eof) {
++		shutdown(flow->host_fd, SHUT_WR);
++	}
++	if (progressed) {
+ 		tcp_send_packet(ctx, flow, NSTUN_TCP_FLAG_ACK);
+-		return false;
+-
+-	} else if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+-		/* Apply backpressure, register EPOLLOUT */
+-		if (!flow->epoll_out_registered) {
+-			struct epoll_event ev = {.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP,
+-			    .data = {.fd = flow->host_fd}};
+-			epoll_ctl(ctx->epoll_fd, EPOLL_CTL_MOD, flow->host_fd, &ev);
+-			flow->epoll_out_registered = true;
+-		}
+-		return false;
+-	} else {
+-		/* Terminal error, RST the guest */
+-		tcp_rst_and_destroy(ctx, flow);
+-		return true;
+ 	}
++	return false;
+ }
+ 
+ static void handle_socks5_init_host(Context* ctx, TcpFlow* flow, int fd) {
+@@ -716,8 +724,10 @@ static void tcp_process_data(Context* ctx, TcpFlow* flow, const tcp_hdr* tcp,
+ 
+ 			tcp_send_packet(ctx, flow, NSTUN_TCP_FLAG_ACK);
+ 
+-			shutdown(flow->host_fd, SHUT_WR);
+ 			flow->guest_eof = true;
++			if (flow->rx_sent_offset == flow->rx_buffer.size()) {
++				shutdown(flow->host_fd, SHUT_WR);
++			}
+ 
+ 			if (flow->state == TcpState::ESTABLISHED) {
+ 				flow->state = TcpState::CLOSE_WAIT;
