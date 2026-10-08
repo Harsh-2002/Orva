@@ -7,6 +7,7 @@ import http.client
 import http.server
 import json
 import pathlib
+import shutil
 import socket
 import ssl
 import subprocess
@@ -20,6 +21,7 @@ def transfer(address, port, ca, size, number):
     data = bytes((i * 131 + i // 251) % 256 for i in range(size))
     key = f"/regression-{size}-{number}"
     context = ssl.create_default_context(cafile=ca)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
 
     def request(method, body=None):
         connection = http.client.HTTPSConnection("nstun-regression.test", port, timeout=20, context=context)
@@ -109,6 +111,9 @@ def main():
             self.reply(204)
 
     with tempfile.TemporaryDirectory(prefix="orva-nstun-https-") as work:
+        # Do not rely on traversal permissions of the CI runner's private home.
+        client = str(pathlib.Path(work) / "client.py")
+        shutil.copyfile(__file__, client)
         cert = str(pathlib.Path(work) / "cert.pem")
         key = str(pathlib.Path(work) / "key.pem")
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
@@ -118,6 +123,7 @@ def main():
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(cert, key)
         server.socket = context.wrap_socket(server.socket, server_side=True)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -129,7 +135,7 @@ def main():
             flags = ["--disable_clone_newuser"] if args.disable_userns else []
             result = subprocess.run([args.nsjail, "-Mo", *flags, "--user_net", "--chroot", "/",
                                      "--time_limit", "120", "--rlimit_as", "2048", "--",
-                                     sys.executable, str(pathlib.Path(__file__).resolve()),
+                                     sys.executable, client,
                                      "--client", address, str(server.server_port), cert],
                                     timeout=150, check=False)
             assert result.returncode == 0, f"sandbox client exited {result.returncode}"

@@ -63,7 +63,8 @@ first short-write interest assertion.
 
 The real TLS test is `sudo python3 test/nstun-https.py --scratch` on a disposable
 provisioned VM. It starts an ephemeral HTTPS sink, trusts only its generated
-certificate with hostname verification, and launches the client in a real NSTUN
+certificate with hostname verification, requires TLS 1.2 or newer on client and
+server, and launches the client in a real NSTUN
 sandbox. It performs five sequential plus fifteen eight-client-concurrent
 PUT/GET/DELETE round trips across 1 KiB, 56,288 bytes, 256 KiB, 1 MiB, and 4 MiB.
 The receiver reads slowly to exercise backpressure. `--disable-userns` selects
