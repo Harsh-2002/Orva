@@ -16,6 +16,12 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## v2026.10.08
 
+### Changed
+
+- Same-day re-release updates Bifrost core to 1.11.1 and the SQLite Go driver
+  to 1.60.1, plus Lucide Vue, ESLint, jsdom, PostCSS, Vite, and Vitest.
+  The frontend security patches and sandbox TCP forwarding fix remain included.
+
 ### Fixed
 
 - Frontend tooling uses patched `source-map-js` and `postcss-selector-parser`
@@ -29,6 +35,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- This version was re-released after the dependency updates. `orva upgrade`
+  detects same-tag rebuilds by checksum; bare-metal operators should rerun the
+  server installer and accept reinstall/repair (or use `--yes`) to refresh all
+  dependencies. Docker operators must pull `latest` and recreate the container.
 - Use the normal installer upgrade or recreate the Docker container. Updating
   only the Orva server binary does not update nsjail; restart the service so warm
   sandbox workers use the corrected dependency. No function or credential changes
