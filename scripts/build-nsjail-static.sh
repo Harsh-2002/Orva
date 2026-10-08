@@ -15,10 +15,13 @@ trap 'rm -rf "$work"' EXIT
 
 git clone --filter=blob:none https://github.com/google/nsjail.git "$work/nsjail"
 git -C "$work/nsjail" checkout "$ref"
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+bash "$script_dir/patch-nsjail.sh" "$work/nsjail"
 
 # Environment assignment is intentional: nsjail appends protobuf/libnl while
 # its recursive kafel build remains free to clear LDFLAGS for relocatable code.
 LDFLAGS=-static make -C "$work/nsjail" -j"$(nproc)"
+bash "$script_dir/test-nsjail.sh" "$work/nsjail"
 strip "$work/nsjail/nsjail"
 
 description=$(file "$work/nsjail/nsjail")

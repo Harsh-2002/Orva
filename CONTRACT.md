@@ -31,6 +31,10 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
   imports them.
 - Versions are held **lock-step** across `Dockerfile`, `.github/workflows/ci.yml`,
   and `.github/workflows/release.yml` — bump them together.
+- Every nsjail build must apply `scripts/patch-nsjail.sh` to the pinned revision
+  and run `scripts/test-nsjail.sh` after compilation. The reviewed NSTUN patch
+  and deterministic TCP regression live in `scripts/nsjail/`; changing the
+  upstream pin requires reviewing/rebasing the patch, not silently skipping it.
 
 ## 2. Canonical commands
 

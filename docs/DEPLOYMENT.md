@@ -198,6 +198,12 @@ shipped `docker-compose.yml` sets `max-size: 10m, max-file: 5`).
 
 ## Upgrades
 
+Dependency corrections ship with the release. When upgrading for a sandbox
+networking fix, use the normal installer (bare metal) or pull and recreate the
+container (Docker), not just a replacement Orva server binary. The installer
+refreshes nsjail and restarts Orva; recreated workers then use the new dependency.
+See [the NSTUN partial-write RCA](NSTUN_PARTIAL_WRITE.md) for verification and rollback.
+
 ### Docker
 
 ```bash

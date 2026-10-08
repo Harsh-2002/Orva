@@ -9,6 +9,8 @@ Support scripts for deployment and installation. None of these are called by the
 | `install-cli.sh` | POSIX sh installer that **only** installs the slim `orva` CLI to `/usr/local/bin/orva`. No service user, no systemd unit, no rootfs. Same intent as `install.sh --cli-only` but a smaller standalone script (linked directly from the README CLI-install instructions). Also supports macOS + shell completion, which `install.sh --cli-only` does not. |
 | `install-cli.ps1` | Windows PowerShell CLI installer. Installs `orva.exe` to `%LOCALAPPDATA%\Programs\orva\` and adds it to the user PATH. |
 | `build-rootfs.sh` | Builds nsjail root filesystem bundle for each runtime from a base container image. Requires Docker. Output tarballs go into the release image. |
+| `build-nsjail-static.sh` | Builds the checksum-published, fully static nsjail asset; applies the reviewed NSTUN correction and runs its deterministic TCP regression before stripping/installing. |
+| `patch-nsjail.sh`, `test-nsjail.sh`, `nsjail/` | Exact-revision dependency patch and tests of the real NSTUN implementation. Shared by Docker, source CI, static installer candidates, and Release; never bypass these when updating the pin. |
 
 ## Gotchas
 

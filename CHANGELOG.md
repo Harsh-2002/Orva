@@ -14,6 +14,26 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+## v2026.10.08
+
+### Fixed
+
+- Frontend tooling uses patched `source-map-js` and `postcss-selector-parser`
+  dependencies for GHSA-68fv-2mgg-jv7q and GHSA-rj75-hqrm-r3gf. The dependency
+  audit remains enforced; no advisory is suppressed.
+- Sandbox egress TCP uploads no longer strand buffered bytes after a successful
+  partial host-socket write. The reproducibly patched nsjail dependency retains
+  unsent offsets, schedules writable wakeups, preserves read backpressure, and
+  drains buffered data before forwarding guest FIN. Deterministic regression
+  tests gate Docker, CI, and static release dependency builds.
+
+### Upgrade notes
+
+- Use the normal installer upgrade or recreate the Docker container. Updating
+  only the Orva server binary does not update nsjail; restart the service so warm
+  sandbox workers use the corrected dependency. No function or credential changes
+  are needed. See `docs/NSTUN_PARTIAL_WRITE.md` for the RCA and validation.
+
 ## v2026.09.25
 
 ### Added

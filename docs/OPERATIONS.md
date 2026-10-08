@@ -384,6 +384,16 @@ anything under `functions/` to "clean up".
 migration refused to commit and rolled back, so the database is untouched and
 unmigrated. Upgrade to a build containing this fix and start again.
 
+## Symptom: sandbox uploads stall while small uploads work
+
+The NSTUN revision shipped before the partial-write correction could acknowledge
+guest data but strand the remainder of a successful short host-socket write.
+This can cause S3 upload timeouts and incomplete request bodies even when DNS,
+credentials, and the storage service are working. See
+[NSTUN_PARTIAL_WRITE.md](NSTUN_PARTIAL_WRITE.md) for evidence, the reproducible
+dependency fix, regression coverage, upgrade verification, and rollback.
+Do not weaken egress policy or change function credentials to work around it.
+
 ## Symptom: nsjail cgroups accumulating under the delegate
 
 **Diagnosis.** Workers are SIGKILLed, so nsjail never runs its own cleanup
