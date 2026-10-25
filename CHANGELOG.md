@@ -12,7 +12,7 @@ the commit messages. Only the current release's tag exists — older tags are
 pruned with their releases — so use `git log <current-tag>..HEAD` for the
 unreleased range, and the sections below as the record for everything before it.
 
-## Unreleased
+## v2026.10.25
 
 ### Changed
 
