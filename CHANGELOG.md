@@ -14,6 +14,28 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Changed
+
+- Dependency refresh closes the five open Dependabot pull requests: Bifrost
+  core 1.11.3, `golang.org/x/crypto` 0.58.0, `golang.org/x/term` 0.47.0, and
+  patch-level updates across the Go module graph. The frontend group moves to
+  Vue 3.5.44, Pinia 4.1.0, Vue Router 5.4.0, Lucide Vue 1.61.0, CodeMirror
+  View 6.43.15 and Merge 6.12.3, ESLint 10.13.0, Vitest 5.0.5, jsdom 30.1.3,
+  PostCSS 8.5.31, `@vitejs/plugin-vue` 6.0.10, Vite 8.3.5, markdown-it 15.0.3,
+  and follow-redirects 1.16.1.
+
+### Fixed
+
+- The frontend dependency audit passes again with no suppressed advisories.
+  Vite, markdown-it, follow-redirects, and the transitive `undici` parser are
+  all on patched releases for GHSA-r825-w8mm-5pxw, GHSA-9jrq-w75r-8gcw,
+  GHSA-q3jh-wrc6-jgq8, GHSA-xjj6-f33q-929c and the markdown-it quadratic-time
+  advisories; `npm audit --audit-level=moderate` reports zero vulnerabilities.
+- Verification now runs on Go 1.27.3. `govulncheck` reports zero reachable
+  vulnerabilities, down from fourteen standard-library findings in the
+  1.27.1 toolchain (html/template and HTTP/2), none of which were fixable in
+  Orva's own code.
+
 ## v2026.10.08
 
 ### Changed
