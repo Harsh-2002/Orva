@@ -16,9 +16,12 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Changed
 
-- Dependency refresh closes the five open Dependabot pull requests: Bifrost
-  core 1.11.3, `golang.org/x/crypto` 0.58.0, `golang.org/x/term` 0.47.0, and
-  patch-level updates across the Go module graph. The frontend group moves to
+- Dependency refresh supersedes the five open Dependabot pull requests:
+  Bifrost core 1.13.1, `go-selfupdate` 1.7.0, the SQLite Go driver 1.61.0,
+  `golang.org/x/crypto` 0.58.0, `golang.org/x/term` 0.47.0, and patch-level
+  updates across the Go module graph. `go.mod` now requires Go 1.27.3 — the
+  first patch with the html/template and HTTP/2 fixes — so a 1.27.0–1.27.2
+  toolchain downloads it automatically. The frontend group moves to
   Vue 3.5.44, Pinia 4.1.0, Vue Router 5.4.0, Lucide Vue 1.61.0, CodeMirror
   View 6.43.15 and Merge 6.12.3, ESLint 10.13.0, Vitest 5.0.5, jsdom 30.1.3,
   PostCSS 8.5.31, `@vitejs/plugin-vue` 6.0.10, Vite 8.3.5, markdown-it 15.0.3,
