@@ -126,8 +126,10 @@ if [[ "$DISTRO_INIT" == "systemd" ]]; then
     # empty under user namespaces, and a superset of nsjail's file capabilities
     # in the fallback, or execve(nsjail) itself fails with EPERM.
     if grep -q '^CapabilityBoundingSet=$' <<<"$unit"; then
-        grep -q '^NoNewPrivileges=yes$' <<<"$unit" \
-            || die "user-namespace unit kept NoNewPrivileges=false"
+        # NNP must stay off here: systemd's ProtectSystem + NNP makes nsjail's
+        # userns bind remount fail, which breaks deploys but not invokes.
+        grep -q '^NoNewPrivileges=false$' <<<"$unit" \
+            || die "user-namespace unit must not set NoNewPrivileges (breaks nsjail mounts)"
         grep -q '^Environment=ORVA_DISABLE_USERNS=0$' <<<"$unit" \
             || die "empty bounding set without user-namespace mode"
     else
