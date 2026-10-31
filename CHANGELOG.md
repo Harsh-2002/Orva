@@ -14,18 +14,31 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Changed
+
+- The container image no longer installs `nodejs`, `npm`, or `python3-pip` in
+  the final stage. Nothing in the daemon, entrypoint, or CLI uses them: builds
+  run `npm`/`pip` from inside the runtime rootfs jail. Measured on Debian 13,
+  the three packages and their unique dependencies add **223 MB installed**
+  (~75 MB of the published image's compressed layers).
+- The Node runtime rootfs is stripped at build time. The upstream binary ships
+  full symbols; removing them saves **17 MiB** per rootfs (126.9 MB → 108.7 MB)
+  and was verified to still run JavaScript. JavaScript stack traces are
+  unaffected; only native frame names in a core dump are lost.
+
 ### Fixed
 
+- `orva upgrade` refuses a binary-only upgrade on a bare-metal server when the
+  installed runtime rootfs carries a different release stamp, because the
+  adapter protocol moves with the binary and a mismatch makes every invocation
+  time out. The refusal names the stale version and points at `install.sh`;
+  `--force` still replaces only the binary. The container path is unaffected
+  (no stamp; `entrypoint.sh` refreshes the rootfs from the image).
 - Frontend dependency audit is clean again after advisories landed post-release.
   `follow-redirects` moves to 1.16.2 (GHSA-mrwp-f3q8-3g9p), and `overrides` pin
   `minimatch` 11.0.3 (GHSA-g3hv-75wg-m249) and `glob` 14.0.3
   (GHSA-3g3m-2fjr-6pw4) because ESLint, editorconfig and js-beautify still
   request the vulnerable major ranges upstream. No advisory is suppressed.
-
-## Unreleased
-
-### Fixed
-
 - The bare-metal installer now probes unprivileged user namespaces with a
   **capability-free** nsjail and applies `setcap` only when that probe fails.
   It previously applied the file capabilities first, which makes nsjail's
