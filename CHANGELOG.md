@@ -12,6 +12,16 @@ the commit messages. Only the current release's tag exists — older tags are
 pruned with their releases — so use `git log <current-tag>..HEAD` for the
 unreleased range, and the sections below as the record for everything before it.
 
+## Unreleased
+
+### Fixed
+
+- Frontend dependency audit is clean again after advisories landed post-release.
+  `follow-redirects` moves to 1.16.2 (GHSA-mrwp-f3q8-3g9p), and `overrides` pin
+  `minimatch` 11.0.3 (GHSA-g3hv-75wg-m249) and `glob` 14.0.3
+  (GHSA-3g3m-2fjr-6pw4) because ESLint, editorconfig and js-beautify still
+  request the vulnerable major ranges upstream. No advisory is suppressed.
+
 ## v2026.10.25
 
 ### Changed
