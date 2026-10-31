@@ -48,6 +48,17 @@ case "$runtime" in
     if [[ ! -x "$out/usr/local/bin/node" ]]; then
       ln -sf "$(readlink -f "$out/usr/local/bin/node" 2>/dev/null || echo /usr/local/bin/node)" "$out/usr/local/bin/node" || true
     fi
+    # The upstream binary ships full symbols (~17 MiB on amd64). JavaScript
+    # stack traces come from V8's own tables, so removing them costs only
+    # native frame names in a core dump.
+    if command -v strip >/dev/null 2>&1; then
+      nr_before=$(stat -c %s "$out/usr/local/bin/node" 2>/dev/null || echo 0)
+      strip --strip-unneeded "$out/usr/local/bin/node" 2>/dev/null || true
+      nr_after=$(stat -c %s "$out/usr/local/bin/node" 2>/dev/null || echo 0)
+      echo ">> stripped node binary: $nr_before -> $nr_after bytes"
+    else
+      echo ">> strip not found; node binary keeps its symbols" >&2
+    fi
     ;;
   python)
     if [[ ! -x "$out/usr/local/bin/python3" ]]; then

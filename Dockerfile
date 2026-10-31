@@ -52,6 +52,12 @@ RUN bash /nsjail-tools/test-nsjail.sh /nsjail && strip /nsjail/nsjail
 
 # Orva offers two runtimes, latest-stable only: node (Node.js 24) and
 # python (Python 3.14). Bump the base image here to track a newer stable.
+FROM node:24-slim AS node-strip
+# Strip in a throwaway stage so binutils never reaches the shipped image.
+RUN apt-get update && apt-get install -y --no-install-recommends binutils \
+    && strip --strip-unneeded /usr/local/bin/node \
+    && rm -rf /var/lib/apt/lists/*
+
 FROM node:24-slim AS rootfs-node
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
@@ -90,7 +96,6 @@ LABEL org.opencontainers.image.title="Orva" \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tini curl libprotobuf32 libnl-route-3-200 libcap2-bin \
       iproute2 \
-      python3-pip nodejs npm \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
     && mkdir -p /var/lib/orva/functions
 
@@ -101,6 +106,8 @@ COPY --from=nsjail /nsjail/nsjail /usr/local/bin/nsjail
 # common commands work without re-passing --endpoint / --api-key.
 COPY --from=go /out/orva /usr/local/bin/orva
 COPY --from=rootfs-node   / /opt/orva/rootfs/node/
+# Overwrite the unstripped copy with the stripped one from the throwaway stage.
+COPY --from=node-strip    /usr/local/bin/node /opt/orva/rootfs/node/usr/local/bin/node
 COPY --from=rootfs-python / /opt/orva/rootfs/python/
 COPY scripts/entrypoint.sh /usr/local/bin/orva-entrypoint
 RUN chmod +x /usr/local/bin/orva-entrypoint
