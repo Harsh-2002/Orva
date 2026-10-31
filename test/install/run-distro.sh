@@ -122,10 +122,22 @@ if [[ "$DISTRO_INIT" == "systemd" ]]; then
     # binary carrying file capabilities anyway.
     [[ "$unit" != *"AmbientCapabilities="* ]] \
         || die "orva.service still grants ambient capabilities to the daemon"
-    # The bounding set must remain a superset of nsjail's file capabilities, or
-    # execve(nsjail) itself fails with EPERM.
-    [[ "$unit" == *"CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE"* ]] \
-        || die "orva.service bounding set would prevent nsjail exec"
+    # The bounding set and NoNewPrivileges must agree with the selected mode:
+    # empty under user namespaces, and a superset of nsjail's file capabilities
+    # in the fallback, or execve(nsjail) itself fails with EPERM.
+    if grep -q '^CapabilityBoundingSet=$' <<<"$unit"; then
+        grep -q '^NoNewPrivileges=yes$' <<<"$unit" \
+            || die "user-namespace unit kept NoNewPrivileges=false"
+        grep -q '^Environment=ORVA_DISABLE_USERNS=0$' <<<"$unit" \
+            || die "empty bounding set without user-namespace mode"
+    else
+        grep -q '^CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE$' <<<"$unit" \
+            || die "fallback unit bounding set would prevent nsjail exec"
+        grep -q '^NoNewPrivileges=false$' <<<"$unit" \
+            || die "fallback unit must allow file capabilities (NoNewPrivileges=false)"
+        grep -q '^Environment=ORVA_DISABLE_USERNS=1$' <<<"$unit" \
+            || die "capability bounding set without fallback mode"
+    fi
     [[ "$unit" == *"Environment=ORVA_DISABLE_USERNS="* ]] \
         || die "orva.service is missing the detected userns mode"
     # `orva backup restore` exits 70 to force a restart; without this a
