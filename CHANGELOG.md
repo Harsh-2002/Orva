@@ -32,9 +32,12 @@ unreleased range, and the sections below as the record for everything before it.
   `setgroups` setup fail and silently pins a capable host to the capability
   fallback. On such hosts functions ran as the service UID with no UID
   boundary, and the unit kept a five-entry capability bounding set. Selecting
-  user namespaces now also writes `CapabilityBoundingSet=` empty and
-  `NoNewPrivileges=yes`. Re-run the installer to pick this up; a drop-in that
-  pins `ORVA_DISABLE_USERNS` is reported, not deleted.
+  user namespaces now also writes an empty `CapabilityBoundingSet`. The unit
+  keeps `NoNewPrivileges=false` in that mode: systemd applies `ProtectSystem` as
+  a read-only mount and combining it with NNP makes nsjail's own read-only bind
+  fail (EPERM), which breaks deploys while invokes still succeed. Re-run the
+  installer to pick this up; a drop-in that pins `ORVA_DISABLE_USERNS` is
+  reported, not deleted.
 - `docs/SECURITY.md` no longer claims that inside UID 0 maps to `nobody`, that
   `CapBnd` is always zero, or that `--rlimit_as max` bounds memory. The first
   two depend on the deployment mode; the third only preserves a hard limit the

@@ -918,9 +918,14 @@ write_service_files() {
     install -d -m 0755 "$PREFIX/share/orva/scripts"
     if [ "$SERVICE_DISABLE_USERNS" = "0" ]; then
         svc_cap_block="# nsjail creates an unprivileged user namespace per function and needs no
-# file capabilities, so the daemon keeps an empty bounding set."
+# file capabilities, so the daemon keeps an empty bounding set.
+# NoNewPrivileges stays off in this mode: systemd implements ProtectSystem as a
+# read-only mount, and combining it with NNP makes nsjail's own read-only bind
+# inside the user namespace fail with EPERM. That breaks deploys (the build
+# jail binds a writable /tmp) while invokes keep working, so it is not caught
+# by the sandbox probe. The empty bounding set is the control here."
         svc_caps="CapabilityBoundingSet="
-        svc_nnp="NoNewPrivileges=yes"
+        svc_nnp="NoNewPrivileges=false"
     else
         svc_cap_block="# File capabilities are the fallback. The bounding set must stay a
 # superset of nsjail's (=eip): Linux rejects execve(nsjail) with EPERM if any

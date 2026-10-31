@@ -301,8 +301,15 @@ CapAmb: 0000000000000000      ← 0: nothing ambient
 depends on the deployment: empty when the installer selected user namespaces
 (the unit's `CapabilityBoundingSet` is emptied), and the service/container
 bounding set in the capability fallback. An inherited bounding entry is inert —
-`NoNewPrivs=1` and neither runtime rootfs contains a setuid binary — but it is
-not zero, so `CapEff` is the field to read, not `CapBnd`.
+the sandbox runs with `NoNewPrivs=1` and neither runtime rootfs contains a
+setuid binary — but it is not zero, so `CapEff` is the field to read.
+
+In user-namespace mode the service unit keeps `NoNewPrivileges=false`. systemd
+implements `ProtectSystem` as a read-only mount, and combining it with NNP makes
+nsjail's own read-only bind inside the user namespace fail with EPERM — deploys
+break while invokes keep working. The empty bounding set and the absence of file
+capabilities are the controls in that mode; nsjail still sets `NoNewPrivs` on
+the sandboxed process itself.
 
 ## Filesystem isolation
 
