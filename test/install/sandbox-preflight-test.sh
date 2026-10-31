@@ -15,13 +15,20 @@ bad() { printf 'not ok - %s\n' "$1" >&2; fail=$((fail + 1)); }
 # selector SCENARIO [ORVA_DISABLE_USERNS]
 # Scenario syntax is '<normal result>,<fallback result>', each pass|fail.
 selector() {
-  local scenario="$1" override="${2-}" out rc
+  local scenario="$1" override="${2-}" out rc capfile caps
+  capfile=$(mktemp)
   set +e
   if [[ $# -eq 2 ]]; then
-    out=$(ORVA_INSTALL_LIB=1 ORVA_DISABLE_USERNS="$override" SCENARIO="$scenario" \
+    out=$(ORVA_INSTALL_LIB=1 ORVA_DISABLE_USERNS="$override" SCENARIO="$scenario" CAPFILE="$capfile" \
       sh -c '
         . "$1"
+        CAPS=""
+        flush_caps() { printf "%s" "$CAPS" > "$CAPFILE"; }
+        trap flush_caps EXIT
+        clear_nsjail_caps() { CAPS="${CAPS}clear "; }
+        apply_nsjail_caps() { CAPS="${CAPS}apply "; }
         probe_sandbox_mode() {
+          CAPS="${CAPS}probe$1 "
           case "$SCENARIO:$1" in
             pass,*:0|*,pass:1) return 0 ;;
             *) return 1 ;;
@@ -31,10 +38,16 @@ selector() {
         printf "mode=%s explicit=%s\n" "$SERVICE_DISABLE_USERNS" "$SERVICE_DISABLE_USERNS_EXPLICIT"
       ' sh "$INSTALLER" 2>&1)
   else
-    out=$(ORVA_INSTALL_LIB=1 SCENARIO="$scenario" \
+    out=$(ORVA_INSTALL_LIB=1 SCENARIO="$scenario" CAPFILE="$capfile" \
       sh -c '
         . "$1"
+        CAPS=""
+        flush_caps() { printf "%s" "$CAPS" > "$CAPFILE"; }
+        trap flush_caps EXIT
+        clear_nsjail_caps() { CAPS="${CAPS}clear "; }
+        apply_nsjail_caps() { CAPS="${CAPS}apply "; }
         probe_sandbox_mode() {
+          CAPS="${CAPS}probe$1 "
           case "$SCENARIO:$1" in
             pass,*:0|*,pass:1) return 0 ;;
             *) return 1 ;;
@@ -46,19 +59,21 @@ selector() {
   fi
   rc=$?
   set -e
-  printf '%s\n' "$rc:$out"
+  caps=$(cat "$capfile")
+  rm -f "$capfile"
+  printf '%s\ncaps=%s\n' "$rc:$out" "$caps"
 }
 
 out=$(selector 'pass,pass')
-if [[ "$out" == *'0:'* && "$out" == *'mode=0 explicit=0'* ]]; then
-  ok 'automatic selector keeps verified user namespaces'
+if [[ "$out" == *'0:'* && "$out" == *'mode=0 explicit=0'* && "$out" == *'caps=clear probe0 '* ]]; then
+  ok 'automatic selector keeps verified user namespaces and leaves nsjail capability-free'
 else
   bad "automatic normal success: $out"
 fi
 
 out=$(selector 'fail,pass')
-if [[ "$out" == *'0:'* && "$out" == *'mode=1 explicit=0'* && "$out" == *'file-capability fallback'* ]]; then
-  ok 'automatic selector repairs blocked user namespaces with verified fallback'
+if [[ "$out" == *'0:'* && "$out" == *'mode=1 explicit=0'* && "$out" == *'file-capability fallback'* && "$out" == *'caps=clear probe0 apply probe1 '* ]]; then
+  ok 'automatic selector probes without capabilities, then applies them only for the verified fallback'
 else
   bad "automatic fallback: $out"
 fi
@@ -71,14 +86,14 @@ else
 fi
 
 out=$(selector 'pass,fail' 1)
-if [[ "$out" == 1:* && "$out" == *'requested ORVA_DISABLE_USERNS=1 cannot run nsjail'* ]]; then
-  ok 'explicit fallback mode fails closed when it is not viable'
+if [[ "$out" == 1:* && "$out" == *'requested ORVA_DISABLE_USERNS=1 cannot run nsjail'* && "$out" == *'caps=clear apply probe1 '* ]]; then
+  ok 'explicit fallback mode applies capabilities before probing and fails closed when not viable'
 else
   bad "explicit fallback failure: $out"
 fi
 
 out=$(selector 'fail,fail')
-if [[ "$out" == 1:* && "$out" == *'refusing to install a server that cannot invoke functions'* ]]; then
+if [[ "$out" == 1:* && "$out" == *'refusing to install a server that cannot invoke functions'* && "$out" == *'caps=clear probe0 apply probe1 '* ]]; then
   ok 'neither viable mode aborts the install before service startup'
 else
   bad "both modes failure: $out"

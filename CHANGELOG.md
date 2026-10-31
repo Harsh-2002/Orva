@@ -22,6 +22,24 @@ unreleased range, and the sections below as the record for everything before it.
   (GHSA-3g3m-2fjr-6pw4) because ESLint, editorconfig and js-beautify still
   request the vulnerable major ranges upstream. No advisory is suppressed.
 
+## Unreleased
+
+### Fixed
+
+- The bare-metal installer now probes unprivileged user namespaces with a
+  **capability-free** nsjail and applies `setcap` only when that probe fails.
+  It previously applied the file capabilities first, which makes nsjail's
+  `setgroups` setup fail and silently pins a capable host to the capability
+  fallback. On such hosts functions ran as the service UID with no UID
+  boundary, and the unit kept a five-entry capability bounding set. Selecting
+  user namespaces now also writes `CapabilityBoundingSet=` empty and
+  `NoNewPrivileges=yes`. Re-run the installer to pick this up; a drop-in that
+  pins `ORVA_DISABLE_USERNS` is reported, not deleted.
+- `docs/SECURITY.md` no longer claims that inside UID 0 maps to `nobody`, that
+  `CapBnd` is always zero, or that `--rlimit_as max` bounds memory. The first
+  two depend on the deployment mode; the third only preserves a hard limit the
+  service user already had, and the shipped unit leaves it unlimited.
+
 ## v2026.10.25
 
 ### Changed

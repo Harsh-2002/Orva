@@ -243,16 +243,26 @@ them.
 
 ## What "running as root inside the sandbox" actually means
 
-User code sees `getuid() == 0`. **It is NOT root on the host.**
+User code's UID depends on the mode the installer verified for the host, and
+**neither mode is root on the host.**
 
-The mechanism is `CLONE_NEWUSER` + UID mapping. nsjail's `-Mo` flag
-(`internal/sandbox/sandbox.go`, `buildArgs()`) creates a new user namespace where
-inside-UID 0 is mapped to host-UID 65534 (`nobody`). All capability
-checks happen against the user-namespace's UID, but actions that cross
-the namespace boundary (writing to a file owned by host-root,
-mounting a filesystem outside the chroot, sending a signal to a host
-PID) are denied because the function has zero effective capabilities
-**outside** its namespace.
+nsjail's `-Mo` flag (`internal/sandbox/sandbox.go`, `buildArgs()`) creates a new
+user namespace. Without explicit mappings nsjail maps the invoking account to
+the same UID *inside* the namespace, so a bare-metal install shows the service
+UID (`orva`, commonly 999) and a Docker install — whose daemon is root in the
+container — shows 0. The value is not the boundary: every capability set is
+dropped, and actions that cross the namespace boundary (writing a host-root
+file, mounting outside the chroot, signalling a host PID) are denied because
+the function holds no capabilities outside its namespace.
+
+On hosts that cannot create an unprivileged user namespace, the installer falls
+back to nsjail's file capabilities and `--disable_clone_newuser`. There is no
+UID translation in that mode: the sandbox runs as the service account, and the
+boundary is the mount, PID, network, IPC and UTS namespaces, the chroot, seccomp,
+and a zero effective capability set. The installer probes the user namespace
+with a **capability-free** nsjail first, because a binary carrying file
+capabilities cannot create one (its `setgroups` setup is denied); capabilities
+are applied only when that probe fails.
 
 Verify it yourself:
 
@@ -278,17 +288,21 @@ curl -X POST -H "X-Orva-API-Key: $KEY" \
 Expected output (the meaningful lines):
 
 ```
-Uid: 0  0  0  0
-Gid: 0  0  0  0
+Uid: 0  0  0  0               ← Docker: daemon is root in the container.
+                              ← Bare metal: the service UID (e.g. 999).
 CapInh: 0000000000000000      ← 0: no inheritable caps
 CapPrm: 0000000000000000      ← 0: no permitted caps
-CapEff: 0000000000000000      ← 0: no effective caps
-CapBnd: 0000000000000000      ← 0: nothing in the bounding set
+CapEff: 0000000000000000      ← 0: the control — nothing effective
+CapBnd: 00000000002014c0      ← may be non-zero: inherited; inert (below)
 CapAmb: 0000000000000000      ← 0: nothing ambient
 ```
 
-UID 0 with **all 64 capability bits cleared**. The function can do
-nothing root-on-the-host could do.
+`CapPrm`, `CapEff`, `CapAmb`, and `CapInh` are zero in every mode. `CapBnd`
+depends on the deployment: empty when the installer selected user namespaces
+(the unit's `CapabilityBoundingSet` is emptied), and the service/container
+bounding set in the capability fallback. An inherited bounding entry is inert —
+`NoNewPrivs=1` and neither runtime rootfs contains a setuid binary — but it is
+not zero, so `CapEff` is the field to read, not `CapBnd`.
 
 ## Filesystem isolation
 
@@ -318,15 +332,17 @@ Configured at `internal/sandbox/sandbox.go:154-160`:
 
 ## Capability dropping
 
-By default nsjail puts the function in a user namespace where it appears to
-have UID 0 but holds **zero capabilities outside that namespace**. On a
-bare-metal host that blocks unprivileged user namespaces, the installer uses
-nsjail file capabilities for setup and starts it with
-`--disable_clone_newuser`; nsjail drops privileges before running the adapter,
-while the remaining mount, PID, network, IPC, UTS, chroot, and seccomp
-boundaries stay enabled. This is selected only after an execution probe using
-the actual `orva` service account, binary, and rootfs; running the daemon as
-root is neither required nor an accepted workaround.
+By default nsjail puts the function in a user namespace; the UID inside is the
+invoking account (0 for the Docker daemon, the service UID on bare metal), and
+it holds **zero capabilities outside that namespace**. On a bare-metal host that
+blocks unprivileged user namespaces, the installer uses nsjail file capabilities
+for setup and starts it with `--disable_clone_newuser`; nsjail drops privileges
+before running the adapter, while the remaining mount, PID, network, IPC, UTS,
+chroot, and seccomp boundaries stay enabled. The installer probes the user
+namespace with a capability-free binary first, applies file capabilities only
+if that probe fails, and always probes with the actual `orva` service account,
+binary, and rootfs; running the daemon as root is neither required nor an
+accepted workaround.
 nsjail does not need to call `prctl(PR_SET_NO_NEW_PRIVS)` separately —
 the user namespace gives the same effect for cross-namespace operations.
 
@@ -378,9 +394,10 @@ Per-function caps are enforced in two places:
 When cgroup controllers are not delegated, Orva deliberately refuses to pass
 invalid cgroup arguments to nsjail and falls back to `rlimit_as`. It reports
 `sandbox.resource_limits: "rlimit_only"` plus a warning in health and Settings.
-That retains process address-space protection but does **not** enforce the
-function's declared CPU, pid, or hard-memory limits; delegate cgroup v2
-controllers for the full resource boundary.
+`--rlimit_as max` only preserves a hard limit the service user already had, and
+the shipped systemd unit sets `LimitAS=infinity` — so on an undelégated host
+there is **no hard memory bound**; the pool's admission accounting is the only
+brake. Delegate cgroup v2 controllers for a real memory, pid, and CPU boundary.
 
 Automatic detection stays inside the daemon's own service/container cgroup.
 Orva moves only itself into `orva.daemon`, enables the delegated controllers on

@@ -142,18 +142,20 @@ service environment. Check these known causes:
   Check `systemctl cat orva` for `Delegate=yes` and inspect the service's
   `cgroup.controllers`. Orva creates its own daemon and worker leaves only
   below that service cgroup; it will not claim the host root as a delegate.
-- **nsjail capabilities excluded by systemd.** If the API returns
-  `SANDBOX_ERROR` immediately and nsjail produces no stderr, inspect
-  `systemctl cat orva`. The bounding set must retain every capability the
-  installed nsjail binary carries as a file capability — `CAP_SYS_ADMIN`,
-  `CAP_NET_ADMIN`, `CAP_SETUID`, `CAP_SETGID`, `CAP_NET_BIND_SERVICE` —
-  otherwise Linux rejects the setcap nsjail binary at `execve` before it can
-  log. These are **nsjail's** requirements, not orvad's: `CAP_NET_ADMIN` is
-  what lets nsjail configure the TUN interface for `--user_net`
-  (`network_mode: egress`). orvad itself administers no host networking, so
-  dropping the capability from the bounding set does not "turn off the
-  firewall" — it breaks sandbox spawn outright. Re-running the current
-  bare-metal installer refreshes the unit safely on upgrades.
+- **nsjail capabilities excluded by systemd.** This applies to the capability
+  fallback only. When the installer's probe selects user namespaces, the unit
+  ships `CapabilityBoundingSet=` empty, `NoNewPrivileges=yes`, and nsjail
+  carries no file capabilities. In fallback mode, inspect `systemctl cat orva`:
+  the bounding set must retain every capability the installed nsjail binary
+  carries as a file capability — `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`,
+  `CAP_SETUID`, `CAP_SETGID`, `CAP_NET_BIND_SERVICE` — otherwise Linux rejects
+  the setcap nsjail binary at `execve` before it can log. These are **nsjail's**
+  requirements, not orvad's: `CAP_NET_ADMIN` is what lets nsjail configure the
+  TUN interface for `--user_net` (`network_mode: egress`). orvad itself
+  administers no host networking, so dropping the capability from the bounding
+  set does not "turn off the firewall" — it breaks sandbox spawn outright.
+  Re-running the current bare-metal installer refreshes the unit safely on
+  upgrades.
 - **`/dev/net/tun` missing.** If only `network_mode: egress` functions fail
   (and `none` functions run fine), nsjail cannot open the TUN device.
   `modprobe tun` on bare metal; pass `--device /dev/net/tun` in Docker.
@@ -165,8 +167,21 @@ should print the Node version.
 If it instead reports `setGroupsDeny failed`, `Couldn't initialize user
 namespace`, or cannot write `/proc/<pid>/setgroups`, the host has blocked the
 nsjail user-namespace sequence even when `unshare` or the sysctl appears to
-work. Re-run the current installer: it tests both modes as `orva` and persists
-the verified fallback. To diagnose an intentional override, test the fallback:
+work — **or the binary is carrying file capabilities**, which breaks the same
+sequence. Test the capability-free form, because `cp` does not preserve file
+capabilities:
+
+```bash
+cp /usr/local/bin/nsjail /tmp/nsjail-nocap && chmod 0755 /tmp/nsjail-nocap
+sudo -u orva /tmp/nsjail-nocap -Mo --chroot /var/lib/orva/rootfs/node -T /tmp \
+  -- /usr/local/bin/node --version
+```
+
+If that prints the Node version, the host supports user namespaces and the
+installer will select them on the next run; re-run it to clear the stale file
+capabilities and rewrite the unit. Otherwise re-run the current installer: it
+tests both modes as `orva` and persists the verified fallback. To diagnose an
+intentional override, test the fallback:
 
 ```bash
 sudo -u orva /usr/local/bin/nsjail -Mo --disable_clone_newuser \

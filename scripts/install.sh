@@ -70,6 +70,10 @@ fi
 # CI-only seam: pre-release installer tests inject the candidate static nsjail
 # because no release asset exists until after the tagged commit passes CI.
 TEST_NSJAIL_PATH="${ORVA_TEST_NSJAIL_PATH:-}"
+# Only the capability fallback needs these. A user-namespace sandbox gets the
+# same rights inside its own namespace, so a host that can create one must not
+# carry file capabilities on nsjail — they break that path (setgroups EPERM).
+NSJAIL_CAPS="cap_sys_admin,cap_setuid,cap_setgid,cap_net_admin,cap_net_bind_service=eip"
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -763,11 +767,17 @@ probe_sandbox_mode() {
 }
 
 select_sandbox_mode() {
+    # Probe the user namespace with a capability-free nsjail: carrying file
+    # capabilities makes nsjail's setgroups setup fail, which would otherwise
+    # look like a host that cannot do user namespaces at all.
+    clear_nsjail_caps
+
     if [ "$SERVICE_DISABLE_USERNS_EXPLICIT" = "1" ]; then
         case "$SERVICE_DISABLE_USERNS" in
             0|1) ;;
             *) die "ORVA_DISABLE_USERNS must be exactly 0 or 1" ;;
         esac
+        [ "$SERVICE_DISABLE_USERNS" = "1" ] && apply_nsjail_caps
         if ! probe_sandbox_mode "$SERVICE_DISABLE_USERNS"; then
             die "requested ORVA_DISABLE_USERNS=$SERVICE_DISABLE_USERNS cannot run nsjail as $SERVICE_USER; correct the host policy or choose the other verified mode"
         fi
@@ -780,6 +790,7 @@ select_sandbox_mode() {
         log "sandbox mode: user namespaces"
         return
     fi
+    apply_nsjail_caps
     if probe_sandbox_mode 1; then
         SERVICE_DISABLE_USERNS=1
         warn "user-namespace setup is blocked on this host; using nsjail's file-capability fallback (mount, PID, network, IPC, UTS, chroot and seccomp isolation remain enabled)"
@@ -828,10 +839,19 @@ download_and_install_binaries() {
     # Daemon defaults to nsjail at /usr/local/bin/nsjail (matches Docker image).
     install -d -m 0755 /usr/local/bin
     install -m 0755 "$tmp/nsjail" /usr/local/bin/nsjail
-    nsjail_caps="cap_sys_admin,cap_setuid,cap_setgid,cap_net_admin,cap_net_bind_service=eip"
+    # A previous install may have left file capabilities behind. They are only
+    # applied after the probe below if the fallback is actually selected.
+    clear_nsjail_caps
+}
+
+# File capabilities are the fallback, not the default. On a host that can create
+# unprivileged user namespaces they are actively harmful: nsjail's userns setup
+# fails at setgroups when the binary carries them, so leaving them on makes the
+# userns probe fail for the wrong reason and pins the host to the weaker mode.
+apply_nsjail_caps() {
     have setcap || die "setcap is required to install nsjail capabilities"
-    setcap "$nsjail_caps" "$PREFIX/bin/nsjail" || die "failed to apply capabilities to $PREFIX/bin/nsjail"
-    setcap "$nsjail_caps" /usr/local/bin/nsjail || die "failed to apply capabilities to /usr/local/bin/nsjail"
+    setcap "$NSJAIL_CAPS" "$PREFIX/bin/nsjail" || die "failed to apply capabilities to $PREFIX/bin/nsjail"
+    setcap "$NSJAIL_CAPS" /usr/local/bin/nsjail || die "failed to apply capabilities to /usr/local/bin/nsjail"
     cap_state=$(getcap /usr/local/bin/nsjail 2>/dev/null || true)
     for cap_name in cap_sys_admin cap_setuid cap_setgid cap_net_admin cap_net_bind_service; do
         case "$cap_state" in
@@ -843,6 +863,12 @@ download_and_install_binaries() {
         *=eip*) ;;
         *) die "nsjail capability verification failed: expected effective, inheritable, and permitted flags" ;;
     esac
+}
+
+clear_nsjail_caps() {
+    have setcap || return 0
+    setcap -r "$PREFIX/bin/nsjail" 2>/dev/null || true
+    setcap -r /usr/local/bin/nsjail 2>/dev/null || true
 }
 
 download_rootfs() {
@@ -890,6 +916,18 @@ create_user() {
 write_service_files() {
     [ "$DRYRUN" = "1" ] && return
     install -d -m 0755 "$PREFIX/share/orva/scripts"
+    if [ "$SERVICE_DISABLE_USERNS" = "0" ]; then
+        svc_cap_block="# nsjail creates an unprivileged user namespace per function and needs no
+# file capabilities, so the daemon keeps an empty bounding set."
+        svc_caps="CapabilityBoundingSet="
+        svc_nnp="NoNewPrivileges=yes"
+    else
+        svc_cap_block="# File capabilities are the fallback. The bounding set must stay a
+# superset of nsjail's (=eip): Linux rejects execve(nsjail) with EPERM if any
+# of them cannot be raised here, before nsjail logs a word."
+        svc_caps="CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE"
+        svc_nnp="NoNewPrivileges=false"
+    fi
     cat > "$PREFIX/share/orva/scripts/orva.service" <<EOF
 [Unit]
 Description=Orva self-hosted serverless platform
@@ -911,11 +949,10 @@ RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
 # The daemon itself holds no capabilities: the egress policy is enforced inside
-# each sandbox by nsjail, not by host firewall rules. The bounding set must stay
-# a superset of nsjail's file capabilities (=eip) — Linux rejects execve(nsjail)
-# with EPERM if any of them cannot be raised here, before nsjail logs a word.
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE
-NoNewPrivileges=false
+# each sandbox by nsjail, not by host firewall rules.
+${svc_cap_block}
+${svc_caps}
+${svc_nnp}
 Delegate=yes
 ReadWritePaths=${DATA_DIR}
 ProtectSystem=strict
@@ -994,6 +1031,15 @@ install_unit() {
         SVC_KIND="systemd"
         log "installing systemd unit"
         install -m 0644 "$PREFIX/share/orva/scripts/orva.service" /etc/systemd/system/orva.service
+        # A drop-in that pins ORVA_DISABLE_USERNS overrides the mode the probe
+        # just selected, silently restoring the weaker fallback. Warn instead of
+        # deleting it: the operator may have pinned it on purpose.
+        for iu_dropin in /etc/systemd/system/orva.service.d/*.conf; do
+            [ -f "$iu_dropin" ] || continue
+            if grep -q 'ORVA_DISABLE_USERNS' "$iu_dropin" 2>/dev/null; then
+                warn "drop-in $iu_dropin sets ORVA_DISABLE_USERNS and overrides the detected mode; remove it to use $( [ "$SERVICE_DISABLE_USERNS" = "0" ] && echo 'user namespaces' || echo 'the capability fallback' )"
+            fi
+        done
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload
         fi
