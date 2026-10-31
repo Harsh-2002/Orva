@@ -892,6 +892,14 @@ sudo systemctl restart orva        # OpenRC: rc-service orva restart
 Re-run `install.sh` instead when the runtime adapters, rootfs or the service
 unit also need refreshing — `orva upgrade` touches none of them.
 
+**The binary and the runtime rootfs are one unit.** A server build refuses the
+upgrade when `$ORVA_DATA_DIR/rootfs/{node,python}/.orva-rootfs-version` (written
+by `install.sh`) names a different release than the one being installed, because
+the adapter protocol moves with the binary and a mismatch makes every invocation
+time out. The refusal names the stale version and tells you to re-run
+`install.sh`; `--force` replaces the binary anyway. A rootfs with no stamp — the
+container image, where `entrypoint.sh` refreshes it — is allowed.
+
 If the install path is not writable (e.g. `/usr/local/bin` on a system
 where you installed without `sudo`), `orva upgrade` exits non-zero
 with a hint:

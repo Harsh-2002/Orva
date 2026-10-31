@@ -19,6 +19,50 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(s[:])
 }
 
+// TestCheckRootfsVersion covers the binary/rootfs coupling guard: an
+// unstamped rootfs (container) must pass, a matching stamp must pass, and a
+// stale stamp must refuse with the install.sh remedy.
+func TestCheckRootfsVersion(t *testing.T) {
+	unstamped := t.TempDir()
+	if err := checkRootfsVersion(unstamped, "v2026.10.25"); err != nil {
+		t.Fatalf("unstamped rootfs must not block an upgrade: %v", err)
+	}
+
+	writeStamp := func(t *testing.T, root, runtime, version string) {
+		t.Helper()
+		path := filepath.Join(root, "rootfs", runtime, ".orva-rootfs-version")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(version+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stale := t.TempDir()
+	writeStamp(t, stale, "node", "v2026.09.04")
+	err := checkRootfsVersion(stale, "v2026.10.25")
+	if err == nil {
+		t.Fatal("stale rootfs must refuse the binary-only upgrade")
+	}
+	if !strings.Contains(err.Error(), "install.sh") || !strings.Contains(err.Error(), "v2026.09.04") {
+		t.Fatalf("refusal must name the stale version and the remedy, got: %v", err)
+	}
+	if err := checkRootfsVersion(stale, "v2026.09.04"); err != nil {
+		t.Fatalf("matching rootfs must pass: %v", err)
+	}
+
+	pythonOnly := t.TempDir()
+	writeStamp(t, pythonOnly, "python", "v2026.09.04")
+	if err := checkRootfsVersion(pythonOnly, "v2026.10.25"); err == nil {
+		t.Fatal("a python-only stamp must also block")
+	}
+
+	if err := checkRootfsVersion(stale, ""); err != nil {
+		t.Fatalf("empty target version must not block: %v", err)
+	}
+}
+
 // TestUpgradeAction covers the install decision truth table.
 func TestUpgradeAction(t *testing.T) {
 	cases := []struct {
@@ -49,7 +93,7 @@ func TestLessOrEqual(t *testing.T) {
 		{"v2026.08.06", "2026.08.05", false}, // latest newer
 		{"v2026.08.04", "2026.08.05", true},  // latest older
 		{"v2026.08.05", "dev", false},        // dev current -> latest is "newer", offer upgrade (no panic)
-		{"nonsense", "2026.08.05", true},      // unparseable latest -> not newer
+		{"nonsense", "2026.08.05", true},     // unparseable latest -> not newer
 	}
 	for _, c := range cases {
 		if got := lessOrEqual(c.latestTag, c.current); got != c.want {

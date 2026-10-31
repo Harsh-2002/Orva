@@ -153,6 +153,19 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	// A server binary and its runtime rootfs ship the adapter protocol
+	// together. Replacing only the binary across releases leaves the old
+	// adapters in place, and every invocation then fails its readiness probe.
+	if ServerBuild && !force {
+		dataDir := os.Getenv("ORVA_DATA_DIR")
+		if dataDir == "" {
+			dataDir = "/var/lib/orva"
+		}
+		if err := checkRootfsVersion(dataDir, latest.Tag); err != nil {
+			return err
+		}
+	}
+
 	if err := assertWritable(exe); err != nil {
 		return fmt.Errorf("%w\nhint: re-run with `sudo orva upgrade` if the binary lives in a system path like /usr/local/bin", err)
 	}
@@ -378,6 +391,35 @@ func fetchAsset(ctx context.Context, url string) ([]byte, error) {
 // same-tag rebuild (checksum changed), or --force all trigger an install.
 func upgradeAction(versionNewer, rebuilt, force bool) bool {
 	return force || versionNewer || rebuilt
+}
+
+// rootfsVersion reports the release stamp install.sh writes for the installed
+// runtime rootfs. ok=false when neither runtime is stamped, which is normal
+// inside the container: entrypoint.sh seeds and refreshes the rootfs from the
+// image, and no installer runs there.
+func rootfsVersion(dataDir string) (string, bool) {
+	for _, rt := range []string{"node", "python"} {
+		b, err := os.ReadFile(filepath.Join(dataDir, "rootfs", rt, ".orva-rootfs-version"))
+		if err != nil {
+			continue
+		}
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// checkRootfsVersion refuses a binary-only upgrade when the installed rootfs
+// belongs to a different release. The adapter protocol moves with the binary,
+// so a replacement without the matching rootfs leaves every invocation timing
+// out; install.sh refreshes both together. An unstamped rootfs is allowed.
+func checkRootfsVersion(dataDir, target string) error {
+	got, ok := rootfsVersion(dataDir)
+	if !ok || target == "" || got == target {
+		return nil
+	}
+	return fmt.Errorf("runtime rootfs is %s but this upgrade installs %s: a binary-only upgrade leaves the old adapters behind and invocations fail until the rootfs is refreshed\nre-run install.sh to refresh both, or pass --force to replace only the binary", got, target)
 }
 
 // remoteBuildDiffers reports whether the latest release's published asset for
