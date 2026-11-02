@@ -23,9 +23,9 @@ TEST_FN = "e2e-mock-fn"
 
 
 def cleanup_fn(c):
-    # Tolerant cleanup. NOTE: the REST GET/DELETE /functions/{fn_id} route
-    # resolves by UUID only (unlike the MCP/agent layer, which also accepts a
-    # name), so we list and delete by id rather than by name.
+    # Tolerant cleanup. REST GET/DELETE accept a function id or a name; we
+    # still delete by the id from the list so a later function that reuses the
+    # name cannot be the one this module removes.
     try:
         lst = c.get("/api/v1/functions") or {}
         for fn in lst.get("functions", []):
@@ -80,7 +80,7 @@ def main():
             check("after approve: succeeded", any(r.get("status") == "succeeded" for r in rresults), str(rresults))
             check("after approve: final answer + done", has_event(rframes, "delta") and has_event(rframes, "done"))
             # Confirm the function really exists now (the agent did real work).
-            # Use the id from the tool result — REST GET resolves by UUID only.
+            # Use the id from the tool result so the lookup is unambiguous.
             created = (rresults[0].get("result") or {}) if rresults else {}
             fid = created.get("id") if isinstance(created, dict) else None
             check("create result carries a function id", bool(fid), str(created)[:160])

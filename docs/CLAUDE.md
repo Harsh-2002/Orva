@@ -25,6 +25,7 @@ execute it.**
 | `ERRORS.md` | Error slug catalog — `SLUG → HTTP status → human meaning` |
 | `GVISOR.md` | gVisor (`runsc`) runtime evaluation — incompatibility writeup |
 | `KATA.md` | Kata Containers runtime evaluation — supported configurations + measured cost |
+| `NSTUN_PARTIAL_WRITE.md` | NSTUN TCP partial-write incident — root cause, validation evidence, rollback |
 | `OPERATIONS.md` | Day-2 ops: backup/restore, VACUUM, log rotation, upgrades |
 | `RUNTIMES.md` | Per-runtime handler contract, streaming (generators/async iterables), TypeScript |
 | `SECURITY.md` | Threat model, nsjail sandbox isolation, per-sandbox egress policy (nsjail NSTUN), credentials at the request boundary |

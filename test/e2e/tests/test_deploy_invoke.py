@@ -2,8 +2,8 @@
 """Full sandboxed loop: create node fn -> deploy-inline -> wait active -> invoke -> executions.
 
 Needs nsjail/sandbox. If the build never reaches active (no nested sandboxing in
-this env), the whole module skips. REST resolves functions by UUID only, so the
-id is captured from the create response.
+this env), the whole module skips. REST accepts a function id or name; the id is
+captured from the create response so the rest of the module is unambiguous.
 """
 import json
 import os

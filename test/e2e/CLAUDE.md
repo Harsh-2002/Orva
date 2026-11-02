@@ -106,7 +106,9 @@ This suite is meant to **grow on every change**:
     cached keys and only evicted on expiry, never on delete. Fixed by sharing
     the cache and evicting on delete (`test_keys.py` now asserts a revoked key
     returns 401 immediately).
-  - REST `GET /functions/{id}` resolves by UUID only, not name (the handler calls `Registry.Get` directly); `DELETE` and the other id-taking routes resolve by UUID OR name via `resolveFnID`.
+  - REST `GET /functions/{id}` used to resolve by UUID only while `DELETE` and
+    the other id-taking routes accepted a name. Fixed in `9d4f6e9`: `GET` now
+    resolves a name via `resolveFnID` too, so both forms work.
   - REST `create_function` is lenient (fills defaults), unlike the strict MCP
     tool — validation tests must use genuinely invalid input.
 - New feature/endpoint/CLI command → it is **not done** until it has a module/cases here.

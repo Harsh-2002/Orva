@@ -18,7 +18,7 @@ user-space kernel that selectively re-implements Linux syscalls).
 | Host | Ubuntu 24.04, kernel 6.8.0-111-generic, x86_64, 2 CPU, 11.68 GiB |
 | Docker | 29.4.1, default runtime `runc`, cgroup v2 |
 | gVisor | `release-20260504.0` |
-| Orva image | `ghcr.io/harsh-2002/orva:v2026.05.12` |
+| Orva image | `ghcr.io/harsh-2002/orva:latest` at the time of the test (per-version tags are pruned) |
 | Date | 2026-05-13 |
 
 Runtimes registered with the Docker daemon:
