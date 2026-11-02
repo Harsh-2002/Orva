@@ -72,7 +72,7 @@ func TestCheckRootfsVersion(t *testing.T) {
 		if !strings.Contains(err.Error(), "python is v2026.09.04") {
 			t.Fatalf("refusal must name python, got: %v", err)
 		}
-		if strings.Contains(err.Error(), "node (") {
+		if strings.Contains(err.Error(), "node is ") {
 			t.Fatalf("a current node rootfs must not be named as stale, got: %v", err)
 		}
 	})
