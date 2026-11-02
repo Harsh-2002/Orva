@@ -104,8 +104,9 @@ entrypoint, or a package with no wheel for the runtime's Python (3.14).
 good version via the Deployments view.
 
 If **every** invocation waits for a cold worker and returns HTTP 429
-`INVOCATION_QUEUE_FULL` after a manual binary-only upgrade, check the
-runtime adapter version before tuning concurrency. A server that expects the
+`INVOCATION_QUEUE_FULL` after a manual binary-only upgrade (one that bypassed
+the `orva upgrade` rootfs guard with `--force` or an unstamped rootfs), check
+the runtime adapter version before tuning concurrency. A server that expects the
 adapter's startup `ready` frame cannot use an older rootfs adapter that does
 not emit it. For an existing bare-metal rootfs, run the **new binary's**
 `orva setup --skip-nsjail --data-dir /var/lib/orva` to refresh its embedded

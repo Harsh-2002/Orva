@@ -19,15 +19,10 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(s[:])
 }
 
-// TestCheckRootfsVersion covers the binary/rootfs coupling guard: an
-// unstamped rootfs (container) must pass, a matching stamp must pass, and a
-// stale stamp must refuse with the install.sh remedy.
+// TestCheckRootfsVersion covers the binary/rootfs coupling guard. Every
+// stamped runtime must match: a current Node rootfs must not hide a stale
+// Python one.
 func TestCheckRootfsVersion(t *testing.T) {
-	unstamped := t.TempDir()
-	if err := checkRootfsVersion(unstamped, "v2026.10.25"); err != nil {
-		t.Fatalf("unstamped rootfs must not block an upgrade: %v", err)
-	}
-
 	writeStamp := func(t *testing.T, root, runtime, version string) {
 		t.Helper()
 		path := filepath.Join(root, "rootfs", runtime, ".orva-rootfs-version")
@@ -39,27 +34,215 @@ func TestCheckRootfsVersion(t *testing.T) {
 		}
 	}
 
-	stale := t.TempDir()
-	writeStamp(t, stale, "node", "v2026.09.04")
-	err := checkRootfsVersion(stale, "v2026.10.25")
+	t.Run("unstamped is allowed", func(t *testing.T) {
+		if err := checkRootfsVersion(t.TempDir(), "v2026.10.25"); err != nil {
+			t.Fatalf("unstamped rootfs must not block an upgrade: %v", err)
+		}
+	})
+
+	t.Run("matching runtimes pass", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStamp(t, dir, "node", "v2026.10.25")
+		writeStamp(t, dir, "python", "v2026.10.25")
+		if err := checkRootfsVersion(dir, "v2026.10.25"); err != nil {
+			t.Fatalf("matching rootfs must pass: %v", err)
+		}
+	})
+
+	t.Run("stale node refuses", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStamp(t, dir, "node", "v2026.09.04")
+		err := checkRootfsVersion(dir, "v2026.10.25")
+		if err == nil {
+			t.Fatal("stale rootfs must refuse the binary-only upgrade")
+		}
+		if !strings.Contains(err.Error(), "node is v2026.09.04") || !strings.Contains(err.Error(), "install.sh") {
+			t.Fatalf("refusal must name the stale runtime, its version and the remedy, got: %v", err)
+		}
+	})
+
+	t.Run("stale python refuses even when node is current", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStamp(t, dir, "node", "v2026.10.25")
+		writeStamp(t, dir, "python", "v2026.09.04")
+		err := checkRootfsVersion(dir, "v2026.10.25")
+		if err == nil {
+			t.Fatal("a stale python rootfs must refuse even when node matches")
+		}
+		if !strings.Contains(err.Error(), "python is v2026.09.04") {
+			t.Fatalf("refusal must name python, got: %v", err)
+		}
+		if strings.Contains(err.Error(), "node (") {
+			t.Fatalf("a current node rootfs must not be named as stale, got: %v", err)
+		}
+	})
+
+	t.Run("both stale names both", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStamp(t, dir, "node", "v2026.09.04")
+		writeStamp(t, dir, "python", "v2026.08.01")
+		err := checkRootfsVersion(dir, "v2026.10.25")
+		if err == nil {
+			t.Fatal("both stale must refuse")
+		}
+		for _, want := range []string{"node is v2026.09.04", "python is v2026.08.01"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("refusal must name %q, got: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("one stamped runtime is enough to refuse", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStamp(t, dir, "python", "v2026.09.04")
+		if err := checkRootfsVersion(dir, "v2026.10.25"); err == nil {
+			t.Fatal("a python-only stamp must also block")
+		}
+	})
+
+	t.Run("empty target is allowed", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStamp(t, dir, "node", "v2026.09.04")
+		if err := checkRootfsVersion(dir, ""); err != nil {
+			t.Fatalf("empty target version must not block: %v", err)
+		}
+	})
+}
+
+// TestResolveDataDir pins the precedence the service and the installer share:
+// flag, environment, installer record, unit file, default. A bare `orva
+// upgrade` has none of the unit's environment, which is why the record exists.
+func TestResolveDataDir(t *testing.T) {
+	prevRecord, prevUnits := installRecordPath, serviceUnitPaths
+	t.Cleanup(func() { installRecordPath, serviceUnitPaths = prevRecord, prevUnits })
+
+	setup := func(t *testing.T) (record, unit string) {
+		t.Helper()
+		dir := t.TempDir()
+		record = filepath.Join(dir, "install.conf")
+		unit = filepath.Join(dir, "orva.service")
+		installRecordPath = record
+		serviceUnitPaths = []string{unit}
+		return record, unit
+	}
+	write := func(t *testing.T, path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("default when nothing is configured", func(t *testing.T) {
+		setup(t)
+		t.Setenv("ORVA_DATA_DIR", "")
+		if got := resolveDataDir(""); got != "/var/lib/orva" {
+			t.Errorf("resolveDataDir() = %q, want /var/lib/orva", got)
+		}
+	})
+
+	t.Run("unit file is a fallback for installs without a record", func(t *testing.T) {
+		_, unit := setup(t)
+		write(t, unit, "[Service]\nEnvironment=ORVA_DATA_DIR=/srv/from-unit\n")
+		t.Setenv("ORVA_DATA_DIR", "")
+		if got := resolveDataDir(""); got != "/srv/from-unit" {
+			t.Errorf("resolveDataDir() = %q, want /srv/from-unit", got)
+		}
+	})
+
+	t.Run("openrc export is parsed", func(t *testing.T) {
+		_, unit := setup(t)
+		write(t, unit, "export ORVA_DATA_DIR=\"/srv/openrc\"\n")
+		t.Setenv("ORVA_DATA_DIR", "")
+		if got := resolveDataDir(""); got != "/srv/openrc" {
+			t.Errorf("resolveDataDir() = %q, want /srv/openrc", got)
+		}
+	})
+
+	t.Run("installer record wins over the unit", func(t *testing.T) {
+		record, unit := setup(t)
+		write(t, record, "# written by install.sh\nDATA_DIR=/srv/from-record\n")
+		write(t, unit, "Environment=ORVA_DATA_DIR=/srv/from-unit\n")
+		t.Setenv("ORVA_DATA_DIR", "")
+		if got := resolveDataDir(""); got != "/srv/from-record" {
+			t.Errorf("resolveDataDir() = %q, want /srv/from-record", got)
+		}
+	})
+
+	t.Run("environment wins over the record", func(t *testing.T) {
+		record, _ := setup(t)
+		write(t, record, "DATA_DIR=/srv/from-record\n")
+		t.Setenv("ORVA_DATA_DIR", "/srv/from-env")
+		if got := resolveDataDir(""); got != "/srv/from-env" {
+			t.Errorf("resolveDataDir() = %q, want /srv/from-env", got)
+		}
+	})
+
+	t.Run("flag wins over everything", func(t *testing.T) {
+		record, _ := setup(t)
+		write(t, record, "DATA_DIR=/srv/from-record\n")
+		t.Setenv("ORVA_DATA_DIR", "/srv/from-env")
+		if got := resolveDataDir("/srv/from-flag"); got != "/srv/from-flag" {
+			t.Errorf("resolveDataDir() = %q, want /srv/from-flag", got)
+		}
+	})
+
+	t.Run("malformed record falls through", func(t *testing.T) {
+		record, _ := setup(t)
+		write(t, record, "this is not a key value line\n")
+		t.Setenv("ORVA_DATA_DIR", "")
+		if got := resolveDataDir(""); got != "/var/lib/orva" {
+			t.Errorf("resolveDataDir() = %q, want the default", got)
+		}
+	})
+
+	t.Run("quoted and spaced values are cleaned", func(t *testing.T) {
+		record, _ := setup(t)
+		write(t, record, "DATA_DIR = \"/srv/quoted\"\n")
+		t.Setenv("ORVA_DATA_DIR", "")
+		if got := resolveDataDir(""); got != "/srv/quoted" {
+			t.Errorf("resolveDataDir() = %q, want /srv/quoted", got)
+		}
+	})
+}
+
+// TestGuardFindsCustomDataDir reproduces the blind spot this record exists for:
+// a bare `orva upgrade` has no ORVA_DATA_DIR, so only the installer record can
+// point the guard at a custom data directory.
+func TestGuardFindsCustomDataDir(t *testing.T) {
+	prevRecord, prevUnits := installRecordPath, serviceUnitPaths
+	t.Cleanup(func() { installRecordPath, serviceUnitPaths = prevRecord, prevUnits })
+
+	dataDir := t.TempDir()
+	for _, rt := range []string{"node", "python"} {
+		dir := filepath.Join(dataDir, "rootfs", rt)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(rt, version string) {
+		t.Helper()
+		p := filepath.Join(dataDir, "rootfs", rt, ".orva-rootfs-version")
+		if err := os.WriteFile(p, []byte(version+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("node", "v2026.10.25")
+	write("python", "v2026.09.04")
+
+	record := filepath.Join(t.TempDir(), "install.conf")
+	if err := os.WriteFile(record, []byte("DATA_DIR="+dataDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installRecordPath = record
+	serviceUnitPaths = nil
+	t.Setenv("ORVA_DATA_DIR", "")
+
+	err := checkRootfsVersion(resolveDataDir(""), "v2026.10.25")
 	if err == nil {
-		t.Fatal("stale rootfs must refuse the binary-only upgrade")
+		t.Fatal("guard must find a custom data dir through the installer record and refuse the stale python rootfs")
 	}
-	if !strings.Contains(err.Error(), "install.sh") || !strings.Contains(err.Error(), "v2026.09.04") {
-		t.Fatalf("refusal must name the stale version and the remedy, got: %v", err)
-	}
-	if err := checkRootfsVersion(stale, "v2026.09.04"); err != nil {
-		t.Fatalf("matching rootfs must pass: %v", err)
-	}
-
-	pythonOnly := t.TempDir()
-	writeStamp(t, pythonOnly, "python", "v2026.09.04")
-	if err := checkRootfsVersion(pythonOnly, "v2026.10.25"); err == nil {
-		t.Fatal("a python-only stamp must also block")
-	}
-
-	if err := checkRootfsVersion(stale, ""); err != nil {
-		t.Fatalf("empty target version must not block: %v", err)
+	if !strings.Contains(err.Error(), "python is v2026.09.04") {
+		t.Fatalf("refusal must name the stale python rootfs, got: %v", err)
 	}
 }
 

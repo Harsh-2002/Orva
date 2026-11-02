@@ -725,7 +725,7 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | `orva system health / metrics / db-stats / storage / vacuum` | Diagnostics + maintenance |
 | `orva chat [-p MSG]` | Chat with the Orva AI assistant — interactive REPL, or one-shot with `-p` |
 | `orva docs [--raw]` | Render the Orva reference documentation in the terminal |
-| `orva upgrade` | Self-update from the latest GitHub release |
+| `orva upgrade [--check] [--force] [--data-dir DIR]` | Self-update from the latest GitHub release |
 | `orva completion <shell>` | Emit a completion script (see below) |
 | `orva --version` | Build identity (matches `/api/v1/system/health`) |
 
@@ -868,6 +868,7 @@ orva completion powershell > "$completionDir\orva-completion.ps1"
 orva upgrade --check        # is there a newer release?
 orva upgrade                # download + atomically replace the running binary
 orva upgrade --force        # reinstall the latest even if versions match
+orva upgrade --data-dir /srv/orva   # non-default install location
 ```
 
 How it works: the command queries the GitHub releases API, picks the
@@ -893,10 +894,13 @@ Re-run `install.sh` instead when the runtime adapters, rootfs or the service
 unit also need refreshing — `orva upgrade` touches none of them.
 
 **The binary and the runtime rootfs are one unit.** A server build refuses the
-upgrade when `$ORVA_DATA_DIR/rootfs/{node,python}/.orva-rootfs-version` (written
-by `install.sh`) names a different release than the one being installed, because
-the adapter protocol moves with the binary and a mismatch makes every invocation
-time out. The refusal names the stale version and tells you to re-run
+upgrade when an installed runtime rootfs names a different release than the one
+being installed, because the adapter protocol moves with the binary and a
+mismatch makes every invocation time out. Every stamped runtime is checked — a
+current Node rootfs cannot hide a stale Python one. The data directory comes
+from `--data-dir`, then `ORVA_DATA_DIR`, then the record `install.sh` writes to
+`/etc/orva/install.conf`, then the systemd/OpenRC unit it wrote, then
+`/var/lib/orva`. The refusal names every stale runtime and tells you to re-run
 `install.sh`; `--force` replaces the binary anyway. A rootfs with no stamp — the
 container image, where `entrypoint.sh` refreshes it — is allowed.
 

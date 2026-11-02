@@ -28,12 +28,15 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
-- `orva upgrade` refuses a binary-only upgrade on a bare-metal server when the
+- `orva upgrade` refuses a binary-only upgrade on a bare-metal server when any
   installed runtime rootfs carries a different release stamp, because the
   adapter protocol moves with the binary and a mismatch makes every invocation
-  time out. The refusal names the stale version and points at `install.sh`;
-  `--force` still replaces only the binary. The container path is unaffected
-  (no stamp; `entrypoint.sh` refreshes the rootfs from the image).
+  time out. It checks both runtimes and finds the data directory from
+  `--data-dir`, `ORVA_DATA_DIR`, the record `install.sh` writes to
+  `/etc/orva/install.conf`, or the service unit. The refusal names every stale
+  runtime and points at `install.sh`; `--force` still replaces only the binary.
+  The container path is unaffected (no stamp; `entrypoint.sh` refreshes the
+  rootfs from the image).
 - Frontend dependency audit is clean again after advisories landed post-release.
   `follow-redirects` moves to 1.16.2 (GHSA-mrwp-f3q8-3g9p), and `overrides` pin
   `minimatch` 11.0.3 (GHSA-g3hv-75wg-m249) and `glob` 14.0.3

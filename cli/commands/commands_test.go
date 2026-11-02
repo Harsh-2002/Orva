@@ -93,6 +93,7 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"jobs", "list"}, "fn"},
 		{[]string{"upgrade"}, "check"},
 		{[]string{"upgrade"}, "force"},
+		{[]string{"upgrade"}, "data-dir"},
 		{[]string{"cron", "create"}, "fn"},
 		{[]string{"cron", "create"}, "expr"},
 		{[]string{"webhooks", "create"}, "name"},
