@@ -20,7 +20,7 @@ performance cost, and when an operator should reach for it.
 | Docker | 29.4.1, default runtime `runc`, cgroup v2 |
 | Kata | 3.30.0 (containerd-shim-kata-v2 at `/opt/kata/bin/`) |
 | Hypervisors | QEMU (default config) + Cloud Hypervisor (`configuration-clh.toml`) |
-| Orva image | `ghcr.io/harsh-2002/orva:v2026.05.12` |
+| Orva image | `ghcr.io/harsh-2002/orva:latest` at the time of the test (per-version tags are pruned) |
 | Date | 2026-05-13 |
 
 Runtimes registered in `/etc/docker/daemon.json`:
