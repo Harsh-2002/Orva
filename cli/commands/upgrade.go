@@ -78,6 +78,13 @@ On a server this replaces the binary only. Restart the service afterwards, and
 re-run install.sh instead when the runtime adapters, rootfs or the service unit
 also need refreshing.
 
+A server build also refuses a binary-only upgrade when the installed runtime
+rootfs belongs to a different release, because the adapter protocol moves with
+the binary. The data directory comes from --data-dir, then ORVA_DATA_DIR, then
+the record install.sh writes to /etc/orva/install.conf (or the service unit it
+wrote), then /var/lib/orva. --force skips that check and replaces only the
+binary.
+
 If the install location is not writable by the current user, the command
 exits non-zero with a hint to re-run under sudo. It never silently elevates.
 
@@ -88,11 +95,13 @@ Set ORVA_UPGRADE_REPO=<owner>/<name> to point at a fork.`,
 func init() {
 	upgradeCmd.Flags().Bool("check", false, "check for a newer release without downloading")
 	upgradeCmd.Flags().Bool("force", false, "reinstall the latest release even if it matches the current version")
+	upgradeCmd.Flags().String("data-dir", "", "data directory holding the runtime rootfs (default: $ORVA_DATA_DIR, the installer record or service unit, then /var/lib/orva)")
 }
 
 func runUpgrade(cmd *cobra.Command, _ []string) error {
 	check, _ := cmd.Flags().GetBool("check")
 	force, _ := cmd.Flags().GetBool("force")
+	dataDirFlag, _ := cmd.Flags().GetString("data-dir")
 	out := cmd.OutOrStdout()
 
 	if env := os.Getenv("ORVA_UPGRADE_REPO"); env != "" {
@@ -157,11 +166,7 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	// together. Replacing only the binary across releases leaves the old
 	// adapters in place, and every invocation then fails its readiness probe.
 	if ServerBuild && !force {
-		dataDir := os.Getenv("ORVA_DATA_DIR")
-		if dataDir == "" {
-			dataDir = "/var/lib/orva"
-		}
-		if err := checkRootfsVersion(dataDir, latest.Tag); err != nil {
+		if err := checkRootfsVersion(resolveDataDir(dataDirFlag), latest.Tag); err != nil {
 			return err
 		}
 	}
@@ -393,33 +398,117 @@ func upgradeAction(versionNewer, rebuilt, force bool) bool {
 	return force || versionNewer || rebuilt
 }
 
-// rootfsVersion reports the release stamp install.sh writes for the installed
-// runtime rootfs. ok=false when neither runtime is stamped, which is normal
-// inside the container: entrypoint.sh seeds and refreshes the rootfs from the
-// image, and no installer runs there.
-func rootfsVersion(dataDir string) (string, bool) {
+// installRecordPath is written by install.sh. The CLI is a separate process
+// from the service, so it cannot read the unit's Environment=ORVA_DATA_DIR;
+// without this record a custom --data-dir install looks unstamped and the
+// rootfs guard silently passes.
+//
+// serviceUnitPaths are the two definitions install.sh writes. They are a
+// fallback for installs created before the record existed; the record wins.
+var (
+	installRecordPath = "/etc/orva/install.conf"
+	serviceUnitPaths  = []string{"/etc/systemd/system/orva.service", "/etc/init.d/orva"}
+)
+
+// resolveDataDir mirrors the data directory the service runs with: explicit
+// flag, then environment, then the installer's record, then the unit files,
+// then the default.
+func resolveDataDir(flagValue string) string {
+	if v := strings.TrimSpace(flagValue); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("ORVA_DATA_DIR")); v != "" {
+		return v
+	}
+	if v := readInstallDataDir(installRecordPath); v != "" {
+		return v
+	}
+	if v := readServiceUnitDataDir(serviceUnitPaths); v != "" {
+		return v
+	}
+	return "/var/lib/orva"
+}
+
+// readInstallDataDir parses the `key=value` record install.sh writes. A
+// missing or malformed file is not an error: it only means the guard falls
+// through to the unit files or the default.
+func readInstallDataDir(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(k) != "DATA_DIR" {
+			continue
+		}
+		return strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	return ""
+}
+
+// readServiceUnitDataDir reads the installer-written Environment/export line
+// from a systemd or OpenRC definition.
+func readServiceUnitDataDir(paths []string) string {
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			for _, prefix := range []string{"Environment=ORVA_DATA_DIR=", "export ORVA_DATA_DIR="} {
+				if v, ok := strings.CutPrefix(line, prefix); ok {
+					if v = strings.Trim(strings.TrimSpace(v), `"'`); v != "" {
+						return v
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// rootfsVersions reports the release stamp for every installed runtime.
+// A runtime with no stamp is omitted: container images carry none, and
+// install.sh writes one only after it extracts a tarball.
+func rootfsVersions(dataDir string) map[string]string {
+	out := map[string]string{}
 	for _, rt := range []string{"node", "python"} {
 		b, err := os.ReadFile(filepath.Join(dataDir, "rootfs", rt, ".orva-rootfs-version"))
 		if err != nil {
 			continue
 		}
 		if v := strings.TrimSpace(string(b)); v != "" {
-			return v, true
+			out[rt] = v
 		}
 	}
-	return "", false
+	return out
 }
 
-// checkRootfsVersion refuses a binary-only upgrade when the installed rootfs
-// belongs to a different release. The adapter protocol moves with the binary,
-// so a replacement without the matching rootfs leaves every invocation timing
-// out; install.sh refreshes both together. An unstamped rootfs is allowed.
+// checkRootfsVersion refuses a binary-only upgrade when any installed rootfs
+// belongs to a different release. Checking only the first stamp let a current
+// Node rootfs hide a stale Python one, and install.sh leaves the old tree in
+// place when a runtime tarball is missing from a release.
 func checkRootfsVersion(dataDir, target string) error {
-	got, ok := rootfsVersion(dataDir)
-	if !ok || target == "" || got == target {
+	if target == "" {
 		return nil
 	}
-	return fmt.Errorf("runtime rootfs is %s but this upgrade installs %s: a binary-only upgrade leaves the old adapters behind and invocations fail until the rootfs is refreshed\nre-run install.sh to refresh both, or pass --force to replace only the binary", got, target)
+	versions := rootfsVersions(dataDir)
+	var stale []string
+	for _, rt := range []string{"node", "python"} {
+		if v, ok := versions[rt]; ok && v != target {
+			stale = append(stale, fmt.Sprintf("%s is %s", rt, v))
+		}
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	return fmt.Errorf("runtime rootfs does not match this release: %s, but this upgrade installs %s. A binary-only upgrade leaves the old adapters behind and invocations fail until the rootfs is refreshed\nre-run install.sh to refresh both, or pass --force to replace only the binary", strings.Join(stale, ", "), target)
 }
 
 // remoteBuildDiffers reports whether the latest release's published asset for

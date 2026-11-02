@@ -157,5 +157,35 @@ else
   bad "interactive repair refusal: $out"
 fi
 
+# `orva upgrade` is a separate process from the service and cannot see the
+# unit's Environment=ORVA_DATA_DIR, so install.sh records the chosen path.
+recdir=$(mktemp -d); record="$recdir/install.conf"
+ORVA_INSTALL_LIB=1 ORVA_INSTALL_RECORD="$record" sh -c '
+  . "$1"
+  DATA_DIR=/srv/orva
+  DRYRUN=0
+  write_install_record
+' sh "$INSTALLER" >/dev/null 2>&1
+if [ -f "$record" ] && grep -qx 'DATA_DIR=/srv/orva' "$record"; then
+  ok 'installer records the data directory for orva upgrade'
+else
+  bad "install record missing or wrong: $(cat "$record" 2>/dev/null || echo missing)"
+fi
+rm -rf "$recdir"
+
+recdir=$(mktemp -d); record="$recdir/install.conf"
+ORVA_INSTALL_LIB=1 ORVA_INSTALL_RECORD="$record" sh -c '
+  . "$1"
+  DATA_DIR=/srv/orva
+  DRYRUN=1
+  write_install_record
+' sh "$INSTALLER" >/dev/null 2>&1
+if [ ! -e "$record" ]; then
+  ok 'dry-run does not write the install record'
+else
+  bad 'dry-run wrote the install record'
+fi
+rm -rf "$recdir"
+
 printf 'passed=%d failed=%d\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

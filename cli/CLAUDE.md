@@ -208,5 +208,15 @@ that has no `serve`, after which systemd could not start the host. Server
 assets are linux-only, so `checkUpgradePlatform` refuses a server build on any
 other GOOS rather than falling through to the CLI asset.
 
+**Rootfs coupling.** A server binary and its runtime rootfs ship the adapter
+protocol together, so `runUpgrade` refuses a binary-only upgrade when any
+installed rootfs carries a different release stamp (`--force` bypasses it).
+The data directory is resolved from `--data-dir`, `ORVA_DATA_DIR`, the record
+`install.sh` writes to `/etc/orva/install.conf`, the systemd/OpenRC unit, then
+`/var/lib/orva`. A bare `orva upgrade` cannot see the unit's environment, so
+the record is what makes a custom `--data-dir` install visible. Both runtimes
+are checked: checking only the first let a current Node rootfs hide a stale
+Python one.
+
 If the install path is not writable, `orva upgrade` exits non-zero with
 a "re-run with `sudo orva upgrade`" hint. Never silently elevates.

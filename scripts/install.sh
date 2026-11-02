@@ -29,6 +29,9 @@ VERSION="${ORVA_VERSION:-}"                       # empty → resolve "latest"
 PREFIX="${ORVA_PREFIX:-/opt/orva}"
 DATA_DIR="${ORVA_DATA_DIR:-/var/lib/orva}"
 CLI_INSTALL_PATH="${ORVA_CLI_PATH:-/usr/local/bin/orva}"
+# `orva upgrade` runs outside the service and cannot see the unit's
+# Environment=ORVA_DATA_DIR, so record the chosen path where it looks.
+INSTALL_RECORD="${ORVA_INSTALL_RECORD:-/etc/orva/install.conf}"
 COMPOSE_DIR="${ORVA_COMPOSE_DIR:-/opt/orva}"
 PORT="${ORVA_PORT:-8443}"
 DOCKER_RUNTIME_OVERRIDE="${ORVA_DOCKER_RUNTIME:-}"   # force the container runtime
@@ -1013,6 +1016,20 @@ start_pre() {
 EOF
     chmod 0755 "$PREFIX/share/orva/scripts/orva.openrc"
     write_uninstall_script
+    write_install_record
+}
+
+# A bare `orva upgrade` has no access to the unit's environment, so the data
+# directory it must inspect is recorded here. Without it a custom --data-dir
+# install looks unstamped and the rootfs guard silently passes.
+write_install_record() {
+    [ "$DRYRUN" = "1" ] && { log "(dryrun) would record data dir in $INSTALL_RECORD"; return; }
+    install -d -m 0755 "$(dirname "$INSTALL_RECORD")"
+    cat > "$INSTALL_RECORD" <<EOF
+# Written by install.sh. Read by \`orva upgrade\` to locate the runtime rootfs.
+DATA_DIR=${DATA_DIR}
+EOF
+    chmod 0644 "$INSTALL_RECORD"
 }
 
 install_adapters() {
@@ -1310,6 +1327,8 @@ rm -rf "\$PREFIX"; rm -f /usr/local/bin/nsjail
 # after \$PREFIX removal) or a regular-file copy left by an older install-cli
 # run. -e is false for a dangling symlink, so test -L too.
 if [ -e "\$CLI_PATH" ] || [ -L "\$CLI_PATH" ]; then rm -f "\$CLI_PATH"; fi
+rm -f "${INSTALL_RECORD}"
+rmdir /etc/orva 2>/dev/null || true
 if [ "\$PURGE" = "1" ]; then
     rm -rf "\$DATA_DIR"
     id -u "\$SERVICE_USER" >/dev/null 2>&1 && { userdel "\$SERVICE_USER" 2>/dev/null || deluser "\$SERVICE_USER" 2>/dev/null || true; }
