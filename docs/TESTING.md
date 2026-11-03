@@ -2328,7 +2328,7 @@ accepting, explicitly, that CodeQL is advisory.
 | Job | push `main` | PR | release / dispatch | Sunday |
 |---|---|---|---|---|
 | `agent-docs` (AGENTS.md symlink mirror) | ✅ always | ✅ always | – | – |
-| `lint` (actionlint + shellcheck + `dash -n`) | if code | if code | – | – |
+| `lint` (actionlint + shellcheck + `dash -n`, and it **executes** `sandbox-preflight-test.sh` and `rootfs-sync-test.sh`) | if code | if code | – | – |
 | `go` (vet, **`-race` test**, build+version assert, govulncheck) | if code | if code | – | – |
 | `ui` (`npm ci`, `npm audit`, lint, build) | if code | if code | – | – |
 | `docker` (no-cache build + health smoke on 18443) | if code | if code | – | – |
