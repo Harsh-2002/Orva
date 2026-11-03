@@ -21,15 +21,24 @@ shape instead, and MCP (`/mcp`) uses JSON-RPC errors. Neither is covered here.
 
 ## Where these apply
 
-The invocation codes below — `FUNCTION_BUSY`, `MEMORY_EXHAUSTED`,
-`EGRESS_POLICY_UNAVAILABLE`, `TIMEOUT`, `SHUTTING_DOWN` and the rest — reach
-callers on **every** invoke path: `POST /fn/{id}`, custom routes, replay,
-function-to-function `orva.invoke()`, and the inbound-webhook trigger.
+The admission and worker-acquire codes — `FUNCTION_BUSY`,
+`INVOCATION_QUEUE_FULL`, `MEMORY_EXHAUSTED`, `EGRESS_POLICY_UNAVAILABLE`,
+`SHUTTING_DOWN` and the rest of the pool and build codes — reach callers on
+**every** invoke path: `POST /fn/{id}`, custom routes, replay,
+function-to-function `orva.invoke()`, and the inbound-webhook trigger. An SDK
+can therefore tell a concurrency cap it should back off from a host OOM it
+should not.
 
-That is new. Only `POST /fn/{id}` used the shared mapper; the other four
-flattened every failure to a bare `503 POOL_ERROR`, so an SDK retrying on
-those paths could not tell a concurrency cap it should back off from a host
-OOM it should not.
+A failure **after** a worker is running is reported per path:
+
+| path | function timed out | worker crashed |
+|---|---|---|
+| `POST /fn/{id}` and custom routes | 504 `TIMEOUT` | 502 `WORKER_CRASHED` |
+| replay | 504 `TIMEOUT` | 502 `REPLAY_FAILED` |
+| function-to-function, inbound webhook | 502 `INVOKE_FAILED` | 502 `INVOKE_FAILED` |
+
+On the last row, tell the two apart by `error.message`: `function timed out`
+for a timeout, `worker exited unexpectedly…` for a crash.
 
 ## Code reference
 
@@ -96,8 +105,9 @@ session writers.
 | `RESTORE_FAILED` | 500 | restore failed after the archive was accepted (disk I/O, rename); the live database is left in place | no — check the server log and free space |
 | `VACUUM_FAILED` | 500 | checkpoint or `VACUUM` failed | yes — retry; if it persists, check free disk and open readers |
 | `BUILD_ERROR` | 500 | the deploy's build failed; the function is left in `error` status | no — check `/api/v1/deployments/<id>/logs` for the npm/pip error, fix, redeploy |
-| `WORKER_CRASHED` | 502 | adapter exited unexpectedly (`process.exit`, OOM-kill, syntax error in handler, or an older/manual nsjail host-policy setup) | no — inspect the execution log and sandbox health |
-| `INVOKE_FAILED` | 502 | inbound webhook or internal SDK invoke failed before a response was produced | yes — retry; inspect the execution log |
+| `WORKER_CRASHED` | 502 | on `POST /fn/{id}` and custom routes: adapter exited unexpectedly (`process.exit`, OOM-kill, syntax error in handler, or an older/manual nsjail host-policy setup). Replay reports this as `REPLAY_FAILED`; function-to-function and webhook paths as `INVOKE_FAILED` | no — inspect the execution log and sandbox health |
+| `INVOKE_FAILED` | 502 | a function-to-function call or inbound-webhook delivery reached a worker, but the run failed: a timeout (`function timed out`) or a crash (`worker exited unexpectedly…`). `POST /fn/{id}` reports the same failures as `TIMEOUT` / `WORKER_CRASHED` | depends on the cause — raise `timeout_ms` or fix the handler; the execution log has the detail |
+| `REPLAY_FAILED` | 502 | replay: the replayed run failed in the worker (a crash or dispatch error). A timeout is reported as `TIMEOUT` | no — inspect the handler and the new execution's log |
 | `INVALID_RESPONSE` | 502 | replay: the adapter returned a response the server could not parse | no — inspect the handler and its execution log |
 | `BUILDING` | 503 | first deploy in flight; no prior code to serve | **yes** — `Retry-After: 5` |
 | `BUILD_QUEUE_FULL` | 503 | build queue at channel capacity | yes — `Retry-After: depth × 30s` |
@@ -113,7 +123,7 @@ session writers.
 | `SERVICE_UNAVAILABLE` | 503 | authentication lookup failed (database error); the request is refused rather than treated as unauthenticated | yes — retry once the database is reachable |
 | `FIREWALL_DISABLED` | 503 | firewall manager not initialized; status/resolve cannot report enforcement | no — check the server log |
 | `FUNCTION_UNAVAILABLE` | 503 | inbound webhook: the target function is not in the registry (deleted or not yet loaded) | yes — retry once the function is active |
-| `TIMEOUT` | 504 | function exceeded its `timeout_ms` | no — raise it or optimize handler |
+| `TIMEOUT` | 504 | function exceeded its `timeout_ms` on `POST /fn/{id}`, custom routes, or replay. Function-to-function and webhook paths report a timeout as `INVOKE_FAILED` | no — raise it or optimize handler |
 | `MAX_CALL_DEPTH` | 507 | function-to-function chain exceeded the call-depth cap | no — break the chain or restructure |
 | `CLIENT_DISCONNECTED` | 499 | client closed the connection mid-request | n/a (never reaches client) |
 

@@ -36,7 +36,15 @@ unreleased range, and the sections below as the record for everything before it.
   `/etc/orva/install.conf`, or the service unit. The refusal names every stale
   runtime and points at `install.sh`; `--force` still replaces only the binary.
   The container path is unaffected (no stamp; `entrypoint.sh` refreshes the
-  rootfs from the image).
+  rootfs from the image). `orva upgrade --check` applies the same test, so it no
+  longer recommends running `orva upgrade` when that run would be refused.
+- The generated uninstaller removes the directory that held the install record
+  rather than assuming `/etc/orva`, which matters when `ORVA_INSTALL_RECORD` is
+  overridden.
+- `docs/ERRORS.md` now states how a timeout or crash is reported on each invoke
+  path: `TIMEOUT` / `WORKER_CRASHED` on `/fn` and custom routes, `TIMEOUT` /
+  `REPLAY_FAILED` on replay, and `INVOKE_FAILED` on function-to-function and
+  inbound-webhook calls. It also catalogs `REPLAY_FAILED`, which was missing.
 - Frontend dependency audit is clean again after advisories landed post-release.
   `follow-redirects` moves to 1.16.2 (GHSA-mrwp-f3q8-3g9p), and `overrides` pin
   `minimatch` 11.0.3 (GHSA-g3hv-75wg-m249) and `glob` 14.0.3

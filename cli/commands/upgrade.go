@@ -83,7 +83,8 @@ rootfs belongs to a different release, because the adapter protocol moves with
 the binary. The data directory comes from --data-dir, then ORVA_DATA_DIR, then
 the record install.sh writes to /etc/orva/install.conf (or the service unit it
 wrote), then /var/lib/orva. --force skips that check and replaces only the
-binary.
+binary. --check applies the same test, so it does not recommend running upgrade
+when a real run would be refused.
 
 If the install location is not writable by the current user, the command
 exits non-zero with a hint to re-run under sudo. It never silently elevates.
@@ -146,13 +147,25 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	do := upgradeAction(versionNewer, rebuilt, force)
 
 	if check {
+		// Mirror the real run's rootfs guard so --check never recommends a refused upgrade.
+		var stale []string
+		if ServerBuild && !force && (versionNewer || rebuilt) {
+			stale = staleRootfs(resolveDataDir(dataDirFlag), latest.Tag)
+		}
 		switch {
 		case versionNewer:
 			fmt.Fprintf(out, "orva %s is available (current: %s)\n", latestStr, Version)
 		case rebuilt:
-			fmt.Fprintf(out, "orva %s has a newer build available (same version, rebuilt) — run `orva upgrade`\n", Version)
+			fmt.Fprintf(out, "orva %s has a newer build available (same version, rebuilt)", Version)
+			if len(stale) == 0 {
+				fmt.Fprint(out, " — run `orva upgrade`")
+			}
+			fmt.Fprintln(out)
 		default:
 			fmt.Fprintf(out, "orva %s is up to date (latest: %s)\n", Version, latestStr)
+		}
+		if len(stale) > 0 {
+			fmt.Fprintf(out, "runtime rootfs is behind (%s): `orva upgrade` would refuse a binary-only upgrade — re-run install.sh to refresh the binary and rootfs together\n", strings.Join(stale, ", "))
 		}
 		return nil
 	}
@@ -495,6 +508,17 @@ func rootfsVersions(dataDir string) map[string]string {
 // Node rootfs hide a stale Python one, and install.sh leaves the old tree in
 // place when a runtime tarball is missing from a release.
 func checkRootfsVersion(dataDir, target string) error {
+	stale := staleRootfs(dataDir, target)
+	if len(stale) == 0 {
+		return nil
+	}
+	return fmt.Errorf("runtime rootfs does not match this release: %s, but this upgrade installs %s. A binary-only upgrade leaves the old adapters behind and invocations fail until the rootfs is refreshed\nre-run install.sh to refresh both, or pass --force to replace only the binary", strings.Join(stale, ", "), target)
+}
+
+// staleRootfs lists each stamped runtime whose release differs from target, as
+// "node is v2026.09.04". It is shared by the real upgrade and by --check so
+// the two cannot disagree about whether `orva upgrade` would be refused.
+func staleRootfs(dataDir, target string) []string {
 	if target == "" {
 		return nil
 	}
@@ -505,10 +529,7 @@ func checkRootfsVersion(dataDir, target string) error {
 			stale = append(stale, fmt.Sprintf("%s is %s", rt, v))
 		}
 	}
-	if len(stale) == 0 {
-		return nil
-	}
-	return fmt.Errorf("runtime rootfs does not match this release: %s, but this upgrade installs %s. A binary-only upgrade leaves the old adapters behind and invocations fail until the rootfs is refreshed\nre-run install.sh to refresh both, or pass --force to replace only the binary", strings.Join(stale, ", "), target)
+	return stale
 }
 
 // remoteBuildDiffers reports whether the latest release's published asset for

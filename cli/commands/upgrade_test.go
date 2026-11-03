@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func sha256Hex(b []byte) string {
@@ -244,6 +247,128 @@ func TestGuardFindsCustomDataDir(t *testing.T) {
 	if !strings.Contains(err.Error(), "python is v2026.09.04") {
 		t.Fatalf("refusal must name the stale python rootfs, got: %v", err)
 	}
+}
+
+// TestUpgradeCheckReportsRootfs drives `orva upgrade --check` against a fake
+// release feed. --check must not recommend `orva upgrade` when a real run would
+// be refused for a stale runtime rootfs.
+func TestUpgradeCheckReportsRootfs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("server builds are published for linux only")
+	}
+	prevServer, prevVersion, prevRepo := ServerBuild, Version, orvaRepo
+	prevRecord, prevUnits, prevAPI := installRecordPath, serviceUnitPaths, githubAPIBase
+	t.Cleanup(func() {
+		ServerBuild, Version, orvaRepo = prevServer, prevVersion, prevRepo
+		installRecordPath, serviceUnitPaths, githubAPIBase = prevRecord, prevUnits, prevAPI
+	})
+	ServerBuild = true
+
+	const tag = "v2026.08.09"
+	asset := "orva-linux-" + runtime.GOARCH
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/orva/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"tag_name": %q, "assets": [
+			{"name": %q, "browser_download_url": "http://dl/asset"},
+			{"name": "checksums.txt", "browser_download_url": "%s/checksums"}]}`, tag, asset, "http://"+r.Host)
+	})
+	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%s  %s\n", strings.Repeat("0", 64), asset) // never equals the test binary
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	githubAPIBase = srv.URL
+	t.Setenv("ORVA_UPGRADE_REPO", "acme/orva")
+	t.Setenv("ORVA_DATA_DIR", "")
+	serviceUnitPaths = nil
+
+	dataDir := func(t *testing.T, node, python string) {
+		t.Helper()
+		root := t.TempDir()
+		for rt, v := range map[string]string{"node": node, "python": python} {
+			if v == "" {
+				continue
+			}
+			dir := filepath.Join(root, "rootfs", rt)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, ".orva-rootfs-version"), []byte(v+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		record := filepath.Join(t.TempDir(), "install.conf")
+		if err := os.WriteFile(record, []byte("DATA_DIR="+root+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		installRecordPath = record
+	}
+	runCheck := func(t *testing.T, force bool) string {
+		t.Helper()
+		var out bytes.Buffer
+		cmd := &cobra.Command{RunE: runUpgrade}
+		cmd.Flags().Bool("check", true, "")
+		cmd.Flags().Bool("force", force, "")
+		cmd.Flags().String("data-dir", "", "")
+		cmd.SetOut(&out)
+		cmd.SetContext(context.Background())
+		if err := runUpgrade(cmd, nil); err != nil {
+			t.Fatalf("--check must not fail: %v", err)
+		}
+		return out.String()
+	}
+
+	t.Run("newer tag with a stale python rootfs warns", func(t *testing.T) {
+		Version = "2026.01.01"
+		dataDir(t, tag, "v2026.07.01")
+		out := runCheck(t, false)
+		if !strings.Contains(out, "is available") || !strings.Contains(out, "python is v2026.07.01") ||
+			!strings.Contains(out, "would refuse") || !strings.Contains(out, "install.sh") {
+			t.Fatalf("expected an availability line plus a stale-rootfs warning, got:\n%s", out)
+		}
+	})
+
+	t.Run("matching rootfs stays quiet", func(t *testing.T) {
+		Version = "2026.01.01"
+		dataDir(t, tag, tag)
+		if out := runCheck(t, false); strings.Contains(out, "behind") || strings.Contains(out, "would refuse") {
+			t.Fatalf("a matching rootfs must not warn, got:\n%s", out)
+		}
+	})
+
+	t.Run("unstamped rootfs stays quiet", func(t *testing.T) {
+		Version = "2026.01.01"
+		dataDir(t, "", "")
+		if out := runCheck(t, false); strings.Contains(out, "behind") {
+			t.Fatalf("an unstamped rootfs (container) must not warn, got:\n%s", out)
+		}
+	})
+
+	t.Run("force does not warn because a forced run is not refused", func(t *testing.T) {
+		Version = "2026.01.01"
+		dataDir(t, "v2026.07.01", "")
+		if out := runCheck(t, true); strings.Contains(out, "behind") {
+			t.Fatalf("--force skips the guard, so --check must not warn, got:\n%s", out)
+		}
+	})
+
+	t.Run("same-tag rebuild with a stale rootfs does not recommend upgrade", func(t *testing.T) {
+		Version = "2026.08.09"
+		dataDir(t, "v2026.07.01", "")
+		out := runCheck(t, false)
+		if !strings.Contains(out, "has a newer build available") || strings.Contains(out, "run `orva upgrade`") ||
+			!strings.Contains(out, "would refuse") {
+			t.Fatalf("a refused rebuild must not recommend `orva upgrade`, got:\n%s", out)
+		}
+	})
+
+	t.Run("same-tag rebuild with a matching rootfs still recommends upgrade", func(t *testing.T) {
+		Version = "2026.08.09"
+		dataDir(t, tag, tag)
+		if out := runCheck(t, false); !strings.Contains(out, "run `orva upgrade`") {
+			t.Fatalf("an allowed rebuild must still recommend `orva upgrade`, got:\n%s", out)
+		}
+	})
 }
 
 // TestUpgradeAction covers the install decision truth table.

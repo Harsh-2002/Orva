@@ -1328,7 +1328,7 @@ rm -rf "\$PREFIX"; rm -f /usr/local/bin/nsjail
 # run. -e is false for a dangling symlink, so test -L too.
 if [ -e "\$CLI_PATH" ] || [ -L "\$CLI_PATH" ]; then rm -f "\$CLI_PATH"; fi
 rm -f "${INSTALL_RECORD}"
-rmdir /etc/orva 2>/dev/null || true
+rmdir "${INSTALL_RECORD%/*}" 2>/dev/null || true
 if [ "\$PURGE" = "1" ]; then
     rm -rf "\$DATA_DIR"
     id -u "\$SERVICE_USER" >/dev/null 2>&1 && { userdel "\$SERVICE_USER" 2>/dev/null || deluser "\$SERVICE_USER" 2>/dev/null || true; }

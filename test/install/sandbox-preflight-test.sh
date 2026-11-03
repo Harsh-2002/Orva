@@ -187,5 +187,25 @@ else
 fi
 rm -rf "$recdir"
 
+# The uninstaller removes the record and tidies the directory that held it,
+# including when ORVA_INSTALL_RECORD pointed somewhere other than /etc/orva.
+recdir=$(mktemp -d)
+mkdir -p "$recdir/prefix/share/orva/scripts" "$recdir/custom"
+printf 'DATA_DIR=/srv/orva\n' > "$recdir/custom/install.conf"
+ORVA_INSTALL_LIB=1 ORVA_INSTALL_RECORD="$recdir/custom/install.conf" sh -c '
+  . "$1"
+  PREFIX="$2"; DATA_DIR=/srv/orva; SERVICE_USER=orva; CLI_INSTALL_PATH=/usr/local/bin/orva
+  write_uninstall_script
+' sh "$INSTALLER" "$recdir/prefix" >/dev/null 2>&1
+uninstaller="$recdir/prefix/share/orva/scripts/uninstall.sh"
+if grep -qxF "rm -f \"$recdir/custom/install.conf\"" "$uninstaller" &&
+   grep -qxF "rmdir \"$recdir/custom\" 2>/dev/null || true" "$uninstaller" &&
+   ! grep -q 'rmdir /etc/orva' "$uninstaller"; then
+  ok 'uninstaller tidies the directory of a custom install record path'
+else
+  bad "uninstaller record cleanup wrong: $(grep -n 'install.conf\|rmdir' "$uninstaller" 2>/dev/null)"
+fi
+rm -rf "$recdir"
+
 printf 'passed=%d failed=%d\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
