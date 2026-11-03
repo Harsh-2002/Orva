@@ -177,8 +177,25 @@ echo "# phase 4: post-load per-pool snapshot" >&2
 metrics=$("${CURL[@]}" "$BASE/api/v1/system/metrics.json")
 echo "# function_id	function_name	idle	busy	queued	spawning	desired	effective_max	queue_p95_ms	service_p95_ms	cold_p95_ms	limiting_reason"
 echo "$metrics" | jq -r '.pools[] | [.function_id, .function_name, .idle, .busy, .queued, .spawning, .desired_workers, .effective_max, .queue_wait_p95_ms, .service_p95_ms, .cold_start_p95_ms, .limiting_reason] | @tsv'
-if echo "$metrics" | jq -e 'any(.pools[]; (.idle + .busy + .spawning) > .effective_max)' >/dev/null; then
-    echo "pool exceeded effective capacity" >&2
+# Admission is what must never exceed the cap: workers that are running or starting.
+# An idle worker may outlast a cap that dipped with host memory until the autoscaler's
+# scale-down grace (30 s) expires, so the full count is allowed to settle. Asserting
+# idle+busy+spawning at a single instant passed or failed on timing alone.
+if echo "$metrics" | jq -e 'any(.pools[]; (.busy + .spawning) > .effective_max)' >/dev/null; then
+    echo "pool admitted more workers than its effective capacity" >&2
+    exit 1
+fi
+settled=0
+for _ in $(seq 1 24); do
+    if ! echo "$metrics" | jq -e 'any(.pools[]; (.idle + .busy + .spawning) > .effective_max)' >/dev/null; then
+        settled=1
+        break
+    fi
+    sleep 2
+    metrics=$("${CURL[@]}" "$BASE/api/v1/system/metrics.json")
+done
+if [ "$settled" != 1 ]; then
+    echo "idle workers stayed above effective capacity past the scale-down grace" >&2
     exit 1
 fi
 
