@@ -160,7 +160,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "26"
           # No npm cache — fresh install on every run.
           cache: ""
 

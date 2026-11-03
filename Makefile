@@ -95,7 +95,7 @@ ui: docs-embed
 	@command -v npm >/dev/null 2>&1 || { \
 	  echo "npm not found."; \
 	  echo "Orva embeds the dashboard in the server binary, so building the"; \
-	  echo "server needs Node 24. Install it, or use a release binary:"; \
+	  echo "server needs Node 26. Install it, or use a release binary:"; \
 	  echo "  https://github.com/Harsh-2002/Orva/releases/latest"; \
 	  exit 1; }
 	cd frontend && npm install && npm run build
