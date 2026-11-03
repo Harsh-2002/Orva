@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -109,6 +110,47 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, map[string]any{"channels": out})
 }
 
+// validateChannelFunctions checks that every id is unique and exists, whatever
+// their number: the collision check skips fewer than two ids, so a bad id would
+// otherwise fail at the junction insert as a 500.
+func (h *ChannelHandler) validateChannelFunctions(w http.ResponseWriter, functionIDs []string, reqID string) bool {
+	seen := make(map[string]struct{}, len(functionIDs))
+	for _, id := range functionIDs {
+		if _, dup := seen[id]; dup {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION", "function_ids lists "+id+" more than once", reqID)
+			return false
+		}
+		seen[id] = struct{}{}
+		if _, err := h.DB.GetFunction(id); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				respond.Error(w, http.StatusBadRequest, "INVALID_FUNCTION", "function "+id+" not found", reqID)
+				return false
+			}
+			slog.Error("channel: function lookup failed", "function_id", id, "error", err)
+			respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to look up function", reqID)
+			return false
+		}
+	}
+	return true
+}
+
+// rejectToolNameCollision writes the error response and returns true when the
+// functions cannot be bundled. Existence is validated first, so an error that
+// is not a collision is a server fault and must not echo database text.
+func (h *ChannelHandler) rejectToolNameCollision(w http.ResponseWriter, functionIDs []string, reqID string) bool {
+	err := h.DB.CheckChannelToolNameCollision(functionIDs)
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, database.ErrToolNameCollision) {
+		respond.Error(w, http.StatusBadRequest, "TOOL_NAME_COLLISION", err.Error(), reqID)
+		return true
+	}
+	slog.Error("channel: tool-name check failed", "error", err)
+	respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to check tool names", reqID)
+	return true
+}
+
 // Create handles POST /api/v1/channels. Returns the plaintext token
 // in the response body — the ONLY time it leaves the server.
 func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -127,15 +169,13 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "at least one function_id is required", reqID)
 		return
 	}
+	if !h.validateChannelFunctions(w, req.FunctionIDs, reqID) {
+		return
+	}
 	// Tool-name collision guard. If two bundled functions both map to
 	// the same MCP tool name (e.g. "stripe-charge" + "stripe_charge"),
 	// reject up-front with a clear message.
-	if err := h.DB.CheckChannelToolNameCollision(req.FunctionIDs); err != nil {
-		if errors.Is(err, database.ErrToolNameCollision) {
-			respond.Error(w, http.StatusBadRequest, "TOOL_NAME_COLLISION", err.Error(), reqID)
-			return
-		}
-		respond.Error(w, http.StatusBadRequest, "INVALID_FUNCTION", err.Error(), reqID)
+	if h.rejectToolNameCollision(w, req.FunctionIDs, reqID) {
 		return
 	}
 
@@ -294,12 +334,10 @@ func (h *ChannelHandler) SetFunctions(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}
-	if err := h.DB.CheckChannelToolNameCollision(req.FunctionIDs); err != nil {
-		if errors.Is(err, database.ErrToolNameCollision) {
-			respond.Error(w, http.StatusBadRequest, "TOOL_NAME_COLLISION", err.Error(), reqID)
-			return
-		}
-		respond.Error(w, http.StatusBadRequest, "INVALID_FUNCTION", err.Error(), reqID)
+	if !h.validateChannelFunctions(w, req.FunctionIDs, reqID) {
+		return
+	}
+	if h.rejectToolNameCollision(w, req.FunctionIDs, reqID) {
 		return
 	}
 	// The audit field. This was hardcoded "" with a comment blaming an

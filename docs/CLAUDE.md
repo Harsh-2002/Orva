@@ -39,7 +39,7 @@ execute it.**
 - New REST endpoint → update `API.md`
 - New CLI subcommand or flag → update `CLI.md`
 - New config key → update `CONFIG.md`
-- New error slug → update `ERRORS.md`
+- New error slug → update `ERRORS.md` (`TestErrorCatalogMatchesHandlers` fails the build if you forget)
 - Runtime behavior change → update `RUNTIMES.md`
 - Backup/restore or vacuum changes → update `OPERATIONS.md`
 - Security boundary change → update `SECURITY.md`

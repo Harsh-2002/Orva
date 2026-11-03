@@ -62,7 +62,7 @@ session writers.
 | `INCOMPATIBLE_FORMAT` | 400 | backup restore: the archive was written by an incompatible backup format version | no — restore it with the Orva version that wrote it |
 | `CONFIRM_REQUIRED` | 400 | backup restore without `?confirm=1`; the live database would be overwritten | no — repeat with `confirm=1` once you intend to replace the data |
 | `TOOL_NAME_COLLISION` | 400 | channel create/update: two bundled functions map to the same MCP tool name (e.g. `stripe-charge` and `stripe_charge`) | no — rename one function |
-| `INVALID_FUNCTION` | 400 | channel create/update: a referenced function does not exist or cannot be bundled | no — fix the function list |
+| `INVALID_FUNCTION` | 400 | channel create or `PUT /channels/{id}/functions`: a `function_ids` entry does not exist (`function <id> not found`). Every id is checked, including a single one | no — fix the function list |
 | `CANT_DELETE_SELF` | 400 | session revoke targeting the calling session without `?allow_self=1` | no — use `POST /api/v1/auth/logout` |
 | `AMBIGUOUS_PREFIX` | 400 | session revoke: the prefix matches more than one session | no — use a longer prefix |
 | `WRONG_PASSWORD` | 400 | change-password: the current password is incorrect | no — retry with the correct password |
@@ -161,4 +161,4 @@ Wire-level mapping lives in `backend/internal/server/handlers/errmap.go` (`invok
   (cron, jobs, function-to-function, inbound webhook). It has no `invokeError`
   case yet, so it currently surfaces as `SANDBOX_ERROR`.
 
-Adding a new code: define a sentinel, return it from the relevant code path, add a case to `invokeError` (or `deployError`), append a row to the table above. A code a handler raises directly with `respond.Error` needs only the row.
+Adding a new code: define a sentinel, return it from the relevant code path, add a case to `invokeError` (or `deployError`), append a row to the table above. A code a handler raises directly with `respond.Error` needs only the row. `TestErrorCatalogMatchesHandlers` (`backend/internal/server/error_catalog_test.go`) fails the build if a handler emits a code that has no row here, or a row has no emitter.

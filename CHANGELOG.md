@@ -41,6 +41,15 @@ unreleased range, and the sections below as the record for everything before it.
 - The generated uninstaller removes the directory that held the install record
   rather than assuming `/etc/orva`, which matters when `ORVA_INSTALL_RECORD` is
   overridden.
+- Creating a channel, or replacing its function set, with a `function_ids` entry
+  that does not exist now returns 400 `INVALID_FUNCTION` naming the missing id.
+  A single unknown id used to return 500 `INTERNAL` because the tool-name check
+  skips fewer than two ids, and with several ids the 400 carried the raw database
+  text (`sql: no rows in result set`). A real database error is now a 500 instead
+  of a mislabelled 400. An id listed twice now returns 400 `VALIDATION` instead
+  of 500 `INTERNAL`.
+- `TestErrorCatalogMatchesHandlers` fails the build when a REST handler emits an
+  error code with no row in `docs/ERRORS.md`, or a row has no emitter.
 - `docs/ERRORS.md` now states how a timeout or crash is reported on each invoke
   path: `TIMEOUT` / `WORKER_CRASHED` on `/fn` and custom routes, `TIMEOUT` /
   `REPLAY_FAILED` on replay, and `INVOKE_FAILED` on function-to-function and
