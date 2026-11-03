@@ -235,7 +235,15 @@ else
         orvad_pid=$(ss -ltnp 2>/dev/null | grep -w "$port" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
     fi
     if [ -z "$orvad_pid" ]; then
-        orvad_pid=$(pgrep -f '(^|/)orva serve' 2>/dev/null | head -1 || true)
+        # The command line also matches wrappers (runuser, sudo -u, setsid),
+        # whose only children are not the sandboxes. Take the process that is
+        # itself orva.
+        for cand in $(pgrep -f '(^|/)orva serve' 2>/dev/null); do
+            if [ "$(ps -o comm= -p "$cand" 2>/dev/null | tr -d ' ')" = orva ]; then
+                orvad_pid=$cand
+                break
+            fi
+        done
     fi
     if [ -z "$orvad_pid" ]; then
         echo "process_check	SKIPPED	could not identify the orvad pid on $port (set ORVA_ATSCALE_PID)" >&2
