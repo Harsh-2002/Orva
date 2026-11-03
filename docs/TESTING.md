@@ -278,7 +278,7 @@ Say these out loud before you claim a change is verified:
 | Requirement | Why | Check |
 |---|---|---|
 | Go 1.27+ | the embedded Bifrost AI gateway needs it | `go version` |
-| Node 24 | frontend build only — *not* the function runtime | `node --version` |
+| Node 26 | frontend build only — *not* the function runtime | `node --version` |
 | Python 3.14 (CONTRACT §1) | CI parity. The E2E suite is stdlib-only and **ran clean on 3.13.5** — do not go install 3.14 before you can run anything | `python3 -V` |
 | Linux, cgroup v2, unprivileged userns | nsjail | `mount \| grep cgroup2` |
 | **nsjail at `/usr/local/bin/nsjail`** | every invocation | §2.2 |
@@ -477,7 +477,7 @@ backend/internal/server/ui.go:10:12: pattern all:ui_dist: no matching files foun
 ```
 
 That is why `make build`, `make test` and `make lint` build the UI when the
-directory is empty. **Building the server needs Node 24**; the alternative is a
+directory is empty. **Building the server needs Node 26**; the alternative is a
 release binary. A clean tree to a working binary took 6.5 s on the survey host
 (2.4 s on the second run, where the guard leaves a populated `ui_dist` alone).
 

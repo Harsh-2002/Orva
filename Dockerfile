@@ -6,7 +6,8 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-FROM node:24-alpine AS ui
+# Dashboard build toolchain (Node 26, current LTS); the function runtime is chosen below.
+FROM node:26-alpine AS ui
 WORKDIR /ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund

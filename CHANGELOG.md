@@ -25,6 +25,10 @@ unreleased range, and the sections below as the record for everything before it.
   full symbols; removing them saves **17 MiB** per rootfs (126.9 MB → 108.7 MB)
   and was verified to still run JavaScript. JavaScript stack traces are
   unaffected; only native frame names in a core dump are lost.
+- The dashboard now builds with Node 26 (current LTS) in the Dockerfile, CI and
+  the release workflow, and building the server from source needs Node 26.
+  Go stays on 1.27.3, already the latest stable. Functions are unaffected: the
+  `node` runtime is still Node.js 24.
 
 ### Fixed
 

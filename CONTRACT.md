@@ -18,7 +18,7 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
 
 ## 1. Toolchain (pinned, lock-step)
 
-- **Go 1.27+** (the embedded Bifrost AI gateway requires it), **Node.js 24**,
+- **Go 1.27+** (the embedded Bifrost AI gateway requires it), **Node.js 26** (dashboard build only; functions run on the `node` runtime rootfs),
   **Python 3.14**.
 - **nsjail** at the hardcoded path `/usr/local/bin/nsjail` (Linux only) — `PATH` is
   never consulted and there is no env override (`config/defaults.go` `NsjailBin`,
@@ -59,7 +59,7 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
 - **The UI is embedded via `//go:embed ui_dist`, and `ui_dist/` is NOT
   committed.** `//go:embed` is a compile error on an absent directory, so
   `make build` / `make test` / `make lint` build the UI when it is missing —
-  a fresh clone works, and building the server needs Node 24. They do not
+  a fresh clone works, and building the server needs Node 26. They do not
   rebuild an already-populated `ui_dist`, so **run `make build-all` (or
   `make embed` first) after a frontend change**; that is the one remaining way
   to ship a stale dashboard.
