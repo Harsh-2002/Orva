@@ -204,8 +204,9 @@ below `min_free_disk_mb` — a rebuildable cache is never the reason a deploy
 fails for want of space.
 
 To drop one function's cache by hand — the clean recovery from a build that
-installed a bad package, since the cache is the only place those bytes persist
-between deploys:
+installed a bad package. The cache holds the downloads; the installed copy stays
+in the function's version directory until that version is pruned, so a purge
+alone does not rebuild an existing version:
 
 ```bash
 orva functions purge-cache greeter
@@ -214,7 +215,8 @@ curl -X DELETE -H "X-Orva-API-Key: $KEY" \
   http://localhost:8443/api/v1/functions/greeter/build-cache
 ```
 
-The next deploy of that function refetches its dependencies and is slower once.
+The next deploy that builds a new version refetches its dependencies and is
+slower once.
 
 ## Build identity
 

@@ -278,7 +278,7 @@ Say these out loud before you claim a change is verified:
 | Requirement | Why | Check |
 |---|---|---|
 | Go 1.27+ | the embedded Bifrost AI gateway needs it | `go version` |
-| Node 26 | frontend build only — *not* the function runtime | `node --version` |
+| Node 26 | dashboard build; the `node` function runtime is also Node 26, inside the rootfs | `node --version` |
 | Python 3.15 (CONTRACT §1) | CI parity. The E2E suite is stdlib-only and **ran clean on 3.13.5** — do not go install 3.15 before you can run anything | `python3 -V` |
 | Linux, cgroup v2, unprivileged userns | nsjail | `mount \| grep cgroup2` |
 | **nsjail at `/usr/local/bin/nsjail`** | every invocation | §2.2 |
@@ -366,7 +366,7 @@ bash scripts/build-rootfs.sh $ORVA_DATA_DIR/rootfs/python python
 `orva setup --rootfs-url <base>` downloads release tarballs instead of building.
 
 Versions **inside** the rootfs, measured by invoking a handler that prints them:
-node `v24.16.0`, python `3.14.5`. The host's own node/python are irrelevant to
+node `v26.13.0`, python `3.15.2`. The host's own node/python are irrelevant to
 functions — but the host's `python3` does run the E2E harness.
 
 Missing-rootfs signature (reproduced on a fresh data dir): deploy succeeds and
@@ -994,6 +994,8 @@ All rows below were measured against a live instance:
 | `routes-test.sh` | exact route, `/prefix/*` rewriting, reserved-prefix rejection, method filter 405/200, direct invoke coexists | **2.95 s** | `routes-test  pass=6  fail=0` (7 with `hey`) | yes |
 | `secrets-test.sh` | secret round-trip, values visible as env inside the sandbox, redeploy drops a deleted secret | **4.8 s** | `secrets-test  pass=6  fail=0` (8 with `hey`+`sqlite3`) | yes |
 | `egress-test.sh` | `none` blocked → `egress` reaches example.com → back to `none` re-isolates; a hostname blocklist rule genuinely REJECTs and deleting it restores reachability | **11.5 s** | `=== egress-test: 15 passed, 0 failed ===` (19 with `ORVA_CONTAINER`) | yes — `trap cleanup EXIT` |
+| `test/install/rootfs-sync-test.sh` | container rootfs seed/refresh by `.orva-runtime` stamp: seed, no-op, stale refresh, interrupted copy, user data untouched, empty path refused | **<1 s** | `passed=8 failed=0` | **yes**, `lint` job |
+| `test/install/sandbox-preflight-test.sh` | installer sandbox-mode selection and repair paths, plus the install record | **<1 s** | `passed=11 failed=0` | **yes**, `lint` job |
 | `errors-test.sh` | error contracts: 413, 502 `WORKER_CRASHED`, 504 `TIMEOUT`, 404, 405, 429 `INVOCATION_QUEUE_FULL` with `Retry-After` (burst at a warm, saturated pool), 409 `NOT_ACTIVE`, 400 on `status=building` | **14 s** (2-vCPU VM; includes a warm-up call and a 5 s burst) | `errors-test  pass=10  fail=0` | yes |
 | `build-cache-test.sh` | per-function dep-cache lifecycle: cold build, warm rebuild, purge → 200, idempotent purge, purge refused for non-functions, deploy-after-purge | **6.5 s** (warm npm) | `build-cache: 10 passed, 0 failed` | yes |
 | `heavy-deploy-test.sh` | async build queue: POST returns <500 ms with a `deployment_id`, real pip build, SSE stream emits, garbage requirements → `failed` while the function stays `active` | **14.3 s** (warm pip) | `heavy-deploy-test  pass=12  fail=0` | yes, but writes a log file (§9) |
@@ -2326,7 +2328,7 @@ accepting, explicitly, that CodeQL is advisory.
 | Job | push `main` | PR | release / dispatch | Sunday |
 |---|---|---|---|---|
 | `agent-docs` (AGENTS.md symlink mirror) | ✅ always | ✅ always | – | – |
-| `lint` (actionlint + shellcheck + `dash -n`) | if code | if code | – | – |
+| `lint` (actionlint + shellcheck + `dash -n`, and it **executes** `sandbox-preflight-test.sh` and `rootfs-sync-test.sh`) | if code | if code | – | – |
 | `go` (vet, **`-race` test**, build+version assert, govulncheck) | if code | if code | – | – |
 | `ui` (`npm ci`, `npm audit`, lint, build) | if code | if code | – | – |
 | `docker` (no-cache build + health smoke on 18443) | if code | if code | – | – |

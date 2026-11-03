@@ -41,6 +41,11 @@ execute it.**
 - New config key → update `CONFIG.md`
 - New error slug → update `ERRORS.md` (`TestErrorCatalogMatchesHandlers` fails the build if you forget)
 - Runtime behavior change → update `RUNTIMES.md`
+- Runtime version bump → `sandbox.NodeMajor` / `sandbox.PythonMinor` plus
+  `README.md`, `PRODUCT.md`, `DESIGN.md`, `reference.md`, `RUNTIMES.md`,
+  `ARCHITECTURE.md`, `OPERATIONS.md`, `scripts/build-rootfs.sh` and the four
+  dashboard files that print a runtime label; `TestRuntimeVersionsAgree` fails
+  the build otherwise
 - Backup/restore or vacuum changes → update `OPERATIONS.md`
 - Security boundary change → update `SECURITY.md`
 - New container-runtime evaluation → add `<NAME>.md` (mirror `KATA.md` / `GVISOR.md`) + update `SUPPORT.md` and the README runtime-support table

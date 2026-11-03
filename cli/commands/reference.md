@@ -1154,7 +1154,7 @@ Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel 
 Pick exactly one — Orva has no Docker, no buildpacks, no per-function version pinning. Two runtimes, generic ids, latest-stable only:
 - python (Python 3.15) — entry: handler.py — deps: requirements.txt
 - node (Node.js 26, also runs TypeScript) — entry: handler.js — deps: package.json
-Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error.
+Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error. Python deps are installed wheel-only, so a package with no wheel for the current Python fails the build with "no matching distribution" — shortly after a Python release that is usually a temporary gap upstream. Use a pure-Python alternative (for example `ruamel.yaml` instead of PyYAML, `pyzstd` instead of zstandard) or pin a version that ships the wheel.
 </runtimes>
 
 <handler_contract>
@@ -1776,7 +1776,7 @@ orva system health      # smoke test
 | `orva deploy` | [path] | Package a directory and deploy as a function |
 | `orva invoke` | [name|id] | POST to /fn/<id>/ and print the response |
 | `orva logs` | [name|id] [--follow] | List recent executions; --follow streams live via SSE |
-| `orva functions` | list / get / create / delete | CRUD for the function registry |
+| `orva functions` | list / get / create / update / delete / purge-cache | CRUD for the function registry; purge-cache drops the dependency cache |
 | `orva cron` | list / create / update / delete | Manage cron schedules attached to functions |
 | `orva jobs` | list / enqueue / retry / delete | Background queue management |
 | `orva kv` | list / get / put / delete | Browse a function’s key/value store |

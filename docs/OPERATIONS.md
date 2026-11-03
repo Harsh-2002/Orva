@@ -112,7 +112,8 @@ not emit it. For an existing bare-metal rootfs, run the **new binary's**
 `orva setup --skip-nsjail --data-dir /var/lib/orva` to refresh its embedded
 adapters and SDK, then restart Orva. Prefer the normal installer for upgrades:
 it refreshes the binary, rootfs, and adapters together. The Docker entrypoint
-refreshes adapters on every container start.
+refreshes adapters on every container start and replaces a volume's runtime rootfs
+whenever its `.orva-runtime` stamp differs from the image's.
 
 During function deletion, completion records for that function may still be
 queued after the API has returned. The writer now discards those records and
@@ -127,9 +128,13 @@ deleted function are removed in the same delete transaction.
 An Orva release can move a function runtime to a newer Node.js major or Python
 minor version. Afterwards some functions fail while others keep working:
 
-- a Node function with a native addon returns `500` with `Module did not
-  self-register` or `was compiled against a different Node.js version`;
-- a Python function with compiled packages returns `502 WORKER_CRASHED`.
+- a function that imports a compiled package at the top of the handler returns
+  `502 WORKER_CRASHED` — the worker dies before it reports ready. The package's
+  `ImportError` (Python) or `Module did not self-register` /
+  `was compiled against a different Node.js version` (Node) is in the
+  execution's stderr;
+- a Node function that requires a native addon *inside* the handler returns
+  `500` with that same message.
 
 Functions that are plain code, pure Python or pure JavaScript, or that use a
 stable ABI (`abi3`, N-API) are unaffected.

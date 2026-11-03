@@ -698,7 +698,7 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | Command | What it does |
 |---|---|
 | `orva login [--test]` | Save endpoint + API key to `~/.orva/config.yaml` |
-| `orva functions list / get / create / delete` | Function lifecycle |
+| `orva functions list / get / create / update / delete / purge-cache` | Function lifecycle |
 | `orva deploy <path> [--follow]` | Build + deploy a function from a directory |
 | `orva invoke <name>` | Run a function once and print the response |
 | `orva logs <name> [--follow \| --exec-id]` | Execution history, live tail, or single-row drill-down |
@@ -893,7 +893,10 @@ sudo systemctl restart orva        # OpenRC: rc-service orva restart
 Re-run `install.sh` instead when the runtime adapters, rootfs or the service
 unit also need refreshing — `orva upgrade` touches none of them.
 
-**The binary and the runtime rootfs are one unit.** A server build refuses the
+**The binary and the runtime rootfs are one unit.** `install.sh` records the
+release it installed in `rootfs/<runtime>/.orva-rootfs-version`, and the guard
+compares that stamp — not the interpreter stamp — with the release being
+installed. A server build refuses the
 upgrade when an installed runtime rootfs names a different release than the one
 being installed, because the adapter protocol moves with the binary and a
 mismatch makes every invocation time out. Every stamped runtime is checked — a
