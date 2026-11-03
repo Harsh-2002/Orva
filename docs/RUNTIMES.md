@@ -173,7 +173,7 @@ some compiled packages. As of the 3.15 move these are PyYAML, zstandard,
 snowflake-connector-python and onnxruntime; 292 of the 300 most-downloaded PyPI
 packages install fine. If a function needs one of them before upstream
 publishes, use a pure-Python or already-supported alternative — `ruamel.yaml`
-for PyYAML, `msgspec` for zstandard — or pin the dependency to a version that
+for PyYAML, `pyzstd` for zstandard — or pin the dependency to a version that
 ships the wheel.
 
 **Dependencies belong to the runtime they were built for.** They are installed
