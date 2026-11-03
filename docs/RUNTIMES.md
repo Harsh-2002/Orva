@@ -169,7 +169,12 @@ them and include the `.whl` in the deploy. Pip runs on the runtime's own
 interpreter and picks wheels for its Python version, glibc and architecture; a
 package with no wheel for the current Python fails the build with pip's
 "no matching distribution". A new Python release can briefly lack wheels for
-some compiled packages (PyYAML and zstandard, as of the 3.15 move).
+some compiled packages. As of the 3.15 move these are PyYAML, zstandard,
+snowflake-connector-python and onnxruntime; 292 of the 300 most-downloaded PyPI
+packages install fine. If a function needs one of them before upstream
+publishes, use a pure-Python or already-supported alternative — `ruamel.yaml`
+for PyYAML, `msgspec` for zstandard — or pin the dependency to a version that
+ships the wheel.
 
 **Dependencies belong to the runtime they were built for.** They are installed
 into the version directory, so compiled Python packages and Node native addons

@@ -14,6 +14,8 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+## v2026.11.03
+
 ### Breaking
 
 - **The function runtimes moved to the latest stable versions: `node` is now
