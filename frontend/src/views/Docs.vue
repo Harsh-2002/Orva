@@ -1598,8 +1598,8 @@ print(r.json())`,
 ])
 
 const runtimes = [
-  { id: 'python', name: 'Python 3.14', entry: 'handler.py', deps: 'requirements.txt', icon: PythonGlyph },
-  { id: 'node',   name: 'Node.js 24',  entry: 'handler.js', deps: 'package.json',     icon: NodeGlyph },
+  { id: 'python', name: 'Python 3.15', entry: 'handler.py', deps: 'requirements.txt', icon: PythonGlyph },
+  { id: 'node',   name: 'Node.js 26',  entry: 'handler.js', deps: 'package.json',     icon: NodeGlyph },
 ]
 
 const configRows = [

@@ -50,7 +50,7 @@ re-read platform explanations on every visit.
 
 ## Capabilities and Constraints
 
-- The supported runtimes are Node.js 24, Python 3.14, and TypeScript compiled
+- The supported runtimes are Node.js 26, Python 3.15, and TypeScript compiled
   into the Node runtime. Orva deliberately supports latest-stable runtimes only.
 - Linux function execution is isolated with nsjail. Egress policy is per
   sandbox and fail-closed.

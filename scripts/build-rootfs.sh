@@ -2,7 +2,7 @@
 # build-rootfs.sh — extract a minimal language rootfs from an official image.
 #
 # Usage: build-rootfs.sh <output-dir> <runtime>
-#   runtime: node | python   (latest-stable only: Node.js 24 / Python 3.14)
+#   runtime: node | python   (latest-stable only: Node.js 26 / Python 3.15)
 #
 # The resulting rootfs is a directory usable as an nsjail --chroot target.
 # It contains /usr/local/bin/node (or python3), all required shared libs,
@@ -19,8 +19,8 @@ if [[ -z "$out" || -z "$runtime" ]]; then
 fi
 
 case "$runtime" in
-  node)   image="node:24-slim" ;;
-  python) image="python:3.14-slim" ;;
+  node)   image="node:26-slim" ;;
+  python) image="python:3.15-slim" ;;
   *) echo "unsupported runtime: $runtime" >&2; exit 2 ;;
 esac
 
@@ -66,6 +66,16 @@ case "$runtime" in
     fi
     ;;
 esac
+
+# Record which interpreter this rootfs carries. The builder hashes it into every
+# version, and the container entrypoint compares it to decide whether a volume's
+# rootfs is stale. It comes from the interpreter itself, not from this script.
+case "$runtime" in
+  node)   stamp="node $(docker run --rm --entrypoint node "$image" --version)" ;;
+  python) stamp="python $(docker run --rm --entrypoint python3 "$image" --version | awk '{print $2}')" ;;
+esac
+printf '%s\n' "$stamp" > "$out/.orva-runtime"
+echo ">> runtime stamp: $stamp"
 
 # Standard Orva rootfs structure.
 mkdir -p "$out/opt/orva" "$out/code" "$out/tmp"

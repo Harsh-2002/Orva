@@ -72,8 +72,8 @@ Orva offers two runtimes, latest-stable only. The ID is generic (`node` /
 
 | Runtime | ID | Version | Entrypoint | Dependencies |
 |---|---|---|---|---|
-| Python | `python` | 3.14 | `handler.py` | `requirements.txt` |
-| Node.js | `node` | 24 | `handler.js` | `package.json` |
+| Python | `python` | 3.15 | `handler.py` | `requirements.txt` |
+| Node.js | `node` | 26 | `handler.js` | `package.json` |
 
 ---
 
@@ -1152,8 +1152,8 @@ Orva is a self-hosted serverless platform — think Cloudflare Workers / Vercel 
 
 <runtimes>
 Pick exactly one — Orva has no Docker, no buildpacks, no per-function version pinning. Two runtimes, generic ids, latest-stable only:
-- python (Python 3.14) — entry: handler.py — deps: requirements.txt
-- node (Node.js 24, also runs TypeScript) — entry: handler.js — deps: package.json
+- python (Python 3.15) — entry: handler.py — deps: requirements.txt
+- node (Node.js 26, also runs TypeScript) — entry: handler.js — deps: package.json
 Native modules (psycopg2-binary, sharp, bcrypt, etc.) are supported via prebuilt wheels / npm prebuilts; if a dep needs a system library not present in the runtime image, the build will fail with a clear error.
 </runtimes>
 
@@ -1412,7 +1412,7 @@ A POST endpoint that accepts a URL, fetches its og:image, caches the result by U
 </user_request>
 
 <your_response>
-**Plan.** Python 3.14 handler that accepts `{ "url": "..." }`, hashes the URL, checks orva.kv for a cached og_image (24-hour TTL), and on miss does an outbound HTTPS GET, parses the og:image meta tag, caches, and returns. Needs egress. Dep: `httpx`. No auth gate — receivers like this are typically public; add a JWT check if you'll expose it to anonymous web clients.
+**Plan.** Python 3.15 handler that accepts `{ "url": "..." }`, hashes the URL, checks orva.kv for a cached og_image (24-hour TTL), and on miss does an outbound HTTPS GET, parses the og:image meta tag, caches, and returns. Needs egress. Dep: `httpx`. No auth gate — receivers like this are typically public; add a JWT check if you'll expose it to anonymous web clients.
 
 ```python
 import hashlib, json, re, httpx
@@ -1470,7 +1470,7 @@ Every night at 3 AM UTC, delete all KV keys that start with "session:" and are o
 </user_request>
 
 <your_response>
-**Plan.** Python 3.14 handler triggered by a cron schedule `0 3 * * *` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. Requires egress because the bundled KV SDK calls Orva's control plane. Recommended auth: leave public; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
+**Plan.** Python 3.15 handler triggered by a cron schedule `0 3 * * *` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. Requires egress because the bundled KV SDK calls Orva's control plane. Recommended auth: leave public; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
 
 ```python
 import json
@@ -1513,7 +1513,7 @@ A function that receives Stripe webhook events, verifies the signature, and on `
 </user_request>
 
 <your_response>
-**Plan.** Node 24 handler. Reads STRIPE_WEBHOOK_SECRET from env, verifies the X-Stripe-Signature header (HMAC-SHA256 over "<ts>.<raw_body>"), and on `checkout.session.completed` enqueues an orva.jobs job. Returns 200 fast (Stripe times out at 10 s). Worker function "provision-account" runs in the background. No egress needed (we only RECEIVE; no outbound calls). No deps beyond the SDK and node:crypto.
+**Plan.** Node 26 handler. Reads STRIPE_WEBHOOK_SECRET from env, verifies the X-Stripe-Signature header (HMAC-SHA256 over "<ts>.<raw_body>"), and on `checkout.session.completed` enqueues an orva.jobs job. Returns 200 fast (Stripe times out at 10 s). Worker function "provision-account" runs in the background. No egress needed (we only RECEIVE; no outbound calls). No deps beyond the SDK and node:crypto.
 
 Set auth_mode to "public" — the HMAC IS the auth here, the platform_key gate would block Stripe.
 
@@ -1581,7 +1581,7 @@ Wire it up:
 
 ---
 
-Now ask me what kind of function I want to build. When I describe it, return a complete, ready-to-paste handler file plus requirements.txt or package.json if any third-party deps are needed. Default to Python 3.14 unless I say otherwise. If my idea fits orva.kv (caching/state), orva.jobs (background work), orva.invoke (chaining functions), a cron schedule, or a webhook receiver, use those primitives instead of inventing external infrastructure.
+Now ask me what kind of function I want to build. When I describe it, return a complete, ready-to-paste handler file plus requirements.txt or package.json if any third-party deps are needed. Default to Python 3.15 unless I say otherwise. If my idea fits orva.kv (caching/state), orva.jobs (background work), orva.invoke (chaining functions), a cron schedule, or a webhook receiver, use those primitives instead of inventing external infrastructure.
 ```
 
 ---

@@ -18,8 +18,8 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
 
 ## 1. Toolchain (pinned, lock-step)
 
-- **Go 1.27+** (the embedded Bifrost AI gateway requires it), **Node.js 26** (dashboard build only; functions run on the `node` runtime rootfs),
-  **Python 3.14**.
+- **Go 1.27+** (the embedded Bifrost AI gateway requires it), **Node.js 26** (the dashboard build and the `node` function runtime),
+  **Python 3.15** (the `python` function runtime and CI).
 - **nsjail** at the hardcoded path `/usr/local/bin/nsjail` (Linux only) — `PATH` is
   never consulted and there is no env override (`config/defaults.go` `NsjailBin`,
   pinned by `config_test.go`). The server starts without it, but **every

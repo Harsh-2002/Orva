@@ -147,7 +147,7 @@ either stopped or guaranteed not to be deploying / GC'ing.
 | `/var/lib/orva/.master.key` | **critical** — the AES-256-GCM key every function secret is encrypted with | static |
 | `/var/lib/orva/functions/*/versions/<hash>/` | rollback targets | bounded by `versions_to_keep` |
 | `/var/lib/orva/functions/*/current` (symlink) | active version pointer | static |
-| `/var/lib/orva/rootfs/` | ~600 MB of language base images | static; re-seeded by the Docker entrypoint on an empty volume, or by `install.sh` on bare metal |
+| `/var/lib/orva/rootfs/` | ~600 MB of language base images | managed by the image or installer, not for local edits. The Docker entrypoint seeds an empty volume and replaces a runtime whenever the image carries a different interpreter (its `.orva-runtime` stamp differs); `install.sh` does the same on bare metal |
 
 **A backup of the database and version archives alone is not sufficient.**
 Secrets are stored encrypted; `.master.key` is the only copy of the key that

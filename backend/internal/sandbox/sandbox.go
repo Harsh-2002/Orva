@@ -19,14 +19,22 @@ import (
 type Language string
 
 const (
-	// Orva offers exactly two runtimes, latest-stable only: `node` (Node.js 24)
-	// and `python` (Python 3.14). The identifier is generic on purpose — the
+	// Orva offers exactly two runtimes, latest-stable only: `node` (Node.js 26)
+	// and `python` (Python 3.15). The identifier is generic on purpose — the
 	// concrete version is an implementation detail that tracks latest-stable and
 	// is surfaced only as a display label (see handlers/runtimes.go). Legacy
 	// versioned IDs (node22/node24/python313/python314) are rewritten to these
 	// at startup — see migrations.go.
 	Node   Language = "node"
 	Python Language = "python"
+)
+
+// The versions the two runtime rootfs images carry. Everything in Go derives its
+// labels and its build identity from these; the Dockerfile, build-rootfs.sh, the
+// docs and the dashboard are checked against them by TestRuntimeVersionsAgree.
+const (
+	NodeMajor   = "26"
+	PythonMinor = "3.15"
 )
 
 // IsNode reports whether a language is the Node runtime.

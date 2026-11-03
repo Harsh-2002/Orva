@@ -198,8 +198,8 @@ picks up the new target.
 │           │   └── main.js                    Orva's adapter wrapper
 │           └── def5678.../
 └── rootfs/
-    ├── node/                                slim image with /usr/local/bin/node (Node.js 24)
-    └── python/                              slim image with /usr/local/bin/python3 (Python 3.14)
+    ├── node/                                slim image with /usr/local/bin/node (Node.js 26)
+    └── python/                              slim image with /usr/local/bin/python3 (Python 3.15)
 ```
 
 ## Database schema
@@ -437,9 +437,9 @@ Per-runtime adapter scripts. The adapter is the entrypoint nsjail
 exec's into; it reads request frames from stdin, calls the user's
 exported handler, and writes response frames back.
 
-- `node/adapter.js` — Node.js 24. Also serves TypeScript, which `tsc`
+- `node/adapter.js` — Node.js 26. Also serves TypeScript, which `tsc`
   compiles to JavaScript at build time, so there is no separate TS adapter.
-- `python/adapter.py` — Python 3.14. Also speaks WSGI and ASGI, so Flask and
+- `python/adapter.py` — Python 3.15. Also speaks WSGI and ASGI, so Flask and
   FastAPI apps run unmodified.
 
 ### `frontend/`
@@ -519,7 +519,8 @@ Combined with per-fn `dynamicMax` capped on CPU + memory budget, the
 host stays healthy during traffic floods.
 
 **Why content-addressed deploys?** Identical redeploys are a no-op
-(same hash → cached version dir). Rollback is a symlink retarget.
+(same source and runtime → same hash → cached version dir). The hash covers the
+runtime so a runtime upgrade rebuilds dependencies on the next deploy. Rollback is a symlink retarget.
 Garbage collection is "delete versions not in the keep window." The
 alternative — re-extract and re-install on every redeploy — is
 slower and provides no rollback story.

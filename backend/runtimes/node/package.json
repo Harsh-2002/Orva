@@ -4,5 +4,5 @@
   "main": "./orva.js",
   "types": "./orva.d.ts",
   "private": true,
-  "description": "Orva runtime SDK (in-sandbox). Shipped with the Node 24 adapter — not published to npm."
+  "description": "Orva runtime SDK (in-sandbox). Shipped with the Node 26 adapter — not published to npm."
 }

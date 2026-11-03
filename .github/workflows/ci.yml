@@ -229,14 +229,19 @@ jobs:
         run: |
           dash -n scripts/install.sh
           dash -n scripts/install-cli.sh
+          dash -n scripts/rootfs-sync.sh
           dash -n test/release/download-verified-asset.sh
           shellcheck -s sh -S warning \
             scripts/install.sh \
             scripts/install-cli.sh \
+            scripts/rootfs-sync.sh \
             test/release/download-verified-asset.sh
 
       - name: installer sandbox preflight unit tests
         run: bash test/install/sandbox-preflight-test.sh
+
+      - name: container rootfs sync unit tests
+        run: bash test/install/rootfs-sync-test.sh
 
       # bash scripts — entrypoint + every test suite. Failing builds here
       # gate the consolidated E2E suites' installer and CLI jobs.
@@ -446,7 +451,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
 
       # The dashboard is not committed, so the server binary cannot be
       # compiled without building it first: //go:embed all:ui_dist is a

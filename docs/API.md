@@ -176,10 +176,16 @@ Deploy from JSON.
 {
   "code": "module.exports = async () => ({ok:true});",
   "filename": "handler.js",
-  "dependencies": "lodash@^4.17.21", // optional, becomes package.json or requirements.txt
+  "dependencies": "{\"dependencies\":{\"lodash\":\"^4.17.21\"}}",
   "extras": {"tsconfig.json": "{...}"}  // optional support files written alongside the handler
 }
 ```
+
+`dependencies` is optional and is written **verbatim** as the dependency file for
+the runtime: the contents of a `package.json` for `node` (a JSON document, not a
+bare `name@version`), or the contents of a `requirements.txt` for `python`
+(`"requests==2.31.0\n"`). A value that is not valid for that file fails the
+build.
 
 Returns 202 with the deployment record. Build runs asynchronously.
 

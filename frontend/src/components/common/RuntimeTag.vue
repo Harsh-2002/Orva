@@ -8,7 +8,7 @@
     width to say what a 14 px snake or hexagon says instantly.
 
     The word is not thrown away, it moves to the accessible name and the
-    tooltip, so screen readers and hover both still get "Python 3.14". Icon-only
+    tooltip, so screen readers and hover both still get "Python 3.15". Icon-only
     is a legitimate choice here precisely because the set is two items wide,
     stable, and has established marks. It would not be legitimate for status,
     which is why StatusBadge keeps its word.
@@ -61,7 +61,7 @@ const mark = computed(() => {
   return null
 })
 
-// The pinned versions live in CONTRACT.md (Node 24, Python 3.14). They are
+// The pinned versions live in CONTRACT.md (Node 26, Python 3.15). They are
 // spelled out here because "Python" alone does not tell an operator which
 // interpreter their handler is about to run on.
 const label = computed(() => runtimeLabel(props.runtime) || 'Unknown runtime')

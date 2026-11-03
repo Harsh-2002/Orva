@@ -14,6 +14,40 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Breaking
+
+- **The function runtimes moved to the latest stable versions: `node` is now
+  Node.js 26 (current LTS) and `python` is Python 3.15.** Node.js 24 and Python
+  3.14 are no longer provided. Plain code, pure-Python and pure-JavaScript
+  dependencies, and packages on a stable ABI (`abi3`, N-API) keep working
+  unchanged. Dependencies are installed into each function's version directory,
+  so **compiled packages and native Node addons built for the old runtime do not
+  load on the new one** until the function is redeployed: Python functions fail
+  with `502 WORKER_CRASHED`, Node functions with `500 Module did not
+  self-register`. Python 3.15 is new, so a package that has not published a
+  Python 3.15 wheel cannot be installed yet (pip runs wheel-only). On
+  3 November 2026, of the 300 most-downloaded PyPI packages, PyYAML,
+  zstandard, snowflake-connector-python and onnxruntime had no wheel for it
+  (the other 296 did, or are pure Python). Until they publish one, vendor a
+  pure-Python alternative or pin the function's code to avoid the package.
+
+### Upgrade notes
+
+- After upgrading, redeploy every function that has compiled dependencies. The
+  version hash now covers the runtime, so redeploying unchanged source rebuilds
+  its dependencies on the new runtime; before this release an identical redeploy
+  reused the old build and could not fix it. A rollback to a deployment built
+  before the upgrade brings the old dependencies back. See
+  `docs/OPERATIONS.md` ("some functions fail right after a runtime upgrade").
+- Docker: pull the new image and recreate the container. The entrypoint moves
+  the volume's runtimes to the image's on first start; no manual step.
+- Bare-metal installs: re-run `install.sh`. It replaces the runtime rootfs
+  together with the binary, and it applies the user-namespace probe and unit
+  hardening fixes listed below. `orva upgrade` from the previous release
+  replaces only the binary, so functions would stay on Node.js 24 and
+  Python 3.14 until the installer runs; from this release on it refuses a
+  binary-only upgrade when the installed rootfs belongs to a different release.
+
 ### Changed
 
 - The container image no longer installs `nodejs`, `npm`, or `python3-pip` in
@@ -27,11 +61,39 @@ unreleased range, and the sections below as the record for everything before it.
   unaffected; only native frame names in a core dump are lost.
 - The dashboard now builds with Node 26 (current LTS) in the Dockerfile, CI and
   the release workflow, and building the server from source needs Node 26.
-  Go stays on 1.27.3, already the latest stable. Functions are unaffected: the
-  `node` runtime is still Node.js 24.
+  Go stays on 1.27.3, already the latest stable.
+- Runtime versions now come from one place in Go (`sandbox.NodeMajor` and
+  `sandbox.PythonMinor`) and `TestRuntimeVersionsAgree` fails the build when the
+  Dockerfile, `build-rootfs.sh`, the CI Python pin, the docs or the dashboard
+  disagree with it. The Dockerfile prunes `python3.*` rather than a hard-coded
+  minor version.
 
 ### Fixed
 
+- The Python dependency install no longer pins `--platform manylinux2014_*`,
+  `--python-version` or `--implementation`. pip runs on the rootfs's own
+  interpreter and now detects its tags itself. The pinned tag hid every wheel
+  newer than manylinux2014, so numpy, pandas, scipy, pillow, scikit-learn,
+  pyarrow, torch and others failed with "no matching distribution", or an older
+  release that still had a matching wheel was installed without warning. The
+  new selection is a superset of the old one, and it also follows the host
+  architecture.
+- Container volumes never received a new runtime. The entrypoint seeded a
+  volume's rootfs only when it was empty and otherwise refreshed just the
+  adapters, so an image upgrade left an existing volume on its old Node and
+  Python indefinitely, and interpreter security fixes never reached it. Each
+  rootfs now carries a `.orva-runtime` stamp written from the real interpreter,
+  and the entrypoint replaces a volume's runtime whenever the stamp differs from
+  the image's (copying to a sibling directory first, so an interrupted refresh
+  keeps the working one). The first start after this upgrade copies the two
+  runtimes into the volume.
+- Redeploying unchanged source after a runtime change now rebuilds the
+  dependencies. The version hash used to cover only the source, so the build
+  cache reused the old version directory and there was no way to rebuild short
+  of editing the code.
+- `docs/API.md` showed `"dependencies": "lodash@^4.17.21"` for `deploy-inline`.
+  The field is written verbatim as the dependency file, so for `node` it must be
+  a `package.json` document; the example produced an invalid `package.json`.
 - `orva upgrade` refuses a binary-only upgrade on a bare-metal server when any
   installed runtime rootfs carries a different release stamp, because the
   adapter protocol moves with the binary and a mismatch makes every invocation

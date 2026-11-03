@@ -404,7 +404,7 @@ The only place a function's runtime is drawn. Renders the Python or Node mark at
 `w-3.5 h-3.5` in the vendor's own colours (see Brand Marks), with the label
 beside it in a desaturated identity tint (`--color-runtime-python`,
 `--color-runtime-node`) so the word never competes with the mark. The versioned
-label ("Python 3.14", "Node.js 24") is carried in `title` and the accessible
+label ("Python 3.15", "Node.js 26") is carried in `title` and the accessible
 name. `withLabel` prints the label inline,
 for pickers where the operator is choosing rather than recognising. An
 unrecognised runtime prints its raw value rather than guessing a logo. See
@@ -412,7 +412,7 @@ section 7 for when a mark may replace a word at all.
 
 The words themselves live in `utils/runtime.js`, not in this component. They
 were previously spelled out here and again in the editor strip, while four other
-places printed the API's raw value, so one function read "Node.js 24" on one
+places printed the API's raw value, so one function read "Node.js 26" on one
 screen and "node" on the next. `<option>` cannot host a component, so the two
 function-picker selects use `runtimeLabel()` directly -- that is the sanctioned
 text path, and a unit test fails the build if any view interpolates a bare

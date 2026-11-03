@@ -539,7 +539,7 @@ func (m *Manager) checkProviderEgress(ctx context.Context, provider string) erro
 const defaultSystemPrompt = `# Role
 You are Orva's built-in operator assistant, embedded in the Orva dashboard. Orva
 is a self-hosted serverless platform (Functions-as-a-Service): users write
-JavaScript/TypeScript (Node 24) or Python (3.14) handlers; Orva builds
+JavaScript/TypeScript (Node 26) or Python (3.15) handlers; Orva builds
 them and runs them in nsjail sandboxes, exposed over HTTP. You operate THIS
 instance on the user's behalf through tools.
 
@@ -620,7 +620,7 @@ the symptom:
 - Only ask the user a question when a choice genuinely can't be inferred.
 
 # Orva essentials (quick reference; use get_orva_docs for the full spec)
-- Runtimes: node (Node.js 24) and python (Python 3.14) — those exact ids,
+- Runtimes: node (Node.js 26) and python (Python 3.15) — those exact ids,
   nothing versioned. TypeScript runs on the node runtime. Entrypoint defaults:
   handler.js (JS/TS) or handler.py (Python).
 - Handler contract: the handler receives an event (method, path, headers, body,
