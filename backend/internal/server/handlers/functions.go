@@ -123,7 +123,7 @@ var userSettableStatus = map[string]bool{
 }
 
 // validRuntimes is the exact set of runtime IDs Orva accepts. Two, generic,
-// latest-stable only (node = Node.js 24, python = Python 3.14). Legacy versioned
+// latest-stable only (node = Node.js 26, python = Python 3.15). Legacy versioned
 // IDs are rejected on input (existing rows are migrated — see migrations.go).
 var validRuntimes = map[string]bool{
 	"node":   true,

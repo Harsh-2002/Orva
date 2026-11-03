@@ -3,7 +3,7 @@
 #
 # Per runtime:
 #   1. Start orvad container with --runtime=$RUNTIME on a runtime-specific port.
-#   2. Onboard admin, mint API key, deploy a reference Node 24 function.
+#   2. Onboard admin, mint API key, deploy a reference Node 26 function.
 #   3. Warm the pool.
 #   4. Cold-start probe (drain pool then invoke; capture latency ×10, take median).
 #   5. ceiling.sh (full ramp) — writes per-runtime CSV.

@@ -51,18 +51,19 @@ COPY scripts/test-nsjail.sh /nsjail-tools/
 COPY scripts/nsjail/tcp-regression.cc /nsjail-tools/nsjail/
 RUN bash /nsjail-tools/test-nsjail.sh /nsjail && strip /nsjail/nsjail
 
-# Orva offers two runtimes, latest-stable only: node (Node.js 24) and
-# python (Python 3.14). Bump the base image here to track a newer stable.
-FROM node:24-slim AS node-strip
+# Orva offers two runtimes, latest-stable only: node (Node.js 26) and
+# python (Python 3.15). Bump the base image here to track a newer stable.
+FROM node:26-slim AS node-strip
 # Strip in a throwaway stage so binutils never reaches the shipped image.
 RUN apt-get update && apt-get install -y --no-install-recommends binutils \
     && strip --strip-unneeded /usr/local/bin/node \
     && rm -rf /var/lib/apt/lists/*
 
-FROM node:24-slim AS rootfs-node
+FROM node:26-slim AS rootfs-node
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
-    && mkdir -p /opt/orva /opt/orva/node_modules/orva /code
+    && mkdir -p /opt/orva /opt/orva/node_modules/orva /code \
+    && echo "node $(node --version)" > /.orva-runtime
 # The SDK's own package.json is canonical (main ./orva.js, types ./orva.d.ts),
 # so every file must keep its real name — a rename here breaks `main`.
 COPY backend/runtimes/node/adapter.js   /opt/orva/adapter.js
@@ -70,12 +71,13 @@ COPY backend/runtimes/node/orva.js      /opt/orva/node_modules/orva/orva.js
 COPY backend/runtimes/node/orva.d.ts    /opt/orva/node_modules/orva/orva.d.ts
 COPY backend/runtimes/node/package.json /opt/orva/node_modules/orva/package.json
 
-FROM python:3.14-slim AS rootfs-python
+FROM python:3.15-slim AS rootfs-python
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
-    && find /usr/local/lib/python3.14 -depth -type d -name __pycache__ -exec rm -rf {} + \
-    && find /usr/local/lib/python3.14 -depth -type d -name tests -exec rm -rf {} + \
-    && mkdir -p /opt/orva /code
+    && find /usr/local/lib/python3.* -depth -type d -name __pycache__ -exec rm -rf {} + \
+    && find /usr/local/lib/python3.* -depth -type d -name tests -exec rm -rf {} + \
+    && mkdir -p /opt/orva /code \
+    && echo "python $(python3 --version | cut -d' ' -f2)" > /.orva-runtime
 COPY backend/runtimes/python/adapter.py /opt/orva/adapter.py
 COPY backend/runtimes/python/orva.py    /opt/orva/orva.py
 COPY backend/runtimes/python/py.typed   /opt/orva/py.typed
@@ -111,7 +113,8 @@ COPY --from=rootfs-node   / /opt/orva/rootfs/node/
 COPY --from=node-strip    /usr/local/bin/node /opt/orva/rootfs/node/usr/local/bin/node
 COPY --from=rootfs-python / /opt/orva/rootfs/python/
 COPY scripts/entrypoint.sh /usr/local/bin/orva-entrypoint
-RUN chmod +x /usr/local/bin/orva-entrypoint
+COPY scripts/rootfs-sync.sh /usr/local/bin/orva-rootfs-sync
+RUN chmod +x /usr/local/bin/orva-entrypoint && chmod 0644 /usr/local/bin/orva-rootfs-sync
 
 WORKDIR /var/lib/orva
 EXPOSE 8443

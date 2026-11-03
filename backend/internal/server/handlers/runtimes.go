@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
@@ -28,16 +29,16 @@ type runtimeInfo struct {
 var supportedRuntimes = []runtimeInfo{
 	{
 		ID:             "node",
-		Name:           "Node.js 24 (current)",
-		Version:        "24",
+		Name:           "Node.js " + sandbox.NodeMajor + " (current)",
+		Version:        sandbox.NodeMajor,
 		Language:       "javascript",
 		DefaultHandler: "handler.js",
 		Extensions:     []string{".js", ".mjs", ".cjs", ".ts"},
 	},
 	{
 		ID:             "python",
-		Name:           "Python 3.14 (current)",
-		Version:        "3.14",
+		Name:           "Python " + sandbox.PythonMinor + " (current)",
+		Version:        sandbox.PythonMinor,
 		Language:       "python",
 		DefaultHandler: "handler.py",
 		Extensions:     []string{".py"},

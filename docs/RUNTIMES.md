@@ -8,8 +8,8 @@ stdin/stdout to the parent `orvad` process.
 
 | runtime  | base image       | entrypoint default | dependency file    |
 |----------|------------------|--------------------|--------------------|
-| `node`   | node:24-slim     | `handler.js`       | `package.json`     |
-| `python` | python:3.14-slim | `handler.py`       | `requirements.txt` |
+| `node`   | node:26-slim     | `handler.js`       | `package.json`     |
+| `python` | python:3.15-slim | `handler.py`       | `requirements.txt` |
 
 The dashboard editor marks likely syntax issues after typing pauses. These are
 local hints, not a complete compiler or a guarantee that a function will run.
@@ -143,7 +143,7 @@ def handler(req):
 ```
 
 The adapter looks for a top-level `handler` callable. Async (`async def`)
-is supported on the python runtime (Python 3.14); the adapter awaits if needed.
+is supported on the python runtime (Python 3.15); the adapter awaits if needed.
 
 ## Dependencies
 
@@ -165,7 +165,19 @@ echo "requests==2.31.0" > requirements.txt
 
 Pip uses `--only-binary=:all:` so wheels are required (no compilation
 during the build). For native deps that don't ship wheels, prebuild
-them and include the `.whl` in the deploy.
+them and include the `.whl` in the deploy. Pip runs on the runtime's own
+interpreter and picks wheels for its Python version, glibc and architecture; a
+package with no wheel for the current Python fails the build with pip's
+"no matching distribution". A new Python release can briefly lack wheels for
+some compiled packages (PyYAML and zstandard, as of the 3.15 move).
+
+**Dependencies belong to the runtime they were built for.** They are installed
+into the version directory, so compiled Python packages and Node native addons
+built for one runtime version do not load on the next. The version hash covers
+the runtime as well as the source: redeploying unchanged source after the
+runtime changes rebuilds the dependencies instead of reusing the old directory.
+Packages that are pure Python or pure JavaScript, or that use a stable ABI
+(`abi3`, N-API), keep working across a runtime upgrade.
 
 ## Environment variables
 

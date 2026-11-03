@@ -1433,8 +1433,8 @@ const canTest = computed(() => isDeployed.value && !deploying.value)
 // python); the version shown here is a display label that tracks latest-stable.
 // Functions on legacy versioned ids are migrated to these on server startup.
 const runtimes = [
-  { id: 'python', label: 'Python 3.14' },
-  { id: 'node',   label: 'Node.js 24' },
+  { id: 'python', label: 'Python 3.15' },
+  { id: 'node',   label: 'Node.js 26' },
 ]
 
 const isPythonRuntime = (rt) => rt === 'python'

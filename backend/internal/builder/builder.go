@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -122,11 +121,15 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 		return nil, err
 	}
 
-	// Compute code hash.
-	codeHash, err := hashFile(codeArchivePath)
+	// The version hash covers the installed runtime as well as the source.
+	// Dependencies are built into the version directory, so the same source on a
+	// different interpreter must not hit the cache hit below: compiled packages
+	// and native addons from the old runtime do not load on the new one.
+	archiveHash, err := hashFile(codeArchivePath)
 	if err != nil {
 		return nil, fmt.Errorf("hash archive: %w", err)
 	}
+	codeHash := versionHash(archiveHash, b.runtimeIdentity(fn.Runtime))
 
 	fnDir := filepath.Join(b.DataDir, "functions", fn.ID)
 	versionDir := filepath.Join(fnDir, "versions", codeHash)
@@ -347,17 +350,32 @@ exec(open("/opt/orva/adapter.py").read())
 	}
 }
 
-// isNodeRuntime / isPythonRuntime / pythonVersionFor are thin helpers so a
-// version bump only changes one place. Orva offers two generic runtimes
-// (node = Node.js 24, python = Python 3.14).
 func isNodeRuntime(r string) bool   { return r == "node" }
 func isPythonRuntime(r string) bool { return r == "python" }
 
-// pythonVersionFor returns the pip --python-version flag value for the python
-// runtime. Used so wheels resolve for the right interpreter; bump alongside the
-// python rootfs base image.
-func pythonVersionFor(r string) string {
-	return "3.14"
+// RuntimeStampFile is written into each runtime rootfs when it is built, from the
+// interpreter it carries ("node v26.13.0", "python 3.15.2").
+const RuntimeStampFile = ".orva-runtime"
+
+// runtimeIdentity names the interpreter that is actually installed for a runtime.
+// It is read from the rootfs rather than assumed from this binary's own version,
+// because the two can disagree: a binary-only upgrade, or a container volume that
+// still holds the previous image's rootfs. A rootfs without a stamp (one built
+// before stamps existed) gets an identity of its own, so it never shares a build
+// with a stamped one.
+func (b *Builder) runtimeIdentity(runtime string) string {
+	raw, err := os.ReadFile(filepath.Join(b.RootfsDir, runtime, RuntimeStampFile))
+	if s := strings.TrimSpace(string(raw)); err == nil && s != "" {
+		return s
+	}
+	return runtime + " unstamped"
+}
+
+// versionHash identifies a build: the source archive plus the interpreter it is
+// built for. Same source and interpreter give the same hash and hit the cache.
+func versionHash(archiveHash, identity string) string {
+	sum := sha256.Sum256([]byte(archiveHash + "\x00" + identity))
+	return hex.EncodeToString(sum[:])
 }
 
 // hashFile computes the SHA256 hash of a file.
@@ -544,35 +562,15 @@ func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtim
 			return entrypoint, nil
 		}
 		slog.Info("installing python dependencies", "dir", codeDir, "runtime", runtime)
-		// Wheels are still resolved explicitly for the sandbox's Python
-		// version and platform. The build now runs on that interpreter, so
-		// this is belt-and-braces rather than a cross-install — but pinning
-		// it keeps wheel selection identical to what shipped before.
-		// --only-binary=:all: forces wheels so we never execute a setup.py.
-		pyVer := pythonVersionFor(runtime)
 		out, err := b.runBuildStep(ctx, buildStep{
 			language: sandbox.Python,
 			fnID:     fnID,
 			codeDir:  codeDir,
 			stream:   "pip",
 			timeout:  b.buildStepTimeout(),
-			argv: []string{
-				pythonPipBin,
-				"install", "-r", sandbox.BuildCodeDir + "/requirements.txt",
-				"-t", sandbox.BuildCodeDir,
-				"--python-version", pyVer,
-				"--platform", pipPlatformTag(),
-				"--implementation", "cp",
-				"--only-binary=:all:",
-				"--quiet",
-				// Suppress pip's "Running pip as the 'root' user" warning.
-				// We're inside a single-tenant container — there's no
-				// alternative user to switch to and the warning was the
-				// only line showing up in the deploy progress UI.
-				"--root-user-action=ignore",
-			},
-			env:     map[string]string{"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
-			network: buildNetworkEgress,
+			argv:     pipInstallArgv(),
+			env:      map[string]string{"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+			network:  buildNetworkEgress,
 		})
 		if err != nil {
 			return entrypoint, fmt.Errorf("pip install failed: %w\n%s", err, string(out))
@@ -926,18 +924,28 @@ func (b *Builder) tryFnLock(fnID string) (func(), bool) {
 	return lk.Unlock, true
 }
 
-// pipPlatformTag is the manylinux wheel platform pip resolves against.
+// pipInstallArgv is the pip invocation for the python runtime's dependencies.
 //
-// It must track the host architecture. This was hardcoded to
-// manylinux2014_x86_64, which combined with --only-binary=:all: meant an
-// arm64 host silently installed x86_64 wheels — any package with a compiled
-// extension would then fail to import at invoke time, long after the deploy
-// reported success.
-func pipPlatformTag() string {
-	if goruntime.GOARCH == "arm64" {
-		return "manylinux2014_aarch64"
+// It deliberately passes no --platform, --python-version or --implementation.
+// pip runs inside the jail on the rootfs's own interpreter, so it already knows
+// its interpreter, glibc and architecture. Pinning a platform tag hid every wheel
+// newer than that tag: manylinux2014 made numpy, pandas, scipy, pillow, pyarrow
+// and torch "not found", or silently installed an older release that still had a
+// matching wheel. An arm64 pin also installed x86_64 wheels that failed to import
+// at invoke time. Native detection is a superset of the old selection.
+//
+// --only-binary=:all: forces wheels, so setup.py never runs.
+func pipInstallArgv() []string {
+	return []string{
+		pythonPipBin,
+		"install", "-r", sandbox.BuildCodeDir + "/requirements.txt",
+		"-t", sandbox.BuildCodeDir,
+		"--only-binary=:all:",
+		"--quiet",
+		// Suppress pip's "Running pip as the 'root' user" warning: this is a
+		// single-tenant jail with no other user to switch to.
+		"--root-user-action=ignore",
 	}
-	return "manylinux2014_x86_64"
 }
 
 // buildStepTimeout returns the per-step deadline from build_timeout_seconds.

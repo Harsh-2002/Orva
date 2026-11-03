@@ -279,7 +279,7 @@ Say these out loud before you claim a change is verified:
 |---|---|---|
 | Go 1.27+ | the embedded Bifrost AI gateway needs it | `go version` |
 | Node 26 | frontend build only — *not* the function runtime | `node --version` |
-| Python 3.14 (CONTRACT §1) | CI parity. The E2E suite is stdlib-only and **ran clean on 3.13.5** — do not go install 3.14 before you can run anything | `python3 -V` |
+| Python 3.15 (CONTRACT §1) | CI parity. The E2E suite is stdlib-only and **ran clean on 3.13.5** — do not go install 3.15 before you can run anything | `python3 -V` |
 | Linux, cgroup v2, unprivileged userns | nsjail | `mount \| grep cgroup2` |
 | **nsjail at `/usr/local/bin/nsjail`** | every invocation | §2.2 |
 | rootfs trees under `$ORVA_DATA_DIR/rootfs/{node,python}` | every invocation | §2.3 |
@@ -2390,7 +2390,7 @@ A regression in `env.py` is invisible to CI.
 | `go` vuln | `go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...` | a new advisory reddens CI with zero code change |
 | `ui` | `cd frontend && npm audit --audit-level=moderate && npm test && npm run lint && npm run build` | CI uses **`npm ci`** (lockfile-strict); `make ui` uses `npm install` and may rewrite the lockfile. `npm audit` is the classic green-locally-red-in-CI leg. `npm test` is two runners — `node --test test/*.test.js` and `vitest run` over `test/components/**` — and `make ui`/`make embed`/`make build-all` run **neither**, so a frontend change verified only through the Makefile has run no frontend test at all |
 | `docker` | `docker build -t orva:ci . && docker run -d -p 127.0.0.1:18443:8443 …` then poll health | CI uses `no-cache: true, pull: true`. Neither passes `--build-arg VERSION`, so both report `dev`/`unknown` — only `release.yml` stamps identity. The first 2–3 health curls fail with `Empty reply`; the 30× loop is required |
-| `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` builds the UI from source (the job installs Node 24 for exactly this), so the E2E job serves a freshly built dashboard |
+| `e2e` | §1.2 plus `ORVA_ENDPOINT=$B ORVA_API_KEY=$K bash test/sdk-test.sh` | CI uses a **host** nsjail with `setcap` + `ORVA_DISABLE_USERNS=1`; local Docker mode keeps user namespaces and `--cap-add SYS_ADMIN`. Different nsjail configuration. `make build` builds the UI from source (the job installs Node 26 for exactly this), so the E2E job serves a freshly built dashboard |
 | `cli-unit` | `go vet ./cli/... ./internal/...` && `go test ./cli/commands/ -count=1` | CI adds `-v` |
 | `cli-cross-build` | `bash test/cli/build-matrix.sh && bash test/cli/command-tree.sh` | the qemu-aarch64 `--version` leg is a `warn`, never a failure, and is skipped without qemu |
 | `install-matrix` | `ORVA_BROWSER_LEG=0 bash test/install/run-distro.sh ubuntu24` | verified: exit 0, ~4 min, host port **19449** |

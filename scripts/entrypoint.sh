@@ -4,8 +4,9 @@
 # The rootfs + adapters are baked into the image. When users mount a volume
 # at /var/lib/orva to persist their DB + function code, that volume shadows
 # the image's /var/lib/orva/rootfs. On first start the volume is empty and
-# we copy the rootfs in. On upgrades we refresh the adapters in case the
-# image has newer versions.
+# we copy the rootfs in. On upgrades the runtimes are replaced when the image
+# carries a different interpreter (see rootfs-sync.sh), and the adapters are
+# always refreshed.
 
 set -e
 
@@ -14,14 +15,10 @@ VOLUME_ROOTFS=/var/lib/orva/rootfs
 
 RUNTIMES="node python"
 
-for rt in $RUNTIMES; do
-  # If the volume's rootfs for this runtime is empty, seed it from the image.
-  if [ ! -d "$VOLUME_ROOTFS/$rt/usr" ]; then
-    echo ">> seeding $VOLUME_ROOTFS/$rt from image"
-    mkdir -p "$VOLUME_ROOTFS/$rt"
-    cp -a "$IMAGE_ROOTFS/$rt/." "$VOLUME_ROOTFS/$rt/"
-  fi
-done
+# shellcheck source=/dev/null
+. /usr/local/bin/orva-rootfs-sync
+# shellcheck disable=SC2086  # RUNTIMES is a word list on purpose
+sync_runtime_rootfs "$IMAGE_ROOTFS" "$VOLUME_ROOTFS" $RUNTIMES
 
 # Always refresh the adapters + bundled SDK so image upgrades roll out
 # even when the user has an existing volume. Includes the orva module

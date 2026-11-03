@@ -1129,7 +1129,7 @@ const suggestFix = async () => {
     if (!cachedSource.value) {
       // The /source endpoint returns {code, filename, runtime}. Fall
       // back to a function GET if the runtime field is missing on the
-      // older shape — we want a clean "Python 3.14"-style label in the
+      // older shape — we want a clean "Python 3.15"-style label in the
       // prompt's <context> section.
       try {
         const res = await getFunctionSource(drawerRow.value.function_id)

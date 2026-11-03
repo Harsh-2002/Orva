@@ -98,7 +98,7 @@ curl -s -H "X-Orva-API-Key: $KEY" "http://localhost:8443/api/v1/executions/$EXEC
 
 Look at the `stderr`. If empty, the worker died before writing —
 common causes: missing dependency (typo in `requirements.txt`), wrong
-entrypoint, or a package with no wheel for the runtime's Python (3.14).
+entrypoint, or a package with no wheel for the runtime's Python (3.15).
 
 **Fix.** Redeploy with corrected code; or rollback to the last known
 good version via the Deployments view.
@@ -121,6 +121,28 @@ foreign-key failure. This counter should rise only alongside deliberate
 function deletion; `writer.critical_failures` remains the storage-failure
 signal. Parentless captured requests, spans, and structured logs for the
 deleted function are removed in the same delete transaction.
+
+## Symptom: some functions fail right after a runtime upgrade
+
+An Orva release can move a function runtime to a newer Node.js major or Python
+minor version. Afterwards some functions fail while others keep working:
+
+- a Node function with a native addon returns `500` with `Module did not
+  self-register` or `was compiled against a different Node.js version`;
+- a Python function with compiled packages returns `502 WORKER_CRASHED`.
+
+Functions that are plain code, pure Python or pure JavaScript, or that use a
+stable ABI (`abi3`, N-API) are unaffected.
+
+**Cause.** Dependencies are installed into the function's version directory, so
+the binaries there were built for the old interpreter.
+
+**Fix.** Redeploy the function from its source. The version hash covers the
+runtime, so unchanged source is rebuilt on the new runtime instead of reusing the
+old directory. Rolling back to a deployment that was built before the upgrade
+brings the old, incompatible dependencies back. If the rebuild fails with pip's
+"no matching distribution", the package has no wheel for the new Python yet;
+pin an older version that does, or wait for the package to publish one.
 
 ## Symptom: EVERY function returns `WORKER_CRASHED` right after a bare-metal install
 

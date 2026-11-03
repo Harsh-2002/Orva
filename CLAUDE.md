@@ -1,6 +1,6 @@
 # Orva
 
-Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node.js 24), Python (3.14), or TypeScript functions — two generic runtimes, `node` and `python`, latest-stable only; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, MCP server, and an in-product AI chat assistant (the **Chat** sidebar item, route `/web/ai`) that operates the instance end-to-end via in-process tool calling (BYO provider keys, embedded Bifrost gateway).
+Self-hosted Function-as-a-Service (FaaS) for homelab and on-premises use. Users write JavaScript (Node.js 26), Python (3.15), or TypeScript functions — two generic runtimes, `node` and `python`, latest-stable only; Orva deploys them into nsjail sandboxes and exposes them over HTTP with a built-in dashboard, CLI, MCP server, and an in-product AI chat assistant (the **Chat** sidebar item, route `/web/ai`) that operates the instance end-to-end via in-process tool calling (BYO provider keys, embedded Bifrost gateway).
 
 > **Operational contract:** read [`CONTRACT.md`](CONTRACT.md) **before proposing changes** — the canonical commands, build/CI invariants, ports, and must-not-break rules. Each directory's `CLAUDE.md` (mirrored as `AGENTS.md` so Codex/opencode read it too) covers how that subsystem works.
 >

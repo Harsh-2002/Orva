@@ -311,7 +311,7 @@ system health.
 
 A typical workflow to ship a new function:
   1. list_runtimes  — see which Python/Node/TypeScript versions are available
-     (Python 3.14, Node.js 24, and TypeScript on the Node runtime in v0.4).
+     (Python 3.15, Node.js 26, and TypeScript on the Node runtime in v0.4).
   2. create_function — give it a name, runtime, and resource limits.
   3. (optional) set_secret — store API keys the function will read at runtime.
   4. (optional) update_function with network_mode="egress" if it needs to call external HTTPS.
@@ -346,7 +346,7 @@ v0.4 capabilities:
   - Settings storage + vacuum — GET /api/v1/system/storage breaks down DB,
     WAL, and functions-tree sizes; POST /api/v1/system/vacuum runs
     PRAGMA wal_checkpoint(TRUNCATE) followed by VACUUM to reclaim space.
-  - TypeScript runtime — first-class TS support on the Node 24 runtime; pick
+  - TypeScript runtime — first-class TS support on the Node 26 runtime; pick
     runtime="node" and a .ts handler source.
   - /metrics histograms — orva_invocation_duration_ms_bucket{le=…} +
     orva_sandbox_spawn_duration_ms_bucket{le=…} are emitted alongside the
