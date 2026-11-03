@@ -217,9 +217,11 @@ Returns the function's current code + dependencies as JSON. Used by
 the Editor view.
 
 ### `DELETE /api/v1/functions/{id}/build-cache`
-Drops the function's persistent installer cache (npm / pip). The next deploy
-re-downloads its dependencies from scratch. Use when a cached dependency is
-suspect; it never touches deployed versions or the running function.
+Drops the function's persistent installer cache (npm / pip). The next deploy that
+builds a new version re-downloads its dependencies from scratch; a redeploy of
+identical source is served from the existing version directory and is unaffected.
+Use when a cached dependency is suspect; it never touches deployed versions or
+the running function.
 
 ### `GET /api/v1/functions/{id}/diff?from=<dep_id>&to=<dep_id>&format=json|unified`
 Compares the handler source + dependency manifest between two past

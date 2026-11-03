@@ -1776,7 +1776,7 @@ orva system health      # smoke test
 | `orva deploy` | [path] | Package a directory and deploy as a function |
 | `orva invoke` | [name|id] | POST to /fn/<id>/ and print the response |
 | `orva logs` | [name|id] [--follow] | List recent executions; --follow streams live via SSE |
-| `orva functions` | list / get / create / delete | CRUD for the function registry |
+| `orva functions` | list / get / create / update / delete / purge-cache | CRUD for the function registry; purge-cache drops the dependency cache |
 | `orva cron` | list / create / update / delete | Manage cron schedules attached to functions |
 | `orva jobs` | list / enqueue / retry / delete | Background queue management |
 | `orva kv` | list / get / put / delete | Browse a function’s key/value store |

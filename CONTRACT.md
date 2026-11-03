@@ -30,7 +30,11 @@ place the load-bearing operational facts live; `CLAUDE.md`/`AGENTS.md` and
   live at **repo-root `internal/`** (NOT `backend/internal/`) because the slim CLI
   imports them.
 - Versions are held **lock-step** across `Dockerfile`, `.github/workflows/ci.yml`,
-  and `.github/workflows/release.yml` — bump them together.
+  and `.github/workflows/release.yml` — bump them together. The function runtime
+  versions themselves live in `sandbox.NodeMajor` / `sandbox.PythonMinor`
+  (`backend/internal/sandbox/sandbox.go`); `TestRuntimeVersionsAgree` fails the
+  build when the Dockerfile stages, `scripts/build-rootfs.sh`, the CI Python pin,
+  the docs or the dashboard disagree with them.
 - Every nsjail build must apply `scripts/patch-nsjail.sh` to the pinned revision
   and run `scripts/test-nsjail.sh` after compilation. The reviewed NSTUN patch
   and deterministic TCP regression live in `scripts/nsjail/`; changing the

@@ -198,6 +198,11 @@ shipped `docker-compose.yml` sets `max-size: 10m, max-file: 5`).
 
 ## Upgrades
 
+A release that moves a function runtime replaces the volume's rootfs on start
+(the entrypoint compares `.orva-runtime`), and functions with compiled
+dependencies need a redeploy afterwards — see `OPERATIONS.md`, "some functions
+fail right after a runtime upgrade".
+
 Dependency corrections ship with the release. When upgrading for a sandbox
 networking fix, use the normal installer (bare metal) or pull and recreate the
 container (Docker), not just a replacement Orva server binary. The installer

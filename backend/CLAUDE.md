@@ -155,7 +155,7 @@ interface first) for the sandbox SDK control plane. Do not reintroduce a
 gateway or generic health probe: it can select a separate Orva instance before
 this server begins listening. The environment override remains available for
 unusual routing.
-| `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx` |
+| `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `safepath` | Containment for user-supplied relative paths. `Validate` on the write side so a bad `entrypoint` never reaches storage; `Join` on the read side, which must hold independently because rows written before validation still carry whatever they carry. Traversal is rejected, not collapsed. |

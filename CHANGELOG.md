@@ -24,14 +24,19 @@ unreleased range, and the sections below as the record for everything before it.
   dependencies, and packages on a stable ABI (`abi3`, N-API) keep working
   unchanged. Dependencies are installed into each function's version directory,
   so **compiled packages and native Node addons built for the old runtime do not
-  load on the new one** until the function is redeployed: Python functions fail
-  with `502 WORKER_CRASHED`, Node functions with `500 Module did not
-  self-register`. Python 3.15 is new, so a package that has not published a
+  load on the new one** until the function is redeployed. Importing the package
+  at the top of the handler fails the worker before it is ready: both runtimes
+  return `502 WORKER_CRASHED`, with the package's `ImportError` (Python) or
+  `Module did not self-register` / `was compiled against a different Node.js
+  version` (Node) in the execution's stderr. Requiring the package inside the
+  handler instead returns `500` with that message. Python 3.15 is new, so a package that has not published a
   Python 3.15 wheel cannot be installed yet (pip runs wheel-only). On
-  3 November 2026, of the 300 most-downloaded PyPI packages, PyYAML,
-  zstandard, snowflake-connector-python and onnxruntime had no wheel for it
-  (the other 296 did, or are pure Python). Until they publish one, vendor a
-  pure-Python alternative or pin the function's code to avoid the package.
+  3 November 2026, of the 300 most-downloaded PyPI packages, 292 install
+  wheel-only on 3.15 (296 on 3.14). The four that work on 3.14 but not yet on
+  3.15 are PyYAML, zstandard, snowflake-connector-python and onnxruntime; the
+  other four (ruff, uv, playwright, watchdog) are not wheel-installable on any
+  Python version. Until the four publish, use a pure-Python alternative or pin
+  the dependency.
 
 ### Upgrade notes
 

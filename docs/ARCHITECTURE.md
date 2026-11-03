@@ -151,7 +151,8 @@ POST /api/v1/functions/{id}/deploy-inline   {code, dependencies}
      │      ├ Builder.Build(ctx, fn, tarball)
      │      │     │
      │      │     ├ pre-flight statvfs check        → ErrInsufficientDisk
-     │      │     ├ hashFile(tarball) → codeHash
+     │      │     ├ hashFile(tarball) → archiveHash
+     │      │     ├ versionHash(archiveHash, runtimeIdentity) → codeHash
      │      │     ├ if versions/<hash>/.orva-ready exists → cached short-circuit
      │      │     ├ scratch_dir = versions/<hash>.tmp.<rand>
      │      │     │     ├ extract tarball

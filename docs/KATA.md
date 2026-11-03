@@ -69,7 +69,7 @@ guest. There's no syscall translation layer to trip over.
 ## Performance cost
 
 Measured 2026-05-13 on Ubuntu 24.04 / kernel 6.8 / 2 CPU / 11.68 GiB.
-Workload: Node 24 noop handler (`async () => ({statusCode:200,body:"ok"})`).
+Workload: a noop handler (Node 24 at the time of the measurement; `test/kata-bench/run.sh` deploys the current Node runtime, so re-run it rather than comparing these numbers directly).
 Each runtime measured sequentially in isolation against the same
 reference function. To reproduce on your host, run `bash
 test/kata-bench/run.sh` — it writes per-runtime CSVs under

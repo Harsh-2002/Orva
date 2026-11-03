@@ -170,8 +170,8 @@ interpreter and picks wheels for its Python version, glibc and architecture; a
 package with no wheel for the current Python fails the build with pip's
 "no matching distribution". A new Python release can briefly lack wheels for
 some compiled packages. As of the 3.15 move these are PyYAML, zstandard,
-snowflake-connector-python and onnxruntime; 292 of the 300 most-downloaded PyPI
-packages install fine. If a function needs one of them before upstream
+snowflake-connector-python and onnxruntime: 292 of the 300 most-downloaded PyPI
+packages install wheel-only on 3.15 (296 on 3.14). If a function needs one of them before upstream
 publishes, use a pure-Python or already-supported alternative — `ruamel.yaml`
 for PyYAML, `pyzstd` for zstandard — or pin the dependency to a version that
 ships the wheel.
