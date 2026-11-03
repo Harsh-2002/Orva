@@ -865,7 +865,7 @@ orva completion powershell > "$completionDir\orva-completion.ps1"
 ## Auto-update (`orva upgrade`)
 
 ```bash
-orva upgrade --check        # is there a newer release?
+orva upgrade --check        # is there a newer release? (also warns if a real run would be refused)
 orva upgrade                # download + atomically replace the running binary
 orva upgrade --force        # reinstall the latest even if versions match
 orva upgrade --data-dir /srv/orva   # non-default install location
@@ -901,8 +901,10 @@ current Node rootfs cannot hide a stale Python one. The data directory comes
 from `--data-dir`, then `ORVA_DATA_DIR`, then the record `install.sh` writes to
 `/etc/orva/install.conf`, then the systemd/OpenRC unit it wrote, then
 `/var/lib/orva`. The refusal names every stale runtime and tells you to re-run
-`install.sh`; `--force` replaces the binary anyway. A rootfs with no stamp — the
-container image, where `entrypoint.sh` refreshes it — is allowed.
+`install.sh`; `--force` replaces the binary anyway. `orva upgrade --check`
+applies the same test and prints a `runtime rootfs is behind (…)` line instead of
+recommending `orva upgrade` when a real run would be refused. A rootfs with no
+stamp — the container image, where `entrypoint.sh` refreshes it — is allowed.
 
 If the install path is not writable (e.g. `/usr/local/bin` on a system
 where you installed without `sudo`), `orva upgrade` exits non-zero
