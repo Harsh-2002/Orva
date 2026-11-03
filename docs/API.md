@@ -533,8 +533,10 @@ prefix, function_count, last_used_at, expires_at, created_at.
 }
 ```
 Returns the plaintext token **once** in the `token` field. Save it
-immediately — it's not recoverable. Two functions whose names
-snake_case to the same MCP tool name are rejected with 400 / `TOOL_NAME_COLLISION`.
+immediately — it's not recoverable. A `function_ids` entry that does not exist
+is rejected with 400 / `INVALID_FUNCTION`, an id listed twice with 400 /
+`VALIDATION`, and two functions whose names snake_case to the same MCP tool name
+with 400 / `TOOL_NAME_COLLISION`.
 
 ### `GET /api/v1/channels/{id}`
 Detail with the bundled function set + per-function description overrides.
@@ -550,7 +552,9 @@ Update name / description / expires_at. Function set is unchanged.
 }
 ```
 Replaces the function set wholesale. Junction descriptions on
-overlapping function IDs are preserved unless explicitly overridden.
+overlapping function IDs are preserved unless explicitly overridden. The same
+`INVALID_FUNCTION`, `VALIDATION` (duplicate id) and `TOOL_NAME_COLLISION` checks
+apply, and a rejected request leaves the existing set unchanged.
 
 ### `POST /api/v1/channels/{id}/rotate`
 Re-issues the bearer token. Returns `{token: "orva_chn_..."}` once;
