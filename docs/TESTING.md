@@ -994,7 +994,7 @@ All rows below were measured against a live instance:
 | `routes-test.sh` | exact route, `/prefix/*` rewriting, reserved-prefix rejection, method filter 405/200, direct invoke coexists | **2.95 s** | `routes-test  pass=6  fail=0` (7 with `hey`) | yes |
 | `secrets-test.sh` | secret round-trip, values visible as env inside the sandbox, redeploy drops a deleted secret | **4.8 s** | `secrets-test  pass=6  fail=0` (8 with `hey`+`sqlite3`) | yes |
 | `egress-test.sh` | `none` blocked → `egress` reaches example.com → back to `none` re-isolates; a hostname blocklist rule genuinely REJECTs and deleting it restores reachability | **11.5 s** | `=== egress-test: 15 passed, 0 failed ===` (19 with `ORVA_CONTAINER`) | yes — `trap cleanup EXIT` |
-| `errors-test.sh` | 8 error contracts: 413, 502 `WORKER_CRASHED`, 504 `TIMEOUT`, 404, 405, `POOL_AT_CAPACITY`, 409 `NOT_ACTIVE`, 400 on `status=building` | **6.0 s** | `errors-test  pass=8  fail=0` | yes |
+| `errors-test.sh` | error contracts: 413, 502 `WORKER_CRASHED`, 504 `TIMEOUT`, 404, 405, 429 `INVOCATION_QUEUE_FULL` with `Retry-After` (burst at a warm, saturated pool), 409 `NOT_ACTIVE`, 400 on `status=building` | **14 s** (2-vCPU VM; includes a warm-up call and a 5 s burst) | `errors-test  pass=10  fail=0` | yes |
 | `build-cache-test.sh` | per-function dep-cache lifecycle: cold build, warm rebuild, purge → 200, idempotent purge, purge refused for non-functions, deploy-after-purge | **6.5 s** (warm npm) | `build-cache: 10 passed, 0 failed` | yes |
 | `heavy-deploy-test.sh` | async build queue: POST returns <500 ms with a `deployment_id`, real pip build, SSE stream emits, garbage requirements → `failed` while the function stays `active` | **14.3 s** (warm pip) | `heavy-deploy-test  pass=12  fail=0` | yes, but writes a log file (§9) |
 | `tracing-test.sh` | http root span + `X-Trace-Id`, F2F parent linkage, W3C `traceparent` honored, replay = fresh trace, outlier + `baseline_p95_ms` | **10.2 s** | ANSI `✓`/`✗` then `PASS: 10` / `FAIL: 0` | yes — trap + pre-run sweep |
@@ -1056,7 +1056,7 @@ routes-test.sh|pass|routes-test|pass=6|fail=0
 heavy-deploy-test.sh|pass|heavy-deploy-test|pass=12|fail=0
 build-cache-test.sh|pass|build-cache: 10 passed, 0 failed
 onboarding-flow.sh|pass|skip|(users already exist; cannot test the onboarding bootstrap)
-errors-test.sh|pass|errors-test|pass=8|fail=0
+errors-test.sh|pass|errors-test|pass=10|fail=0
 rollback-test.sh|pass|rollback-test|pass=9|fail=0
 egress-test.sh|pass|=== egress-test: 15 passed, 0 failed ===
 auth-test.sh|pass|auth-test: pass=11 fail=0
@@ -1128,7 +1128,7 @@ and the umbrella records `fail`.
 
 They have **no nsjail-availability skip anywhere**. The only `skip` paths are
 egress fail-closed (needs `ORVA_CONTAINER`), onboarding (users exist), the
-secrets DB sanity check (no `sqlite3`), and the errors `POOL_AT_CAPACITY` step
+secrets DB sanity check (no `sqlite3`), and the errors `INVOCATION_QUEUE_FULL` step
 (pool PUT rejected). On a host without nsjail they simply go red — unlike
 `test/e2e/`, which has a real skip protocol. That claim is inferred from the
 absence of any nsjail probe in the code, **`[UNVERIFIED]`** by running on an
@@ -1953,7 +1953,7 @@ assertion written against `.code` gets `null`; the path is `.error.code`.
 | exceed `timeout_ms` | **504** `TIMEOUT` with `details.timeout_ms`, in ~timeout+0.1 s |
 | 8 MB request body | **413** `PAYLOAD_TOO_LARGE` (the JSON cap is 6 MB) |
 | ~7 MB `deploy-inline` | **not** 413 — the deploy reader is deliberately exempt from the JSON cap (`test_security.py` M4) |
-| pool saturated under contention | `POOL_AT_CAPACITY` |
+| warm pool saturated under contention | **429** `INVOCATION_QUEUE_FULL` with `Retry-After`, after the 2 s overload wait (a *cold* pool queues instead, up to 12 s) |
 | exceed `memory_mb` | **502** `WORKER_CRASHED` in the 2026-09-24 delegated smolvm test; the worker subtree's `oom_kill` counter increased |
 
 **`memory_mb` and `cpus` are not enforced on a bare-metal host without cgroup
@@ -2508,7 +2508,7 @@ carries both flags for that reason.
 | `python3 -m unittest discover -s test/e2e/unit -p 'test_*.py'` | 0.2 s | `Ran 11 tests … OK` |
 | `bash test/api-smoke.sh` | 0.45 s | `=== api-smoke: 20 passed, 0 failed ===` |
 | `bash test/auth-test.sh` | 0.80 s | `auth-test: pass=11 fail=0` |
-| `bash test/errors-test.sh` | 6.0 s | `errors-test  pass=8  fail=0` |
+| `bash test/errors-test.sh` | 14 s | `errors-test  pass=10  fail=0` |
 | `bash test/rollback-test.sh` | 4.6 s | `rollback-test  pass=9  fail=0` |
 | `bash test/routes-test.sh` | 2.95 s | `routes-test  pass=6  fail=0` |
 | `bash test/secrets-test.sh` | 4.8 s | `secrets-test  pass=6  fail=0` |
@@ -2553,7 +2553,7 @@ carries both flags for that reason.
 | `WORKER_CRASHED` | 502 | the worker spawned and died — check execution stderr |
 | `TIMEOUT` | 504 | exceeded `timeout_ms` |
 | `PAYLOAD_TOO_LARGE` | 413 | over the 6 MB JSON cap (deploy-inline is exempt) |
-| `POOL_AT_CAPACITY` | 503 | pool saturated |
+| `INVOCATION_QUEUE_FULL` | 429 | pool saturated or the queue wait expired; back off for `Retry-After` |
 | `NOT_ACTIVE` | 409 | the function is not `active` |
 | `VALIDATION` | 400 | bad field value |
 | `INVALID_JSON` | 400 | unparseable body |

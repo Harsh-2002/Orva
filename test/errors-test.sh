@@ -139,8 +139,8 @@ http_assert "METHOD_NOT_ALLOWED 405" "405" "METHOD_NOT_ALLOWED" "" "$resp"
 "${CURL[@]}" -X DELETE "$BASE/api/v1/routes?path=$(printf '%s' "/errs/method-only" | jq -sRr @uri)" >/dev/null
 "${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$fid" >/dev/null
 
-# 6. POOL_AT_CAPACITY — set max_warm=1, hammer with c=10 and short ctx.
-echo "# 6: POOL_AT_CAPACITY"
+# 6. INVOCATION_QUEUE_FULL — pin max_warm=1, warm the pool, then burst past it.
+echo "# 6: INVOCATION_QUEUE_FULL"
 fn_name="errs-pool-$$"
 "${CURL[@]}" -X POST "$BASE/api/v1/functions" -H "Content-Type: application/json" \
     -d "{\"name\":\"$fn_name\",\"runtime\":\"node\",\"memory_mb\":128,\"cpus\":1,\"timeout_ms\":2000}" >/dev/null
@@ -174,9 +174,18 @@ pool_resp=$("${CURL[@]}" -X PUT "$BASE/api/v1/pool/config" \
 if echo "$pool_resp" | jq -e '.max_warm == 1' >/dev/null 2>&1; then
     sleep 1  # let the pool refresh settle
 
-    # Fire 5 invokes simultaneously. With max_warm=1 and a 1.5s handler,
-    # at least one should hit POOL_AT_CAPACITY (waits past TimeoutMS).
+    # Warm the pool first. A request that arrives at a cold or still-growing
+    # pool is given the long readiness wait on purpose, so a burst against a
+    # cold pool queues instead of shedding. Once the one worker is idle the
+    # pool is saturated, and a burst gets the 2 s overload wait.
+    curl -s -o /dev/null --max-time 10 -X POST -H "X-Orva-API-Key: $KEY" "$BASE/fn/${fid#fn_}/" -d '{}'
+    sleep 0.3
+
+    # Fire 5 invokes simultaneously. With max_warm=1 and a 1.5s handler the
+    # first two are served and the rest are shed with 429 INVOCATION_QUEUE_FULL
+    # once the wait expires.
     capacity_hit=0
+    retry_after_hit=0
     pids=()
     out_dir=$(mktemp -d)
     for i in 1 2 3 4 5; do
@@ -185,13 +194,19 @@ if echo "$pool_resp" | jq -e '.max_warm == 1' >/dev/null 2>&1; then
     done
     wait "${pids[@]}" 2>/dev/null
     for f in "$out_dir"/*.txt; do
-        if grep -q "POOL_AT_CAPACITY" "$f" 2>/dev/null; then capacity_hit=$((capacity_hit+1)); fi
+        if grep -q "^HTTP/[0-9.]* 429" "$f" 2>/dev/null && grep -q "INVOCATION_QUEUE_FULL" "$f" 2>/dev/null; then
+            capacity_hit=$((capacity_hit+1))
+            if grep -qi "^retry-after: *[0-9]" "$f" 2>/dev/null; then retry_after_hit=$((retry_after_hit+1)); fi
+        fi
     done
     rm -rf "$out_dir"
-    check "POOL_AT_CAPACITY at least once under contention" \
+    check "429 INVOCATION_QUEUE_FULL at least once under contention" \
         "$([ "$capacity_hit" -ge 1 ] && echo ok || echo fail)" "hits=$capacity_hit"
+    check "shed responses carry Retry-After" \
+        "$([ "$capacity_hit" -ge 1 ] && [ "$retry_after_hit" -eq "$capacity_hit" ] && echo ok || echo fail)" \
+        "shed=$capacity_hit with_retry_after=$retry_after_hit"
 else
-    echo "# (skipping POOL_AT_CAPACITY: pool/config PUT returned: $pool_resp)"
+    echo "# (skipping INVOCATION_QUEUE_FULL: pool/config PUT returned: $pool_resp)"
 fi
 
 "${CURL[@]}" -X DELETE "$BASE/api/v1/functions/$fid" >/dev/null
