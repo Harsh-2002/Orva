@@ -14,6 +14,14 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Upgrade notes
+
+- `golang.org/x/net` moves to v0.62.0, and Bifrost to 1.14.1 with sqlite 1.61.1.
+- The Go vulnerability gate now carries one expiring exception, GO-2026-6911
+  (`mark3labs/mcp-go` redirect SSRF). Orva does not use the affected MCP client
+  code, a test enforces that, and the gate still fails on any other reachable
+  finding. Details and the removal condition are in `docs/SECURITY.md`.
+
 ## v2026.11.03
 
 ### Breaking

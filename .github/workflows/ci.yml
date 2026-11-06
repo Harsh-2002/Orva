@@ -328,8 +328,12 @@ jobs:
       - name: govulncheck (Go vulnerability scan)
         # The Go analog of the ui job's `npm audit`: fail the build on a
         # call-reachable Go/stdlib vulnerability. Pinned like actionlint above —
-        # never @latest. Default source mode keeps it low-noise (reachable only).
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+        # never @latest. Only call-reachable findings fail. -format json always
+        # exits 0, so scripts/govulncheck-gate.py is the gate: it carries one
+        # expiring exception (GO-2026-6911) and fails on anything else.
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 -format json ./... > govulncheck.json
+          python3 scripts/govulncheck-gate.py govulncheck.json
 
   ui:
     name: ui build
