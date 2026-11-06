@@ -811,6 +811,27 @@ bug — gVisor doesn't expose nested-namespace primitives, and nsjail
 can't run without them. Full reproduction + alternatives in
 [`docs/GVISOR.md`](GVISOR.md).
 
+## Known advisory: GO-2026-6911 (mcp-go redirect SSRF)
+
+`github.com/mark3labs/mcp-go` follows cross-origin redirects in its MCP
+*client* transport and forwards configured headers and OAuth tokens to the
+redirected host. Every version is affected and there is no fixed release
+(upstream issue mark3labs/mcp-go#1188, fix PR #1190, unmerged as of
+2026-11-07).
+
+Orva is not exposed. The module is reached only through the embedded Bifrost
+gateway's MCP client, which Bifrost builds only when it is given an `MCPConfig`
+or `AddMCPClient` is called. Orva passes neither and dispatches its own tools
+in-process; provider calls use Bifrost's HTTP stack, not mcp-go.
+`llm.TestGatewayHasNoMCPManager` fails the build if the gateway ever builds an
+MCP manager.
+
+`govulncheck` still reports the finding because its call graph cannot see that
+condition, so the CI gate (`scripts/govulncheck-gate.py`) carries one expiring
+exception for this ID. It fails on any other call-reachable finding, when a fix
+becomes available, and on 2026-12-07. Delete the exception when a fixed mcp-go
+is required by a Bifrost release that builds with this tree.
+
 ## Reading further in the code
 
 - `internal/sandbox/sandbox.go` — nsjail invocation
