@@ -14,9 +14,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+## v2026.11.07
+
 ### Upgrade notes
 
-- `golang.org/x/net` moves to v0.62.0, and Bifrost to 1.14.1 with sqlite 1.61.1.
+- Dependency updates only; nothing to do on upgrade. `golang.org/x/net` moves to
+  v0.62.0, Bifrost to 1.14.1, sqlite to 1.61.1, and the dashboard's lucide,
+  axios, eslint, autoprefixer and postcss to their latest patch/minor releases.
 - The Go vulnerability gate now carries one expiring exception, GO-2026-6911
   (`mark3labs/mcp-go` redirect SSRF). Orva does not use the affected MCP client
   code, a test enforces that, and the gate still fails on any other reachable
