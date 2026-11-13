@@ -14,6 +14,17 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Changed
+
+- **Python cold start is ~4.8x faster: ~460 ms to ~96 ms.** The Python runtime
+  rootfs now ships precompiled standard-library bytecode. It previously shipped
+  none, and the rootfs is mounted read-only at invoke time, so every cold start
+  recompiled roughly 200 modules from source — `asyncio` alone cost 407 ms of a
+  457 ms import (`logging`, `re`, `inspect`). Neither the Docker image nor the
+  bare-metal rootfs tarball needs an operator action; the new rootfs is picked
+  up by the usual upgrade path. It is ~20 MB larger (126 MB to 146 MB unpacked).
+  Node is unchanged (its cold start is module loading, not compilation).
+
 ## v2026.11.07
 
 ### Upgrade notes

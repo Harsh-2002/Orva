@@ -254,8 +254,18 @@ deploy time.
 ## Cold starts vs warm hits
 
 The first invocation after deploy or after a long idle period
-spawns a fresh worker (~50–500 ms depending on runtime size and deps).
-Subsequent invocations land on idle workers from the pool (~2–15 ms).
+spawns a fresh worker. Subsequent invocations land on idle workers from the
+pool (~2–15 ms). Measured on a 2-vCPU host with `test/coldstart/coldstart.py`
+(trivial handler → a real module graph):
+
+| runtime | trivial | real (40 modules + deps) |
+|---|---|---|
+| node | ~30–39 ms | ~95–120 ms (module loading dominates) |
+| python | ~90 ms | ~96 ms (interpreter start dominates) |
+
+The Python rootfs ships precompiled stdlib bytecode for that number; without it
+the adapter took ~460 ms, nearly all of it recompiling stdlib modules the
+read-only rootfs could not cache.
 
 Per-function pool sizing uses 60-second stable demand, 6-second burst demand,
 queue pressure, service p95, and cold-start p95. You tune only the policy

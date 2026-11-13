@@ -1437,3 +1437,14 @@ remain unexecuted locally. An initial Node child-process probe was invalid:
 nsjail's default 32-open-file limit produced `EMFILE` before `pids.max` was
 reached. That low per-worker FD limit is a separate workload-density hypothesis
 to measure under safe aggregate FD accounting, not evidence of a PID cap.
+
+### Cold start, per runtime (2026-11-13)
+
+Measured with `test/coldstart/coldstart.py` on a 2-vCPU Debian guest against a
+bare-metal install of the release rootfs, one sample per retired pool
+generation, 5 generations per fixture. Node: trivial 39.0 ms, real (40 modules
+plus `express`) 119.5 ms — module loading is most of the difference. Python:
+trivial 89.6 ms, real 96.0 ms. The same Python fixtures measured 461 ms before
+the rootfs shipped stdlib bytecode; the ~4.8x comes from removing stdlib
+recompilation, not from handler code. These are single-host numbers, not a
+throughput or scalability claim.
