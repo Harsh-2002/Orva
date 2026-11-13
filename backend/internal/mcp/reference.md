@@ -91,6 +91,13 @@ absence of hints is not a guarantee that a build or invocation will succeed.
 
 ### 1. Create the function row
 
+Authors can also upload an already-built CommonJS JavaScript bundle to the
+`node` runtime with entrypoint `dist/handler.js`. See
+[Author-side prebundling](https://github.com/Harsh-2002/Orva/blob/main/docs/PREBUNDLING.md)
+for the opt-in JS/TS recipe and compatibility limits. Keep the bundler and
+original sources in the author workspace; `/source`, editor and diff show the
+uploaded bundle, not original TypeScript. Orva does not bundle automatically.
+
 ```bash
 curl -X POST {{ORIGIN}}/api/v1/functions \
   -H 'X-Orva-API-Key: <YOUR_KEY>' \

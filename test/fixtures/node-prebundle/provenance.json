@@ -1,0 +1,34 @@
+{
+  "tool": "esbuild",
+  "version": "0.25.12",
+  "flags": [
+    "--bundle",
+    "--packages=bundle",
+    "--platform=node",
+    "--target=node26",
+    "--format=cjs",
+    "--external:orva",
+    "--external:orva/*",
+    "--external:node:*",
+    "--sourcemap=external"
+  ],
+  "sha256": {
+    "js/upload/dist/handler.js": "15627f0a06b06e02554cadc4636740ff629c94da41775cc60e7cfad24e80e28a",
+    "js/upload/dist/handler.js.map": "011ae57cfa71d8915da6dba4b463a49bbcb617f3e4d8d2f300d463e4614fedf5",
+    "ts/upload/dist/handler.js": "bbcacad02fa9b7ad8aafda125c2bb043d9a8ae7b7de6d8626140f62a393e32c1",
+    "ts/upload/dist/handler.js.map": "ac81364aa327588eac732007565a1c2e1d78acbcf28681f0f0339577bc9b380a",
+    "src/handler.js": "0ca4f9241b078f5d22d9a2e07193478e87878c61cc96837e7d8a9fd5280d2d8c",
+    "src/message.js": "594fa3bc2fa107c3641dbd37baee43baf1db391f9b33a35c6ca9cd3fb4cdede6",
+    "src/handler.ts": "54ba96361c6e4b48f99c37e08dbf52052ee166f8b7680db7de18f03160714fe2",
+    "src/message.ts": "19bc4dcf0baa460f93a9864641004ee3b894542607629059bb5df7436c85a131",
+    "probes/asset.js": "9ae308c7312e3d158b70704e1d216fed1348c91cc593b2cd2c7bd832d7f0c397",
+    "probes/asset.txt": "2d47174bb31f5a1c77d2c1097bf4ceea650ff78d1ddf418f61848dba2fefdacb",
+    "probes/dynamic.js": "1ecfead2fc676d107cfaea66bc3371f2c44a7d84bee6489d7d795a154bbca78b",
+    "probes/native.js": "c9f5901a33f9455a608a8cef81378caf5d4fdd155f63d9cd7e6c2ea2349f76c1",
+    "probes/addon.node": "81c2266e20a902a0b065b9b408e6e9ddbd214a1c8e5944e6a1bc299c6c95b6ff",
+    "regenerate.mjs": "a08d8c44d9b1b7708aed2b44d4ee4915eb0bbe14d5ce5fbe5ce8c14e5a79007d",
+    "package.json": "dd755dbbb0bec8eb1094db2e620b1046e5e1c82271820b6e9cdc949cbc67f2ba",
+    "package-lock.json": "0cc2b56ce5750bf2fd785f37cabccc200fad65f78fa4f69291375e26baf4183f"
+  },
+  "probes": "build-only asset reference, unresolved dynamic require, .node loader rejection"
+}
