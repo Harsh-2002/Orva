@@ -62,6 +62,10 @@ unmodified.
 
 ## TypeScript
 
+For opt-in **author-side** JS/TS prebundling to a clean JavaScript upload,
+see [Author-side prebundling](PREBUNDLING.md). This is not platform bundling;
+the existing server-side TypeScript path below remains unchanged.
+
 TypeScript is a first-class deploy path on the `node` runtime — there is no
 separate TS runtime. Include a `tsconfig.json` and declare `typescript` in your
 `package.json` dependencies or devDependencies, and the build runs

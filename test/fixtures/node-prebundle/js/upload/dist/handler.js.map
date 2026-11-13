@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../src/message.js", "../../../src/handler.js"],
+  "sourcesContent": ["const { posix } = require('node:path');\n\nexports.message = name => `Hello ${posix.basename(name)}`;\n", "const { message } = require('./message.js');\nconst { kv } = require('orva');\n\nexports.handler = async event => {\n  const { name } = JSON.parse(event.body || '{}');\n  await kv.put('prebundle:last', name);\n  const saved = await kv.get('prebundle:last', null);\n  return {\n    statusCode: 201,\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ revision: 'bundle-A', language: 'js', message: message(name), saved }),\n  };\n};\n"],
+  "mappings": ";;;;;;AAAA;AAAA,mBAAAA,UAAA;AAAA,QAAM,EAAE,MAAM,IAAI,QAAQ,WAAW;AAErC,IAAAA,SAAQ,UAAU,UAAQ,SAAS,MAAM,SAAS,IAAI,CAAC;AAAA;AAAA;;;ACFvD,IAAM,EAAE,QAAQ,IAAI;AACpB,IAAM,EAAE,GAAG,IAAI,QAAQ,MAAM;AAE7B,QAAQ,UAAU,OAAM,UAAS;AAC/B,QAAM,EAAE,KAAK,IAAI,KAAK,MAAM,MAAM,QAAQ,IAAI;AAC9C,QAAM,GAAG,IAAI,kBAAkB,IAAI;AACnC,QAAM,QAAQ,MAAM,GAAG,IAAI,kBAAkB,IAAI;AACjD,SAAO;AAAA,IACL,YAAY;AAAA,IACZ,SAAS,EAAE,gBAAgB,mBAAmB;AAAA,IAC9C,MAAM,KAAK,UAAU,EAAE,UAAU,YAAY,UAAU,MAAM,SAAS,QAAQ,IAAI,GAAG,MAAM,CAAC;AAAA,EAC9F;AACF;",
+  "names": ["exports"]
+}
