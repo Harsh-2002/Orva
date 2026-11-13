@@ -555,6 +555,26 @@ jobs:
           ORVA_ENDPOINT=http://127.0.0.1:8443 ORVA_API_KEY="$ADMIN_KEY" \
             bash test/sdk-test.sh
 
+      - name: Cold-start measurement (report only)
+        id: coldstart
+        # No threshold: this records spawn latency per runtime so a change that
+        # moves it is visible. report/annotate only, never fail on the numbers.
+        # Each sample retires the pool and proves a cold worker (one spawn).
+        timeout-minutes: 10
+        env:
+          ORVA_REQUIRE_SANDBOX: "1"
+        run: |
+          ADMIN_KEY="$(cat "$RUNNER_TEMP/orva-data/.admin-key")"
+          python3 test/coldstart/coldstart.py \
+            --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY" \
+            --samples 5 --json "$RUNNER_TEMP/coldstart.json" | tee "$RUNNER_TEMP/coldstart.txt"
+          {
+            echo "## Cold start (report only)"
+            echo '```'
+            cat "$RUNNER_TEMP/coldstart.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Stop Orva
         if: always()
         run: |
