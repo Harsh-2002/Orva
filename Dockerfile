@@ -72,10 +72,14 @@ COPY backend/runtimes/node/orva.d.ts    /opt/orva/node_modules/orva/orva.d.ts
 COPY backend/runtimes/node/package.json /opt/orva/node_modules/orva/package.json
 
 FROM python:3.15-slim AS rootfs-python
+# Precompile the stdlib (and site-packages) instead of deleting __pycache__: the
+# rootfs is read-only at invoke, so nothing can be cached later. Without this
+# every cold start recompiles ~200 modules and the adapter reaches ready in
+# ~460 ms instead of ~100 ms (asyncio alone is 407 ms of that import).
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
-    && find /usr/local/lib/python3.* -depth -type d -name __pycache__ -exec rm -rf {} + \
     && find /usr/local/lib/python3.* -depth -type d -name tests -exec rm -rf {} + \
+    && python3 -m compileall -q "$(python3 -c 'import sys; print(f"/usr/local/lib/python{sys.version_info.major}.{sys.version_info.minor}")')" \
     && mkdir -p /opt/orva /code \
     && echo "python $(python3 --version | cut -d' ' -f2)" > /.orva-runtime
 COPY backend/runtimes/python/adapter.py /opt/orva/adapter.py

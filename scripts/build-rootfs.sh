@@ -64,6 +64,33 @@ case "$runtime" in
     if [[ ! -x "$out/usr/local/bin/python3" ]]; then
       (cd "$out/usr/local/bin" && ln -sf python python3) || true
     fi
+    # The official slim image ships no .pyc, and the rootfs is mounted read-only
+    # at invoke time, so nothing can be cached there later: every cold start
+    # recompiles ~200 stdlib modules. Measured before this step, importing the
+    # adapter's stdlib set took 457 ms (asyncio alone 407 ms, mostly
+    # logging/re/inspect) and the adapter reached ready in ~460 ms; with the
+    # bytecode it is ~100 ms. Compiled through a chroot so the .pyc records the
+    # real source paths, not the build mount.
+    stdlib_rel=$(cd "$out" && ls -d usr/local/lib/python3.* 2>/dev/null | head -1)
+    if [[ -z "$stdlib_rel" ]]; then
+      echo "no stdlib directory found under $out/usr/local/lib" >&2
+      exit 1
+    fi
+    echo ">> precompiling ${stdlib_rel}"
+    # The container runs as root (chroot needs it), so it would otherwise leave
+    # root-owned 0600 files that this script cannot package as a normal user.
+    stdlib_abs="/${stdlib_rel}"
+    docker run --rm \
+      -e HOST_UID_GID="$(id -u):$(id -g)" \
+      -v "$(cd "$out" && pwd)":/rootfs \
+      --entrypoint /bin/sh "$image" -c "
+        set -e
+        chroot /rootfs /usr/local/bin/python3 -m compileall -q '$stdlib_abs'
+        chown -R \"\$HOST_UID_GID\" '/rootfs$stdlib_abs'
+        find '/rootfs$stdlib_abs' -name '*.pyc' -exec chmod 0644 {} +
+      "
+    pyc=$(find "$out/$stdlib_rel" -name '*.pyc' | wc -l)
+    echo ">> stdlib bytecode: $pyc .pyc files"
     ;;
 esac
 
