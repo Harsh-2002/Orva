@@ -113,7 +113,11 @@ not emit it. For an existing bare-metal rootfs, run the **new binary's**
 adapters and SDK, then restart Orva. Prefer the normal installer for upgrades:
 it refreshes the binary, rootfs, and adapters together. The Docker entrypoint
 refreshes adapters on every container start and replaces a volume's runtime rootfs
-whenever its `.orva-runtime` stamp differs from the image's.
+whenever its `.orva-runtime` interpreter stamp or `.orva-rootfs-revision`
+content revision differs from the image's. A missing volume revision triggers
+a one-time refresh, so bytecode-only updates reach existing volumes too.
+Matching identities skip the copy. The interpreter stamp remains unchanged for
+content-only updates, preserving dependency-cache identity.
 
 During function deletion, completion records for that function may still be
 queued after the API has returned. The writer now discards those records and

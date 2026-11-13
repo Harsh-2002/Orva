@@ -147,7 +147,7 @@ either stopped or guaranteed not to be deploying / GC'ing.
 | `/var/lib/orva/.master.key` | **critical** — the AES-256-GCM key every function secret is encrypted with | static |
 | `/var/lib/orva/functions/*/versions/<hash>/` | rollback targets | bounded by `versions_to_keep` |
 | `/var/lib/orva/functions/*/current` (symlink) | active version pointer | static |
-| `/var/lib/orva/rootfs/` | ~600 MB of language base images | managed by the image or installer, not for local edits. The Docker entrypoint seeds an empty volume and replaces a runtime whenever the image carries a different interpreter (its `.orva-runtime` stamp differs); `install.sh` does the same on bare metal |
+| `/var/lib/orva/rootfs/` | ~600 MB of language base images | managed by the image or installer, not for local edits. The Docker entrypoint seeds an empty volume and replaces a runtime when its interpreter stamp (`.orva-runtime`) or content revision (`.orva-rootfs-revision`) differs; re-running `install.sh` replaces the rootfs on bare metal |
 
 **A backup of the database and version archives alone is not sufficient.**
 Secrets are stored encrypted; `.master.key` is the only copy of the key that
@@ -198,10 +198,14 @@ shipped `docker-compose.yml` sets `max-size: 10m, max-file: 5`).
 
 ## Upgrades
 
-A release that moves a function runtime replaces the volume's rootfs on start
-(the entrypoint compares `.orva-runtime`), and functions with compiled
-dependencies need a redeploy afterwards — see `OPERATIONS.md`, "some functions
-fail right after a runtime upgrade".
+A changed interpreter stamp or content revision replaces the Docker volume's
+runtime rootfs on start. Missing content revisions refresh once; matching
+identities leave the runtime alone. A content-only revision (such as precompiled
+Python stdlib bytecode) does not change interpreter identity or dependency-cache
+keys. An interpreter upgrade may require redeploying functions with compiled
+dependencies — see `OPERATIONS.md`, "some functions fail right after a runtime
+upgrade". On bare metal, re-run `install.sh` to replace the rootfs; upgrading
+only the binary does not update runtime contents.
 
 Dependency corrections ship with the release. When upgrading for a sandbox
 networking fix, use the normal installer (bare metal) or pull and recreate the

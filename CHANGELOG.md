@@ -16,14 +16,21 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Changed
 
-- **Python cold start is ~4.8x faster: ~460 ms to ~96 ms.** The Python runtime
-  rootfs now ships precompiled standard-library bytecode. It previously shipped
-  none, and the rootfs is mounted read-only at invoke time, so every cold start
-  recompiled roughly 200 modules from source — `asyncio` alone cost 407 ms of a
-  457 ms import (`logging`, `re`, `inspect`). Neither the Docker image nor the
-  bare-metal rootfs tarball needs an operator action; the new rootfs is picked
-  up by the usual upgrade path. It is ~20 MB larger (126 MB to 146 MB unpacked).
-  Node is unchanged (its cold start is module loading, not compilation).
+- The Python rootfs now ships precompiled standard-library bytecode, avoiding
+  repeated source compilation on its read-only runtime mount. Cold-start savings
+  depend on the workload. Interpreter identity and dependency-cache keys are
+  unchanged; rootfs content has a separate revision shared by Docker and native
+  construction.
+
+### Upgrade notes
+
+- Docker: pull the new image and recreate the container. The entrypoint now
+  compares both interpreter and rootfs content revision, so existing volumes
+  without a revision refresh once even when Python's version is unchanged.
+  Later starts with matching identities do not recopy the runtimes. Both runtimes
+  gain revision metadata; Node's runtime contents are otherwise unchanged.
+- Bare metal: re-run `install.sh` to replace the rootfs alongside the binary.
+  A binary-only `orva upgrade` does not install the precompiled bytecode.
 
 ## v2026.11.07
 
