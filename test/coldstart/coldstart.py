@@ -212,11 +212,18 @@ def global_spawn_histogram(t):
 
 
 def retire(t, fn_id):
-    """Remove the pool generation so the next invoke must spawn a worker."""
+    """Remove the pool generation so the next invoke must spawn a worker.
+
+    max_warm=1 keeps the controller from pre-spawning a burst for the single
+    request we send: without it a cold pool legitimately spawns several workers
+    and the generation no longer holds one spawn sample (seen on busy CI hosts,
+    where nearly every sample was discarded).
+    """
     t.ok("PUT", "/api/v1/pool/config", {
         "function_id": fn_id,
         "scale_to_zero": True,
         "min_warm": 0,
+        "max_warm": 1,
     })
 
 
@@ -385,7 +392,7 @@ def main():
     ap.add_argument("--api-key", default=os.environ.get("ORVA_API_KEY", ""))
     ap.add_argument("--samples", type=int, default=7)
     ap.add_argument("--max-attempts", type=int, default=0,
-                    help="default: 3x samples")
+                    help="default: 5x samples")
     ap.add_argument("--json", dest="json_path", default="")
     args = ap.parse_args()
 
@@ -400,7 +407,7 @@ def main():
     t = Target(args.url, key)
     try:
         t.ok("GET", "/api/v1/system/health")
-        attempt_cap = args.max_attempts or args.samples * 3
+        attempt_cap = args.max_attempts or args.samples * 5
         report = run(t, args.samples, attempt_cap)
     except HarnessError as e:
         print(f"HARNESS ERROR: {e}", file=sys.stderr)
@@ -409,6 +416,15 @@ def main():
     report["target"] = args.url
     report["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     print(render(report, args.url))
+    # Report-only must still be honest: an incomplete fixture prints a workflow
+    # warning so a green step cannot hide a number nobody could measure.
+    for runtime, kinds in (report["runtimes"] or {}).items():
+        for kind in ("real", "trivial"):
+            m = kinds.get(kind)
+            if m is not None and m["accepted"] < args.samples:
+                print(f"::warning title=cold start incomplete::{runtime}/{kind}: "
+                      f"{m['accepted']}/{args.samples} samples accepted "
+                      f"({m['discarded']} discarded)")
     if args.json_path:
         with open(args.json_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, sort_keys=True)
