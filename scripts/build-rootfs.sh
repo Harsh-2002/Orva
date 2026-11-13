@@ -64,13 +64,7 @@ case "$runtime" in
     if [[ ! -x "$out/usr/local/bin/python3" ]]; then
       (cd "$out/usr/local/bin" && ln -sf python python3) || true
     fi
-    # The official slim image ships no .pyc, and the rootfs is mounted read-only
-    # at invoke time, so nothing can be cached there later: every cold start
-    # recompiles ~200 stdlib modules. Measured before this step, importing the
-    # adapter's stdlib set took 457 ms (asyncio alone 407 ms, mostly
-    # logging/re/inspect) and the adapter reached ready in ~460 ms; with the
-    # bytecode it is ~100 ms. Compiled through a chroot so the .pyc records the
-    # real source paths, not the build mount.
+    # The runtime rootfs is read-only; chroot keeps cached source paths valid.
     stdlib_rel=$(cd "$out" && ls -d usr/local/lib/python3.* 2>/dev/null | head -1)
     if [[ -z "$stdlib_rel" ]]; then
       echo "no stdlib directory found under $out/usr/local/lib" >&2
@@ -94,14 +88,13 @@ case "$runtime" in
     ;;
 esac
 
-# Record which interpreter this rootfs carries. The builder hashes it into every
-# version, and the container entrypoint compares it to decide whether a volume's
-# rootfs is stale. It comes from the interpreter itself, not from this script.
+# Keep interpreter identity separate from content changes for dependency caching.
 case "$runtime" in
   node)   stamp="node $(docker run --rm --entrypoint node "$image" --version)" ;;
   python) stamp="python $(docker run --rm --entrypoint python3 "$image" --version | awk '{print $2}')" ;;
 esac
 printf '%s\n' "$stamp" > "$out/.orva-runtime"
+cp "$(dirname "$0")/rootfs-revisions/$runtime" "$out/.orva-rootfs-revision"
 echo ">> runtime stamp: $stamp"
 
 # Standard Orva rootfs structure.
