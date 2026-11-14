@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -76,7 +77,23 @@ type Worker struct {
 	readStopOnce sync.Once
 
 	errBuf *ringBuffer
+
+	// stderrSync is true when the adapter advertised the end-of-record
+	// marker. An older adapter never sets it, so it never costs a wait.
+	stderrSync atomic.Bool
 }
+
+// stderrSyncMarker is written by the adapter to stderr immediately before a
+// terminal stdout frame. stdout and stderr are different pipes drained by
+// different goroutines, so without it a snapshot taken on the response frame
+// can miss the handler's last stderr lines, and they are then lost: the next
+// dispatch starts counting from the buffer length at that moment.
+var stderrSyncMarker = []byte("\n__ORVA_EOR__\n")
+
+// stderrSyncWait bounds how long Stderr waits for the marker. It is only
+// reached when the drain goroutine has not yet copied bytes the child wrote
+// before it replied, which is a matter of microseconds.
+const stderrSyncWait = 250 * time.Millisecond
 
 // Frame types on the wire. See runtimes/*/adapter.{js,py} for the other end.
 type frameRequest struct {
@@ -91,6 +108,9 @@ type frameResponse struct {
 	Body       string            `json:"body,omitempty"`
 	Fatal      bool              `json:"fatal,omitempty"`
 	Message    string            `json:"message,omitempty"`
+	// StderrSync is set on the ready frame by adapters that write
+	// stderrSyncMarker to stderr just before every terminal frame.
+	StderrSync bool `json:"stderr_sync,omitempty"`
 	// Streaming chunk frames carry base64-encoded bytes in Data so the
 	// transport stays JSON-safe (raw bytes can include 0x00 / NUL which
 	// upset some intermediaries). v0.4 C1 — see proxy.Forward + adapter.py
@@ -246,6 +266,7 @@ func (w *Worker) AwaitReady(ctx context.Context) error {
 	if err := json.Unmarshal(payload, &frame); err != nil || frame.Type != "ready" {
 		return fmt.Errorf("%w: invalid adapter startup frame", ErrWorkerExited)
 	}
+	w.stderrSync.Store(frame.StderrSync)
 	return nil
 }
 
@@ -374,6 +395,9 @@ type DispatchResult struct {
 	w         *Worker
 	errBefore int64
 	finished  bool
+	// complete means the adapter replied normally, so its end-of-record
+	// marker is expected in stderr. An aborted stream never sets it.
+	complete bool
 	// readErr is sticky — once the underlying pipe surfaces an error, all
 	// subsequent NextFrame calls return it.
 	readErr error
@@ -449,6 +473,7 @@ func (r *DispatchResult) NextFrame(ctx context.Context) (kind string, data []byt
 			return "chunk", dec, nil
 		case "response_end":
 			r.finished = true
+			r.complete = true
 			r.w.Served.Add(1)
 			r.finalize()
 			return "end", nil, nil
@@ -482,7 +507,22 @@ func (r *DispatchResult) Stderr() []byte {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return r.w.errBuf.Snapshot(r.errBefore)
+	snap := r.w.errBuf.Snapshot(r.errBefore)
+	if !r.w.stderrSync.Load() {
+		return snap
+	}
+	if r.complete {
+		for deadline := time.Now().Add(stderrSyncWait); !bytes.Contains(snap, stderrSyncMarker) &&
+			time.Now().Before(deadline); {
+			time.Sleep(50 * time.Microsecond)
+			snap = r.w.errBuf.Snapshot(r.errBefore)
+		}
+	}
+	snap = bytes.ReplaceAll(snap, stderrSyncMarker, nil)
+	if len(snap) == 0 {
+		return nil
+	}
+	return snap
 }
 
 // DispatchEx writes a request frame, reads the FIRST response frame, and
@@ -577,7 +617,7 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 			// Non-fatal adapter error: handler threw but VM is healthy. Do
 			// NOT mark dead; do NOT classify as ErrWorkerExited.
 			unlock()
-			return &DispatchResult{w: w, errBefore: errBefore},
+			return &DispatchResult{w: w, errBefore: errBefore, complete: true},
 				fmt.Errorf("adapter: %s", resp.Message)
 		}
 		if resp.Type == "response" {
@@ -592,6 +632,7 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 				w:          w,
 				errBefore:  errBefore,
 				finished:   true,
+				complete:   true,
 			}, nil
 		}
 		if resp.Type == "response_start" {

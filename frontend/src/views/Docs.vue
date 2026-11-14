@@ -895,6 +895,15 @@
 
       <TraceTreeDiagram />
 
+      <p class="doc-prose">
+        Custom code spans belong directly to their containing execution, even
+        when code-span calls are nested. SDK logs are execution-scoped, not
+        code-span-scoped. Selecting a code span shows the containing execution's
+        logs. Structured logs are collected for HTTP, F2F, cron/jobs, and inbound
+        webhooks; they use best-effort storage and may arrive after the response.
+        Ordinary stderr and malformed structured records remain in invocation logs.
+      </p>
+
       <h3 class="doc-h3">
         What user code sees
       </h3>

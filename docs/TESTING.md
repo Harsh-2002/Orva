@@ -23,6 +23,22 @@ orders of magnitude, not SLAs.
 
 ## 1. The shortest path to "I have verified Orva works"
 
+For tracing repairs, run `test_tracing_logs.py` through the isolated E2E runner.
+It deploys owned Node/Python functions and checks actual HTTP, buffered/streaming
+F2F, failed-child, job, signed-inbound and replay logs, including raw stderr,
+malformed records, correlation and duplicate prevention. It polls asynchronous
+telemetry and drains accepted writes before deleting its resources. It never
+substitutes a sandbox skip for a pass. Cron shares the scheduler recording path
+exercised by jobs; this module does not wait for a wall-clock cron fire.
+
+Frontend component regressions cover out-of-order responses (including stale
+errors), keep-alive activation, delayed children, execution-scoped code-span
+logs, and zero/tiny/end-boundary timeline geometry. Browser acceptance must use
+a fresh candidate UI build in both themes at phone and desktop widths, checking
+ruler/rail alignment, focus after a long job delay, keyboard controls and
+stale-data recovery. Mocked browser data qualifies rendering and interaction,
+not collection; real sandbox tests qualify the collection paths separately.
+
 For invocation-concurrency changes, use a disposable instance and run
 `python3 test/performance/invocation_admission.py --scratch --url <scratch-url> --api-key <key> --extended`.
 For cgroup enforcement, run `python3 test/performance/cgroup_hard_limit.py --scratch

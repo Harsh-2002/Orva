@@ -14,7 +14,28 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Fixed
+
+- A function's stderr, including `orva.log.*` structured logs, was silently
+  lost for a large share of invocations (about 28% in a 400-request test on a
+  2-vCPU guest). The adapter's response and its stderr travel on separate pipes,
+  so the host could read the reply before the output written ahead of it, and
+  those bytes were then skipped by the next request. Adapters now write an
+  end-of-record marker to stderr before each terminal frame and the host waits
+  for it (bounded to 250 ms, and only when the adapter advertises it), then
+  strips it. Handler output is unchanged byte for byte. This affected HTTP
+  invocations as much as function-to-function, job, cron and webhook runs.
+
 ### Changed
+
+- Trace diagnostics now distinguish execution-level log correlation from code
+  spans. Structured SDK logs from function-to-function calls, cron/jobs, and
+  inbound webhooks are collected alongside HTTP logs; ordinary stderr remains
+  available in invocation details. Historical missing logs are not recovered.
+- The trace waterfall adds a shared time ruler, focus/zoom controls and visible
+  cold-start/status labels. Zero-duration spans use markers and bars stay inside
+  the selected time window. Trace navigation ignores stale responses; active
+  detail views refresh to include delayed child executions.
 
 - The Python rootfs now ships precompiled standard-library bytecode, avoiding
   repeated source compilation on its read-only runtime mount. Cold-start savings
@@ -24,6 +45,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- The server binary and the runtime adapters are a pair. A new adapter under an
+  old binary prints a `__ORVA_EOR__` line at the end of every invocation's
+  stderr. Docker refreshes adapters on start; on bare metal run `orva setup` (or
+  re-run `install.sh`) after replacing the binary. A new binary with an old
+  adapter works as before, without the fix.
 - Docker: pull the new image and recreate the container. The entrypoint now
   compares both interpreter and rootfs content revision, so existing volumes
   without a revision refresh once even when Python's version is unchanged.

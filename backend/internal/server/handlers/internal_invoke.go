@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/executionlogs"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
@@ -178,8 +179,10 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	respJSON, _, err := acq.Worker.Dispatch(ctx, eventJSON)
+	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	durationMS := time.Since(start).Milliseconds()
+	// Raw logs have an execution FK, so publish the completion before its logs.
+	defer func() { executionlogs.Persist(h.DB, stderr, fn.ID, execID, traceID, spanID) }()
 	if err != nil {
 		reqErr = err
 		errMsg := err.Error()
@@ -384,6 +387,9 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	eventJSON, _ := json.Marshal(event)
 
 	dres, err := acq.Worker.DispatchEx(ctx, eventJSON)
+	if dres != nil {
+		defer func() { executionlogs.Persist(h.DB, dres.Stderr(), fn.ID, execID, traceID, spanID) }()
+	}
 	if err != nil {
 		reqErr = err
 		errMsg := err.Error()

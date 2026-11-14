@@ -327,8 +327,20 @@ def _read_frame():
 _stdout_lock = threading.Lock()
 
 
+# stdout and stderr are separate pipes, so the host can read a response frame
+# before the stderr bytes written ahead of it. This marker, written last, lets
+# the host wait until it has read everything this request wrote.
+_STDERR_SYNC = "\n__ORVA_EOR__\n"
+
+
 def _write_frame(obj):
     body = json.dumps(obj).encode("utf-8")
+    if obj.get("type") in ("response", "response_end", "error"):
+        try:
+            sys.stderr.write(_STDERR_SYNC)
+            sys.stderr.flush()
+        except (BrokenPipeError, OSError):
+            pass
     with _stdout_lock:
         try:
             _stdout.write(struct.pack(">I", len(body)))
@@ -628,7 +640,7 @@ def _dispatch_and_emit(event, streaming_enabled, keepalive_s):
 # single lifecycle authority, and a worker that exits on its own schedule races
 # the pool's accounting.
 
-_write_frame({"type": "ready"})
+_write_frame({"type": "ready", "stderr_sync": True})
 
 try:
     while True:

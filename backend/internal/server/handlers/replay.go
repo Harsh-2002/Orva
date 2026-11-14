@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/executionlogs"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
@@ -196,6 +197,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	duration := time.Since(start)
+	stderr = executionlogs.Process(h.DB, stderr, fn.ID, newExecID, traceID, spanID)
 	if h.Metrics != nil {
 		h.Metrics.RecordDuration(duration)
 		h.Metrics.RecordInvocation(acq.ColdStart)

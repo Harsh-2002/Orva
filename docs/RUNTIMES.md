@@ -188,6 +188,18 @@ runtime changes rebuilds the dependencies instead of reusing the old directory.
 Packages that are pure Python or pure JavaScript, or that use a stable ABI
 (`abi3`, N-API), keep working across a runtime upgrade.
 
+## Trace and log correlation
+
+Both SDKs expose `trace.span` and `log`. Custom code spans are direct children
+of the containing execution, even when code-span calls are nested. SDK logs
+carry the execution's span ID, not a currently active custom-span ID. The trace
+viewer therefore labels code-span log selection as execution-scoped.
+
+Structured SDK logs are extracted from worker stderr for HTTP, F2F, cron/jobs,
+and inbound-webhook invocations. Ordinary stderr and malformed structured
+records remain in invocation logs. Structured telemetry is best-effort, not an
+audit log. See [Tracing](TRACING.md) for propagation and storage semantics.
+
 ## Environment variables
 
 Two sources, merged at spawn time:

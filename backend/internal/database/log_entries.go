@@ -7,8 +7,8 @@ import (
 
 // LogEntry is one structured log line emitted by orva.log.* inside a
 // function. The runtime SDK serialises the entry as a single
-// `__ORVA_LOG_JSON__{...}` line on stderr; proxy.Forward extracts it
-// during stderr drain and queues an insert here.
+// `__ORVA_LOG_JSON__{...}` line on stderr; executionlogs extracts it
+// during dispatch finalization and queues an insert here.
 type LogEntry struct {
 	ID          int64     `json:"id"`
 	FunctionID  string    `json:"-"`

@@ -14,6 +14,7 @@ import (
 
 	"errors"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/executionlogs"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
@@ -298,7 +299,7 @@ func (p *Proxy) finalizeStderr(r *http.Request, fnID, execID string, raw []byte)
 	}
 	tID := trace.TraceID(r.Context())
 	sID := trace.SpanID(r.Context())
-	return stripNsjailNoise(extractStructuredLogs(p.DB, raw, fnID, execID, tID, sID))
+	return executionlogs.Process(p.DB, raw, fnID, execID, tID, sID)
 }
 
 // New creates a new Proxy.

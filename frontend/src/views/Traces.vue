@@ -168,7 +168,7 @@
                 <template v-if="item.cold_start_count"> · {{ item.cold_start_count }} cold</template>
               </span>
             </span>
-            <span class="font-mono text-foreground-strong md:text-foreground-muted">{{ item.duration_ms }}ms</span>
+            <span class="font-mono text-foreground-strong md:text-foreground-muted">{{ formatTraceTime(item.duration_ms) }}</span>
             <span class="text-foreground-muted">{{ item.span_count }} span{{ item.span_count === 1 ? '' : 's' }}</span>
             <!-- The flag is decorative here: the row button carries an
                  aria-label, which replaces the accessible name of everything
@@ -209,13 +209,13 @@
 <script setup>
 defineOptions({ name: 'TracesView' })
 
-import { onMounted, ref } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Flag, Network, RefreshCw, Search } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import { listTraces } from '@/api/endpoints'
-import { shortID } from '@/utils/traceLayout'
+import { shortID, formatTraceTime } from '@/utils/traceLayout'
 
 const router = useRouter()
 const traces = ref([])
@@ -226,6 +226,8 @@ const fnFilter = ref('')
 const statusFilter = ref('')
 const outlierOnly = ref(false)
 const timePreset = ref('all')
+let active = false
+let generation = 0
 
 const statusOptions = [
   { value: '', label: 'All status' },
@@ -242,6 +244,9 @@ const timePresets = [
 ]
 
 const fetchTraces = async ({ append = false } = {}) => {
+  if (!active || (append && loading.value)) return
+  const request = ++generation
+  const current = () => active && generation === request
   loading.value = true
   error.value = ''
   try {
@@ -253,12 +258,17 @@ const fetchTraces = async ({ append = false } = {}) => {
     if (preset?.ms) params.since = new Date(Date.now() - preset.ms).toISOString()
     if (append && nextCursor.value) params.before = nextCursor.value
     const incoming = (await listTraces(params)).data
-    traces.value = append ? [...traces.value, ...(incoming?.traces || [])] : (incoming?.traces || [])
+    if (!current()) return
+    const items = Array.isArray(incoming?.traces) ? incoming.traces.filter((item) => item?.trace_id) : []
+    traces.value = append ? [...traces.value, ...items] : items
     nextCursor.value = incoming?.next_cursor || ''
   } catch (err) {
+    if (!current()) return
+    traces.value = []
+    nextCursor.value = ''
     error.value = err?.response?.data?.error?.message || err?.message || 'Failed to load traces.'
   } finally {
-    loading.value = false
+    if (current()) loading.value = false
   }
 }
 const refresh = () => { nextCursor.value = ''; fetchTraces() }
@@ -288,5 +298,14 @@ const traceLabel = (item) => {
   return parts.join(', ')
 }
 
-onMounted(refresh)
+const activate = () => {
+  if (active) return
+  active = true
+  refresh()
+}
+const stop = () => { active = false; ++generation; loading.value = false }
+onMounted(activate)
+onActivated(activate)
+onDeactivated(stop)
+onBeforeUnmount(stop)
 </script>
