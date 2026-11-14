@@ -1550,13 +1550,17 @@ chunked runs than in both baseline runs, also in windows far from any tick,
 with p50 unchanged; the cause was not isolated. Both are small beside a 4-5 s
 freeze on every tick.
 
-**Still open.** Other single statements on `db.write` have the same shape and
-were not measured: `PurgeOldExecutions` (one unbounded `DELETE` per execution
-child table and for `executions`), `DeleteFunction` (one transaction over every
-execution row of the function; deleting a function with about 2 million
-executions held the writer for over a minute during this work) and
-`KVSweepExpired`. Ramp steps are 10 s, so a step can land on a sweep tick; that
-may account for part of the run-to-run spread in the knees above.
+**Follow-up.** The two other periodic single statements on `db.write`,
+`PurgeOldExecutions` (daily) and `KVSweepExpired` (5-minute), now delete in
+bounded batches the same way. Their effect was measured on a throwaway 200,000
+row database, not under load on the rig above: the old purge held the writer
+for up to 2.8 s and let 6 probe writes through, the new one let 3,909 through
+with a 39 ms worst wait (the KV sweep: 1 probe and 0.80 s before, 3,951 and
+34 ms after). **Still open:** `DeleteFunction` removes every execution row of a
+function in one transaction (deleting a function with about 2 million
+executions held the writer for over a minute during this work). Ramp steps are
+10 s, so a step can land on a sweep tick; that may account for part of the
+run-to-run spread in the knees above.
 
 **Durability signals.** Across all 76 five-second windows, `critical_failures`
 and `critical_timeouts` were 0. Only best-effort telemetry and activity were

@@ -16,6 +16,24 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- The daily execution-history purge and the 5-minute KV expiry sweep had the
+  same flaw as the activity sweep: each ran as one unbounded `DELETE` on the
+  database's only write connection, which also carries the execution-record
+  writer. At scale a purge removes a whole day of history in one statement
+  (tens of millions of rows at 1,200 requests/s), and the first purge on an
+  instance with a long history is larger still, so writes stopped for the
+  duration and requests were rejected with `429 STORAGE_BACKPRESSURE`. Both now
+  delete in bounded batches of 500 with a 20 ms pause. Each purge batch is one
+  transaction (an execution's children go with it), so the database stays
+  consistent if the process stops mid-purge, and the purge now stops at
+  shutdown. Measured on a 200,000-row throwaway database: the old purge held the
+  writer for up to 2.8 s and let 6 writes through; the new one let 3,909
+  through with a worst wait of 39 ms. It takes about twice as long end to end
+  (17 s versus 9 s there), well inside the 24 h interval. The retention warning
+  now reports the number of executions actually deleted; it no longer includes
+  a `remaining` count, because a before/after `COUNT(*)` is wrong while writes
+  continue and expensive on a large table. `DeleteFunction` on a function with
+  millions of executions is still one transaction and is not changed here.
 - Every 5 minutes the activity-log retention sweep deleted everything past the
   50,000-row cap in a single statement on the database's only write connection,
   which also carries the execution-record writer. At about 1,200 requests/s that

@@ -1,10 +1,12 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -824,28 +826,129 @@ var executionOwnedChildTables = []string{
 	"execution_log_entries",
 }
 
-func (db *Database) PurgeOldExecutions(retentionDays int) error {
+// A purge is bounded batches with a pause, not one statement: db.write is the
+// single connection the async execution writer commits through, so a long
+// DELETE freezes every commit and backs requests up into STORAGE_BACKPRESSURE.
+const (
+	purgeChunk = 500
+	purgePause = 20 * time.Millisecond
+)
+
+// PurgeOldExecutions deletes execution history older than retentionDays in
+// bounded batches and returns how many executions it removed (also on error,
+// since earlier batches stay committed). Cancelling ctx stops it between
+// batches; each batch is one transaction, so the database is consistent at
+// every point.
+func (db *Database) PurgeOldExecutions(ctx context.Context, retentionDays int) (int64, error) {
 	// One cutoff for the whole purge. Evaluating datetime('now', …) per
 	// statement lets a row cross the boundary mid-purge and orphan its
 	// children.
 	var cutoff string
-	if err := db.read.QueryRow(
+	if err := db.read.QueryRowContext(ctx,
 		"SELECT datetime('now', '-' || ? || ' days')", retentionDays).Scan(&cutoff); err != nil {
-		return err
+		return 0, err
 	}
 
-	for _, table := range executionChildTables {
-		if _, err := db.write.Exec(
-			"DELETE FROM "+table+" WHERE execution_id IN ("+
-				"SELECT id FROM executions WHERE started_at < ?)", cutoff); err != nil {
-			return fmt.Errorf("purge %s: %w", table, err)
+	removed, err := db.purgeExecutions(ctx, cutoff)
+	if err != nil {
+		return removed, fmt.Errorf("purge executions: %w", err)
+	}
+	return removed, db.purgeOtherRetainedTables(ctx, cutoff)
+}
+
+func (db *Database) purgeExecutions(ctx context.Context, cutoff string) (removed int64, err error) {
+	for {
+		n, err := db.purgeExecutionBatch(ctx, cutoff)
+		removed += int64(n)
+		if err != nil {
+			return removed, err
+		}
+		if n < purgeChunk {
+			return removed, nil
+		}
+		if err := sleepCtx(ctx, purgePause); err != nil {
+			return removed, err
 		}
 	}
+}
 
-	if _, err := db.write.Exec("DELETE FROM executions WHERE started_at < ?", cutoff); err != nil {
-		return err
+// purgeExecutionBatch removes up to purgeChunk executions older than cutoff
+// together with their children, in one transaction so an execution is never
+// deleted while a child survives, nor a child left without its parent.
+func (db *Database) purgeExecutionBatch(ctx context.Context, cutoff string) (int, error) {
+	tx, err := db.write.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
 	}
-	return db.purgeOtherRetainedTables(cutoff)
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx,
+		"SELECT id FROM executions WHERE started_at < ? LIMIT "+strconv.Itoa(purgeChunk), cutoff)
+	if err != nil {
+		return 0, err
+	}
+	ids := make([]any, 0, purgeChunk)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	_ = rows.Close()
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	in := "(?" + strings.Repeat(",?", len(ids)-1) + ")"
+	for _, table := range executionChildTables {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE execution_id IN "+in, ids...); err != nil {
+			return 0, fmt.Errorf("purge %s: %w", table, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM executions WHERE id IN "+in, ids...); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
+// sleepCtx pauses for d unless ctx ends first.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// deleteRowsChunked deletes rows of table matching cond (a rowid table), one
+// bounded batch at a time with a pause, returning the total deleted.
+func (db *Database) deleteRowsChunked(ctx context.Context, table, cond string, args ...any) (deleted int64, err error) {
+	stmt := "DELETE FROM " + table + " WHERE rowid IN (SELECT rowid FROM " + table +
+		" WHERE " + cond + " LIMIT " + strconv.Itoa(purgeChunk) + ")"
+	for {
+		res, err := db.write.ExecContext(ctx, stmt, args...)
+		if err != nil {
+			return deleted, err
+		}
+		n, _ := res.RowsAffected()
+		deleted += n
+		if n < purgeChunk {
+			return deleted, nil
+		}
+		if err := sleepCtx(ctx, purgePause); err != nil {
+			return deleted, err
+		}
+	}
 }
 
 // purgeOtherRetainedTables trims the finished rows that also accumulate
@@ -861,29 +964,30 @@ func (db *Database) PurgeOldExecutions(retentionDays int) error {
 // Only terminal rows are removed: anything still pending or running is left
 // alone regardless of age, so a long-scheduled job is never swept out from
 // under the scheduler.
-func (db *Database) purgeOtherRetainedTables(cutoff string) error {
-	stmts := []struct{ what, sql string }{
-		{"jobs", `DELETE FROM jobs
-			WHERE status IN ('succeeded','failed','cancelled')
-			  AND COALESCE(finished_at, created_at) < ?`},
-		{"webhook_deliveries", `DELETE FROM webhook_deliveries
-			WHERE status IN ('succeeded','failed','cancelled')
-			  AND COALESCE(finished_at, created_at) < ?`},
+func (db *Database) purgeOtherRetainedTables(ctx context.Context, cutoff string) error {
+	stmts := []struct {
+		what, table, cond string
+		withCutoff        bool
+	}{
+		{"jobs", "jobs", `status IN ('succeeded','failed','cancelled')
+			AND COALESCE(finished_at, created_at) < ?`, true},
+		{"webhook_deliveries", "webhook_deliveries", `status IN ('succeeded','failed','cancelled')
+			AND COALESCE(finished_at, created_at) < ?`, true},
 		// build_logs only. The deployment ROW is small metadata and is the
 		// rollback audit trail the dashboard lists; the log lines are the
 		// bulk. Version pruning on disk is the version GC's job.
-		{"build_logs", `DELETE FROM build_logs WHERE deployment_id IN (
+		{"build_logs", "build_logs", `deployment_id IN (
 			SELECT id FROM deployments
 			WHERE status IN ('succeeded','failed')
-			  AND submitted_at < ?)`},
-		{"sessions", `DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP`},
+			  AND submitted_at < ?)`, true},
+		{"sessions", "sessions", `expires_at < CURRENT_TIMESTAMP`, false},
 	}
 	for _, st := range stmts {
-		args := []any{cutoff}
-		if st.what == "sessions" {
-			args = nil
+		var args []any
+		if st.withCutoff {
+			args = []any{cutoff}
 		}
-		if _, err := db.write.Exec(st.sql, args...); err != nil {
+		if _, err := db.deleteRowsChunked(ctx, st.table, st.cond, args...); err != nil {
 			return fmt.Errorf("purge %s: %w", st.what, err)
 		}
 	}

@@ -1,6 +1,9 @@
 package database
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // seedExecution writes an executions row with an explicit age in days, which is
 // what retention keys off. The normal insert path stamps started_at itself, so
@@ -41,7 +44,7 @@ func TestPurgeRemovesOnlyExpiredExecutions(t *testing.T) {
 	if got := countExecutions(t, db); got != 4 {
 		t.Fatalf("seed: want 4 rows, got %d", got)
 	}
-	if err := db.PurgeOldExecutions(DefaultRetentionDays); err != nil {
+	if _, err := db.PurgeOldExecutions(context.Background(), DefaultRetentionDays); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
 
@@ -69,7 +72,7 @@ func TestPurgeOnceIsDisabledByZero(t *testing.T) {
 	if err := db.SetSystemConfig(RetentionSettingKey, "0"); err != nil {
 		t.Skipf("cannot set system config in this build: %v", err)
 	}
-	db.purgeOnce()
+	db.purgeOnce(context.Background())
 
 	if got := countExecutions(t, db); got != 1 {
 		t.Fatalf("retention 0 must keep everything, got %d rows", got)
@@ -86,7 +89,7 @@ func TestPurgeOnceUsesTheConfiguredWindow(t *testing.T) {
 	if err := db.SetSystemConfig(RetentionSettingKey, "5"); err != nil {
 		t.Skipf("cannot set system config in this build: %v", err)
 	}
-	db.purgeOnce()
+	db.purgeOnce(context.Background())
 
 	if got := countExecutions(t, db); got != 1 {
 		t.Fatalf("a 5-day window must drop the 10-day row and keep the 1-day row, got %d rows", got)
@@ -137,7 +140,7 @@ func TestPurgeCascadesToEveryExecutionChildTable(t *testing.T) {
 		}
 	}
 
-	if err := db.PurgeOldExecutions(DefaultRetentionDays); err != nil {
+	if _, err := db.PurgeOldExecutions(context.Background(), DefaultRetentionDays); err != nil {
 		t.Fatalf("purge: %v", err)
 	}
 

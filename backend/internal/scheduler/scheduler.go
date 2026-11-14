@@ -501,7 +501,7 @@ func (s *Scheduler) kvSweepLoop(ctx context.Context) {
 
 	// One sweep on boot so a recently-restarted server doesn't keep
 	// hours-old expired rows around for the full first interval.
-	s.kvSweepOnce()
+	s.kvSweepOnce(ctx)
 
 	for {
 		select {
@@ -510,13 +510,16 @@ func (s *Scheduler) kvSweepLoop(ctx context.Context) {
 		case <-s.stop:
 			return
 		case <-t.C:
-			s.kvSweepOnce()
+			s.kvSweepOnce(ctx)
 		}
 	}
 }
 
-func (s *Scheduler) kvSweepOnce() {
-	deleted, err := s.db.KVSweepExpired()
+func (s *Scheduler) kvSweepOnce(ctx context.Context) {
+	deleted, err := s.db.KVSweepExpired(ctx)
+	if err != nil && ctx.Err() != nil {
+		return // shutting down mid-sweep
+	}
 	if err != nil {
 		slog.Warn("kv: sweep failed", "err", err)
 		return
