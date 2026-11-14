@@ -1573,3 +1573,35 @@ responses.
 machine; Docker; native under systemd; runs longer than a few minutes; more
 than two repetitions per step; whether the block-device hangs seen once with the
 chunked sweep recur, and the cause of its 1.2-1.4 ms higher typical p95.
+
+### Re-run on the fixed build (2026-11-15)
+
+The ramp above was repeated after the activity-sweep fix: the same rig, the same
+harness (after its overload-step fix), `main` at `31faac4`, two repetitions on a
+fresh database and a freshly started cgroup-enforced server each. That build
+has the chunked activity sweep but not the later purge/KV change, which cannot
+matter in runs this short (the purge is daily and no function used KV).
+
+| Workload | Last good rate, before / after the fix | p99 at the new last-good rate |
+|---|---|---|
+| Node hello | 1,600 / 1,600  vs  1,600 / 1,600 | 308 / 12 ms |
+| Python hello | 2,400 / 1,200  vs  1,600 / 1,600 | 463 / 22 ms |
+| Node, 3 ms CPU | 800 / 800  vs  800 / 800 | 309 / 412 ms |
+| Mixed | 1,200 / 1,200  vs  1,200 / 1,200 | 214 / 127 ms |
+
+- **The knees reproduced:** each workload landed on the same step in both new
+  runs. Before, only three of four did. Python's earlier 2x spread is gone,
+  which fits a sweep tick landing inside a 10 s step. It does not show that
+  Python capacity improved: 1,600/s sits inside the earlier 1,200-2,400 band,
+  and two repetitions is a small sample.
+- **Node hello's first failing step (2,400/s) returned only HTTP 200** with a p99
+  of 121-315 ms. It misses the pass criteria on dropped best-effort telemetry
+  alone (310-409 rows), not on errors or latency.
+- **Overload was unchanged:** every failure was a fast `429
+  INVOCATION_QUEUE_FULL`, with no 5xx and no transport errors in any step; all
+  four recovery steps in both runs were clean (8 of 8, against 7 of 8 before).
+  The mixed overload step's roughly 12,000 unsent requests are the load
+  generator's 2,000-connection cap, not a server ceiling; client CPUs peaked at
+  36% busy.
+- **Still the same limits:** one guest, shared kernel and loopback, 10 s steps,
+  and two repetitions.
