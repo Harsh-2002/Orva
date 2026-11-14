@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -162,39 +163,83 @@ func (db *Database) ListActivity(f ActivityFilter) (rows []ActivityRow, nextCurs
 	return rows, nextCursor, nextCursorID, nil
 }
 
+// Activity sweeps run on the writer's only connection (MaxOpenConns is 1), so a
+// long DELETE there stops every commit of the async writer. activity_log has
+// four secondary indexes, which makes each deleted row cost five B-tree
+// updates: at 1,200 req/s the table gains ~360,000 rows per 5-minute sweep and
+// one statement deleting the surplus held the writer for 3.5-5.2 s. The
+// critical queue (1,024 entries) fills in under a second at that rate, so
+// requests were rejected with 429 STORAGE_BACKPRESSURE while the pool sat
+// idle. Deleting in small chunks with a pause keeps every hold short.
+const (
+	activitySweepChunk = 1000
+	activitySweepPause = 20 * time.Millisecond
+)
+
 // SweepActivity drops rows older than the configured retention window
 // AND/OR truncates to the configured max-row cap, whichever bites first.
-// Reads its knobs from system_config so operators can tune live.
-func (db *Database) SweepActivity() (deleted int64, err error) {
+// Reads its knobs from system_config so operators can tune live. It deletes in
+// bounded chunks so the async writer can commit between them.
+func (db *Database) SweepActivity(ctx context.Context) (deleted int64, err error) {
 	days := readSysConfigInt(db, "activity_retention_days", 7)
 	maxRows := readSysConfigInt(db, "activity_retention_max_rows", 50000)
 
 	if days > 0 {
 		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
-		res, err := db.write.Exec(`DELETE FROM activity_log WHERE ts < ?`, cutoff)
+		n, err := db.deleteActivityChunked(ctx, `ts < ?`, cutoff)
+		deleted += n
 		if err != nil {
 			return deleted, err
 		}
-		n, _ := res.RowsAffected()
-		deleted += n
 	}
 
 	if maxRows > 0 {
-		res, err := db.write.Exec(`
-			DELETE FROM activity_log
-			WHERE id IN (
-				SELECT id FROM activity_log
-				ORDER BY ts DESC, id DESC
-				LIMIT -1 OFFSET ?
-			)`, maxRows)
+		// The (maxRows+1)th newest row is the boundary: it and everything older
+		// go. Finding it is a read-only index walk, so it never holds the writer.
+		var boundaryTS, boundaryID int64
+		err := db.read.QueryRowContext(ctx, `
+			SELECT ts, id FROM activity_log
+			ORDER BY ts DESC, id DESC
+			LIMIT 1 OFFSET ?`, maxRows).Scan(&boundaryTS, &boundaryID)
+		if err == sql.ErrNoRows {
+			return deleted, nil // at or under the cap
+		}
+		if err != nil {
+			return deleted, err
+		}
+		n, err := db.deleteActivityChunked(ctx, `ts < ? OR (ts = ? AND id <= ?)`, boundaryTS, boundaryTS, boundaryID)
+		deleted += n
+		if err != nil {
+			return deleted, err
+		}
+	}
+
+	return deleted, nil
+}
+
+// deleteActivityChunked deletes every row matching cond (with its args), one
+// bounded chunk at a time, pausing between chunks so other writers get the
+// connection, and stops promptly when ctx is cancelled (shutdown). Rows
+// inserted while it runs are not touched unless they match.
+func (db *Database) deleteActivityChunked(ctx context.Context, cond string, args ...any) (deleted int64, err error) {
+	stmt := `DELETE FROM activity_log WHERE id IN (
+		SELECT id FROM activity_log WHERE ` + cond + ` LIMIT ` + strconv.Itoa(activitySweepChunk) + `)`
+	for {
+		res, err := db.write.ExecContext(ctx, stmt, args...)
 		if err != nil {
 			return deleted, err
 		}
 		n, _ := res.RowsAffected()
 		deleted += n
+		if n < activitySweepChunk {
+			return deleted, nil
+		}
+		select {
+		case <-ctx.Done():
+			return deleted, ctx.Err()
+		case <-time.After(activitySweepPause):
+		}
 	}
-
-	return deleted, nil
 }
 
 // readSysConfigInt is a tiny lookup that falls back to the default on
