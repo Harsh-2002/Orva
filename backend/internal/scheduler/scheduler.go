@@ -535,7 +535,7 @@ func (s *Scheduler) activitySweepLoop(ctx context.Context) {
 	defer t.Stop()
 
 	// Boot sweep so a long downtime doesn't leave stale rows around.
-	s.activitySweepOnce()
+	s.activitySweepOnce(ctx)
 
 	for {
 		select {
@@ -544,13 +544,16 @@ func (s *Scheduler) activitySweepLoop(ctx context.Context) {
 		case <-s.stop:
 			return
 		case <-t.C:
-			s.activitySweepOnce()
+			s.activitySweepOnce(ctx)
 		}
 	}
 }
 
-func (s *Scheduler) activitySweepOnce() {
-	deleted, err := s.db.SweepActivity()
+func (s *Scheduler) activitySweepOnce(ctx context.Context) {
+	deleted, err := s.db.SweepActivity(ctx)
+	if err != nil && ctx.Err() != nil {
+		return // shutting down mid-sweep; the next boot sweep finishes the job
+	}
 	if err != nil {
 		slog.Warn("activity: sweep failed", "err", err)
 		return

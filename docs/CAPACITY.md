@@ -1503,19 +1503,60 @@ that in mind.
 
 **Recovery.** 7 of 8 ramp recovery steps were clean. The exception is below.
 
-**Python stalls at about 75% CPU (open finding).** A 90 s steady run at 1,200/s
-on Python, with no preceding overload, had one 5 s window with 943 `429`s
-(15.7%) and a 3.0 s p95, then healed by itself. The run-1 ramp's first Python
-recovery step (15 s at 1,200/s after a 4,800/s overload) showed the same shape:
-1,620 `429`s and a 3.6 s p95. That is two stall episodes in about 3.5 minutes at
-this rate. The Node hello function showed none in 180 s of steady 1,200/s plus
-a 4x overload and its recovery, and both post-overload recovery series (18
-windows each) were clean, so overload itself is not the trigger. The pool was
-rotating workers constantly (several spawns and kills per window) and
-`cold_start_p95_ms` reached about 5 s under saturation. One **untested**
-hypothesis is a feedback loop: the rotation spare scales with measured spawn
-p95, so slow spawns under CPU pressure ask for more spare workers and more
-spawns. Reproduce with `capacity_ramp.py series py-hello 1200`.
+**Intermittent multi-second stalls: found, fixed (2026-11-15 follow-up).** A
+steady 1,200/s run had windows with hundreds of `429`s and a 3-5 s p95, then
+healed on its own. This section first blamed Python at about 75% CPU and then
+a spawn-rotation feedback loop; **both were wrong.** The `429` code was
+`STORAGE_BACKPRESSURE`, not `INVOCATION_QUEUE_FULL`, and the worker pool was
+idle and healthy throughout (13-27 idle workers, 0 busy, 0 queued). Node was
+not immune: its 180 s run simply did not overlap a tick.
+
+The cause: `Scheduler.activitySweepLoop` runs every 300 s and called
+`SweepActivity`, which deleted everything past the 50,000-row cap in one
+statement on `db.write`. That is the same single connection the async writer
+commits through (`MaxOpenConns(1)`). At 1,200 req/s the table gains about
+360,000 rows per tick and `activity_log` has four secondary indexes, so about
+310,000 deletes (five B-tree updates each) held the writer for 3.3-5.2 s. The
+1,024-entry critical queue is under a second of traffic at that rate, so it
+filled and admission returned `429 STORAGE_BACKPRESSURE` after its documented
+5 s wait. The WAL also grew from 41 MB to 122 MB and was truncated afterwards,
+which is why a checkpoint looked like the cause at first.
+
+Evidence, four 30-minute runs on one rig and one fresh database each, ordered
+A-B-B-A (A = `main`, B = chunked sweep; 200 ms writer-queue samples, 50 ms WAL
+and block-device samples):
+
+| Run | Build | Writer freezes at the 300 s ticks | `429`s | Typical window p95 |
+|---|---|---|---|---|
+| A1 | main | 5 of 5 observable (3.5-5.2 s) | 421 | 5.1 ms |
+| B1 | chunked | 0 of 6 | 2,491 (see below) | 6.5 ms |
+| B2 | chunked | 0 of 6 | 0 | 6.4 ms |
+| A2 | main | 6 of 6 (3.3-4.6 s) | 507 | 5.0 ms |
+
+The freezes sat on every tick, 300.0 s apart, and no other freeze exceeded
+0.8 s in the baseline runs. With the chunked sweep no freeze exceeded 0.8 s at
+a tick, the WAL never left its 41 MB steady state, and the cap still held
+(about 114,000-122,000 rows at the end, which is 50,000 plus the rows added
+since the last sweep). `SweepActivity` now deletes 1,000 rows at a time with a
+20 ms pause, and stops on shutdown.
+
+**Unexplained.** B1 also had a cluster of block-device hangs (I/O in flight
+with no completions for 11 s and 7 s) that froze the writer for 14 s and 6 s.
+B2 and both baseline runs had none in 124 minutes combined, so it was neither
+reproduced nor attributed; it is not the sweep's delete statement (the queue
+froze after the sweep had finished), but a provoked storage hang cannot be
+excluded on one occurrence. Typical window p95 was 1.2-1.4 ms higher in both
+chunked runs than in both baseline runs, also in windows far from any tick,
+with p50 unchanged; the cause was not isolated. Both are small beside a 4-5 s
+freeze on every tick.
+
+**Still open.** Other single statements on `db.write` have the same shape and
+were not measured: `PurgeOldExecutions` (one unbounded `DELETE` per execution
+child table and for `executions`), `DeleteFunction` (one transaction over every
+execution row of the function; deleting a function with about 2 million
+executions held the writer for over a minute during this work) and
+`KVSweepExpired`. Ramp steps are 10 s, so a step can land on a sweep tick; that
+may account for part of the run-to-run spread in the knees above.
 
 **Durability signals.** Across all 76 five-second windows, `critical_failures`
 and `critical_timeouts` were 0. Only best-effort telemetry and activity were
@@ -1526,4 +1567,5 @@ responses.
 
 **Not established.** Production capacity; behaviour on a separate client
 machine; Docker; native under systemd; runs longer than a few minutes; more
-than two repetitions per step; the Python stall's cause.
+than two repetitions per step; whether the block-device hangs seen once with the
+chunked sweep recur, and the cause of its 1.2-1.4 ms higher typical p95.

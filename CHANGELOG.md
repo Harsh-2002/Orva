@@ -16,6 +16,18 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Every 5 minutes the activity-log retention sweep deleted everything past the
+  50,000-row cap in a single statement on the database's only write connection,
+  which also carries the execution-record writer. At about 1,200 requests/s that
+  was roughly 310,000 rows and froze the writer for 3-5 s on every sweep (11 of
+  11 observed ticks); the queue then filled and requests were rejected with
+  `429 STORAGE_BACKPRESSURE` while the worker pool sat idle. The sweep now
+  deletes 1,000 rows at a time with a short pause and stops on shutdown, so it
+  no longer blocks writes: no freeze occurred on any of 12 sweep ticks across
+  two 30-minute runs. Retention behaviour is unchanged. Only 1,200 requests/s was
+  measured; a lower rate leaves fewer rows to delete per sweep, so a shorter
+  stall is expected but was not tested. `PurgeOldExecutions`, `DeleteFunction` and the KV sweep still run as
+  single statements and can hold the writer similarly on very large tables.
 - A function's stderr, including `orva.log.*` structured logs, was silently
   lost for a large share of invocations (about 28% in a 400-request test on a
   2-vCPU guest). The adapter's response and its stderr travel on separate pipes,
