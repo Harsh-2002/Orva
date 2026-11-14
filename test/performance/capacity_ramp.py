@@ -90,7 +90,13 @@ class Rig:
                "-require-cgroup-v2", "-observe-url", self.a.url, "-drain-timeout", "60s"]
         for n in names:
             cmd += ["-url", self.urls[n]]
-        return json.loads(subprocess.run(cmd, capture_output=True, text=True, check=True).stdout)
+        # loadgen exits 1 when it ran and measured but saw errors, transport failures
+        # or unsent requests, which is what an overload step is for; 2 means it never
+        # ran (bad flags, unreachable server, unenforced cgroups).
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        if p.returncode not in (0, 1) or not p.stdout.strip():
+            raise SystemExit(f"loadgen did not run (exit {p.returncode}): {p.stderr.strip()[:300]}")
+        return json.loads(p.stdout)
 
 
 def cpu_times():
