@@ -503,6 +503,15 @@ waterfall — `parse` and `transform` show as bars nested under the
 function's main span, and the level-tagged log lines appear in the
 Logs lane below.
 
+Code spans always belong directly to the containing execution. Nested calls to
+`trace.span` do not establish nested code-span parentage, and SDK logs are
+execution-scoped, not code-span-scoped. Selecting a code span shows its
+containing execution's logs with that scope stated explicitly. Structured logs
+are collected on HTTP, function-to-function, cron/job, and inbound-webhook
+execution paths, including replays. Ordinary stderr and malformed log
+records remain in invocation logs. Structured telemetry is best-effort and may
+arrive after the response or be dropped under pressure.
+
 ### Streaming F2F
 
 ```js
@@ -1703,7 +1712,11 @@ failures.
 ### Where to look
 
 - `/traces` — trace-wide summaries, filterable by exact function ID/name (matching any span), status, outlier, and time preset. Status, duration, and counts aggregate the complete trace.
-- `/traces/:id` — one expandable causal waterfall. Select a span in place for status code, cold/warm state, error, baseline comparison, and linked logs; use the separate **Open invocation** action to navigate.
+- `/traces/:id` — one expandable causal waterfall. Select a span in place for status code, cold/warm state, error, baseline comparison, and execution-scoped logs; use the separate **Open invocation** action to navigate. Code-span selection shows the containing execution's logs, not code-span-specific correlation.
+  A shared ruler, focus/zoom controls and **Fit trace** keep short spans after
+  long job delays inspectable. Zero-duration spans use a line marker. Detail
+  refreshes every five seconds while active, with manual **Refresh** and a
+  stale-snapshot notice on failure; cached inactive views stop refreshing.
 - `GET /api/v1/traces/{id}` — full span tree as JSON. Pair with `list_traces` / `get_trace` MCP tools for AI agents.
 - `GET /api/v1/functions/{id}/baseline` — current P95/P99/mean for a function.
 

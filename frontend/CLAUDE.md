@@ -52,8 +52,9 @@ change.
 | `src/views/Settings.vue` | System settings, backup/restore card, storage card |
 | `src/views/InboundWebhooks.vue` | Inbound webhook trigger management |
 | `src/views/Dashboard.vue` | System overview; its Server response time card uses `response_latency_ms` (full public invoke handler), not the shorter `latency_ms` proxy interval |
-| `src/views/Traces.vue` | Trace list with filters + outlier badges |
-| `src/views/TraceDetail.vue` | Single-trace waterfall + span detail |
+| `src/views/Traces.vue` | Trace list with filters + outlier badges; generation guards discard obsolete successes and failures, including after deactivation |
+| `src/views/TraceDetail.vue` | Single-trace waterfall + span detail; active-only non-overlapping five-second refresh and manual Refresh retain the last snapshot with a stale notice on failure |
+| `src/components/traces/TraceWaterfall.vue` + `src/utils/traceLayout.js` | Shared ruler and bounded focus/zoom windows, zero-duration markers, visible status/cold labels and execution-scoped log selection. Code spans do not imply nested SDK context or code-span log correlation |
 | `src/views/FunctionDiff.vue` | Side-by-side / unified source diff between two deployments (CodeMirror merge) + rollback CTA |
 | `src/utils/aiPrompts.js` | `buildPromptText()` (code gen) + `buildFixSuggestionPrompt()` (debug) |
 | `src/utils/rollbackDiff.js` | `describeSnapshotDiff()` — shared settings/env diff lines (Editor, Deployments, FunctionDiff) |

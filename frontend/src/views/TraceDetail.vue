@@ -1,23 +1,38 @@
 <template>
   <div class="space-y-6">
-    <header>
-      <button
-        type="button"
-        class="touch-expand-sm inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-foreground-muted hover:text-foreground-strong rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        @click="router.push('/traces')"
+    <header class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <button
+          type="button"
+          class="touch-expand-sm inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-foreground-muted hover:text-foreground-strong rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          @click="router.push('/traces')"
+        >
+          <ArrowLeft
+            class="w-3.5 h-3.5"
+            aria-hidden="true"
+          /> All traces
+        </button>
+        <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
+          Trace diagnostics
+        </h1>
+        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+          Follow work across functions without leaving the trace.
+        </p>
+      </div>
+      <Button
+        variant="secondary"
+        :loading="loading"
+        @click="fetchTrace"
       >
-        <ArrowLeft
-          class="w-3.5 h-3.5"
-          aria-hidden="true"
-        /> All traces
-      </button>
-      <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
-        Trace diagnostics
-      </h1>
-      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-        Follow work across functions without leaving the trace.
-      </p>
+        Refresh
+      </Button>
     </header>
+    <p
+      class="text-xs text-foreground-muted"
+      role="status"
+    >
+      {{ loading ? 'Updating trace…' : error && trace ? 'Showing previously loaded data. Refresh failed; retry with Refresh.' : 'Refreshes every 5 seconds while this view is open, including delayed jobs.' }}
+    </p>
 
     <div
       v-if="error"
@@ -34,7 +49,7 @@
       Loading trace…
     </div>
 
-    <template v-else-if="trace">
+    <template v-if="trace">
       <section aria-labelledby="trace-summary-heading">
         <div class="flex items-center gap-2 flex-wrap">
           <h2
@@ -65,14 +80,14 @@
             <dt class="inline text-foreground-muted">
               Status
             </dt><dd class="inline">
-              <StatusBadge :status="trace.status" />
+              <StatusBadge :status="trace.status || 'unknown'" />
             </dd>
           </div>
           <div>
             <dt class="inline text-foreground-muted">
               Duration
             </dt><dd class="inline text-foreground-strong font-mono">
-              {{ trace.total_duration_ms }}ms
+              {{ formatTraceTime(trace.total_duration_ms) }}
             </dd>
           </div>
           <div>
@@ -117,13 +132,14 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Copy, Flag } from '@lucide/vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
+import Button from '@/components/common/Button.vue'
 import TraceWaterfall from '@/components/traces/TraceWaterfall.vue'
 import { getTrace } from '@/api/endpoints'
-import { shortID } from '@/utils/traceLayout'
+import { shortID, formatTraceTime } from '@/utils/traceLayout'
 
 // The trace this view is scoped to. A route prop, not useRoute(): Vue does
 // not patch a keep-alived view's props, so a cached view stops following the URL.
@@ -133,18 +149,33 @@ const router = useRouter()
 const trace = ref(null)
 const loading = ref(false)
 const error = ref('')
+let active = false
+let generation = 0
+let timer
 
 const fetchTrace = async () => {
+  if (!active || !props.id || loading.value) return
+  clearTimeout(timer)
+  const request = ++generation
+  const id = props.id
+  const current = () => active && request === generation && id === props.id
   loading.value = true
   error.value = ''
   try {
-    trace.value = (await getTrace(props.id)).data
+    const data = (await getTrace(id)).data
+    if (!current()) return
+    if (!data || typeof data !== 'object' || !data.trace_id) throw new Error('Trace response was empty. Try Refresh.')
+    trace.value = data
   } catch (err) {
+    if (!current()) return
     error.value = err?.response?.status === 404
       ? 'No spans found for that trace.'
       : err?.response?.data?.error?.message || err?.message || 'Failed to load trace.'
   } finally {
-    loading.value = false
+    if (current()) {
+      loading.value = false
+      timer = setTimeout(fetchTrace, 5000)
+    }
   }
 }
 const openInvocation = (executionID) => router.push({ path: '/invocations', query: { exec: executionID } })
@@ -156,7 +187,26 @@ const copyID = async () => {
 // Clearing first matters as much as refetching: without it the previous trace
 // stayed on screen for the whole request, under the new trace's URL.
 watch(() => props.id, () => {
+  ++generation
+  clearTimeout(timer)
+  loading.value = false
+  error.value = ''
   trace.value = null
   fetchTrace()
-}, { immediate: true })
+}, { flush: 'sync' })
+const activate = () => {
+  if (active) return
+  active = true
+  fetchTrace()
+}
+const stop = () => {
+  active = false
+  ++generation
+  clearTimeout(timer)
+  loading.value = false
+}
+onMounted(activate)
+onActivated(activate)
+onDeactivated(stop)
+onBeforeUnmount(stop)
 </script>

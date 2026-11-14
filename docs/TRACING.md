@@ -121,11 +121,39 @@ All three tools require the read permission and run side-effect-free.
   and offers function, status, outlier, and time-range filters.
 - **/traces/:id** renders one expandable causal waterfall. Selecting a span
   keeps you on the trace and reveals status code, cold/warm state, error,
-  duration versus baseline, and its structured logs. **Open invocation** is a
-  separate action. Logs can be switched between all spans and the selected
-  span; structured fields expand in place.
+  duration versus baseline, and related execution logs. **Open invocation** is a
+  separate action. Logs can be switched between the whole trace and the
+  selected execution; structured fields expand in place.
+  The shared ruler measures time from the current window's start; the window
+  bounds show offsets from the trace start. **Focus selected span** makes short
+  work after long job delays inspectable, **Zoom in/out** changes the window,
+  and **Fit trace** restores the full extent. Spans outside the window remain
+  selectable; zero-duration spans use a line rather than an invented duration.
+  Cold starts and outcome status are visible before expansion.
+  Detail refreshes every five seconds while the view is active and has a
+  **Refresh** action. Failed refreshes keep the last snapshot with an explicit
+  stale-data notice. Leaving the view stops its refresh loop.
 - **Invocations log** has a Trace column showing the first 11 chars of
   the trace_id; click jumps to the trace detail.
+
+### Code spans and log scope
+
+`orva.trace.span()` records a timed code block beneath its containing execution.
+The SDK does not record an active custom-span stack: nested code blocks are
+siblings beneath that execution, not a nested code-span tree. Structured SDK
+logs are also associated with the execution, not the enclosing code block.
+Selecting a code span therefore shows its containing execution's logs, with an
+explicit scope notice. It does not establish that a log occurred inside that
+code span. Concurrent child executions remain separate log scopes.
+
+Worker stderr is synchronised with each reply, so a log written just before a
+handler returns is not lost to a read race. Structured log records are extracted from worker stderr for HTTP invocations,
+function-to-function calls, scheduler executions (cron and jobs), and inbound
+webhooks, as well as replays. Ordinary stderr and malformed
+structured-log records remain available in invocation logs. Both structured
+logs and custom spans use best-effort asynchronous storage, so they may arrive
+after the response or be dropped under telemetry pressure; an empty log lane
+does not prove that a function emitted no logs.
 
 ## Concurrency / scalability
 

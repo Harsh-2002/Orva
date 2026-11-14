@@ -244,7 +244,15 @@ async function dispatch(event) {
   return await handler(event);
 }
 
+// stdout and stderr are separate pipes, so the host can read a response frame
+// before the stderr bytes written ahead of it. This marker, written last,
+// lets the host wait until it has read everything this request wrote.
+const STDERR_SYNC = '\n__ORVA_EOR__\n';
+
 function writeFrame(obj) {
+  if (obj.type === 'response' || obj.type === 'response_end' || obj.type === 'error') {
+    try { process.stderr.write(STDERR_SYNC); } catch {}
+  }
   const body = Buffer.from(JSON.stringify(obj), 'utf-8');
   const hdr = Buffer.alloc(4);
   hdr.writeUInt32BE(body.length, 0);
@@ -448,7 +456,7 @@ async function readFrame() {
 // The pool must not publish this process as executable until imports and the
 // handler have loaded. A ready frame is consumed by Worker.AwaitReady, not by
 // the first invocation, so cold-start CPU cannot burn the function timeout.
-writeFrame({ type: 'ready' });
+writeFrame({ type: 'ready', stderr_sync: true });
 
 (async () => {
   // Worker recycling is owned by the pool (SandboxTemplate DefaultMaxUses →

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/executionlogs"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
@@ -458,6 +459,7 @@ func (s *Scheduler) persistResult(id string, ranAt, nextAt time.Time, status, er
 // and set to the enqueuing function for jobs.
 func (s *Scheduler) recordExecution(lease *database.ExecutionLease, execID, fnID, status string, statusCode int, startedAt time.Time, stderr []byte, errMsg, traceID, spanID, parentSpanID, trigger, parentFnID string) {
 	durationMS := time.Since(startedAt).Milliseconds()
+	stderr = executionlogs.Process(s.db, stderr, fnID, execID, traceID, spanID)
 	exec := &database.Execution{
 		ID:               execID,
 		FunctionID:       fnID,

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/executionlogs"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/proxy"
@@ -197,6 +198,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	durationMS := time.Since(startedAt).Milliseconds()
+	stderr = executionlogs.Process(h.DB, stderr, fn.ID, execID, traceID, spanID)
 	if err != nil {
 		reqErr = err
 		errMsg := err.Error()
