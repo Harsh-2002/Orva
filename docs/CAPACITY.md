@@ -1448,3 +1448,82 @@ trivial 89.6 ms, real 96.0 ms. The same Python fixtures measured 461 ms before
 the rootfs shipped stdlib bytecode; the ~4.8x comes from removing stdlib
 recompilation, not from handler code. These are single-host numbers, not a
 throughput or scalability claim.
+
+## 2026-11-15 enforced-cgroup ramp, overload and recovery
+
+First capacity run with **hard sandbox limits actually enforced** and the load
+generator kept off the server's CPUs. These are measurements on one rig, not a
+throughput promise, and not a substitute for measuring your own workload.
+
+**Rig.** One 4-vCPU/8-GiB microsandbox guest (Linux 6.12, Debian 12), Orva built
+from `4fae1fe` on the v2026.11.07 rootfs with refreshed adapters. The server was
+pinned to CPUs 0-1 (`taskset`, so it saw `num_cpu: 2`) and the load generator
+(`test/performance/loadgen`) to CPUs 2-3. Health reported `cgroup_v2` with no
+warnings, and `cgroup_hard_limit.py` passed in the same guest (memory
+`oom_kill` 0→1, CPU `nr_throttled` 0→8, PID `max` events 0→33). Functions used
+128 MB and 0.5 CPU. Client CPUs peaked at about 27% busy, so the generator was
+not the limit; the server CPUs reached 87-100% at the cliffs.
+
+This is **not a separate-machine client**: both sides share one guest kernel and
+loopback, because sandbox-to-sandbox networking is not available and the LAN is
+deliberately off limits to test guests. CPU contention is removed; kernel and
+virtualisation effects are not.
+
+**Getting enforcement in a guest.** The default guest reports `rlimit_only`
+because the kernel's no-internal-processes rule blocks delegation: the guest
+root had not enabled `cpu`/`memory`/`pids` for its children, and the launching
+shell was still a member of the daemon's cgroup. Enabling those controllers on
+the guest root and starting the daemon by `exec` inside its own empty cgroup is
+what a service manager with `Delegate=yes` does, and is all it took.
+
+**Method.** `test/performance/capacity_ramp.py`: 10 s open-loop steps at rising
+rates until one misses a criterion, then 15 s at 2x the last good rate
+(overload) and 15 s at half of it (recovery). A step is GOOD when achieved is
+at least 95% of scheduled, nothing is unsent, there are no transport errors,
+non-2xx is at most 0.5%, p99 is under 1000 ms and the writer lost nothing. That
+p99 bar is lenient: read the p99 column, not just the verdict.
+
+| Workload | Last good rate, run 1 / run 2 | p99 there | First failing step |
+|---|---|---|---|
+| Node hello | 1,600 / 1,600 /s | 31 / 49 ms | 2,400: `429`s (run 1), telemetry drops only (run 2) |
+| Python hello | 2,400 / 1,200 /s | 293 / 15 ms | 3,200 collapses (17,141 `429`s of 32,000); run 2's 1,600 step failed only on 22 telemetry drops with a 19 ms p99 |
+| Node, 3 ms CPU | 800 / 800 /s | 158 / 510 ms | 1,200. Already queueing at 800 (run 2 p50 365 ms); 400 is the low-tail rate (p99 121 / 14 ms) |
+| Mixed (all three) | 1,200 / 1,200 /s | 36 / 45 ms | 1,600 (p99 1.4 s with no errors in run 1; 5.9 s and 1,992 `429`s in run 2) |
+
+Run-to-run spread is large near a cliff (Python's last good rate differs by 2x),
+so treat each knee as a band, not a number.
+
+**Overload fails fast and cleanly.** Every failure in run 1, and in both
+time series, was `429 INVOCATION_QUEUE_FULL` with active requests held near
+790, no 5xx and no transport errors. Run 2 was only logged as counts, so its
+error codes were not examined. Accepted requests can still wait seconds before
+service when the pool is growing (p95 up to about 5 s on the mixed workload),
+consistent with the documented 10 s readiness wait; set client timeouts with
+that in mind.
+
+**Recovery.** 7 of 8 ramp recovery steps were clean. The exception is below.
+
+**Python stalls at about 75% CPU (open finding).** A 90 s steady run at 1,200/s
+on Python, with no preceding overload, had one 5 s window with 943 `429`s
+(15.7%) and a 3.0 s p95, then healed by itself. The run-1 ramp's first Python
+recovery step (15 s at 1,200/s after a 4,800/s overload) showed the same shape:
+1,620 `429`s and a 3.6 s p95. That is two stall episodes in about 3.5 minutes at
+this rate. The Node hello function showed none in 180 s of steady 1,200/s plus
+a 4x overload and its recovery, and both post-overload recovery series (18
+windows each) were clean, so overload itself is not the trigger. The pool was
+rotating workers constantly (several spawns and kills per window) and
+`cold_start_p95_ms` reached about 5 s under saturation. One **untested**
+hypothesis is a feedback loop: the rotation spare scales with measured spawn
+p95, so slow spawns under CPU pressure ask for more spare workers and more
+spawns. Reproduce with `capacity_ramp.py series py-hello 1200`.
+
+**Durability signals.** Across all 76 five-second windows, `critical_failures`
+and `critical_timeouts` were 0. Only best-effort telemetry and activity were
+dropped, and only in saturated windows (153 in the Python stall window; 1,826
+and 2,512 in the 4x overload windows for Python and Node). This is writer
+counters, **not** execution-row reconciliation against client-observed
+responses.
+
+**Not established.** Production capacity; behaviour on a separate client
+machine; Docker; native under systemd; runs longer than a few minutes; more
+than two repetitions per step; the Python stall's cause.
