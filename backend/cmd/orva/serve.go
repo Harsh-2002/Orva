@@ -140,11 +140,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	// which leaves the autoscaler permanently over-reserving.
 	sandbox.SweepOrphanCgroups()
 
-	// Trim execution history so the database does not grow without bound.
-	// Runs once now and daily thereafter; the window is the system_config key
-	// database.RetentionSettingKey (0 disables it).
-	db.StartRetention(context.Background())
-
 	srv := server.New(cfg, db)
 
 	// Load the active function set into the registry cache, then kick off
@@ -157,6 +152,12 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Trim execution history so the database does not grow without bound.
+	// Runs once now and daily thereafter; the window is the system_config key
+	// database.RetentionSettingKey (0 disables it). It stops with the server
+	// context, so a purge in progress ends between batches at shutdown.
+	db.StartRetention(ctx)
 
 	go func() {
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

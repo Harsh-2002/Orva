@@ -232,18 +232,12 @@ func (db *Database) KVCountContext(ctx context.Context, functionID string) (int,
 	return n, nil
 }
 
-// KVSweepExpired deletes all rows whose expires_at is in the past.
-// Returns the number of rows removed. Called periodically by the
-// scheduler.
-func (db *Database) KVSweepExpired() (int64, error) {
-	res, err := db.write.Exec(
-		`DELETE FROM kv_store WHERE expires_at IS NOT NULL AND expires_at <= ?`,
-		time.Now().UTC())
-	if err != nil {
-		return 0, err
-	}
-	n, _ := res.RowsAffected()
-	return n, nil
+// KVSweepExpired deletes all rows whose expires_at is in the past, in bounded
+// batches so the writer connection is never held long. Returns the number of
+// rows removed. Called periodically by the scheduler.
+func (db *Database) KVSweepExpired(ctx context.Context) (int64, error) {
+	return db.deleteRowsChunked(ctx, "kv_store",
+		`expires_at IS NOT NULL AND expires_at <= ?`, time.Now().UTC())
 }
 
 // KVListPage is the result shape for cursor-paginated KV list. NextCursor

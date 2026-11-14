@@ -66,7 +66,7 @@ func (db *Database) StartRetention(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-first.C:
-			db.purgeOnce()
+			db.purgeOnce(ctx)
 		}
 
 		t := time.NewTicker(retentionInterval)
@@ -76,13 +76,13 @@ func (db *Database) StartRetention(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				db.purgeOnce()
+				db.purgeOnce(ctx)
 			}
 		}
 	}()
 }
 
-func (db *Database) purgeOnce() {
+func (db *Database) purgeOnce(ctx context.Context) {
 	days := db.GetSystemConfigInt(RetentionSettingKey, DefaultRetentionDays)
 	if days <= 0 {
 		// Explicitly disabled. Say so once per tick at debug level rather than
@@ -91,26 +91,26 @@ func (db *Database) purgeOnce() {
 		return
 	}
 
-	var before, after int64
-	_ = db.read.QueryRow("SELECT COUNT(*) FROM executions").Scan(&before)
-
-	if err := db.PurgeOldExecutions(days); err != nil {
-		slog.Warn("execution retention: purge failed", "err", err, "retention_days", days)
-		return
-	}
-
-	if err := db.read.QueryRow("SELECT COUNT(*) FROM executions").Scan(&after); err != nil {
-		return
-	}
-	if removed := before - after; removed > 0 {
+	removed, err := db.PurgeOldExecutions(ctx, days)
+	// Report what was actually deleted rather than a before/after row count:
+	// the purge now runs for a long time on a busy instance, so concurrent
+	// inserts would cancel out the deletions, and COUNT(*) over a huge table
+	// is itself expensive. A cancelled or failed run still deleted rows.
+	if removed > 0 {
 		// Warn, not Info: this is the only scheduled job that destroys
 		// operator-visible data, and the first sweep on an instance with a
 		// long history can remove a lot of it at once. Name the setting and
 		// how to switch it off in the message itself, so an operator who
 		// notices does not have to go looking for what did it.
 		slog.Warn("execution retention: deleted execution history older than the retention window",
-			"removed", removed, "retention_days", days, "remaining", after,
+			"removed", removed, "retention_days", days,
 			"setting", RetentionSettingKey,
 			"disable", "set system_config."+RetentionSettingKey+" to 0 to keep everything")
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return // shutting down mid-purge; the next run finishes it
+		}
+		slog.Warn("execution retention: purge failed", "err", err, "retention_days", days)
 	}
 }

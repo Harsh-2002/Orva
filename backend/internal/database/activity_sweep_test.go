@@ -124,7 +124,7 @@ func TestSweepActivityRetentionWindowDeletesOnlyOldRows(t *testing.T) {
 func TestSweepActivityDoesNotMonopoliseTheWriter(t *testing.T) {
 	db := newSweepDB(t)
 	now := time.Now().UnixMilli()
-	seedActivity(t, db, 60000, func(i int) int64 { return now + int64(i) })
+	seedActivity(t, db, 15000, func(i int) int64 { return now + int64(i) })
 	if err := db.SetSystemConfig("activity_retention_max_rows", "100"); err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +157,8 @@ probe:
 			time.Sleep(2 * time.Millisecond)
 		}
 	}
-	if deleted != 60000-100 {
-		t.Fatalf("deleted = %d, want %d", deleted, 60000-100)
+	if deleted != 15000-100 {
+		t.Fatalf("deleted = %d, want %d", deleted, 15000-100)
 	}
 	if len(waits) < 5 {
 		t.Fatalf("only %d probes landed during the sweep; it did not yield the writer", len(waits))
