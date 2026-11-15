@@ -210,7 +210,11 @@ func assertWriterStayedResponsive(t *testing.T, what string, waits []time.Durati
 	if m := waits[len(waits)/2]; m > 250*time.Millisecond {
 		t.Fatalf("median write wait %s during the %s", m, what)
 	}
-	if w := waits[len(waits)-1]; w > time.Second {
+	// A frozen writer waits for the whole statement; the probe-count check above
+	// is what catches that. This ceiling only guards against multi-second stalls
+	// and has to survive a loaded -race runner, where one write was seen to wait
+	// 1.004 s against a 1 s limit during a healthy chunked delete.
+	if w := waits[len(waits)-1]; w > 3*time.Second {
 		t.Fatalf("a write waited %s during the %s; chunks must keep holds short", w, what)
 	}
 }
