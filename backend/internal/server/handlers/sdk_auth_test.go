@@ -65,7 +65,7 @@ func TestJobAttributionUsesSignedCaller(t *testing.T) {
 	insertSDKTestFunction(t, db, "fn-job-caller", "job-caller")
 	insertSDKTestFunction(t, db, "fn-job-target", "job-target")
 	auth := sdkauth.New([]byte("process-secret"))
-	release := auth.BindExecution("exec-job", "fn-job-caller", "trace-signed", "span-signed", time.Now())
+	release := auth.BindExecution("exec-job", "fn-job-caller", "trace-signed", "span-signed", time.Now(), 0)
 	defer release()
 	h := &JobsHandler{DB: db, SDKAuth: auth}
 	body := bytes.NewBufferString(`{"function_name":"job-target","payload":{}}`)
@@ -94,7 +94,7 @@ func TestJobAttributionUsesSignedCaller(t *testing.T) {
 
 func TestUserSpanMustBelongToSignedCaller(t *testing.T) {
 	auth := sdkauth.New([]byte("process-secret"))
-	release := auth.BindExecution("exec-owned", "fn-owner", "trace", "span", time.Now())
+	release := auth.BindExecution("exec-owned", "fn-owner", "trace", "span", time.Now(), 0)
 	defer release()
 	h := &SpansHandler{DB: newTestDB(t), SDKAuth: auth}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/spans", bytes.NewBufferString(`{"name":"work","duration_ms":1}`))
@@ -115,7 +115,7 @@ func TestCronUpsertUsesSignedCallerScope(t *testing.T) {
 	insertSDKTestFunction(t, db, "fn-cron-other", "cron-other")
 	auth := sdkauth.New([]byte("process-secret"))
 	h := &CronHandler{DB: db, SDKAuth: auth}
-	release := auth.BindExecution("exec-1", "fn-cron-owner", "trace-1", "span-1", time.Now())
+	release := auth.BindExecution("exec-1", "fn-cron-owner", "trace-1", "span-1", time.Now(), 0)
 	defer release()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons", bytes.NewBufferString(`{"name":"nightly","schedule":"0 3 * * *"}`))
 	req.Header.Set("X-Orva-Internal-Token", mintLive(auth, "fn-cron-owner"))
@@ -164,7 +164,7 @@ func TestCronUpsertRequiresALiveExecution(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.bind != "" {
-				defer auth.BindExecution("exec-1", tc.bind, "t", "s", time.Now())()
+				defer auth.BindExecution("exec-1", tc.bind, "t", "s", time.Now(), 0)()
 			}
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
 				bytes.NewBufferString(`{"name":"planted","schedule":"* * * * *"}`))
@@ -199,7 +199,7 @@ func TestSDKScheduleCountIsCapped(t *testing.T) {
 	insertSDKTestFunction(t, db, "fn-cron-many", "cron-many")
 	auth := sdkauth.New([]byte("process-secret"))
 	h := &CronHandler{DB: db, SDKAuth: auth}
-	defer auth.BindExecution("exec-1", "fn-cron-many", "t", "s", time.Now())()
+	defer auth.BindExecution("exec-1", "fn-cron-many", "t", "s", time.Now(), 0)()
 
 	upsert := func(name string) int {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/crons",
@@ -246,7 +246,7 @@ func TestTheScheduleCapIgnoresOperatorCreatedRows(t *testing.T) {
 	insertSDKTestFunction(t, db, "fn-cron-mixed", "cron-mixed")
 	auth := sdkauth.New([]byte("process-secret"))
 	h := &CronHandler{DB: db, SDKAuth: auth}
-	defer auth.BindExecution("exec-1", "fn-cron-mixed", "t", "s", time.Now())()
+	defer auth.BindExecution("exec-1", "fn-cron-mixed", "t", "s", time.Now(), 0)()
 
 	// Operator schedules: created in the dashboard, so no name.
 	for i := 0; i < maxSDKSchedulesPerFunction+5; i++ {

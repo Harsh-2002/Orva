@@ -16,6 +16,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Function-to-function recursion through `orva.invoke` is now bounded even when
+  a function omits or forges the call-depth header. The depth is tracked by the
+  host on each execution instead of being read from the caller's request, so a
+  function calling itself is stopped at the maximum depth (8) with
+  `507 MAX_CALL_DEPTH` rather than exhausting the warm pool.
 - `DELETE /api/v1/functions/{id}` answered an empty reply for a function whose
   delete took longer than the server's write timeout (120 s by default): the
   delete finished and was logged as 200, but the connection had already been

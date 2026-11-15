@@ -39,6 +39,33 @@ type InternalInvokeHandler struct {
 
 const defaultMaxCallDepth = 8
 
+// callerDepth returns the caller's host-recorded call depth and enforces the
+// cap, writing the 507 itself when exceeded. Depth lives on the execution
+// binding, never in a request header: a function can simply omit the header,
+// which made the cap bypassable. X-Orva-Call-Depth is ignored entirely.
+//
+// Known residual: a function could leak one of its own execution ids to a
+// sibling execution (e.g. via KV) and borrow that execution's lower depth.
+// The planned per-dispatch SDK lease closes that.
+func (h *InternalInvokeHandler) callerDepth(w http.ResponseWriter, r *http.Request, callerFnID, reqID string) (int, bool) {
+	depth, ok := h.SDKAuth.ExecutionDepth(r.Header.Get("X-Orva-Execution-Id"), callerFnID)
+	if !ok {
+		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+			"SDK request is not associated with an active caller execution", reqID)
+		return 0, false
+	}
+	maxDepth := h.MaxCallDepth
+	if maxDepth <= 0 {
+		maxDepth = defaultMaxCallDepth
+	}
+	if depth+1 > maxDepth {
+		respond.Error(w, http.StatusInsufficientStorage, "MAX_CALL_DEPTH",
+			"call depth exceeds max ("+strconv.Itoa(maxDepth)+")", reqID)
+		return 0, false
+	}
+	return depth, true
+}
+
 // Invoke handles POST /api/v1/_internal/invoke/{name}. The path uses the
 // friendly function name (NOT the fn_<id> form) so user code stays
 // readable: orva.invoke("resize-image", payload).
@@ -67,28 +94,8 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Call-depth guard. The adapter forwards the inbound depth header
-	// when it makes a nested invoke() so we can refuse cycles before
-	// the pool runs out of workers.
-	depth := 0
-	if v := r.Header.Get("X-Orva-Call-Depth"); v != "" {
-		// Clamp at zero. The proxy no longer forwards an inbound
-		// x-orva-call-depth into the sandbox, so this value should always be
-		// one the SDK echoed back from us — but the cap is the only thing
-		// bounding F2F recursion, and a negative value defeats it entirely
-		// (depth+1 > max is false forever). Cheap to make that unreachable
-		// from here as well as from the proxy.
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			depth = n
-		}
-	}
-	maxDepth := h.MaxCallDepth
-	if maxDepth <= 0 {
-		maxDepth = defaultMaxCallDepth
-	}
-	if depth+1 > maxDepth {
-		respond.Error(w, http.StatusInsufficientStorage, "MAX_CALL_DEPTH",
-			"call depth exceeds max ("+strconv.Itoa(maxDepth)+")", reqID)
+	depth, depthOK := h.callerDepth(w, r, callerFnID, reqID)
+	if !depthOK {
 		return
 	}
 
@@ -156,7 +163,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	// children would be invisible to ops tooling.
 	execID := ids.New()
 	start := time.Now()
-	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start)
+	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start, depth+1)
 	defer releaseExecution()
 
 	// Synthesize the event in the same shape the public /fn/ handler
@@ -291,25 +298,8 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	depth := 0
-	if v := r.Header.Get("X-Orva-Call-Depth"); v != "" {
-		// Clamp at zero. The proxy no longer forwards an inbound
-		// x-orva-call-depth into the sandbox, so this value should always be
-		// one the SDK echoed back from us — but the cap is the only thing
-		// bounding F2F recursion, and a negative value defeats it entirely
-		// (depth+1 > max is false forever). Cheap to make that unreachable
-		// from here as well as from the proxy.
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			depth = n
-		}
-	}
-	maxDepth := h.MaxCallDepth
-	if maxDepth <= 0 {
-		maxDepth = defaultMaxCallDepth
-	}
-	if depth+1 > maxDepth {
-		respond.Error(w, http.StatusInsufficientStorage, "MAX_CALL_DEPTH",
-			"call depth exceeds max ("+strconv.Itoa(maxDepth)+")", reqID)
+	depth, depthOK := h.callerDepth(w, r, callerFnID, reqID)
+	if !depthOK {
 		return
 	}
 
@@ -367,7 +357,7 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 
 	execID := ids.New()
 	start := time.Now()
-	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start)
+	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start, depth+1)
 	defer releaseExecution()
 	event := map[string]any{
 		"method": "POST",

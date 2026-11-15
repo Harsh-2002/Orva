@@ -94,10 +94,28 @@ func TestMintDegradesSafely(t *testing.T) {
 	}
 }
 
+func TestExecutionDepthIsHostRecordedAndScoped(t *testing.T) {
+	auth := New([]byte("secret"))
+	release := auth.BindExecution("exec-d", "fn-a", "t", "s", time.Now(), 3)
+	if d, ok := auth.ExecutionDepth("exec-d", "fn-a"); !ok || d != 3 {
+		t.Fatalf("ExecutionDepth = %d, %v; want 3, true", d, ok)
+	}
+	if _, ok := auth.ExecutionDepth("exec-d", "fn-b"); ok {
+		t.Fatal("ExecutionDepth answered for a different function")
+	}
+	if _, ok := auth.ExecutionDepth("missing", "fn-a"); ok {
+		t.Fatal("ExecutionDepth answered for an unknown execution")
+	}
+	release()
+	if _, ok := auth.ExecutionDepth("exec-d", "fn-a"); ok {
+		t.Fatal("ExecutionDepth answered after the binding was released")
+	}
+}
+
 func TestExecutionOwnershipIsScopedAndRemoved(t *testing.T) {
 	auth := New([]byte("secret"))
 	started := time.Now().Add(-time.Second)
-	release := auth.BindExecution("exec-1", "fn-a", "trace-a", "span-a", started)
+	release := auth.BindExecution("exec-1", "fn-a", "trace-a", "span-a", started, 0)
 	if !auth.OwnsExecution("exec-1", "fn-a") || auth.OwnsExecution("exec-1", "fn-b") {
 		t.Fatal("execution ownership was not function scoped")
 	}
