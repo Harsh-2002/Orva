@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -295,5 +297,46 @@ func unifiedDiff(path, before, after string) string {
 	}
 	edits := myers.ComputeEdits(span.URIFromPath(path), before, after)
 	u := gotextdiff.ToUnified("a/"+path, "b/"+path, before, edits)
-	return fmt.Sprint(u)
+	return fixHunkStarts(fmt.Sprint(u))
+}
+
+var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$`)
+
+// fixHunkStarts recomputes each hunk's new-side start. gotextdiff takes it from
+// the edit's own position rather than adding up what earlier hunks inserted or
+// removed, so every hunk after the first carried a wrong "+start" and the
+// output could not be applied with patch. The old-side start and both counts
+// are right and are kept.
+func fixHunkStarts(unified string) string {
+	lines := strings.Split(unified, "\n")
+	delta := 0
+	for i, l := range lines {
+		m := hunkHeader.FindStringSubmatch(l)
+		if m == nil {
+			continue
+		}
+		oldStart, _ := strconv.Atoi(m[1])
+		oldCount, newCount := 1, 1
+		if m[2] != "" {
+			oldCount, _ = strconv.Atoi(m[2])
+		}
+		if m[4] != "" {
+			newCount, _ = strconv.Atoi(m[4])
+		}
+		first := oldStart // first old line this hunk covers, or the insertion point
+		if oldCount == 0 {
+			first = oldStart + 1 // "-N,0" names the line before the insertion
+		}
+		newStart := first + delta
+		if newCount == 0 {
+			newStart-- // "+N,0" names the line before the deletion
+		}
+		newPart := strconv.Itoa(newStart)
+		if newCount != 1 { // git omits a count of 1
+			newPart += "," + strconv.Itoa(newCount)
+		}
+		lines[i] = fmt.Sprintf("@@ -%s +%s @@%s", strings.TrimPrefix(strings.SplitN(l, " +", 2)[0], "@@ -"), newPart, m[5])
+		delta += newCount - oldCount
+	}
+	return strings.Join(lines, "\n")
 }

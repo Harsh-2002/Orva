@@ -30,7 +30,7 @@ const router = createRouter({
         // instance's props, so an off-screen view stops following the URL.
         { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue'), props: true },
         { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue'), props: true },
-        { path: 'functions/:name/diff', name: 'function-diff', component: () => import('@/views/FunctionDiff.vue') },
+        { path: 'functions/:name/diff', name: 'function-diff', component: () => import('@/views/FunctionDiff.vue'), props: (r) => ({ name: r.params.name, from: r.query.from || '', to: r.query.to || '' }) },
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
         { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue'), props: true },
         { path: 'functions/:name/test', name: 'function-test', component: () => import('@/views/TestWorkbench.vue'), props: true },

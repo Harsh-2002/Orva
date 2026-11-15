@@ -247,7 +247,9 @@ belonging to this function.
   added, removed}]}`. `before` / `after` carry the raw file bytes so
   the browser-side merge viewer can compute its own hunks.
 - `format=unified` returns `text/x-diff` with git-style hunks per file
-  (`--- a/path` / `+++ b/path` / `@@ …`). Consumed by `orva diff`.
+  (`--- a/path` / `+++ b/path` / `@@ …`). Consumed by `orva diff`. Hunk headers
+  are `patch`-compatible: each hunk's new-side start accounts for the lines
+  earlier hunks added or removed.
 
 Errors:
 - 400 `VALIDATION` if `from` and `to` are equal, belong to different

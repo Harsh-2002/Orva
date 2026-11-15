@@ -357,21 +357,31 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import Button from '@/components/common/Button.vue'
 import { ArrowLeftRight, Copy, Settings2, ChevronDown, FileCode, Package, List, RotateCcw, Zap } from '@lucide/vue'
 import { compareDeployments, listDeployments, listFunctions, getDeployment, rollbackFunction } from '@/api/endpoints'
+import { makeLineDiff } from '@/utils/lineDiff'
+import { inlineDiffMarks } from '@/utils/diffMarks'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
 
-const route = useRoute()
+// name/from/to arrive as props, not from useRoute(): Layout.vue keeps pages
+// alive, so a cached instance would otherwise keep the previous function's
+// record (and Rollback would act on it) when another function's compare page
+// is opened. A cached instance's props do not update while it is away.
+const props = defineProps({
+  name: { type: String, default: '' },
+  from: { type: String, default: '' },
+  to: { type: String, default: '' },
+})
 const router = useRouter()
 
-const fnName = computed(() => route.params.name)
-const fromId = computed(() => route.query.from || '')
-const toId = computed(() => route.query.to || '')
+const fnName = computed(() => props.name)
+const fromId = computed(() => props.from)
+const toId = computed(() => props.to)
 
 const fn = ref(null)
 const versions = ref([])
@@ -429,18 +439,26 @@ const loadCodeMirror = () => {
     cmLoader = Promise.all([
       import('@codemirror/state'),
       import('codemirror'),
+      import('@codemirror/view'),
       import('@codemirror/merge'),
       import('@codemirror/lang-javascript'),
       import('@codemirror/lang-python'),
       import('@codemirror/lang-json'),
       import('@codemirror/theme-one-dark'),
-    ]).then(([state, core, merge, js, py, jsonLang, dark]) => {
+    ]).then(([state, core, view, merge, js, py, jsonLang, dark]) => {
       cm = {
         EditorState: state.EditorState,
         EditorView: core.EditorView,
         basicSetup: core.basicSetup,
         MergeView: merge.MergeView,
         unifiedMergeView: merge.unifiedMergeView,
+        diffConfig: { override: makeLineDiff({ diff: merge.diff, Change: merge.Change }) },
+        inlineMarks: inlineDiffMarks({
+          ViewPlugin: view.ViewPlugin,
+          Decoration: view.Decoration,
+          RangeSetBuilder: state.RangeSetBuilder,
+          getChunks: merge.getChunks,
+        }),
         javascript: js.javascript,
         python: py.python,
         json: jsonLang.json,
@@ -465,59 +483,52 @@ const loadCodeMirror = () => {
 // loaded, so this is read at mount time rather than tracked.
 const langExtras = () => (fn.value?.runtime?.startsWith('python') ? [cm.python()] : [cm.javascript()])
 
+// GitHub's model: a whole-line tint for added/removed lines, a stronger tint of
+// the same hue on a line number + marker column, and word marks (cm.inlineMarks)
+// only inside lines that were edited. Text colours are never touched, so syntax
+// highlighting keeps its contrast. The dashboard editor is always dark, and
+// EditorView.theme() does not support the &light/&dark markers (only baseTheme
+// does), so these are plain selectors.
+//
+// The unified (phone) view is a single editor with no .cm-merge-a/.cm-merge-b
+// class; its rules are scoped with :not() so they can never out-rank the
+// side-by-side colours (an unscoped green rule once painted removed-side marks
+// green because it was declared later at equal specificity).
+const RED = '248, 81, 73'
+const GREEN = '63, 185, 80'
 const githubDiffThemeSpec = {
-  // GitHub dark-adapted: soft red for deleted lines (left/side-A)
-  '&.cm-merge-a .cm-changedLine': {
-    backgroundColor: 'rgba(248, 81, 73, 0.15)',
+  // Removed lines (old text, left / side A).
+  '&.cm-merge-a .cm-changedLine, .cm-deletedChunk': { backgroundColor: `rgba(${RED}, 0.14)` },
+  '&.cm-merge-a .cm-diffWord, .cm-deletedChunk .cm-deletedText': { backgroundColor: `rgba(${RED}, 0.40)`, borderRadius: '3px' },
+  // Added lines (new text, right / side B, and the unified document).
+  '&.cm-merge-b .cm-changedLine, &:not(.cm-merge-a):not(.cm-merge-b) .cm-changedLine, .cm-insertedLine, .cm-inlineChangedLine': {
+    backgroundColor: `rgba(${GREEN}, 0.14)`,
   },
-  // GitHub dark-adapted: soft green for inserted lines (right/side-B)
-  '&.cm-merge-b .cm-changedLine': {
-    backgroundColor: 'rgba(63, 185, 80, 0.15)',
-  },
-  // Changed tokens: visible background highlight instead of 2px underline.
-  // The dashboard is always dark, and EditorView.theme() does NOT support
-  // the &light/&dark markers (those are baseTheme-only — passing them here
-  // throws "Unsupported selector: &light" and blanks the whole page). Use
-  // plain &.cm-merge-{a,b} selectors matching the changedLine rules above.
-  '&.cm-merge-a .cm-changedText': {
-    background: 'none',
-    backgroundColor: 'rgba(248, 81, 73, 0.35)',
-    borderRadius: '2px',
-  },
-  '&.cm-merge-b .cm-changedText': {
-    background: 'none',
-    backgroundColor: 'rgba(63, 185, 80, 0.30)',
-    borderRadius: '2px',
-  },
-  // Gutter markers: GitHub red/green
-  '&.cm-merge-a .cm-changedLineGutter': { color: '#f85149' },
-  '&.cm-merge-b .cm-changedLineGutter': { color: '#3fb950' },
+  '&.cm-merge-b .cm-diffWord, &:not(.cm-merge-a):not(.cm-merge-b) .cm-diffWord': { backgroundColor: `rgba(${GREEN}, 0.40)`, borderRadius: '3px' },
 
-  // Unified inline view (unifiedMergeView, the phone default) renders into
-  // a single editor with NO cm-merge-a / cm-merge-b wrappers, so every rule
-  // above is inert there. Deleted content arrives as a .cm-deletedChunk
-  // widget; inserted / changed lines stay in the main doc. Mirror the same
-  // GitHub palette onto those classes so the unified diff matches
-  // side-by-side instead of falling back to the addon's stock colors.
-  // (.cm-changedText / .cm-changedLine also exist side-by-side, but the
-  //  two-class .cm-merge-* selectors above out-specify these single-class
-  //  ones, so this block only takes effect in unified mode.)
-  '.cm-deletedChunk': { backgroundColor: 'rgba(248, 81, 73, 0.15)' },
-  '.cm-deletedChunk .cm-deletedText': {
-    background: 'none',
-    backgroundColor: 'rgba(248, 81, 73, 0.35)',
-    borderRadius: '2px',
+  // Marker column: a tinted cell with + / - where the 3px bar used to be.
+  '.cm-changeGutter': { width: '22px', paddingLeft: '0' },
+  '.cm-changeGutter .cm-gutterElement': {
+    textAlign: 'center',
+    fontWeight: '600',
+    paddingLeft: '0',
+    paddingRight: '0',
   },
-  '.cm-deletedChunk .cm-changedLineGutter, .cm-deletedChunk .cm-deletedLineGutter': { color: '#f85149' },
-  '.cm-insertedLine, .cm-changedLine, .cm-inlineChangedLine': {
-    backgroundColor: 'rgba(63, 185, 80, 0.15)',
+  '&.cm-merge-a .cm-changedLineGutter, .cm-deletedLineGutter, .cm-deletedChunk .cm-changedLineGutter': {
+    background: `rgba(${RED}, 0.30)`,
+    color: `rgb(${RED})`,
   },
-  '.cm-changedLine .cm-changedText, .cm-inlineChangedLine .cm-changedText': {
-    background: 'none',
-    backgroundColor: 'rgba(63, 185, 80, 0.30)',
-    borderRadius: '2px',
+  '&.cm-merge-b .cm-changedLineGutter, &:not(.cm-merge-a):not(.cm-merge-b) .cm-changedLineGutter, .cm-inlineChangedLineGutter': {
+    background: `rgba(${GREEN}, 0.30)`,
+    color: `rgb(${GREEN})`,
   },
-  '.cm-changedLineGutter, .cm-inlineChangedLineGutter': { color: '#3fb950' },
+  '&.cm-merge-a .cm-changedLineGutter::before, .cm-deletedLineGutter::before': { content: '"\\2212"' },
+  '&.cm-merge-b .cm-changedLineGutter::before, &:not(.cm-merge-a):not(.cm-merge-b) .cm-changedLineGutter::before, .cm-inlineChangedLineGutter::before': {
+    content: '"+"',
+  },
+
+  // The empty side of an added/removed block: flat and quiet, not a gap.
+  '.cm-mergeSpacer': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
 }
 
 const baseExtensions = (extras) => [
@@ -525,6 +536,7 @@ const baseExtensions = (extras) => [
   ...extras,
   cm.oneDark,
   cm.diffTheme,
+  cm.inlineMarks,
   cm.EditorState.readOnly.of(true),
   cm.EditorView.lineWrapping,
 ]
@@ -566,8 +578,11 @@ const mountMergeView = (mount, before, after, extras) => {
       parent: mount,
       orientation: 'a-b',
       revertControls: false,
-      highlightChanges: true,
+      // The library's own text marks cover every change, wholly added lines
+      // included; cm.inlineMarks draws word marks only where a line was edited.
+      highlightChanges: false,
       gutter: true,
+      diffConfig: cm.diffConfig,
     })
   }
   // Unified inline view for small screens. Single editor showing the "after"
@@ -578,7 +593,7 @@ const mountMergeView = (mount, before, after, extras) => {
       doc: after,
       extensions: [
         ...baseExtensions(extras),
-        cm.unifiedMergeView({ original: before, mergeControls: false }),
+        cm.unifiedMergeView({ original: before, mergeControls: false, highlightChanges: false, diffConfig: cm.diffConfig }),
       ],
     }),
   })
@@ -654,7 +669,9 @@ const rebuildViews = async () => {
   await mountManifestView()
 }
 
+let reloadGen = 0 // a slower, older response must not overwrite a newer one
 const reload = async () => {
+  const gen = ++reloadGen
   errCode.value = ''
   errMessage.value = ''
   payload.value = null
@@ -662,9 +679,11 @@ const reload = async () => {
   if (!fn.value || !fromId.value || !toId.value || fromId.value === toId.value) return
   try {
     const res = await compareDeployments(fn.value.id, fromId.value, toId.value, 'json')
+    if (gen !== reloadGen) return
     payload.value = res.data
     await rebuildViews()
   } catch (e) {
+    if (gen !== reloadGen) return
     const body = e.response?.data?.error
     errCode.value = body?.code || 'INTERNAL'
     errMessage.value = body?.message || e.message || 'Failed to load diff.'
@@ -872,8 +891,18 @@ const rollbackToFrom = async () => {
   }
 }
 
-onMounted(async () => {
-  setupMediaQuery()
+onMounted(setupMediaQuery)
+
+let loadGen = 0
+// loadFunction (re)builds the whole page for props.name. A name change must
+// drop everything belonging to the previous function first.
+const loadFunction = async () => {
+  const gen = ++loadGen
+  fn.value = null
+  versions.value = []
+  availableHashes.value = []
+  errCode.value = ''
+  errMessage.value = ''
   // GET /api/v1/functions/{id} doesn't resolve names — list and filter
   // the way Editor.vue / Deployments.vue do. The diff endpoint itself
   // is fine with names (it uses the shared resolveFnID helper) but we
@@ -882,20 +911,27 @@ onMounted(async () => {
     const listRes = await listFunctions()
     const found = (listRes.data?.functions || []).find((f) => f.name === fnName.value)
     if (!found) throw new Error('not found')
+    if (gen !== loadGen) return
     fn.value = found
   } catch (e) {
+    if (gen !== loadGen) return
     errCode.value = e.response?.data?.error?.code || 'FUNCTION_NOT_FOUND'
     errMessage.value = e.response?.data?.error?.message || 'Function not found.'
+    payload.value = null
+    destroyViews()
     return
   }
   try {
     const list = await listDeployments(fn.value.id, 100)
+    if (gen !== loadGen) return
     versions.value = list.data.deployments || list.data || []
   } catch {
+    if (gen !== loadGen) return
     versions.value = []
   }
   await reload()
-})
+}
+watch(() => props.name, loadFunction, { immediate: true })
 
 // Manifest panel toggles independently of the handler diff: only its own
 // view is mounted/destroyed, so the code panel above keeps its DOM and
@@ -906,7 +942,7 @@ watch(manifestOpen, async (open) => {
   if (open) await mountManifestView()
 })
 
-watch([fromId, toId], reload)
+watch([fromId, toId], () => { if (fn.value?.name === props.name) reload() })
 watch(() => fn.value?.runtime, () => { rebuildViews() })
 
 onUnmounted(() => {
