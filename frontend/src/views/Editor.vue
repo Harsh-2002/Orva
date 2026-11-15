@@ -1195,7 +1195,7 @@
 
 <script setup>
 import { ref, shallowRef, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
-import { useRoute, useRouter, onBeforeRouteUpdate, onBeforeRouteLeave } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare, FlaskConical, Eye, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
@@ -1458,10 +1458,12 @@ const isEditing = computed(() => !!props.name)
 
 // View / Edit. An existing function opens in view so reading it cannot edit or
 // deploy it by accident; a new function has nothing to read and is always edit.
-const modeOptions = [
-  { value: 'view', label: 'View', icon: Eye },
+// View is unavailable while a build runs: leaving Edit then would either discard
+// the buffer being deployed or leave View showing code the build is replacing.
+const modeOptions = computed(() => [
+  { value: 'view', label: 'View', icon: Eye, disabled: deploying.value, title: deploying.value ? 'Available when the build finishes' : undefined },
   { value: 'edit', label: 'Edit', icon: Pencil },
-]
+])
 const initialMode = () => (props.name && props.mode !== 'edit' ? 'view' : 'edit')
 const editorMode = ref(initialMode())
 const viewMode = computed(() => isEditing.value && editorMode.value === 'view')
@@ -1529,21 +1531,38 @@ const announceMode = (text) => {
   modeAnnouncement.value = ''
   nextTick(() => { modeAnnouncement.value = text })
 }
-const requestMode = async (next, fromUrl = false) => {
-  if (!props.name || next === editorMode.value) return
-  const target = routeTarget()
-  if (next === 'view' && isDirty.value) {
-    // A link that lost ?mode (list row, breadcrumb) is not a decision to throw
-    // work away: stay in Edit and put the flag back.
-    if (fromUrl) { setModeQuery('edit', target); return }
-    const ok = await confirmStore.ask({
+// One discard question at a time. The confirm store holds a single resolver, so
+// a second ask() would orphan the first promise forever; the second caller is
+// told "no" instead, which for every caller here means "stay where you are".
+let discardOpen = false
+const askDiscard = async (message) => {
+  if (discardOpen) return false
+  discardOpen = true
+  try {
+    return await confirmStore.ask({
       title: 'Discard changes?',
-      message: 'This function has unsaved changes. Switching to View discards them.',
+      message,
       confirmLabel: 'Discard',
       cancelLabel: 'Keep editing',
       danger: true,
     })
-    if (!ok || !sameRoute(target)) return
+  } finally {
+    discardOpen = false
+  }
+}
+const requestMode = async (next, fromUrl = false) => {
+  if (!props.name || next === editorMode.value) return
+  const target = routeTarget()
+  if (next === 'view' && deploying.value) {
+    if (fromUrl) setModeQuery('edit', target)
+    return
+  }
+  if (next === 'view' && isDirty.value) {
+    // A link that lost ?mode (list row, breadcrumb) is not a decision to throw
+    // work away: stay in Edit and put the flag back.
+    if (fromUrl) { setModeQuery('edit', target); return }
+    const ok = await askDiscard('This function has unsaved changes. Switching to View discards them.')
+    if (!ok || !sameRoute(target) || deploying.value) return
     discardChanges()
   }
   editorMode.value = next
@@ -1553,23 +1572,21 @@ const requestMode = async (next, fromUrl = false) => {
   else setModeQuery(next, target)
 }
 
-// Opening another function (or /functions/new) from a dirty Edit would run
-// resetEditorState and drop the buffer. Leaving for any other page keeps the
-// cached buffer, so only an Editor-to-Editor change of function is asked about.
+// Opening another function (or /functions/new) from dirty work would run
+// resetEditorState and drop the buffer. A global guard, not onBeforeRouteUpdate/
+// Leave: vue-router unregisters those while this view is cached, which is
+// exactly when "Editor -> list -> another function" happens. Leaving for any
+// other page keeps the cached buffer, so only a change of function is asked about.
 const guardFunctionChange = async (to) => {
   if (to.name !== 'function-detail' && to.name !== 'function-new') return true
   if ((to.params.name || '') === props.name) return true
   if (viewMode.value || !isDirty.value) return true
-  return confirmStore.ask({
-    title: 'Discard changes?',
-    message: 'This function has unsaved changes. Opening another function discards them.',
-    confirmLabel: 'Discard',
-    cancelLabel: 'Keep editing',
-    danger: true,
-  })
+  if (!(await askDiscard('This function has unsaved changes. Opening another function discards them.'))) return false
+  baseline.value = emptyBaseline()
+  return true
 }
-onBeforeRouteUpdate(guardFunctionChange)
-onBeforeRouteLeave(guardFunctionChange)
+const removeFunctionGuard = router.beforeEach(guardFunctionChange)
+onBeforeUnmount(removeFunctionGuard)
 
 // A mode that turns to View (switch or URL) must not leave an editable panel up.
 watch(viewMode, (on) => {
@@ -1659,7 +1676,16 @@ const dependencyFileName = computed(() => {
   return isPythonRuntime(form.value.runtime) ? 'requirements.txt' : 'package.json'
 })
 
-const setRuntime = (rt) => {
+// On /functions/new, choosing a runtime, a template or a fresh name picks a
+// starting point rather than doing work. When nothing had been typed beforehand,
+// re-base after it so only later typing counts as unsaved.
+const asStartingPoint = (fn) => {
+  const pristine = !isEditing.value && !isDirty.value
+  fn()
+  if (pristine) baseline.value = captureBaseline()
+}
+const setRuntime = (rt) => asStartingPoint(() => setRuntimeNow(rt))
+const setRuntimeNow = (rt) => {
   form.value.runtime = rt
   if (!isEditing.value && (!code.value || Object.values(defaultCode).includes(code.value))) {
     code.value = defaultCode[rt] || ''
@@ -1739,7 +1765,8 @@ const scheduleDetect = (src) => {
 // Re-run detection on every keystroke. Debounced inside scheduleDetect.
 watch(code, (newCode) => scheduleDetect(newCode))
 
-const applyTemplate = () => {
+const applyTemplate = () => asStartingPoint(applyTemplateNow)
+const applyTemplateNow = () => {
   const list = templates[form.value.runtime] || []
   const selected = list.find((t) => t.id === templateId.value)
   if (selected) {
@@ -2016,6 +2043,9 @@ const loadRouteData = async () => {
     // or hit the re-roll button next to it.
     setRuntime('python')
     form.value.name = generateFunctionName()
+    // The seed is the starting point, not work: only what is typed after it
+    // makes a new function worth a "discard?" question.
+    baseline.value = captureBaseline()
   }
 }
 
@@ -2042,10 +2072,13 @@ watch(() => props.mode, (m) => {
 //     re-fetched metadata but not the source)
 //   - Window refocus (catches the "I deployed via CLI in another
 //     terminal, came back to the open browser tab" case)
-const reloadSource = async (fn) => {
+const reloadSource = async (fn, { skipIfDirty = false } = {}) => {
   if (!fn) return
+  // Judged after the fetch, not before: typing while it was in flight is work too.
+  const stale = () => skipIfDirty && !viewMode.value && isDirty.value
   try {
     const srcRes = await apiClient.get(`/functions/${fn.id}/source`)
+    if (stale()) return
     if (srcRes.data.code) {
       code.value = srcRes.data.code
       dependencyText.value = srcRes.data.dependencies || ''
@@ -2055,6 +2088,7 @@ const reloadSource = async (fn) => {
   } catch {
     /* fall through to template */
   }
+  if (stale()) return
   code.value = defaultCode[fn.runtime] || ''
   dependencyText.value = ''
   markSourceClean()
@@ -2075,7 +2109,7 @@ const onWindowFocus = async () => {
     const listRes = await apiClient.get('/functions')
     const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
     if (!fn) return
-    await reloadSource(fn)
+    await reloadSource(fn, { skipIfDirty: true })
     await loadVersions(fn)
   } catch {
     /* ignore; user can hit Reload manually */
@@ -2153,7 +2187,7 @@ watch(
 // has been deployed (the name is the routing identity at that point).
 const rerollName = () => {
   if (isEditing.value || fnId.value) return
-  form.value.name = generateFunctionName()
+  asStartingPoint(() => { form.value.name = generateFunctionName() })
 }
 
 // activeVersionDeploymentId: the deployment_id of the row marked active

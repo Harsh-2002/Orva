@@ -18,9 +18,13 @@ const FN_B = { id: 'fn-b', name: 'beta', runtime: 'python', entrypoint: 'handler
 // Tests that need a build in flight park the deploy-inline response here.
 let deployGate = null
 let sourcePrefix = 'source of'
+let sourceGate = null
 const apiClient = {
   get: vi.fn(async (url) => {
     if (url === '/functions') return { data: { functions: [FN_A, FN_B] } }
+    if (url.endsWith('/source')) {
+      if (sourceGate) await sourceGate
+    }
     if (url.endsWith('/source')) return { data: { code: `${sourcePrefix} ${url}`, dependencies: '' } }
     return { data: {} }
   }),
@@ -109,7 +113,7 @@ const isReadOnly = (w) => w.find('[data-code]').attributes('data-readonly')
 const radio = (w, label) => w.findAll('button[role="radio"]').find((b) => b.text() === label)
 const checkedLabel = (w) => w.findAll('button[role="radio"]').find((b) => b.attributes('aria-checked') === 'true')?.text()
 
-beforeEach(() => { vi.clearAllMocks(); deployGate = null; sourcePrefix = 'source of' })
+beforeEach(() => { vi.clearAllMocks(); deployGate = null; sourceGate = null; sourcePrefix = 'source of' })
 afterEach(() => { while (mounted.length) mounted.pop().unmount() })
 
 describe('editor view / edit mode', () => {
@@ -353,5 +357,114 @@ describe('editor view / edit mode', () => {
     expect(checkedLabel(wrapper)).toBe('View')
     expect(vm.modals.secrets).toBe(false)
     expect(vm.modals.settings).toBe(false)
+  })
+
+  // vue-router unregisters per-component guards while the page is cached, so the
+  // check has to live somewhere that stays registered.
+  it('dirty Edit -> another page -> a different function asks; Keep leaves the buffer, same function does not ask', async () => {
+    const { wrapper, router, confirm, go } = await boot('/functions/alpha?mode=edit')
+    await wrapper.find('[data-code]').trigger('click')
+    await settle()
+    await go('/elsewhere')
+    expect(confirm.visible).toBe(false)
+
+    const nav = router.push('/functions/beta')
+    await settle()
+    expect(confirm.visible).toBe(true)
+    expect(confirm.title).toBe('Discard changes?')
+    confirm.settle(false)
+    await nav
+    await settle()
+    expect(router.currentRoute.value.path).toBe('/elsewhere')
+
+    await go('/functions/alpha?mode=edit')
+    expect(confirm.visible).toBe(false)
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+    expect(checkedLabel(wrapper)).toBe('Edit')
+
+    // Discard lets the move through.
+    await go('/elsewhere')
+    const nav2 = router.push('/functions/beta')
+    await settle()
+    confirm.settle(true)
+    await nav2
+    await settle()
+    expect(router.currentRoute.value.path).toBe('/functions/beta')
+    expect(wrapper.find('[data-code]').text()).toBe('source of /functions/fn-b/source')
+  })
+
+  it('a new function with typed code is protected; an untouched seed is not', async () => {
+    const first = await boot('/functions/new')
+    await first.router.push('/functions/alpha')
+    await settle()
+    expect(first.confirm.visible).toBe(false) // nothing typed -> free to leave
+    expect(first.router.currentRoute.value.path).toBe('/functions/alpha')
+    while (mounted.length) mounted.pop().unmount()
+
+    const { wrapper, router, confirm } = await boot('/functions/new')
+    await wrapper.find('[data-code]').trigger('click')
+    await settle()
+    const nav = router.push('/functions/alpha')
+    await settle()
+    expect(confirm.visible).toBe(true)
+    confirm.settle(false)
+    await nav
+    await settle()
+    expect(router.currentRoute.value.path).toBe('/functions/new')
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+  })
+
+  it('cannot switch to View while a build is running, and can afterwards without a prompt', async () => {
+    let release
+    deployGate = new Promise((r) => { release = r })
+    const { wrapper, confirm } = await boot('/functions/alpha?mode=edit')
+    window.dispatchEvent(new CustomEvent('orva:deploy'))
+    await settle()
+    expect(radio(wrapper, 'View').attributes('disabled')).toBeDefined()
+    await radio(wrapper, 'View').trigger('click')
+    await settle()
+    expect(checkedLabel(wrapper)).toBe('Edit')
+    expect(confirm.visible).toBe(false)
+
+    release()
+    await settle()
+    expect(radio(wrapper, 'View').attributes('disabled')).toBeUndefined()
+    await radio(wrapper, 'View').trigger('click')
+    await settle()
+    expect(confirm.visible).toBe(false)
+    expect(checkedLabel(wrapper)).toBe('View')
+  })
+
+  it('typing while the focus refresh is fetching is not overwritten', async () => {
+    const { wrapper } = await boot('/functions/alpha?mode=edit')
+    let release
+    sourceGate = new Promise((r) => { release = r })
+    sourcePrefix = 'server changed'
+    window.dispatchEvent(new window.Event('focus'))
+    await settle()
+    await wrapper.find('[data-code]').trigger('click') // typed during the fetch
+    await settle()
+    release()
+    await settle()
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+  })
+
+  it('a guard prompt cannot open on top of the mode prompt', async () => {
+    const { wrapper, router, confirm } = await boot('/functions/alpha?mode=edit')
+    await wrapper.find('[data-code]').trigger('click')
+    await settle()
+    await radio(wrapper, 'View').trigger('click')
+    await settle()
+    expect(confirm.visible).toBe(true)
+
+    await router.push('/functions/beta').catch(() => {})
+    await settle()
+    expect(router.currentRoute.value.path).toBe('/functions/alpha')
+    expect(confirm.visible).toBe(true) // still the first question
+
+    confirm.settle(false)
+    await settle()
+    expect(checkedLabel(wrapper)).toBe('Edit')
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
   })
 })
