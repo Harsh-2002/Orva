@@ -372,11 +372,14 @@ class _Chan:
 _chan: Optional[_Chan] = None
 _chan_probed = False
 _chan_lock = threading.Lock()
+_channel_forked = False
 
 
 def _channel() -> Optional[_Chan]:
     """The open channel, or None when this worker has none (HTTP fallback)."""
     global _chan, _chan_probed
+    if _channel_forked and os.environ.get("ORVA_SDK_PROTO") == "1":
+        raise OrvaUnavailableError("SDK channel unavailable in a forked child")
     if _chan_probed:
         return _chan
     with _chan_lock:
@@ -402,6 +405,8 @@ def _after_fork_in_child() -> None:
     # A forked child shares the descriptor with its parent and has no reader
     # thread; two readers on one stream would steal each other's frames, so the
     # child must never use it.
+    global _channel_forked
+    _channel_forked = True
     ch = _chan
     if ch is not None:
         ch.dead = OrvaUnavailableError("SDK channel unavailable in a forked child")

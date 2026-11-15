@@ -172,8 +172,9 @@ def stream_eof():
     return {"got": got, "res": attempt(run_it)}
 
 
-def fork():
-    kv.get("parent-before")
+def fork(warm=True):
+    if warm:
+        kv.get("parent-before")
     r, w = os.pipe()
     pid = os.fork()
     if pid == 0:
@@ -185,6 +186,10 @@ def fork():
     child = json.loads(os.read(r, 65536).decode())
     os.waitpid(pid, 0)
     return {"child": child, "parent_after": kv.get("parent-after")}
+
+
+def fork_lazy():
+    return fork(warm=False)
 
 
 print(json.dumps(globals()[sys.argv[1]](), default=repr))

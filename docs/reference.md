@@ -195,7 +195,7 @@ encrypted and only decrypt into the worker environment at spawn time.
 | `description` | Intent | One-sentence summary of what the function does (e.g. "resize uploaded images to webp"). Surfaces in `list_functions`, the dashboard's function card and search, and channel-mode tool descriptions exposed to other agents. Required when creating via MCP; optional via REST/CLI for backwards compat. |
 | `env_vars` | Plain config | Plaintext config stored on the function record. Use for feature flags and non-secret settings. |
 | `/secrets` | Encrypted | AES-256-GCM at rest. Values decrypt only into the worker environment at spawn time. |
-| `network_mode` | Egress control | none = isolated loopback. egress = outbound HTTPS allowed; firewall blocklist applies. The orva SDK (kv / invoke / jobs) reaches orvad over the bridge, so it requires `egress`. |
+| `network_mode` | Egress control | none = isolated loopback. egress = outbound HTTPS allowed; firewall blocklist applies. Current adapters route supported orva SDK operations over the inherited worker channel, including in `none`; external function network requests still require `egress`. |
 | `auth_mode` | Invoke gate | none = public. platform_key = require an Orva session cookie, or an API key carrying the `invoke` permission (via `X-Orva-API-Key` or `Authorization: Bearer`). signed = require HMAC. |
 | `rate_limit_per_min` | Per-IP throttle | Optional cap for public or webhook-facing functions. Exceeding it returns 429. The IP is the TCP peer address; `X-Forwarded-For` is honoured only when the operator sets `ORVA_TRUSTED_PROXY=true`, and then its rightmost entry. |
 | custom routes | Pretty URLs | Operator-defined `/path` or `/prefix/*` mappings to the function. Manage via `POST /api/v1/routes`, the `set_route` MCP tool, the `orva routes set` CLI, or the dashboard's function settings → "Custom routes" section (collision-checks against other functions). Optional. |
@@ -229,13 +229,28 @@ curl -X POST {{ORIGIN}}/fn/<function_id> \
 
 ## SDK from inside a function
 
-The bundled `orva` module is a stdlib-only wrapper over Orva's loopback
-API. It ships beside the runtime adapter — `require('orva')` (Node) and
+The bundled `orva` module ships beside the runtime adapter — `require('orva')` (Node) and
 `from orva import …` (Python) work without `npm install` / `pip
 install`. The Node SDK ships TypeScript declarations (`orva.d.ts`); the
 Python SDK ships a `py.typed` marker so IDEs surface full type hints. A
 TypeScript handler must map the module in `tsconfig.json` before `tsc` can
 see those declarations — see the TypeScript section of `docs/RUNTIMES.md`.
+
+On current adapters, `kv`, `invoke`/`invokeStream`, `jobs`, `crons`, and
+`trace.span` operations use a private inherited per-worker socket channel; the
+host derives the function ID from that channel. SDKs retain the legacy HTTP
+transport when the channel is absent (including older installed adapters).
+KV reads and writes can run at module scope; they use the worker's function
+identity but no dispatch lease, so a value read there can become stale.
+`invoke`, `invokeStream`, `jobs.enqueue`, `crons.upsert`, and custom spans
+require an active handler dispatch on that channel. Calls are bounded to depth
+8; up to 8 streams may be open per channel, and each stream read yields a chunk no larger than 256 KiB, with stream state
+closed on cancellation/lease end. Frames are limited to 4 MiB, with 32
+in-flight calls and bounded pending replies. KV list replies paginate, and KV
+batches remain limited to 100 operations. Channel list pages stop at about
+2 MiB and return a continuation cursor; batch results over 3 MiB are refused
+with `413 RESULT_TOO_LARGE` (request fewer keys). The host bounds pending
+handler/reply work to 64 calls per channel and disconnects a stalled reader.
 
 Surface, as of v0.7:
 
@@ -384,10 +399,10 @@ exports.handler = async (event) => {
 }
 ```
 
-> **Network mode:** the SDK reaches orvad over loopback through the
-> host gateway, so the function needs `network_mode: "egress"`. On
-> the default `"none"` the SDK throws `OrvaUnavailableError` with a
-> clear hint.
+> **Network mode:** current adapters use the inherited SDK channel, so these
+> SDK calls work with `network_mode: "none"`; legacy HTTP fallback is used
+> when the channel is unavailable. `network_mode: "egress"` is still needed
+> for outbound network requests made by your function.
 
 ### KV — batch ops, atomic counter, compare-and-swap
 
@@ -838,7 +853,7 @@ call directly. API key permissions scope the available tool set.
 
 > **Channel-mode tool input.** When a downstream agent calls a channel-bundled tool, the input shape is the same `ChannelInvokeInput` envelope (`method`, `path`, `headers`, `body` with the discriminator above, `timeout_ms`). The output mirrors `invoke_function` (`status_code`, `headers`, `body` string, `execution_id`, optional `stderr`, optional `orva_hint`).
 
-> **Deploy-time SDK warning.** `deploy_function_inline` scans the source for the in-sandbox `orva` SDK import. If present AND the function's `network_mode` is `"none"`, the deploy result includes a `warning` field — the SDK will fail at runtime because it talks to orvad over the bridge network. Switch to `network_mode='egress'` and the next invoke is a cold start with a working SDK.
+> Current adapters use the inherited SDK channel without a user-facing opt-in setting. SDK calls work in `network_mode: "none"`; external network calls still require `egress`. The legacy HTTP transport remains available when the channel is absent or an older adapter is installed.
 
 > Generate a token from the Docs page in the dashboard, then drop it
 > into your client config (Claude Code, Claude Desktop, Cursor, Cline,
@@ -1211,10 +1226,10 @@ Secrets are stored encrypted at rest, decrypted only into the worker environment
 </env_and_secrets>
 
 <orva_sdk>
-Every function has the `orva` module pre-installed — zero install, zero config — but you MUST import it: `import orva` in Python, `const orva = require('orva')` in Node. Without the import the handler dies with NameError / ReferenceError: orva is not defined. The SDK reaches orvad over the bridge network using HTTP, so the function MUST be created with `network_mode: "egress"` (or updated to it later). With the default `network_mode: "none"`, every SDK call fails at runtime with `ENETUNREACH` / `OrvaUnavailableError` / `TypeError: fetch failed`. Core primitives:
+Every function has the `orva` module pre-installed — zero install, zero config — but you MUST import it: `import orva` in Python, `const orva = require('orva')` in Node. Without the import the handler dies with NameError / ReferenceError: orva is not defined. Current adapters route supported SDK operations over an inherited per-worker socket channel, which works in `network_mode: "none"`; SDKs retain legacy HTTP fallback when the channel is absent, including with older installed adapters. External network calls made by the function still require `network_mode: "egress"`. Core primitives:
 
 ## orva.kv — per-function key/value store on SQLite
-Per-function namespace enforced by a process-signed, function-scoped SDK credential; caller identity never comes from a request header. Keys never collide across functions. TTL is optional: omit it to preserve an existing expiry (new keys are persistent), pass 0 to clear expiry, or pass a positive value to set/refresh it; negative values are rejected. Expiry is filtered at read time and swept every 5 minutes. Values must be valid JSON and are capped at 64 KiB; keys must be non-empty UTF-8 and are capped at 256 characters. Batches are all-or-nothing and capped at 100 operations. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
+Per-function namespace enforced by the host-bound worker channel identity (or the signed function-scoped credential on legacy HTTP); caller identity never comes from an unverified request header. Keys never collide across functions. TTL is optional: omit it to preserve an existing expiry (new keys are persistent), pass 0 to clear expiry, or pass a positive value to set/refresh it; negative values are rejected. Expiry is filtered at read time and swept every 5 minutes. Values must be valid JSON and are capped at 64 KiB; keys must be non-empty UTF-8 and are capped at 256 characters. Batches are all-or-nothing and capped at 100 operations. Use for: caches, idempotency keys, rate-limit counters, light session state, feature flags, last-seen markers. NOT a primary database, NOT a queue, NOT for blob storage.
 
   Python:
     from orva import kv
@@ -1344,7 +1359,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - Filesystem: read-only, INCLUDING /code (your own code is mounted read-only). /tmp is the only writable path — ephemeral, cleared between cold starts.
 - NO raw sockets. NO listening ports — the platform owns the HTTP server. Subprocesses are permitted by the default seccomp policy, but the sandbox ships no shell and no package manager, so treat them as unavailable.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
-- orva.kv / orva.invoke / orva.jobs ALSO require egress — the SDK reaches orvad over the bridge network via HTTP, so a function with `network_mode: "none"` will see every SDK call fail with ENETUNREACH / OrvaUnavailableError. If the handler imports the orva module, set `network_mode: "egress"` at create time (or update later) — `deploy_function_inline` (MCP) and `POST /api/v1/functions/<id>/deploy-inline` return a `warning` field when the import meets `none`; the dashboard's Deploy button does not surface it.
+- Current adapters route KV, invoke/invokeStream, jobs, crons, and trace.span over the inherited per-worker SDK socket channel, so these operations work with `network_mode: "none"`. The SDK keeps legacy HTTP fallback for absent channels/older installed adapters; do not infer that an external HTTP request is available in none mode. `network_mode: "egress"` remains necessary for outbound network calls by function code. SDK function identity is derived per channel, while dispatch-scoped operations require the active per-dispatch lease; up to 8 streams may be open per channel, with chunks no larger than 256 KiB, frames at 4 MiB, and at most 32 calls are in flight, with bounded pending replies.
 - When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
 - Concurrency: each warm worker handles one request at a time; simultaneous requests use separate workers in the same function's pool. A worker becomes available only after its adapter has loaded the handler and signalled readiness. Pool Controller v2 sizes workers from arrival rate, queue pressure, service time, and cold-start time, bounded by effective host CPU/memory and function concurrency. With no override, the pool maximum is automatic; `max_warm=0` restores that behavior and a positive value can only lower it. Pending admission count scales with detected host memory and file descriptors, with a share reserved for other functions. Public HTTP requests reserve daemon memory before body read; unknown-length bodies use the configured body cap for this estimate. A saturated pool waits at most two seconds for a worker; a pool that can still grow or has workers starting may wait up to twelve seconds (adapter-readiness budget plus one scaler tick). Expired worker admission returns `429 INVOCATION_QUEUE_FULL`; a full execution-record writer returns `429 STORAGE_BACKPRESSURE` after a five-second wait. Both carry `Retry-After: 1` and occur before user code starts. A function's configured execution timeout starts when a ready worker is acquired, not while waiting in the admission queue or while the adapter loads. Rejected requests are not replay-captured. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>
@@ -1486,7 +1501,7 @@ Every night at 3 AM UTC, delete all KV keys that start with "session:" and are o
 </user_request>
 
 <your_response>
-**Plan.** Python 3.15 handler triggered by a cron schedule `0 3 * * *` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. Requires egress because the bundled KV SDK calls Orva's control plane. Recommended auth: leave public; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
+**Plan.** Python 3.15 handler triggered by a cron schedule `0 3 * * *` UTC. Lists keys with prefix "session:" via orva.kv.list, page by page, and lets the TTL-based sweep handle expiration — but for keys we want gone NOW, we delete explicitly. No deps. KV works over the SDK channel in `network_mode: none` with current adapters. Recommended auth: leave public; cron triggers don't go through the HTTP gate, but if anyone could hit it from outside, set platform_key.
 
 ```python
 import json

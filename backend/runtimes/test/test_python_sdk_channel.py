@@ -268,6 +268,11 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual(out["child"]["err"]["name"], "OrvaUnavailableError")
         self.assertEqual([f["a"]["key"] for f in frames], ["parent-before", "parent-after"])
 
+    def test_fork_before_first_sdk_call_refuses_child(self):
+        out, frames = run("fork_lazy", kv_host())
+        self.assertEqual(out["child"]["err"]["name"], "OrvaUnavailableError")
+        self.assertEqual([f["a"]["key"] for f in frames], ["parent-after"])
+
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     seen = []

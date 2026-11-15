@@ -63,9 +63,12 @@ func (h *Host) prepare(ctx context.Context, caller sandbox.SDKCaller, args json.
 	if caller.Exec == nil {
 		return nil, serr(403, "SDK_SCOPE_VIOLATION", "SDK request is not associated with an active caller execution")
 	}
+	if e := revoked(ctx, caller.Exec); e != nil {
+		return nil, e
+	}
 	var a invokeArgs
-	if err := json.Unmarshal(args, &a); err != nil {
-		return nil, serr(400, "VALIDATION", "invalid arguments")
+	if e := decodeArgs(args, sandbox.MaxSDKFrame, &a); e != nil {
+		return nil, e
 	}
 	if a.Name == "" {
 		return nil, serr(400, "VALIDATION", "function name is required")
@@ -265,7 +268,10 @@ func (h *Host) streamNext(ctx context.Context, caller sandbox.SDKCaller, args js
 		return nil, serr(403, "SDK_SCOPE_VIOLATION", "SDK request is not associated with an active caller execution")
 	}
 	var a handleArgs
-	if json.Unmarshal(args, &a) != nil || a.Handle == "" {
+	if e := decodeArgs(args, limitSmall, &a); e != nil {
+		return nil, e
+	}
+	if a.Handle == "" {
 		return nil, serr(400, "VALIDATION", "handle is required")
 	}
 	t, e := sessionTable(ctx)
@@ -311,7 +317,10 @@ func (h *Host) streamClose(ctx context.Context, caller sandbox.SDKCaller, args j
 		return nil, serr(403, "SDK_SCOPE_VIOLATION", "SDK request is not associated with an active caller execution")
 	}
 	var a handleArgs
-	if json.Unmarshal(args, &a) != nil || a.Handle == "" {
+	if e := decodeArgs(args, limitSmall, &a); e != nil {
+		return nil, e
+	}
+	if a.Handle == "" {
 		return nil, serr(400, "VALIDATION", "handle is required")
 	}
 	t, e := sessionTable(ctx)

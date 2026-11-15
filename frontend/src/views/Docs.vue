@@ -340,7 +340,14 @@
             instead writes to stderr and is parsed back out server-side, so it
             needs no network access and lands under
             <strong>Structured logs</strong> in the test workbench and in the
-            invocation drawer's <strong>Logs</strong> panel. The module also
+            invocation drawer's <strong>Logs</strong> panel. Current adapters
+            send KV, invoke/invokeStream, jobs, crons, and trace.span over an
+            inherited per-worker socket channel, so those operations work in
+            <code class="doc-chip">network_mode: "none"</code>. Missing-channel
+            and older-adapter cases retain legacy HTTP fallback; external
+            network calls still require egress. KV can run at module scope
+            (reads can become stale); invoke, jobs, crons, and spans require an
+            active handler dispatch. The module also
             exports
             <code class="doc-chip">crons</code>,
             <code class="doc-chip">trace</code>,
@@ -437,14 +444,12 @@
         :icon="Globe"
         title="Network mode"
       >
-        The SDK reaches orvad over loopback through the host gateway, so
-        the function needs
-        <code class="doc-chip">network_mode: "egress"</code>.
-        On the default
-        <code class="doc-chip">"none"</code>
-        the SDK throws
-        <code class="doc-chip">OrvaUnavailableError</code>
-        with a clear hint.
+        Current adapters use the inherited socket channel for supported SDK
+        operations, including in
+        <code class="doc-chip">network_mode: "none"</code>.
+        Legacy HTTP fallback remains for missing channels and older adapters.
+        Egress is still required for outbound network requests made by your
+        function.
       </Callout>
     </section>
 

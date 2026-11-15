@@ -225,9 +225,13 @@ func TestInvokeNeedsExecutionAndInvoker(t *testing.T) {
 	if serr == nil || serr.Status != 403 || serr.Code != "SDK_SCOPE_VIOLATION" {
 		t.Fatalf("module-scope invoke = %+v", serr)
 	}
-	// an absent body is {} and identity args are ignored
+	// An absent body is {}; identity arguments are rejected, not trusted.
 	ctx := context.Background()
 	r, serr := e.host.Handle(ctx, e.exec(ctx, 0, "L"), "invoke", json.RawMessage(`{"name":"`+fnB+`","depth":0,"trace_id":"x"}`))
+	if serr == nil || serr.Status != 400 || serr.Code != "INVALID_JSON" {
+		t.Fatalf("identity arguments accepted: %v %+v", r, serr)
+	}
+	r, serr = e.host.Handle(ctx, e.exec(ctx, 0, "L"), "invoke", json.RawMessage(`{"name":"`+fnB+`"}`))
 	if serr != nil || !strings.Contains(string(r.(json.RawMessage)), `\"trace\": \"trace1\"`) {
 		t.Fatalf("%v %+v", r, serr)
 	}

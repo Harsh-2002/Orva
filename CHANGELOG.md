@@ -14,6 +14,20 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Added
+
+- Current Node and Python adapters automatically route KV, function
+  invoke/streaming, jobs, cron updates, and custom spans over an inherited
+  per-worker SDK channel (there is no opt-in setting yet).
+  These calls work in `network_mode: none`; outbound network requests from
+  function code still require egress.
+
+### Upgrade notes
+
+- The SDK retains HTTP fallback for a missing channel or an older installed
+  runtime adapter. Keep the server binary and adapters refreshed together to
+  use the channel; the legacy HTTP endpoints remain supported.
+
 ### Fixed
 
 - Function-to-function recursion through `orva.invoke` is now bounded even when
