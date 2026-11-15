@@ -190,8 +190,8 @@ Packages that are pure Python or pure JavaScript, or that use a stable ABI
 
 ## SDK operations and network mode
 
-Current runtime adapters automatically carry `kv`, `invoke`/`invokeStream`, `jobs`, `crons`,
-and `trace.span` calls over a private inherited per-worker socket channel. There is no user-facing SDK opt-in setting yet. The
+With the function's `sdk` permission enabled, current runtime adapters carry `kv`, `invoke`/`invokeStream`, `jobs`, `crons`,
+and `trace.span` calls over a private inherited per-worker socket channel. New functions default to `sdk: false`, independently of outbound networking. The
 host derives the function ID from the channel, not SDK arguments. If the channel
 is unavailable, including with an older installed adapter, the SDK falls back
 to its existing HTTP endpoints. Those HTTP endpoints remain supported.

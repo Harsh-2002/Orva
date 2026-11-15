@@ -630,12 +630,13 @@ the symptom:
   (code [+ dependencies = package.json/requirements.txt], wait=true) →
   invoke_function (method REQUIRED) → get_execution_logs on failure.
 - Networking: network_mode is "none" (loopback only — the default) or "egress"
-  (outbound HTTPS + the in-sandbox SDK). Set egress at create time if the handler
-  uses the orva SDK (kv/invoke/jobs) or any external HTTPS. Flipping it drains the
-  warm pool, so the next invoke is a (normal) cold start. ENETUNREACH/ECONNREFUSED
-  on an SDK/HTTP handler means it's still on "none" — switch to egress and retry.
-- In-sandbox SDK (egress): per-function KV (orva.kv), function-to-function invoke
-  (orva.invoke), and background jobs (orva.jobs).
+  (outbound HTTPS). Enable egress for external network calls only. The separate
+  sdk permission defaults false for new functions regardless of network_mode.
+  Set sdk=true for platform SDK calls; the private SDK channel works in either
+  network mode. Flipping sdk or network_mode hard-drains the pool.
+- In-sandbox SDK (sdk=true): per-function KV (orva.kv), function-to-function invoke
+  (orva.invoke), and background jobs (orva.jobs). An SDK-disabled callee can still
+  receive invocations; a caller's SDK permission never grants the callee SDK access.
 - set_secret/delete_secret are idempotent but drain the function's warm pool (next
   invoke is a cold start); don't loop secret writes in production.
 - Also available: secrets (encrypted env injection), custom routes, cron

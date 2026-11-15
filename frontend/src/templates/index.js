@@ -1360,7 +1360,7 @@ const pythonTemplates = [
 
   { id: 'py-guestbook',      category: 'Showcase',  label: 'Guestbook (full-stack showcase)', cron: true,
     description: 'HTML page + JSON API + KV + jobs + cron + secrets in one file. Best demo of what one Orva function can do.',
-    code: py_guestbook, deps: '' },
+    code: py_guestbook, deps: '', requiresSDK: true },
 
   { id: 'py-stream-llm',     category: 'Showcase',  label: 'Streaming LLM tokens',
     description: 'Generator that yields one word every 100ms. Demonstrates v0.4 chunked streaming end-to-end.',
@@ -1368,7 +1368,7 @@ const pythonTemplates = [
 
   { id: 'py-traced-pipeline', category: 'Showcase',  label: 'v0.7 SDK pipeline',
     description: 'trace.span + log.info + kv.incr + idempotent jobs.enqueue. After invoking, open the new trace — child spans and structured logs render inline in the waterfall.',
-    code: py_traced_pipeline, deps: '' },
+    code: py_traced_pipeline, deps: '', requiresSDK: true },
 ]
 
 // v0.7 SDK showcase (Node): atomic incr, compare-and-swap loop,
@@ -1443,11 +1443,11 @@ const nodeTemplates = [
 
   { id: 'node-url-shortener',   category: 'Utility',   label: 'URL shortener',
     description: 'POST creates a slug, GET redirects. Uses Orva KV.',
-    code: node_url_shortener, deps: '' },
+    code: node_url_shortener, deps: '', requiresSDK: true },
 
   { id: 'node-counter-cas',     category: 'Showcase',  label: 'v0.7 SDK counter (kv.incr + kv.cas)',
     description: 'Atomic counter and a CAS-retry loop for richer state. Demonstrates v0.7 race-safe primitives and structured logging end-to-end.',
-    code: node_counter_cas, deps: '' },
+    code: node_counter_cas, deps: '', requiresSDK: true },
 
   // TypeScript starter — the builder's tsc step picks this up via the
   // companion tsconfig.json. The `extras` field carries auxiliary files

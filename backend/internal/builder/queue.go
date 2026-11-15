@@ -168,8 +168,11 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 		defer lk.Unlock()
 	}
 
+	mutation := q.reg.MutationLock(job.FunctionID)
+	mutation.Lock()
 	fn, err := q.reg.Get(job.FunctionID)
 	if err != nil {
+		mutation.Unlock()
 		q.fail(job, "load_function", fmt.Sprintf("function lookup failed: %v", err), started)
 		return
 	}
@@ -182,6 +185,7 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 		fn.Status = "building"
 		_ = q.reg.SetSilent(fn)
 	}
+	mutation.Unlock()
 
 	lw := newLogWriter(q.db, job.DeploymentID)
 	// Per-job copy: Logger used to be set on the one shared *Builder, so with
@@ -196,16 +200,29 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	if buildErr != nil {
 		logger.Warn("build failed", "err", buildErr)
 		_ = lw.append("stderr", buildErr.Error())
+		q.restoreBuildStatus(job.FunctionID)
 		q.fail(job, "build", buildErr.Error(), started)
-		// If there was no previous active build, flip status to error;
-		// otherwise leave the previous active code serving traffic.
-		if fn.Status == "building" {
-			fn.Status = "error"
-			_ = q.reg.SetSilent(fn)
-		}
 		return
 	}
 
+	// The build's input copy predates accepted config updates, including revocations.
+	// Reload under the same mutation lock as PUT/MCP and keep it through snapshot publication.
+	mutation.Lock()
+	defer mutation.Unlock()
+	current, err := q.reg.Get(job.FunctionID)
+	if err != nil {
+		q.fail(job, "persist", err.Error(), started)
+		return
+	}
+	if current.Runtime != fn.Runtime || current.Entrypoint != fn.Entrypoint {
+		if current.Status == "building" {
+			current.Status = "error"
+			_ = q.reg.SetSilent(current)
+		}
+		q.fail(job, "build", "function build inputs changed during build; redeploy with the current configuration", started)
+		return
+	}
+	fn = current
 	fn.Image = result.ImageTag
 	fn.ImageSize = result.ImageSize
 	fn.CodeHash = result.CodeHash
@@ -224,7 +241,9 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	} else {
 		fn.RunEntrypoint = ""
 	}
-	fn.Status = "active"
+	if fn.Status != "inactive" {
+		fn.Status = "active"
+	}
 	fn.Version++
 	// This build is now what serves. The pointer is what the deployments list
 	// reads to mark a version live, so a rollback can move it to an older row
@@ -269,6 +288,16 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 
 	if job.OnComplete != nil {
 		job.OnComplete(job.FunctionID, true)
+	}
+}
+
+func (q *Queue) restoreBuildStatus(fnID string) {
+	lk := q.reg.MutationLock(fnID)
+	lk.Lock()
+	defer lk.Unlock()
+	if fn, err := q.reg.Get(fnID); err == nil && fn.Status == "building" {
+		fn.Status = "error"
+		_ = q.reg.SetSilent(fn)
 	}
 }
 

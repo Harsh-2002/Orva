@@ -341,13 +341,15 @@
             needs no network access and lands under
             <strong>Structured logs</strong> in the test workbench and in the
             invocation drawer's <strong>Logs</strong> panel. Current adapters
-            send KV, invoke/invokeStream, jobs, crons, and trace.span over an
+            send permitted KV, invoke/invokeStream, jobs, crons, and trace.span over an
             inherited per-worker socket channel, so those operations work in
             <code class="doc-chip">network_mode: "none"</code>. Missing-channel
             and older-adapter cases retain legacy HTTP fallback; external
             network calls still require egress. KV can run at module scope
             (reads can become stale); invoke, jobs, crons, and spans require an
-            active handler dispatch. The module also
+            active handler dispatch. Enable the function’s
+            <code class="doc-chip">sdk</code> permission for SDK-dependent handlers;
+            new functions default to disabled, independently of outbound networking. The module also
             exports
             <code class="doc-chip">crons</code>,
             <code class="doc-chip">trace</code>,

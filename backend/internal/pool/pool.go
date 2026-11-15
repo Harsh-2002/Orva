@@ -80,14 +80,13 @@ type SandboxTemplate struct {
 	// 127.0.0.1 is the sandbox's own loopback, so it cannot reach orvad.
 	// detectInternalAPIBase probes for a routable address instead, which is
 	// normally RFC1918 — hence the control-plane carve-out the egress policy
-	// compiles ahead of the operator's block rules. Functions with
-	// network_mode=none have no network stack at all and cannot use the SDK.
+	// compiles ahead of the operator's block rules. SDK-enabled functions use
+	// the private channel independently of network mode.
 	APIBaseURL string
 
 	// SDKHandler serves SDK calls arriving over each worker's private channel
-	// (kv.* so far). The channel is enabled per worker only when this is set
-	// AND the installed adapter declares support, so a nil handler or an older
-	// adapter silently keeps the HTTP transport.
+	// for SDK-enabled functions with a supported adapter. Older adapters keep
+	// the HTTP fallback, still gated by the function's SDK permission.
 	SDKHandler sandbox.SDKHandler
 
 	// EgressPolicy is consulted at every network_mode=egress spawn and returns
@@ -908,12 +907,13 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 					env[k] = v
 				}
 			}
+			sanitizeSDKEnv(env)
 			// Internal SDK plumbing — adapter uses these to talk to the
 			// KV / F2F / jobs endpoints. Empty when running outside the
 			// server (tests) so user code can probe presence to decide
 			// whether to fall back.
 			releaseSDKToken := func() {}
-			if m.tmpl.SDKToken != nil {
+			if fn.SDK && m.tmpl.SDKToken != nil {
 				token, release := m.tmpl.SDKToken(fn.ID)
 				env["ORVA_INTERNAL_TOKEN"] = token
 				env["ORVA_API_BASE"] = m.tmpl.APIBaseURL
@@ -939,6 +939,10 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			}
 
 			start := time.Now()
+			var sdkHandler sandbox.SDKHandler
+			if fn.SDK {
+				sdkHandler = tmpl.SDKHandler
+			}
 			w, err := sandbox.Spawn(ctx, sandbox.ExecConfig{
 				Language: sandbox.Language(fn.Runtime),
 				CodeDir:  codeDir,
@@ -973,7 +977,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				OnExit: releaseSDKToken,
 				// SDK channel: identity is the function this worker serves.
 				FunctionID: fn.ID,
-				SDKHandler: tmpl.SDKHandler,
+				SDKHandler: sdkHandler,
 			})
 			if err != nil {
 				// No process, so nothing will ever call OnExit for it.

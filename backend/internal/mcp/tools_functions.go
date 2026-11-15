@@ -44,6 +44,7 @@ type FunctionView struct {
 	CPUs              float64           `json:"cpus"`
 	EnvVars           map[string]string `json:"env_vars,omitempty"`
 	NetworkMode       string            `json:"network_mode"`
+	SDK               bool              `json:"sdk"`
 	MaxConcurrency    int               `json:"max_concurrency"`
 	ConcurrencyPolicy string            `json:"concurrency_policy"`
 	AuthMode          string            `json:"auth_mode"`
@@ -71,6 +72,7 @@ func toFunctionView(ctx context.Context, fn *database.Function, deps Deps) Funct
 		CPUs:              fn.CPUs,
 		EnvVars:           fn.EnvVars,
 		NetworkMode:       fn.NetworkMode,
+		SDK:               fn.SDK,
 		MaxConcurrency:    fn.MaxConcurrency,
 		ConcurrencyPolicy: fn.ConcurrencyPolicy,
 		AuthMode:          fn.AuthMode,
@@ -159,7 +161,8 @@ type CreateFunctionInput struct {
 	MemoryMB          int64             `json:"memory_mb" jsonschema:"REQUIRED — sandbox RAM in MB. Hard cap; a handler that exceeds it gets OOM-killed. Pick from runtime baseline + working set: tiny Node/Python with no deps ~64; with frameworks ~128-256; image/PDF/ML work 512+. Must be > 0."`
 	CPUs              float64           `json:"cpus" jsonschema:"REQUIRED — CPU shares (fractional ok, e.g. 0.25, 0.5, 1, 2). Roughly 'how many cores worth of CPU time can this handler burn'. IO-bound (HTTP fetch, DB) → 0.25-0.5; mixed → 0.5-1; CPU-bound (image, crypto, ML) → 1+. Must be > 0."`
 	EnvVars           map[string]string `json:"env_vars,omitempty" jsonschema:"plaintext env vars injected into the sandbox at spawn time (use set_secret for credentials — env_vars are stored unencrypted). Empty map is fine."`
-	NetworkMode       string            `json:"network_mode" jsonschema:"REQUIRED — choose explicitly. 'none' = sandbox has loopback only; the orva.kv / orva.invoke / orva.jobs SDK calls (which reach orvad over the bridge network) will fail with ENETUNREACH. Use only for pure-compute handlers with no platform calls. 'egress' = sandbox has outbound TCP via pasta NAT (subject to firewall rules at /api/v1/firewall); REQUIRED for any handler that imports the orva module or makes external HTTPS. Pick 'egress' if the handler uses orva.kv, orva.invoke, orva.jobs, jobs.enqueue, or fetch/requests to an external URL."`
+	NetworkMode       string            `json:"network_mode" jsonschema:"REQUIRED — choose explicitly. 'none' blocks external network; 'egress' permits outbound network subject to egress policy. SDK permission is separate."`
+	SDK               bool              `json:"sdk,omitempty" jsonschema:"Opt in to the orva platform SDK; default false regardless of network_mode. SDK channel calls work with none or egress. Does not change incoming invocation auth."`
 	MaxConcurrency    int               `json:"max_concurrency,omitempty" jsonschema:"max parallel invocations, 0 (default) = unlimited"`
 	ConcurrencyPolicy string            `json:"concurrency_policy,omitempty" jsonschema:"queue (default) or reject when at max"`
 	AuthMode          string            `json:"auth_mode" jsonschema:"REQUIRED — invocation auth gate. 'none' = anyone with the URL can invoke (use only for genuinely public endpoints); 'platform_key' = caller must present an Orva API key via X-Orva-API-Key or Bearer (use for server-to-server, internal dashboards, cron); 'signed' = caller signs the request HMAC-SHA256 over '<unix_ts>.<raw_body>' using ORVA_SIGNING_SECRET (use for partner integrations). Default-allow ('none') silently exposes data — pick consciously."`
@@ -177,7 +180,8 @@ type UpdateFunctionInput struct {
 	MemoryMB          *int64             `json:"memory_mb,omitempty"`
 	CPUs              *float64           `json:"cpus,omitempty"`
 	EnvVars           *map[string]string `json:"env_vars,omitempty"`
-	NetworkMode       *string            `json:"network_mode,omitempty" jsonschema:"'none' (loopback only — orva.kv/invoke/jobs WILL FAIL because the SDK uses HTTP over the bridge) or 'egress' (outbound TCP via pasta NAT — required for any orva SDK call or external HTTPS). Flipping triggers a hard pool drain so the next invocation respawns with the correct netns; expect cold_start=true on that invocation."`
+	NetworkMode       *string            `json:"network_mode,omitempty" jsonschema:"'none' blocks external network; 'egress' permits outbound network subject to egress policy. Independent of sdk. Flipping hard-drains the pool."`
+	SDK               *bool              `json:"sdk,omitempty" jsonschema:"Enable or revoke the platform SDK independently of external network access. Omitted leaves unchanged; false revokes. Flipping hard-drains the pool."`
 	MaxConcurrency    *int               `json:"max_concurrency,omitempty"`
 	ConcurrencyPolicy *string            `json:"concurrency_policy,omitempty"`
 	AuthMode          *string            `json:"auth_mode,omitempty"`
@@ -295,7 +299,7 @@ func registerFunctionTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "get_function",
 			Title:       "Get Function",
-			Description: "Fetch one function by id or name. Returns the full record including invoke_url (use verbatim to call the function over HTTP — never concatenate /fn/ + id manually), any custom routes, resource limits, env_vars, network_mode, auth_mode, and rate_limit_per_min.",
+			Description: "Fetch one function by id or name. Returns the full record including invoke_url (use verbatim to call the function over HTTP — never concatenate /fn/ + id manually), any custom routes, resource limits, env_vars, network_mode, sdk, auth_mode, and rate_limit_per_min.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in GetFunctionInput) (*mcpsdk.CallToolResult, FunctionView, error) {
@@ -338,10 +342,10 @@ func registerFunctionTools(rc *regCtx) {
 				"`timeout_ms` (per-invocation cap; pick from your handler's expected work — fast CRUD ~5000-10000, AI/LLM ~30000-60000, heavy reports 120000+), " +
 				"`memory_mb` (RAM cap; tiny handlers 64, with frameworks 128-256, image/PDF/ML 512+), " +
 				"`cpus` (CPU shares; IO-bound 0.25-0.5, mixed 0.5-1, CPU-bound 1+), " +
-				"`network_mode` ('egress' if the handler imports `orva` / makes external HTTPS, 'none' only for pure compute), " +
+				"`network_mode` ('egress' for external HTTPS, 'none' to block external network), optional `sdk` (default false; set true for platform SDK calls), " +
 				"`auth_mode` ('platform_key' / 'signed' for anything that handles user data; 'none' only for genuinely public endpoints). " +
 				"Optional: env_vars, max_concurrency, concurrency_policy, rate_limit_per_min — sane defaults. " +
-				"Defaulting any of the required fields silently has been a frequent source of bugs (auth=none on private endpoints, network_mode=none on SDK handlers, undersized memory) — being explicit costs ~10 extra lines and prevents the whole class of foot-gun.",
+				"Choose required fields consciously (auth=none exposes endpoints; undersized memory kills workers). SDK permission does not imply external network access.",
 			Annotations: &mcpsdk.ToolAnnotations{
 				DestructiveHint: ptrFalse(),
 				OpenWorldHint:   ptrFalse(),
@@ -361,7 +365,7 @@ func registerFunctionTools(rc *regCtx) {
 			Name:  "update_function",
 			Title: "Update Function",
 			Description: "BEFORE calling this with code-shape implications (entrypoint changes, runtime swaps, etc.): if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract diverges from Lambda / Vercel / Workers and skipping the docs is the leading cause of update_function calls that activate broken handlers.\n\n" +
-				"Patch a function's settings. Any field omitted is left unchanged. Flipping memory/cpus/env_vars/network_mode drains the warm pool so the next invocation respawns with the new config.",
+				"Patch a function's settings. Any field omitted is left unchanged. Flipping memory/cpus/env_vars/network_mode/sdk drains the warm pool so the next invocation respawns with the new config. SDK is separate from external egress and incoming auth.",
 			Annotations: &mcpsdk.ToolAnnotations{
 				IdempotentHint: true,
 				OpenWorldHint:  ptrFalse(),
@@ -482,13 +486,7 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 	}
 	if strings.TrimSpace(in.NetworkMode) == "" {
 		return nil, errors.New(
-			"network_mode is required: choose 'egress' if the handler uses " +
-				"orva.kv / orva.invoke / orva.jobs (the SDK reaches orvad " +
-				"over HTTP and needs outbound network) or makes external " +
-				"HTTPS calls; choose 'none' only for a pure-compute " +
-				"handler with no platform or network access. Default-deny " +
-				"would silently break SDK calls; default-allow would erode " +
-				"sandbox isolation — so neither default is correct.",
+			"network_mode is required: choose 'egress' for external HTTPS or 'none' to block external network. Enable sdk separately for platform SDK calls.",
 		)
 	}
 	if !database.ValidNetworkMode(in.NetworkMode) {
@@ -538,6 +536,7 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 		CPUs:              in.CPUs,
 		EnvVars:           in.EnvVars,
 		NetworkMode:       in.NetworkMode,
+		SDK:               in.SDK,
 		MaxConcurrency:    in.MaxConcurrency,
 		ConcurrencyPolicy: in.ConcurrencyPolicy,
 		AuthMode:          in.AuthMode,
@@ -564,6 +563,13 @@ func createFunction(deps Deps, in CreateFunctionInput) (*database.Function, erro
 //     creates a fresh one with the new config.
 func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, error) {
 	fn, err := resolveFunction(deps, in.FunctionID)
+	if err != nil {
+		return nil, err
+	}
+	lk := deps.Registry.MutationLock(fn.ID)
+	lk.Lock()
+	defer lk.Unlock()
+	fn, err = deps.Registry.Get(fn.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -624,6 +630,11 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 	if in.EnvVars != nil {
 		fn.EnvVars = *in.EnvVars
 		drainPool = true
+	}
+	if in.SDK != nil && *in.SDK != fn.SDK {
+		fn.SDK = *in.SDK
+		drainPool = true
+		networkModeChanged = true
 	}
 	if in.NetworkMode != nil {
 		if !database.ValidNetworkMode(*in.NetworkMode) {

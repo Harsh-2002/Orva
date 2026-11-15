@@ -678,6 +678,26 @@
           </label>
         </div>
 
+        <div class="border-t border-border pt-4">
+          <label class="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              v-model="form.sdk"
+              id="fn-sdk"
+              type="checkbox"
+              :disabled="viewMode"
+              class="mt-0.5 w-4 h-4 rounded border-border bg-background focus:outline-none focus:ring-1 focus:ring-focus-ring"
+            >
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground-strong flex items-center gap-2">
+                <Plug class="w-4 h-4 text-foreground-muted" /> Allow Orva SDK
+              </div>
+              <div class="text-xs text-foreground-muted mt-1 leading-snug">
+                Off by default. Enables the function's Orva SDK for KV, function-to-function calls, jobs, crons, and spans. This does not allow outbound network access.
+              </div>
+            </div>
+          </label>
+        </div>
+
         <div class="border-t border-border pt-4 space-y-2">
           <label
             for="fn-auth-mode"
@@ -1340,6 +1360,7 @@ const form = ref({
   memory_mb: 64,
   cpus: 0.5,
   network_mode: 'none',          // 'none' | 'egress'
+  sdk: false,
   max_concurrency: 0,             // 0 = unlimited
   concurrency_policy: 'queue',    // 'queue' | 'reject'
   auth_mode: 'none',              // 'none' | 'platform_key' | 'signed'
@@ -1767,9 +1788,11 @@ watch(code, (newCode) => scheduleDetect(newCode))
 
 const applyTemplate = () => asStartingPoint(applyTemplateNow)
 const applyTemplateNow = () => {
+  if (viewMode.value) return
   const list = templates[form.value.runtime] || []
   const selected = list.find((t) => t.id === templateId.value)
   if (selected) {
+    if (selected.requiresSDK) form.value.sdk = true
     code.value = selected.code
     dependencyText.value = selected.deps || ''
     // Carry the template's support files and entrypoint. Both were dropped
@@ -1956,6 +1979,7 @@ const resetEditorState = () => {
     memory_mb: 64,
     cpus: 0.5,
     network_mode: 'none',
+    sdk: false,
     max_concurrency: 0,
     concurrency_policy: 'queue',
     auth_mode: 'none',
@@ -2009,6 +2033,7 @@ const loadRouteData = async () => {
       form.value.memory_mb = fn.memory_mb
       form.value.cpus = fn.cpus
       form.value.network_mode = fn.network_mode || 'none'
+      form.value.sdk = fn.sdk === true
       form.value.max_concurrency = fn.max_concurrency || 0
       form.value.concurrency_policy = fn.concurrency_policy || 'queue'
       form.value.auth_mode = fn.auth_mode || 'none'
@@ -2276,6 +2301,7 @@ const confirmFirstDeploy = async () => {
 }
 
 const runDeploy = async () => {
+  if (viewMode.value) return
   if (!form.value.name || !code.value) {
     confirmStore.notify({ title: 'Missing fields', message: 'Please provide a function name and code.' })
     return
@@ -2310,6 +2336,7 @@ const runDeploy = async () => {
           cpus: form.value.cpus,
           env_vars: envVarsMap,
           network_mode: form.value.network_mode,
+          sdk: form.value.sdk,
           max_concurrency: form.value.max_concurrency || 0,
           concurrency_policy: form.value.concurrency_policy || 'queue',
           auth_mode: form.value.auth_mode || 'none',
@@ -2342,6 +2369,7 @@ const runDeploy = async () => {
         cpus: form.value.cpus,
         env_vars: envVarsMap,
         network_mode: form.value.network_mode,
+        sdk: form.value.sdk,
         max_concurrency: form.value.max_concurrency || 0,
         concurrency_policy: form.value.concurrency_policy || 'queue',
         auth_mode: form.value.auth_mode || 'none',
@@ -2705,6 +2733,7 @@ const rollbackToVersion = async (v) => {
       form.value.memory_mb = fn.memory_mb
       form.value.cpus = fn.cpus
       form.value.network_mode = fn.network_mode || 'none'
+      form.value.sdk = fn.sdk === true
       form.value.max_concurrency = fn.max_concurrency || 0
       form.value.concurrency_policy = fn.concurrency_policy || 'queue'
       form.value.auth_mode = fn.auth_mode || 'none'
@@ -2826,10 +2855,15 @@ const resetForm = async () => {
     confirmLabel: 'Reset',
     danger: true,
   })
-  if (!ok) return
+  if (!ok || viewMode.value) return
+  if (isEditing.value) {
+    discardChanges()
+    return
+  }
   form.value.name = ''
   fnId.value = ''
   code.value = ''
+  form.value.sdk = false
   deployedThisSession.value = false
   buildError.value = ''
   lastBuild.value = null

@@ -40,7 +40,7 @@ Orva is **not** designed to defend against:
 
 ## Sandbox SDK identity
 
-Each worker receives a signed SDK credential naming its immutable function ID
+Each SDK-enabled worker receives a signed legacy SDK credential naming its immutable function ID
 and the specific worker process it was issued to. Legacy HTTP SDK endpoints
 verify this credential for KV, function invoke/streaming, job enqueue, cron
 upsert, and user-span requests; they never trust
@@ -60,6 +60,17 @@ always comes from the signed claim. The SDK credential cannot authenticate to
 operator APIs.
 
 ### SDK channel and transitional credentials
+
+SDK authority is an explicit per-function `sdk` permission, separate from
+network mode. Disabled functions receive neither a worker channel nor the
+legacy SDK credential/base URL. Reserved SDK environment values cannot grant
+permission. Permission changes hard-drain workers; the SDK credential is
+released when each worker is reaped. New functions default to disabled. The
+retirement does not abort in-flight invocations: they retain their existing
+authority until they finish; no new work is assigned to those retired workers.
+The
+one-time migration enables existing egress functions only; a later explicit
+disable survives restart. Receiving a call does not grant the callee SDK access.
 
 Current adapters use an inherited per-worker socket channel for KV, function
 invoke/streaming, job enqueue, cron upsert, and user-span operations. The host

@@ -33,6 +33,7 @@ export function describeSnapshotDiff(a, b) {
   num('CPUs', a.cpus, b.cpus)
   num('Timeout', a.timeout_ms, b.timeout_ms, ' ms')
   num('Network', a.network_mode || 'none', b.network_mode || 'none')
+  num('Orva SDK', a.sdk === true, b.sdk === true)
   num('Auth gate', a.auth_mode || 'none', b.auth_mode || 'none')
   num('Rate limit', a.rate_limit_per_min || 0, b.rate_limit_per_min || 0, '/min')
   num('Max concurrency', a.max_concurrency || 0, b.max_concurrency || 0)

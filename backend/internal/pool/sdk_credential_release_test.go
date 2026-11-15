@@ -41,6 +41,10 @@ func TestSpawnFailureReleasesTheSDKCredential(t *testing.T) {
 		tmpl.EgressPolicy = func() (string, string, error) { return "", "", errTestNoPolicy }
 		m.tmpl = tmpl
 		fn := registerFn(t, reg, "cred-egress", "egress")
+		fn.SDK = true
+		if err := reg.Set(fn); err != nil {
+			t.Fatal(err)
+		}
 
 		p, err := m.getOrCreatePool(fn.ID)
 		if err != nil {
@@ -68,6 +72,10 @@ func TestSpawnFailureReleasesTheSDKCredential(t *testing.T) {
 		tmpl.EgressPolicy = nil
 		m.tmpl = tmpl
 		fn := registerFn(t, reg, "cred-none", "none")
+		fn.SDK = true
+		if err := reg.Set(fn); err != nil {
+			t.Fatal(err)
+		}
 
 		p, err := m.getOrCreatePool(fn.ID)
 		if err != nil {

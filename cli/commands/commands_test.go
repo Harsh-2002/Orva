@@ -88,6 +88,8 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"kv", "cas"}, "new"},
 		{[]string{"functions", "list"}, "limit"},
 		{[]string{"functions", "list"}, "offset"},
+		{[]string{"functions", "create"}, "sdk"},
+		{[]string{"functions", "update"}, "sdk"},
 		{[]string{"traces", "list"}, "before"},
 		{[]string{"jobs", "list"}, "status"},
 		{[]string{"jobs", "list"}, "fn"},

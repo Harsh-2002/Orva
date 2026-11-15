@@ -53,6 +53,9 @@ func TestRollbackDerivesRunEntrypointFromDiskNotFromALegacySnapshot(t *testing.T
 	if err := db.InsertDeployment(dep); err != nil {
 		t.Fatalf("insert deployment: %v", err)
 	}
+	if err := db.SetDeploymentSnapshot(dep.ID, legacy); err != nil {
+		t.Fatalf("store legacy snapshot: %v", err)
+	}
 
 	version := filepath.Join(dataDir, "functions", fnID, "versions", hash)
 	if err := os.MkdirAll(filepath.Join(version, "dist"), 0o755); err != nil {

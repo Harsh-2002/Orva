@@ -18,11 +18,19 @@ unreleased range, and the sections below as the record for everything before it.
 
 - Current Node and Python adapters automatically route KV, function
   invoke/streaming, jobs, cron updates, and custom spans over an inherited
-  per-worker SDK channel (there is no opt-in setting yet).
+  per-worker SDK channel when the function's explicit `sdk` permission is enabled.
   These calls work in `network_mode: none`; outbound network requests from
   function code still require egress.
 
 ### Upgrade notes
+
+- **SDK permission is now explicit.** New functions default to `sdk: false`,
+  including egress functions. Enable SDK access separately for handlers using
+  Orva KV, calls, jobs, cron declarations or custom spans. Existing egress
+  functions are enabled once during migration; existing none-mode functions
+  are not. Explicitly revoking SDK access hard-drains their workers and is
+  preserved on restart. Outbound networking and public invocation auth are
+  unchanged.
 
 - The SDK retains HTTP fallback for a missing channel or an older installed
   runtime adapter. Keep the server binary and adapters refreshed together to
@@ -30,6 +38,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Completing or failing an older deployment no longer overwrites configuration
+  changes accepted while it was building, including revoked SDK permission,
+  authentication settings and environment values. Changed runtime or entrypoint
+  inputs invalidate the older build instead of activating it.
 - Function-to-function recursion through `orva.invoke` is now bounded even when
   a function omits or forges the call-depth header. The depth is tracked by the
   host on each execution instead of being read from the caller's request, so a

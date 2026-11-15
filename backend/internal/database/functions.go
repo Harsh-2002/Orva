@@ -22,6 +22,7 @@ type Function struct {
 	CPUs              float64           `json:"cpus"`
 	EnvVars           map[string]string `json:"env_vars"`
 	NetworkMode       string            `json:"network_mode"`
+	SDK               bool              `json:"sdk"`
 	MaxConcurrency    int               `json:"max_concurrency"`    // 0 = unlimited
 	ConcurrencyPolicy string            `json:"concurrency_policy"` // "queue" | "reject"
 	AuthMode          string            `json:"auth_mode"`          // "none" | "platform_key" | "signed"
@@ -138,12 +139,12 @@ func (db *Database) InsertFunction(fn *Function) error {
 	}
 
 	err = db.write.QueryRow(`
-		INSERT INTO functions (id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO functions (id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, sdk, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING created_at, updated_at`,
 		fn.ID, fn.Name, fn.Description, fn.Runtime, fn.Entrypoint, fn.Image,
 		fn.TimeoutMS, fn.MemoryMB, fn.CPUs, string(envJSON),
-		fn.NetworkMode, fn.MaxConcurrency, fn.ConcurrencyPolicy,
+		fn.NetworkMode, fn.SDK, fn.MaxConcurrency, fn.ConcurrencyPolicy,
 		fn.AuthMode, fn.RateLimitPerMin,
 		fn.Version, fn.Status, fn.CodeHash, fn.ImageSize, fn.ActiveDeploymentID, fn.RunEntrypoint,
 	).Scan(&fn.CreatedAt, &fn.UpdatedAt)
@@ -154,11 +155,11 @@ func (db *Database) InsertFunction(fn *Function) error {
 }
 
 func (db *Database) GetFunction(id string) (*Function, error) {
-	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE id = ?`, id))
+	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, sdk, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE id = ?`, id))
 }
 
 func (db *Database) GetFunctionByName(name string) (*Function, error) {
-	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE name = ?`, name))
+	return scanFunction(db.read.QueryRow(`SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, sdk, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE name = ?`, name))
 }
 
 type ListFunctionsParams struct {
@@ -181,7 +182,7 @@ func (db *Database) ListFunctions(params ListFunctionsParams) (*ListFunctionsRes
 		params.Limit = 1000
 	}
 
-	query := "SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE 1=1"
+	query := "SELECT id, name, description, runtime, entrypoint, image, timeout_ms, memory_mb, cpus, env_vars, network_mode, sdk, max_concurrency, concurrency_policy, auth_mode, rate_limit_per_min, version, status, code_hash, image_size, active_deployment_id, run_entrypoint, created_at, updated_at FROM functions WHERE 1=1"
 	countQuery := "SELECT COUNT(*) FROM functions WHERE 1=1"
 	var args []any
 
@@ -232,7 +233,7 @@ func (db *Database) UpdateFunction(fn *Function) error {
 		UPDATE functions SET
 			name = ?, description = ?, runtime = ?, entrypoint = ?, image = ?,
 			timeout_ms = ?, memory_mb = ?, cpus = ?, env_vars = ?,
-			network_mode = ?, max_concurrency = ?, concurrency_policy = ?,
+			network_mode = ?, sdk = ?, max_concurrency = ?, concurrency_policy = ?,
 			auth_mode = ?, rate_limit_per_min = ?,
 			version = ?, status = ?, code_hash = ?, active_deployment_id = ?, run_entrypoint = ?,
 			image_size = ?, updated_at = CURRENT_TIMESTAMP
@@ -240,7 +241,7 @@ func (db *Database) UpdateFunction(fn *Function) error {
 		RETURNING created_at, updated_at`,
 		fn.Name, fn.Description, fn.Runtime, fn.Entrypoint, fn.Image,
 		fn.TimeoutMS, fn.MemoryMB, fn.CPUs, string(envJSON),
-		fn.NetworkMode, fn.MaxConcurrency, fn.ConcurrencyPolicy,
+		fn.NetworkMode, fn.SDK, fn.MaxConcurrency, fn.ConcurrencyPolicy,
 		fn.AuthMode, fn.RateLimitPerMin,
 		fn.Version, fn.Status, fn.CodeHash, fn.ActiveDeploymentID, fn.RunEntrypoint,
 		fn.ImageSize, fn.ID,
@@ -394,7 +395,7 @@ func scanFunction(row *sql.Row) (*Function, error) {
 	err := row.Scan(
 		&fn.ID, &fn.Name, &fn.Description, &fn.Runtime, &fn.Entrypoint, &image,
 		&fn.TimeoutMS, &fn.MemoryMB, &fn.CPUs, &envJSON,
-		&fn.NetworkMode, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
+		&fn.NetworkMode, &fn.SDK, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
 		&fn.AuthMode, &fn.RateLimitPerMin,
 		&fn.Version, &fn.Status, &codeHash,
 		&fn.ImageSize, &fn.ActiveDeploymentID, &fn.RunEntrypoint, &fn.CreatedAt, &fn.UpdatedAt,
@@ -422,7 +423,7 @@ func scanFunctionRow(rows *sql.Rows) (*Function, error) {
 	err := rows.Scan(
 		&fn.ID, &fn.Name, &fn.Description, &fn.Runtime, &fn.Entrypoint, &image,
 		&fn.TimeoutMS, &fn.MemoryMB, &fn.CPUs, &envJSON,
-		&fn.NetworkMode, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
+		&fn.NetworkMode, &fn.SDK, &fn.MaxConcurrency, &fn.ConcurrencyPolicy,
 		&fn.AuthMode, &fn.RateLimitPerMin,
 		&fn.Version, &fn.Status, &codeHash,
 		&fn.ImageSize, &fn.ActiveDeploymentID, &fn.RunEntrypoint, &fn.CreatedAt, &fn.UpdatedAt,
