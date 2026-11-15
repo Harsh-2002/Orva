@@ -153,6 +153,13 @@ func (q *Queue) runJob(workerID int, job BuildJob) {
 	logger := slog.With("worker", workerID, "deployment", job.DeploymentID, "fn", job.FunctionID)
 	logger.Info("build starting")
 
+	// A delete holds this lock for as long as it runs, so a job for a function
+	// already being deleted must not queue behind it and pin a worker.
+	if fn, err := q.reg.Get(job.FunctionID); err == nil && fn.Status == database.FunctionStatusDeleting {
+		q.fail(job, "load_function", "function is being deleted", started)
+		return
+	}
+
 	// Serialize against rollback on the same fn so the symlink retarget
 	// in ActivateVersion can never race a parallel rollback's retarget.
 	if q.FnLock != nil {

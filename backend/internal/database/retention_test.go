@@ -242,7 +242,7 @@ func TestDeleteFunctionLeavesNoOrphanedChildRows(t *testing.T) {
 	seedExecution(t, db, execID, 1) // creates parent function fn-retention
 	seedExecutionChildren(t, db, execID)
 
-	if err := db.DeleteFunction("fn-retention"); err != nil {
+	if err := db.DeleteFunction(context.Background(), "fn-retention"); err != nil {
 		t.Fatalf("delete function: %v", err)
 	}
 
@@ -276,7 +276,7 @@ func TestDeleteFunctionKeepsAnotherFunctionsRows(t *testing.T) {
 	}
 	seedExecutionChildren(t, db, "exec-keep")
 
-	if err := db.DeleteFunction("fn-retention"); err != nil {
+	if err := db.DeleteFunction(context.Background(), "fn-retention"); err != nil {
 		t.Fatalf("delete function: %v", err)
 	}
 

@@ -44,6 +44,7 @@ const meta = computed(() => {
     case 'queued':
     case 'building':
     case 'pending':
+    case 'deleting':
     case 'timeout':
       return { classes: 'text-warning-fg border-warning-ring', icon: Clock }
 

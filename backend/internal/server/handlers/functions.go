@@ -3,6 +3,7 @@ package handlers
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -505,6 +506,10 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	fn.Version++
 
 	if err := h.Registry.Set(fn); err != nil {
+		if errors.Is(err, database.ErrFunctionDeleting) {
+			respond.Error(w, http.StatusConflict, "CONFLICT", "function is being deleted", reqID)
+			return
+		}
 		// Create reports this exact case as 409; Update reported 500, so a
 		// rename onto a taken name looked like a server fault.
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -529,6 +534,9 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	respond.JSON(w, http.StatusOK, fn)
 }
+
+// functionDeleteTimeout bounds one DELETE attempt; see Delete.
+const functionDeleteTimeout = 30 * time.Minute
 
 // Delete handles DELETE /api/v1/functions/{fn_id}.
 func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -555,8 +563,19 @@ func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		defer lk.Unlock()
 	}
 
-	if err := h.Registry.Delete(fnID); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to delete function", reqID)
+	// Detached from the request: a client or proxy that gives up must not
+	// leave a half-deleted function. The bound is generous, not a promise;
+	// past it the function stays 'deleting' and a retried DELETE resumes.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), functionDeleteTimeout)
+	defer cancel()
+	// Stop new work first so the pool does not refill while rows are removed.
+	if h.PoolDrain != nil {
+		h.PoolDrain(fnID)
+	}
+	if err := h.Registry.Delete(ctx, fnID); err != nil {
+		slog.Error("delete function failed", "fn", fnID, "err", err)
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL",
+			"function delete did not finish; it is marked deleting, retry DELETE to resume", reqID)
 		return
 	}
 	if h.PoolDrain != nil {
@@ -1229,6 +1248,10 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		fn.ConcurrencyPolicy = targetSnapshot.ConcurrencyPolicy
 	}
 	if err := h.Registry.Set(fn); err != nil {
+		if errors.Is(err, database.ErrFunctionDeleting) {
+			respond.Error(w, http.StatusConflict, "CONFLICT", "function is being deleted", reqID)
+			return
+		}
 		// The symlink is already retargeted, so the function is serving the
 		// promoted code either way; only the row did not stick.
 		slog.Error("rollback registry update failed", "fn", fnID, "err", err)

@@ -353,6 +353,13 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 		s.publishCron("failed", row, "", errMsg)
 		return
 	}
+	if fn.Status == database.FunctionStatusDeleting {
+		// Do not refill a pool the delete just drained.
+		errMsg := "function is being deleted"
+		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		s.publishCron("failed", row, "", errMsg)
+		return
+	}
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -697,6 +704,10 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *datab
 		// No fn name to report (the row's gone) — webhook receivers
 		// still get the function_id.
 		finalize("", "function lookup: "+err.Error(), false)
+		return
+	}
+	if fn.Status == database.FunctionStatusDeleting {
+		finalize(fn.Name, "function is being deleted", false)
 		return
 	}
 	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond

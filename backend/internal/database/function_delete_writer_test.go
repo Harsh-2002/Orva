@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -34,7 +35,7 @@ func TestDeleteFunctionDiscardsQueuedExecutionChildren(t *testing.T) {
 		FunctionID: "fn-delete-queued", ExecutionID: "exec-delete-queued",
 		Stdout: "work",
 	})
-	if err := db.DeleteFunction("fn-delete-queued"); err != nil {
+	if err := db.DeleteFunction(context.Background(), "fn-delete-queued"); err != nil {
 		t.Fatal(err)
 	}
 	db.writer.start()
@@ -120,7 +121,7 @@ func TestDeleteFunctionRemovesChildrenWithoutParentExecution(t *testing.T) {
 	}) {
 		t.Fatal("pre-parent telemetry did not commit")
 	}
-	if err := db.DeleteFunction("fn-delete-orphan"); err != nil {
+	if err := db.DeleteFunction(context.Background(), "fn-delete-orphan"); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range executionOwnedChildTables {
@@ -145,7 +146,7 @@ func TestDeleteFunctionConcurrentWithExecutionEnqueues(t *testing.T) {
 			}, 1, 200, "", 2)
 		}
 	}()
-	if err := db.DeleteFunction("fn-delete-race"); err != nil {
+	if err := db.DeleteFunction(context.Background(), "fn-delete-race"); err != nil {
 		t.Fatal(err)
 	}
 	wg.Wait()

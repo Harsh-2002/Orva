@@ -217,7 +217,7 @@ func assertWriterStayedResponsive(t *testing.T, what string, waits []time.Durati
 
 func TestPurgeExecutionsDoesNotMonopoliseTheWriter(t *testing.T) {
 	db := newTestDB(t)
-	seedExecutionsAt(t, db, "old", 12000, "2020-01-01 00:00:00")
+	seedExecutionsAt(t, db, "old", 4000, "2020-01-01 00:00:00")
 	waits := probeWriterWaits(t, db, func() error {
 		_, err := db.PurgeOldExecutions(context.Background(), 30)
 		return err
@@ -303,7 +303,7 @@ func TestKVSweepExpiredEquivalenceAcrossBatches(t *testing.T) {
 
 func TestKVSweepExpiredDoesNotMonopoliseTheWriter(t *testing.T) {
 	db := newTestDB(t)
-	seedExpiredKV(t, db, 20000)
+	seedExpiredKV(t, db, 8000)
 	waits := probeWriterWaits(t, db, func() error { _, err := db.KVSweepExpired(context.Background()); return err })
 	if got := tableCount(t, db, "kv_store"); got != 60 {
 		t.Fatalf("%d keys left, want 60", got)

@@ -331,6 +331,19 @@ sqlite3 /var/lib/orva/orva.db \
 
 Or move the data dir to a bigger volume.
 
+## Symptom: a function shows status `deleting`
+
+A function delete is chunked and takes as long as the function has data (about
+11,000 rows per second was measured; a function with two million executions
+takes a few minutes). While it runs the function shows `deleting`, does not
+invoke or fire cron/jobs, and answers `409` to edits. If the `DELETE` call timed
+out in a proxy, the delete is still running: it is detached from the request,
+bounded at 30 minutes. If a restart or an error interrupted it, the function
+stays `deleting`; the server resumes it at the next start, and repeating
+`DELETE /api/v1/functions/{id}` resumes it immediately. Look for
+`resumed interrupted function delete` or `resume function delete failed` in the
+server log.
+
 ## Symptom: clipboard buttons in the UI silently fail
 
 **Diagnosis.** You're accessing the dashboard over plain HTTP from a

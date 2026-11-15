@@ -167,7 +167,21 @@ traversal returns 400 `VALIDATION`.
 it.
 
 ### `DELETE /api/v1/functions/{id}`
-Removes the row + the on-disk versions dir. Irreversible.
+Removes the function row, its executions, KV rows, jobs and the on-disk code
+and build cache. Irreversible.
+
+The delete is chunked so a function with millions of executions does not stall
+other functions' writes. It first sets the function's `status` to `deleting`
+(visible in `GET /api/v1/functions`, the dashboard and the `function.updated`
+event): invocation, cron and job firing stop at once, and `PUT`, rollback and
+redeploy answer `409 CONFLICT`. The name stays taken until the delete finishes.
+The call stays synchronous and answers `200 {"status":"deleted","id":...}` when
+done, which can take minutes for a very large function (about 11,000 rows per
+second was measured); a client or proxy that times out does not stop it, because
+the delete runs detached from the request, bounded at 30 minutes. If it does not
+finish (that bound, a restart or a database error) the function stays
+`deleting`: repeat the `DELETE` to resume, and the server also resumes it at
+startup. A repeated `DELETE` for a function that is already gone answers `404`.
 
 ### `POST /api/v1/functions/{id}/deploy-inline`
 Deploy from JSON.

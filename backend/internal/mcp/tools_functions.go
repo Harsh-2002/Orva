@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/safepath"
 	"github.com/Harsh-2002/Orva/internal/ids"
@@ -384,7 +386,7 @@ func registerFunctionTools(rc *regCtx) {
 				OpenWorldHint:   ptrFalse(),
 			},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in DeleteFunctionInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in DeleteFunctionInput) (*mcpsdk.CallToolResult, DeletedOutput, error) {
 			if !in.Confirm {
 				return nil, DeletedOutput{}, errors.New("delete refused: pass confirm=true to acknowledge irreversibility")
 			}
@@ -392,11 +394,27 @@ func registerFunctionTools(rc *regCtx) {
 			if err != nil {
 				return nil, DeletedOutput{}, err
 			}
-			if err := deps.Registry.Delete(fn.ID); err != nil {
-				return nil, DeletedOutput{}, err
+			// Same serialisation as the HTTP handler: a build that finishes
+			// during the delete must not write the row back, and the code
+			// tree must not be removed while a build reads it.
+			if deps.PoolMgr != nil {
+				lk := deps.PoolMgr.FunctionLock(fn.ID)
+				lk.Lock()
+				defer lk.Unlock()
+				deps.PoolMgr.Drain(fn.ID)
+			}
+			// Detached so the caller giving up cannot leave it half done; a
+			// retry resumes a function left 'deleting'.
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
+			defer cancel()
+			if err := deps.Registry.Delete(dctx, fn.ID); err != nil {
+				return nil, DeletedOutput{}, fmt.Errorf("delete did not finish; the function is marked deleting, retry to resume: %w", err)
 			}
 			if deps.PoolMgr != nil {
 				deps.PoolMgr.DrainAndRemove(fn.ID)
+			}
+			if err := builder.PurgeFunctionFiles(deps.DataDir, fn.ID); err != nil {
+				slog.Warn("delete function: on-disk cleanup incomplete", "fn", fn.ID, "err", err)
 			}
 			return nil, DeletedOutput{DeletedID: fn.ID}, nil
 		},
@@ -655,6 +673,9 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 	}
 
 	if err := deps.Registry.Set(fn); err != nil {
+		if errors.Is(err, database.ErrFunctionDeleting) {
+			return nil, fmt.Errorf("function %s is being deleted", fn.Name)
+		}
 		return nil, err
 	}
 	if drainPool && deps.PoolMgr != nil {
