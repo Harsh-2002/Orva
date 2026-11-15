@@ -66,6 +66,9 @@ network mode. Disabled functions receive neither a worker channel nor the
 legacy SDK credential/base URL. Reserved SDK environment values cannot grant
 permission. Permission changes hard-drain workers; the SDK credential is
 released when each worker is reaped. New functions default to disabled. The
+retirement does not abort in-flight invocations: they retain their existing
+authority until they finish; no new work is assigned to those retired workers.
+The
 one-time migration enables existing egress functions only; a later explicit
 disable survives restart. Receiving a call does not grant the callee SDK access.
 

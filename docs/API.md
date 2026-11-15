@@ -137,6 +137,8 @@ not disable outbound networking.
 
 Update `sdk` using an explicit boolean (`false` revokes permission). Changes
 hard-drain existing workers so stale worker capabilities cannot be reused.
+In-flight invocations may finish on their retired workers; their credentials
+remain valid until release and reaping. New invocations use the new permission.
 The field is returned in individual function and list records. This permission
 governs the function's outgoing SDK access, not whether it may receive a call:
 an SDK-enabled caller can invoke an active callee whose own `sdk` is false.
