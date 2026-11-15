@@ -1,14 +1,19 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"time"
 
+	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -304,16 +309,17 @@ func runFunctionsDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	resp, err := client.Delete("/api/v1/functions/" + fnID)
+	// The server removes a large history in batches and answers when it is
+	// done, which can take minutes: no overall timeout, and Ctrl-C stops
+	// waiting (the delete itself carries on server-side).
+	infof(cmd, "Deleting %s (a function with a large history can take minutes; Ctrl-C stops waiting, not the delete)", args[0])
+	ctx, stop := signal.NotifyContext(baseContext(cmd), os.Interrupt)
+	defer stop()
+	raw, err := deleteFunctionWait(ctx, client, fnID)
 	if err != nil {
-		return err
-	}
-	if err := checkResponse(resp); err != nil {
-		return err
-	}
-	raw, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("stopped waiting; the server may still be deleting %s (status \"deleting\"). Run the command again to resume or confirm", args[0])
+		}
 		return err
 	}
 
@@ -322,6 +328,28 @@ func runFunctionsDelete(cmd *cobra.Command, args []string) error {
 	}
 	okf(cmd, "Deleted function %s", fnID)
 	return nil
+}
+
+// baseContext is the command's context, or Background when run outside Execute.
+func baseContext(cmd *cobra.Command) context.Context {
+	if ctx := cmd.Context(); ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+// deleteFunctionWait issues DELETE with no client-side deadline and returns the
+// response body. A repeat DELETE resumes a delete the server left 'deleting'.
+func deleteFunctionWait(ctx context.Context, client *cli.Client, fnID string) ([]byte, error) {
+	resp, err := client.Send(cli.Request{Method: http.MethodDelete, Path: "/api/v1/functions/" + fnID, NoTimeout: true, Ctx: ctx})
+	if err != nil {
+		return nil, err
+	}
+	if err := checkResponse(resp); err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }
 
 func runFunctionsPurgeCache(cmd *cobra.Command, args []string) error {

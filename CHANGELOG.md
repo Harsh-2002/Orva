@@ -16,6 +16,12 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- `orva functions delete` no longer fails with a client timeout on a function
+  with a large history. The server now removes such a function in batches and
+  answers when it is finished, which can take longer than the CLI's 120-second
+  request limit; the CLI reported a failure while the delete carried on. It now
+  waits without a limit, says so, and treats Ctrl-C as "stop waiting" (the
+  delete continues on the server; run the command again to resume or confirm).
 - Deleting a function with a large history no longer stops every other
   function's writes. `DeleteFunction` removed all of a function's executions in
   one transaction on the database's only write connection, so deleting a
