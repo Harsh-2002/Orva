@@ -264,7 +264,7 @@
         class="bg-background border border-border rounded-lg overflow-hidden"
       >
         <header class="px-4 py-2.5 flex items-center justify-between gap-3 bg-surface border-b border-border">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-foreground-strong flex items-center gap-2">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-foreground-strong flex items-center gap-2 min-w-0">
             <FileCode class="w-3.5 h-3.5 text-foreground-muted" />
             <span class="font-mono normal-case tracking-normal text-sm font-medium">{{ handlerFile.path }}</span>
             <span
@@ -276,14 +276,14 @@
               class="text-[10px] px-1.5 py-0.5 rounded bg-danger/15 text-danger border border-danger/30 font-medium tracking-normal normal-case"
             >removed</span>
           </h2>
-          <button
-            class="text-[10px] font-medium uppercase tracking-label text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover rounded px-2 py-1 transition-colors"
-            :title="sideBySide ? 'Switch to unified inline view' : 'Switch to side-by-side view'"
-            :aria-pressed="sideBySide"
-            @click="toggleSideBySide"
-          >
-            {{ sideBySide ? 'side-by-side' : 'unified' }}
-          </button>
+          <SegmentedControl
+            :model-value="sideBySide ? 'split' : 'unified'"
+            :options="layoutOptions"
+            aria-label="Diff layout"
+            size="xs"
+            class="shrink-0"
+            @update:model-value="setLayout"
+          />
         </header>
         <!-- Skeleton is a sibling, not a child of the mount node: CodeMirror
              appends its own DOM into codeMountRef and Vue must not be patching
@@ -359,12 +359,13 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from '@/components/common/Button.vue'
-import { ArrowLeftRight, Copy, Settings2, ChevronDown, FileCode, Package, List, RotateCcw, Zap } from '@lucide/vue'
+import { ArrowLeftRight, Columns2, Rows2, Copy, Settings2, ChevronDown, FileCode, Package, List, RotateCcw, Zap } from '@lucide/vue'
 import { compareDeployments, listDeployments, listFunctions, getDeployment, rollbackFunction } from '@/api/endpoints'
 import { makeLineDiff } from '@/utils/lineDiff'
 import { inlineDiffMarks } from '@/utils/diffMarks'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 import FilterSelect from '@/components/common/FilterSelect.vue'
+import SegmentedControl from '@/components/common/SegmentedControl.vue'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
 
@@ -412,8 +413,13 @@ try {
   else if (stored === 'false') userOverride.value = false
 } catch { /* localStorage may be disabled in private mode */ }
 
-const toggleSideBySide = () => {
-  const next = !sideBySide.value
+const layoutOptions = [
+  { value: 'split', label: 'Side by side', icon: Columns2, title: 'Old and new next to each other' },
+  { value: 'unified', label: 'Unified', icon: Rows2, title: 'One column, removed lines above added lines' },
+]
+const setLayout = (layout) => {
+  const next = layout === 'split'
+  if (next === sideBySide.value) return
   userOverride.value = next
   try { window.localStorage?.setItem?.(SIDE_BY_SIDE_STORAGE_KEY, String(next)) } catch { /* ignore */ }
   rebuildViews()
