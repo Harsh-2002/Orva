@@ -26,6 +26,11 @@ test('a control that was re-rendered (target detached) before the event reached 
   assert.equal(shouldNavigateOnRowClick(click({ target: detachedSvg, composedPath: () => [detachedSvg, row] })), true)
 })
 
+test('shift and alt clicks, and switch/checkbox/menuitem roles, do not navigate', () => {
+  assert.equal(shouldNavigateOnRowClick(click({ shiftKey: true })), false)
+  assert.equal(shouldNavigateOnRowClick(click({ altKey: true })), false)
+})
+
 test('a drag-select of an id (selection present) does not navigate', () => {
   assert.equal(shouldNavigateOnRowClick(click(), 'a1b2c3'), false)
 })

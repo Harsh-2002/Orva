@@ -6,7 +6,7 @@
 
 // Anything inside the row that does its own thing, or that holds text you may
 // want to select (ids): a click that starts there is not a row click.
-const OWN_CLICK = 'a, button, input, select, textarea, label, summary, [role="button"], [role="menu"], [data-no-row]'
+const OWN_CLICK = 'a, button, input, select, textarea, label, summary, [role="button"], [role="switch"], [role="checkbox"], [role="radio"], [role="menu"], [role="menuitem"], [role="tab"], [data-no-row]'
 
 // rowClickTarget decides whether a click on a row should navigate. `selection`
 // is window.getSelection()?.toString(): dragging across an id to copy it ends in
@@ -14,6 +14,9 @@ const OWN_CLICK = 'a, button, input, select, textarea, label, summary, [role="bu
 export function shouldNavigateOnRowClick(event, selection = '') {
   if (event.defaultPrevented) return false
   if (event.button !== undefined && event.button !== 0) return false
+  // Shift opens a new window and Alt downloads on the link in the same row;
+  // the row has no equivalent, so it does nothing rather than something else.
+  if (event.shiftKey || event.altKey) return false
   // composedPath, not target.closest: clicking a control can re-render it (the
   // copy button swaps its icon) before the event bubbles to the row, leaving
   // event.target detached and closest() blind to the button it was inside. The
