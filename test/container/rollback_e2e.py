@@ -71,6 +71,15 @@ def wait_build(fn_id, want_version=None, timeout=180):
 DB = "/var/lib/orva/orva.db"
 
 
+def _docker():
+    """The docker command this user can run: direct first, then passwordless
+    sudo (the same order run.sh uses). Hard-coding sudo made every database
+    read come back as an error on a host where docker works without it."""
+    if subprocess.run(["docker", "info"], capture_output=True).returncode == 0:
+        return ["docker"]
+    return ["sudo", "-n", "docker"]
+
+
 def _in_container(script):
     """Run a Python snippet inside the container.
 
@@ -79,7 +88,7 @@ def _in_container(script):
     keeps every read against the database the server is actually using.
     """
     out = subprocess.run(
-        ["sudo", "-n", "docker", "exec", CONTAINER, "python3", "-c", script],
+        [*_docker(), "exec", CONTAINER, "python3", "-c", script],
         capture_output=True, text=True)
     if out.returncode != 0:
         return "ERR:" + out.stderr.strip()
