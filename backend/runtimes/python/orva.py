@@ -686,3 +686,123 @@ __all__ = [
     "__test_mode__",
     "SDK_VERSION",
 ]
+
+# ---- SPIKE: private SDK channel (fd ORVA_SDK_FD), no network involved. ----
+# os.read/os.write on purpose: socket.recv/send compile to recvfrom/sendto, which
+# the no-network seccomp profile blocks. One lazily started reader thread
+# demultiplexes replies by id so threads can call concurrently.
+import struct as _struct
+import threading as _threading
+
+
+class _Chan:
+    def __init__(self, fd):
+        self.fd = fd
+        self.wlock = _threading.Lock()
+        self.lock = _threading.Lock()
+        self.pending = {}
+        self.next_id = 1
+        self.dead = None
+        t = _threading.Thread(target=self._reader, daemon=True)
+        t.start()
+        if hasattr(os, "register_at_fork"):
+            os.register_at_fork(after_in_child=self._mark_dead_in_child)
+
+    def _mark_dead_in_child(self):
+        # A forked child shares the descriptor with its parent; two readers on
+        # one stream would interleave frames, so the child must never use it.
+        self.dead = OrvaUnavailableError("SDK channel unavailable in a forked child")
+
+    def _read_exact(self, n):
+        out = b""
+        while len(out) < n:
+            chunk = os.read(self.fd, n - len(out))
+            if not chunk:
+                raise OrvaUnavailableError("SDK channel closed")
+            out += chunk
+        return out
+
+    def _reader(self):
+        try:
+            while True:
+                (n,) = _struct.unpack(">I", self._read_exact(4))
+                msg = json.loads(self._read_exact(n).decode("utf-8"))
+                with self.lock:
+                    slot = self.pending.pop(msg.get("id"), None)
+                if slot:
+                    slot[1].append(msg)
+                    slot[0].set()
+        except BaseException as e:  # noqa: BLE001 - wake every waiter on any failure
+            self.dead = e if isinstance(e, OrvaError) else OrvaUnavailableError(str(e))
+            with self.lock:
+                waiters = list(self.pending.values())
+                self.pending.clear()
+            for ev, _res in waiters:
+                ev.set()
+
+    def call(self, op, **extra):
+        if self.dead:
+            raise self.dead
+        ev = _threading.Event()
+        res = []
+        with self.lock:
+            cid = self.next_id
+            self.next_id += 1
+            self.pending[cid] = (ev, res)
+        body = json.dumps({"id": cid, "op": op, **extra}).encode("utf-8")
+        frame = _struct.pack(">I", len(body)) + body
+        with self.wlock:
+            view = memoryview(frame)
+            while view:
+                view = view[os.write(self.fd, view):]
+        ev.wait()
+        if not res:
+            raise self.dead or OrvaUnavailableError("SDK channel closed")
+        return res[0]
+
+
+_chan = None
+
+
+def _spike_channel():
+    global _chan
+    if _chan is None:
+        try:
+            fd = int(os.environ.get("ORVA_SDK_FD", ""))
+        except ValueError:
+            raise OrvaUnavailableError("no SDK channel (ORVA_SDK_FD unset)")
+        os.set_blocking(fd, True)
+        _chan = _Chan(fd)
+    return _chan
+
+
+def _spike_echo(n=1000, size=16, threads=1):
+    ch = _spike_channel()
+    data = "x" * size
+    lat = []
+    lat_lock = _threading.Lock()
+    counter = {"sent": 0}
+
+    def work():
+        while True:
+            with lat_lock:
+                if counter["sent"] >= n:
+                    return
+                counter["sent"] += 1
+            s = time.perf_counter()
+            r = ch.call("echo", data=data)
+            if not r.get("ok") or r.get("data") != data:
+                raise RuntimeError("bad echo")
+            with lat_lock:
+                lat.append((time.perf_counter() - s) * 1e6)
+
+    t0 = time.perf_counter()
+    ts = [_threading.Thread(target=work) for _ in range(threads)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    total = (time.perf_counter() - t0) * 1000
+    lat.sort()
+    return {"n": n, "threads": threads, "total_ms": total, "per_call_us": total * 1000 / n,
+            "p50_us": lat[len(lat) // 2], "p99_us": lat[int(len(lat) * 0.99)]}

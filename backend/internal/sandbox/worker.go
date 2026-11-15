@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,9 @@ type Worker struct {
 	stderr  io.ReadCloser
 	Spawned time.Time
 	Served  atomic.Int64
+
+	// sdk is the host end of the per-worker SDK channel (nil when disabled).
+	sdk net.Conn
 
 	// CgroupPath is resolved asynchronously after Spawn (nsjail names the
 	// cgroup after its jailed child's PID, which isn't known until after fork).
@@ -163,10 +167,29 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	// nsjail + everything inside the sandbox.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
+	var sdkHost net.Conn
+	if cfg.SDKChannel {
+		host, child, perr := newSDKPair()
+		if perr != nil {
+			stdinPipe.Close()
+			stdoutPipe.Close()
+			stderrPipe.Close()
+			return nil, perr
+		}
+		sdkHost = host
+		cmd.ExtraFiles = []*os.File{child}
+		// Whatever happens next the parent must not keep the child's end:
+		// the host only sees EOF when every copy of it is gone.
+		defer child.Close()
+	}
+
 	if err := cmd.Start(); err != nil {
 		stdinPipe.Close()
 		stdoutPipe.Close()
 		stderrPipe.Close()
+		if sdkHost != nil {
+			sdkHost.Close()
+		}
 		return nil, fmt.Errorf("start nsjail: %w", err)
 	}
 
@@ -181,8 +204,12 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		stderrDone: make(chan struct{}),
 		frames:     make(chan frameRead),
 		readStop:   make(chan struct{}),
+		sdk:        sdkHost,
 	}
 	go w.readLoop()
+	if sdkHost != nil {
+		go serveSDKSpike(sdkHost)
+	}
 
 	// Start draining before Wait. exec.Cmd.Wait closes its parent-side pipes
 	// after process exit, so reversing this order can lose stderr from a fast
@@ -217,6 +244,9 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		// serving until it drains. Releasing there would 401 a live request.
 		if cfg.OnExit != nil {
 			cfg.OnExit()
+		}
+		if w.sdk != nil {
+			_ = w.sdk.Close()
 		}
 
 		// Reclaim the cgroup HERE, not at Kill time. nsjail is SIGKILLed, so

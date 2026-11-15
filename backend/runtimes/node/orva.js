@@ -578,7 +578,72 @@ const context = {
   get sdkVersion() { return SDK_VERSION },
 }
 
+// ---- SPIKE: private SDK channel (fd ORVA_SDK_FD), no network involved. ----
+// Length-prefixed JSON frames over an inherited AF_UNIX socketpair. Concurrent
+// calls are matched to replies by id, so Promise.all works.
+const _net = require('net')
+let _chan = null
+function _spikeChannel() {
+  if (_chan) return _chan
+  const fd = parseInt(process.env.ORVA_SDK_FD || '', 10)
+  if (!Number.isInteger(fd)) throw new OrvaUnavailableError('no SDK channel (ORVA_SDK_FD unset)')
+  const sock = new _net.Socket({ fd, readable: true, writable: true })
+  const pending = new Map()
+  let nextId = 1
+  let buf = Buffer.alloc(0)
+  sock.on('data', (chunk) => {
+    buf = Buffer.concat([buf, chunk])
+    for (;;) {
+      if (buf.length < 4) return
+      const n = buf.readUInt32BE(0)
+      if (buf.length < 4 + n) return
+      const msg = JSON.parse(buf.subarray(4, 4 + n).toString('utf8'))
+      buf = buf.subarray(4 + n)
+      const p = pending.get(msg.id)
+      if (p) { pending.delete(msg.id); p.resolve(msg) }
+    }
+  })
+  const fail = (e) => { for (const p of pending.values()) p.reject(e); pending.clear() }
+  sock.on('error', fail)
+  sock.on('close', () => fail(new OrvaUnavailableError('SDK channel closed')))
+  sock.unref() // keeps the process alive only while calls are pending (ref() below)
+  _chan = {
+    call(op, extra) {
+      const id = nextId++
+      const body = Buffer.from(JSON.stringify({ id, op, ...extra }), 'utf8')
+      const hdr = Buffer.alloc(4); hdr.writeUInt32BE(body.length, 0)
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject })
+        sock.ref()
+        sock.write(Buffer.concat([hdr, body]), (err) => { if (err) { pending.delete(id); reject(err) } })
+      }).finally(() => { if (pending.size === 0) sock.unref() })
+    },
+  }
+  return _chan
+}
+async function _spikeEcho(n = 1000, size = 16, concurrency = 1) {
+  const ch = _spikeChannel()
+  const data = 'x'.repeat(size)
+  const lat = []
+  const t0 = process.hrtime.bigint()
+  let sent = 0
+  const worker = async () => {
+    while (sent < n) {
+      sent++
+      const s = process.hrtime.bigint()
+      const r = await ch.call('echo', { data })
+      if (!r.ok || r.data !== data) throw new Error('bad echo')
+      lat.push(Number(process.hrtime.bigint() - s) / 1000)
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker))
+  const total = Number(process.hrtime.bigint() - t0) / 1e6
+  lat.sort((a, b) => a - b)
+  return { n, concurrency, total_ms: total, per_call_us: (total * 1000) / n, p50_us: lat[Math.floor(lat.length / 2)], p99_us: lat[Math.floor(lat.length * 0.99)] }
+}
+
 module.exports = {
+  _spikeEcho,
   kv,
   invoke,
   invokeStream,
