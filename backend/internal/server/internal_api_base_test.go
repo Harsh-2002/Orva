@@ -44,7 +44,7 @@ func TestInternalAPIBaseExplicitOverride(t *testing.T) {
 func TestSandboxTemplateKeepsConfiguredSeccompPolicy(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Sandbox.SeccompPolicy = "strict"
-	tmpl := newSandboxTemplate(cfg, nil, nil, "http://192.0.2.10:8443")
+	tmpl := newSandboxTemplate(cfg, nil, nil, "http://192.0.2.10:8443", nil)
 	if tmpl.DefaultSeccomp != "strict" {
 		t.Fatalf("worker policy = %q, want strict", tmpl.DefaultSeccomp)
 	}
