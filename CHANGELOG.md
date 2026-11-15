@@ -16,6 +16,27 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Compare versions (dashboard) showed a misleading diff. The editor's character
+  diff has a small default budget and, past it, marked the whole changed range
+  as replaced, so lines identical in both versions were highlighted and a
+  3,000-line file with a third of its lines edited showed 2,999 changed lines
+  (unbounded, the same diff took about 15 s). It now diffs whole lines first and
+  refines inside the changed lines only (about 100 ms on that file). The look now
+  follows GitHub: added and removed lines carry a flat tint and a `+`/`-` marker
+  column, code keeps its full contrast, and word-level marks appear only inside
+  lines that were edited (before, every added line also had a second highlight
+  box over its text, and removed-side marks could be green). Whitespace-only
+  edits are shown by the line tint alone. In the phone-width unified view a
+  removed block shows its `-` marker on its first row only.
+- Compare versions kept the previous function's data when you opened another
+  function's compare page from inside the dashboard: it compared with the old
+  function's id ("deployment belongs to a different function"), and Rollback
+  would have acted on the wrong function. The page now reloads for the function
+  in the address.
+- `GET /api/v1/functions/{id}/diff?format=unified` (and so `orva diff`) wrote a
+  wrong new-side start in every hunk after the first, for example `+10` where
+  `+17` is correct, so the output could not be applied with `patch`. The hunk
+  headers now match `diff -u`.
 - CLI: `orva backup` (download), `orva backup restore` (upload), `orva deploy`
   (archive upload) and `orva system vacuum` were cut off by the client's
   120-second limit, which covers the whole request including the body. A large
