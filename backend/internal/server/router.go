@@ -65,7 +65,7 @@ type RouterDeps struct {
 	PoolMgr    *pool.Manager
 	EventHub   *events.Hub
 	Firewall   *firewall.Manager
-	SDKAuth    *sdkauth.Authenticator // Function-scoped worker credential verifier.
+	SDKAuth    *sdkauth.Authenticator // Host-owned execution identity bookkeeping.
 	StartTime  time.Time              // Shared process start time (health/uptime). Zero → time.Now().
 }
 
@@ -232,9 +232,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/v1/functions/{fn_id}/secrets", secretHandler.Upsert)
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/secrets/{key}", secretHandler.Delete)
 
-	// Operator-facing KV inspector (the dashboard's KV page). The
-	// internal-token /api/v1/_kv/* surface stays separate for SDK calls
-	// from inside sandboxes.
+	// Operator-facing KV inspector (the dashboard's KV page).
 	kvOperatorHandler := &handlers.KVOperatorHandler{DB: r.db, Registry: r.registry}
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/kv", kvOperatorHandler.List)
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/kv/{key}", kvOperatorHandler.Get)
@@ -255,7 +253,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/fixtures/{name}", fixtureHandler.Delete)
 
 	// Cron schedules (per-function, fired by internal/scheduler).
-	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry, SDKAuth: r.sdkAuth}
+	cronHandler := &handlers.CronHandler{DB: r.db, Registry: r.registry}
 	r.mux.HandleFunc("GET    /api/v1/functions/{fn_id}/cron", cronHandler.List)
 	r.mux.HandleFunc("POST   /api/v1/functions/{fn_id}/cron", cronHandler.Create)
 	r.mux.HandleFunc("PUT    /api/v1/functions/{fn_id}/cron/{id}", cronHandler.Update)
@@ -263,35 +261,9 @@ func (r *Router) setupRoutes() {
 	// Dashboard "Schedules" page lists schedules across all functions.
 	r.mux.HandleFunc("GET /api/v1/cron", cronHandler.ListAll)
 
-	// Internal token used by the worker SDK (kv, jobs, F2F invoke).
-	// Per-function key/value store (Phase 3). Internal-only — auth is the
-	// function-scoped SDK credential, not API keys.
-	kvHandler := &handlers.KVHandler{DB: r.db, SDKAuth: r.sdkAuth}
-	r.mux.HandleFunc("PUT    /api/v1/_kv/{fn_id}/{key}", kvHandler.Put)
-	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}/{key}", kvHandler.Get)
-	r.mux.HandleFunc("DELETE /api/v1/_kv/{fn_id}/{key}", kvHandler.Delete)
-	r.mux.HandleFunc("GET    /api/v1/_kv/{fn_id}", kvHandler.List)
-	// v0.6 SDK upgrade: batch / atomic increment / compare-and-swap.
-	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/batch", kvHandler.Batch)
-	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/incr", kvHandler.Incr)
-	r.mux.HandleFunc("POST   /api/v1/_kv/{fn_id}/{key}/cas", kvHandler.CAS)
-
-	// Function-to-function calls (Phase 4). Path uses the friendly name.
-	f2fHandler := &handlers.InternalInvokeHandler{
-		DB: r.db, Registry: r.registry, Pool: r.poolMgr, Metrics: r.metrics, SDKAuth: r.sdkAuth,
-	}
-	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}", f2fHandler.Invoke)
-	// v0.6 SDK upgrade: chunked-transfer streaming variant for invokeStream.
-	r.mux.HandleFunc("POST /api/v1/_internal/invoke/{name}/stream", f2fHandler.InvokeStream)
-
-	// v0.6 SDK upgrade: user-defined spans + SDK-driven cron upsert.
-	spansHandler := &handlers.SpansHandler{DB: r.db, SDKAuth: r.sdkAuth}
-	r.mux.HandleFunc("POST /api/v1/_internal/spans", spansHandler.Create)
-	r.mux.HandleFunc("POST /api/v1/_internal/crons", cronHandler.UpsertInternal)
-
-	// Background job queue (Phase 5). Public + scoped SDK credentials both work.
+	// Background job queue for authenticated operators. SDK calls use the channel.
 	jobsHandler := &handlers.JobsHandler{
-		DB: r.db, Registry: r.registry, SDKAuth: r.sdkAuth,
+		DB: r.db, Registry: r.registry,
 	}
 	r.mux.HandleFunc("POST   /api/v1/jobs", jobsHandler.Enqueue)
 	r.mux.HandleFunc("GET    /api/v1/jobs", jobsHandler.List)
@@ -575,7 +547,7 @@ func (r *Router) buildMiddlewareChain() {
 	// Build chain from inside out: Handler -> Logger -> RequestID -> Auth -> BodySize -> CORS
 	chain := loggerMiddleware(r.db, r.eventHub, r.mux)
 	chain = requestIDMiddleware(chain)
-	chain = authMiddleware(r.db, &r.keyCache, &r.sessionCache, r.sdkAuth, chain)
+	chain = authMiddleware(r.db, &r.keyCache, &r.sessionCache, chain)
 	chain = bodySizeMiddleware(maxBody, chain)
 	chain = corsMiddleware(origins, chain)
 

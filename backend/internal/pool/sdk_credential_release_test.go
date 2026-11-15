@@ -2,130 +2,115 @@ package pool
 
 import (
 	"context"
-	"sync"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
-// The SDK credential is bound to one worker process: Mint hands back a release
-// that expires it, and the pool must call that release on every path where the
-// worker it was minted for does not end up running.
-//
-// This is the half the sdkauth tests cannot cover. sdkauth proves a released
-// credential stops verifying; this proves the pool actually releases. Get the
-// wiring wrong and the credential silently reverts to its old lifetime -- valid
-// until the process restarts -- with nothing failing anywhere.
-//
-// The reaper path (a worker that spawned and later died) is covered by the
-// gated sandbox E2E, since it needs a real nsjail process to reap.
-func TestSpawnFailureReleasesTheSDKCredential(t *testing.T) {
+func TestSDKSpawnFailsClosedWithoutEgressPolicy(t *testing.T) {
 	m, reg := egressTestManager(t)
 	tmpl := fakeSandboxTemplate(t)
-
-	var mu sync.Mutex
-	minted, released := 0, 0
-	tmpl.SDKToken = func(string) (string, func()) {
-		mu.Lock()
-		minted++
-		mu.Unlock()
-		return "orva-test-token", func() {
-			mu.Lock()
-			released++
-			mu.Unlock()
-		}
+	tmpl.EgressPolicy = func() (string, string, error) { return "", "", errTestNoPolicy }
+	m.tmpl = tmpl
+	fn := registerFn(t, reg, "sdk-egress", "egress")
+	fn.SDK = true
+	if err := reg.Set(fn); err != nil {
+		t.Fatal(err)
 	}
+	p, err := m.getOrCreatePool(fn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.spawnFn(context.Background()); !errors.Is(err, errTestNoPolicy) {
+		t.Fatalf("spawn without policy = %v", err)
+	}
+}
 
-	t.Run("egress policy unavailable", func(t *testing.T) {
-		// Fails closed BEFORE Spawn, and it is the path most likely to be
-		// missed: it returns early from the middle of the closure.
-		tmpl.EgressPolicy = func() (string, string, error) { return "", "", errTestNoPolicy }
-		m.tmpl = tmpl
-		fn := registerFn(t, reg, "cred-egress", "egress")
-		fn.SDK = true
-		if err := reg.Set(fn); err != nil {
-			t.Fatal(err)
-		}
+func TestSDKSpawnRequiresChannelHost(t *testing.T) {
+	m, reg := egressTestManager(t)
+	m.tmpl = fakeSandboxTemplate(t)
+	fn := registerFn(t, reg, "sdk-no-host", "none")
+	fn.SDK = true
+	if err := reg.Set(fn); err != nil {
+		t.Fatal(err)
+	}
+	p, err := m.getOrCreatePool(fn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.spawnFn(context.Background()); err == nil {
+		t.Fatal("SDK-enabled worker started without a channel host")
+	}
+}
 
-		p, err := m.getOrCreatePool(fn.ID)
-		if err != nil {
-			t.Fatalf("getOrCreatePool: %v", err)
-		}
-		if _, err := p.spawnFn(context.Background()); err == nil {
-			t.Fatal("spawn succeeded without an egress policy")
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		if minted == 0 {
-			t.Fatal("no credential was minted, so this asserts nothing")
-		}
-		if released != minted {
-			t.Errorf("minted %d credentials, released %d: a credential outlived a worker that never started",
-				minted, released)
-		}
-	})
-
-	t.Run("worker death releases it", func(t *testing.T) {
-		mu.Lock()
-		minted, released = 0, 0
-		mu.Unlock()
-		// network_mode=none needs no egress policy, so this reaches Spawn.
-		tmpl.EgressPolicy = nil
-		m.tmpl = tmpl
-		fn := registerFn(t, reg, "cred-none", "none")
-		fn.SDK = true
-		if err := reg.Set(fn); err != nil {
-			t.Fatal(err)
-		}
-
-		p, err := m.getOrCreatePool(fn.ID)
-		if err != nil {
-			t.Fatalf("getOrCreatePool: %v", err)
-		}
-		w, err := p.spawnFn(context.Background())
-		if err != nil {
-			// Spawn failed instead: the release must still have run, and the
-			// reaper path is then covered by the gated sandbox E2E.
-			mu.Lock()
-			defer mu.Unlock()
-			if released != minted {
-				t.Errorf("a failed spawn left %d of %d credentials valid", minted-released, minted)
+func TestRetiredWorkerCancelsItsChannelWithoutInterruptingBusyWorker(t *testing.T) {
+	for _, idle := range []bool{false, true} {
+		t.Run(map[bool]string{false: "busy", true: "idle"}[idle], func(t *testing.T) {
+			m, reg := egressTestManager(t)
+			tmpl := fakeSandboxTemplate(t)
+			if err := os.WriteFile(filepath.Join(tmpl.RootfsDir, "node/opt/orva/adapter.js"), []byte("// orva-sdk-proto:1\n"), 0o644); err != nil {
+				t.Fatal(err)
 			}
-			return
-		}
-
-		mu.Lock()
-		mintedNow := minted
-		releasedNow := released
-		mu.Unlock()
-		if mintedNow == 0 {
-			t.Fatal("no credential was minted, so this asserts nothing")
-		}
-		if releasedNow != 0 {
-			t.Fatal("the credential was released while its worker was still alive: live SDK calls would 401")
-		}
-
-		// Kill it and let the reaper run. Kill returns as soon as the signal
-		// is delivered, so poll for the release rather than assuming it is
-		// synchronous.
-		if err := w.Kill(); err != nil {
-			t.Fatalf("kill: %v", err)
-		}
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			mu.Lock()
-			done := released == mintedNow
-			mu.Unlock()
-			if done {
-				return
+			const shim = `#!/usr/bin/env python3
+import json, os, struct, sys
+request = json.dumps({"id": 1, "op": "kv.get", "a": {"key": "hold"}}).encode()
+os.write(3, struct.pack(">I", len(request)) + request)
+ready = b'{"type":"ready"}'
+sys.stdout.buffer.write(struct.pack(">I", len(ready)) + ready)
+sys.stdout.buffer.flush()
+sys.stdin.buffer.read()
+`
+			if err := os.WriteFile(tmpl.NsjailBin, []byte(shim), 0o755); err != nil {
+				t.Fatal(err)
 			}
-			if time.Now().After(deadline) {
-				mu.Lock()
-				got := released
-				mu.Unlock()
-				t.Fatalf("released %d of %d credentials 5s after the worker died: the credential outlives its worker, which is the bug this change exists to fix",
-					got, mintedNow)
+			started := make(chan context.Context, 1)
+			ended := make(chan error, 1)
+			tmpl.SDKHandler = func(ctx context.Context, caller sandbox.SDKCaller, op string, _ json.RawMessage) (any, *sandbox.SDKError) {
+				started <- ctx
+				<-ctx.Done()
+				ended <- ctx.Err()
+				return nil, nil
 			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	})
+			m.tmpl = tmpl
+			fn := registerFn(t, reg, "channel-lifetime", "none")
+			fn.SDK = true
+			if err := reg.Set(fn); err != nil {
+				t.Fatal(err)
+			}
+			acq, err := m.Acquire(context.Background(), fn.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = acq.Worker.Kill() })
+			var channelCtx context.Context
+			select {
+			case channelCtx = <-started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("worker did not reach its private channel host")
+			}
+			if idle {
+				m.Release(acq, nil)
+			}
+			m.Drain(fn.ID)
+			if !idle {
+				if channelCtx.Err() != nil || acq.Worker.IsDead() {
+					t.Fatal("retiring the busy generation interrupted its live channel")
+				}
+				m.Release(acq, nil)
+			}
+			select {
+			case err := <-ended:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("channel cancellation = %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("retired worker's SDK handler outlived its channel")
+			}
+		})
+	}
 }

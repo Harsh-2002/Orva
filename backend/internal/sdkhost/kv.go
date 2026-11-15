@@ -13,8 +13,8 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 )
 
-// Per-op argument ceilings mirror the body limits of the HTTP KV handlers
-// (get/delete/list/incr 64 KiB, put/cas 1 MiB, batch 8 MiB) and are further
+// Per-op argument ceilings (get/delete/list/incr 64 KiB, put/cas 1 MiB,
+// batch 8 MiB) are further
 // clamped to the protocol frame size.
 const (
 	limitSmall = 1 << 16
@@ -69,7 +69,7 @@ func fmtTime(e *database.KVEntry) *string {
 	return &s
 }
 
-// ---- wire shapes (identical JSON to the HTTP handlers' responses) ----
+// ---- wire shapes ----
 
 type getResult struct {
 	Value     json.RawMessage `json:"value"`
@@ -196,9 +196,8 @@ func (h *Host) kvList(ctx context.Context, fn string, args json.RawMessage) (any
 	if e := decodeArgs(args, limitSmall, &a); e != nil {
 		return nil, e
 	}
-	// The HTTP handler ignores a limit that does not parse as an integer and
-	// falls back to 100. SDKs send Number(limit), which may be fractional (or
-	// null for NaN/Infinity), so the same leniency applies here.
+	// SDKs send Number(limit), which may be fractional (or null for NaN/Infinity).
+	// Retain the default of 100 when it does not parse as an integer.
 	limit := 100
 	if t := bytes.TrimSpace(a.Limit); len(t) > 0 && !bytes.Equal(t, []byte("null")) {
 		switch t[0] {
@@ -364,8 +363,7 @@ func (h *Host) kvCAS(ctx context.Context, fn string, args json.RawMessage) (any,
 	if err != nil {
 		return nil, fail(500, "INTERNAL", "kv cas failed: "+err.Error())
 	}
-	// A failed precondition is a normal 200 {"ok":false,"current":...}, exactly
-	// as the HTTP handler replies; it is not an error reply.
+	// A failed precondition is a normal {"ok":false,"current":...}, not an error.
 	resp := map[string]any{"ok": ok}
 	if !ok && current != nil {
 		resp["current"] = json.RawMessage(current)

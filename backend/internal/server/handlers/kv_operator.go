@@ -2,11 +2,6 @@
 // the MCP tools in tools_kv.go (same shapes, same database calls) so
 // the dashboard can browse / inspect / edit / delete keys without
 // having to reach for the MCP transport.
-//
-// The internal-token handlers in kv.go stay separate and untouched —
-// those serve worker SDK calls from inside sandboxes; these serve
-// session/api-key authenticated callers from the dashboard. Sharing
-// a file would muddy two distinct auth models.
 package handlers
 
 import (
@@ -261,16 +256,14 @@ func (h *KVOperatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "key": key})
 }
 
-// kvOperatorIncrRequest carries the delta and optional TTL refresh. Mirrors
-// the internal kvIncrRequest (kv.go) — same shape, operator auth.
+// kvOperatorIncrRequest carries the delta and optional TTL refresh.
 type kvOperatorIncrRequest struct {
 	Delta      int64 `json:"delta"`
 	TTLSeconds *int  `json:"ttl_seconds,omitempty"`
 }
 
 // Incr handles POST /api/v1/functions/{fn_id}/kv/{key}/incr. Atomically adds
-// delta (default 1) to an integer value and returns the new value. The
-// API-key-authed twin of the internal-token KVHandler.Incr.
+// delta (default 1) to an integer value and returns the new value.
 func (h *KVOperatorHandler) Incr(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
@@ -309,7 +302,7 @@ func (h *KVOperatorHandler) Incr(w http.ResponseWriter, r *http.Request) {
 
 // kvOperatorCASRequest expresses "swap from Expected to New, only if Expected
 // matches the current value". A null Expected means "the key must not currently
-// exist" (insert-if-absent). Mirrors the internal kvCASRequest (kv.go).
+// exist" (insert-if-absent).
 type kvOperatorCASRequest struct {
 	Expected   *json.RawMessage `json:"expected"`
 	New        json.RawMessage  `json:"new"`

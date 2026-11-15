@@ -335,7 +335,7 @@ func TestFirewallStatusEndpoint(t *testing.T) {
 	t.Run("with manager", func(t *testing.T) {
 		// Not Start()ed: no policy has been published, so this is exactly the
 		// fail-closed state EGRESS_POLICY_UNAVAILABLE points operators at.
-		mgr := firewall.NewManager(db, t.TempDir(), firewall.ControlPlane{Port: 8443})
+		mgr := firewall.NewManager(db, t.TempDir())
 		h := &FirewallHandler{DB: db, Manager: mgr}
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/firewall/status", nil)
 		w := httptest.NewRecorder()
@@ -352,9 +352,6 @@ func TestFirewallStatusEndpoint(t *testing.T) {
 		}
 		if snap.Enforced {
 			t.Error("enforced = true with no published policy")
-		}
-		if snap.ControlPlane.Port != 8443 {
-			t.Errorf("control_plane_allow.port = %d, want 8443", snap.ControlPlane.Port)
 		}
 	})
 }

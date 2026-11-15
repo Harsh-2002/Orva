@@ -31,7 +31,7 @@ func TestRenderedConfigIsAcceptedByNsjail(t *testing.T) {
 		{ID: 3, Kind: "custom", RuleType: database.BlocklistTypeCIDR,
 			Value: "2001:db8::/32", Enabled: true},
 	}
-	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(),
+	c, err := compile(rules, noResolve, DefaultGuestNet(),
 		[]netip.Addr{netip.MustParseAddr("1.1.1.1")})
 	if err != nil {
 		t.Fatalf("compile: %v", err)

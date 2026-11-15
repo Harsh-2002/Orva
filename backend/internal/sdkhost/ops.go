@@ -8,11 +8,9 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 )
 
-// jobs.enqueue, crons.upsert and spans.emit run the same identity-based cores
-// as the HTTP handlers (handlers.EnqueueJob / UpsertCron / CreateUserSpan), so
-// validation, limits and reply bodies cannot drift between the transports.
+// SDK operations delegate validation and persistence to identity-based handler cores.
 
-// decodeBody is decodeArgs with the HTTP handler's oversize message.
+// decodeBody retains the operation-specific oversize message.
 func decodeBody(args json.RawMessage, limit int, tooBig string, dst any) *sandbox.SDKError {
 	if len(args) > limit {
 		return fail(400, "INVALID_BODY", tooBig)
@@ -70,9 +68,6 @@ func (h *Host) cronsUpsert(ctx context.Context, caller sandbox.SDKCaller, args j
 }
 
 func (h *Host) spansEmit(ctx context.Context, caller sandbox.SDKCaller, args json.RawMessage) (any, *sandbox.SDKError) {
-	// The HTTP path answers 400 VALIDATION for a missing execution header and
-	// 403 for a stale one; the channel cannot tell module scope from a revoked
-	// lease, so both are the 403.
 	if caller.Exec == nil {
 		return nil, fail(403, "SDK_SCOPE_VIOLATION", "span execution is not active for the calling function")
 	}

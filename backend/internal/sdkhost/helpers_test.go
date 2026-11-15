@@ -4,19 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
-	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
-	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 )
 
 const (
@@ -123,79 +120,163 @@ func (d sdkDriver) call(op, args string) reply {
 	return out
 }
 
-// ---- HTTP transport: the real handler, a minted credential ----
-
-type httpDriver struct {
-	h    *handlers.KVHandler
-	auth *sdkauth.Authenticator
-	fn   string
+// dbDriver is an independent reference over the shared database cores, not Host.Handle.
+type dbDriver struct {
+	db *database.Database
+	fn string
 }
 
-func newHTTPDriver(db *database.Database, fn string) httpDriver {
-	a := sdkauth.New([]byte("secret"))
-	return httpDriver{h: &handlers.KVHandler{DB: db, SDKAuth: a}, auth: a, fn: fn}
-}
-
-func (d httpDriver) call(op, args string) reply {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(args), &m); err != nil {
-		panic("test args must be a JSON object: " + args)
+func (d dbDriver) call(op, args string) reply {
+	out := reply{Step: op + " " + args, Status: 200}
+	reject := func(status int, code, message string) reply {
+		out.Status, out.Code, out.Message = status, code, message
+		return out
 	}
-	var key string
-	if raw, ok := m["key"]; ok {
-		_ = json.Unmarshal(raw, &key)
-		delete(m, "key")
+	var a struct {
+		Key, Prefix, Cursor string
+		Value, New, Limit   json.RawMessage
+		Expected            *json.RawMessage
+		TTLSeconds          *int `json:"ttl_seconds"`
+		Delta               int64
+		Ops                 []struct {
+			Op, Key    string
+			Value      json.RawMessage
+			TTLSeconds *int `json:"ttl_seconds"`
+		}
 	}
-	rest, _ := json.Marshal(m)
-	var req *http.Request
-	var fn func(http.ResponseWriter, *http.Request)
+	a.Delta = 1
+	if err := json.Unmarshal([]byte(args), &a); err != nil {
+		return reject(400, "INVALID_JSON", "invalid request body")
+	}
+	if op != "batch" && op != "list" {
+		if err := database.ValidateKVKey(a.Key); err != nil {
+			return reject(400, "VALIDATION", err.Error())
+		}
+	}
+	var result any
+	var err error
 	switch op {
-	case "get":
-		req, fn = httptest.NewRequest("GET", "/x", nil), d.h.Get
-	case "delete":
-		req, fn = httptest.NewRequest("DELETE", "/x", nil), d.h.Delete
 	case "put":
-		req, fn = httptest.NewRequest("PUT", "/x", bytes.NewReader(rest)), d.h.Put
-	case "incr":
-		req, fn = httptest.NewRequest("POST", "/x", bytes.NewReader(rest)), d.h.Incr
-	case "cas":
-		req, fn = httptest.NewRequest("POST", "/x", bytes.NewReader(rest)), d.h.CAS
-	case "batch":
-		req, fn = httptest.NewRequest("POST", "/x", bytes.NewReader([]byte(args))), d.h.Batch
+		err = d.db.KVPut(d.fn, a.Key, a.Value, a.TTLSeconds)
+		if err != nil && len(a.Value) > database.KVMaxValueBytes {
+			return reject(413, "VALIDATION", err.Error())
+		}
+		result = map[string]any{"status": "ok", "key": a.Key, "ttl_seconds": a.TTLSeconds}
+	case "get":
+		var entry *database.KVEntry
+		entry, err = d.db.KVGet(d.fn, a.Key)
+		if errors.Is(err, database.ErrKVNotFound) {
+			return reject(404, "NOT_FOUND", "key not found")
+		}
+		if err == nil {
+			result = referenceEntry(entry, false)
+		}
+	case "delete":
+		err = d.db.KVDelete(d.fn, a.Key)
+		result = map[string]any{"status": "deleted", "key": a.Key}
 	case "list":
-		q := url.Values{}
-		for _, k := range []string{"prefix", "cursor"} {
-			if raw, ok := m[k]; ok {
-				var s string
-				_ = json.Unmarshal(raw, &s)
-				q.Set(k, s)
+		limit := 100
+		if n, e := strconv.Atoi(strings.Trim(string(a.Limit), `"`)); e == nil {
+			limit = n
+		}
+		var page *database.KVListPage
+		page, err = d.db.KVListWithCursor(d.fn, a.Prefix, a.Cursor, limit)
+		if err == nil {
+			rows := make([]any, 0, len(page.Entries))
+			for _, entry := range page.Entries {
+				rows = append(rows, referenceEntry(entry, true))
+			}
+			body := map[string]any{"keys": rows}
+			if page.NextCursor != "" {
+				body["next_cursor"] = page.NextCursor
+			}
+			result = body
+		}
+	case "incr":
+		var next int64
+		next, err = d.db.KVIncr(d.fn, a.Key, a.Delta, a.TTLSeconds)
+		if err != nil && strings.Contains(err.Error(), "not an integer") {
+			return reject(409, "KV_INCR_FAILED", err.Error())
+		}
+		result = map[string]any{"value": next}
+	case "cas":
+		if len(a.New) == 0 {
+			return reject(400, "VALIDATION", "new value is required")
+		}
+		if e := database.ValidateKVValue(a.New); e != nil {
+			return reject(400, "VALIDATION", e.Error())
+		}
+		if e := database.ValidateKVTTL(a.TTLSeconds); e != nil {
+			return reject(400, "VALIDATION", e.Error())
+		}
+		var expected []byte
+		if a.Expected != nil {
+			expected = []byte(*a.Expected)
+			if e := database.ValidateKVValue(expected); e != nil {
+				return reject(400, "VALIDATION", "expected value: "+e.Error())
 			}
 		}
-		if raw, ok := m["limit"]; ok {
-			q.Set("limit", string(raw))
+		var ok bool
+		var current []byte
+		ok, current, err = d.db.KVCAS(d.fn, a.Key, expected, a.New, a.TTLSeconds)
+		body := map[string]any{"ok": ok}
+		if !ok && current != nil {
+			body["current"] = json.RawMessage(current)
 		}
-		req, fn = httptest.NewRequest("GET", "/x?"+q.Encode(), nil), d.h.List
+		result = body
+	case "batch":
+		if len(a.Ops) > 100 {
+			return reject(400, "VALIDATION", "batch capped at 100 ops")
+		}
+		ops := make([]database.KVBatchOp, len(a.Ops))
+		for i, row := range a.Ops {
+			if e := database.ValidateKVKey(row.Key); e != nil {
+				return reject(400, "VALIDATION", e.Error())
+			}
+			if row.Op != "put" && row.Op != "get" && row.Op != "delete" {
+				return reject(400, "VALIDATION", "unknown batch operation: "+row.Op)
+			}
+			ops[i] = database.KVBatchOp{Op: row.Op, Key: row.Key, Value: row.Value, TTLSeconds: row.TTLSeconds}
+		}
+		var rows []database.KVBatchResult
+		rows, err = d.db.KVBatch(d.fn, ops)
+		wire := make([]any, 0, len(rows))
+		for _, row := range rows {
+			entry := map[string]any{"op": row.Op, "key": row.Key, "found": row.Found}
+			if row.Value != nil {
+				entry["value"] = json.RawMessage(row.Value)
+			}
+			if row.ExpiresAt != nil {
+				entry["expires_at"] = row.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z")
+			}
+			if row.Err != "" {
+				entry["error"] = row.Err
+			}
+			wire = append(wire, entry)
+		}
+		result = map[string]any{"results": wire}
 	default:
 		panic("op " + op)
 	}
-	req.SetPathValue("fn_id", d.fn)
-	req.SetPathValue("key", key)
-	tok, _ := d.auth.Mint(d.fn)
-	req.Header.Set("X-Orva-Internal-Token", tok)
-	w := httptest.NewRecorder()
-	fn(w, req)
-	out := reply{Step: op + " " + args, Status: w.Code}
-	body := decodeAny(w.Body.Bytes())
-	if w.Code >= 400 {
-		if m, ok := body.(map[string]any); ok {
-			if e, ok := m["error"].(map[string]any); ok {
-				out.Code, _ = e["code"].(string)
-				out.Message, _ = e["message"].(string)
-			}
-		}
-		return out
+	if err != nil {
+		return reject(400, "VALIDATION", err.Error())
 	}
-	out.Body = body
+	b, err := json.Marshal(result)
+	if err != nil {
+		panic(err)
+	}
+	out.Body = decodeAny(b)
+	return out
+}
+
+func referenceEntry(entry *database.KVEntry, withKey bool) map[string]any {
+	out := map[string]any{"value": json.RawMessage(entry.Value)}
+	if withKey {
+		out["key"] = entry.Key
+	}
+	if entry.ExpiresAt != nil {
+		out["expires_at"] = entry.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
 	return out
 }
 
@@ -221,25 +302,25 @@ func jb(m map[string]any) string {
 
 func jstr(n int) string { return `"` + strings.Repeat("a", n-2) + `"` }
 
-// runBoth runs one scenario through the HTTP handler and through Host.Handle on
+// runBoth runs one scenario through the database cores and through Host.Handle on
 // two fresh databases and requires every step to be observably identical.
 func runBoth(t *testing.T, scenario func(r *rec)) {
 	t.Helper()
 	dbH, dbS := newDB(t), newDB(t)
 	t.Cleanup(func() { dbH.Close(); dbS.Close() })
-	rh := &rec{d: newHTTPDriver(dbH, fnA)}
+	rh := &rec{d: dbDriver{db: dbH, fn: fnA}}
 	rs := &rec{d: sdkDriver{h: New(dbS), fn: fnA}}
 	scenario(rh)
 	scenario(rs)
 	if len(rh.log) != len(rs.log) {
-		t.Fatalf("step count differs http=%d sdk=%d", len(rh.log), len(rs.log))
+		t.Fatalf("step count differs core=%d sdk=%d", len(rh.log), len(rs.log))
 	}
 	for i := range rh.log {
 		a, b := rh.log[i], rs.log[i]
 		ja, _ := json.Marshal(a.Body)
 		jbb, _ := json.Marshal(b.Body)
 		if a.Status != b.Status || a.Code != b.Code || a.Message != b.Message || string(ja) != string(jbb) {
-			t.Errorf("step %d %q differs:\n http: %d %s %q %s\n sdk:  %d %s %q %s",
+			t.Errorf("step %d %q differs:\n core: %d %s %q %s\n sdk:  %d %s %q %s",
 				i, a.Step, a.Status, a.Code, a.Message, ja, b.Status, b.Code, b.Message, jbb)
 		}
 	}

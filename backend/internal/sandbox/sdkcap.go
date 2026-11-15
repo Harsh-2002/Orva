@@ -5,23 +5,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 )
 
 // sdkProtoMarker is the literal an adapter carries in its first bytes to declare
-// support for the SDK channel. Adapters that do not have it use the HTTP SDK.
+// support for the SDK channel. SDK-enabled workers require this marker.
 var sdkProtoMarker = []byte("orva-sdk-proto:1")
 
 const sdkMarkerWindow = 4 << 10
-
-type adapterCapKey struct {
-	path  string
-	mtime time.Time
-	size  int64
-}
-
-var adapterCaps sync.Map // adapterCapKey -> bool
 
 // adapterPathFor returns the installed adapter for a language inside rootfs
 // (the runtime directory, i.e. <RootfsDir>/<language>), mirroring resolveRuntime.
@@ -36,29 +26,27 @@ func adapterPathFor(rootfs string, lang Language) string {
 }
 
 // adapterSupportsSDK reports whether the installed adapter declares the SDK
-// channel. An absent or unreadable adapter is "no": the channel stays off and
-// the SDK falls back to HTTP. Results are cached by path, mtime and size, so a
-// runtime upgrade is picked up without re-reading the file per spawn.
+// channel. An absent or unreadable adapter is "no", which fails SDK spawns.
+// Read the bounded header each time: permissions and read failures can change
+// without changing the adapter's size or mtime.
 func adapterSupportsSDK(rootfs string, lang Language) bool {
 	path := adapterPathFor(rootfs, lang)
 	if path == "" {
 		return false
 	}
 	fi, err := os.Stat(path)
-	if err != nil || fi.IsDir() {
+	if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o444 == 0 {
 		return false
 	}
-	key := adapterCapKey{path: path, mtime: fi.ModTime(), size: fi.Size()}
-	if v, ok := adapterCaps.Load(key); ok {
-		return v.(bool)
+	f, err := os.Open(path)
+	if err != nil {
+		return false
 	}
-	ok := false
-	if f, err := os.Open(path); err == nil {
-		buf := make([]byte, sdkMarkerWindow)
-		n, _ := io.ReadFull(f, buf)
-		_ = f.Close()
-		ok = bytes.Contains(buf[:n], sdkProtoMarker)
+	defer f.Close()
+	buf := make([]byte, sdkMarkerWindow)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return false
 	}
-	adapterCaps.Store(key, ok)
-	return ok
+	return bytes.Contains(buf[:n], sdkProtoMarker)
 }

@@ -28,9 +28,6 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
-	"net/url"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,7 +54,6 @@ type Manager struct {
 	db      *database.Database
 	dataDir string // where resolv.conf, hosts and policy generations are written
 
-	cp    ControlPlane
 	guest GuestNet
 
 	mu          sync.RWMutex
@@ -98,14 +94,11 @@ type Manager struct {
 	wg     sync.WaitGroup
 }
 
-// NewManager builds the policy manager. cp is required: a policy compiled
-// without knowing orvad's own reachable address could block the internal SDK,
-// so compilation fails rather than guessing.
-func NewManager(db *database.Database, dataDir string, cp ControlPlane) *Manager {
+// NewManager builds the policy manager.
+func NewManager(db *database.Database, dataDir string) *Manager {
 	return &Manager{
 		db:              db,
 		dataDir:         dataDir,
-		cp:              cp,
 		guest:           DefaultGuestNet(),
 		hostnameMap:     map[string][]string{},
 		hostSeen:        map[string]map[string]time.Time{},
@@ -223,7 +216,7 @@ func (m *Manager) refresh() error {
 	dnsCfg := LoadDNSConfig(m.db)
 	dnsAddrs := dnsServerAddrs(dnsCfg)
 
-	c, err := compile(rules, m.resolveHostname, m.cp, m.guest, dnsAddrs)
+	c, err := compile(rules, m.resolveHostname, m.guest, dnsAddrs)
 	if err != nil {
 		// Keep the last known-good policy rather than degrading to NSTUN's
 		// default-allow. If there is no known-good policy, egress spawns will
@@ -253,16 +246,12 @@ func (m *Manager) refresh() error {
 			m.markStale(err.Error())
 			return err
 		}
-		exemptPort, _ := portToUint16(m.cp.Port)
 		p := &Policy{
 			Gen: gen, Path: path,
 			Rules4: len(c.rules4), Rules6: len(c.rules6),
 			Allows: c.allows, Rejects: c.rejects,
 			CompiledAt: time.Now().UTC(),
 			rules4:     c.rules4, rules6: c.rules6,
-			// 0 on an out-of-range port: matches nothing, so the daemon gets
-			// no exemption at all rather than one scoped to a truncated port.
-			exemptAddrs: m.cp.Addrs, exemptPort: exemptPort,
 		}
 		m.policy.Store(p)
 		slog.Info("egress policy published",
@@ -401,7 +390,6 @@ type Snapshot struct {
 	PendingRecycle   bool             `json:"pending_recycle"`
 	LastCompileError string           `json:"last_compile_error,omitempty"`
 	LastSuccessAt    string           `json:"last_success_at,omitempty"`
-	ControlPlane     ControlPlaneInfo `json:"control_plane_allow"`
 	Unenforced       []UnenforcedRule `json:"unenforced_rules,omitempty"`
 }
 
@@ -413,29 +401,18 @@ type RuleCounts struct {
 	Reject int `json:"reject"`
 }
 
-// ControlPlaneInfo is the carve-out that keeps the internal SDK reachable,
-// exposed so an operator can see exactly what is permitted and why.
-type ControlPlaneInfo struct {
-	Addrs []string `json:"addrs"`
-	Port  int      `json:"port"`
-}
-
 func (m *Manager) Snapshot() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	out := Snapshot{
-		IPv4:           append([]string(nil), m.resolvedV4...),
-		IPv6:           append([]string(nil), m.resolvedV6...),
-		HostnameMap:    map[string][]string{},
-		LastError:      m.lastError,
-		Backend:        "nstun",
-		PolicyStale:    m.stale,
-		PendingRecycle: m.pendingRetire,
-		ControlPlane: ControlPlaneInfo{
-			Addrs: addrsToStrings(m.cp.Addrs),
-			Port:  m.cp.Port,
-		},
+		IPv4:             append([]string(nil), m.resolvedV4...),
+		IPv6:             append([]string(nil), m.resolvedV6...),
+		HostnameMap:      map[string][]string{},
+		LastError:        m.lastError,
+		Backend:          "nstun",
+		PolicyStale:      m.stale,
+		PendingRecycle:   m.pendingRetire,
 		LastCompileError: m.compileErr,
 	}
 	if !m.lastSuccess.IsZero() {
@@ -552,43 +529,4 @@ func sortStrings(s []string) {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
-}
-
-// ParseControlPlane derives the carve-out from the internal API base URL the
-// server hands to sandboxes. A hostname is resolved here, at startup, so a
-// failure is loud rather than becoming a silently missing allow rule.
-func ParseControlPlane(apiBase string, fallbackPort int) (ControlPlane, error) {
-	cp := ControlPlane{Port: fallbackPort}
-
-	u, err := url.Parse(strings.TrimSpace(apiBase))
-	if err != nil || u.Host == "" {
-		return cp, fmt.Errorf("internal API base %q is not a URL", apiBase)
-	}
-	host := u.Hostname()
-	if p := u.Port(); p != "" {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > 65535 {
-			return cp, fmt.Errorf("internal API base %q has an invalid port", apiBase)
-		}
-		cp.Port = n
-	}
-
-	if a, err := netip.ParseAddr(host); err == nil {
-		cp.Addrs = []netip.Addr{a.Unmap()}
-		return cp, nil
-	}
-
-	ips, err := net.LookupHost(host)
-	if err != nil || len(ips) == 0 {
-		return cp, fmt.Errorf("internal API base host %q did not resolve: %w", host, err)
-	}
-	for _, s := range ips {
-		if a, perr := netip.ParseAddr(s); perr == nil {
-			cp.Addrs = append(cp.Addrs, a.Unmap())
-		}
-	}
-	if len(cp.Addrs) == 0 {
-		return cp, fmt.Errorf("internal API base host %q resolved to no usable address", host)
-	}
-	return cp, nil
 }

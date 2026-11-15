@@ -77,7 +77,7 @@ func TestAdapterSupportsSDK(t *testing.T) {
 		if err := os.Chmod(p, 0); err != nil {
 			t.Fatal(err)
 		}
-		if os.Geteuid() != 0 && adapterSupportsSDK(root, Node) {
+		if adapterSupportsSDK(root, Node) {
 			t.Fatal("unreadable adapter reported as supporting")
 		}
 		if err := os.MkdirAll(filepath.Join(root, "opt", "orva", "adapter.py"), 0o755); err != nil {
@@ -90,16 +90,30 @@ func TestAdapterSupportsSDK(t *testing.T) {
 			t.Fatal("unknown language reported as supporting")
 		}
 	})
-	t.Run("cache is keyed by mtime and size", func(t *testing.T) {
+	t.Run("rechecks content permissions and replacement", func(t *testing.T) {
 		root := t.TempDir()
 		same := func(m string) []byte { return []byte("// orva-sdk-proto:" + m + "\n") }
 		p := writeAdapter(t, root, "adapter.js", same("1"), now)
 		if !adapterSupportsSDK(root, Node) {
 			t.Fatal("want true")
 		}
-		// Same size, same mtime: the cached answer is served (and is right).
+		// A repeated lookup still sees the installed adapter.
 		if !adapterSupportsSDK(root, Node) {
-			t.Fatal("cached lookup changed")
+			t.Fatal("repeated lookup changed")
+		}
+		if err := os.Chmod(p, 0); err != nil {
+			t.Fatal(err)
+		}
+		if adapterSupportsSDK(root, Node) {
+			t.Fatal("previous support bypassed unreadable permissions")
+		}
+		if err := os.Chmod(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// A same-size rewrite with restored mtime must also be re-read.
+		writeAdapter(t, root, "adapter.js", same("2"), now)
+		if adapterSupportsSDK(root, Node) {
+			t.Fatal("previous support bypassed changed marker")
 		}
 		// Same size, newer mtime: the file is re-read.
 		writeAdapter(t, root, "adapter.js", same("2"), now.Add(time.Hour))
@@ -111,9 +125,11 @@ func TestAdapterSupportsSDK(t *testing.T) {
 		if !adapterSupportsSDK(root, Node) {
 			t.Fatal("size change did not invalidate the cache")
 		}
-		if _, ok := adapterCaps.Load(adapterCapKey{path: p, mtime: now.Add(time.Hour).Truncate(0), size: int64(len(same("1")) + 1)}); !ok {
-			// mtime precision differs per filesystem; the behavioural checks above are authoritative.
-			t.Log("cache key lookup by exact mtime not found (filesystem timestamp precision)")
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
+		if adapterSupportsSDK(root, Node) {
+			t.Fatal("previous support bypassed missing adapter")
 		}
 	})
 }

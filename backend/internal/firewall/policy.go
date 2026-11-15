@@ -77,19 +77,6 @@ func DefaultGuestNet() GuestNet {
 	}
 }
 
-// ControlPlane is the narrow carve-out the guest needs to reach orvad's
-// internal SDK endpoints (kv, jobs, function-to-function). Supplied by the
-// server from its single startup probe — the compiler never probes.
-//
-// This exists because detectInternalAPIBase deliberately hands sandboxes a
-// NON-loopback address (from inside the jail, 127.0.0.1 is the jail's own
-// loopback). That address is normally RFC1918, so enabling any shipped
-// private-network suggestion would otherwise break every SDK call.
-type ControlPlane struct {
-	Addrs []netip.Addr
-	Port  int
-}
-
 // UnenforcedRule is a stored rule deliberately excluded from the compiled
 // policy, surfaced through the API so the UI never implies it is in force.
 type UnenforcedRule struct {
@@ -113,16 +100,6 @@ type Policy struct {
 	// rules backs Blocks() for daemon-side enforcement. Same rule set and
 	// same first-match-wins order the sandbox gets.
 	rules4, rules6 []nstunRule
-	// exemptAddrs/exemptPort are never blocked daemon-side. They mirror the
-	// compiled control-plane carve-out EXACTLY, including its port: the
-	// sandbox rule is ALLOW TCP <addr> dport=<port>, so exempting the whole
-	// address here would make the daemon strictly less restricted than a
-	// sandbox. On a single-node install the control-plane address is the
-	// box's own LAN IP, so that gap was an SSRF hole — an operator who
-	// blocklists their own host still had webhook deliveries reaching every
-	// other port on it.
-	exemptAddrs []netip.Addr
-	exemptPort  uint16
 }
 
 type ruleAction uint8
@@ -185,7 +162,6 @@ type compiled struct {
 func compile(
 	rules []*database.BlocklistRule,
 	resolve func(host string) []string,
-	cp ControlPlane,
 	gn GuestNet,
 	dnsServers []netip.Addr,
 ) (compiled, error) {
@@ -200,30 +176,7 @@ func compile(
 		c.add6(nstunRule{act: actionAllow, pr: protoAny, dst: hostPrefix(gn.GW6)})
 	}
 
-	// 2. Control plane: exact host, exact port, TCP only. A missing carve-out
-	//    is a compile failure — never a broad allow and never a silent
-	//    omission, which would break the SDK in a maximally confusing way.
-	if len(cp.Addrs) == 0 {
-		return compiled{}, errors.New("control-plane address is unknown: refusing to compile a policy that could block orvad's internal SDK")
-	}
-	if cp.Port < 1 || cp.Port > 65535 {
-		return compiled{}, fmt.Errorf("control-plane port %d out of range", cp.Port)
-	}
-	for _, a := range cp.Addrs {
-		if !usableTarget(a) {
-			return compiled{}, errors.New("control-plane address is invalid or unspecified")
-		}
-		port, ok := portToUint16(cp.Port)
-		if !ok {
-			return compiled{}, fmt.Errorf("control-plane port %d out of range", cp.Port)
-		}
-		c.addByFamily(nstunRule{
-			act: actionAllow, pr: protoTCP,
-			dst: hostPrefix(a), dport: port,
-		})
-	}
-
-	// 3. DNS resolvers: exact host, port 53, UDP and TCP.
+	// 2. DNS resolvers: exact host, port 53, UDP and TCP.
 	for _, s := range dnsServers {
 		if !usableTarget(s) {
 			continue
@@ -235,7 +188,7 @@ func compile(
 		}
 	}
 
-	// 4. The operator blocklist.
+	// 3. The operator blocklist.
 	var v4Blocks, v6Blocks []netip.Prefix
 	for _, r := range rules {
 		if r == nil || !r.Enabled {
@@ -348,15 +301,7 @@ func hostPrefix(a netip.Addr) netip.Prefix {
 	return netip.PrefixFrom(a, a.BitLen())
 }
 
-// portToUint16 converts a port with the range check local to the conversion.
-//
-// compile rejects an out-of-range control-plane port before any policy is
-// built, so this cannot currently fail — but the conversion sits on a security
-// boundary, and a bare uint16() truncates silently: 70000 becomes 4464, and
-// 65536+8443 becomes 8443. Either would scope the daemon's exemption to a port
-// the operator never exempted, which is precisely the defect the port-scoping
-// fix closed. ok=false yields 0, which matches no real port, so an invalid
-// value produces NO exemption rather than the wrong one.
+// portToUint16 rejects out-of-range ports rather than truncating them.
 func portToUint16(p int) (uint16, bool) {
 	if p < 1 || p > 65535 {
 		return 0, false
@@ -518,8 +463,7 @@ func countRuleBlocks(rendered []byte) (v4, v6 int) {
 // refused. It walks the same rules in the same first-match-wins order the
 // sandbox gets, so the daemon and the sandboxes cannot drift apart.
 //
-// Loopback and the control plane are always exempt: orvad must never be able
-// to cut off its own internal calls.
+// Loopback remains exempt; private host addresses obey the operator blocklist.
 func (p *Policy) Blocks(addr netip.Addr, port uint16) bool {
 	if p == nil || !addr.IsValid() {
 		return false
@@ -530,11 +474,6 @@ func (p *Policy) Blocks(addr netip.Addr, port uint16) bool {
 	// anyway (from inside the jail 127.0.0.1 is the jail's own).
 	if addr.IsLoopback() {
 		return false
-	}
-	for _, e := range p.exemptAddrs {
-		if e.Unmap() == addr && port == p.exemptPort {
-			return false
-		}
 	}
 	rules := p.rules4
 	if addr.Is6() {
