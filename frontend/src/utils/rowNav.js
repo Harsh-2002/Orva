@@ -40,3 +40,12 @@ export function rowNav(router, to) {
     router.push(to)
   }
 }
+
+// rowAction is rowNav for rows whose destination is not a route (an edit modal):
+// it runs `action` under the same rules.
+export function rowAction(action) {
+  return (event) => {
+    const selection = typeof window !== 'undefined' ? window.getSelection?.()?.toString() : ''
+    if (shouldNavigateOnRowClick(event, selection)) action()
+  }
+}

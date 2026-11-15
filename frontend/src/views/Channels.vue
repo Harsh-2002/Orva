@@ -176,12 +176,19 @@
         <li
           v-for="c in channels"
           :key="c.id"
-          class="px-4 py-3"
+          class="px-4 py-3 cursor-pointer"
+          @click="rowAction(() => openEditFunctions(c))($event)"
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-foreground-strong truncate">{{ c.name }}</span>
+                <button
+                  type="button"
+                  class="font-medium text-foreground-strong truncate text-left rounded-sm hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  @click="openEditFunctions(c)"
+                >
+                  {{ c.name }}
+                </button>
                 <span class="inline-flex items-center gap-1 text-[11px] text-foreground-muted">
                   <Boxes class="w-3 h-3" /> {{ c.function_count }}
                 </span>
@@ -280,11 +287,18 @@
           <tr
             v-for="c in channels"
             :key="c.id"
-            class="hover:bg-surface/50 transition-colors"
+            class="hover:bg-surface/50 transition-colors cursor-pointer"
+            @click="rowAction(() => openEditFunctions(c))($event)"
           >
             <td class="px-6 py-4">
               <div class="font-medium text-foreground-strong">
-                {{ c.name }}
+                <button
+                  type="button"
+                  class="rounded-sm text-left hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  @click="openEditFunctions(c)"
+                >
+                  {{ c.name }}
+                </button>
               </div>
               <div
                 v-if="c.description"
@@ -383,6 +397,7 @@ import { Plug, Boxes, Copy, Check, X, Trash2, RotateCcw, AlertCircle, Pencil } f
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import { rowAction } from '@/utils/rowNav'
 import FunctionPickerModal from '@/components/channels/FunctionPickerModal.vue'
 import {
   listChannels,

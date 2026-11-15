@@ -48,3 +48,13 @@ test('rowNav pushes the route, and opens a new tab on cmd/ctrl-click', () => {
   assert.deepEqual(opened, [['/web/functions/greeter', '_blank', 'noopener']])
   delete globalThis.window
 })
+
+test('rowAction runs the action under the same rules', async () => {
+  const { rowAction } = await import('../src/utils/rowNav.js')
+  globalThis.window = { getSelection: () => ({ toString: () => '' }) }
+  let ran = 0
+  rowAction(() => { ran++ })(click())
+  rowAction(() => { ran++ })(click({ target: target(true) }))
+  assert.equal(ran, 1)
+  delete globalThis.window
+})

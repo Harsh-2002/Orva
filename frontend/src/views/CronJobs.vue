@@ -29,12 +29,19 @@
         <li
           v-for="job in jobs"
           :key="job.id"
-          class="px-4 py-3"
+          class="px-4 py-3 cursor-pointer"
+          @click="rowAction(() => editSchedule(job))($event)"
         >
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-medium text-foreground truncate">{{ job.function_name }}</span>
+                <button
+                  type="button"
+                  class="font-medium text-foreground truncate text-left rounded-sm hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  @click="editSchedule(job)"
+                >
+                  {{ job.function_name }}
+                </button>
                 <span
                   v-if="job.name"
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-surface-subtle text-foreground-muted border-border"
@@ -126,11 +133,18 @@
           <tr
             v-for="job in jobs"
             :key="job.id"
-            class="hover:bg-surface-hover transition-colors"
+            class="hover:bg-surface-hover transition-colors cursor-pointer"
+            @click="rowAction(() => editSchedule(job))($event)"
           >
             <td class="px-6 py-4 font-medium text-foreground max-w-[16rem]">
               <div class="flex items-center gap-2 min-w-0">
-                <span class="truncate">{{ job.function_name }}</span>
+                <button
+                  type="button"
+                  class="truncate text-left rounded-sm hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  @click="editSchedule(job)"
+                >
+                  {{ job.function_name }}
+                </button>
                 <!-- A schedule with a name was declared by the function's own
                      code; the dashboard cannot set one. That is what makes an
                      unexpected entry here visible as one. -->
@@ -459,6 +473,7 @@ import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from '@luc
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import IconButton from '@/components/common/IconButton.vue'
+import { rowAction } from '@/utils/rowNav'
 import Modal from '@/components/common/Modal.vue'
 import LoadError from '@/components/common/LoadError.vue'
 import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions, browserTimezone } from '@/api/endpoints'
