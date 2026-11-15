@@ -124,7 +124,9 @@ func (c *Client) Send(r Request) (*http.Response, error) {
 	if r.NoTimeout {
 		// A copy with no overall deadline so long-lived streams (SSE,
 		// streamed invocations, build-log follows) aren't killed at 120s.
-		httpClient = &http.Client{Transport: c.HTTP.Transport}
+		// CheckRedirect must come along: it is what stops the API key header
+		// following a redirect to another host.
+		httpClient = &http.Client{Transport: c.HTTP.Transport, CheckRedirect: c.HTTP.CheckRedirect}
 	}
 
 	resp, err := httpClient.Do(req)
