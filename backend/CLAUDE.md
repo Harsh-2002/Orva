@@ -212,6 +212,21 @@ Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/
 
 SQLite WAL mode. All migrations in `internal/database/migrations.go` — additive only. `VACUUM INTO` produces consistent backup snapshots without a write lock.
 
+## Runtime SDK channel tests
+
+`backend/runtimes/{node/orva.js,python/orva.py}` route `kv.*` over a private per-worker socketpair
+(fd `ORVA_SDK_FD` when `ORVA_SDK_PROTO=1`, otherwise legacy HTTP); the routing set is `_CHANNEL_OPS`
+in each SDK. The adapters carry the literal `orva-sdk-proto:1` marker near the top (the host reads it
+to detect adapter/host skew) and store the `{"type":"lease"}` stdin frame for the SDK. Tests play the
+host over a real socketpair and need no nsjail or Docker:
+
+```bash
+node --test backend/runtimes/test/node_sdk_channel.test.js
+python3 -m unittest discover -s backend/runtimes/test -p 'test_*.py'
+```
+
+Edit `backend/runtimes/`, then run `make adapters-embed`.
+
 ## Gotchas
 
 - `backend/cmd/orva/adapters/` is **generated** — edit `backend/runtimes/` instead; `make adapters-embed` syncs them.

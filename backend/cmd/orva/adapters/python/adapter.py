@@ -1,3 +1,4 @@
+# orva-sdk-proto:1
 """Orva Python adapter — universal handler loader.
 
 Accepts a wide range of conventions so existing code from AWS Lambda,
@@ -651,6 +652,15 @@ try:
         if ftype == "quit":
             _write_frame({"type": "bye"})
             sys.exit(0)
+        if ftype == "lease":
+            # Per-dispatch SDK-channel lease for the SDK; not a request.
+            try:
+                import orva as _orva_sdk
+
+                _orva_sdk._set_lease(frame.get("lease"))
+            except Exception:  # noqa: BLE001 - never let the SDK break the loop
+                pass
+            continue
         if ftype != "request":
             continue
 

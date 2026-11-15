@@ -308,6 +308,15 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.15"
+
+      - name: SDK channel tests (node + python runtimes)
+        run: |
+          node --test backend/runtimes/test/node_sdk_channel.test.js
+          python3 -m unittest discover -s backend/runtimes/test -p 'test_*.py'
+
       - name: go test
         run: go test -count=1 -race ./...
 

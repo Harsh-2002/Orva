@@ -128,19 +128,223 @@ async function _request(method, path, opts = {}) {
   return { status: res.status, body: text, headers: res.headers }
 }
 
+// ── SDK channel ─────────────────────────────────────────────────────
+//
+// A private AF_UNIX socketpair the host passes to the worker as fd
+// ORVA_SDK_FD (with ORVA_SDK_PROTO=1). Frames are [u32 BE length][JSON];
+// requests {id, op, lease?, a}, replies {id, ok, r | e:{status,code,message}}.
+// The client never sends identity: the host derives it from the connection
+// and the lease. Without the env pair (or with a bad fd) the SDK keeps using
+// HTTP, unchanged. Protocol: docs of the SDK channel, v1.
+
+const _net = require('net')
+const _fs = require('fs')
+
+const MAX_FRAME = 4 << 20 // 4 MiB, both directions
+const MAX_INFLIGHT = 32 // host refuses the 33rd with 429, so queue instead
+
+// Ops served over the channel. Everything else stays on HTTP; later work
+// only has to add names here.
+const _CHANNEL_OPS = new Set([
+  'kv.get',
+  'kv.put',
+  'kv.delete',
+  'kv.list',
+  'kv.batch',
+  'kv.incr',
+  'kv.cas',
+])
+
+// The adapter stores the per-dispatch lease here (it does not import the SDK).
+const _LEASE_KEY = Symbol.for('orva.sdk.lease')
+const _currentLease = () => globalThis[_LEASE_KEY] || ''
+function _setLease(lease) {
+  globalThis[_LEASE_KEY] = typeof lease === 'string' ? lease : ''
+}
+
+// Per-call deadline (queue wait included); same default as the HTTP path.
+let _channelTimeoutMs = DEFAULT_TIMEOUT_MS
+function _setChannelTimeout(ms) {
+  _channelTimeoutMs = ms
+}
+
+class _Channel {
+  constructor(fd) {
+    this.sock = new _net.Socket({ fd, readable: true, writable: true })
+    this.inflight = new Map() // id -> entry; timed-out entries stay until the host replies
+    this.queue = []
+    this.nextId = 1
+    this.dead = null
+    this.buf = Buffer.alloc(0)
+    this.sock.on('data', (chunk) => this._onData(chunk))
+    this.sock.on('error', (err) => this._fail(new OrvaUnavailableError(`SDK channel error: ${err.message || err}`)))
+    this.sock.on('close', () => this._fail(new OrvaUnavailableError('SDK channel closed')))
+    this.sock.on('end', () => this._fail(new OrvaUnavailableError('SDK channel closed')))
+    this.sock.unref() // only keeps the process alive while calls are pending
+  }
+
+  call(op, args) {
+    if (this.dead) return Promise.reject(this.dead)
+    const id = this.nextId++
+    const msg = { id, op, a: args }
+    const lease = _currentLease()
+    if (lease) msg.lease = lease
+    const body = Buffer.from(JSON.stringify(msg), 'utf8')
+    if (body.length > MAX_FRAME) {
+      return Promise.reject(new OrvaError(`${op}: request too large (${body.length} bytes, max ${MAX_FRAME})`, 413))
+    }
+    const hdr = Buffer.allocUnsafe(4)
+    hdr.writeUInt32BE(body.length, 0)
+    return new Promise((resolve, reject) => {
+      const entry = { id, op, frame: Buffer.concat([hdr, body]), resolve, reject, settled: false, timer: null }
+      entry.timer = setTimeout(() => {
+        if (entry.settled) return
+        entry.settled = true
+        const qi = this.queue.indexOf(entry)
+        if (qi >= 0) this.queue.splice(qi, 1)
+        // A sent request keeps its in-flight slot until the host answers it.
+        reject(new OrvaError(`request timed out after ${_channelTimeoutMs}ms`, 0))
+        this._pump()
+        this._refresh()
+      }, _channelTimeoutMs)
+      this.queue.push(entry)
+      this._pump()
+      this._refresh()
+    })
+  }
+
+  _pump() {
+    while (!this.dead && this.queue.length > 0 && this.inflight.size < MAX_INFLIGHT) {
+      const entry = this.queue.shift()
+      this.inflight.set(entry.id, entry)
+      this.sock.write(entry.frame, (err) => {
+        if (err) this._fail(new OrvaUnavailableError(`SDK channel write failed: ${err.message || err}`))
+      })
+    }
+  }
+
+  _refresh() {
+    // Abandoned (timed-out) requests still hold a slot but must not keep the
+    // process alive.
+    let waiting = this.queue.length > 0
+    for (const entry of this.inflight.values()) if (!entry.settled) waiting = true
+    if (waiting) this.sock.ref()
+    else this.sock.unref()
+  }
+
+  _onData(chunk) {
+    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk
+    for (;;) {
+      if (this.buf.length < 4) return
+      const n = this.buf.readUInt32BE(0)
+      if (n < 1 || n > MAX_FRAME) {
+        this._fail(new OrvaUnavailableError(`SDK channel protocol error: bad frame length ${n}`))
+        return
+      }
+      if (this.buf.length < 4 + n) return
+      let msg
+      try {
+        msg = JSON.parse(this.buf.subarray(4, 4 + n).toString('utf8'))
+      } catch {
+        this._fail(new OrvaUnavailableError('SDK channel protocol error: invalid JSON'))
+        return
+      }
+      this.buf = this.buf.subarray(4 + n)
+      this._onReply(msg)
+    }
+  }
+
+  _onReply(msg) {
+    const entry = msg && this.inflight.get(msg.id)
+    if (!entry) return
+    this.inflight.delete(msg.id)
+    if (!entry.settled) {
+      entry.settled = true
+      clearTimeout(entry.timer)
+      if (msg.ok) {
+        entry.resolve({ status: 200, data: msg.r === undefined ? {} : msg.r, body: '' })
+      } else {
+        const e = msg.e || {}
+        entry.resolve({
+          status: Number(e.status) || 500,
+          body: `${e.code || 'ERROR'}: ${e.message || ''}`,
+        })
+      }
+    }
+    this._pump()
+    this._refresh()
+  }
+
+  _fail(err) {
+    if (this.dead) return
+    this.dead = err
+    const all = [...this.inflight.values(), ...this.queue]
+    this.inflight.clear()
+    this.queue = []
+    for (const entry of all) {
+      if (entry.settled) continue
+      entry.settled = true
+      clearTimeout(entry.timer)
+      entry.reject(err)
+    }
+    try { this.sock.destroy() } catch { /* already closed */ }
+  }
+}
+
+let _chan // undefined = not probed yet, null = not available, else _Channel
+
+// Returns the open channel, a dead one (calls then reject with
+// OrvaUnavailableError), or null when this worker has none.
+function _channel() {
+  if (_chan !== undefined) return _chan
+  _chan = null
+  if (process.env.ORVA_SDK_PROTO !== '1') return _chan
+  const raw = process.env.ORVA_SDK_FD || ''
+  if (!/^\d+$/.test(raw)) return _chan
+  const fd = parseInt(raw, 10)
+  try {
+    if (!_fs.fstatSync(fd).isSocket()) return _chan
+    _chan = new _Channel(fd)
+  } catch {
+    _chan = null
+  }
+  return _chan
+}
+
 // ── KV ──────────────────────────────────────────────────────────────
+//
+// Every kv call goes through _kv(): the op name picks the private SDK channel
+// when one is open (see "SDK channel" below) and the legacy HTTP route
+// otherwise. Channel args are the HTTP request bodies minus identity:
+//   kv.get {key}                       -> {value, expires_at?}   (404 = missing)
+//   kv.put {key, value, ttl_seconds?}  -> {}
+//   kv.delete {key}                    -> {}                     (404 ignored)
+//   kv.list {prefix?, limit, cursor?}  -> {keys, next_cursor}
+//   kv.batch {ops}                     -> {results}
+//   kv.incr {key, delta, ttl_seconds?} -> {value}
+//   kv.cas {key, expected, new, ttl_seconds?} -> {ok, current?}
+
+function _kv(op, args, method, path, opts) {
+  if (!(_testImpl && _testImpl.request) && _CHANNEL_OPS.has(op)) {
+    const ch = _channel()
+    if (ch) return ch.call(op, args)
+  }
+  return _request(method, path, opts)
+}
+
+// Parsed JSON of a reply from either transport.
+function _data(res) {
+  return res.data !== undefined ? res.data : JSON.parse(res.body)
+}
 
 const kv = {
   /** Read a JSON-decoded value. Returns defaultValue on missing/expired. */
   async get(key, defaultValue = null) {
     const fn = _fnID()
-    const { status, body } = await _request(
-      'GET',
-      `/api/v1/_kv/${fn}/${encodeURIComponent(key)}`
-    )
-    if (status === 404) return defaultValue
-    if (status >= 400) throw new OrvaError(`kv.get(${key}) failed: ${body}`, status)
-    const data = JSON.parse(body)
+    const res = await _kv('kv.get', { key }, 'GET', `/api/v1/_kv/${fn}/${encodeURIComponent(key)}`)
+    if (res.status === 404) return defaultValue
+    if (res.status >= 400) throw new OrvaError(`kv.get(${key}) failed: ${res.body}`, res.status)
+    const data = _data(res)
     return data.value != null ? data.value : defaultValue
   },
 
@@ -151,22 +355,21 @@ const kv = {
     if (Object.hasOwn(options, 'ttlSeconds')) {
       requestBody.ttl_seconds = Number(options.ttlSeconds)
     }
-    const { status, body } = await _request(
+    const res = await _kv(
+      'kv.put',
+      { key, ...requestBody },
       'PUT',
       `/api/v1/_kv/${fn}/${encodeURIComponent(key)}`,
       { body: requestBody }
     )
-    if (status >= 400) throw new OrvaError(`kv.put(${key}) failed: ${body}`, status)
+    if (res.status >= 400) throw new OrvaError(`kv.put(${key}) failed: ${res.body}`, res.status)
   },
 
   async delete(key) {
     const fn = _fnID()
-    const { status, body } = await _request(
-      'DELETE',
-      `/api/v1/_kv/${fn}/${encodeURIComponent(key)}`
-    )
-    if (status >= 400 && status !== 404) {
-      throw new OrvaError(`kv.delete(${key}) failed: ${body}`, status)
+    const res = await _kv('kv.delete', { key }, 'DELETE', `/api/v1/_kv/${fn}/${encodeURIComponent(key)}`)
+    if (res.status >= 400 && res.status !== 404) {
+      throw new OrvaError(`kv.delete(${key}) failed: ${res.body}`, res.status)
     }
   },
 
@@ -181,9 +384,12 @@ const kv = {
     qs.set('limit', String(limit))
     if (prefix) qs.set('prefix', prefix)
     if (cursor) qs.set('cursor', cursor)
-    const { status, body } = await _request('GET', `/api/v1/_kv/${fn}?${qs}`)
-    if (status >= 400) throw new OrvaError(`kv.list failed: ${body}`, status)
-    const data = JSON.parse(body)
+    const args = { limit: Number(limit) }
+    if (prefix) args.prefix = prefix
+    if (cursor) args.cursor = cursor
+    const res = await _kv('kv.list', args, 'GET', `/api/v1/_kv/${fn}?${qs}`)
+    if (res.status >= 400) throw new OrvaError(`kv.list failed: ${res.body}`, res.status)
+    const data = _data(res)
     return {
       keys: data.keys || [],
       nextCursor: data.next_cursor || '',
@@ -193,13 +399,10 @@ const kv = {
   /** Read N keys in one round trip. Missing keys map to null. */
   async getMany(keys) {
     if (!keys || keys.length === 0) return {}
-    const fn = _fnID()
     const ops = keys.map((k) => ({ op: 'get', key: k }))
-    const { status, body } = await _request('POST', `/api/v1/_kv/${fn}/batch`, {
-      body: { ops },
-    })
-    if (status >= 400) throw new OrvaError(`kv.getMany failed: ${body}`, status)
-    const data = JSON.parse(body)
+    const res = await _kvBatch(ops)
+    if (res.status >= 400) throw new OrvaError(`kv.getMany failed: ${res.body}`, res.status)
+    const data = _data(res)
     _assertAtomicBatch(data, 'kv.getMany')
     const out = {}
     for (const r of data.results || []) {
@@ -211,29 +414,23 @@ const kv = {
   /** Write N entries in one transaction. */
   async putMany(entries) {
     if (!entries || entries.length === 0) return
-    const fn = _fnID()
     const ops = entries.map((e) => {
       const op = { op: 'put', key: e.key, value: e.value }
       if (Object.hasOwn(e, 'ttlSeconds')) op.ttl_seconds = Number(e.ttlSeconds)
       return op
     })
-    const { status, body } = await _request('POST', `/api/v1/_kv/${fn}/batch`, {
-      body: { ops },
-    })
-    if (status >= 400) throw new OrvaError(`kv.putMany failed: ${body}`, status)
-    _assertAtomicBatch(JSON.parse(body), 'kv.putMany')
+    const res = await _kvBatch(ops)
+    if (res.status >= 400) throw new OrvaError(`kv.putMany failed: ${res.body}`, res.status)
+    _assertAtomicBatch(_data(res), 'kv.putMany')
   },
 
   /** Delete N keys in one transaction. Returns the number removed. */
   async deleteMany(keys) {
     if (!keys || keys.length === 0) return 0
-    const fn = _fnID()
     const ops = keys.map((k) => ({ op: 'delete', key: k }))
-    const { status, body } = await _request('POST', `/api/v1/_kv/${fn}/batch`, {
-      body: { ops },
-    })
-    if (status >= 400) throw new OrvaError(`kv.deleteMany failed: ${body}`, status)
-    const data = JSON.parse(body)
+    const res = await _kvBatch(ops)
+    if (res.status >= 400) throw new OrvaError(`kv.deleteMany failed: ${res.body}`, res.status)
+    const data = _data(res)
     _assertAtomicBatch(data, 'kv.deleteMany')
     return (data.results || []).filter((r) => r.found).length
   },
@@ -245,13 +442,15 @@ const kv = {
     if (Object.hasOwn(options, 'ttlSeconds')) {
       requestBody.ttl_seconds = Number(options.ttlSeconds)
     }
-    const { status, body } = await _request(
+    const res = await _kv(
+      'kv.incr',
+      { key, ...requestBody },
       'POST',
       `/api/v1/_kv/${fn}/${encodeURIComponent(key)}/incr`,
       { body: requestBody }
     )
-    if (status >= 400) throw new OrvaError(`kv.incr(${key}) failed: ${body}`, status)
-    return JSON.parse(body).value
+    if (res.status >= 400) throw new OrvaError(`kv.incr(${key}) failed: ${res.body}`, res.status)
+    return _data(res).value
   },
 
   /**
@@ -268,18 +467,22 @@ const kv = {
     if (Object.hasOwn(options, 'ttlSeconds')) {
       requestBody.ttl_seconds = Number(options.ttlSeconds)
     }
-    const { status, body } = await _request(
+    const res = await _kv(
+      'kv.cas',
+      { key, ...requestBody },
       'POST',
       `/api/v1/_kv/${fn}/${encodeURIComponent(key)}/cas`,
-      {
-        body: requestBody,
-      }
+      { body: requestBody }
     )
-    if (status >= 400) throw new OrvaError(`kv.cas(${key}) failed: ${body}`, status)
-    const data = JSON.parse(body)
+    if (res.status >= 400) throw new OrvaError(`kv.cas(${key}) failed: ${res.body}`, res.status)
+    const data = _data(res)
     if (!data.ok) throw new OrvaCASMismatch(data.current ?? null)
     return true
   },
+}
+
+function _kvBatch(ops) {
+  return _kv('kv.batch', { ops }, 'POST', `/api/v1/_kv/${_fnID()}/batch`, { body: { ops } })
 }
 
 function _assertAtomicBatch(data, operation) {
@@ -594,4 +797,6 @@ module.exports = {
   OrvaCASMismatch,
   __test_mode__,
   SDK_VERSION,
+  _setLease,
+  _setChannelTimeout,
 }

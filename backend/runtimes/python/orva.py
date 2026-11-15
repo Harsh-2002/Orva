@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import struct
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -190,6 +193,223 @@ def _request(
         raise OrvaError(f"request failed: {e}", status=0)
 
 
+# ── SDK channel ─────────────────────────────────────────────────────
+#
+# A private AF_UNIX socketpair the host passes to the worker as fd
+# ORVA_SDK_FD (with ORVA_SDK_PROTO=1). Frames are [u32 BE length][JSON];
+# requests {id, op, lease?, a}, replies {id, ok, r | e:{status,code,message}}.
+# The client never sends identity: the host derives it from the connection
+# and the lease. Without the env pair (or with a bad fd) the SDK keeps using
+# HTTP, unchanged.
+#
+# os.read/os.write ONLY: socket.recv/send compile to recvfrom/sendto, which
+# the no-network seccomp profile blocks. One lazily started daemon reader
+# thread demultiplexes replies by id, so threads (and asyncio handlers
+# calling the synchronous SDK) can call concurrently. It touches nothing but
+# this fd, so it cannot interfere with the adapter's stdout lock/heartbeat.
+
+MAX_FRAME = 4 << 20  # 4 MiB, both directions
+MAX_INFLIGHT = 32  # the host refuses the 33rd with 429, so wait client-side
+
+# Ops served over the channel. Everything else stays on HTTP; later work only
+# has to add names here.
+_CHANNEL_OPS = frozenset(
+    ("kv.get", "kv.put", "kv.delete", "kv.list", "kv.batch", "kv.incr", "kv.cas")
+)
+
+# Per-dispatch lease from the adapter's `lease` stdin frame. Module-scope code
+# runs before any lease, so it is empty then. The host revokes it; we never
+# clear it ourselves.
+_lease = ""
+
+
+def _set_lease(lease: Any) -> None:
+    global _lease
+    _lease = lease if isinstance(lease, str) else ""
+
+
+# Per-call deadline (slot wait included); same default as the HTTP path.
+_channel_timeout_s = DEFAULT_TIMEOUT_S
+
+
+def _set_channel_timeout(seconds: float) -> None:
+    global _channel_timeout_s
+    _channel_timeout_s = seconds
+
+
+class _Chan:
+    def __init__(self, fd: int):
+        os.set_blocking(fd, True)
+        os.set_inheritable(fd, False)
+        self.fd = fd
+        self.cond = threading.Condition()  # guards inflight, next_id, dead, reader
+        self.wlock = threading.Lock()  # serialises frame writes
+        # id -> [Event, result list, abandoned]. A timed-out entry keeps its
+        # slot until the host answers it, so we never exceed MAX_INFLIGHT.
+        self.inflight: Dict[int, list] = {}
+        self.next_id = 1
+        self.dead: Optional[OrvaError] = None
+        self.reader: Optional[threading.Thread] = None
+
+    # -- lifecycle -------------------------------------------------------
+
+    def mark_dead(self, err: OrvaError) -> None:
+        with self.cond:
+            if self.dead is None:
+                self.dead = err
+            waiters = list(self.inflight.values())
+            self.inflight.clear()
+            self.cond.notify_all()
+        for slot in waiters:
+            slot[0].set()
+
+    def _read_exact(self, n: int) -> bytes:
+        parts = []
+        have = 0
+        while have < n:
+            chunk = os.read(self.fd, n - have)
+            if not chunk:
+                raise OrvaUnavailableError("SDK channel closed")
+            parts.append(chunk)
+            have += len(chunk)
+        return b"".join(parts)
+
+    def _reader(self) -> None:
+        try:
+            while True:
+                (n,) = struct.unpack(">I", self._read_exact(4))
+                if n < 1 or n > MAX_FRAME:
+                    raise OrvaUnavailableError(f"SDK channel protocol error: bad frame length {n}")
+                try:
+                    msg = json.loads(self._read_exact(n).decode("utf-8"))
+                except ValueError:
+                    raise OrvaUnavailableError("SDK channel protocol error: invalid JSON")
+                if not isinstance(msg, dict):
+                    raise OrvaUnavailableError("SDK channel protocol error: reply is not an object")
+                with self.cond:
+                    slot = self.inflight.pop(msg.get("id"), None)
+                    self.cond.notify_all()
+                if slot is not None and not slot[2]:
+                    slot[1].append(msg)
+                    slot[0].set()
+        except BaseException as e:  # noqa: BLE001 - wake every waiter on any failure
+            self.mark_dead(e if isinstance(e, OrvaError) else OrvaUnavailableError(f"SDK channel error: {e}"))
+            # The fd stays open: closing it could let the number be reused
+            # while a racing writer still holds it.
+
+    # -- calls -----------------------------------------------------------
+
+    def call(self, op: str, args: Dict[str, Any]) -> tuple[int, bytes, Dict[str, str]]:
+        timeout_s = _channel_timeout_s
+        deadline = time.monotonic() + timeout_s
+        timeout_err = OrvaError(f"request failed: timed out after {timeout_s:g}s", status=0)
+        with self.cond:
+            if self.dead:
+                raise self.dead
+            cid = self.next_id
+            self.next_id += 1
+            if self.reader is None:
+                self.reader = threading.Thread(target=self._reader, name="orva-sdk-channel", daemon=True)
+                self.reader.start()
+        msg: Dict[str, Any] = {"id": cid, "op": op, "a": args}
+        if _lease:
+            msg["lease"] = _lease
+        body = json.dumps(msg).encode("utf-8")
+        if len(body) > MAX_FRAME:
+            raise OrvaError(f"{op}: request too large ({len(body)} bytes, max {MAX_FRAME})", status=413)
+        frame = struct.pack(">I", len(body)) + body
+
+        slot = [threading.Event(), [], False]
+        with self.cond:
+            while len(self.inflight) >= MAX_INFLIGHT and not self.dead:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise timeout_err
+                self.cond.wait(remaining)
+            if self.dead:
+                raise self.dead
+            self.inflight[cid] = slot
+        try:
+            with self.wlock:
+                view = memoryview(frame)
+                while view:
+                    view = view[os.write(self.fd, view):]
+        except OSError as e:
+            err = OrvaUnavailableError(f"SDK channel write failed: {e}")
+            self.mark_dead(err)
+            raise err
+
+        if not slot[0].wait(max(0.0, deadline - time.monotonic())):
+            slot[2] = True  # abandoned: the slot is freed when the host replies
+            raise timeout_err
+        if not slot[1]:
+            raise self.dead or OrvaUnavailableError("SDK channel closed")
+        reply = slot[1][0]
+        if reply.get("ok"):
+            r = reply.get("r")
+            return 200, json.dumps({} if r is None else r).encode("utf-8"), {}
+        e = reply.get("e") or {}
+        try:
+            status = int(e.get("status") or 500)
+        except (TypeError, ValueError):
+            status = 500
+        return status, f"{e.get('code') or 'ERROR'}: {e.get('message') or ''}".encode("utf-8"), {}
+
+
+_chan: Optional[_Chan] = None
+_chan_probed = False
+_chan_lock = threading.Lock()
+
+
+def _channel() -> Optional[_Chan]:
+    """The open channel, or None when this worker has none (HTTP fallback)."""
+    global _chan, _chan_probed
+    if _chan_probed:
+        return _chan
+    with _chan_lock:
+        if _chan_probed:
+            return _chan
+        _chan_probed = True
+        if os.environ.get("ORVA_SDK_PROTO") != "1":
+            return None
+        raw = os.environ.get("ORVA_SDK_FD", "")
+        if not raw.isdigit():
+            return None
+        fd = int(raw)
+        try:
+            if not stat.S_ISSOCK(os.fstat(fd).st_mode):
+                return None
+            _chan = _Chan(fd)
+        except OSError:
+            _chan = None
+        return _chan
+
+
+def _after_fork_in_child() -> None:
+    # A forked child shares the descriptor with its parent and has no reader
+    # thread; two readers on one stream would steal each other's frames, so the
+    # child must never use it.
+    ch = _chan
+    if ch is not None:
+        ch.dead = OrvaUnavailableError("SDK channel unavailable in a forked child")
+        ch.inflight.clear()
+        ch.cond = threading.Condition()
+        ch.wlock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_after_fork_in_child)
+
+
+def _kv(op: str, args: Dict[str, Any], method: str, path: str, body: bytes = b"") -> tuple[int, bytes, Dict[str, str]]:
+    """Run one kv op over the SDK channel when there is one, else over HTTP."""
+    if not (_test_impl and "request" in _test_impl) and op in _CHANNEL_OPS:
+        ch = _channel()
+        if ch is not None:
+            return ch.call(op, args)
+    return _request(method, path, body=body)
+
+
 # ── KV ──────────────────────────────────────────────────────────────
 
 
@@ -199,7 +419,9 @@ class _KV:
     @staticmethod
     def get(key: str, default: Any = None) -> Any:
         fn = _function_id()
-        status, body, _ = _request("GET", f"/api/v1/_kv/{fn}/{quote(key, safe='')}")
+        status, body, _ = _kv(
+            "kv.get", {"key": key}, "GET", f"/api/v1/_kv/{fn}/{quote(key, safe='')}"
+        )
         if status == 404:
             return default
         if status >= 400:
@@ -214,8 +436,12 @@ class _KV:
         if ttl_seconds is not None:
             request_body["ttl_seconds"] = int(ttl_seconds)
         payload = json.dumps(request_body).encode("utf-8")
-        status, body, _ = _request(
-            "PUT", f"/api/v1/_kv/{fn}/{quote(key, safe='')}", body=payload
+        status, body, _ = _kv(
+            "kv.put",
+            {"key": key, **request_body},
+            "PUT",
+            f"/api/v1/_kv/{fn}/{quote(key, safe='')}",
+            body=payload,
         )
         if status >= 400:
             raise OrvaError(f"kv.put({key!r}) failed: {body!r}", status=status)
@@ -223,7 +449,9 @@ class _KV:
     @staticmethod
     def delete(key: str) -> None:
         fn = _function_id()
-        status, body, _ = _request("DELETE", f"/api/v1/_kv/{fn}/{quote(key, safe='')}")
+        status, body, _ = _kv(
+            "kv.delete", {"key": key}, "DELETE", f"/api/v1/_kv/{fn}/{quote(key, safe='')}"
+        )
         if status >= 400 and status != 404:
             raise OrvaError(f"kv.delete({key!r}) failed: {body!r}", status=status)
 
@@ -237,7 +465,12 @@ class _KV:
             qs.append("prefix=" + urllib.parse.quote(prefix, safe=""))
         if cursor:
             qs.append("cursor=" + urllib.parse.quote(cursor, safe=""))
-        status, body, _ = _request("GET", f"/api/v1/_kv/{fn}?" + "&".join(qs))
+        args: Dict[str, Any] = {"limit": int(limit)}
+        if prefix:
+            args["prefix"] = prefix
+        if cursor:
+            args["cursor"] = cursor
+        status, body, _ = _kv("kv.list", args, "GET", f"/api/v1/_kv/{fn}?" + "&".join(qs))
         if status >= 400:
             raise OrvaError(f"kv.list failed: {body!r}", status=status)
         data = json.loads(body)
@@ -249,8 +482,8 @@ class _KV:
         if not keys:
             return {}
         fn = _function_id()
-        payload = json.dumps({"ops": [{"op": "get", "key": k} for k in keys]}).encode("utf-8")
-        status, body, _ = _request("POST", f"/api/v1/_kv/{fn}/batch", body=payload)
+        ops = [{"op": "get", "key": k} for k in keys]
+        status, body, _ = _kv_batch(fn, ops)
         if status >= 400:
             raise OrvaError(f"kv.get_many failed: {body!r}", status=status)
         data = json.loads(body)
@@ -270,8 +503,7 @@ class _KV:
             if "ttl_seconds" in entry:
                 op["ttl_seconds"] = int(entry["ttl_seconds"])
             ops.append(op)
-        payload = json.dumps({"ops": ops}).encode("utf-8")
-        status, body, _ = _request("POST", f"/api/v1/_kv/{fn}/batch", body=payload)
+        status, body, _ = _kv_batch(fn, ops)
         if status >= 400:
             raise OrvaError(f"kv.put_many failed: {body!r}", status=status)
         _assert_atomic_batch(json.loads(body), "kv.put_many")
@@ -281,8 +513,8 @@ class _KV:
         if not keys:
             return 0
         fn = _function_id()
-        payload = json.dumps({"ops": [{"op": "delete", "key": k} for k in keys]}).encode("utf-8")
-        status, body, _ = _request("POST", f"/api/v1/_kv/{fn}/batch", body=payload)
+        ops = [{"op": "delete", "key": k} for k in keys]
+        status, body, _ = _kv_batch(fn, ops)
         if status >= 400:
             raise OrvaError(f"kv.delete_many failed: {body!r}", status=status)
         data = json.loads(body)
@@ -296,8 +528,12 @@ class _KV:
         if ttl_seconds is not None:
             request_body["ttl_seconds"] = int(ttl_seconds)
         payload = json.dumps(request_body).encode("utf-8")
-        status, body, _ = _request(
-            "POST", f"/api/v1/_kv/{fn}/{quote(key, safe='')}/incr", body=payload
+        status, body, _ = _kv(
+            "kv.incr",
+            {"key": key, **request_body},
+            "POST",
+            f"/api/v1/_kv/{fn}/{quote(key, safe='')}/incr",
+            body=payload,
         )
         if status >= 400:
             raise OrvaError(f"kv.incr({key!r}) failed: {body!r}", status=status)
@@ -310,8 +546,12 @@ class _KV:
         if ttl_seconds is not None:
             request_body["ttl_seconds"] = int(ttl_seconds)
         payload = json.dumps(request_body).encode("utf-8")
-        status, body, _ = _request(
-            "POST", f"/api/v1/_kv/{fn}/{quote(key, safe='')}/cas", body=payload
+        status, body, _ = _kv(
+            "kv.cas",
+            {"key": key, **request_body},
+            "POST",
+            f"/api/v1/_kv/{fn}/{quote(key, safe='')}/cas",
+            body=payload,
         )
         if status >= 400:
             raise OrvaError(f"kv.cas({key!r}) failed: {body!r}", status=status)
@@ -322,6 +562,16 @@ class _KV:
 
 
 kv = _KV()
+
+
+def _kv_batch(fn: str, ops: List[Dict[str, Any]]) -> tuple[int, bytes, Dict[str, str]]:
+    return _kv(
+        "kv.batch",
+        {"ops": ops},
+        "POST",
+        f"/api/v1/_kv/{fn}/batch",
+        body=json.dumps({"ops": ops}).encode("utf-8"),
+    )
 
 
 def _assert_atomic_batch(data: Dict[str, Any], operation: str) -> None:
@@ -686,123 +936,3 @@ __all__ = [
     "__test_mode__",
     "SDK_VERSION",
 ]
-
-# ---- SPIKE: private SDK channel (fd ORVA_SDK_FD), no network involved. ----
-# os.read/os.write on purpose: socket.recv/send compile to recvfrom/sendto, which
-# the no-network seccomp profile blocks. One lazily started reader thread
-# demultiplexes replies by id so threads can call concurrently.
-import struct as _struct
-import threading as _threading
-
-
-class _Chan:
-    def __init__(self, fd):
-        self.fd = fd
-        self.wlock = _threading.Lock()
-        self.lock = _threading.Lock()
-        self.pending = {}
-        self.next_id = 1
-        self.dead = None
-        t = _threading.Thread(target=self._reader, daemon=True)
-        t.start()
-        if hasattr(os, "register_at_fork"):
-            os.register_at_fork(after_in_child=self._mark_dead_in_child)
-
-    def _mark_dead_in_child(self):
-        # A forked child shares the descriptor with its parent; two readers on
-        # one stream would interleave frames, so the child must never use it.
-        self.dead = OrvaUnavailableError("SDK channel unavailable in a forked child")
-
-    def _read_exact(self, n):
-        out = b""
-        while len(out) < n:
-            chunk = os.read(self.fd, n - len(out))
-            if not chunk:
-                raise OrvaUnavailableError("SDK channel closed")
-            out += chunk
-        return out
-
-    def _reader(self):
-        try:
-            while True:
-                (n,) = _struct.unpack(">I", self._read_exact(4))
-                msg = json.loads(self._read_exact(n).decode("utf-8"))
-                with self.lock:
-                    slot = self.pending.pop(msg.get("id"), None)
-                if slot:
-                    slot[1].append(msg)
-                    slot[0].set()
-        except BaseException as e:  # noqa: BLE001 - wake every waiter on any failure
-            self.dead = e if isinstance(e, OrvaError) else OrvaUnavailableError(str(e))
-            with self.lock:
-                waiters = list(self.pending.values())
-                self.pending.clear()
-            for ev, _res in waiters:
-                ev.set()
-
-    def call(self, op, **extra):
-        if self.dead:
-            raise self.dead
-        ev = _threading.Event()
-        res = []
-        with self.lock:
-            cid = self.next_id
-            self.next_id += 1
-            self.pending[cid] = (ev, res)
-        body = json.dumps({"id": cid, "op": op, **extra}).encode("utf-8")
-        frame = _struct.pack(">I", len(body)) + body
-        with self.wlock:
-            view = memoryview(frame)
-            while view:
-                view = view[os.write(self.fd, view):]
-        ev.wait()
-        if not res:
-            raise self.dead or OrvaUnavailableError("SDK channel closed")
-        return res[0]
-
-
-_chan = None
-
-
-def _spike_channel():
-    global _chan
-    if _chan is None:
-        try:
-            fd = int(os.environ.get("ORVA_SDK_FD", ""))
-        except ValueError:
-            raise OrvaUnavailableError("no SDK channel (ORVA_SDK_FD unset)")
-        os.set_blocking(fd, True)
-        _chan = _Chan(fd)
-    return _chan
-
-
-def _spike_echo(n=1000, size=16, threads=1):
-    ch = _spike_channel()
-    data = "x" * size
-    lat = []
-    lat_lock = _threading.Lock()
-    counter = {"sent": 0}
-
-    def work():
-        while True:
-            with lat_lock:
-                if counter["sent"] >= n:
-                    return
-                counter["sent"] += 1
-            s = time.perf_counter()
-            r = ch.call("echo", data=data)
-            if not r.get("ok") or r.get("data") != data:
-                raise RuntimeError("bad echo")
-            with lat_lock:
-                lat.append((time.perf_counter() - s) * 1e6)
-
-    t0 = time.perf_counter()
-    ts = [_threading.Thread(target=work) for _ in range(threads)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    total = (time.perf_counter() - t0) * 1000
-    lat.sort()
-    return {"n": n, "threads": threads, "total_ms": total, "per_call_us": total * 1000 / n,
-            "p50_us": lat[len(lat) // 2], "p99_us": lat[int(len(lat) * 0.99)]}
