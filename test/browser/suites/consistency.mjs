@@ -87,6 +87,11 @@ const PROBE = ({ radii, icons, tol, rowExempt, labelExempt }) => {
       label: labelOf(el),
       texted: own,
       desc: describe(el),
+      // A segment of a radio group names a mode, not an action, and the shared
+      // SegmentedControl draws every one the same way; "Edit" there is not the
+      // icon-only Edit button on a table row. Compared on radius and in its row,
+      // not by label.
+      segment: !!el.closest('[role="radiogroup"]'),
     })
   }
 
@@ -155,6 +160,7 @@ const PROBE = ({ radii, icons, tol, rowExempt, labelExempt }) => {
   for (const c of controls) {
     if (!c.label || c.label.length < 3) continue
     if (labelExempt.includes(c.label)) continue
+    if (c.segment) continue
     labels.push({ label: c.label, h: c.h, fs: c.fs, icon: c.icon, desc: c.desc })
   }
 

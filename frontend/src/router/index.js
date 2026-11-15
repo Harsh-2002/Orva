@@ -2,6 +2,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import Layout from '@/components/layout/Layout.vue'
 
+// The Editor takes `?mode=edit` as a prop for the same reason it takes :name as
+// one: it is keep-alived, and useRoute() keeps moving under a deactivated view.
+const editorProps = (r) => ({ ...r.params, mode: r.query.mode === 'edit' ? 'edit' : '' })
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -28,7 +32,7 @@ const router = createRouter({
         // props: true, not useRoute(), on every scoped view below: Layout.vue
         // keep-alives the router-view and Vue does not patch a cached
         // instance's props, so an off-screen view stops following the URL.
-        { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue'), props: true },
+        { path: 'functions/:name', name: 'function-detail', component: () => import('@/views/Editor.vue'), props: editorProps },
         { path: 'functions/:name/deployments', name: 'function-deployments', component: () => import('@/views/Deployments.vue'), props: true },
         { path: 'functions/:name/diff', name: 'function-diff', component: () => import('@/views/FunctionDiff.vue'), props: (r) => ({ name: r.params.name, from: r.query.from || '', to: r.query.to || '' }) },
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
@@ -37,7 +41,7 @@ const router = createRouter({
         // Canonical create route. The Editor keys off its `name` prop, which
         // this route leaves empty -- that is what puts it in create mode, and
         // why it resolves props too rather than inheriting a stale one.
-        { path: 'functions/new', name: 'function-new', component: () => import('@/views/Editor.vue'), props: true },
+        { path: 'functions/new', name: 'function-new', component: () => import('@/views/Editor.vue'), props: editorProps },
         // Legacy /deploy redirects to the canonical create route. Kept so
         // any bookmarks or external links keep working; new code points
         // at /functions/new.

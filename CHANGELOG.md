@@ -115,6 +115,21 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Changed
 
+- Dashboard: a function now opens in **View** mode (read-only code; Reset, Deploy,
+  Rollback and the Settings/Env/Deps/Secrets items are hidden, and Cmd/Ctrl-S does
+  nothing). **Edit** is an explicit `View | Edit` switch next to the name, mirrored
+  in the address as `?mode=edit`, and `/functions/new` is always edit. Switching
+  back to View with unsaved changes asks before discarding them. The pencil on the
+  Functions list opens a function directly in Edit.
+- Dashboard: lists are clickable where they have a destination. On the Functions
+  list the whole row or card opens the function and the name is a real link (the
+  pencil was the only way in); Channels and Cron schedules open their editor from
+  the name or the row. Copy buttons, checkboxes and selecting an id still behave
+  as before, and Cmd/Ctrl-click opens a new tab.
+- Dashboard: the Compare versions layout switch (Side by side / Unified) is a
+  bordered segmented control with icons instead of a lowercase caption that did
+  not look clickable. It is a shared `SegmentedControl` (radio semantics, arrow
+  keys) that the View/Edit switch also uses.
 - Trace diagnostics now distinguish execution-level log correlation from code
   spans. Structured SDK logs from function-to-function calls, cron/jobs, and
   inbound webhooks are collected alongside HTTP logs; ordinary stderr remains

@@ -74,12 +74,16 @@
           <li
             v-for="fn in filtered"
             :key="fn.id"
-            class="px-4 py-3 active:bg-surface-hover/50 transition-colors"
+            class="px-4 py-3 active:bg-surface-hover/50 transition-colors cursor-pointer"
+            @click="rowNav(router, fnPath(fn))($event)"
           >
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="font-medium text-foreground-strong truncate">{{ fn.name }}</span>
+                  <router-link
+                    :to="fnPath(fn)"
+                    class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full text-sm font-medium text-foreground-strong truncate rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >{{ fn.name }}</router-link>
                   <span
                     v-if="fn.network_mode === 'egress'"
                     class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-tint text-warning-fg border border-warning-ring"
@@ -130,7 +134,7 @@
                 <IconButton
                   :icon="Pencil"
                   title="Edit function"
-                  @click="router.push('/functions/' + fn.name)"
+                  @click="router.push(fnPath(fn, 'edit'))"
                 />
                 <IconButton
                   :icon="Trash2"
@@ -207,8 +211,9 @@
             <tr
               v-for="fn in filtered"
               :key="fn.id"
-              class="hover:bg-surface/50 transition-colors"
+              class="hover:bg-surface/50 transition-colors cursor-pointer"
               :class="{ 'bg-surface/30': selected.has(fn.id) }"
+              @click="rowNav(router, fnPath(fn))($event)"
             >
               <td class="px-6 py-4 align-middle">
                 <!-- The label is the touch target. A checkbox is a replaced
@@ -226,7 +231,10 @@
               </td>
               <td class="px-6 py-4 font-medium text-foreground-strong">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <span>{{ fn.name }}</span>
+                  <router-link
+                    :to="fnPath(fn)"
+                    class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full rounded-md hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >{{ fn.name }}</router-link>
                   <span
                     v-if="fn.network_mode === 'egress'"
                     class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-tint text-warning-fg border border-warning-ring"
@@ -299,7 +307,7 @@
                   <IconButton
                     :icon="Pencil"
                     title="Edit function"
-                    @click="router.push('/functions/' + fn.name)"
+                    @click="router.push(fnPath(fn, 'edit'))"
                   />
                   <IconButton
                     :icon="Trash2"
@@ -430,9 +438,13 @@ import { listFunctions } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
 import { useEventsStore } from '@/stores/events'
+import { rowNav } from '@/utils/rowNav'
 
 const confirmStore = useConfirmStore()
 const router = useRouter()
+
+// The function page opens in View mode; the pencil asks for Edit.
+const fnPath = (fn, mode) => ({ path: `/functions/${fn.name}`, query: mode ? { mode } : {} })
 
 const PAGE_SIZE = 25
 

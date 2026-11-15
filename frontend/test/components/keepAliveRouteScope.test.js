@@ -71,6 +71,9 @@ vi.mock('@/components/common/CodeEditor.vue', async () => {
 
 const OTHER = { render: () => null }
 
+// Mirrors router/index.js: ?mode=edit reaches the Editor as a prop.
+const editorProps = (r) => ({ ...r.params, mode: r.query.mode === 'edit' ? 'edit' : '' })
+
 // Mirrors Layout.vue: one un-keyed keep-alive around the router-view.
 const Shell = {
   template: '<router-view v-slot="{ Component }"><keep-alive :max="10"><component :is="Component" /></keep-alive></router-view>',
@@ -191,10 +194,10 @@ describe('keep-alive route scoping', () => {
   it('Editor ignores orva:deploy while it is cached behind another view', async () => {
     const Editor = (await import('@/views/Editor.vue')).default
     const { go } = await boot([
-      { path: '/functions/:name', name: 'function-detail', component: Editor, props: true },
+      { path: '/functions/:name', name: 'function-detail', component: Editor, props: editorProps },
       { path: '/functions/:name/kv', name: 'function-kv', component: OTHER },
       { path: '/functions/:name/test', name: 'function-test', component: OTHER },
-    ], '/functions/alpha')
+    ], '/functions/alpha?mode=edit')
 
     window.dispatchEvent(new CustomEvent('orva:deploy'))
     await settle()
