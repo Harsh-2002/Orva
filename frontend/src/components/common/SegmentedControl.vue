@@ -3,7 +3,7 @@
     ref="root"
     role="radiogroup"
     :aria-label="ariaLabel"
-    class="inline-flex items-center gap-0.5 rounded-md border border-border bg-surface p-0.5"
+    class="inline-flex items-center gap-0.5 rounded-lg border border-border bg-surface p-0.5"
   >
     <button
       v-for="(opt, i) in options"
@@ -16,7 +16,7 @@
       :title="opt.title"
       :data-value="opt.value"
       :class="[
-        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 disabled:cursor-not-allowed',
+        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 disabled:cursor-not-allowed',
         size === 'xs' ? 'h-6 px-2.5 text-xs touch-expand-xs' : 'h-7 px-3 text-xs touch-expand-sm',
         opt.value === modelValue
           ? 'bg-background text-foreground-strong border border-border shadow-sm'

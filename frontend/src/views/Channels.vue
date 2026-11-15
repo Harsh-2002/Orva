@@ -184,7 +184,7 @@
               <div class="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  class="font-medium text-foreground-strong truncate text-left rounded-sm hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full text-sm font-medium text-foreground-strong truncate text-left rounded-md hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   @click="openEditFunctions(c)"
                 >
                   {{ c.name }}
@@ -294,7 +294,7 @@
               <div class="font-medium text-foreground-strong">
                 <button
                   type="button"
-                  class="rounded-sm text-left hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full rounded-md text-left hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   @click="openEditFunctions(c)"
                 >
                   {{ c.name }}

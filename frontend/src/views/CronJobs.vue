@@ -37,7 +37,7 @@
               <div class="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  class="font-medium text-foreground truncate text-left rounded-sm hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full text-sm font-medium text-foreground truncate text-left rounded-md hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   @click="editSchedule(job)"
                 >
                   {{ job.function_name }}
@@ -140,7 +140,7 @@
               <div class="flex items-center gap-2 min-w-0">
                 <button
                   type="button"
-                  class="truncate text-left rounded-sm hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full truncate text-left rounded-md hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   @click="editSchedule(job)"
                 >
                   {{ job.function_name }}

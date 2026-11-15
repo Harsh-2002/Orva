@@ -82,7 +82,7 @@
                 <div class="flex items-center gap-1.5 flex-wrap">
                   <router-link
                     :to="fnPath(fn)"
-                    class="font-medium text-foreground-strong truncate rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full text-sm font-medium text-foreground-strong truncate rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >{{ fn.name }}</router-link>
                   <span
                     v-if="fn.network_mode === 'egress'"
@@ -233,7 +233,7 @@
                 <div class="flex items-center gap-2 flex-wrap">
                   <router-link
                     :to="fnPath(fn)"
-                    class="rounded-sm hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    class="inline-flex items-center min-h-[1.5rem] touch-expand-xs max-w-full rounded-md hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                   >{{ fn.name }}</router-link>
                   <span
                     v-if="fn.network_mode === 'egress'"
