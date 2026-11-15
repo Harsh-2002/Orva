@@ -47,6 +47,8 @@ type Worker struct {
 	// disp is the dispatch currently running on the worker; the SDK server
 	// validates every frame's lease against it. Nil between dispatches.
 	disp atomic.Pointer[dispatchState]
+	// sdkSess is the channel session, set once when the SDK server starts.
+	sdkSess atomic.Pointer[SDKSession]
 
 	// CgroupPath is resolved asynchronously after Spawn (nsjail names the
 	// cgroup after its jailed child's PID, which isn't known until after fork).
@@ -226,6 +228,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 			violation: w.markDead,
 			kill:      func() { _ = w.Kill() },
 		}
+		w.sdkSess.Store(&srv.session)
 		go srv.serve()
 	}
 
@@ -838,9 +841,7 @@ func (w *Worker) beginLease(ctx context.Context) []byte {
 		return nil
 	}
 	st := newDispatchState(ctx)
-	if old := w.disp.Swap(st); old != nil {
-		old.cancel()
-	}
+	w.endDispatch(w.disp.Swap(st))
 	frame, _ := json.Marshal(map[string]string{"type": "lease", "lease": st.info.Lease})
 	return frame
 }
@@ -848,8 +849,18 @@ func (w *Worker) beginLease(ctx context.Context) []byte {
 // revokeLease ends the current dispatch's authority: later frames carrying its
 // lease are refused and callee work derived from its ctx is cancelled.
 func (w *Worker) revokeLease() {
-	if st := w.disp.Swap(nil); st != nil {
-		st.cancel()
+	w.endDispatch(w.disp.Swap(nil))
+}
+
+// endDispatch cancels a finished dispatch's ctx and tells the channel session
+// so work it started on that lease (open streams) is torn down.
+func (w *Worker) endDispatch(st *dispatchState) {
+	if st == nil {
+		return
+	}
+	st.cancel()
+	if sess := w.sdkSess.Load(); sess != nil {
+		sess.leaseRevoked(st.info.Lease)
 	}
 }
 

@@ -155,6 +155,7 @@ interface first) for the sandbox SDK control plane. Do not reintroduce a
 gateway or generic health probe: it can select a separate Orva instance before
 this server begins listening. The environment override remains available for
 unusual routing.
+| `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), the same ones the HTTP handlers use; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
 | `executionlogs` | Shared worker-stderr processing for HTTP, buffered/streaming F2F, scheduler, inbound webhook and replay paths. Extracts structured SDK records into the optional telemetry writer and preserves ordinary stderr and malformed records for invocation logs. |

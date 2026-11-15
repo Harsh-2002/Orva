@@ -128,6 +128,9 @@ func New(cfg *config.Config, db *database.Database) *Server {
 
 	// Wire the warm pool manager. It owns the sandbox.Limiter as a
 	// host-wide ceiling and spawns per-function worker pools lazily.
+	// The channel host needs the pool for invoke, and the pool needs the host's
+	// handler for its spawn template: the invoker is attached afterwards.
+	sdkHost := sdkhost.New(db)
 	poolMgr := pool.NewManager(
 		pool.ManagerConfig{
 			DefaultMin: 1,
@@ -141,9 +144,12 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			ReapInterval:   30 * time.Second,
 			EagerWarmup:    true,
 		},
-		newSandboxTemplate(cfg, met, sdkAuth.Mint, apiBase, sdkhost.New(db).Handle),
+		newSandboxTemplate(cfg, met, sdkAuth.Mint, apiBase, sdkHost.Handle),
 		db, reg, limiter,
 	)
+	sdkHost.SetInvoker(&handlers.InternalInvokeHandler{
+		DB: db, Registry: reg, Pool: poolMgr, Metrics: met, SDKAuth: sdkAuth,
+	})
 
 	// Create proxy with sandbox config.
 	px := &proxy.Proxy{

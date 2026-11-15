@@ -33,8 +33,15 @@ func TestDispatchAndIdentity(t *testing.T) {
 	defer db.Close()
 	h := New(db)
 	ctx := context.Background()
-	for _, op := range []string{"invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close", "jobs.enqueue", "crons.upsert", "spans.emit"} {
+	// invoke* are implemented: without an invoker they are 501, and without a
+	// live execution they are a scope violation once an invoker exists.
+	for _, op := range []string{"invoke", "invoke.stream.open", "jobs.enqueue", "crons.upsert", "spans.emit"} {
 		if _, e := h.Handle(ctx, sandbox.SDKCaller{FunctionID: fnA}, op, nil); e == nil || e.Status != 501 || e.Code != "NOT_IMPLEMENTED" {
+			t.Errorf("%s: %+v", op, e)
+		}
+	}
+	for _, op := range []string{"invoke.stream.next", "invoke.stream.close"} {
+		if _, e := h.Handle(ctx, sandbox.SDKCaller{FunctionID: fnA}, op, nil); e == nil || e.Status != 403 || e.Code != "SDK_SCOPE_VIOLATION" {
 			t.Errorf("%s: %+v", op, e)
 		}
 	}
@@ -82,7 +89,7 @@ func TestMetrics(t *testing.T) {
 	h.Handle(context.Background(), c, "kv.get", json.RawMessage(`{"key":"zz"}`))
 	h.Handle(context.Background(), c, "whatever-attacker-chose", nil)
 	h.Handle(context.Background(), c, "invoke", nil)
-	want := []string{"kv.put:200", "kv.get:404", "unknown:400", "unimplemented:501"}
+	want := []string{"kv.put:200", "kv.get:404", "unknown:400", "invoke:501"}
 	if strings.Join(cm.seen, ",") != strings.Join(want, ",") {
 		t.Fatalf("metrics %v want %v", cm.seen, want)
 	}

@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 )
 
@@ -73,4 +74,68 @@ func NewExecInfo(ctx context.Context, executionID, traceID, spanID string, depth
 		info.Deadline = d
 	}
 	return info
+}
+
+// SDKSessionState is handler-owned state for one SDK channel (one worker). The
+// host calls LeaseRevoked when a dispatch's lease ends and Closed once when the
+// channel closes; both must be quick and must not call back into the worker
+// that owns the channel.
+type SDKSessionState interface {
+	LeaseRevoked(lease string)
+	Closed()
+}
+
+// SDKSession is the per-channel session the sandbox creates when the channel
+// starts serving. Handlers reach it through SDKSessionFrom(ctx).
+type SDKSession struct {
+	mu     sync.Mutex
+	state  SDKSessionState
+	closed bool
+}
+
+// State returns the handler's state, creating it with init on first use. After
+// the channel closed it returns nil (the caller must refuse the operation).
+func (s *SDKSession) State(init func() SDKSessionState) SDKSessionState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if s.state == nil {
+		s.state = init()
+	}
+	return s.state
+}
+
+func (s *SDKSession) leaseRevoked(lease string) {
+	s.mu.Lock()
+	st := s.state
+	s.mu.Unlock()
+	if st != nil {
+		st.LeaseRevoked(lease)
+	}
+}
+
+func (s *SDKSession) close() {
+	s.mu.Lock()
+	st := s.state
+	s.closed = true
+	s.mu.Unlock()
+	if st != nil {
+		st.Closed()
+	}
+}
+
+type sessionCtxKey struct{}
+
+// SDKSessionFrom returns the channel session attached to an SDK op's ctx.
+func SDKSessionFrom(ctx context.Context) *SDKSession {
+	s, _ := ctx.Value(sessionCtxKey{}).(*SDKSession)
+	return s
+}
+
+// WithSDKSession attaches a session to ctx; the sandbox does this for every
+// op it serves, so only tests and embedders of a Handler need it.
+func WithSDKSession(ctx context.Context, s *SDKSession) context.Context {
+	return context.WithValue(ctx, sessionCtxKey{}, s)
 }

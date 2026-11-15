@@ -11,6 +11,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 )
 
 // Metrics receives one observation per handled op. status is the HTTP-like
@@ -37,6 +38,7 @@ type OpStats struct {
 
 var opNames = [...]string{
 	"kv.get", "kv.put", "kv.delete", "kv.list", "kv.batch", "kv.incr", "kv.cas",
+	"invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close",
 	"unimplemented", "unknown",
 }
 
@@ -51,6 +53,7 @@ type opCounter struct{ count, errs, ns atomic.Uint64 }
 type Host struct {
 	DB      *database.Database
 	metrics Metrics
+	invoker atomic.Pointer[handlers.InternalInvokeHandler]
 	ops     [len(opNames)]opCounter
 }
 
@@ -86,8 +89,7 @@ func opIndex(op string) int {
 
 func isUnimplemented(op string) bool {
 	switch op {
-	case "invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close",
-		"jobs.enqueue", "crons.upsert", "spans.emit":
+	case "jobs.enqueue", "crons.upsert", "spans.emit":
 		return true
 	}
 	return false
@@ -138,6 +140,14 @@ func (h *Host) Handle(ctx context.Context, caller sandbox.SDKCaller, op string, 
 		return h.kvIncr(ctx, caller.FunctionID, args)
 	case "kv.cas":
 		return h.kvCAS(ctx, caller.FunctionID, args)
+	case "invoke":
+		return h.invoke(ctx, caller, args)
+	case "invoke.stream.open":
+		return h.streamOpen(ctx, caller, args)
+	case "invoke.stream.next":
+		return h.streamNext(ctx, caller, args)
+	case "invoke.stream.close":
+		return h.streamClose(ctx, caller, args)
 	}
 	if isUnimplemented(op) {
 		return nil, &sandbox.SDKError{Status: 501, Code: "NOT_IMPLEMENTED", Message: "operation not implemented on the SDK channel yet"}

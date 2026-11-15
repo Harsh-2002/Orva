@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -55,140 +56,159 @@ func (h *InternalInvokeHandler) callerDepth(w http.ResponseWriter, r *http.Reque
 			"SDK request is not associated with an active caller execution", reqID)
 		return 0, false
 	}
-	maxDepth := h.MaxCallDepth
-	if maxDepth <= 0 {
-		maxDepth = defaultMaxCallDepth
-	}
-	if depth+1 > maxDepth {
-		respond.Error(w, http.StatusInsufficientStorage, "MAX_CALL_DEPTH",
-			"call depth exceeds max ("+strconv.Itoa(maxDepth)+")", reqID)
+	if ierr := h.CheckDepth(depth); ierr != nil {
+		ierr.write(w, reqID)
 		return 0, false
 	}
 	return depth, true
 }
 
-// Invoke handles POST /api/v1/_internal/invoke/{name}. The path uses the
-// friendly function name (NOT the fn_<id> form) so user code stays
-// readable: orva.invoke("resize-image", payload).
-func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
-	reqID := r.Header.Get("X-Request-ID")
+// F2FCaller is the host-recorded identity of the execution making an F2F call.
+// It comes from the SDK credential's execution binding (HTTP) or the dispatch
+// lease (SDK channel), never from request data.
+type F2FCaller struct {
+	FunctionID string
+	TraceID    string
+	SpanID     string
+	Depth      int
+}
 
-	// The verified function claim supplies immutable caller attribution.
-	callerFnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
-	if authErr != nil {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid SDK credential", reqID)
-		return
-	}
-	callerTraceID, callerSpanID, _, callerActive := h.SDKAuth.TraceContext(
-		r.Header.Get("X-Orva-Execution-Id"), callerFnID,
-	)
-	if !callerActive {
-		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
-			"SDK request is not associated with an active caller execution", reqID)
-		return
-	}
+// InvokeError is a failure of an F2F call carrying the exact HTTP status and
+// envelope; the SDK channel reuses status/code/message verbatim.
+type InvokeError struct {
+	Status int
+	Opts   respond.ErrorOpts
+}
 
-	name := r.PathValue("name")
+func (e *InvokeError) Error() string { return e.Opts.Code + ": " + e.Opts.Message }
+
+func (e *InvokeError) write(w http.ResponseWriter, reqID string) {
+	opts := e.Opts
+	opts.RequestID = reqID
+	respond.ErrorWithDetail(w, e.Status, opts)
+}
+
+func (h *InternalInvokeHandler) maxDepth() int {
+	if h.MaxCallDepth > 0 {
+		return h.MaxCallDepth
+	}
+	return defaultMaxCallDepth
+}
+
+// CheckDepth enforces the call-depth cap for a caller at callerDepth.
+func (h *InternalInvokeHandler) CheckDepth(callerDepth int) *InvokeError {
+	if m := h.maxDepth(); callerDepth+1 > m {
+		return &InvokeError{Status: http.StatusInsufficientStorage, Opts: respond.ErrorOpts{Code: "MAX_CALL_DEPTH", Message: "call depth exceeds max (" + strconv.Itoa(m) + ")", RequestID: ""}}
+	}
+	return nil
+}
+
+// ResolveCallee finds an active callee by name.
+func (h *InternalInvokeHandler) ResolveCallee(name string) (*database.Function, *InvokeError) {
 	if name == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "function name is required", reqID)
-		return
+		return nil, &InvokeError{Status: http.StatusBadRequest, Opts: respond.ErrorOpts{Code: "VALIDATION", Message: "function name is required", RequestID: ""}}
 	}
-
-	depth, depthOK := h.callerDepth(w, r, callerFnID, reqID)
-	if !depthOK {
-		return
-	}
-
-	// Resolve name → function. Look up via the DB (single SQL hit) so
-	// brand-new functions are visible immediately without registry warm.
+	// Look up via the DB (single SQL hit) so brand-new functions are visible
+	// immediately without registry warm.
 	fn, err := h.DB.GetFunctionByName(name)
 	if err != nil {
-		respond.Error(w, http.StatusNotFound, "NOT_FOUND",
-			"function not found: "+name, reqID)
-		return
+		return nil, &InvokeError{Status: http.StatusNotFound, Opts: respond.ErrorOpts{Code: "NOT_FOUND", Message: "function not found: " + name, RequestID: ""}}
 	}
-	// Every other invoke entrypoint refuses an inactive function; this one
-	// did not, so orva.invoke("some-inactive-fn") from inside a sandbox ran
-	// it anyway.
 	if fn.Status != "active" {
-		respond.Error(w, http.StatusConflict, "NOT_ACTIVE",
-			"function is not active", reqID)
-		return
+		return nil, &InvokeError{Status: http.StatusConflict, Opts: respond.ErrorOpts{Code: "NOT_ACTIVE", Message: "function is not active", RequestID: ""}}
 	}
+	return fn, nil
+}
 
-	body, err := readBoundedBody(r.Body, 1<<20)
+func reserveExecutionCtx(parent context.Context, db *database.Database, reqID string) (*database.ExecutionLease, *InvokeError) {
+	reserveCtx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	lease, err := db.ReserveExecution(reserveCtx)
 	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return nil, &InvokeError{Status: http.StatusTooManyRequests, Opts: respond.ErrorOpts{
+			Code: "STORAGE_BACKPRESSURE", Message: "execution storage is catching up",
+			RequestID: reqID, RetryAfterS: 1,
+			Hint: "back off briefly and retry; no function code ran",
+		}}
+	}
+	return lease, nil
+}
+
+func f2fEvent(fn *database.Function, execID string, c F2FCaller, traceID, spanID string, body []byte, stream bool) []byte {
+	headers := map[string]string{
+		"content-type":        "application/json",
+		"x-orva-trigger":      "f2f",
+		"x-orva-call-depth":   strconv.Itoa(c.Depth + 1),
+		"x-orva-function-id":  fn.ID,
+		"x-orva-execution-id": execID,
+		"x-orva-trace-id":     traceID,
+		"x-orva-span-id":      spanID,
+	}
+	if stream {
+		headers["x-orva-stream"] = "1"
+	}
+	eventJSON, _ := json.Marshal(map[string]any{
+		"method": "POST", "path": "/", "headers": headers, "body": string(body),
+	})
+	return eventJSON
+}
+
+func calleeTimeout(fn *database.Function) time.Duration {
+	if t := time.Duration(fn.TimeoutMS) * time.Millisecond; t > 0 {
+		return t
+	}
+	return 30 * time.Second
+}
+
+func (h *InternalInvokeHandler) recordMetrics(coldStart bool, durationMS int64, execID, fnID, status string) {
+	if h.Metrics == nil {
 		return
 	}
-	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
-	if !admitted {
-		return
+	// Count the invocation, not just the baseline: these paths fed Baselines
+	// but never the counters.
+	h.Metrics.RecordInvocation(coldStart)
+	h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
+	h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fnID, status, coldStart, durationMS)
+}
+
+// RunInvoke runs one buffered F2F call. parent bounds it: cancelling parent
+// cancels the callee. It returns the worker envelope verbatim.
+func (h *InternalInvokeHandler) RunInvoke(parent context.Context, c F2FCaller, fn *database.Function, body []byte, reqID string) ([]byte, *InvokeError) {
+	if err := parent.Err(); err != nil {
+		return nil, invokeErrorFrom(err, fn, reqID)
+	}
+	executionLease, ierr := reserveExecutionCtx(parent, h.DB, reqID)
+	if ierr != nil {
+		return nil, ierr
 	}
 	defer executionLease.Cancel()
 
-	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	// v0.5 trace context. The SDK forwards X-Orva-Trace-Id /
-	// X-Orva-Span-Id from the caller's env (set by proxy.Forward when the
-	// caller was started). traceID may be empty for legacy calls; we
-	// generate a fresh root in that case so this F2F still produces a
-	// usable single-span trace. parentSpanID = caller's span = our parent.
-	traceID := callerTraceID
-	parentSpanID := callerSpanID
+	timeout := calleeTimeout(fn)
+	// traceID may be empty for legacy calls; parentSpanID = caller's span.
+	traceID := c.TraceID
+	parentSpanID := c.SpanID
 	spanID := trace.NewSpanID()
 
-	acq, err := h.Pool.Acquire(r.Context(), fn.ID)
+	acq, err := h.Pool.Acquire(parent, fn.ID)
 	if err != nil {
-		// Use the shared taxonomy rather than flattening everything to a
-		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
-		// Retry-After), MEMORY_EXHAUSTED, EGRESS_POLICY_UNAVAILABLE and
-		// TIMEOUT; without it an SDK retrying on this path cannot tell a
-		// concurrency cap it should back off from from a host OOM it should
-		// not, and the error codes documented in docs/ERRORS.md only ever
-		// appeared on one of the five invoke entrypoints.
-		status, opts := invokeError(err, fn, reqID)
-		respond.ErrorWithDetail(w, status, opts)
-		return
+		// The shared taxonomy distinguishes FUNCTION_BUSY, MEMORY_EXHAUSTED,
+		// EGRESS_POLICY_UNAVAILABLE and TIMEOUT.
+		return nil, invokeErrorFrom(err, fn, reqID)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
 
-	// Generate an execution ID so this F2F call shows up in the executions
-	// log AND in the trace tree as a distinct span. Without this, F2F
-	// children would be invisible to ops tooling.
+	// A distinct execution so the F2F child shows in the executions log and
+	// the trace tree.
 	execID := ids.New()
 	start := time.Now()
-	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start, depth+1)
+	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start, c.Depth+1)
 	defer releaseExecution()
-	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, depth+1, start))
+	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, c.Depth+1, start))
 
-	// Synthesize the event in the same shape the public /fn/ handler
-	// builds so user code can't tell the difference (which is the point).
-	// Trace headers reach the user code so the SDK can forward them on
-	// any nested invokes.
-	event := map[string]any{
-		"method": "POST",
-		"path":   "/",
-		"headers": map[string]string{
-			"content-type":        "application/json",
-			"x-orva-trigger":      "f2f",
-			"x-orva-call-depth":   strconv.Itoa(depth + 1),
-			"x-orva-function-id":  fn.ID,
-			"x-orva-execution-id": execID,
-			"x-orva-trace-id":     traceID,
-			"x-orva-span-id":      spanID,
-		},
-		"body": string(body),
-	}
-	eventJSON, _ := json.Marshal(event)
-
-	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
+	respJSON, stderr, err := acq.Worker.Dispatch(ctx, f2fEvent(fn, execID, c, traceID, spanID, body, false))
 	durationMS := time.Since(start).Milliseconds()
 	// Raw logs have an execution FK, so publish the completion before its logs.
 	defer func() { executionlogs.Persist(h.DB, stderr, fn.ID, execID, traceID, spanID) }()
@@ -198,33 +218,20 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			errMsg = "function timed out"
 		}
-		// Record the failed F2F as a span so the trace tree shows the
-		// failure point even when the parent succeeded.
 		h.DB.AsyncInsertExecutionFinal(
 			&database.Execution{
 				ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: acq.ColdStart,
 				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
-				Trigger: "f2f", ParentFunctionID: callerFnID,
+				Trigger: "f2f", ParentFunctionID: c.FunctionID,
 				StartedAt: start,
 			},
 			durationMS, http.StatusBadGateway, errMsg, 0, executionLease,
 		)
-		if h.Metrics != nil {
-			// Count the invocation, not just the baseline. These paths fed
-			// Baselines but never the counters, so orva_invocations_total and
-			// the dashboard percentiles excluded them entirely.
-			h.Metrics.RecordInvocation(acq.ColdStart)
-			h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
-			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, "error", acq.ColdStart, durationMS)
-		}
-		respond.Error(w, http.StatusBadGateway, "INVOKE_FAILED", errMsg, reqID)
-		return
+		h.recordMetrics(acq.ColdStart, durationMS, execID, fn.ID, "error")
+		return nil, &InvokeError{Status: http.StatusBadGateway, Opts: respond.ErrorOpts{Code: "INVOKE_FAILED", Message: errMsg, RequestID: reqID}}
 	}
 
-	// Successful F2F: best-effort parse of the worker envelope to derive
-	// status code + response size for the span. The body shape is
-	// {"statusCode":N,"headers":{...},"body":"..."}; on parse failure we
-	// fall back to status=200, size=0 — the span still records.
+	// Best-effort parse of the worker envelope for the span's status + size.
 	var env struct {
 		StatusCode int    `json:"statusCode"`
 		Body       string `json:"body"`
@@ -245,25 +252,255 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 		&database.Execution{
 			ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: acq.ColdStart,
 			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
-			Trigger: "f2f", ParentFunctionID: callerFnID,
+			Trigger: "f2f", ParentFunctionID: c.FunctionID,
 			StartedAt: start,
 		},
 		durationMS, statusCode, "", respSize, executionLease,
 	)
-	if h.Metrics != nil {
-		// Count the invocation, not just the baseline. These paths fed
-		// Baselines but never the counters, so orva_invocations_total and
-		// the dashboard percentiles excluded them entirely.
-		h.Metrics.RecordInvocation(acq.ColdStart)
-		h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
-		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
-	}
+	h.recordMetrics(acq.ColdStart, durationMS, execID, fn.ID, execStatus)
+	return respJSON, nil
+}
 
+func invokeErrorFrom(err error, fn *database.Function, reqID string) *InvokeError {
+	status, opts := invokeError(err, fn, reqID)
+	return &InvokeError{Status: status, Opts: opts}
+}
+
+// F2FStream is an open streaming F2F call. Streaming=false means the callee
+// answered with one frame: StatusCode/Headers/Body are complete and the call is
+// already recorded and released. Otherwise the caller drives NextFrame until
+// "end" or an error and then calls Finish exactly once (it is idempotent).
+type F2FStream struct {
+	Streaming  bool
+	StatusCode int
+	Headers    map[string]string
+	Body       string
+
+	h            *InternalInvokeHandler
+	fn           *database.Function
+	c            F2FCaller
+	acq          *pool.AcquireResult
+	ctx          context.Context
+	cancel       context.CancelFunc
+	dres         *sandbox.DispatchResult
+	execID       string
+	traceID      string
+	spanID       string
+	parentSpanID string
+	start        time.Time
+	lease        *database.ExecutionLease
+	release      func()
+
+	mu         sync.Mutex
+	ended      bool
+	totalBytes int
+	reqErr     error
+	once       sync.Once
+}
+
+// OpenStream dispatches a streaming F2F call and returns once the callee's
+// response head (or complete single-frame response) is known.
+func (h *InternalInvokeHandler) OpenStream(parent context.Context, c F2FCaller, fn *database.Function, body []byte, reqID string) (*F2FStream, *InvokeError) {
+	if err := parent.Err(); err != nil {
+		return nil, invokeErrorFrom(err, fn, reqID)
+	}
+	executionLease, ierr := reserveExecutionCtx(parent, h.DB, reqID)
+	if ierr != nil {
+		return nil, ierr
+	}
+	s := &F2FStream{h: h, fn: fn, c: c, lease: executionLease,
+		traceID: c.TraceID, parentSpanID: c.SpanID, spanID: trace.NewSpanID()}
+
+	acq, err := h.Pool.Acquire(parent, fn.ID)
+	if err != nil {
+		executionLease.Cancel()
+		return nil, invokeErrorFrom(err, fn, reqID)
+	}
+	s.acq = acq
+	s.ctx, s.cancel = context.WithTimeout(parent, calleeTimeout(fn))
+	s.execID = ids.New()
+	s.start = time.Now()
+	s.release = h.SDKAuth.BindExecution(s.execID, fn.ID, s.traceID, s.spanID, s.start, c.Depth+1)
+	s.ctx = sandbox.WithExecution(s.ctx, sandbox.NewExecInfo(s.ctx, s.execID, s.traceID, s.spanID, c.Depth+1, s.start))
+
+	dres, err := acq.Worker.DispatchEx(s.ctx, f2fEvent(fn, s.execID, c, s.traceID, s.spanID, body, true))
+	s.dres = dres
+	if err != nil {
+		s.reqErr = err
+		errMsg := err.Error()
+		if errors.Is(err, context.DeadlineExceeded) {
+			errMsg = "function timed out"
+		}
+		s.insert("error", http.StatusBadGateway, errMsg, 0)
+		s.teardown()
+		return nil, &InvokeError{Status: http.StatusBadGateway, Opts: respond.ErrorOpts{Code: "INVOKE_FAILED", Message: errMsg, RequestID: reqID}}
+	}
+	s.StatusCode = dres.StatusCode
+	if s.StatusCode == 0 {
+		s.StatusCode = 200
+	}
+	s.Headers = dres.Headers
+	if !dres.Streaming {
+		s.Body = dres.Body
+		s.ended = true
+		execStatus := "success"
+		if s.StatusCode >= 500 {
+			execStatus = "error"
+		}
+		s.insert(execStatus, s.StatusCode, "", len(dres.Body))
+		s.h.recordMetrics(acq.ColdStart, time.Since(s.start).Milliseconds(), s.execID, fn.ID, execStatus)
+		s.teardown()
+		return s, nil
+	}
+	s.Streaming = true
+	return s, nil
+}
+
+func (s *F2FStream) insert(status string, code int, errMsg string, size int) {
+	s.h.DB.AsyncInsertExecutionFinal(
+		&database.Execution{
+			ID: s.execID, FunctionID: s.fn.ID, Status: status, ColdStart: s.acq.ColdStart,
+			TraceID: s.traceID, SpanID: s.spanID, ParentSpanID: s.parentSpanID,
+			Trigger: "f2f", ParentFunctionID: s.c.FunctionID,
+			StartedAt: s.start,
+		},
+		time.Since(s.start).Milliseconds(), code, errMsg, size, s.lease,
+	)
+}
+
+// teardown releases everything in the order the HTTP handlers' defers did:
+// logs, execution binding, pool worker, timeout ctx, storage reservation.
+func (s *F2FStream) teardown() {
+	if s.dres != nil {
+		executionlogs.Persist(s.h.DB, s.dres.Stderr(), s.fn.ID, s.execID, s.traceID, s.spanID)
+	}
+	s.release()
+	s.h.Pool.Release(s.acq, s.reqErr)
+	s.cancel()
+	s.lease.Cancel()
+}
+
+// NextFrame returns the next streaming frame ("chunk" or "end"). Safe against
+// a concurrent Finish: Finish cancels the call first, which unblocks it.
+func (s *F2FStream) NextFrame() (kind string, data []byte, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ended {
+		return "end", nil, nil
+	}
+	kind, data, err = s.dres.NextFrame(s.ctx)
+	switch {
+	case err != nil:
+		s.reqErr = err
+	case kind == "end":
+		s.ended = true
+	default:
+		s.totalBytes += len(data)
+	}
+	return kind, data, err
+}
+
+// Finish records the call and releases its worker. abortErr non-nil means the
+// stream is abandoned (client gone / closed early): the callee is cancelled.
+// Idempotent.
+func (s *F2FStream) Finish(abortErr error) {
+	if !s.Streaming {
+		return
+	}
+	s.once.Do(func() {
+		if abortErr != nil {
+			s.cancel() // unblocks an in-flight NextFrame
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if !s.ended && s.reqErr == nil {
+			// Drive the (cancelled) stream to a terminal state so the worker's
+			// dispatch lock is released before the worker returns to the pool.
+			for i := 0; i < 16; i++ {
+				kind, _, err := s.dres.NextFrame(s.ctx)
+				if err != nil {
+					s.reqErr = err
+					break
+				}
+				if kind == "end" {
+					s.ended = true
+					break
+				}
+			}
+		}
+		if s.reqErr == nil && abortErr != nil {
+			s.reqErr = abortErr
+		}
+		execStatus := "success"
+		errMsg := ""
+		if s.reqErr != nil || s.StatusCode >= 500 {
+			execStatus = "error"
+		}
+		if s.reqErr != nil {
+			errMsg = s.reqErr.Error()
+		}
+		s.insert(execStatus, s.StatusCode, errMsg, s.totalBytes)
+		s.h.recordMetrics(s.acq.ColdStart, time.Since(s.start).Milliseconds(), s.execID, s.fn.ID, execStatus)
+		s.teardown()
+	})
+}
+
+// Invoke handles POST /api/v1/_internal/invoke/{name}. The path uses the
+// friendly function name (NOT the fn_<id> form) so user code stays
+// readable: orva.invoke("resize-image", payload).
+func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	caller, name, ok := h.httpCaller(w, r, reqID)
+	if !ok {
+		return
+	}
+	fn, ierr := h.ResolveCallee(name)
+	if ierr != nil {
+		ierr.write(w, reqID)
+		return
+	}
+	body, err := readBoundedBody(r.Body, 1<<20)
+	if err != nil {
+		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
+		return
+	}
+	respJSON, ierr := h.RunInvoke(r.Context(), caller, fn, body, reqID)
+	if ierr != nil {
+		ierr.write(w, reqID)
+		return
+	}
 	// Pass through the worker's response verbatim so callers see exactly
 	// the {statusCode, headers, body} shape that public callers see.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respJSON)
+}
+
+// httpCaller authenticates an SDK HTTP request and derives the caller identity
+// and the (depth-checked) callee name, writing the error itself on failure.
+func (h *InternalInvokeHandler) httpCaller(w http.ResponseWriter, r *http.Request, reqID string) (F2FCaller, string, bool) {
+	callerFnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
+	if authErr != nil {
+		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
+			"missing or invalid SDK credential", reqID)
+		return F2FCaller{}, "", false
+	}
+	traceID, spanID, _, active := h.SDKAuth.TraceContext(r.Header.Get("X-Orva-Execution-Id"), callerFnID)
+	if !active {
+		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
+			"SDK request is not associated with an active caller execution", reqID)
+		return F2FCaller{}, "", false
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", "function name is required", reqID)
+		return F2FCaller{}, "", false
+	}
+	depth, depthOK := h.callerDepth(w, r, callerFnID, reqID)
+	if !depthOK {
+		return F2FCaller{}, "", false
+	}
+	return F2FCaller{FunctionID: callerFnID, TraceID: traceID, SpanID: spanID, Depth: depth}, name, true
 }
 
 // InvokeStream handles POST /api/v1/_internal/invoke/{name}/stream. Behaves
@@ -278,188 +515,43 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 // surfaces them as an `Aborted` exception on the iterator.
 func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-
-	callerFnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
-	if authErr != nil {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid SDK credential", reqID)
+	caller, name, ok := h.httpCaller(w, r, reqID)
+	if !ok {
 		return
 	}
-	callerTraceID, callerSpanID, _, callerActive := h.SDKAuth.TraceContext(
-		r.Header.Get("X-Orva-Execution-Id"), callerFnID,
-	)
-	if !callerActive {
-		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
-			"SDK request is not associated with an active caller execution", reqID)
+	fn, ierr := h.ResolveCallee(name)
+	if ierr != nil {
+		ierr.write(w, reqID)
 		return
 	}
-
-	name := r.PathValue("name")
-	if name == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "function name is required", reqID)
-		return
-	}
-
-	depth, depthOK := h.callerDepth(w, r, callerFnID, reqID)
-	if !depthOK {
-		return
-	}
-
-	fn, err := h.DB.GetFunctionByName(name)
-	if err != nil {
-		respond.Error(w, http.StatusNotFound, "NOT_FOUND",
-			"function not found: "+name, reqID)
-		return
-	}
-	// Every other invoke entrypoint refuses an inactive function; this one
-	// did not, so orva.invoke("some-inactive-fn") from inside a sandbox ran
-	// it anyway.
-	if fn.Status != "active" {
-		respond.Error(w, http.StatusConflict, "NOT_ACTIVE",
-			"function is not active", reqID)
-		return
-	}
-
 	body, err := readBoundedBody(r.Body, 1<<20)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
 		return
 	}
-	executionLease, admitted := reserveExecution(w, r, h.DB, reqID)
-	if !admitted {
+	s, ierr := h.OpenStream(r.Context(), caller, fn, body, reqID)
+	if ierr != nil {
+		ierr.write(w, reqID)
 		return
 	}
-	defer executionLease.Cancel()
-
-	timeout := time.Duration(fn.TimeoutMS) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	traceID := callerTraceID
-	parentSpanID := callerSpanID
-	spanID := trace.NewSpanID()
-
-	acq, err := h.Pool.Acquire(r.Context(), fn.ID)
-	if err != nil {
-		// Use the shared taxonomy rather than flattening everything to a
-		// bare 503 POOL_ERROR. invokeError distinguishes FUNCTION_BUSY (with
-		// Retry-After), MEMORY_EXHAUSTED, EGRESS_POLICY_UNAVAILABLE and
-		// TIMEOUT; without it an SDK retrying on this path cannot tell a
-		// concurrency cap it should back off from from a host OOM it should
-		// not, and the error codes documented in docs/ERRORS.md only ever
-		// appeared on one of the five invoke entrypoints.
-		status, opts := invokeError(err, fn, reqID)
-		respond.ErrorWithDetail(w, status, opts)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-	var reqErr error
-	defer func() { h.Pool.Release(acq, reqErr) }()
-
-	execID := ids.New()
-	start := time.Now()
-	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start, depth+1)
-	defer releaseExecution()
-	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, depth+1, start))
-	event := map[string]any{
-		"method": "POST",
-		"path":   "/",
-		"headers": map[string]string{
-			"content-type":        "application/json",
-			"x-orva-trigger":      "f2f",
-			"x-orva-call-depth":   strconv.Itoa(depth + 1),
-			"x-orva-function-id":  fn.ID,
-			"x-orva-execution-id": execID,
-			"x-orva-trace-id":     traceID,
-			"x-orva-span-id":      spanID,
-			"x-orva-stream":       "1",
-		},
-		"body": string(body),
-	}
-	eventJSON, _ := json.Marshal(event)
-
-	dres, err := acq.Worker.DispatchEx(ctx, eventJSON)
-	if dres != nil {
-		defer func() { executionlogs.Persist(h.DB, dres.Stderr(), fn.ID, execID, traceID, spanID) }()
-	}
-	if err != nil {
-		reqErr = err
-		errMsg := err.Error()
-		if errors.Is(err, context.DeadlineExceeded) {
-			errMsg = "function timed out"
-		}
-		h.DB.AsyncInsertExecutionFinal(
-			&database.Execution{
-				ID: execID, FunctionID: fn.ID, Status: "error", ColdStart: acq.ColdStart,
-				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
-				Trigger: "f2f", ParentFunctionID: callerFnID,
-				StartedAt: start,
-			},
-			time.Since(start).Milliseconds(), http.StatusBadGateway, errMsg, 0, executionLease,
-		)
-		respond.Error(w, http.StatusBadGateway, "INVOKE_FAILED", errMsg, reqID)
-		return
-	}
-
-	// Single-frame (non-streaming) response: write headers + body in one go.
-	if !dres.Streaming {
-		statusCode := dres.StatusCode
-		if statusCode == 0 {
-			statusCode = 200
-		}
-		for k, v := range dres.Headers {
-			w.Header().Set("X-Orva-Inner-"+k, v)
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.WriteHeader(statusCode)
-		_, _ = w.Write([]byte(dres.Body))
-		durationMS := time.Since(start).Milliseconds()
-		execStatus := "success"
-		if statusCode >= 500 {
-			execStatus = "error"
-		}
-		h.DB.AsyncInsertExecutionFinal(
-			&database.Execution{
-				ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: acq.ColdStart,
-				TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
-				Trigger: "f2f", ParentFunctionID: callerFnID,
-				StartedAt: start,
-			},
-			durationMS, statusCode, "", len(dres.Body), executionLease,
-		)
-		if h.Metrics != nil {
-			// Count the invocation, not just the baseline. These paths fed
-			// Baselines but never the counters, so orva_invocations_total and
-			// the dashboard percentiles excluded them entirely.
-			h.Metrics.RecordInvocation(acq.ColdStart)
-			h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
-			h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
-		}
-		return
-	}
-
-	// Streaming path. Write the inner statusCode + headers first, then
-	// stream chunks straight from NextFrame to the wire. The ResponseWriter
-	// is flushed after each chunk so SDK clients see progress (the http
-	// pipeline handles chunked-transfer encoding automatically).
-	statusCode := dres.StatusCode
-	if statusCode == 0 {
-		statusCode = 200
-	}
-	for k, v := range dres.Headers {
+	for k, v := range s.Headers {
 		w.Header().Set("X-Orva-Inner-"+k, v)
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
+	if !s.Streaming {
+		w.WriteHeader(s.StatusCode)
+		_, _ = w.Write([]byte(s.Body))
+		return
+	}
+	// Write the inner statusCode + headers first, then stream chunks straight
+	// to the wire, flushing each so SDK clients see progress.
 	w.Header().Set("X-Orva-Streamed", "1")
-	w.WriteHeader(statusCode)
+	w.WriteHeader(s.StatusCode)
 	flusher, _ := w.(http.Flusher)
-
-	totalBytes := 0
+	var abort error
 	for {
-		kind, chunk, ferr := dres.NextFrame(ctx)
+		kind, chunk, ferr := s.NextFrame()
 		if ferr != nil {
-			reqErr = ferr
 			break
 		}
 		if kind == "end" {
@@ -467,40 +559,13 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 		}
 		if len(chunk) > 0 {
 			if _, werr := w.Write(chunk); werr != nil {
-				reqErr = werr
+				abort = werr
 				break
 			}
-			totalBytes += len(chunk)
 		}
 		if flusher != nil {
 			flusher.Flush()
 		}
 	}
-
-	durationMS := time.Since(start).Milliseconds()
-	execStatus := "success"
-	if reqErr != nil || statusCode >= 500 {
-		execStatus = "error"
-	}
-	errMsg := ""
-	if reqErr != nil {
-		errMsg = reqErr.Error()
-	}
-	h.DB.AsyncInsertExecutionFinal(
-		&database.Execution{
-			ID: execID, FunctionID: fn.ID, Status: execStatus, ColdStart: acq.ColdStart,
-			TraceID: traceID, SpanID: spanID, ParentSpanID: parentSpanID,
-			Trigger: "f2f", ParentFunctionID: callerFnID,
-			StartedAt: start,
-		},
-		durationMS, statusCode, errMsg, totalBytes, executionLease,
-	)
-	if h.Metrics != nil {
-		// Count the invocation, not just the baseline. These paths fed
-		// Baselines but never the counters, so orva_invocations_total and
-		// the dashboard percentiles excluded them entirely.
-		h.Metrics.RecordInvocation(acq.ColdStart)
-		h.Metrics.RecordDuration(time.Duration(durationMS) * time.Millisecond)
-		h.Metrics.Baselines.FinalizeExecution(h.DB, execID, fn.ID, execStatus, acq.ColdStart, durationMS)
-	}
+	s.Finish(abort)
 }
