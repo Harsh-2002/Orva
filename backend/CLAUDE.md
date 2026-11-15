@@ -191,6 +191,12 @@ Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.g
 
 ## Key Patterns
 
+**Function mutations:** the registry's per-function mutation lock protects
+read-modify-write configuration and deployment snapshot publication. Acquire the
+build/rollback lock first when both are needed; queued compilation releases the
+mutation lock, then reloads current configuration before publishing build outputs.
+Never persist the build's stale function record over a newer permission update.
+
 **Handler responses**: always use `respond.JSON(w, status, val)` / `respond.Error(w, status, "SLUG", "message", requestID)` from `server/handlers/respond/` (the last arg is the request ID, often `RequestID(r.Context())` or `""`).
 
 **Invocation funnel**: HTTP, cron, jobs, and F2F calls all go through `Worker.Dispatch()` (sync response) or `Worker.DispatchEx()` (multi-frame streaming). Never invoke nsjail directly from handlers. `Dispatch` buffers a streaming handler's output into memory and caps it at 32 MiB — cron, jobs, F2F and inbound webhooks all take that path, so a handler that streams a large body works over `/fn/` and is refused when fired by cron.

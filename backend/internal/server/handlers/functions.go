@@ -352,12 +352,6 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fn, err := h.Registry.Get(fnID)
-	if err != nil {
-		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
-		return
-	}
-
 	var req updateFunctionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
@@ -418,6 +412,14 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CPUs != nil && *req.CPUs <= 0 {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "cpus must be > 0", reqID)
+		return
+	}
+	lk := h.Registry.MutationLock(fnID)
+	lk.Lock()
+	defer lk.Unlock()
+	fn, err := h.Registry.Get(fnID)
+	if err != nil {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
 
@@ -967,6 +969,21 @@ func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Requ
 	// Fallback synchronous path — used by tests and any env without the
 	// Queue wired. Same observable shape as before Phase 9 landed.
 	defer removeTempFile(tarballPath)
+	if h.FnLock != nil {
+		lk := h.FnLock(fn.ID)
+		lk.Lock()
+		defer lk.Unlock()
+	}
+	// Without a queue, serialize the whole synchronous build with config updates.
+	// An update can only return success after this build has released its input copy.
+	lk := h.Registry.MutationLock(fn.ID)
+	lk.Lock()
+	defer lk.Unlock()
+	fn, err = h.Registry.Get(fn.ID)
+	if err != nil {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
+	}
 	// Status flips during the synchronous build path are silent for the
 	// same reason as the queue path — covered by deployment.* events.
 	fn.Status = "building"
@@ -1103,12 +1120,6 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fn, err := h.Registry.Get(fnID)
-	if err != nil {
-		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
-		return
-	}
-
 	var req rollbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
@@ -1131,6 +1142,14 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		lk := h.FnLock(fnID)
 		lk.Lock()
 		defer lk.Unlock()
+	}
+	lk := h.Registry.MutationLock(fnID)
+	lk.Lock()
+	defer lk.Unlock()
+	fn, err := h.Registry.Get(fnID)
+	if err != nil {
+		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
+		return
 	}
 
 	started := time.Now()
