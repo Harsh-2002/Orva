@@ -1558,8 +1558,28 @@ for up to 2.8 s and let 6 probe writes through, the new one let 3,909 through
 with a 39 ms worst wait (the KV sweep: 1 probe and 0.80 s before, 3,951 and
 34 ms after). `DeleteFunction` is chunked the same way (200,000 executions,
 100,000 KV rows and 50,000 jobs on a throwaway host database: 1 probe and an
-8.0 s worst wait before, 6,838 probes and 46 ms after; it takes about three
-times longer end to end). None of these was measured under load on the rig.
+8.0 s worst wait before, 6,838 probes and 46 ms after).
+
+**Delete under sustained load (2026-11-15, one guest, shared kernel).** 800
+requests/s on one function for 75 s, and at +20 s a second function with
+300,000 executions deleted; three alternating repeats per binary, the WAL
+checkpointed before each run, and `hot` served by the same server:
+
+| Binary | Delete | `hot` ok/s | 429s | p99 | worst | telemetry shed |
+|---|---|---|---|---|---|---|
+| old release | 18 s | 615 of 800 | 600 | 85-94 ms | 2.7-3.1 s | 182-227 |
+| chunked, fixed 20 ms pause | 143 s | 800 | 0 | 20-21 ms | 80-270 ms | 4,116-6,797 |
+| chunked, adaptive pacing (experiment, not shipped) | 530-789 s | 800 | 0 | 8-9 ms | 50-73 ms | 0 |
+
+The chunked delete protects other functions. The adaptive pacer (sleep four times
+each batch's hold, wait while the writer queue is above a quarter full, shrink
+slow batches) shed no telemetry and kept the queue lower, but made the delete 4-5
+times slower again, so it was not adopted. Two cautions. A first, single run
+without checkpointing the 250 MB WAL left by the seeder showed the chunked
+delete far worse (p99 3.0 s, queues pinned): a large un-checkpointed WAL under a
+concurrent sweep is a worse case that this record does not characterise. And the
+first two runs of a fresh guest were noisy for every binary (a p99 of 364 ms
+with no delete at all), so a single run per cell cannot be trusted.
 Ramp steps are 10 s, so a step can land on a sweep tick; that may account for
 part of the run-to-run spread in the knees above.
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
@@ -271,5 +272,35 @@ func TestDeleteResumesAFunctionLeftDeleting(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "functions", fnID)); !os.IsNotExist(err) {
 		t.Fatalf("code tree not reclaimed: %v", err)
+	}
+}
+
+// The delete answers after the server's write timeout has passed. A function
+// with a large history takes minutes, the default timeout is 120 s, and the
+// reply used to be lost (the delete finished, the client saw an empty reply).
+func TestDeleteAnswersAfterTheServerWriteTimeout(t *testing.T) {
+	const fnID = "019df200-7b00-7e00-9c00-aab1cd2e3f42"
+	h, _ := newFnDiskHandler(t, fnID)
+	var lock sync.Mutex
+	h.FnLock = func(string) *sync.Mutex { return &lock }
+	lock.Lock() // the delete waits here, standing in for a long delete
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(h.Delete))
+	srv.Config.WriteTimeout = 200 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	go func() {
+		time.Sleep(700 * time.Millisecond) // well past the write timeout
+		lock.Unlock()
+	}()
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/functions/"+fnID, nil)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("the reply was lost to the write timeout: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }

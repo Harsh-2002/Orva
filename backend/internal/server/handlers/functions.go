@@ -551,6 +551,12 @@ func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
 		return
 	}
+	// A function with a large history takes minutes to delete, longer than the
+	// server's write timeout (120 s by default): the delete finished and was
+	// logged as 200, but the connection had already been closed, so clients saw
+	// an empty reply. The delete runs detached from the request, and the answer
+	// has to outlive the deadline too.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	// Serialize the entire delete with builds and rollback for this function.
 	// A build keeps a pointer to the function row and finishes by calling
 	// Registry.SetSilent; deleting without this lock allowed that final write to
