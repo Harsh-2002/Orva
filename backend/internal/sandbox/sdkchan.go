@@ -1,13 +1,22 @@
 package sandbox
 
 import (
+	"bytes"
+	"context"
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
+	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // sdkChannelFD is the descriptor number the sandboxed process sees. Pipes occupy
@@ -15,8 +24,22 @@ import (
 // otherwise (--pass_fd), so the number is part of the contract with the adapters.
 const sdkChannelFD = 3
 
-// maxSDKFrame bounds one frame read from untrusted sandbox code.
-const maxSDKFrame = 1 << 20
+// sdkWriteTimeout bounds one reply write. A sandbox that stops reading its end
+// would otherwise wedge the writer (and every other reply) forever.
+const sdkWriteTimeout = 5 * time.Second
+
+// sdkOps is the CLOSED set of operations in protocol v1. Anything else is
+// answered with 400 UNKNOWN_OP rather than reaching the handler.
+var sdkOps = map[string]struct{}{
+	"kv.get": {}, "kv.put": {}, "kv.delete": {}, "kv.list": {}, "kv.batch": {},
+	"kv.incr": {}, "kv.cas": {}, "invoke": {}, "invoke.stream.open": {},
+	"invoke.stream.next": {}, "invoke.stream.close": {}, "jobs.enqueue": {},
+	"crons.upsert": {}, "spans.emit": {},
+}
+
+// errSDKProtocol marks a framing/JSON violation: the connection is closed and
+// the worker is not reused.
+var errSDKProtocol = errors.New("sdk protocol violation")
 
 // newSDKPair returns the host end of a per-worker AF_UNIX socketpair and the
 // file the child inherits. Both are CLOEXEC on the host so a concurrent spawn
@@ -38,45 +61,256 @@ func newSDKPair() (host net.Conn, child *os.File, err error) {
 	return host, child, nil
 }
 
+// readSDKFrame reads one length-prefixed frame. The length is validated before
+// any allocation, so a hostile header cannot make the host allocate.
 func readSDKFrame(r io.Reader) ([]byte, error) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return nil, err
 	}
 	n := binary.BigEndian.Uint32(hdr[:])
-	if n == 0 || n > maxSDKFrame {
-		return nil, fmt.Errorf("sdk frame length %d out of range", n)
+	if n == 0 || n > MaxSDKFrame {
+		return nil, fmt.Errorf("%w: frame length %d out of range", errSDKProtocol, n)
 	}
 	buf := make([]byte, n)
-	_, err := io.ReadFull(r, buf)
-	return buf, err
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
-func writeSDKFrame(w io.Writer, payload []byte) error {
-	var hdr [4]byte
-	binary.BigEndian.PutUint32(hdr[:], uint32(len(payload)))
-	_, err := w.Write(append(hdr[:], payload...))
-	return err
+func encodeSDKFrame(payload []byte) []byte {
+	out := make([]byte, 4+len(payload))
+	binary.BigEndian.PutUint32(out, uint32(len(payload)))
+	copy(out[4:], payload)
+	return out
 }
 
-// serveSDKSpike is the SPIKE host handler: it echoes {"id","op":"echo","data"}.
-// It exists only to prove the transport (fd passing under the production
-// seccomp policy, EOF on worker death, latency); the real dispatcher replaces it.
-func serveSDKSpike(c net.Conn) {
-	defer c.Close()
+// sdkRequest is one decoded client frame.
+type sdkRequest struct {
+	ID    uint64          `json:"id"`
+	Op    string          `json:"op"`
+	Lease string          `json:"lease"`
+	Args  json.RawMessage `json:"a"`
+}
+
+// decodeSDKRequest strictly decodes a frame. Every failure wraps errSDKProtocol.
+func decodeSDKRequest(frame []byte) (sdkRequest, error) {
+	var req sdkRequest
+	trimmed := bytes.TrimLeft(frame, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return req, fmt.Errorf("%w: frame is not a JSON object", errSDKProtocol)
+	}
+	dec := json.NewDecoder(bytes.NewReader(frame))
+	if err := dec.Decode(&req); err != nil {
+		return sdkRequest{}, fmt.Errorf("%w: %v", errSDKProtocol, err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return sdkRequest{}, fmt.Errorf("%w: trailing data after object", errSDKProtocol)
+	}
+	if req.ID < 1 {
+		return sdkRequest{}, fmt.Errorf("%w: missing or invalid id", errSDKProtocol)
+	}
+	if a := bytes.TrimSpace(req.Args); len(a) == 0 || bytes.Equal(a, []byte("null")) {
+		req.Args = json.RawMessage("{}")
+	} else if a[0] != '{' {
+		return sdkRequest{}, fmt.Errorf("%w: args is not an object", errSDKProtocol)
+	}
+	return req, nil
+}
+
+// dispatchState is the host's record of the dispatch running on a worker. It is
+// published before the request frame is written and revoked on every exit path.
+type dispatchState struct {
+	info   ExecInfo
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func newLease() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("sandbox: crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// newDispatchState builds the state for one dispatch from the ctx the caller
+// passed (which may carry an ExecInfo from WithExecution).
+func newDispatchState(ctx context.Context) *dispatchState {
+	info, _ := ExecutionFrom(ctx)
+	if info.Lease == "" {
+		info.Lease = newLease()
+	}
+	base := info.Ctx
+	if base == nil {
+		base = ctx
+	}
+	cctx, cancel := context.WithCancel(base)
+	info.Ctx = cctx
+	return &dispatchState{info: info, ctx: cctx, cancel: cancel}
+}
+
+// sdkServer serves one worker's channel. It is separate from Worker so the
+// protocol is testable over a plain net.Conn.
+type sdkServer struct {
+	conn       net.Conn
+	functionID string
+	handler    SDKHandler
+	state      func() *dispatchState
+	// violation is called after the conn is closed for a protocol violation;
+	// the worker must not be reused. kill is called when a reply cannot be
+	// written within writeTimeout.
+	violation    func()
+	kill         func()
+	writeTimeout time.Duration
+
+	wmu      sync.Mutex
+	inflight atomic.Int32
+	closeMu  sync.Once
+	connCtx  context.Context
+	cancel   context.CancelFunc
+}
+
+func (s *sdkServer) closeConn() {
+	s.closeMu.Do(func() {
+		s.cancel()
+		_ = s.conn.Close()
+	})
+}
+
+// serve runs the read loop until the connection ends. Each op runs in its own
+// goroutine because invoke blocks.
+func (s *sdkServer) serve() {
+	s.connCtx, s.cancel = context.WithCancel(context.Background())
+	if s.writeTimeout == 0 {
+		s.writeTimeout = sdkWriteTimeout
+	}
+	sdkOpenChannels.Add(1)
+	defer sdkOpenChannels.Add(-1)
+	defer s.closeConn()
+
 	for {
-		frame, err := readSDKFrame(c)
+		frame, err := readSDKFrame(s.conn)
+		if err == nil {
+			var req sdkRequest
+			if req, err = decodeSDKRequest(frame); err == nil {
+				s.dispatch(req)
+				continue
+			}
+		}
+		if errors.Is(err, errSDKProtocol) {
+			slog.Warn("sdk channel protocol violation", "function_id", s.functionID, "error", err)
+			sdkProtocolViolations.Add(1)
+			s.closeConn()
+			if s.violation != nil {
+				s.violation()
+			}
+		}
+		return
+	}
+}
+
+func (s *sdkServer) dispatch(req sdkRequest) {
+	if _, ok := sdkOps[req.Op]; !ok {
+		sdkRecord("unknown", 400, 0)
+		s.reply(req.ID, nil, &SDKError{Status: 400, Code: "UNKNOWN_OP", Message: "unknown op"})
+		return
+	}
+	caller := SDKCaller{FunctionID: s.functionID}
+	ctx := s.connCtx
+	if req.Lease != "" {
+		st := s.state()
+		if st == nil || st.info.Lease != req.Lease {
+			sdkRecord(req.Op, 403, 0)
+			s.reply(req.ID, nil, &SDKError{Status: 403, Code: "SDK_SCOPE_VIOLATION",
+				Message: "lease is not valid for a running execution"})
+			return
+		}
+		info := st.info
+		caller.Exec = &info
+		ctx = st.ctx
+	}
+	if s.inflight.Add(1) > MaxSDKInflight {
+		s.inflight.Add(-1)
+		sdkRecord(req.Op, 429, 0)
+		s.reply(req.ID, nil, &SDKError{Status: 429, Code: "TOO_MANY_INFLIGHT",
+			Message: "too many unanswered SDK requests"})
+		return
+	}
+	go func() {
+		defer s.inflight.Add(-1)
+		start := time.Now()
+		res, serr := s.call(ctx, caller, req)
+		status := 200
+		if serr != nil {
+			status = serr.Status
+		}
+		sdkRecord(req.Op, status, time.Since(start))
+		s.reply(req.ID, res, serr)
+	}()
+}
+
+func (s *sdkServer) call(ctx context.Context, caller SDKCaller, req sdkRequest) (res any, serr *SDKError) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("sdk handler panic", "function_id", s.functionID, "op", req.Op, "panic", p)
+			res, serr = nil, &SDKError{Status: 500, Code: "INTERNAL", Message: "internal error"}
+		}
+	}()
+	return s.handler(ctx, caller, req.Op, req.Args)
+}
+
+type sdkOKReply struct {
+	ID uint64 `json:"id"`
+	OK bool   `json:"ok"`
+	R  any    `json:"r"`
+}
+
+type sdkErrReply struct {
+	ID uint64    `json:"id"`
+	OK bool      `json:"ok"`
+	E  *SDKError `json:"e"`
+}
+
+func (s *sdkServer) reply(id uint64, res any, serr *SDKError) {
+	var payload []byte
+	var err error
+	if serr == nil {
+		if res == nil {
+			res = struct{}{}
+		}
+		payload, err = json.Marshal(sdkOKReply{ID: id, OK: true, R: res})
 		if err != nil {
-			return
+			serr = &SDKError{Status: 500, Code: "INTERNAL", Message: "result is not encodable"}
+		} else if len(payload) > MaxSDKFrame {
+			serr = &SDKError{Status: 500, Code: "RESULT_TOO_LARGE", Message: "result exceeds the SDK frame limit"}
 		}
-		var req map[string]any
-		if json.Unmarshal(frame, &req) != nil {
-			return
-		}
-		req["ok"] = true
-		out, _ := json.Marshal(req)
-		if writeSDKFrame(c, out) != nil {
-			return
+	}
+	if serr != nil {
+		payload, _ = json.Marshal(sdkErrReply{ID: id, OK: false, E: serr})
+	}
+	s.write(payload)
+}
+
+func (s *sdkServer) write(payload []byte) {
+	buf := encodeSDKFrame(payload)
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_ = s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+	if _, err := s.conn.Write(buf); err != nil {
+		// The sandbox stopped reading (or the conn is gone). A partially
+		// written frame would desync the stream, so the only safe move is to
+		// drop the connection and the worker.
+		select {
+		case <-s.connCtx.Done():
+		default:
+			slog.Warn("sdk channel write failed; killing worker", "function_id", s.functionID, "error", err)
+			sdkWriteFailures.Add(1)
+			s.closeConn()
+			if s.kill != nil {
+				s.kill()
+			}
 		}
 	}
 }

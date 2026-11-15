@@ -13,6 +13,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
@@ -165,6 +166,7 @@ func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start, depth+1)
 	defer releaseExecution()
+	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, depth+1, start))
 
 	// Synthesize the event in the same shape the public /fn/ handler
 	// builds so user code can't tell the difference (which is the point).
@@ -359,6 +361,7 @@ func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Requ
 	start := time.Now()
 	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, start, depth+1)
 	defer releaseExecution()
+	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, depth+1, start))
 	event := map[string]any{
 		"method": "POST",
 		"path":   "/",

@@ -64,3 +64,13 @@ func ExecutionFrom(ctx context.Context) (ExecInfo, bool) {
 	info, ok := ctx.Value(execCtxKey{}).(ExecInfo)
 	return info, ok
 }
+
+// NewExecInfo builds the identity a dispatch call site attaches to its ctx.
+// Deadline is the ctx deadline when there is one.
+func NewExecInfo(ctx context.Context, executionID, traceID, spanID string, depth int, startedAt time.Time) ExecInfo {
+	info := ExecInfo{ExecutionID: executionID, TraceID: traceID, SpanID: spanID, Depth: depth, StartedAt: startedAt}
+	if d, ok := ctx.Deadline(); ok {
+		info.Deadline = d
+	}
+	return info
+}

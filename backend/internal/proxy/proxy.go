@@ -469,6 +469,8 @@ func (p *Proxy) Forward(
 	// timeout starts only once a sandbox is actually ready to execute it.
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(
+		ctx, execID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), 0, startTime))
 	// reqErr is the error we pass back to Release — determines whether the
 	// worker gets returned to the pool or killed.
 	var reqErr error
