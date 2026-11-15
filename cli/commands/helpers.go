@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -117,4 +118,15 @@ func resolveFnID(client *cli.Client, nameOrID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no function named %q (run `orva functions list` to see available functions)", nameOrID)
+}
+
+// sendLong issues a request with no overall client deadline, for work whose
+// duration depends on data size: backup and restore transfers, deploy uploads,
+// VACUUM. The shared client's 120 s limit covers the whole request including the
+// body, so it cuts those off mid-way while the server carries on.
+func sendLong(ctx context.Context, client *cli.Client, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	return client.Send(cli.Request{
+		Method: method, Path: path, Body: body, ContentType: contentType,
+		NoTimeout: true, Ctx: ctx,
+	})
 }

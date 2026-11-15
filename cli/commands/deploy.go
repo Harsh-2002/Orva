@@ -3,6 +3,7 @@ package commands
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -432,17 +433,7 @@ func uploadDeploy(client *cli.Client, fnID, archivePath string) (*http.Response,
 		}
 	}()
 
-	url := client.BaseURL + "/api/v1/functions/" + fnID + "/deploy"
-	req, err := http.NewRequest(http.MethodPost, url, pr)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if client.APIKey != "" {
-		req.Header.Set("X-Orva-API-Key", client.APIKey)
-	}
-
-	return client.HTTP.Do(req)
+	return sendLong(context.Background(), client, http.MethodPost, "/api/v1/functions/"+fnID+"/deploy", pr, writer.FormDataContentType())
 }
 
 // applyDeployOverrides PATCHes runtime/entrypoint onto an existing function

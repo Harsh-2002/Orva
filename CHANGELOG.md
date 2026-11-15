@@ -16,6 +16,17 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- CLI: `orva backup` (download), `orva backup restore` (upload), `orva deploy`
+  (archive upload) and `orva system vacuum` were cut off by the client's
+  120-second limit, which covers the whole request including the body. A large
+  backup failed part-way, a slow upload failed while the server carried on, and
+  a long VACUUM reported a timeout. They now run without an overall limit
+  (Ctrl-C still stops them), and a failed backup download removes its partial
+  file instead of leaving something that looks like an archive.
+- CLI: requests sent without a timeout (streamed invoke, `orva logs --follow`,
+  `orva chat`, `orva activity`, and the commands above) did not apply the
+  redirect guard that stops the API key header being sent to another host.
+  A redirect to a different host now drops it on those requests too.
 - `orva functions delete` no longer fails with a client timeout on a function
   with a large history. The server now removes such a function in batches and
   answers when it is finished, which can take longer than the CLI's 120-second

@@ -78,7 +78,7 @@ func runBackupDownload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s already exists; pick a different path or remove it first", out)
 	}
 
-	resp, err := client.Get("/api/v1/backup")
+	resp, err := sendLong(baseContext(cmd), client, http.MethodGet, "/api/v1/backup", nil, "")
 	if err != nil {
 		return fmt.Errorf("backup request failed: %w", err)
 	}
@@ -100,6 +100,8 @@ func runBackupDownload(cmd *cobra.Command, args []string) error {
 	n, err := io.Copy(f, resp.Body)
 	if err != nil {
 		f.Close()
+		// A truncated archive that looks like a backup is worse than none.
+		_ = os.Remove(out)
 		return fmt.Errorf("write archive: %w", err)
 	}
 	// Surface the close error. A short write that only fails on flush --
@@ -170,17 +172,7 @@ func runBackupRestore(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	req, err := http.NewRequest(http.MethodPost,
-		client.BaseURL+"/api/v1/restore?confirm=1", pr)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", contentType)
-	if client.APIKey != "" {
-		req.Header.Set("X-Orva-API-Key", client.APIKey)
-	}
-
-	resp, err := client.HTTP.Do(req)
+	resp, err := sendLong(baseContext(cmd), client, http.MethodPost, "/api/v1/restore?confirm=1", pr, contentType)
 	if err != nil {
 		// The server `os.Exit`s about 1s after responding 200, so a
 		// connection-reset from the client side AFTER receiving the

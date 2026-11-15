@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/spf13/cobra"
 )
@@ -221,7 +222,7 @@ func runSystemVacuum(cmd *cobra.Command, args []string) error {
 	}
 
 	infof(cmd, "Running VACUUM (writes will block briefly)...")
-	resp, err := client.Post("/api/v1/system/vacuum", nil)
+	resp, err := sendLong(baseContext(cmd), client, http.MethodPost, "/api/v1/system/vacuum", nil, "")
 	if err != nil {
 		return err
 	}
