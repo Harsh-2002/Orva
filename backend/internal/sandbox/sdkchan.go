@@ -239,7 +239,6 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 		return
 	}
 	go func() {
-		defer s.inflight.Add(-1)
 		start := time.Now()
 		res, serr := s.call(ctx, caller, req)
 		status := 200
@@ -247,6 +246,10 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 			status = serr.Status
 		}
 		sdkRecord(req.Op, status, time.Since(start))
+		// Free the slot BEFORE the reply is written: a client that stays within
+		// the limit sends its next request the instant it reads this reply, and
+		// would otherwise be counted as the 33rd and refused.
+		s.inflight.Add(-1)
 		s.reply(req.ID, res, serr)
 	}()
 }

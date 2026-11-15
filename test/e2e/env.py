@@ -44,7 +44,8 @@ def ensure_image(rebuild=False, tag=IMAGE):
         return
     print(f"[env] building image {tag} from {REPO_ROOT} (this takes a few minutes)…")
     p = subprocess.run(
-        ["docker", "build", "-t", tag, "--build-arg", "VERSION=e2e-test", "."],
+        ["docker", "build", *(["--network", os.environ["ORVA_E2E_BUILD_NETWORK"]] if os.environ.get("ORVA_E2E_BUILD_NETWORK") else []),
+         "-t", tag, "--build-arg", "VERSION=e2e-test", "."],
         cwd=REPO_ROOT, text=True, timeout=2400,
     )
     if p.returncode != 0:
@@ -72,7 +73,7 @@ class Instance:
             "-p", f"127.0.0.1:{self.port}:8443",
             "-v", f"{VOLUME}:/var/lib/orva",
             # Reach the host's mock LLM from inside the container.
-            "--add-host", "host.docker.internal:host-gateway",
+            "--add-host", "host.docker.internal:" + os.environ.get("ORVA_E2E_HOST_GATEWAY", "host-gateway"),
             # SYS_ADMIN is all nsjail needs for sandboxed deploy/invoke: each
             # sandbox's TAP device is created inside nsjail's own user
             # namespace, so egress needs no NET_ADMIN on the container. If the
@@ -87,6 +88,10 @@ class Instance:
         ]
         if os.path.exists("/dev/net/tun"):
             args += ["--device", "/dev/net/tun:/dev/net/tun"]
+        # A daemon whose default bridge network was removed cannot `docker run`
+        # without one; test/container/run.sh handles the same case.
+        if os.environ.get("ORVA_E2E_NETWORK"):
+            args += ["--network", os.environ["ORVA_E2E_NETWORK"]]
         args += [self.image]
         _docker(*args)
         print(f"[env] started {self.name} on {self.base_url}")
