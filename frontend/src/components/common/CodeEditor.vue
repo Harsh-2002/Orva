@@ -65,6 +65,15 @@ let view = null
 let wrappingMedia = null
 const languageCompartment = new Compartment()
 const wrappingCompartment = new Compartment()
+// Reconfigured in place when the prop flips, so a View/Edit switch keeps the
+// buffer, scroll position and selection. `readOnly` blocks edits but leaves the
+// content focusable, selectable and copyable, which is what View mode needs;
+// `editable` is deliberately left alone (false would drop it from the tab order).
+const readOnlyCompartment = new Compartment()
+const readOnlyExtensions = (on) => [
+  EditorState.readOnly.of(on),
+  EditorView.contentAttributes.of({ 'aria-readonly': on ? 'true' : 'false' }),
+]
 
 const syntaxLinter = linter((editor) => {
   const diagnostics = syntaxDiagnostics(editor.state)
@@ -122,7 +131,7 @@ onMounted(() => {
           padding: '0 16px',
         },
       }),
-      EditorState.readOnly.of(props.readOnly),
+      readOnlyCompartment.of(readOnlyExtensions(props.readOnly)),
     ],
   })
 
@@ -152,6 +161,10 @@ watch(() => props.modelValue, (newValue) => {
       },
     })
   }
+})
+
+watch(() => props.readOnly, (on) => {
+  if (view) view.dispatch({ effects: readOnlyCompartment.reconfigure(readOnlyExtensions(on)) })
 })
 
 // Watch for language changes — swap only the language extension via the

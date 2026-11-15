@@ -82,19 +82,22 @@ const settle = async (n = 12) => { for (let i = 0; i < n; i++) { await nextTick(
 const dialog = () => document.body.querySelector('[role="dialog"]')
 const dialogText = () => dialog()?.textContent.replace(/\s+/g, ' ').trim() || ''
 
+// Mirrors router/index.js: ?mode=edit reaches the Editor as a prop.
+const editorProps = (r) => ({ ...r.params, mode: r.query.mode === 'edit' ? 'edit' : '' })
+
 const openEditor = async () => {
   const Editor = (await import('@/views/Editor.vue')).default
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/functions/:name', name: 'function-detail', component: Editor, props: true },
+      { path: '/functions/:name', name: 'function-detail', component: Editor, props: editorProps },
       { path: '/functions/:name/test', name: 'function-test', component: OTHER },
       { path: '/functions/:name/deployments', name: 'function-deployments', component: OTHER },
       { path: '/ai', name: 'ai', component: OTHER },
       { path: '/:r(.*)*', component: OTHER },
     ],
   })
-  router.push('/functions/alpha')
+  router.push('/functions/alpha?mode=edit')
   await router.isReady()
   const wrapper = mount(
     { template: '<router-view v-slot="{ Component }"><keep-alive><component :is="Component"/></keep-alive></router-view>' },
@@ -249,7 +252,7 @@ describe('editor build log modal', () => {
     const { wrapper, router } = await openEditor()
     await clickDeploy(wrapper)
 
-    router.push('/functions/beta')
+    router.push('/functions/beta?mode=edit')
     await settle()
     expect(wrapper.text()).toContain('handler.py')
 
@@ -273,7 +276,7 @@ describe('editor build log modal', () => {
     await settle()
     expect(wrapper.findAll('button').some((b) => b.text().trim() === 'Deployed')).toBe(true)
 
-    router.push('/functions/beta')
+    router.push('/functions/beta?mode=edit')
     await settle()
     expect(wrapper.text()).toContain('handler.py')
     // beta was not deployed, so its button must not say so.

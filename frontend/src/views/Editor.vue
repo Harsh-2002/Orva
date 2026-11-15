@@ -46,6 +46,21 @@
           <Shuffle class="w-3.5 h-3.5" />
         </button>
         <span class="text-[11px] text-foreground-muted font-medium tracking-tight shrink-0">{{ runtimeLabel(form.runtime) }}</span>
+        <!-- A new function has nothing to read yet, so it has no switch and is
+             always in edit mode. -->
+        <SegmentedControl
+          v-if="isEditing"
+          :model-value="editorMode"
+          :options="modeOptions"
+          aria-label="Mode"
+          size="sm"
+          class="shrink-0"
+          @update:model-value="requestMode"
+        />
+        <span
+          class="sr-only"
+          aria-live="polite"
+        >{{ modeAnnouncement }}</span>
       </div>
       <!-- Wrapper for the dropdowns + actions on mobile so they sit on
            one row (or wrap among themselves). On sm+ they merge back
@@ -55,6 +70,7 @@
            Versions is hidden until isEditing && versions.length so the
            menu stays small for new-function flows. -->
         <div
+          v-if="!viewMode || versions.length"
           ref="configMenuRef"
           class="relative"
         >
@@ -74,6 +90,7 @@
             role="menu"
           >
             <button
+              v-if="!viewMode"
               class="menu-item"
               role="menuitem"
               @click="openMenuItem('settings')"
@@ -83,6 +100,7 @@
               <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">runtime · limits</span>
             </button>
             <button
+              v-if="!viewMode"
               class="menu-item"
               role="menuitem"
               @click="openMenuItem('envVars')"
@@ -95,6 +113,7 @@
               >{{ envVarCount }}</span>
             </button>
             <button
+              v-if="!viewMode"
               class="menu-item"
               role="menuitem"
               @click="openMenuItem('deps')"
@@ -104,6 +123,7 @@
               <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">package · requirements</span>
             </button>
             <button
+              v-if="!viewMode"
               class="menu-item"
               role="menuitem"
               @click="openMenuItem('secrets')"
@@ -198,6 +218,7 @@
           Test
         </Button>
         <Button
+          v-if="!viewMode"
           variant="secondary"
           size="sm"
           @click="resetForm"
@@ -208,6 +229,7 @@
              without it the toolbar reflowed on every click, and wrapped at
              phone width. -->
         <Button
+          v-if="!viewMode"
           size="sm"
           class="min-w-[7.25rem]"
           :loading="deploying"
@@ -295,6 +317,10 @@
             v-else-if="lastBuild?.version"
             class="text-[10px] text-success-fg font-medium"
           >v{{ lastBuild.version }} live</span>
+          <span
+            v-if="viewMode"
+            class="text-[10px] text-foreground-muted font-medium"
+          >Read-only</span>
           <span class="text-[10px] text-foreground-muted font-mono hidden md:inline">
             {{ code.length }} chars
           </span>
@@ -310,6 +336,7 @@
           v-model="code"
           :language="form.runtime"
           :filename="fileName"
+          :read-only="viewMode"
           class="flex-1 min-h-0"
         />
       </div>
@@ -1003,6 +1030,7 @@
               <GitCompare class="w-3 h-3" /> Compare
             </router-link>
             <button
+              v-if="!viewMode"
               :disabled="rollingBack"
               class="touch-expand-xs inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong disabled:opacity-50"
               @click="rollbackToVersion(v)"
@@ -1168,11 +1196,12 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare, FlaskConical } from '@lucide/vue'
+import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare, FlaskConical, Eye, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import Input from '@/components/common/Input.vue'
 import Modal from '@/components/common/Modal.vue'
+import SegmentedControl from '@/components/common/SegmentedControl.vue'
 import PythonIcon from '@/components/icons/brand/PythonIcon.vue'
 import NodeIcon from '@/components/icons/brand/NodeIcon.vue'
 
@@ -1224,7 +1253,11 @@ import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 // not useRoute(): Vue does not patch a keep-alived view's props, and an Editor
 // that followed the live route reset the unsaved buffer on every navigation to
 // a page without a :name.
-const props = defineProps({ name: { type: String, default: '' } })
+// `mode` carries ?mode=edit the same way: '' or 'view' opens read-only.
+const props = defineProps({
+  name: { type: String, default: '' },
+  mode: { type: String, default: '' },
+})
 
 const route = useRoute()
 const router = useRouter()
@@ -1422,6 +1455,75 @@ const pendingSecrets = ref([])
 const totalSecretsCount = computed(() => secrets.value.length + pendingSecrets.value.length)
 
 const isEditing = computed(() => !!props.name)
+
+// View / Edit. An existing function opens in view so reading it cannot edit or
+// deploy it by accident; a new function has nothing to read and is always edit.
+const modeOptions = [
+  { value: 'view', label: 'View', icon: Eye },
+  { value: 'edit', label: 'Edit', icon: Pencil },
+]
+const initialMode = () => (props.name && props.mode !== 'edit' ? 'view' : 'edit')
+const editorMode = ref(initialMode())
+const viewMode = computed(() => isEditing.value && editorMode.value === 'view')
+const modeAnnouncement = ref('')
+
+// What the loaded function looks like, for "does the switch need to ask?".
+// Settings/env edits live in `form` until Deploy, so they count as unsaved too.
+const snapshotForm = () => JSON.stringify({
+  form: form.value,
+  env: envVars.value.filter((p) => p.key.trim()).map((p) => [p.key, p.value]),
+})
+let baseline = { code: '', deps: '', form: '' }
+const markFormClean = () => {
+  baseline.form = snapshotForm()
+  baseline.formState = {
+    form: { ...form.value },
+    env: envVars.value.map((p) => ({ ...p })),
+  }
+}
+const markSourceClean = () => { baseline.code = code.value; baseline.deps = dependencyText.value }
+const isDirty = computed(() => baseline.form !== '' && (
+  code.value !== baseline.code
+  || dependencyText.value !== baseline.deps
+  || snapshotForm() !== baseline.form
+))
+const discardChanges = () => {
+  code.value = baseline.code
+  dependencyText.value = baseline.deps
+  if (baseline.formState) {
+    form.value = { ...baseline.formState.form }
+    envVars.value = baseline.formState.env.map((p) => ({ ...p }))
+  }
+}
+
+// Keeps ?mode in step with the switch so the page can be linked and reloaded
+// in either mode. replace, not push: flipping the switch is not a destination.
+const setModeQuery = (next) => {
+  const query = { ...route.query }
+  if (next === 'edit') query.mode = 'edit'
+  else delete query.mode
+  router.replace({ query })
+}
+const requestMode = async (next, fromUrl = false) => {
+  if (!props.name || next === editorMode.value) return
+  if (next === 'view' && isDirty.value) {
+    const ok = await confirmStore.ask({
+      title: 'Discard changes?',
+      message: 'This function has unsaved changes. Switching to View discards them.',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+      danger: true,
+    })
+    if (!ok) {
+      if (fromUrl) setModeQuery('edit')
+      return
+    }
+    discardChanges()
+  }
+  editorMode.value = next
+  modeAnnouncement.value = next === 'edit' ? 'Edit mode' : 'View mode, read-only'
+  if (!fromUrl) setModeQuery(next)
+}
 
 // canTest: function has deployed code AND there's no active build in
 // flight. While `deploying` is true, the warm pool may be holding stale
@@ -1802,6 +1904,10 @@ const resetEditorState = () => {
 
 const loadRouteData = async () => {
   resetEditorState()
+  // A different function (or /functions/new) starts from its own URL, never
+  // from the mode the previous one was left in.
+  editorMode.value = initialMode()
+  baseline = { code: '', deps: '', form: '' }
 
   if (props.name) {
     // Edit mode — load function metadata + actual deployed source code.
@@ -1835,6 +1941,7 @@ const loadRouteData = async () => {
       // window-refocus) can re-pull without duplicating the fallback
       // logic.
       await reloadSource(fn)
+      markFormClean()
 
       // Load existing secrets into the sidebar panel.
       await loadSecrets()
@@ -1859,6 +1966,14 @@ const loadRouteData = async () => {
 
 watch(() => props.name, loadRouteData, { immediate: true })
 
+// ?mode changed under a live Editor (Back, or a link to this same function).
+// Declared after the name watcher: a link to another function changes both, and
+// loadRouteData has already set the mode by the time this runs.
+watch(() => props.mode, (m) => {
+  if (!props.name) return
+  requestMode(m === 'edit' ? 'edit' : 'view', true)
+})
+
 // reloadSource pulls the function's currently-deployed source from
 // `/api/v1/functions/<id>/source` and slams it into the editor buffer
 // + dependency text. If the function exists but hasn't been deployed
@@ -1879,6 +1994,7 @@ const reloadSource = async (fn) => {
     if (srcRes.data.code) {
       code.value = srcRes.data.code
       dependencyText.value = srcRes.data.dependencies || ''
+      markSourceClean()
       return
     }
   } catch {
@@ -1886,6 +2002,7 @@ const reloadSource = async (fn) => {
   }
   code.value = defaultCode[fn.runtime] || ''
   dependencyText.value = ''
+  markSourceClean()
 }
 
 // Window-refocus handler — operators commonly deploy / rollback / edit
@@ -1913,7 +2030,7 @@ const onWindowFocus = async () => {
 // the palette is open or not. Suppress while a build is already in
 // flight to avoid double-clicks racing through cmd-S spam.
 const onDeployShortcut = () => {
-  if (deploying.value) return
+  if (viewMode.value || deploying.value) return
   deployFunction()
 }
 
@@ -2045,6 +2162,7 @@ onBeforeUnmount(() => {
 // name + final config; once they confirm, runDeploy() does the actual
 // upload. Existing functions skip straight to runDeploy().
 const deployFunction = async () => {
+  if (viewMode.value) return
   if (!code.value) {
     confirmStore.notify({ title: 'Missing code', message: 'Write a handler before deploying.' })
     return
@@ -2161,6 +2279,8 @@ const runDeploy = async () => {
       // Legacy synchronous response — older backend without async pipeline.
       buildLogs.value.push(`Deployed! Hash: ${deployRes.data.code_hash || 'unknown'}`)
       deployedThisSession.value = true
+      markSourceClean()
+      markFormClean()
       lastBuild.value = { version: null, durationMs: null }
       deploying.value = false
       return
@@ -2215,6 +2335,8 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
     deploying.value = false
     if (ok) {
       deployedThisSession.value = true
+      markSourceClean()
+      markFormClean()
       lastDeployAt.value = new Date().toISOString()
       // The button no longer promises a new version, so the result names the
       // one it made; a response without `version` still reports its duration.
@@ -2437,6 +2559,7 @@ const suggestBuildFix = async () => {
 
 const rollingBack = ref(false)
 const rollbackToVersion = async (v) => {
+  if (viewMode.value) return
   if (!fnId.value || !v?.deployment_id || rollingBack.value) return
 
   // Pull the target deployment's snapshot + the current function record
@@ -2502,6 +2625,7 @@ const rollbackToVersion = async (v) => {
         envVars.value = []
       }
       await reloadSource(fn)
+      markFormClean()
       await loadVersions(fn)
     }
   } catch (e) {
@@ -2602,6 +2726,7 @@ const flushPendingSecrets = async () => {
 }
 
 const resetForm = async () => {
+  if (viewMode.value) return
   const ok = await confirmStore.ask({
     title: 'Reset editor?',
     message: 'Unsaved changes in the editor will be discarded.',
