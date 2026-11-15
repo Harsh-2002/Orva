@@ -193,7 +193,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	releaseExecution := h.SDKAuth.BindExecution(newExecID, fn.ID, traceID, spanID, start)
+	releaseExecution := h.SDKAuth.BindExecution(newExecID, fn.ID, traceID, spanID, start, 0)
 	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	duration := time.Since(start)

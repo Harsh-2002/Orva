@@ -354,7 +354,7 @@ func (p *Proxy) Forward(
 		defer release()
 	}
 	releaseExecution := p.SDKAuth.BindExecution(
-		execID, fnID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), startTime,
+		execID, fnID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), startTime, 0,
 	)
 	defer releaseExecution()
 

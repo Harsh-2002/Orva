@@ -194,7 +194,7 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
+	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt, 0)
 	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	durationMS := time.Since(startedAt).Milliseconds()

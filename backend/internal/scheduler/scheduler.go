@@ -414,7 +414,7 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, ranAt)
+	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, ranAt, 0)
 	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {
@@ -757,7 +757,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *datab
 	}
 	eventJSON, _ := json.Marshal(event)
 
-	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt)
+	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt, 0)
 	defer releaseExecution()
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {

@@ -42,16 +42,38 @@ type activeExecution struct {
 	startedAt  time.Time
 	traceID    string
 	spanID     string
+	depth      int
 }
 
-func (a *Authenticator) BindExecution(executionID, functionID, traceID, spanID string, startedAt time.Time) func() {
+// BindExecution records a live execution. depth is the function-to-function
+// call depth: 0 for public, cron, job, webhook and replay entrypoints, and
+// callerDepth+1 for an internal callee. It is held here, on the host, because
+// a header the caller sends is something the caller can omit.
+func (a *Authenticator) BindExecution(executionID, functionID, traceID, spanID string, startedAt time.Time, depth int) func() {
 	if a == nil || executionID == "" || functionID == "" {
 		return func() {}
 	}
 	a.active.Store(executionID, activeExecution{
-		functionID: functionID, startedAt: startedAt, traceID: traceID, spanID: spanID,
+		functionID: functionID, startedAt: startedAt, traceID: traceID, spanID: spanID, depth: depth,
 	})
 	return func() { a.active.Delete(executionID) }
+}
+
+// ExecutionDepth returns the host-recorded call depth of a live execution
+// owned by functionID.
+func (a *Authenticator) ExecutionDepth(executionID, functionID string) (int, bool) {
+	if a == nil {
+		return 0, false
+	}
+	value, ok := a.active.Load(executionID)
+	if !ok {
+		return 0, false
+	}
+	execution := value.(activeExecution)
+	if execution.functionID != functionID {
+		return 0, false
+	}
+	return execution.depth, true
 }
 
 func (a *Authenticator) OwnsExecution(executionID, functionID string) bool {
