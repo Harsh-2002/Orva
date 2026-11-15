@@ -88,7 +88,13 @@ export async function run({ context, base, report, destructive }) {
   report.record('journeys', 'phone', 'long code lines soft-wrap instead of clipping',
     phoneOverflow <= 1 ? [] : [`editor still scrolls horizontally by ${phoneOverflow}px`])
   await mobileCodePage.setViewportSize({ width: 1280, height: 800 })
-  const desktopOverflow = await mobileCodePage.locator('.cm-scroller').evaluate((el) => el.scrollWidth - el.clientWidth)
+  // The editor re-applies wrapping from a media-query change event, which lands
+  // a frame or two after the resize: wait for the state rather than racing it.
+  let desktopOverflow = 0
+  for (let i = 0; i < 25 && desktopOverflow <= 1; i++) {
+    desktopOverflow = await mobileCodePage.locator('.cm-scroller').evaluate((el) => el.scrollWidth - el.clientWidth)
+    if (desktopOverflow <= 1) await mobileCodePage.waitForTimeout(100)
+  }
   report.record('journeys', where, 'desktop restores horizontal code scrolling',
     desktopOverflow > 1 ? [] : ['long code line remained wrapped after resizing to desktop'])
   await mobileCodePage.close()

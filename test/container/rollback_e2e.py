@@ -80,15 +80,36 @@ def _docker():
     return ["sudo", "-n", "docker"]
 
 
-def _in_container(script):
-    """Run a Python snippet inside the container.
+_volume = None
 
-    The image ships no sqlite3 CLI, but it does ship python3, whose stdlib has
-    the driver. Going through the container (rather than copying the file out)
-    keeps every read against the database the server is actually using.
+
+def _data_volume():
+    """The docker volume mounted at /var/lib/orva in the container under test."""
+    global _volume
+    if _volume is None:
+        out = subprocess.run(
+            [*_docker(), "inspect", CONTAINER, "--format",
+             "{{range .Mounts}}{{if eq .Destination \"/var/lib/orva\"}}{{.Name}}{{end}}{{end}}"],
+            capture_output=True, text=True)
+        _volume = out.stdout.strip()
+    return _volume
+
+
+def _in_container(script):
+    """Run a Python snippet against the database the server is using.
+
+    The image ships neither python3 nor a sqlite3 CLI (an earlier version of
+    this helper ran `docker exec ... python3` and every read came back as an
+    error), so the snippet runs in a throwaway sibling container that mounts the
+    same data volume. SQLite's locking works across containers on one host, so
+    reads and writes hit the live database file, not a copy.
     """
+    vol = _data_volume()
+    if not vol:
+        return "ERR:no data volume mounted at /var/lib/orva"
     out = subprocess.run(
-        [*_docker(), "exec", CONTAINER, "python3", "-c", script],
+        [*_docker(), "run", "--rm", "--network", "none",
+         "-v", f"{vol}:/var/lib/orva", "python:3.15-slim", "python3", "-c", script],
         capture_output=True, text=True)
     if out.returncode != 0:
         return "ERR:" + out.stderr.strip()
