@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
@@ -51,12 +52,8 @@ type InvokeFunctionOutput struct {
 	ColdStart   bool              `json:"cold_start"`
 	ExecutionID string            `json:"execution_id"`
 	Stderr      string            `json:"stderr,omitempty"`
-	// OrvaHint surfaces a known-shape diagnostic when the handler failed
-	// in a way the platform recognises. Currently set when the invocation
-	// crashed with a network-shaped error AND the function's network_mode
-	// is "none", which is the most common reason an orva-SDK-using
-	// handler fails after deploy. Empty when no hint applies.
-	OrvaHint string `json:"orva_hint,omitempty" jsonschema:"diagnostic hint when the handler failed in a known-shape way (e.g. network_mode=none blocking the orva SDK)"`
+	// SDK permission and external network failures require different remediation.
+	OrvaHint string `json:"orva_hint,omitempty" jsonschema:"diagnostic hint distinguishing missing sdk permission from blocked external network access"`
 }
 
 // ─── list_executions ───────────────────────────────────────────────
@@ -182,7 +179,7 @@ func registerInvokeTools(rc *regCtx) {
 		&mcpsdk.Tool{
 			Name:        "invoke_function",
 			Title:       "Invoke Function",
-			Description: "Call a function and return its response. `method` is REQUIRED — pick GET for read endpoints, POST for create/write, PUT/PATCH for updates, DELETE for removals (no silent default; an invocation that uses the wrong verb usually returns 404/405 which is hard to debug). Pass `body` as either an object (sent as JSON) or a string. Returns status_code, headers, body, plus execution_id you can pass to get_execution_logs if you want stderr. Bypasses the function's auth_mode (the agent's MCP bearer is already trusted). When the handler crashes with a network-shaped error (ENETUNREACH / fetch failed / OrvaUnavailableError) on a function with network_mode=none, the response includes an `orva_hint` telling you exactly what to fix.",
+			Description: "Call a function and return its response. `method` is REQUIRED — pick GET for read endpoints, POST for create/write, PUT/PATCH for updates, DELETE for removals (no silent default; an invocation that uses the wrong verb usually returns 404/405 which is hard to debug). Pass `body` as either an object (sent as JSON) or a string. Returns status_code, headers, body, plus execution_id you can pass to get_execution_logs if you want stderr. Bypasses the function's auth_mode (the agent's MCP bearer is already trusted). Known SDK permission failures and blocked external network failures carry distinct `orva_hint` diagnostics. Invoking an SDK-disabled function does not grant it outgoing SDK permission.",
 			Annotations: &mcpsdk.ToolAnnotations{
 				DestructiveHint: ptrFalse(),
 				OpenWorldHint:   ptrTrue(), // function may call external APIs
@@ -529,14 +526,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		}
 	}
 
-	// Annotate known-shape failures so the agent doesn't have to guess at
-	// the cause. The most common foot-gun: a function created with
-	// network_mode="none" tries to call orva.kv / orva.invoke / orva.jobs
-	// or hit an external URL, and the handler crashes with ENETUNREACH /
-	// ECONNREFUSED / "fetch failed" / OrvaUnavailableError. The agent has
-	// no way to map that to "the platform is blocking my SDK call" — it
-	// looks like a generic runtime crash. Stamp a hint on the output so
-	// the next step is obvious.
+	// Distinguish missing SDK permission from external-network isolation.
 	if hint := networkErrorHint(fn, errMsg, out.Stderr); hint != "" {
 		out.OrvaHint = hint
 	}
@@ -548,17 +538,20 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	return nil, out, nil
 }
 
-// networkErrorHint returns a non-empty hint when the function failed in a
-// way that's almost certainly explained by network_mode="none" blocking
-// the orva SDK or outbound HTTPS. The matching is intentionally broad
-// (substring sniff on errMsg + stderr) — false positives are cheap (the
-// hint is informational), false negatives are expensive (the agent goes
-// down the wrong debugging path).
+// Hints are advisory: runtime message matching cannot prove the underlying failure.
 func networkErrorHint(fn *database.Function, errMsg, stderr string) string {
-	if fn == nil || fn.NetworkMode != database.NetworkModeNone {
+	if fn == nil {
 		return ""
 	}
 	combined := errMsg + " " + stderr
+	if !fn.SDK && (strings.Contains(combined, "OrvaUnavailableError") ||
+		strings.Contains(combined, "OrvaSDKUnavailableError") ||
+		strings.Contains(combined, "SDK permission")) {
+		return builder.SDKNoneWarning
+	}
+	if fn.NetworkMode != database.NetworkModeNone {
+		return ""
+	}
 	if !(strings.Contains(combined, "ENETUNREACH") ||
 		strings.Contains(combined, "ECONNREFUSED") ||
 		strings.Contains(combined, "fetch failed") ||
@@ -566,11 +559,9 @@ func networkErrorHint(fn *database.Function, errMsg, stderr string) string {
 		return ""
 	}
 	return "this function's network_mode is 'none', so the sandbox has " +
-		"loopback only — orva.kv / orva.invoke / orva.jobs (which reach " +
-		"orvad over the bridge network) and any external HTTPS will fail " +
-		"with ENETUNREACH. Run update_function with network_mode='egress' " +
-		"to enable them; the next invocation will be a cold start as the " +
-		"warm pool drains."
+		"loopback only — external HTTPS can fail with ENETUNREACH. " +
+		"Run update_function with network_mode='egress' for external network access. " +
+		"Platform SDK permission is separate (sdk=true); egress does not grant it."
 }
 
 // flattenHeaders collapses each header to a single value (the first).

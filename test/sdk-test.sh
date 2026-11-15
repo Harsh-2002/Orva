@@ -168,7 +168,7 @@ EOF
 
 py_create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$PY_FN\",\"runtime\":\"python\",\"network_mode\":\"egress\",\"entrypoint\":\"handler.py\"}")
+    -d "{\"name\":\"$PY_FN\",\"runtime\":\"python\",\"network_mode\":\"egress\",\"sdk\":true,\"entrypoint\":\"handler.py\"}")
 py_id=$(echo "$py_create" | jq -r '.id')
 assert_nonempty "POST /functions (python)" "$py_id"
 
@@ -320,7 +320,7 @@ EOF
 
 node_create=$("${CURL[@]}" -X POST "$BASE/api/v1/functions" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$NODE_FN\",\"runtime\":\"node\",\"network_mode\":\"egress\",\"entrypoint\":\"handler.js\"}")
+    -d "{\"name\":\"$NODE_FN\",\"runtime\":\"node\",\"network_mode\":\"egress\",\"sdk\":true,\"entrypoint\":\"handler.js\"}")
 node_id=$(echo "$node_create" | jq -r '.id')
 assert_nonempty "POST /functions (node)" "$node_id"
 

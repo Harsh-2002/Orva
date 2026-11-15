@@ -113,7 +113,7 @@ const isReadOnly = (w) => w.find('[data-code]').attributes('data-readonly')
 const radio = (w, label) => w.findAll('button[role="radio"]').find((b) => b.text() === label)
 const checkedLabel = (w) => w.findAll('button[role="radio"]').find((b) => b.attributes('aria-checked') === 'true')?.text()
 
-beforeEach(() => { vi.clearAllMocks(); deployGate = null; sourceGate = null; sourcePrefix = 'source of' })
+beforeEach(() => { vi.clearAllMocks(); deployGate = null; sourceGate = null; sourcePrefix = 'source of'; delete FN_A.sdk })
 afterEach(() => { while (mounted.length) mounted.pop().unmount() })
 
 describe('editor view / edit mode', () => {
@@ -466,5 +466,152 @@ describe('editor view / edit mode', () => {
     await settle()
     expect(checkedLabel(wrapper)).toBe('Edit')
     expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+  })
+})
+
+const editorVM = async (wrapper) => wrapper.findComponent((await import('@/views/Editor.vue')).default).vm
+const toggleSDK = async (vm, value) => {
+  vm.modals.settings = true
+  await settle()
+  const checkbox = document.querySelector('#fn-sdk')
+  expect(checkbox).not.toBeNull()
+  checkbox.checked = value
+  checkbox.dispatchEvent(new window.Event('change', { bubbles: true }))
+  await settle()
+}
+
+describe('editor SDK opt-in lifecycle', () => {
+  it.each([false, true])('sends sdk=%s on create without changing network access', async (enabled) => {
+    const { wrapper } = await boot('/functions/new')
+    const vm = await editorVM(wrapper)
+    expect(vm.form.sdk).toBe(false)
+    if (enabled) await toggleSDK(vm, true)
+    apiClient.post.mockResolvedValueOnce({ data: { id: 'created' } })
+    await vm.runDeploy()
+    expect(apiClient.post).toHaveBeenCalledWith('/functions', expect.objectContaining({ sdk: enabled, network_mode: 'none' }))
+  })
+
+  it.each([false, true])('sends sdk=%s on update without changing egress', async (enabled) => {
+    FN_A.sdk = !enabled
+    const { wrapper } = await boot('/functions/alpha?mode=edit')
+    const vm = await editorVM(wrapper)
+    expect(vm.form.sdk).toBe(!enabled)
+    vm.form.network_mode = 'egress'
+    await toggleSDK(vm, enabled)
+    await vm.runDeploy()
+    expect(apiClient.put).toHaveBeenCalledWith('/functions/fn-a', expect.objectContaining({ sdk: enabled, network_mode: 'egress' }))
+  })
+
+  it('protects an SDK-only change, and Discard restores the loaded false baseline', async () => {
+    const { wrapper, confirm } = await boot('/functions/alpha?mode=edit')
+    const vm = await editorVM(wrapper)
+    expect(vm.form.sdk).toBe(false) // an absent API field is not an implicit grant
+    await toggleSDK(vm, true)
+    expect(vm.isDirty).toBe(true)
+    await radio(wrapper, 'View').trigger('click')
+    await settle()
+    expect(confirm.visible).toBe(true)
+    confirm.settle(false)
+    await settle()
+    expect(vm.form.sdk).toBe(true)
+    expect(checkedLabel(wrapper)).toBe('Edit')
+    await radio(wrapper, 'View').trigger('click')
+    await settle()
+    confirm.settle(true)
+    await settle()
+    expect(vm.form.sdk).toBe(false)
+    expect(vm.isDirty).toBe(false)
+    expect(vm.modals.settings).toBe(false)
+    expect(checkedLabel(wrapper)).toBe('View')
+  })
+
+  it.each([false, true])('Reset restores sdk=%s and preserves the existing function identity', async (enabled) => {
+    FN_A.sdk = enabled
+    const { wrapper, confirm } = await boot('/functions/alpha?mode=edit')
+    const vm = await editorVM(wrapper)
+    await toggleSDK(vm, !enabled)
+    const reset = vm.resetForm()
+    await settle()
+    expect(confirm.title).toBe('Reset editor?')
+    confirm.settle(true)
+    await reset
+    expect(vm.form.sdk).toBe(enabled)
+    expect(vm.form.name).toBe('alpha')
+    expect(vm.fnId).toBe('fn-a')
+    expect(vm.isDirty).toBe(false)
+    await vm.runDeploy()
+    expect(apiClient.put).toHaveBeenCalledWith('/functions/fn-a', expect.objectContaining({ sdk: enabled }))
+    expect(apiClient.post.mock.calls.some(([url]) => url === '/functions')).toBe(false)
+  })
+
+  it('Reset clears an SDK grant on an uncreated function', async () => {
+    const { wrapper, confirm } = await boot('/functions/new')
+    const vm = await editorVM(wrapper)
+    await toggleSDK(vm, true)
+    const reset = vm.resetForm()
+    await settle()
+    confirm.settle(true)
+    await reset
+    expect(vm.form.sdk).toBe(false)
+  })
+
+  it('view mode disables SDK edits and blocks deploy, reset, and template application', async () => {
+    const { wrapper, confirm } = await boot('/functions/alpha')
+    const vm = await editorVM(wrapper)
+    vm.modals.settings = true
+    await settle()
+    expect(document.querySelector('#fn-sdk').disabled).toBe(true)
+    vm.templateId = 'py-guestbook'
+    const source = vm.code
+    vm.applyTemplate()
+    await vm.runDeploy()
+    await vm.resetForm()
+    window.dispatchEvent(new CustomEvent('orva:deploy'))
+    await settle()
+    expect(vm.form.sdk).toBe(false)
+    expect(vm.code).toBe(source)
+    expect(confirm.visible).toBe(false)
+    expect(apiClient.put).not.toHaveBeenCalled()
+    expect(apiClient.post).not.toHaveBeenCalled()
+  })
+
+  it('enables SDK only when an SDK template is explicitly applied, never from code or egress', async () => {
+    const { wrapper } = await boot('/functions/new')
+    const vm = await editorVM(wrapper)
+    vm.form.network_mode = 'egress'
+    vm.code = "from orva import kv\n\ndef handler(event): return kv.get('key')"
+    await settle()
+    expect(vm.form.sdk).toBe(false)
+    vm.templateId = 'py-guestbook'
+    vm.applyTemplate()
+    expect(vm.form.sdk).toBe(true)
+    expect(vm.form.network_mode).toBe('egress')
+    await toggleSDK(vm, false)
+    vm.form.network_mode = 'none'
+    await settle()
+    expect(vm.form.sdk).toBe(false)
+    vm.templateId = 'py-traced-pipeline'
+    vm.applyTemplate()
+    expect(vm.form.sdk).toBe(true)
+    expect(vm.form.network_mode).toBe('none')
+  })
+
+  it('reloads the rolled-back SDK value and adopts it as the clean baseline', async () => {
+    FN_A.sdk = true
+    const { wrapper, confirm } = await boot('/functions/alpha?mode=edit')
+    const vm = await editorVM(wrapper)
+    const { rollbackFunction } = await import('@/api/endpoints')
+    rollbackFunction.mockImplementationOnce(async () => { FN_A.sdk = false; return { data: {} } })
+    const rollback = vm.rollbackToVersion({ deployment_id: 'old', version: 1, short_hash: 'old' })
+    await settle()
+    confirm.settle(true)
+    await rollback
+    await settle()
+    expect(vm.form.sdk).toBe(false)
+    expect(vm.isDirty).toBe(false)
+    await radio(wrapper, 'View').trigger('click')
+    await settle()
+    expect(confirm.visible).toBe(false)
+    expect(checkedLabel(wrapper)).toBe('View')
   })
 })

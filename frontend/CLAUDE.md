@@ -116,6 +116,13 @@ which violet is correct.
 
 ## Non-obvious
 
+- **SDK access is an explicit function setting**, separate from `network_mode`.
+  Editor Settings defaults `sdk` to false, preserves it through dirty/discard,
+  Reset, deploy, and rollback, and disables the checkbox in View. Only explicit
+  selection of a template marked `requiresSDK` enables it automatically; loading
+  source or pasting SDK imports must not grant access. Reset on an existing
+  function restores the loaded/deployed baseline without clearing its identity.
+
 - Dev proxy: `vite.config.js` proxies `/api` and `/auth` to `http://localhost:8443`. Direct `/fn/`, `/webhook/`, and `/metrics` calls in dev must be made to `:8443` directly — they are not proxied through Vite.
 - `src/stores/events.js` opens a persistent SSE connection on mount and reconnects automatically on drop. Dashboard widgets subscribe to this store — they do not open their own connections.
 - **A view scoped to a route param takes it as a prop (`props: true`), never from `useRoute()`.** `Layout.vue` wraps the router-view in `<keep-alive>`, so leaving a page *deactivates* it rather than unmounting it: `useRoute()` keeps updating underneath a view that is no longer on screen, and a `watch` on `route.params` there fires for somebody else's navigation. Vue does not patch a cached instance's props, so a route prop is inert while the view is away and re-syncs when it comes back — one `watch(() => props.x, load, { immediate: true })` then covers both the initial mount and a param change, and nothing else. This is why a cached `Editor.vue` used to wipe an unsaved buffer on the way to `/docs`. The same rule governs global listeners: bind them in `onActivated` / `onDeactivated` (plus `onBeforeUnmount`, which `onDeactivated` does **not** cover when keep-alive evicts at `:max`), not `onMounted` — a deactivated `Editor.vue` was still handling the window-level `orva:deploy` that Cmd/Ctrl-S dispatches from any `/functions/…` path. `KVStore.vue` and `FunctionDiff.vue` still read `useRoute()`. `KVStore.vue` at least re-reads on `onActivated`, so it is wrong only when one param route replaces another with no page in between; `FunctionDiff.vue` resolves its function in `onMounted` alone, so a cached instance keeps the *previous* function's record and its Rollback acts on it.

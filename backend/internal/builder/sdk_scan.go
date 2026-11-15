@@ -22,7 +22,7 @@ var sdkImportPatterns = []string{
 // SourceUsesOrvaSDK reports whether the supplied handler source appears
 // to import the in-sandbox `orva` module (kv / invoke / jobs). The match
 // is a plain substring sweep — we don't try to parse the source. The
-// caller pairs this with the function's network_mode to decide whether
+// caller pairs this with the function's SDK permission to decide whether
 // to surface a deploy warning.
 func SourceUsesOrvaSDK(source string) bool {
 	if source == "" {
@@ -38,10 +38,7 @@ func SourceUsesOrvaSDK(source string) bool {
 
 // SDKNoneWarning is the canonical warning string emitted when a deploy
 // lands code that imports the orva SDK while the function's
-// network_mode is "none". Surfaced on both REST and MCP deploy paths.
+// SDK permission is absent. Surfaced on both REST and MCP deploy paths.
 const SDKNoneWarning = "Function imports the orva SDK (kv / invoke / jobs) " +
-	"but network_mode is 'none' — every SDK call will fail at runtime " +
-	"with ENETUNREACH because the SDK reaches orvad over the bridge " +
-	"network. Update the function with network_mode='egress' to enable " +
-	"the SDK; the next invocation will be a cold start as the warm pool " +
-	"drains."
+	"but sdk permission is false. Update the function with sdk=true to enable " +
+	"platform SDK calls independently of network_mode. External HTTPS still requires egress."

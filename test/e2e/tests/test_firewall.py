@@ -175,7 +175,8 @@ def deploy(c, name, network_mode):
     """Create + deploy the shared handler. Returns (fid, terminal_status)."""
     body = {"name": name, "description": "egress policy e2e", "runtime": "node",
             "entrypoint": "handler.js", "timeout_ms": 30000, "memory_mb": 128,
-            "cpus": 1, "network_mode": network_mode, "auth_mode": "none"}
+            "cpus": 1, "network_mode": network_mode, "auth_mode": "none",
+            "sdk": network_mode == "egress"}
     code, created = c.req("POST", "/api/v1/functions", body, expect=range(200, 599))
     if not (200 <= code < 300) or not isinstance(created, dict):
         return None, f"create -> {code}: {str(created)[:160]}"

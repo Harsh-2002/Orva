@@ -257,6 +257,7 @@ def create(c, owned, suffix, runtime, role):
     fn = c.post('/api/v1/functions', {
         'name': f'e2e-chan-ops-{suffix}-{runtime}-{role}', 'runtime': runtime,
         'entrypoint': filename, 'network_mode': 'none', 'auth_mode': 'none',
+        'sdk': role in ('caller', 'target'),
         # Nine simultaneous self-call workers must fit even on a small CI host.
         'memory_mb': 64, 'cpus': 0.1, 'timeout_ms': 45000, 'max_concurrency': 16,
     })

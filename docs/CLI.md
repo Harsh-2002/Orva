@@ -249,6 +249,26 @@ orva deploy ./py-fn --name greeter --runtime python
 orva deploy ./src --name greeter --runtime node --follow
 ```
 
+### Function configuration and SDK access
+
+`functions create` defaults to `sdk: false`. Pass `--sdk` (or `--sdk=true`)
+to allow the function to use the Orva SDK for KV, function-to-function calls,
+jobs, crons, and spans. This is independent of `--network-mode`: SDK access
+does not enable outbound requests, and enabling egress does not enable the SDK.
+
+```bash
+orva functions create --name counter --runtime node --sdk
+orva functions update counter --sdk=false
+orva functions update counter --sdk=true
+orva functions update counter --network-mode egress
+```
+
+`functions update` sends only explicitly supplied flags. Omitting `--sdk`
+preserves the current value; use `--sdk=false` to revoke SDK access. These
+commands send a JSON boolean, not a string. `functions get counter` includes
+the current `sdk` value. The dashboard exposes the same setting as **Allow
+Orva SDK** in the editor's Settings panel.
+
 ### Invoke
 
 `orva invoke` runs a deployed function over HTTP. The response **body**

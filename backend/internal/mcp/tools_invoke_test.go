@@ -38,7 +38,7 @@ func TestNetworkErrorHint(t *testing.T) {
 			fn:          noneFn,
 			stderr:      "raise OrvaUnavailableError('kv service offline')",
 			wantHint:    true,
-			wantSnippet: "loopback",
+			wantSnippet: "sdk=true",
 		},
 		{
 			name:     "egress + ENETUNREACH (real outbound DNS issue) → no hint",

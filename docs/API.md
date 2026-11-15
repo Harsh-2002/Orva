@@ -109,7 +109,8 @@ Create a function record.
   "cpus": 1,
   "timeout_ms": 30000,
   "env_vars": {"NODE_ENV": "production"},
-  "network_mode": "none"      // none (default) | egress
+  "network_mode": "none",     // none (default) | egress
+  "sdk": false                // explicit SDK permission; defaults to false
 }
 ```
 
@@ -125,6 +126,21 @@ Create a function record.
 Toggling on an existing function via `PUT /api/v1/functions/{id}`
 drains the warm pool so the next invocation picks up the new mode.
 
+`sdk` independently grants the function access to Orva KV, function calls,
+jobs, cron declarations and custom spans. Set `sdk: true` for SDK-dependent
+handlers; current adapters use the private worker channel even in `none`
+network mode. New functions default to `false`, including new egress functions.
+On the first migration, existing egress functions are backfilled to `true`;
+subsequent restarts do not undo an explicit revocation. Enabling outbound
+networking does not enable SDK permission, and disabling SDK permission does
+not disable outbound networking.
+
+Update `sdk` using an explicit boolean (`false` revokes permission). Changes
+hard-drain existing workers so stale worker capabilities cannot be reused.
+The field is returned in individual function and list records. This permission
+governs the function's outgoing SDK access, not whether it may receive a call:
+an SDK-enabled caller can invoke an active callee whose own `sdk` is false.
+
 ### `GET /api/v1/functions`
 List all functions. Optional `?status=active|inactive`, `?runtime=...`.
 
@@ -133,7 +149,7 @@ Single function record. Accepts a function **id or name**.
 
 ### `PUT /api/v1/functions/{id}`
 Partial update. Whitelisted fields: `name`, `description`, `entrypoint`,
-`timeout_ms`, `memory_mb`, `cpus`, `env_vars`, `network_mode`,
+`timeout_ms`, `memory_mb`, `cpus`, `env_vars`, `network_mode`, `sdk`,
 `max_concurrency`, `concurrency_policy`, `auth_mode`, `rate_limit_per_min`,
 `status`.
 

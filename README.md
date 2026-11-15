@@ -126,9 +126,12 @@ exports.handler = async (event) => {
 }
 ```
 
-The SDK reaches Orva over HTTP, and `network_mode` defaults to `none` — so set
-the function's network mode to **egress** or every SDK call fails with
-`ENETUNREACH`. The editor warns you at deploy time when it spots the import.
+Enable **Allow Orva SDK** in the function settings (API: `sdk: true`, CLI:
+`--sdk`). New functions default to disabled. Current adapters use a private
+worker channel, so SDK calls work with the default `network_mode: none`;
+outbound networking is a separate permission needed for external API calls.
+Legacy HTTP SDK fallback remains for older installed adapters until the
+channel-only cut-over.
 
 Handler contract, event shape, and streaming: [docs/RUNTIMES.md](docs/RUNTIMES.md).
 

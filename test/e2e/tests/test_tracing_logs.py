@@ -151,6 +151,7 @@ def deploy(c, owned, runtime, role, suffix):
         'name': f'e2e-trace-logs-{suffix}-{runtime}-{role}', 'runtime': runtime,
         'entrypoint': filename, 'memory_mb': 128, 'timeout_ms': 30000,
         'cpus': 1, 'network_mode': 'egress' if role == 'root' else 'none', 'auth_mode': 'none',
+        'sdk': role == 'root',
     })
     owned.append(fn['id'])
     _, submitted = c.req('POST', f"/api/v1/functions/{fn['id']}/deploy-inline",

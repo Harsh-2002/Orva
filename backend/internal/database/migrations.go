@@ -820,6 +820,10 @@ PRAGMA foreign_keys = ON;
 		}
 	}
 
+	if err := db.migrateSDKPermission(); err != nil {
+		return fmt.Errorf("SDK permission migration: %w", err)
+	}
+
 	// Pool controller v2 removes the public target_concurrency knob. Rebuild
 	// the table because SQLite cannot DROP COLUMN safely across all supported
 	// versions. The copy normalizes the scale contract at the same time:
@@ -862,6 +866,7 @@ PRAGMA foreign_keys = ON;
 			'cpus',               f.cpus,
 			'timeout_ms',         f.timeout_ms,
 			'network_mode',       f.network_mode,
+			'sdk',                json(CASE WHEN f.sdk THEN 'true' ELSE 'false' END),
 			'auth_mode',          COALESCE(f.auth_mode, 'none'),
 			'rate_limit_per_min', COALESCE(f.rate_limit_per_min, 0),
 			'max_concurrency',    f.max_concurrency,

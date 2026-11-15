@@ -96,7 +96,7 @@ def main():
         fn = c.post("/api/v1/functions", {
             "name": "e2e-prebundle-" + uuid.uuid4().hex[:12], "runtime": "node",
             "entrypoint": "dist/handler.js", "memory_mb": 128, "timeout_ms": 10000,
-            "network_mode": "egress", "auth_mode": "none",
+            "network_mode": "egress", "sdk": True, "auth_mode": "none",
         })
         fid = fn["id"]
         owned.append(fid)

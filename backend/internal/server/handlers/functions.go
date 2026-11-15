@@ -91,6 +91,7 @@ type createFunctionRequest struct {
 	CPUs              float64           `json:"cpus"`
 	EnvVars           map[string]string `json:"env_vars"`
 	NetworkMode       string            `json:"network_mode"`
+	SDK               bool              `json:"sdk"`
 	MaxConcurrency    int               `json:"max_concurrency"`
 	ConcurrencyPolicy string            `json:"concurrency_policy"`
 	AuthMode          string            `json:"auth_mode"`
@@ -107,6 +108,7 @@ type updateFunctionRequest struct {
 	CPUs              *float64           `json:"cpus"`
 	EnvVars           *map[string]string `json:"env_vars"`
 	NetworkMode       *string            `json:"network_mode"`
+	SDK               *bool              `json:"sdk"`
 	MaxConcurrency    *int               `json:"max_concurrency"`
 	ConcurrencyPolicy *string            `json:"concurrency_policy"`
 	AuthMode          *string            `json:"auth_mode"`
@@ -256,6 +258,7 @@ func (h *FunctionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CPUs:              req.CPUs,
 		EnvVars:           req.EnvVars,
 		NetworkMode:       req.NetworkMode,
+		SDK:               req.SDK,
 		MaxConcurrency:    req.MaxConcurrency,
 		ConcurrencyPolicy: req.ConcurrencyPolicy,
 		AuthMode:          req.AuthMode,
@@ -430,6 +433,11 @@ func (h *FunctionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// outright so the next Release also kills the busy worker.
 	spawnConfigChanged := false
 	networkModeChanged := false
+	if req.SDK != nil && *req.SDK != fn.SDK {
+		fn.SDK = *req.SDK
+		spawnConfigChanged = true
+		networkModeChanged = true
+	}
 
 	// Apply partial updates.
 	if req.Name != nil {
@@ -875,13 +883,9 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 	gw.Close()
 	tmpFile.Close()
 
-	// Inline deploys carry the source verbatim — scan it for the orva SDK
-	// import while we still have it in hand, and surface a deploy-time
-	// warning if the function's netns won't let the SDK reach orvad.
-	// Without this, the failure shows up only on the first invoke as a
-	// generic runtime crash, after the agent has moved on.
+	// Surface missing SDK permission before the first invocation fails.
 	var deployWarning string
-	if fn.NetworkMode == database.NetworkModeNone && builder.SourceUsesOrvaSDK(req.Code) {
+	if !fn.SDK && builder.SourceUsesOrvaSDK(req.Code) {
 		deployWarning = builder.SDKNoneWarning
 	}
 
@@ -893,7 +897,7 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 // build (legacy path for tests). The tarball at tarballPath is consumed by
 // the Queue and removed when the build completes. deployWarning, when
 // non-empty, is attached to the response payload so callers see advisory
-// notes (e.g. SDK import meets network_mode=none) at deploy time rather
+// notes (e.g. SDK import without SDK permission) at deploy time rather
 // than discovering the issue on the first failed invoke.
 func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Request, fn *database.Function, tarballPath, reqID, deployWarning string) {
 	// Always insert a deployments row so clients can observe state.
@@ -1233,6 +1237,7 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	// shipped with. Secrets are deliberately untouched: they rotate
 	// independently and should always reflect current values.
 	previousActive := fn.ActiveDeploymentID
+	previousSDK, previousNetwork := fn.SDK, fn.NetworkMode
 	fn.CodeHash = targetHash
 	fn.Status = "active"
 	fn.ActiveDeploymentID = targetDeploymentID
@@ -1248,6 +1253,7 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		fn.CPUs = targetSnapshot.CPUs
 		fn.TimeoutMS = targetSnapshot.TimeoutMS
 		fn.NetworkMode = targetSnapshot.NetworkMode
+		fn.SDK = targetSnapshot.SDK
 		fn.AuthMode = targetSnapshot.AuthMode
 		fn.RateLimitPerMin = targetSnapshot.RateLimitPerMin
 		fn.MaxConcurrency = targetSnapshot.MaxConcurrency
@@ -1266,7 +1272,9 @@ func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Drain warm workers so the next invoke picks up the promoted code.
-	if h.PoolRefresh != nil {
+	if (previousSDK != fn.SDK || previousNetwork != fn.NetworkMode) && h.PoolDrain != nil {
+		h.PoolDrain(fnID)
+	} else if h.PoolRefresh != nil {
 		h.PoolRefresh(fnID)
 	}
 

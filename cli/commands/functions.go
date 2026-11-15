@@ -45,8 +45,10 @@ var functionsCreateCmd = &cobra.Command{
 	Short: "Create a new function",
 	Long: `Create a new function. Name and runtime are required; resource limits and
 network mode are optional and fall back to server defaults when omitted.
+The Orva SDK is off by default; --sdk enables it independently of network mode.
 
   orva functions create --name greeter --runtime node
+  orva functions create --name counter --runtime node --sdk
   orva functions create --name fetcher --runtime python \
     --memory-mb 256 --timeout-ms 60000 --network-mode egress`,
 	Args: cobra.NoArgs,
@@ -85,8 +87,11 @@ or pauses a function without a full redeploy.
 
 Runtime cannot be changed here (it is fixed at create; deploy new code to
 change behavior). --env replaces the entire env-var map.
+--sdk enables the Orva SDK; --sdk=false disables it. Omitting it preserves the
+current setting. SDK access does not enable outbound network access.
 
   orva functions update greeter --network-mode egress
+  orva functions update greeter --sdk=false
   orva functions update greeter --memory-mb 256 --timeout-ms 60000
   orva functions update greeter --status inactive
   orva functions update greeter --env API_URL=https://x --env DEBUG=1`,
@@ -119,6 +124,7 @@ func init() {
 	functionsCreateCmd.Flags().Int("memory-mb", 0, "memory limit in MB (0 = server default)")
 	functionsCreateCmd.Flags().Int("timeout-ms", 0, "invocation timeout in ms (0 = server default)")
 	functionsCreateCmd.Flags().String("network-mode", "", "network mode: none | egress (empty = server default)")
+	functionsCreateCmd.Flags().Bool("sdk", false, "allow Orva SDK access (independent of outbound network access)")
 	functionsCreateCmd.MarkFlagRequired("name")
 	functionsCreateCmd.MarkFlagRequired("runtime")
 
@@ -130,6 +136,7 @@ func init() {
 	functionsUpdateCmd.Flags().Float64("cpus", 0, "CPU limit (cores)")
 	functionsUpdateCmd.Flags().StringArray("env", nil, "env var KEY=VALUE (repeatable; replaces the whole env map)")
 	functionsUpdateCmd.Flags().String("network-mode", "", "network mode: none | egress")
+	functionsUpdateCmd.Flags().Bool("sdk", false, "allow Orva SDK access (--sdk=false disables; omitted = unchanged)")
 	functionsUpdateCmd.Flags().Int("max-concurrency", 0, "max concurrent invocations (0 = unlimited)")
 	functionsUpdateCmd.Flags().String("concurrency-policy", "", "when at capacity: queue | reject")
 	functionsUpdateCmd.Flags().String("auth-mode", "", "invocation auth: none | platform_key | signed")
@@ -222,10 +229,12 @@ func runFunctionsCreate(cmd *cobra.Command, args []string) error {
 	memoryMB, _ := cmd.Flags().GetInt("memory-mb")
 	timeoutMS, _ := cmd.Flags().GetInt("timeout-ms")
 	networkMode, _ := cmd.Flags().GetString("network-mode")
+	sdk, _ := cmd.Flags().GetBool("sdk")
 
 	body := map[string]any{
 		"name":    name,
 		"runtime": runtime,
+		"sdk":     sdk,
 	}
 	if memoryMB > 0 {
 		body["memory_mb"] = memoryMB
@@ -416,6 +425,10 @@ func runFunctionsUpdate(cmd *cobra.Command, args []string) error {
 	setStr("concurrency-policy", "concurrency_policy")
 	setStr("auth-mode", "auth_mode")
 	setStr("status", "status")
+	if f.Changed("sdk") {
+		v, _ := f.GetBool("sdk")
+		body["sdk"] = v
+	}
 	if f.Changed("timeout-ms") {
 		v, _ := f.GetInt64("timeout-ms")
 		body["timeout_ms"] = v

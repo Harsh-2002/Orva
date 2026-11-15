@@ -38,9 +38,7 @@ type DeployInlineOutput struct {
 	Error        string `json:"error,omitempty"`
 	// Warning is non-empty when the platform detected something likely
 	// wrong with this deploy that the agent should know before invoking.
-	// Currently emitted when the source imports the orva SDK but the
-	// function's network_mode is "none" (every SDK call would fail at
-	// runtime with ENETUNREACH).
+	// SDK imports require the function's explicit SDK permission.
 	Warning string `json:"warning,omitempty" jsonschema:"non-fatal advisory about likely runtime issues — read this before invoking"`
 }
 
@@ -213,7 +211,7 @@ func registerDeployTools(rc *regCtx) {
 			Name:  "deploy_function_inline",
 			Title: "Deploy Function Inline",
 			Description: "BEFORE calling this: if you have not already called `get_orva_docs` in this conversation, call it first. Orva's handler contract, SDK shape, and event envelope diverge from Lambda / Vercel / Cloudflare Workers; agents that skip the docs and rely on training-data defaults consistently produce code that fails at first invoke (`require('orva')` not `import orva`, `kv.put` not `kv.set`, `exports.handler` not `export default`, no `event.query` parsing of arbitrary URLs, etc.). Reading the docs once costs ~3 KB and prevents 4-6 round-trips of trial-and-error rebuilds.\n\n" +
-				"Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but the function's network_mode is 'none' (the SDK call would fail at runtime).",
+				"Deploy source code to a function. Pass the full handler file as `code`, optional dependency-file content as `dependencies`. `wait` is REQUIRED — pass true to block until the build terminates (so invoke_function won't race a still-queued build), or false to return immediately with status='queued' and poll yourself. Returns deployment_id either way; carries a `warning` field when the source imports the orva SDK but sdk permission is false (enable sdk independently of network_mode).",
 			Annotations: &mcpsdk.ToolAnnotations{
 				DestructiveHint: ptrFalse(),
 				OpenWorldHint:   ptrFalse(),
@@ -363,7 +361,7 @@ func deployInline(ctx context.Context, deps Deps, in DeployInlineInput) (*mcpsdk
 		Status:       "queued",
 		FunctionID:   fn.ID,
 	}
-	if fn.NetworkMode == database.NetworkModeNone && builder.SourceUsesOrvaSDK(in.Code) {
+	if !fn.SDK && builder.SourceUsesOrvaSDK(in.Code) {
 		out.Warning = builder.SDKNoneWarning
 	}
 
@@ -490,6 +488,7 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 		return nil, RollbackFunctionOutput{}, fmt.Errorf("failed to activate version: %w", err)
 	}
 
+	previousSDK, previousNetwork := fn.SDK, fn.NetworkMode
 	fn.CodeHash = targetHash
 	fn.Status = "active"
 	fn.ActiveDeploymentID = targetDeploymentID
@@ -507,6 +506,7 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 		fn.CPUs = targetSnapshot.CPUs
 		fn.TimeoutMS = targetSnapshot.TimeoutMS
 		fn.NetworkMode = targetSnapshot.NetworkMode
+		fn.SDK = targetSnapshot.SDK
 		fn.AuthMode = targetSnapshot.AuthMode
 		fn.RateLimitPerMin = targetSnapshot.RateLimitPerMin
 		fn.MaxConcurrency = targetSnapshot.MaxConcurrency
@@ -517,7 +517,11 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 	}
 
 	if deps.PoolMgr != nil {
-		deps.PoolMgr.RefreshForDeploy(fn.ID)
+		if previousSDK != fn.SDK || previousNetwork != fn.NetworkMode {
+			deps.PoolMgr.Drain(fn.ID)
+		} else {
+			deps.PoolMgr.RefreshForDeploy(fn.ID)
+		}
 	}
 
 	return nil, RollbackFunctionOutput{

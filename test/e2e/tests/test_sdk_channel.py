@@ -139,6 +139,9 @@ def handler(event):
 """
 
 EGRESS_CODE = r"""
+// Exercise the retained HTTP fallback rather than silently using the channel.
+delete process.env.ORVA_SDK_FD;
+delete process.env.ORVA_SDK_PROTO;
 const orva = require('orva');
 exports.handler = async () => {
   // The HTTP transport (egress) still works, including function-to-function calls.
@@ -160,7 +163,8 @@ def cleanup(c):
 def deploy(c, name, runtime, code, fname, net="none", timeout_ms=30000):
     code_, fn = c.req("POST", "/api/v1/functions", {
         "name": name, "runtime": runtime, "entrypoint": fname, "memory_mb": 128, "cpus": 1,
-        "timeout_ms": timeout_ms, "network_mode": net, "auth_mode": "none"}, expect=range(200, 599))
+        "timeout_ms": timeout_ms, "network_mode": net, "sdk": True,
+        "auth_mode": "none"}, expect=range(200, 599))
     if code_ >= 300:
         return None
     fid = fn["id"]

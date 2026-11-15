@@ -26,6 +26,7 @@ type DeploymentSnapshot struct {
 	CPUs              float64 `json:"cpus"`
 	TimeoutMS         int64   `json:"timeout_ms"`
 	NetworkMode       string  `json:"network_mode"`
+	SDK               bool    `json:"sdk"`
 	AuthMode          string  `json:"auth_mode"`
 	RateLimitPerMin   int     `json:"rate_limit_per_min"`
 	MaxConcurrency    int     `json:"max_concurrency"`
@@ -47,6 +48,7 @@ func SnapshotFromFunction(fn *Function) *DeploymentSnapshot {
 		CPUs:              fn.CPUs,
 		TimeoutMS:         fn.TimeoutMS,
 		NetworkMode:       fn.NetworkMode,
+		SDK:               fn.SDK,
 		AuthMode:          fn.AuthMode,
 		RateLimitPerMin:   fn.RateLimitPerMin,
 		MaxConcurrency:    fn.MaxConcurrency,
@@ -103,6 +105,7 @@ func (s *DeploymentSnapshot) Equal(o *DeploymentSnapshot) bool {
 		s.CPUs != o.CPUs ||
 		s.TimeoutMS != o.TimeoutMS ||
 		s.NetworkMode != o.NetworkMode ||
+		s.SDK != o.SDK ||
 		s.AuthMode != o.AuthMode ||
 		s.RateLimitPerMin != o.RateLimitPerMin ||
 		s.MaxConcurrency != o.MaxConcurrency ||
