@@ -255,9 +255,17 @@ function httpHost() {
     let b = ''
     req.on('data', (d) => (b += d))
     req.on('end', () => {
-      seen.push({ method: req.method, url: req.url, token: req.headers['x-orva-internal-token'], body: b })
+      seen.push({ method: req.method, url: req.url, token: req.headers['x-orva-internal-token'], trace: req.headers['x-orva-trace-id'], body: b })
       res.setHeader('content-type', 'application/json')
       if (req.url.startsWith('/api/v1/jobs')) return res.end(JSON.stringify({ id: 'job1' }))
+      if (req.url.endsWith('/stream')) {
+        res.write('aa')
+        return setTimeout(() => res.end('bb'), 10)
+      }
+      if (req.url.startsWith('/api/v1/_internal/invoke/')) {
+        return res.end(JSON.stringify({ statusCode: 200, headers: {}, body: '{"ok":1}' }))
+      }
+      if (req.url.startsWith('/api/v1/_internal/crons')) return res.end(JSON.stringify({ id: 'c1' }))
       if (req.method === 'GET') return res.end(JSON.stringify({ value: 'v' }))
       res.end('{}')
     })
@@ -286,18 +294,154 @@ for (const [name, channel, env] of [
   })
 }
 
-test('non-kv ops stay on HTTP even when the channel is open', async () => {
+test('every op stays on HTTP when the channel is absent', async () => {
   const h = await httpHost()
   try {
-    const { out, frames } = await run('http', kvHost(), {
-      env: { ORVA_API_BASE: `http://127.0.0.1:${h.port}`, ORVA_INTERNAL_TOKEN: 'tok', ORVA_FUNCTION_ID: 'f1' },
+    const { out, frames } = await run('httpAll', () => assert.fail('channel used'), {
+      channel: false,
+      env: { ORVA_API_BASE: `http://127.0.0.1:${h.port}`, ORVA_INTERNAL_TOKEN: 'tok', ORVA_FUNCTION_ID: 'f1', ORVA_TRACE_ID: 'tr1' },
     })
+    assert.equal(frames.length, 0)
     assert.equal(out.job.id, 'job1')
-    assert.deepEqual(h.seen.map((s) => s.url), ['/api/v1/jobs'])
-    assert.deepEqual(frames.map((f) => f.op), ['kv.put', 'kv.get'])
+    assert.equal(out.cron.id, 'c1')
+    assert.deepEqual(out.inv, { statusCode: 200, headers: {}, body: { ok: 1 } })
+    assert.equal(out.chunks.join(''), 'aabb')
+    assert.deepEqual(
+      h.seen.map((s) => s.url).sort(),
+      ['/api/v1/_internal/crons', '/api/v1/_internal/invoke/callee', '/api/v1/_internal/invoke/callee/stream', '/api/v1/_internal/spans', '/api/v1/jobs'].sort()
+    )
+    assert.ok(h.seen.every((s) => s.trace === 'tr1'), 'HTTP keeps sending trace headers')
   } finally {
     h.server.close()
   }
+})
+
+// Host for the PR2 ops. `state` collects what the host saw.
+function opsHost(state = {}) {
+  state.handles = new Map()
+  state.n = 0
+  const chunk = (i) => Buffer.from(`c${i}`).toString('base64')
+  return (msg, ctx) => {
+    const a = msg.a || {}
+    switch (msg.op) {
+      case 'jobs.enqueue':
+        if (a.function_name === 'bad') return ctx.fail(msg.id, 400, 'VALIDATION', 'bad job')
+        return ctx.reply(msg.id, { id: 'job9', replayed: a.idempotency_key === 'k' })
+      case 'crons.upsert':
+        if (a.schedule === 'bad') return ctx.fail(msg.id, 403, 'SDK_SCOPE_VIOLATION', 'no')
+        return ctx.reply(msg.id, { id: 'cron1', name: a.name })
+      case 'spans.emit':
+        if (a.name === 's') return ctx.fail(msg.id, 403, 'SDK_SCOPE_VIOLATION', 'no')
+        return ctx.reply(msg.id, {})
+      case 'invoke':
+        if (a.name === 'missing') return ctx.fail(msg.id, 404, 'NOT_FOUND', 'function not found')
+        if (a.name === 'deep') return ctx.fail(msg.id, 507, 'MAX_CALL_DEPTH', 'too deep')
+        if (a.name === 'busy') return ctx.fail(msg.id, 429, 'FUNCTION_BUSY', 'busy')
+        if (a.name === 'plain') return ctx.reply(msg.id, { statusCode: 200, headers: {}, body: 'not json' })
+        return ctx.reply(msg.id, { statusCode: 200, headers: { a: 'b' }, body: '{"echo":' + JSON.stringify(a.body.q) + '}' })
+      case 'invoke.stream.open': {
+        if (a.name === 'missing') return ctx.fail(msg.id, 404, 'NOT_FOUND', 'function not found')
+        const handle = `h${++state.n}`
+        state.handles.set(handle, { name: a.name, i: 0 })
+        return ctx.reply(msg.id, { handle, status: 200, headers: {} })
+      }
+      case 'invoke.stream.next': {
+        const st = state.handles.get(a.handle)
+        if (!st) return ctx.fail(msg.id, 404, 'NOT_FOUND', 'no such handle')
+        st.i++
+        if (st.name === 'mid' && st.i === 3) {
+          state.handles.delete(a.handle)
+          return ctx.fail(msg.id, 502, 'INVOKE_FAILED', 'callee died')
+        }
+        if (st.name === 'five' && st.i === 3 && state.eofAtThree) return ctx.sock.destroy()
+        if (st.i <= 5) return ctx.reply(msg.id, { chunk_b64: chunk(st.i), done: false })
+        state.handles.delete(a.handle)
+        return ctx.reply(msg.id, { chunk_b64: '', done: true })
+      }
+      case 'invoke.stream.close':
+        state.closed = (state.closed || []).concat(a.handle)
+        state.handles.delete(a.handle)
+        return ctx.reply(msg.id, {})
+    }
+    return ctx.fail(msg.id, 400, 'UNKNOWN_OP', msg.op)
+  }
+}
+
+const noIdentity = (frames) => {
+  for (const f of frames) {
+    assert.deepEqual(Object.keys(f).filter((k) => !['id', 'op', 'a', 'lease'].includes(k)), [])
+    for (const k of ['function_id', 'execution_id', 'trace_id', 'span_id', 'token', 'depth', 'call_depth', 'headers']) {
+      assert.ok(!(k in f.a), `identity field ${k} in ${f.op}`)
+    }
+  }
+}
+
+const IDENT_ENV = { ORVA_TRACE_ID: 'tr1', ORVA_SPAN_ID: 'sp1', ORVA_EXECUTION_ID: 'ex1', ORVA_CALL_DEPTH: '2', ORVA_FUNCTION_ID: 'f1' }
+
+test('jobs, crons, spans and invoke go over the channel with no identity', async () => {
+  const { out, frames } = await run('opsOk', opsHost(), { env: IDENT_ENV })
+  assert.deepEqual(out.job, { id: 'job9', replayed: true })
+  assert.deepEqual(out.cron, { id: 'cron1', name: 'nightly' })
+  assert.equal(out.spanRet, 7)
+  assert.deepEqual(out.inv, { statusCode: 200, headers: { a: 'b' }, body: { echo: 1 } })
+  assert.equal(out.invString.body, 'not json')
+  assert.deepEqual(frames.map((f) => f.op), ['jobs.enqueue', 'crons.upsert', 'spans.emit', 'invoke', 'invoke'])
+  assert.deepEqual(frames[0].a, { function_name: 'fn2', payload: { a: 1 }, max_attempts: 5, idempotency_key: 'k', idempotency_window_seconds: 60 })
+  assert.deepEqual(frames[1].a, { name: 'nightly', schedule: '0 3 * * *', payload: { x: 1 }, timezone: 'UTC', enabled: true })
+  assert.equal(frames[2].a.name, 'work')
+  assert.equal(frames[2].a.status, 'ok')
+  assert.deepEqual(frames[2].a.attributes, { a: 1 })
+  assert.equal(typeof frames[2].a.duration_ms, 'number')
+  assert.deepEqual(frames[3].a, { name: 'callee', body: { q: 1 } })
+  assert.deepEqual(frames[4].a, { name: 'plain', body: {} })
+  assert.ok(frames.every((f) => f.lease === 'L-1'))
+  noIdentity(frames)
+})
+
+test('op errors map to the same OrvaError statuses as HTTP', async () => {
+  const { out } = await run('opsErrors', opsHost(), { env: IDENT_ENV })
+  assert.equal(out.notFound.err.status, 404)
+  assert.match(out.notFound.err.message, /function not found: missing/)
+  assert.equal(out.depth.err.status, 507)
+  assert.equal(out.depth.err.message, 'call depth exceeded')
+  assert.equal(out.busy.err.status, 429)
+  assert.equal(out.job.err.status, 400)
+  assert.equal(out.job.err.name, 'OrvaError')
+  assert.equal(out.cron.err.status, 403)
+  assert.equal(out.spanSwallowed, 'fine') // span ingestion errors never reach user code
+})
+
+test('invokeStream: 5 chunks, early break closes, mid-stream error, open error', async () => {
+  const state = {}
+  const { out, frames } = await run('streams', opsHost(state), { env: IDENT_ENV })
+  assert.deepEqual(out.full, ['c1|Uint8Array', 'c2|Uint8Array', 'c3|Uint8Array', 'c4|Uint8Array', 'c5|Uint8Array'])
+  assert.deepEqual(out.early, ['c1|Uint8Array', 'c2|Uint8Array'])
+  assert.deepEqual(out.mid, ['c1|Uint8Array', 'c2|Uint8Array'])
+  assert.equal(out.midErr.name, 'OrvaError')
+  assert.equal(out.midErr.status, 502)
+  assert.equal(out.openErr.err.status, 404)
+  assert.match(out.openErr.err.message, /function not found: missing/)
+  // h1 finished on its own, h2 was closed by the early break, h3 failed (host already closed it).
+  assert.deepEqual(state.closed, ['h2'])
+  assert.deepEqual(
+    frames.map((f) => (f.op === 'invoke.stream.next' || f.op === 'invoke.stream.close' ? `${f.op}:${f.a.handle}` : f.op)),
+    [
+      'invoke.stream.open', ...Array(6).fill('invoke.stream.next:h1'),
+      'invoke.stream.open', 'invoke.stream.next:h2', 'invoke.stream.next:h2', 'invoke.stream.close:h2',
+      'invoke.stream.open', 'invoke.stream.next:h3', 'invoke.stream.next:h3', 'invoke.stream.next:h3',
+      'invoke.stream.open',
+    ]
+  )
+  assert.deepEqual(frames[0].a, { name: 'five', body: { p: 1 } })
+  assert.deepEqual(frames[1].a, { handle: 'h1' })
+  noIdentity(frames)
+})
+
+test('channel EOF during a stream raises OrvaUnavailableError', async () => {
+  const state = { eofAtThree: true }
+  const { out } = await run('streamEof', opsHost(state), { env: IDENT_ENV })
+  assert.deepEqual(out.got, ['c1', 'c2'])
+  assert.equal(out.res.err.name, 'OrvaUnavailableError')
 })
 
 test('adapters carry the orva-sdk-proto:1 marker near the top', () => {

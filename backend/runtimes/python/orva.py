@@ -13,6 +13,7 @@ build step.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import stat
@@ -211,10 +212,14 @@ def _request(
 MAX_FRAME = 4 << 20  # 4 MiB, both directions
 MAX_INFLIGHT = 32  # the host refuses the 33rd with 429, so wait client-side
 
-# Ops served over the channel. Everything else stays on HTTP; later work only
-# has to add names here.
+# Ops served over the channel. With no channel (or in test mode) every op keeps
+# using its HTTP route.
 _CHANNEL_OPS = frozenset(
-    ("kv.get", "kv.put", "kv.delete", "kv.list", "kv.batch", "kv.incr", "kv.cas")
+    (
+        "kv.get", "kv.put", "kv.delete", "kv.list", "kv.batch", "kv.incr", "kv.cas",
+        "invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close",
+        "jobs.enqueue", "crons.upsert", "spans.emit",
+    )
 )
 
 # Per-dispatch lease from the adapter's `lease` stdin frame. Module-scope code
@@ -299,8 +304,11 @@ class _Chan:
 
     # -- calls -----------------------------------------------------------
 
-    def call(self, op: str, args: Dict[str, Any]) -> tuple[int, bytes, Dict[str, str]]:
-        timeout_s = _channel_timeout_s
+    def call(
+        self, op: str, args: Dict[str, Any], timeout_s: Optional[float] = None
+    ) -> tuple[int, bytes, Dict[str, str]]:
+        if timeout_s is None:
+            timeout_s = _channel_timeout_s
         deadline = time.monotonic() + timeout_s
         timeout_err = OrvaError(f"request failed: timed out after {timeout_s:g}s", status=0)
         with self.cond:
@@ -406,13 +414,34 @@ if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
-def _kv(op: str, args: Dict[str, Any], method: str, path: str, body: bytes = b"") -> tuple[int, bytes, Dict[str, str]]:
-    """Run one kv op over the SDK channel when there is one, else over HTTP."""
-    if not (_test_impl and "request" in _test_impl) and op in _CHANNEL_OPS:
-        ch = _channel()
-        if ch is not None:
-            return ch.call(op, args)
-    return _request(method, path, body=body)
+def _chan_for(op: str) -> Optional[_Chan]:
+    """The channel when `op` must use it, None for HTTP (no channel or test mode)."""
+    if (_test_impl and "request" in _test_impl) or op not in _CHANNEL_OPS:
+        return None
+    return _channel()
+
+
+def _kv(
+    op: str,
+    args: Dict[str, Any],
+    method: str,
+    path: str,
+    body: bytes = b"",
+    headers: Optional[Dict[str, str]] = None,
+    timeout_s: Optional[float] = None,
+) -> tuple[int, bytes, Dict[str, str]]:
+    """Run one op over the SDK channel when there is one, else over HTTP.
+    `headers` (call depth) only exist on the HTTP path: the host derives
+    identity for channel calls."""
+    ch = _chan_for(op)
+    if ch is not None:
+        return ch.call(op, args, timeout_s)
+    kw: Dict[str, Any] = {}
+    if headers is not None:
+        kw["headers"] = headers
+    if timeout_s is not None:
+        kw["timeout_s"] = timeout_s
+    return _request(method, path, body=body, **kw)
 
 
 # ── KV ──────────────────────────────────────────────────────────────
@@ -602,7 +631,9 @@ def invoke(
     incoming = os.environ.get("ORVA_CALL_DEPTH", "")
     if incoming:
         headers["X-Orva-Call-Depth"] = incoming
-    status, raw, _ = _request(
+    status, raw, _ = _kv(
+        "invoke",
+        {"name": function_name, "body": payload if payload is not None else {}},
         "POST",
         f"/api/v1/_internal/invoke/{function_name}",
         body=body,
@@ -634,6 +665,10 @@ def invoke_stream(
     """Stream-invoke variant. Yields response body chunks as bytes. Use
     when the callee returns SSE / async-iterator / generator output and
     you want to consume frames as they arrive instead of buffering."""
+    ch = _chan_for("invoke.stream.open")
+    if ch is not None:
+        yield from _invoke_stream_channel(ch, function_name, payload, max(timeout_ms / 1000.0, 1.0))
+        return
     base = _api_base()
     token = _token()
     if not base or not token:
@@ -673,6 +708,46 @@ def invoke_stream(
         resp.close()
 
 
+def _invoke_stream_channel(
+    ch: _Chan, function_name: str, payload: Any, timeout_s: float
+) -> Iterator[bytes]:
+    """invoke_stream over the SDK channel: open, then one `next` per chunk.
+    Closing the generator early sends invoke.stream.close."""
+    status, raw, _ = ch.call(
+        "invoke.stream.open",
+        {"name": function_name, "body": payload if payload is not None else {}},
+        timeout_s,
+    )
+    if status == 404:
+        raise OrvaError(f"function not found: {function_name}", status=404)
+    if status == 507:
+        raise OrvaError("call depth exceeded", status=507)
+    if status >= 400:
+        raise OrvaError(f"invoke_stream({function_name!r}) failed: {raw!r}", status=status)
+    handle: Optional[str] = json.loads(raw)["handle"]
+    try:
+        while True:
+            status, raw, _ = ch.call("invoke.stream.next", {"handle": handle}, timeout_s)
+            if status >= 400:
+                handle = None  # the host already closed it after a mid-stream failure
+                raise OrvaError(f"invoke_stream({function_name!r}) failed: {raw!r}", status=status)
+            data = json.loads(raw)
+            chunk = base64.b64decode(data.get("chunk_b64") or "")
+            done = bool(data.get("done"))
+            if done:
+                handle = None
+            if chunk:
+                yield chunk
+            if done:
+                return
+    finally:
+        if handle is not None:
+            try:
+                ch.call("invoke.stream.close", {"handle": handle}, timeout_s)
+            except Exception:  # noqa: BLE001 - best effort, the host also closes on lease end
+                pass
+
+
 # ── Background jobs ─────────────────────────────────────────────────
 
 
@@ -698,8 +773,8 @@ class _Jobs:
             body_obj["idempotency_key"] = idempotency_key
         if idempotency_window_seconds:
             body_obj["idempotency_window_seconds"] = int(idempotency_window_seconds)
-        status, raw, headers = _request(
-            "POST", "/api/v1/jobs", body=json.dumps(body_obj).encode("utf-8")
+        status, raw, headers = _kv(
+            "jobs.enqueue", body_obj, "POST", "/api/v1/jobs", body=json.dumps(body_obj).encode("utf-8")
         )
         if status >= 400:
             raise OrvaError(f"jobs.enqueue failed: {raw!r}", status=status)
@@ -731,8 +806,9 @@ class _Crons:
             body_obj["timezone"] = timezone
         if enabled is not None:
             body_obj["enabled"] = bool(enabled)
-        status, raw, _ = _request(
-            "POST", "/api/v1/_internal/crons", body=json.dumps(body_obj).encode("utf-8")
+        status, raw, _ = _kv(
+            "crons.upsert", body_obj, "POST", "/api/v1/_internal/crons",
+            body=json.dumps(body_obj).encode("utf-8"),
         )
         if status >= 400:
             raise OrvaError(f"crons.upsert({name!r}) failed: {raw!r}", status=status)
@@ -774,7 +850,9 @@ class _Trace:
             if attributes is not None:
                 body_obj["attributes"] = attributes
             try:
-                _request(
+                _kv(
+                    "spans.emit",
+                    body_obj,
                     "POST",
                     "/api/v1/_internal/spans",
                     body=json.dumps(body_obj).encode("utf-8"),

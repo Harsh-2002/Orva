@@ -3,6 +3,7 @@
 Run: python3 -m unittest discover -s backend/runtimes/test -p 'test_*.py'
 The parent plays the host over a real socketpair passed to the child as an fd.
 """
+import base64
 import http.server
 import json
 import os
@@ -270,12 +271,23 @@ class ChannelTests(unittest.TestCase):
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     seen = []
+    traces = []
 
     def _do(self):
         n = int(self.headers.get("content-length") or 0)
         self.rfile.read(n)
         type(self).seen.append(f"{self.command} {self.path}")
-        body = b'{"id":"job1"}' if self.path.startswith("/api/v1/jobs") else (b'{"value":"v"}' if self.command == "GET" else b"{}")
+        type(self).traces.append(self.headers.get("x-orva-trace-id"))
+        if self.path.startswith("/api/v1/jobs"):
+            body = b'{"id":"job1"}'
+        elif self.path.endswith("/stream"):
+            body = b"aabb"
+        elif self.path.startswith("/api/v1/_internal/invoke/"):
+            body = b'{"statusCode":200,"headers":{},"body":"{\\"ok\\":1}"}'
+        elif self.path.startswith("/api/v1/_internal/crons"):
+            body = b'{"id":"c1"}'
+        else:
+            body = b'{"value":"v"}' if self.command == "GET" else b"{}"
         self.send_response(200)
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(body)))
@@ -291,6 +303,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 class HTTPFallbackTests(unittest.TestCase):
     def serve(self):
         _Handler.seen = []
+        _Handler.traces = []
         srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.server_close)
@@ -313,12 +326,162 @@ class HTTPFallbackTests(unittest.TestCase):
                           env={**self.env(port), "ORVA_SDK_FD": "3"}, channel=False)
         self.assertEqual(out["v"], "v")
 
-    def test_non_kv_ops_stay_on_http(self):
+    def test_every_op_stays_on_http_when_channel_absent(self):
         port = self.serve()
-        out, frames = run("http", kv_host(), env=self.env(port))
+        out, frames = run("http_all", lambda m, c: self.fail("channel used"),
+                          env={**self.env(port), "ORVA_TRACE_ID": "tr1"}, channel=False)
+        self.assertEqual(frames, [])
         self.assertEqual(out["job"]["id"], "job1")
-        self.assertEqual(_Handler.seen, ["POST /api/v1/jobs"])
-        self.assertEqual([f["op"] for f in frames], ["kv.put", "kv.get"])
+        self.assertEqual(out["cron"], {"id": "c1"})
+        self.assertEqual(out["inv"], {"statusCode": 200, "headers": {}, "body": {"ok": 1}})
+        self.assertEqual("".join(out["chunks"]), "aabb")
+        self.assertEqual(
+            sorted(_Handler.seen),
+            sorted([
+                "POST /api/v1/jobs", "POST /api/v1/_internal/crons", "POST /api/v1/_internal/spans",
+                "POST /api/v1/_internal/invoke/callee", "POST /api/v1/_internal/invoke/callee/stream",
+            ]),
+        )
+        self.assertTrue(all(t == "tr1" for t in _Handler.traces), "HTTP keeps sending trace headers")
+
+
+IDENT_ENV = {"ORVA_TRACE_ID": "tr1", "ORVA_SPAN_ID": "sp1", "ORVA_EXECUTION_ID": "ex1",
+             "ORVA_CALL_DEPTH": "2", "ORVA_FUNCTION_ID": "f1"}
+
+
+def b64(i):
+    return base64.b64encode(f"c{i}".encode()).decode()
+
+
+def ops_host(state):
+    state.setdefault("handles", {})
+    state.setdefault("closed", [])
+    state["n"] = 0
+
+    def host(msg, ctx):
+        a = msg.get("a", {})
+        op = msg["op"]
+        i = msg["id"]
+        if op == "jobs.enqueue":
+            if a["function_name"] == "bad":
+                return ctx.fail(i, 400, "VALIDATION", "bad job")
+            return ctx.reply(i, {"id": "job9", "replayed": a.get("idempotency_key") == "k"})
+        if op == "crons.upsert":
+            if a["schedule"] == "bad":
+                return ctx.fail(i, 403, "SDK_SCOPE_VIOLATION", "no")
+            return ctx.reply(i, {"id": "cron1", "name": a["name"]})
+        if op == "spans.emit":
+            if a["name"] == "s":
+                return ctx.fail(i, 403, "SDK_SCOPE_VIOLATION", "no")
+            return ctx.reply(i, {})
+        if op == "invoke":
+            n = a["name"]
+            if n == "missing":
+                return ctx.fail(i, 404, "NOT_FOUND", "function not found")
+            if n == "deep":
+                return ctx.fail(i, 507, "MAX_CALL_DEPTH", "too deep")
+            if n == "busy":
+                return ctx.fail(i, 429, "FUNCTION_BUSY", "busy")
+            if n == "plain":
+                return ctx.reply(i, {"statusCode": 200, "headers": {}, "body": "not json"})
+            return ctx.reply(i, {"statusCode": 200, "headers": {"a": "b"}, "body": json.dumps({"echo": a["body"]["q"]})})
+        if op == "invoke.stream.open":
+            if a["name"] == "missing":
+                return ctx.fail(i, 404, "NOT_FOUND", "function not found")
+            state["n"] += 1
+            h = f"h{state['n']}"
+            state["handles"][h] = {"name": a["name"], "i": 0}
+            return ctx.reply(i, {"handle": h, "status": 200, "headers": {}})
+        if op == "invoke.stream.next":
+            st = state["handles"].get(a["handle"])
+            if st is None:
+                return ctx.fail(i, 404, "NOT_FOUND", "no such handle")
+            st["i"] += 1
+            if st["name"] == "mid" and st["i"] == 3:
+                del state["handles"][a["handle"]]
+                return ctx.fail(i, 502, "INVOKE_FAILED", "callee died")
+            if st["name"] == "five" and st["i"] == 3 and state.get("eof_at_three"):
+                return ctx.sock.shutdown(socket.SHUT_RDWR)
+            if st["i"] <= 5:
+                return ctx.reply(i, {"chunk_b64": b64(st["i"]), "done": False})
+            del state["handles"][a["handle"]]
+            return ctx.reply(i, {"chunk_b64": "", "done": True})
+        if op == "invoke.stream.close":
+            state["closed"].append(a["handle"])
+            state["handles"].pop(a["handle"], None)
+            return ctx.reply(i, {})
+        ctx.fail(i, 400, "UNKNOWN_OP", op)
+
+    return host
+
+
+class PR2OpsTests(unittest.TestCase):
+    def assert_no_identity(self, frames):
+        for f in frames:
+            self.assertEqual(set(f) - {"id", "op", "a", "lease"}, set())
+            for k in ("function_id", "execution_id", "trace_id", "span_id", "token", "depth", "call_depth", "headers"):
+                self.assertNotIn(k, f["a"], f"{k} in {f['op']}")
+
+    def test_jobs_crons_spans_invoke_over_channel(self):
+        out, frames = run("ops_ok", ops_host({}), env=IDENT_ENV)
+        self.assertEqual(out["job"], {"id": "job9", "replayed": True})
+        self.assertEqual(out["cron"], {"id": "cron1", "name": "nightly"})
+        self.assertEqual(out["inv"], {"statusCode": 200, "headers": {"a": "b"}, "body": {"echo": 1}})
+        self.assertEqual(out["inv_plain"]["body"], "not json")
+        self.assertEqual([f["op"] for f in frames], ["jobs.enqueue", "crons.upsert", "spans.emit", "invoke", "invoke"])
+        self.assertEqual(frames[0]["a"], {"function_name": "fn2", "payload": {"a": 1}, "max_attempts": 5,
+                                          "idempotency_key": "k", "idempotency_window_seconds": 60})
+        self.assertEqual(frames[1]["a"], {"name": "nightly", "schedule": "0 3 * * *", "payload": {"x": 1},
+                                          "timezone": "UTC", "enabled": True})
+        self.assertEqual(frames[2]["a"]["name"], "work")
+        self.assertEqual(frames[2]["a"]["status"], "ok")
+        self.assertEqual(frames[2]["a"]["attributes"], {"a": 1})
+        self.assertIsInstance(frames[2]["a"]["duration_ms"], int)
+        self.assertEqual(frames[3]["a"], {"name": "callee", "body": {"q": 1}})
+        self.assertEqual(frames[4]["a"], {"name": "plain", "body": {}})
+        self.assertTrue(all(f.get("lease") == "L-1" for f in frames))
+        self.assert_no_identity(frames)
+
+    def test_op_error_mapping(self):
+        out, _ = run("ops_errors", ops_host({}), env=IDENT_ENV)
+        self.assertEqual(out["not_found"]["err"]["status"], 404)
+        self.assertIn("function not found: missing", out["not_found"]["err"]["message"])
+        self.assertEqual(out["depth"]["err"]["status"], 507)
+        self.assertEqual(out["depth"]["err"]["message"], "call depth exceeded")
+        self.assertEqual(out["busy"]["err"]["status"], 429)
+        self.assertEqual(out["job"]["err"]["status"], 400)
+        self.assertEqual(out["job"]["err"]["name"], "OrvaError")
+        self.assertEqual(out["cron"]["err"]["status"], 403)
+        self.assertEqual(out["span_swallowed"], "fine")
+
+    def test_invoke_stream_chunks_early_close_mid_error(self):
+        state = {}
+        out, frames = run("streams", ops_host(state), env=IDENT_ENV)
+        five = [f"c{i}|bytes" for i in range(1, 6)]
+        self.assertEqual(out["full"], five)
+        self.assertEqual(out["early"], five[:2])
+        self.assertEqual(out["mid"], ["c1", "c2"])
+        self.assertEqual(out["mid_err"]["err"]["name"], "OrvaError")
+        self.assertEqual(out["mid_err"]["err"]["status"], 502)
+        self.assertEqual(out["open_err"]["err"]["status"], 404)
+        self.assertIn("function not found: missing", out["open_err"]["err"]["message"])
+        # h1 finished on its own, h2 was closed by the early break, h3 failed (host already closed it).
+        self.assertEqual(state["closed"], ["h2"])
+        ops = [f["op"] + (":" + f["a"]["handle"] if "handle" in f["a"] else "") for f in frames]
+        self.assertEqual(ops, (
+            ["invoke.stream.open"] + ["invoke.stream.next:h1"] * 6
+            + ["invoke.stream.open", "invoke.stream.next:h2", "invoke.stream.next:h2", "invoke.stream.close:h2"]
+            + ["invoke.stream.open"] + ["invoke.stream.next:h3"] * 3
+            + ["invoke.stream.open"]
+        ))
+        self.assertEqual(frames[0]["a"], {"name": "five", "body": {"p": 1}})
+        self.assertEqual(frames[1]["a"], {"handle": "h1"})
+        self.assert_no_identity(frames)
+
+    def test_channel_eof_during_stream(self):
+        out, _ = run("stream_eof", ops_host({"eof_at_three": True}), env=IDENT_ENV)
+        self.assertEqual(out["got"], ["c1", "c2"])
+        self.assertEqual(out["res"]["err"]["name"], "OrvaUnavailableError")
 
 
 class MarkerTest(unittest.TestCase):
