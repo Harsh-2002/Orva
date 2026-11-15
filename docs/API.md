@@ -177,7 +177,9 @@ event): invocation, cron and job firing stop at once, and `PUT`, rollback and
 redeploy answer `409 CONFLICT`. The name stays taken until the delete finishes.
 The call stays synchronous and answers `200 {"status":"deleted","id":...}` when
 done, which can take minutes for a very large function (about 11,000 rows per
-second was measured); a client or proxy that times out does not stop it, because
+second was measured on an idle server; 300,000 executions took about 143 s while
+the server handled 800 requests/s for another function, and the reply is held
+open past the server's write timeout); a client or proxy that times out does not stop it, because
 the delete runs detached from the request, bounded at 30 minutes. If it does not
 finish (that bound, a restart or a database error) the function stays
 `deleting`: repeat the `DELETE` to resume, and the server also resumes it at

@@ -16,6 +16,12 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- `DELETE /api/v1/functions/{id}` answered an empty reply for a function whose
+  delete took longer than the server's write timeout (120 s by default): the
+  delete finished and was logged as 200, but the connection had already been
+  closed, so `orva functions delete` and the API saw a failure. It now holds the
+  reply open however long the delete takes (the delete still runs detached from
+  the request).
 - Compare versions (dashboard) showed a misleading diff. The editor's character
   diff has a small default budget and, past it, marked the whole changed range
   as replaced, so lines identical in both versions were highlighted and a
@@ -65,6 +71,14 @@ unreleased range, and the sections below as the record for everything before it.
   200,000 executions, 100,000 KV rows and 50,000 jobs: the old code let 1
   probe write through with a worst wait of 8.0 s; the new code let 6,838
   through with a worst wait of 46 ms, in 23 s rather than 8 s.
+  Measured under load in a VM (800 requests/s on another function, a 300,000
+  execution function deleted at +20 s, WAL checkpointed first, three alternating
+  repeats): the old release served 615 of 800 requests/s with 600
+  `STORAGE_BACKPRESSURE` rejections, a p99 of 85-94 ms and a worst of 3.1 s,
+  and deleted in 18 s; the chunked delete served all 800/s with no rejections, a
+  p99 of 20-21 ms and a worst of 270 ms, and took 143 s. Best-effort telemetry
+  (spans and log entries) was shed during the delete (about 4,100-6,800 of
+  roughly 48,000 rows); request handling and execution records were not.
   **Upgrade notes:** a function being deleted now has `status: "deleting"`;
   `PUT`, rollback and redeploy return `409 CONFLICT` for it, and cron and jobs do
   not fire. The `DELETE` call is still synchronous and still answers 200, but may
