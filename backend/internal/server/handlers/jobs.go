@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
@@ -29,16 +28,6 @@ func (h *JobsHandler) sdkCaller(r *http.Request) string {
 	return caller
 }
 
-type enqueueRequest struct {
-	FunctionID               string          `json:"function_id"`
-	FunctionName             string          `json:"function_name"`
-	Payload                  json.RawMessage `json:"payload"`
-	ScheduledAt              *time.Time      `json:"scheduled_at,omitempty"`
-	MaxAttempts              int             `json:"max_attempts,omitempty"`
-	IdempotencyKey           string          `json:"idempotency_key,omitempty"`
-	IdempotencyWindowSeconds int             `json:"idempotency_window_seconds,omitempty"`
-}
-
 // Enqueue handles POST /api/v1/jobs.
 func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
@@ -57,61 +46,19 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	body, err := readBoundedBody(r.Body, 1<<20)
+	body, err := readBoundedBody(r.Body, MaxEnqueueBody)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)
 		return
 	}
-	var req enqueueRequest
+	var req EnqueueJobRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}
-
-	// Resolve function_id from either field. Adapter SDK sends function_name;
-	// dashboard sends function_id directly.
-	fnID := req.FunctionID
-	if fnID == "" && req.FunctionName != "" {
-		fn, err := h.DB.GetFunctionByName(req.FunctionName)
-		if err != nil {
-			respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found: "+req.FunctionName, reqID)
-			return
-		}
-		fnID = fn.ID
-	}
-	if fnID == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "function_id or function_name is required", reqID)
-		return
-	}
-	if _, err := h.DB.GetFunction(fnID); err != nil {
-		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
-		return
-	}
-
-	payload := []byte(req.Payload)
-	if len(payload) == 0 {
-		payload = []byte("{}")
-	}
-	job := &database.Job{
-		FunctionID:               fnID,
-		Payload:                  payload,
-		MaxAttempts:              req.MaxAttempts,
-		IdempotencyKey:           req.IdempotencyKey,
-		IdempotencyWindowSeconds: req.IdempotencyWindowSeconds,
-	}
-	if req.ScheduledAt != nil {
-		job.ScheduledAt = req.ScheduledAt.UTC()
-	}
-	// v0.5 trace context: when a function inside a sandbox enqueues this
-	// job, the SDK forwards the caller's trace headers. We persist them on
-	// the job row so the eventual execution lands in the same trace as
-	// whatever enqueued it. Empty headers (dashboard or external API
-	// caller) leave these blank → the picked-up job becomes a new root.
-	job.TraceID = callerTraceID
-	job.ParentSpanID = callerSpanID
-	job.EnqueuedByFunctionID = callerFnID
-	if err := h.DB.EnqueueJob(job); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "enqueue failed: "+err.Error(), reqID)
+	job, serr := EnqueueJob(h.DB, callerFnID, callerTraceID, callerSpanID, &req)
+	if serr != nil {
+		serr.write(w, reqID)
 		return
 	}
 	if job.Replayed {

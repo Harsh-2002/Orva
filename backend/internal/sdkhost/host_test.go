@@ -33,7 +33,7 @@ func TestDispatchAndIdentity(t *testing.T) {
 	defer db.Close()
 	h := New(db)
 	ctx := context.Background()
-	for _, op := range []string{"invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close", "jobs.enqueue", "crons.upsert", "spans.emit"} {
+	for _, op := range []string{"invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close"} {
 		if _, e := h.Handle(ctx, sandbox.SDKCaller{FunctionID: fnA}, op, nil); e == nil || e.Status != 501 || e.Code != "NOT_IMPLEMENTED" {
 			t.Errorf("%s: %+v", op, e)
 		}

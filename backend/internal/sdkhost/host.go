@@ -37,6 +37,7 @@ type OpStats struct {
 
 var opNames = [...]string{
 	"kv.get", "kv.put", "kv.delete", "kv.list", "kv.batch", "kv.incr", "kv.cas",
+	"jobs.enqueue", "crons.upsert", "spans.emit",
 	"unimplemented", "unknown",
 }
 
@@ -86,8 +87,7 @@ func opIndex(op string) int {
 
 func isUnimplemented(op string) bool {
 	switch op {
-	case "invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close",
-		"jobs.enqueue", "crons.upsert", "spans.emit":
+	case "invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close":
 		return true
 	}
 	return false
@@ -138,6 +138,12 @@ func (h *Host) Handle(ctx context.Context, caller sandbox.SDKCaller, op string, 
 		return h.kvIncr(ctx, caller.FunctionID, args)
 	case "kv.cas":
 		return h.kvCAS(ctx, caller.FunctionID, args)
+	case "jobs.enqueue":
+		return h.jobsEnqueue(ctx, caller, args)
+	case "crons.upsert":
+		return h.cronsUpsert(ctx, caller, args)
+	case "spans.emit":
+		return h.spansEmit(ctx, caller, args)
 	}
 	if isUnimplemented(op) {
 		return nil, &sandbox.SDKError{Status: 501, Code: "NOT_IMPLEMENTED", Message: "operation not implemented on the SDK channel yet"}
