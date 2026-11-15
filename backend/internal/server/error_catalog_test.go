@@ -20,6 +20,9 @@ var emitPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bcode\s*(?::=|=)\s*"([A-Z][A-Z0-9_]+)"`),
 }
 
+// These documented errors moved from REST wrappers to the channel, not out of the product.
+var migratedSDKErrorPattern = regexp.MustCompile(`\b(?:fail|serr)\([^"\n]*"(KV_UNAVAILABLE|SDK_SCOPE_VIOLATION)"`)
+
 var catalogRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]+)` \\|")
 
 // Codes listed here are knowingly absent from one side. Keep it empty: an entry
@@ -32,7 +35,11 @@ var (
 func emittedErrorCodes(t *testing.T) map[string]string {
 	t.Helper()
 	found := map[string]string{}
-	for _, dir := range []string{".", "handlers"} {
+	for _, dir := range []string{".", "handlers", "../sdkhost"} {
+		patterns := emitPatterns
+		if dir == "../sdkhost" {
+			patterns = []*regexp.Regexp{migratedSDKErrorPattern}
+		}
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
 			t.Fatal(err)
@@ -45,7 +52,7 @@ func emittedErrorCodes(t *testing.T) map[string]string {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, re := range emitPatterns {
+			for _, re := range patterns {
 				for _, m := range re.FindAllStringSubmatch(string(src), -1) {
 					if _, seen := found[m[1]]; !seen {
 						found[m[1]] = f

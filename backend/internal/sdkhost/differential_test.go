@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Every scenario here runs through the real HTTP KV handler and through
+// Every scenario here runs through the shared database KV cores and through
 // Host.Handle against separate fresh databases; each step must be identical.
 
 func TestDiffRoundTrips(t *testing.T) {

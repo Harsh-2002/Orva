@@ -9,6 +9,8 @@ for health, read the first-boot admin key, and tear everything down afterward.
 
 Stdlib only.
 """
+import ipaddress
+import json
 import os
 import subprocess
 import time
@@ -123,6 +125,20 @@ class Instance:
                 return p.stdout.strip()
             time.sleep(0.5)
         raise RuntimeError("admin key not found in container")
+
+    def control_plane_url(self):
+        """Inspect only this runner's container, after start; never guess a gateway."""
+        networks = json.loads(_docker(
+            "inspect", "--format", "{{json .NetworkSettings.Networks}}", self.name,
+        ).stdout)
+        addresses = [ipaddress.ip_address(n["IPAddress"])
+                     for n in networks.values() if n.get("IPAddress")]
+        private = [a for a in addresses if a in ipaddress.ip_network("10.0.0.0/8")
+                   or a in ipaddress.ip_network("172.16.0.0/12")
+                   or a in ipaddress.ip_network("192.168.0.0/16")]
+        if len(private) != 1:
+            raise RuntimeError("isolated container needs exactly one private IPv4 control-plane address")
+        return f"http://{private[0]}:8443"
 
     def logs(self, tail="120"):
         return _docker("logs", "--tail", str(tail), self.name, check=False).stdout or ""

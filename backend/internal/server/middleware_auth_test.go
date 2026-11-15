@@ -6,19 +6,9 @@ import (
 	"testing"
 )
 
-// TestInternalTokenBypassClosed is the regression guard for the auth bypass:
-// authMiddleware must only skip the job enqueue gate for a verified scoped
-// SDK credential. A merely-present (bogus) X-Orva-Internal-Token must NOT
-// grant access — it has to fall through to normal session/API-key auth and
-// get a 401, exactly like an unauthenticated caller.
-//
-// SDK credentials must never grant access to the broader operator API.
+// Legacy SDK headers never grant access to operator APIs.
 func TestScopedSDKCredentialCannotBypassOperatorAuth(t *testing.T) {
 	tc := newTestServer(t)
-	real := mintLive(tc.srv.router.sdkAuth, "function-a")
-	if real == "" {
-		t.Fatal("scoped SDK credential is empty")
-	}
 
 	// A protected admin-surface endpoint that the live exploit hit.
 	const target = "/api/v1/functions"
@@ -48,9 +38,9 @@ func TestScopedSDKCredentialCannotBypassOperatorAuth(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "valid SDK credential cannot access operator APIs",
+			name: "legacy SDK credential cannot access operator APIs",
 			setup: func(r *http.Request) {
-				r.Header.Set("X-Orva-Internal-Token", real)
+				r.Header.Set("X-Orva-Internal-Token", legacySDKToken)
 			},
 			wantStatus: http.StatusUnauthorized,
 		},

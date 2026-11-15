@@ -1,12 +1,9 @@
 package sdkhost
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +35,7 @@ func newOpEnv(t *testing.T) *opEnv {
 	t.Helper()
 	db := newDB(t)
 	t.Cleanup(func() { db.Close() })
-	auth := sdkauth.New([]byte("secret"))
+	auth := sdkauth.New()
 	e := &opEnv{db: db, auth: auth, host: New(db), start: time.Now().Add(-time.Second).UTC()}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	t.Cleanup(e.cancel)
@@ -72,38 +69,68 @@ func (e *opEnv) sdkCall(fn string, module bool, op, args string) reply {
 	return out
 }
 
-// httpCall runs the same op through the real HTTP handler.
-func (e *opEnv) httpCall(fn string, module bool, op, args string) reply {
-	req := httptest.NewRequest("POST", "/x", bytes.NewReader([]byte(args)))
-	tok, _ := e.auth.Mint(fn)
-	req.Header.Set("X-Orva-Internal-Token", tok)
-	if !module {
-		req.Header.Set("X-Orva-Execution-Id", opExec)
+// coreCall uses execution bindings and the shared cores without calling the channel host.
+func (e *opEnv) coreCall(fn string, module bool, op, args string) reply {
+	out := reply{Step: op + " " + short(args)}
+	traceID, spanID, started, active := e.auth.TraceContext(opExec, fn)
+	if module || !active {
+		out.Status, out.Code, out.Message = 403, "SDK_SCOPE_VIOLATION", "SDK request is not associated with an active caller execution"
+		if op == "crons.upsert" {
+			out.Message = "crons.upsert must be called from inside your handler, not at module scope"
+		}
+		if op == "spans.emit" {
+			out.Message = "span execution is not active for the calling function"
+		}
+		return out
 	}
-	w := httptest.NewRecorder()
+	limit := handlers.MaxEnqueueBody
+	if op == "spans.emit" {
+		limit = handlers.MaxUserSpanBody
+	}
+	if len(args) > limit {
+		out.Status, out.Code, out.Message = 400, "INVALID_BODY", "request body exceeds limit"
+		if op == "spans.emit" {
+			out.Message = "failed to read body"
+		}
+		return out
+	}
+	var jobReq handlers.EnqueueJobRequest
+	var cronReq handlers.UpsertCronRequest
+	var spanReq handlers.UserSpanRequest
+	var req any
 	switch op {
 	case "jobs.enqueue":
-		(&handlers.JobsHandler{DB: e.db, SDKAuth: e.auth}).Enqueue(w, req)
+		req = &jobReq
 	case "crons.upsert":
-		(&handlers.CronHandler{DB: e.db, SDKAuth: e.auth}).UpsertInternal(w, req)
+		req = &cronReq
 	case "spans.emit":
-		(&handlers.SpansHandler{DB: e.db, SDKAuth: e.auth}).Create(w, req)
+		req = &spanReq
 	default:
 		panic(op)
 	}
-	out := reply{Step: op + " " + short(args), Status: w.Code}
-	if w.Code >= 400 {
-		var m struct {
-			Error struct{ Code, Message string } `json:"error"`
-		}
-		_ = json.Unmarshal(w.Body.Bytes(), &m)
-		out.Code, out.Message = m.Error.Code, m.Error.Message
+	if err := json.Unmarshal([]byte(args), req); err != nil {
+		out.Status, out.Code, out.Message = 400, "INVALID_JSON", "invalid request body"
 		return out
 	}
-	if w.Code == http.StatusAccepted || w.Code == http.StatusCreated {
-		out.Status = 200 // the channel has one success status
+	var result any
+	var serr *handlers.StatusErr
+	switch op {
+	case "jobs.enqueue":
+		result, serr = handlers.EnqueueJob(e.db, fn, traceID, spanID, &jobReq)
+	case "crons.upsert":
+		result, serr = handlers.UpsertCron(e.db, fn, &cronReq)
+	case "spans.emit":
+		result, serr = handlers.CreateUserSpan(e.db, fn, opExec, traceID, spanID, started, &spanReq)
 	}
-	out.Body = decodeOp(w.Body.Bytes())
+	if serr != nil {
+		out.Status, out.Code, out.Message = serr.Status, serr.Code, serr.Message
+		return out
+	}
+	b, err := json.Marshal(result)
+	if err != nil {
+		panic(err)
+	}
+	out.Status, out.Body = 200, decodeOp(b)
 	return out
 }
 
@@ -142,17 +169,17 @@ func decodeOp(b []byte) any {
 
 type opStep struct{ op, args string }
 
-// diffOps runs the steps through both transports and requires every reply to
+// diffOps compares the shared cores with the channel and requires every reply to
 // match; it returns the two environments for follow-up state checks.
 func diffOps(t *testing.T, module bool, steps []opStep) (h, s *opEnv) {
 	t.Helper()
 	h, s = newOpEnv(t), newOpEnv(t)
 	for i, st := range steps {
-		a, b := h.httpCall(fnA, module, st.op, st.args), s.sdkCall(fnA, module, st.op, st.args)
+		a, b := h.coreCall(fnA, module, st.op, st.args), s.sdkCall(fnA, module, st.op, st.args)
 		ja, _ := json.Marshal(a.Body)
 		jbb, _ := json.Marshal(b.Body)
 		if a.Status != b.Status || a.Code != b.Code || a.Message != b.Message || string(ja) != string(jbb) {
-			t.Errorf("step %d %q differs:\n http: %d %s %q %s\n sdk:  %d %s %q %s",
+			t.Errorf("step %d %q differs:\n core: %d %s %q %s\n sdk:  %d %s %q %s",
 				i, a.Step, a.Status, a.Code, a.Message, ja, b.Status, b.Code, b.Message, jbb)
 		}
 	}
@@ -283,19 +310,15 @@ func TestSpansEmitDifferential(t *testing.T) {
 	}
 }
 
-// At module scope there is no execution: jobs and crons are refused with the
-// identical 403 the HTTP path gives; spans are refused by both (HTTP says 400
-// for the missing header, the channel 403 because it cannot tell module scope
-// from a revoked lease).
-func TestModuleScopeRefusedLikeHTTP(t *testing.T) {
+func TestModuleScopeRefusedWithoutSideEffects(t *testing.T) {
 	for _, st := range []opStep{
 		{"jobs.enqueue", `{"function_name":"fn-b"}`},
 		{"crons.upsert", `{"name":"n","schedule":"* * * * *"}`},
 	} {
 		h, s := newOpEnv(t), newOpEnv(t)
-		a, b := h.httpCall(fnA, true, st.op, st.args), s.sdkCall(fnA, true, st.op, st.args)
+		a, b := h.coreCall(fnA, true, st.op, st.args), s.sdkCall(fnA, true, st.op, st.args)
 		if a.Status != 403 || b.Status != 403 || a.Code != b.Code || a.Message != b.Message {
-			t.Errorf("%s: http=%d %s %q sdk=%d %s %q", st.op, a.Status, a.Code, a.Message, b.Status, b.Code, b.Message)
+			t.Errorf("%s: core=%d %s %q sdk=%d %s %q", st.op, a.Status, a.Code, a.Message, b.Status, b.Code, b.Message)
 		}
 		if jobs, _ := s.db.ListJobs("", "", 10); len(jobs) != 0 {
 			t.Errorf("%s wrote at module scope", st.op)
@@ -305,9 +328,9 @@ func TestModuleScopeRefusedLikeHTTP(t *testing.T) {
 		}
 	}
 	h, s := newOpEnv(t), newOpEnv(t)
-	a, b := h.httpCall(fnA, true, "spans.emit", `{"name":"x"}`), s.sdkCall(fnA, true, "spans.emit", `{"name":"x"}`)
-	if a.Status < 400 || b.Status != 403 || b.Code != "SDK_SCOPE_VIOLATION" {
-		t.Errorf("spans module scope: http=%d sdk=%d %s", a.Status, b.Status, b.Code)
+	a, b := h.coreCall(fnA, true, "spans.emit", `{"name":"x"}`), s.sdkCall(fnA, true, "spans.emit", `{"name":"x"}`)
+	if a.Status != 403 || b.Status != 403 || a.Code != b.Code || a.Message != b.Message {
+		t.Errorf("spans module scope: core=%d sdk=%d %s", a.Status, b.Status, b.Code)
 	}
 }
 

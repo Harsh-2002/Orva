@@ -1,13 +1,10 @@
 package sdkhost
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -105,7 +102,7 @@ func newInvEnv(t *testing.T, extra ...*database.Function) *invEnv {
 		pool.SandboxTemplate{NsjailBin: nsjail, RootfsDir: rootfs, DataDir: tmp, DefaultMaxPids: 32},
 		db, registry.New(db), sandbox.NewLimiter(50))
 	t.Cleanup(func() { _ = pm.Shutdown(context.Background()) })
-	auth := sdkauth.New([]byte("secret"))
+	auth := sdkauth.New()
 	inv := &handlers.InternalInvokeHandler{DB: db, Pool: pm, SDKAuth: auth}
 	return &invEnv{db: db, pm: pm, auth: auth, inv: inv, host: New(db, WithInvoker(inv))}
 }
@@ -134,20 +131,27 @@ func (e *invEnv) exec(ctx context.Context, depth int, lease string) sandbox.SDKC
 		ExecutionID: "e-" + lease, TraceID: "trace1", SpanID: "span1", Depth: depth, Lease: lease, Ctx: ctx}}
 }
 
-// httpCall posts body to the HTTP F2F handler as the SDK would.
-func (e *invEnv) httpCall(t *testing.T, name, body string, depth int) (int, string) {
+// coreCall uses the shared F2F core with a host-bound caller, independently of Host.Handle.
+func (e *invEnv) coreCall(t *testing.T, name, body string, depth int) (int, string) {
 	t.Helper()
-	tok, rel := e.auth.Mint(fnA)
-	defer rel()
-	execID := fmt.Sprintf("http-%d", time.Now().UnixNano())
+	execID := fmt.Sprintf("core-%d", time.Now().UnixNano())
 	defer e.auth.BindExecution(execID, fnA, "trace1", "span1", time.Now(), depth)()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/_internal/invoke/"+name, bytes.NewBufferString(body))
-	req.SetPathValue("name", name)
-	req.Header.Set("X-Orva-Internal-Token", tok)
-	req.Header.Set("X-Orva-Execution-Id", execID)
-	w := httptest.NewRecorder()
-	e.inv.Invoke(w, req)
-	return w.Code, w.Body.String()
+	boundDepth, _ := e.auth.ExecutionDepth(execID, fnA)
+	if err := e.inv.CheckDepth(boundDepth); err != nil {
+		return err.Status, err.Opts.Code
+	}
+	fn, err := e.inv.ResolveCallee(name)
+	if err != nil {
+		return err.Status, err.Opts.Code
+	}
+	traceID, spanID, _, _ := e.auth.TraceContext(execID, fnA)
+	result, err := e.inv.RunInvoke(context.Background(), handlers.F2FCaller{
+		FunctionID: fnA, TraceID: traceID, SpanID: spanID, Depth: boundDepth,
+	}, fn, []byte(body), "core-test")
+	if err != nil {
+		return err.Status, err.Opts.Code
+	}
+	return 200, string(result)
 }
 
 func (e *invEnv) chanCall(name, body string, depth int) (int, string) {
@@ -162,19 +166,7 @@ func (e *invEnv) chanCall(name, body string, depth int) (int, string) {
 	return 200, string(b)
 }
 
-func httpCode(body string) string {
-	var m struct {
-		Code  string
-		Error struct{ Code string }
-	}
-	_ = json.Unmarshal([]byte(body), &m)
-	if m.Error.Code != "" {
-		return m.Error.Code
-	}
-	return m.Code
-}
-
-func TestInvokeDifferentialAgainstHTTP(t *testing.T) {
+func TestInvokeDifferentialAgainstCore(t *testing.T) {
 	e := newInvEnv(t,
 		&database.Function{ID: "fn-off", Name: "fn-off", Status: "inactive"},
 		&database.Function{ID: "fn-slow", Name: "fn-slow", TimeoutMS: 300})
@@ -194,22 +186,22 @@ func TestInvokeDifferentialAgainstHTTP(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			hs, hb := e.httpCall(t, c.callee, c.body, c.depth)
+			hs, hb := e.coreCall(t, c.callee, c.body, c.depth)
 			cs, cb := e.chanCall(c.callee, c.body, c.depth)
 			if hs != c.status || cs != c.status {
-				t.Fatalf("http=%d (%s) channel=%d (%s), want %d", hs, hb, cs, cb, c.status)
+				t.Fatalf("core=%d (%s) channel=%d (%s), want %d", hs, hb, cs, cb, c.status)
 			}
 			if c.status == 200 {
 				var h, ch any
 				_ = json.Unmarshal([]byte(hb), &h)
 				_ = json.Unmarshal([]byte(cb), &ch)
 				if !reflect.DeepEqual(h, ch) {
-					t.Fatalf("envelope differs:\nhttp:    %s\nchannel: %s", hb, cb)
+					t.Fatalf("envelope differs:\ncore:    %s\nchannel: %s", hb, cb)
 				}
 				return
 			}
-			if httpCode(hb) != c.code || cb != c.code {
-				t.Fatalf("http code %q channel code %q, want %q", httpCode(hb), cb, c.code)
+			if hb != c.code || cb != c.code {
+				t.Fatalf("core code %q channel code %q, want %q", hb, cb, c.code)
 			}
 		})
 	}
@@ -217,6 +209,120 @@ func TestInvokeDifferentialAgainstHTTP(t *testing.T) {
 	if _, s := e.chanCall(fnB, `{"mode":"echo"}`, 3); !strings.Contains(s, `\"depth\": \"4\"`) {
 		t.Fatalf("callee depth must be caller depth+1, got %s", s)
 	}
+}
+
+func TestStreamAdmissionMatchesSharedCore(t *testing.T) {
+	e := newInvEnv(t, &database.Function{ID: "fn-off", Name: "fn-off", Status: "inactive"})
+	for _, tc := range []struct {
+		name          string
+		depth, status int
+		code          string
+	}{
+		{"", 0, 400, "VALIDATION"},
+		{"missing", 0, 404, "NOT_FOUND"},
+		{"fn-off", 0, 409, "NOT_ACTIVE"},
+		{fnB, 8, 507, "MAX_CALL_DEPTH"},
+		{fnB, 7, 200, ""},
+	} {
+		t.Run(fmt.Sprintf("%s/depth=%d", tc.name, tc.depth), func(t *testing.T) {
+			ctx := context.Background()
+			coreErr := e.inv.CheckDepth(tc.depth)
+			var fn *database.Function
+			if coreErr == nil {
+				fn, coreErr = e.inv.ResolveCallee(tc.name)
+			}
+			var coreStream *handlers.F2FStream
+			if coreErr == nil {
+				coreStream, coreErr = e.inv.OpenStream(ctx, handlers.F2FCaller{
+					FunctionID: fnA, TraceID: "trace1", SpanID: "span1", Depth: tc.depth,
+				}, fn, []byte(`{"mode":"stream","chunks":["one","two"]}`), "core-stream-test")
+			}
+			if coreStream != nil {
+				defer coreStream.Finish(nil)
+			}
+			sess := &sandbox.SDKSession{}
+			ctx = sandbox.WithSDKSession(ctx, sess)
+			defer sess.State(func() sandbox.SDKSessionState { return newStreamTable() }).Closed()
+			caller := e.exec(ctx, tc.depth, "stream-test")
+			args, err := json.Marshal(map[string]any{"name": tc.name, "body": map[string]any{"mode": "stream", "chunks": []string{"one", "two"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opened, channelErr := e.host.Handle(ctx, caller, "invoke.stream.open", args)
+			if tc.status != 200 {
+				if coreErr == nil || channelErr == nil || coreErr.Status != tc.status || channelErr.Status != tc.status ||
+					coreErr.Opts.Code != tc.code || channelErr.Code != tc.code || coreErr.Opts.Message != channelErr.Message {
+					t.Fatalf("core=%+v channel=%+v, want %d %s", coreErr, channelErr, tc.status, tc.code)
+				}
+				return
+			}
+			if coreErr != nil || channelErr != nil {
+				t.Fatalf("core=%v channel=%v", coreErr, channelErr)
+			}
+			open := opened.(map[string]any)
+			if open["status"] != coreStream.StatusCode || !reflect.DeepEqual(open["headers"], coreStream.Headers) {
+				t.Fatalf("stream metadata differs: core=%d/%v channel=%v", coreStream.StatusCode, coreStream.Headers, open)
+			}
+			var coreBody, channelBody strings.Builder
+			for {
+				kind, data, err := coreStream.NextFrame()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind == "end" {
+					break
+				}
+				coreBody.Write(data)
+			}
+			coreStream.Finish(nil)
+			handle, _ := json.Marshal(map[string]any{"handle": open["handle"]})
+			for {
+				result, sdkErr := e.host.Handle(ctx, caller, "invoke.stream.next", handle)
+				if sdkErr != nil {
+					t.Fatal(sdkErr)
+				}
+				next := result.(map[string]any)
+				if next["done"] == true {
+					break
+				}
+				data, err := base64.StdEncoding.DecodeString(next["chunk_b64"].(string))
+				if err != nil {
+					t.Fatal(err)
+				}
+				channelBody.Write(data)
+			}
+			if coreBody.String() != "onetwo" || channelBody.String() != coreBody.String() {
+				t.Fatalf("stream bodies differ: core=%q channel=%q", coreBody.String(), channelBody.String())
+			}
+		})
+	}
+	e.waitBusy(t, 0)
+}
+
+func TestBothInvokeModesRequireHostExecutionAndRejectIdentityArguments(t *testing.T) {
+	e := newInvEnv(t)
+	for _, op := range []string{"invoke", "invoke.stream.open"} {
+		t.Run(op, func(t *testing.T) {
+			ctx := context.Background()
+			args := json.RawMessage(`{"name":"` + fnB + `"}`)
+			_, err := e.host.Handle(ctx, sandbox.SDKCaller{FunctionID: fnA}, op, args)
+			if err == nil || err.Status != 403 || err.Code != "SDK_SCOPE_VIOLATION" {
+				t.Fatalf("module scope: %v", err)
+			}
+			dead, cancel := context.WithCancel(ctx)
+			cancel()
+			_, err = e.host.Handle(ctx, e.exec(dead, 0, "revoked"), op, args)
+			if err == nil || err.Status != 403 || err.Code != "SDK_SCOPE_VIOLATION" {
+				t.Fatalf("revoked execution: %v", err)
+			}
+			_, err = e.host.Handle(ctx, e.exec(ctx, 0, "live"), op,
+				json.RawMessage(`{"name":"`+fnB+`","depth":0,"execution_id":"forged","trace_id":"forged"}`))
+			if err == nil || err.Status != 400 || err.Code != "INVALID_JSON" {
+				t.Fatalf("identity arguments: %v", err)
+			}
+		})
+	}
+	e.waitBusy(t, 0)
 }
 
 func TestInvokeNeedsExecutionAndInvoker(t *testing.T) {

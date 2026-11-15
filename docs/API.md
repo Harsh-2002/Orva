@@ -418,22 +418,16 @@ atomic. For put/increment/CAS, omitted `ttl_seconds` preserves an existing
 expiry (new keys remain persistent), zero clears expiry, a positive value sets
 or refreshes it, and a negative value returns `400 VALIDATION`.
 
-The `/_kv` and `/_internal` route families are sandbox-SDK transport
-endpoints authenticated with a process-signed, function-scoped credential.
-The verified claim supplies caller identity; caller headers are ignored. A
-credential expires when orvad restarts, KV access is restricted to its own
-namespace, and user spans must
-name an active execution owned by the credential's function. Invokes and job
-enqueue may target another function while retaining signed caller attribution.
-**Cron upsert additionally requires a live execution**: it must be called from
-inside your handler and awaited. Calling it at module scope, or after the
-handler has returned without awaiting it, returns `403 SDK_SCOPE_VIOLATION`. A
-function may declare at most 25 schedules of its own; ones you create in the
-dashboard are not capped and do not count against it. A schedule is the only
-thing an SDK credential can create that outlives the credential, which is why
-this surface is gated where KV is not.
+SDK operations use the inherited worker channel, not HTTP endpoints.
+The former `/api/v1/_kv` and `/api/v1/_internal` routes are removed.
+Caller function identity comes from the channel; dispatch-scoped operations
+use a host-issued lease. KV works at module scope. Function calls, jobs,
+cron declarations and custom spans require an active dispatch. Cron declarations
+remain caller-owned and capped at 25 per function; operator-created schedules
+are not counted against that cap.
 
-These routes are not an operator API and do not accept long-lived API keys.
+The public jobs API below still requires ordinary operator authentication;
+legacy SDK tokens are not accepted.
 
 ## Jobs
 
@@ -711,7 +705,6 @@ the compiled sandbox egress policy (see
   "policy_rule_counts": {"v4": 8, "v6": 2, "allow": 7, "reject": 3},
   "policy_stale": false,
   "last_success_at": "2026-08-09T11:02:14Z",
-  "control_plane_allow": {"addrs": ["172.17.0.1"], "port": 8443},
   "unenforced_rules": [
     {"id": 12, "value": "*.corp.com",
      "reason": "wildcard hostnames are not enforceable: egress policy matches IP/CIDR, not DNS names. Use a CIDR or an exact hostname."}
@@ -731,7 +724,6 @@ the compiled sandbox egress policy (see
 | `pending_recycle` | Warm workers are still running the previous generation. Enforcement is live for new spawns but not yet universal — without this field the status reads "enforcing" while old workers keep the old policy |
 | `last_compile_error` | Present only on failure |
 | `last_success_at` | RFC 3339 timestamp of the last successful compile |
-| `control_plane_allow` | The narrow ALLOW that keeps orvad's internal SDK (`orva.kv` / `orva.jobs` / `orva.invoke`) reachable: exact addresses, exact port, TCP only |
 | `unenforced_rules` | Stored rules deliberately **not** compiled, each with a `reason`. Wildcard rules land here. Surfaced so the UI never implies a rule is in force when it isn't |
 
 `nftables_available` was **removed, with no compatibility alias.** The field

@@ -53,7 +53,7 @@ type prepared struct {
 	parent context.Context
 }
 
-// prepare mirrors the HTTP handlers' check order: name, depth, callee, body.
+// prepare validates in order: name, depth, callee, body.
 // Identity (trace, span, depth) comes only from caller.Exec.
 func (h *Host) prepare(ctx context.Context, caller sandbox.SDKCaller, args json.RawMessage) (*prepared, *sandbox.SDKError) {
 	inv := h.invoker.Load()

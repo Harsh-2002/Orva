@@ -172,6 +172,9 @@ def enabled(c, fn, value):
           result.get('kv_ok') is True and result.get('value') == value)
     check(fn['name'] + ' receives real channel fd/protocol',
           result.get('fd') == '3' and result.get('proto') == '1')
+    check(fn['name'] + ' receives only channel capability, never legacy token/base',
+          result.get('exposed') == ['ORVA_SDK_FD', 'ORVA_SDK_PROTO'],
+          str(result.get('exposed')))
     saved = c.get(f"/api/v1/functions/{fn['id']}/kv/permission-probe")
     check(fn['name'] + ' operator observes exact SDK side effect', saved.get('value') == value)
     return result

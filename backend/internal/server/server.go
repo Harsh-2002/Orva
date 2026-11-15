@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -110,21 +109,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	// After first run the UI authenticates via session cookies from /auth/login.
 	bootstrapAdminKey(db, cfg.Data.Dir)
 
-	// Process-lifetime signing key for function-scoped SDK credentials.
-	// Workers receive a token containing their immutable function ID; the
-	// server derives caller identity from the verified claim.
-	internalToken := generateSDKSigningKey()
-	sdkAuth := sdkauth.New([]byte(internalToken))
-	// API base for the worker SDK. From inside a sandbox with
-	// network_mode=egress, 127.0.0.1 is the sandbox's own loopback —
-	// useless for reaching orvad. The right destination is whatever IP
-	// nsjail's nstun NAT routes externally; in Docker that's the
-	// container's default-gateway IP on the bridge network.
-	// detectHostIP reads /proc/net/route to find that gateway.
-	// Functions with network_mode=none have no network stack at all;
-	// the SDK surfaces OrvaUnavailableError for those.
-	apiBase := detectInternalAPIBase(cfg.Server.Port)
-	slog.Info("internal SDK base configured", "api_base", apiBase)
+	sdkAuth := sdkauth.New()
 
 	// Wire the warm pool manager. It owns the sandbox.Limiter as a
 	// host-wide ceiling and spawns per-function worker pools lazily.
@@ -144,7 +129,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			ReapInterval:   30 * time.Second,
 			EagerWarmup:    true,
 		},
-		newSandboxTemplate(cfg, met, sdkAuth.Mint, apiBase, sdkHost.Handle),
+		newSandboxTemplate(cfg, met, sdkHost.Handle),
 		db, reg, limiter,
 	)
 	sdkHost.SetInvoker(&handlers.InternalInvokeHandler{
@@ -226,26 +211,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 
 	// Sandbox egress policy manager. Started before any function can run so
 	// the first egress worker already has a compiled policy.
-	//
-	// The control-plane carve-out is derived from apiBase: sandboxes reach
-	// orvad on a NON-loopback address, which is normally RFC1918, so without
-	// an explicit allow ahead of the operator's block rules the internal SDK
-	// (kv, jobs, function-to-function) would break the moment anyone enabled
-	// the shipped private-network suggestions.
-	//
-	// A failure here is not fatal: the policy simply never compiles, egress
-	// functions refuse to start (fail-closed — NSTUN defaults to allow, so
-	// running them unfiltered would be worse), and network_mode=none keeps
-	// working. The error surfaces on /firewall/status.
-	controlPlane, cpErr := firewall.ParseControlPlane(apiBase, cfg.Server.Port)
-	if cpErr != nil {
-		slog.Error("egress policy: control-plane address unresolved; egress functions will refuse to start",
-			"err", cpErr, "api_base", apiBase)
-	}
-	slog.Info("egress policy configured",
-		"control_plane", controlPlane.Addrs, "port", controlPlane.Port)
-
-	fw := firewall.NewManager(db, cfg.Data.Dir, controlPlane)
+	fw := firewall.NewManager(db, cfg.Data.Dir)
 
 	// Every egress spawn resolves the current policy generation. Wired before
 	// Start so the initial compile cannot publish into an unwired manager.
@@ -330,15 +296,13 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	}
 }
 
-func newSandboxTemplate(cfg *config.Config, met *metrics.Metrics, sdkToken func(string) (string, func()), apiBase string, sdkHandler sandbox.SDKHandler) pool.SandboxTemplate {
+func newSandboxTemplate(cfg *config.Config, met *metrics.Metrics, sdkHandler sandbox.SDKHandler) pool.SandboxTemplate {
 	return pool.SandboxTemplate{
 		NsjailBin:      cfg.Sandbox.NsjailBin,
 		RootfsDir:      cfg.Sandbox.RootfsDir,
 		DataDir:        cfg.Data.Dir,
 		DefaultSeccomp: cfg.Sandbox.SeccompPolicy,
 		DefaultMaxPids: cfg.Functions.DefaultMaxPids,
-		SDKToken:       sdkToken,
-		APIBaseURL:     apiBase,
 		SDKHandler:     sdkHandler,
 		Metrics:        met,
 	}
@@ -448,74 +412,6 @@ func printBootstrapKey(key, note string) {
 		fmt.Printf("  %s\n", note)
 	}
 	fmt.Println("========================================")
-}
-
-// detectInternalAPIBase selects a local address for sandbox-to-daemon SDK
-// calls. Never probe the default gateway for an arbitrary healthy Orva: a
-// different instance can be running there, and a 200 from its health route
-// says nothing about where this process is listening.
-func detectInternalAPIBase(port int) string {
-	if v := os.Getenv("ORVA_INTERNAL_API_BASE"); v != "" {
-		return strings.TrimRight(v, "/")
-	}
-	if route, err := os.ReadFile("/proc/net/route"); err == nil {
-		if iface := parseDefaultRouteInterface(string(route)); iface != "" {
-			if addrs, err := net.InterfaceByName(iface); err == nil {
-				if ips, err := addrs.Addrs(); err == nil {
-					if base, ok := localInternalAPIBase(ips, port); ok {
-						return base
-					}
-				}
-			}
-		}
-	}
-	if addrs, err := net.InterfaceAddrs(); err == nil {
-		if base, ok := localInternalAPIBase(addrs, port); ok {
-			return base
-		}
-	}
-	// No non-loopback IPv4 is visible. This may be unusable from a network
-	// namespace; the operator can set ORVA_INTERNAL_API_BASE explicitly.
-	slog.Warn("no non-loopback IPv4 for sandbox SDK; set ORVA_INTERNAL_API_BASE if SDK calls fail")
-	return fmt.Sprintf("http://127.0.0.1:%d", port)
-}
-
-func parseDefaultRouteInterface(route string) string {
-	for _, line := range strings.Split(route, "\n")[1:] {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		if fields[1] == "00000000" {
-			return fields[0]
-		}
-	}
-	return ""
-}
-
-func localInternalAPIBase(addrs []net.Addr, port int) (string, bool) {
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		ip := ipNet.IP.To4()
-		if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-			continue
-		}
-		return fmt.Sprintf("http://%s:%d", ip, port), true
-	}
-	return "", false
-}
-
-// generateSDKSigningKey returns a fresh 32-byte signing key. It is regenerated
-// on every start, which makes credentials from a previous process stale.
-func generateSDKSigningKey() string {
-	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("generate SDK signing key: " + err.Error())
-	}
-	return hex.EncodeToString(b[:])
 }
 
 func (s *Server) Start(addr string) error {

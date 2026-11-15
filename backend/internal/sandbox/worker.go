@@ -143,7 +143,10 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.sdkChannel = cfg.SDKHandler != nil && adapterSupportsSDK(rootfs, cfg.Language)
+	if cfg.SDKHandler != nil && !adapterSupportsSDK(rootfs, cfg.Language) {
+		return nil, fmt.Errorf("SDK channel requires a readable adapter with orva-sdk-proto:1: update the installed %s runtime adapter or disable SDK for this function", cfg.Language)
+	}
+	cfg.sdkChannel = cfg.SDKHandler != nil
 	args, childEnv, err := buildArgs(cfg, rootfs, entrypoint)
 	if err != nil {
 		return nil, err
@@ -258,12 +261,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		w.revokeLease()
 		close(w.waitDone)
 
-		// The worker is genuinely gone now, so anything scoped to its
-		// lifetime can be torn down. This is the only place that is true for
-		// every exit path, which is why the SDK-credential release is wired
-		// here rather than to Kill or to the pool's retire path: those two
-		// express an intention to stop the worker, and a busy one keeps
-		// serving until it drains. Releasing there would 401 a live request.
+		// A retired busy worker keeps its channel until the process is gone.
 		if cfg.OnExit != nil {
 			cfg.OnExit()
 		}

@@ -98,7 +98,7 @@ func registerFirewallTools(rc *regCtx) {
 				"`enforced` is false when no policy has compiled — every network_mode=egress invocation then fails closed with EGRESS_POLICY_UNAVAILABLE rather than running unfiltered. " +
 				"`policy_stale` means a recompile failed and the last known-good generation is still in force; read `last_compile_error` for why. " +
 				"`unenforced_rules` lists stored rules the compiler deliberately dropped (a wildcard, or a malformed value) — check it before telling anyone a destination is blocked. " +
-				"`control_plane_allow` is the carve-out that keeps orvad's internal SDK reachable from inside the jail.",
+				"SDK calls use a private per-worker channel; there is no HTTP control-plane carve-out.",
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, firewall.Snapshot, error) {

@@ -1,14 +1,8 @@
 """Orva Python SDK — kv, invoke, jobs, crons, trace, log, context.
 
-Available inside any function running on Orva. Routes through the
-ORVA_API_BASE URL using the function-scoped ORVA_INTERNAL_TOKEN that the
-worker received at spawn time. Both env vars are present in
-production and absent in tests; helpers raise OrvaUnavailableError when
-the SDK can't reach the host unless __test_mode__ has installed an
-override.
-
-Stdlib-only (urllib, json, time, os, sys) — no third-party deps and no
-build step.
+Uses only the inherited worker SDK channel. Without it, operations raise
+OrvaUnavailableError unless __test_mode__ has installed an override.
+Stdlib-only, with no third-party deps or build step.
 """
 
 from __future__ import annotations
@@ -21,16 +15,14 @@ import struct
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterator, List, Optional, TypeVar
 from urllib.parse import quote
 
 
-# SDK version baked at adapter-embed time. Sent on every internal call.
+# SDK version baked at adapter-embed time.
 SDK_VERSION = "0.7.0"
 
 T = TypeVar("T")
@@ -48,9 +40,13 @@ class OrvaError(RuntimeError):
 
 
 class OrvaUnavailableError(OrvaError):
-    """ORVA_API_BASE / ORVA_INTERNAL_TOKEN are missing — typically only
-    happens in tests or when running the handler outside of Orva's
-    sandbox."""
+    """The inherited worker SDK channel is unavailable."""
+
+    def __init__(self, message: str, status: int = 0):
+        super().__init__(
+            f"{message}. Check the function's sdk permission and refresh the runtime adapter.",
+            status=status,
+        )
 
 
 class OrvaCASMismatch(OrvaError):
@@ -72,20 +68,12 @@ _test_impl: Optional[Dict[str, Callable]] = None
 def __test_mode__(impl: Optional[Dict[str, Callable]]) -> None:
     """Swap the SDK transport for unit tests. `impl` is a dict with an
     optional `request` callable matching the (method, path, opts) →
-    (status, body) shape of the internal `_request` function."""
+    (status, body[, headers]) shape. This hook never opens a connection."""
     global _test_impl
     _test_impl = impl
 
 
 # ── Environment accessors ───────────────────────────────────────────
-
-
-def _api_base() -> str:
-    return os.environ.get("ORVA_API_BASE", "")
-
-
-def _token() -> str:
-    return os.environ.get("ORVA_INTERNAL_TOKEN", "")
 
 
 def _function_id() -> str:
@@ -125,73 +113,7 @@ def _memory_mb() -> int:
         return 64
 
 
-def _trace_headers() -> Dict[str, str]:
-    """Forward trace context on every internal call so F2F / job enqueues
-    stay linked into the same trace as the caller."""
-    h: Dict[str, str] = {"X-Orva-SDK-Version": SDK_VERSION}
-    if v := _trace_id():
-        h["X-Orva-Trace-Id"] = v
-    if v := _span_id():
-        h["X-Orva-Span-Id"] = v
-    if v := _execution_id():
-        h["X-Orva-Execution-Id"] = v
-    return h
-
-
-# ── HTTP transport ──────────────────────────────────────────────────
-
-
 DEFAULT_TIMEOUT_S = 30.0
-
-# A module-level opener with HTTP keep-alive enabled. urllib's default
-# `urlopen` opens a fresh TCP connection every call; the opener pools
-# connections so the loopback handshake amortises across the function's
-# SDK calls. The HTTPHandler is the stock one — keep-alive support comes
-# from Python 3.12+'s default `Connection: keep-alive` behaviour on
-# urllib's HTTPConnection underneath.
-_opener = urllib.request.build_opener()
-
-
-def _request(
-    method: str,
-    path: str,
-    *,
-    body: bytes = b"",
-    headers: Optional[Dict[str, str]] = None,
-    timeout_s: float = DEFAULT_TIMEOUT_S,
-) -> tuple[int, bytes, Dict[str, str]]:
-    if _test_impl and "request" in _test_impl:
-        out = _test_impl["request"](
-            method, path, {"body": body, "headers": headers or {}}
-        )
-        if isinstance(out, tuple) and len(out) == 2:
-            return out[0], out[1], {}
-        return out
-    base = _api_base()
-    token = _token()
-    if not base or not token:
-        raise OrvaUnavailableError(
-            "Orva SDK not available (missing ORVA_API_BASE or ORVA_INTERNAL_TOKEN)"
-        )
-    h: Dict[str, str] = {
-        "X-Orva-Internal-Token": token,
-        "Content-Type": "application/json",
-    }
-    h.update(_trace_headers())
-    if headers:
-        h.update(headers)
-    req = urllib.request.Request(base + path, data=body or None, headers=h, method=method)
-    try:
-        with _opener.open(req, timeout=timeout_s) as resp:
-            return (
-                resp.getcode(),
-                resp.read(),
-                {k.lower(): v for k, v in resp.headers.items()},
-            )
-    except urllib.error.HTTPError as e:
-        return e.code, e.read(), {k.lower(): v for k, v in (e.headers or {}).items()}
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise OrvaError(f"request failed: {e}", status=0)
 
 
 # ── SDK channel ─────────────────────────────────────────────────────
@@ -200,8 +122,7 @@ def _request(
 # ORVA_SDK_FD (with ORVA_SDK_PROTO=1). Frames are [u32 BE length][JSON];
 # requests {id, op, lease?, a}, replies {id, ok, r | e:{status,code,message}}.
 # The client never sends identity: the host derives it from the connection
-# and the lease. Without the env pair (or with a bad fd) the SDK keeps using
-# HTTP, unchanged.
+# and the lease. Missing or invalid channel configuration fails closed.
 #
 # os.read/os.write ONLY: socket.recv/send compile to recvfrom/sendto, which
 # the no-network seccomp profile blocks. One lazily started daemon reader
@@ -211,16 +132,6 @@ def _request(
 
 MAX_FRAME = 4 << 20  # 4 MiB, both directions
 MAX_INFLIGHT = 32  # the host refuses the 33rd with 429, so wait client-side
-
-# Ops served over the channel. With no channel (or in test mode) every op keeps
-# using its HTTP route.
-_CHANNEL_OPS = frozenset(
-    (
-        "kv.get", "kv.put", "kv.delete", "kv.list", "kv.batch", "kv.incr", "kv.cas",
-        "invoke", "invoke.stream.open", "invoke.stream.next", "invoke.stream.close",
-        "jobs.enqueue", "crons.upsert", "spans.emit",
-    )
-)
 
 # Per-dispatch lease from the adapter's `lease` stdin frame. Module-scope code
 # runs before any lease, so it is empty then. The host revokes it; we never
@@ -233,7 +144,7 @@ def _set_lease(lease: Any) -> None:
     _lease = lease if isinstance(lease, str) else ""
 
 
-# Per-call deadline (slot wait included); same default as the HTTP path.
+# Per-call deadline includes slot wait.
 _channel_timeout_s = DEFAULT_TIMEOUT_S
 
 
@@ -324,7 +235,7 @@ class _Chan:
             msg["lease"] = _lease
         try:
             # NaN/Infinity are not JSON: the host would treat the frame as a protocol
-            # violation and drop the worker, so refuse them here like the HTTP path did.
+            # violation and drop the worker, so refuse them here.
             body = json.dumps(msg, allow_nan=False).encode("utf-8")
         except ValueError as e:
             raise OrvaError(f"{op}: value is not JSON-serialisable ({e})", status=400)
@@ -376,7 +287,7 @@ _channel_forked = False
 
 
 def _channel() -> Optional[_Chan]:
-    """The open channel, or None when this worker has none (HTTP fallback)."""
+    """The open channel, or None when this worker has none."""
     global _chan, _chan_probed
     if _channel_forked and os.environ.get("ORVA_SDK_PROTO") == "1":
         raise OrvaUnavailableError("SDK channel unavailable in a forked child")
@@ -389,14 +300,16 @@ def _channel() -> Optional[_Chan]:
         if os.environ.get("ORVA_SDK_PROTO") != "1":
             return None
         raw = os.environ.get("ORVA_SDK_FD", "")
-        if not raw.isdigit():
+        if not raw.isascii() or not raw.isdigit():
             return None
-        fd = int(raw)
         try:
+            fd = int(raw)
+            if fd < 3:
+                return None
             if not stat.S_ISSOCK(os.fstat(fd).st_mode):
                 return None
             _chan = _Chan(fd)
-        except OSError:
+        except (OSError, ValueError, OverflowError):
             _chan = None
         return _chan
 
@@ -419,11 +332,11 @@ if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
-def _chan_for(op: str) -> Optional[_Chan]:
-    """The channel when `op` must use it, None for HTTP (no channel or test mode)."""
-    if (_test_impl and "request" in _test_impl) or op not in _CHANNEL_OPS:
-        return None
-    return _channel()
+def _require_channel() -> _Chan:
+    ch = _channel()
+    if ch is None:
+        raise OrvaUnavailableError("Orva SDK channel unavailable (missing or invalid descriptor/protocol)")
+    return ch
 
 
 def _kv(
@@ -435,18 +348,13 @@ def _kv(
     headers: Optional[Dict[str, str]] = None,
     timeout_s: Optional[float] = None,
 ) -> tuple[int, bytes, Dict[str, str]]:
-    """Run one op over the SDK channel when there is one, else over HTTP.
-    `headers` (call depth) only exist on the HTTP path: the host derives
-    identity for channel calls."""
-    ch = _chan_for(op)
-    if ch is not None:
-        return ch.call(op, args, timeout_s)
-    kw: Dict[str, Any] = {}
-    if headers is not None:
-        kw["headers"] = headers
-    if timeout_s is not None:
-        kw["timeout_s"] = timeout_s
-    return _request(method, path, body=body, **kw)
+    """Method/path metadata exists only for the public unit-test hook."""
+    if _test_impl and "request" in _test_impl:
+        out = _test_impl["request"](method, path, {"body": body, "headers": headers or {}})
+        if isinstance(out, tuple) and len(out) == 2:
+            return out[0], out[1], {}
+        return out
+    return _require_channel().call(op, args, timeout_s)
 
 
 # ── KV ──────────────────────────────────────────────────────────────
@@ -670,47 +578,9 @@ def invoke_stream(
     """Stream-invoke variant. Yields response body chunks as bytes. Use
     when the callee returns SSE / async-iterator / generator output and
     you want to consume frames as they arrive instead of buffering."""
-    ch = _chan_for("invoke.stream.open")
-    if ch is not None:
-        yield from _invoke_stream_channel(ch, function_name, payload, max(timeout_ms / 1000.0, 1.0))
-        return
-    base = _api_base()
-    token = _token()
-    if not base or not token:
-        raise OrvaUnavailableError(
-            "Orva SDK not available (missing ORVA_API_BASE or ORVA_INTERNAL_TOKEN)"
-        )
-    body = json.dumps(payload if payload is not None else {}).encode("utf-8")
-    h: Dict[str, str] = {
-        "X-Orva-Internal-Token": token,
-        "Content-Type": "application/json",
-        "X-Orva-Call-Depth": str(_call_depth()),
-    }
-    h.update(_trace_headers())
-    req = urllib.request.Request(
-        base + f"/api/v1/_internal/invoke/{function_name}/stream",
-        data=body,
-        headers=h,
-        method="POST",
+    yield from _invoke_stream_channel(
+        _require_channel(), function_name, payload, max(timeout_ms / 1000.0, 1.0)
     )
-    try:
-        resp = _opener.open(req, timeout=max(timeout_ms / 1000.0, 1.0))
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise OrvaError(f"function not found: {function_name}", status=404)
-        if e.code == 507:
-            raise OrvaError("call depth exceeded", status=507)
-        raise OrvaError(f"invoke_stream({function_name!r}) failed: {e.read()!r}", status=e.code)
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise OrvaError(f"invoke_stream request failed: {e}", status=0)
-    try:
-        while True:
-            chunk = resp.read(64 * 1024)
-            if not chunk:
-                return
-            yield chunk
-    finally:
-        resp.close()
 
 
 def _invoke_stream_channel(

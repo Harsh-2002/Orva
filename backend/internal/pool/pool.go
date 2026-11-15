@@ -63,30 +63,8 @@ type SandboxTemplate struct {
 	// RefreshForDeploy so the next spawn picks up the new values.
 	SecretsLookup func(fnID string) map[string]string
 
-	// SDKToken mints a credential bound to one worker process, and returns
-	// the release that invalidates it when that worker dies. The release MUST
-	// run on every path after a successful mint -- including the spawn error
-	// paths below, where the worker the credential was minted for never came
-	// into existence.
-	//
-	// Previously bound to the worker's
-	// function ID. User code can read it, but cannot alter the signed caller.
-	SDKToken func(functionID string) (token string, release func())
-
-	// APIBaseURL is the base URL the adapter uses when making outbound
-	// calls to Orva's own internal endpoints (KV / F2F / jobs).
-	//
-	// This is deliberately NOT a loopback address: from inside the jail
-	// 127.0.0.1 is the sandbox's own loopback, so it cannot reach orvad.
-	// detectInternalAPIBase probes for a routable address instead, which is
-	// normally RFC1918 — hence the control-plane carve-out the egress policy
-	// compiles ahead of the operator's block rules. SDK-enabled functions use
-	// the private channel independently of network mode.
-	APIBaseURL string
-
 	// SDKHandler serves SDK calls arriving over each worker's private channel
-	// for SDK-enabled functions with a supported adapter. Older adapters keep
-	// the HTTP fallback, still gated by the function's SDK permission.
+	// for SDK-enabled functions. A channel-capable adapter is required.
 	SDKHandler sandbox.SDKHandler
 
 	// EgressPolicy is consulted at every network_mode=egress spawn and returns
@@ -908,17 +886,6 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				}
 			}
 			sanitizeSDKEnv(env)
-			// Internal SDK plumbing — adapter uses these to talk to the
-			// KV / F2F / jobs endpoints. Empty when running outside the
-			// server (tests) so user code can probe presence to decide
-			// whether to fall back.
-			releaseSDKToken := func() {}
-			if fn.SDK && m.tmpl.SDKToken != nil {
-				token, release := m.tmpl.SDKToken(fn.ID)
-				env["ORVA_INTERNAL_TOKEN"] = token
-				env["ORVA_API_BASE"] = m.tmpl.APIBaseURL
-				releaseSDKToken = release
-			}
 			// Resolve the egress policy for this spawn. Read off m (not the
 			// local tmpl copy) so a late SetEgressPolicy is visible to pools
 			// that already exist — same reason as SecretsLookup above.
@@ -931,8 +898,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				if getPolicy := m.tmpl.EgressPolicy; getPolicy != nil {
 					p, g, perr := getPolicy()
 					if perr != nil {
-						releaseSDKToken() // no worker will ever hold this
-						return nil, perr  // fail closed: no policy, no worker
+						return nil, perr // fail closed: no policy, no worker
 					}
 					policyPath, policyGen = p, g
 				}
@@ -942,6 +908,9 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			var sdkHandler sandbox.SDKHandler
 			if fn.SDK {
 				sdkHandler = tmpl.SDKHandler
+				if sdkHandler == nil {
+					return nil, errors.New("SDK is enabled but the private channel host is unavailable")
+				}
 			}
 			w, err := sandbox.Spawn(ctx, sandbox.ExecConfig{
 				Language: sandbox.Language(fn.Runtime),
@@ -970,18 +939,11 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				NsjailBin:        tmpl.NsjailBin,
 				RootfsDir:        tmpl.RootfsDir,
 				Timeout:          time.Duration(fn.TimeoutMS) * time.Millisecond,
-				// Released once this worker's process is reaped, whichever way
-				// it dies. That is what expires the credential on redeploy:
-				// RefreshForDeploy retires the function's workers, and each
-				// one's credential dies with its process.
-				OnExit: releaseSDKToken,
 				// SDK channel: identity is the function this worker serves.
 				FunctionID: fn.ID,
 				SDKHandler: sdkHandler,
 			})
 			if err != nil {
-				// No process, so nothing will ever call OnExit for it.
-				releaseSDKToken()
 				return nil, err
 			}
 			// Spawn only starts nsjail. The adapters still need to import the
@@ -990,7 +952,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 			readyErr := w.AwaitReady(readyCtx)
 			cancelReady()
 			if readyErr != nil {
-				_ = w.Kill() // OnExit owns credential revocation after reap.
+				_ = w.Kill()
 				return nil, readyErr
 			}
 			if m.tmpl.Metrics != nil {

@@ -2,6 +2,7 @@ package pool
 
 import (
 	"errors"
+	"syscall"
 	"testing"
 )
 
@@ -25,8 +26,18 @@ func TestRequestBudgetScalesWithMemoryAndPreservesAnotherFunctionShare(t *testin
 	hm.availBytes.Store(4 << 30)
 	b := newRequestBudget(hm)
 	global, per := b.queueLimits()
-	if global <= 1024 || per <= 256 || per >= global {
-		t.Fatalf("resource-derived queue limits = %d/%d", global, per)
+	wantGlobal := b.limit / requestBaseCharge
+	var files syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &files); err != nil {
+		t.Fatal(err)
+	}
+	if files.Cur > 0 {
+		wantGlobal = min(wantGlobal, int64(files.Cur/4))
+	}
+	wantGlobal = max(wantGlobal, 1)
+	wantPer := max(wantGlobal-wantGlobal/4, 1)
+	if global != wantGlobal || per != wantPer {
+		t.Fatalf("resource-derived queue limits = %d/%d, want %d/%d", global, per, wantGlobal, wantPer)
 	}
 	charge := b.limit - b.limit/4
 	releaseA, ok := b.reserve("a", charge)

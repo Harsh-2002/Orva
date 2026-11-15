@@ -372,3 +372,17 @@ to Prometheus for small deployments.
 ## When something breaks
 
 See [`docs/OPERATIONS.md`](OPERATIONS.md) for the runbook.
+
+## SDK channel cut-over
+
+Upgrade the server and installed runtime adapters/SDK together. SDK-enabled
+functions require the `orva-sdk-proto:1` adapter capability and inherited worker
+channel; an incompatible adapter is an actionable spawn failure, not a reason
+to enable outbound networking. Use the normal installer/setup procedure above
+to refresh adapters. Existing SDK permission grants survive the upgrade.
+
+The SDK HTTP route families, worker credentials/base URL and
+`ORVA_INTERNAL_API_BASE` override are removed. Private-network block rules no
+longer carry an Orva HTTP exception. Do not restore a network exemption to fix
+an SDK error: check the function's `sdk` permission and installed adapter first.
+Public HTTP invocation and operator APIs retain their existing authentication.

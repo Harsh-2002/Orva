@@ -13,9 +13,8 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
-// Identity-based cores shared by the HTTP handlers and the SDK channel host
-// (internal/sdkhost). Each takes an already-authenticated function identity
-// and a decoded request, so the two transports cannot drift apart.
+// Identity-based cores for the SDK channel host (internal/sdkhost). Jobs also
+// serves the operator HTTP handler, without SDK attribution.
 
 // StatusErr is a failure with the HTTP status, code and message both
 // transports report verbatim.
@@ -103,8 +102,7 @@ func EnqueueJob(db *database.Database, callerFnID, callerTraceID, callerSpanID s
 
 // ---- crons.upsert ----
 
-// UpsertCronRequest is the body of POST /api/v1/_internal/crons and of the
-// crons.upsert SDK operation.
+// UpsertCronRequest is the decoded crons.upsert SDK request.
 type UpsertCronRequest struct {
 	Name     string `json:"name"`
 	Schedule string `json:"schedule"`
@@ -204,8 +202,7 @@ func UpsertCron(db *database.Database, fnID string, req *UpsertCronRequest) (map
 
 // ---- spans.emit ----
 
-// UserSpanRequest is the body of POST /api/v1/_internal/spans and of the
-// spans.emit SDK operation. Trace, parent span and execution come from the
+// UserSpanRequest is the decoded spans.emit SDK request. Trace, parent span and execution come from the
 // caller's execution, never from the body.
 type UserSpanRequest struct {
 	Name         string          `json:"name"`

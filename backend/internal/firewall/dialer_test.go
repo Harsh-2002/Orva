@@ -53,20 +53,21 @@ func TestDialerBlockedErrorSurvivesHTTPClient(t *testing.T) {
 	}
 }
 
-func TestDialerNeverBlocksLoopbackOrControlPlane(t *testing.T) {
-	// Both rules cover an address orvad must keep reaching: 127.0.0.0/8 its own
-	// loopback, 172.16.0.0/12 the control plane the SDK talks to.
+func TestDialerPreservesLoopbackButBlocksFormerControlPlane(t *testing.T) {
 	p := buildPolicy(t, []*database.BlocklistRule{
 		cidrRule(1, "127.0.0.0/8"), cidrRule(2, "172.16.0.0/12"),
 	}, nil)
 	ctl := control(p, SubsystemWebhook)
 
-	for _, dest := range []string{"127.0.0.1:8443", "172.17.0.2:8443"} {
+	for _, dest := range []string{"127.0.0.1:8443"} {
 		if err := ctl("tcp", dest, nil); err != nil {
 			t.Errorf("%s must never be refused daemon-side: %v", dest, err)
 		}
 	}
 	// The rest of the covering range is still enforced.
+	if err := ctl("tcp", "172.17.0.2:8443", nil); !errors.Is(err, ErrBlockedByEgressPolicy) {
+		t.Errorf("former HTTP control plane bypassed the blocklist: %v", err)
+	}
 	if err := ctl("tcp", "172.20.1.1:443", nil); err == nil {
 		t.Error("other addresses in the blocked range must still be refused")
 	}
@@ -144,13 +145,15 @@ func TestCheckEndpointRefusesBlockedEndpoint(t *testing.T) {
 	}
 }
 
-func TestCheckEndpointHonoursPortCarveOuts(t *testing.T) {
-	// The control-plane carve-out is port-scoped, so the port parsed out of the
-	// endpoint has to reach Blocks or the exemption silently stops matching.
-	p := buildPolicy(t, []*database.BlocklistRule{cidrRule(1, "172.16.0.0/12")}, nil)
+func TestCheckEndpointHonoursDNSPortButNotFormerControlPlane(t *testing.T) {
+	p := buildPolicy(t, []*database.BlocklistRule{cidrRule(1, "172.16.0.0/12")},
+		[]netip.Addr{netip.MustParseAddr("172.17.0.2")})
 
-	if err := CheckEndpoint(context.Background(), p, SubsystemAIGateway, "http://172.17.0.2:8443"); err != nil {
-		t.Errorf("control-plane endpoint must never be refused: %v", err)
+	if err := CheckEndpoint(context.Background(), p, SubsystemAIGateway, "http://172.17.0.2:53"); err != nil {
+		t.Errorf("DNS resolver must remain reachable on port 53: %v", err)
+	}
+	if err := CheckEndpoint(context.Background(), p, SubsystemAIGateway, "http://172.17.0.2:8443"); !errors.Is(err, ErrBlockedByEgressPolicy) {
+		t.Errorf("former control-plane endpoint must obey the blocklist: %v", err)
 	}
 	if err := CheckEndpoint(context.Background(), p, SubsystemAIGateway, "http://172.20.1.1:11434"); err == nil {
 		t.Error("blocked endpoint must be refused")

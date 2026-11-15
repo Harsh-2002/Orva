@@ -13,10 +13,11 @@ const CHILD = path.join(__dirname, 'node_child.js')
 // Run a scenario. `host(msg, reply, ctx)` is called per request frame.
 function run(scenario, host, { env = {}, channel = true, onSocket } = {}) {
   return new Promise((resolve, reject) => {
-    const e = { ...process.env, ...env }
+    const e = { ...process.env }
     delete e.ORVA_SDK_FD
     delete e.ORVA_SDK_PROTO
     if (channel) Object.assign(e, { ORVA_SDK_FD: '3', ORVA_SDK_PROTO: '1' })
+    Object.assign(e, env)
     const child = spawn(process.execPath, [CHILD, scenario], {
       env: e,
       stdio: ['ignore', 'pipe', 'inherit', 'pipe'],
@@ -124,7 +125,7 @@ test('kv round trips over the channel, with no identity or lease in frames', asy
   }
 })
 
-test('error mapping matches the HTTP path', async () => {
+test('error mapping preserves public SDK statuses', async () => {
   const host = (msg, ctx) => {
     const k = msg.a.key
     if (k === 'busy') return ctx.fail(msg.id, 429, 'TOO_MANY_INFLIGHT', 'slow down')
@@ -249,71 +250,59 @@ test('lease is absent before the first lease and attached after', async () => {
   assert.deepEqual(frames.map((f) => f.lease), [undefined, 'L-1', 'L-2'])
 })
 
-function httpHost() {
+function httpSink() {
   const seen = []
   const server = http.createServer((req, res) => {
-    let b = ''
-    req.on('data', (d) => (b += d))
-    req.on('end', () => {
-      seen.push({ method: req.method, url: req.url, token: req.headers['x-orva-internal-token'], trace: req.headers['x-orva-trace-id'], body: b })
-      res.setHeader('content-type', 'application/json')
-      if (req.url.startsWith('/api/v1/jobs')) return res.end(JSON.stringify({ id: 'job1' }))
-      if (req.url.endsWith('/stream')) {
-        res.write('aa')
-        return setTimeout(() => res.end('bb'), 10)
-      }
-      if (req.url.startsWith('/api/v1/_internal/invoke/')) {
-        return res.end(JSON.stringify({ statusCode: 200, headers: {}, body: '{"ok":1}' }))
-      }
-      if (req.url.startsWith('/api/v1/_internal/crons')) return res.end(JSON.stringify({ id: 'c1' }))
-      if (req.method === 'GET') return res.end(JSON.stringify({ value: 'v' }))
-      res.end('{}')
-    })
+    seen.push(`${req.method} ${req.url}`)
+    req.resume()
+    res.end('{}')
   })
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, seen, port: server.address().port })))
 }
 
-for (const [name, channel, env] of [
-  ['env absent', false, {}],
-  ['fd set but ORVA_SDK_PROTO unset', false, { ORVA_SDK_FD: '3' }],
+for (const [name, env] of [
+  ['SDK permission disabled (channel env absent)', {}],
+  ['protocol missing', { ORVA_SDK_FD: '3' }],
+  ['protocol unsupported', { ORVA_SDK_FD: '3', ORVA_SDK_PROTO: '2' }],
+  ['descriptor missing', { ORVA_SDK_PROTO: '1' }],
+  ['descriptor invalid', { ORVA_SDK_FD: 'bad', ORVA_SDK_PROTO: '1' }],
+  ['descriptor negative', { ORVA_SDK_FD: '-1', ORVA_SDK_PROTO: '1' }],
+  ['descriptor is standard I/O', { ORVA_SDK_FD: '1', ORVA_SDK_PROTO: '1' }],
+  ['descriptor not a socket', { ORVA_TEST_NONSOCKET: '1', ORVA_SDK_PROTO: '1' }],
+  ['descriptor closed', { ORVA_SDK_FD: '999999', ORVA_SDK_PROTO: '1' }],
+  ['descriptor out of range', { ORVA_SDK_FD: '9'.repeat(100), ORVA_SDK_PROTO: '1' }],
 ]) {
-  test(`falls back to HTTP when ${name}`, async () => {
-    const h = await httpHost()
+  test(`all operations fail closed without HTTP: ${name}`, async () => {
+    const h = await httpSink()
     try {
-      const { out, frames } = await run('http', () => assert.fail('channel used'), {
-        channel,
+      const { out, frames } = await run('unavailable', () => assert.fail('channel used'), {
+        channel: false,
         env: { ...env, ORVA_API_BASE: `http://127.0.0.1:${h.port}`, ORVA_INTERNAL_TOKEN: 'tok', ORVA_FUNCTION_ID: 'f1' },
       })
-      assert.equal(out.v, 'v')
+      assert.equal(Object.keys(out.errors).length, 13)
+      for (const [op, result] of Object.entries(out.errors)) {
+        assert.equal(result.err?.name, 'OrvaUnavailableError', op)
+        assert.equal(result.err.status, 0, op)
+        assert.match(result.err.message, /sdk permission.*refresh.*adapter/i, op)
+      }
+      assert.equal(out.spanRet, 7)
+      assert.equal(out.spanError.err.message, 'user failure')
       assert.equal(frames.length, 0)
-      assert.deepEqual(h.seen.slice(0, 2).map((s) => `${s.method} ${s.url}`), ['PUT /api/v1/_kv/f1/k', 'GET /api/v1/_kv/f1/k'])
-      assert.equal(h.seen[0].token, 'tok')
+      assert.deepEqual(h.seen, [])
     } finally {
       h.server.close()
     }
   })
 }
 
-test('every op stays on HTTP when the channel is absent', async () => {
-  const h = await httpHost()
-  try {
-    const { out, frames } = await run('httpAll', () => assert.fail('channel used'), {
-      channel: false,
-      env: { ORVA_API_BASE: `http://127.0.0.1:${h.port}`, ORVA_INTERNAL_TOKEN: 'tok', ORVA_FUNCTION_ID: 'f1', ORVA_TRACE_ID: 'tr1' },
-    })
-    assert.equal(frames.length, 0)
-    assert.equal(out.job.id, 'job1')
-    assert.equal(out.cron.id, 'c1')
-    assert.deepEqual(out.inv, { statusCode: 200, headers: {}, body: { ok: 1 } })
-    assert.equal(out.chunks.join(''), 'aabb')
-    assert.deepEqual(
-      h.seen.map((s) => s.url).sort(),
-      ['/api/v1/_internal/crons', '/api/v1/_internal/invoke/callee', '/api/v1/_internal/invoke/callee/stream', '/api/v1/_internal/spans', '/api/v1/jobs'].sort()
-    )
-    assert.ok(h.seen.every((s) => s.trace === 'tr1'), 'HTTP keeps sending trace headers')
-  } finally {
-    h.server.close()
-  }
+test('explicit test-mode override remains local and reset restores fail-closed behavior', async () => {
+  const { out, frames } = await run('testHook', () => assert.fail('channel used'), {
+    channel: false, env: { ORVA_FUNCTION_ID: 'f1' },
+  })
+  assert.equal(out.value, 'mock')
+  assert.deepEqual(out.seen, [{ method: 'GET', path: '/api/v1/_kv/f1/a%2Fb', opts: {} }])
+  assert.equal(out.restored.err.name, 'OrvaUnavailableError')
+  assert.deepEqual(frames, [])
 })
 
 // Host for the PR2 ops. `state` collects what the host saw.
@@ -398,7 +387,7 @@ test('jobs, crons, spans and invoke go over the channel with no identity', async
   noIdentity(frames)
 })
 
-test('op errors map to the same OrvaError statuses as HTTP', async () => {
+test('op errors preserve public OrvaError statuses', async () => {
   const { out } = await run('opsErrors', opsHost(), { env: IDENT_ENV })
   assert.equal(out.notFound.err.status, 404)
   assert.match(out.notFound.err.message, /function not found: missing/)
@@ -435,6 +424,17 @@ test('invokeStream: 5 chunks, early break closes, mid-stream error, open error',
   assert.deepEqual(frames[0].a, { name: 'five', body: { p: 1 } })
   assert.deepEqual(frames[1].a, { handle: 'h1' })
   noIdentity(frames)
+})
+
+test('return during pending stream open closes the subsequently issued handle', async () => {
+  const { out, frames } = await run('streamPendingReturn', (msg, ctx) => {
+    if (msg.op === 'invoke.stream.open') ctx.reply(msg.id, { handle: 'pending', status: 200, headers: {} })
+    else if (msg.op === 'invoke.stream.close') ctx.reply(msg.id, {})
+    else ctx.fail(msg.id, 500, 'UNEXPECTED', 'no stream reads expected')
+  })
+  assert.deepEqual(out, { returned: { done: true }, next: { done: true } })
+  assert.deepEqual(frames.map(f => f.op), ['invoke.stream.open', 'invoke.stream.close'])
+  assert.equal(frames[1].a.handle, 'pending')
 })
 
 test('channel EOF during a stream raises OrvaUnavailableError', async () => {

@@ -49,8 +49,7 @@ type ExecConfig struct {
 	// are attributed to it, never to anything the sandbox sends.
 	FunctionID string
 	// SDKHandler serves the worker's private SDK channel. Nil disables the
-	// channel; it is also off when the installed adapter does not declare
-	// support (adapterSupportsSDK), in which case the SDK uses its HTTP path.
+	// channel; a non-nil handler requires a channel-capable installed adapter.
 	SDKHandler SDKHandler
 	// sdkChannel is set by Spawn once both conditions above hold.
 	sdkChannel bool
@@ -72,8 +71,7 @@ type ExecConfig struct {
 	// so it observes every exit path -- clean quit, SIGKILL, child crash,
 	// context cancel -- and never fires while the process is still alive.
 	//
-	// Used to release the worker's SDK credential. It must be cheap and must
-	// not block: it runs inline in the reaper, ahead of the cgroup reclaim.
+	// It must be cheap and non-blocking: it runs ahead of cgroup reclaim.
 	OnExit func()
 
 	// Seccomp policy (Kafel string). Empty means no seccomp filter.

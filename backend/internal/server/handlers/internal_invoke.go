@@ -21,11 +21,7 @@ import (
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
-// InternalInvokeHandler is the F2F (function-to-function) entrypoint.
-// User code inside a sandbox calls orva.invoke("other-fn", payload); the
-// adapter POSTs here. We bypass the public auth layer (worker holds the
-// scoped SDK credential) and the per-function rate limiter (loops are bounded
-// by call depth, not request rate).
+// InternalInvokeHandler runs channel F2F calls with host-owned caller identity.
 type InternalInvokeHandler struct {
 	DB       *database.Database
 	Registry *registry.Registry
@@ -41,31 +37,8 @@ type InternalInvokeHandler struct {
 
 const defaultMaxCallDepth = 8
 
-// callerDepth returns the caller's host-recorded call depth and enforces the
-// cap, writing the 507 itself when exceeded. Depth lives on the execution
-// binding, never in a request header: a function can simply omit the header,
-// which made the cap bypassable. X-Orva-Call-Depth is ignored entirely.
-//
-// Known residual: a function could leak one of its own execution ids to a
-// sibling execution (e.g. via KV) and borrow that execution's lower depth.
-// The planned per-dispatch SDK lease closes that.
-func (h *InternalInvokeHandler) callerDepth(w http.ResponseWriter, r *http.Request, callerFnID, reqID string) (int, bool) {
-	depth, ok := h.SDKAuth.ExecutionDepth(r.Header.Get("X-Orva-Execution-Id"), callerFnID)
-	if !ok {
-		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
-			"SDK request is not associated with an active caller execution", reqID)
-		return 0, false
-	}
-	if ierr := h.CheckDepth(depth); ierr != nil {
-		ierr.write(w, reqID)
-		return 0, false
-	}
-	return depth, true
-}
-
 // F2FCaller is the host-recorded identity of the execution making an F2F call.
-// It comes from the SDK credential's execution binding (HTTP) or the dispatch
-// lease (SDK channel), never from request data.
+// It comes from the dispatch lease, never from request data.
 type F2FCaller struct {
 	FunctionID string
 	TraceID    string
@@ -81,12 +54,6 @@ type InvokeError struct {
 }
 
 func (e *InvokeError) Error() string { return e.Opts.Code + ": " + e.Opts.Message }
-
-func (e *InvokeError) write(w http.ResponseWriter, reqID string) {
-	opts := e.Opts
-	opts.RequestID = reqID
-	respond.ErrorWithDetail(w, e.Status, opts)
-}
 
 func (h *InternalInvokeHandler) maxDepth() int {
 	if h.MaxCallDepth > 0 {
@@ -368,7 +335,7 @@ func (s *F2FStream) insert(status string, code int, errMsg string, size int) {
 	)
 }
 
-// teardown releases everything in the order the HTTP handlers' defers did:
+// teardown releases resources in dependency order:
 // logs, execution binding, pool worker, timeout ctx, storage reservation.
 func (s *F2FStream) teardown() {
 	if s.dres != nil {
@@ -443,129 +410,4 @@ func (s *F2FStream) Finish(abortErr error) {
 		s.h.recordMetrics(s.acq.ColdStart, time.Since(s.start).Milliseconds(), s.execID, s.fn.ID, execStatus)
 		s.teardown()
 	})
-}
-
-// Invoke handles POST /api/v1/_internal/invoke/{name}. The path uses the
-// friendly function name (NOT the fn_<id> form) so user code stays
-// readable: orva.invoke("resize-image", payload).
-func (h *InternalInvokeHandler) Invoke(w http.ResponseWriter, r *http.Request) {
-	reqID := r.Header.Get("X-Request-ID")
-	caller, name, ok := h.httpCaller(w, r, reqID)
-	if !ok {
-		return
-	}
-	fn, ierr := h.ResolveCallee(name)
-	if ierr != nil {
-		ierr.write(w, reqID)
-		return
-	}
-	body, err := readBoundedBody(r.Body, 1<<20)
-	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
-		return
-	}
-	respJSON, ierr := h.RunInvoke(r.Context(), caller, fn, body, reqID)
-	if ierr != nil {
-		ierr.write(w, reqID)
-		return
-	}
-	// Pass through the worker's response verbatim so callers see exactly
-	// the {statusCode, headers, body} shape that public callers see.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(respJSON)
-}
-
-// httpCaller authenticates an SDK HTTP request and derives the caller identity
-// and the (depth-checked) callee name, writing the error itself on failure.
-func (h *InternalInvokeHandler) httpCaller(w http.ResponseWriter, r *http.Request, reqID string) (F2FCaller, string, bool) {
-	callerFnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
-	if authErr != nil {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid SDK credential", reqID)
-		return F2FCaller{}, "", false
-	}
-	traceID, spanID, _, active := h.SDKAuth.TraceContext(r.Header.Get("X-Orva-Execution-Id"), callerFnID)
-	if !active {
-		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
-			"SDK request is not associated with an active caller execution", reqID)
-		return F2FCaller{}, "", false
-	}
-	name := r.PathValue("name")
-	if name == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "function name is required", reqID)
-		return F2FCaller{}, "", false
-	}
-	depth, depthOK := h.callerDepth(w, r, callerFnID, reqID)
-	if !depthOK {
-		return F2FCaller{}, "", false
-	}
-	return F2FCaller{FunctionID: callerFnID, TraceID: traceID, SpanID: spanID, Depth: depth}, name, true
-}
-
-// InvokeStream handles POST /api/v1/_internal/invoke/{name}/stream. Behaves
-// like Invoke but streams the response body bytes back to the SDK in
-// chunked-transfer order. The inner envelope's statusCode lands as the
-// outer HTTP status; the inner headers ride as `X-Orva-Inner-<Name>:
-// <value>` header pairs so the SDK can surface them if needed. The body
-// itself is raw — the SDK's async iterator yields each Uint8Array chunk.
-//
-// Errors before any chunk is written produce a normal JSON error
-// response. Errors mid-stream cut the connection (no trailer) — the SDK
-// surfaces them as an `Aborted` exception on the iterator.
-func (h *InternalInvokeHandler) InvokeStream(w http.ResponseWriter, r *http.Request) {
-	reqID := r.Header.Get("X-Request-ID")
-	caller, name, ok := h.httpCaller(w, r, reqID)
-	if !ok {
-		return
-	}
-	fn, ierr := h.ResolveCallee(name)
-	if ierr != nil {
-		ierr.write(w, reqID)
-		return
-	}
-	body, err := readBoundedBody(r.Body, 1<<20)
-	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", "failed to read body", reqID)
-		return
-	}
-	s, ierr := h.OpenStream(r.Context(), caller, fn, body, reqID)
-	if ierr != nil {
-		ierr.write(w, reqID)
-		return
-	}
-	for k, v := range s.Headers {
-		w.Header().Set("X-Orva-Inner-"+k, v)
-	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	if !s.Streaming {
-		w.WriteHeader(s.StatusCode)
-		_, _ = w.Write([]byte(s.Body))
-		return
-	}
-	// Write the inner statusCode + headers first, then stream chunks straight
-	// to the wire, flushing each so SDK clients see progress.
-	w.Header().Set("X-Orva-Streamed", "1")
-	w.WriteHeader(s.StatusCode)
-	flusher, _ := w.(http.Flusher)
-	var abort error
-	for {
-		kind, chunk, ferr := s.NextFrame()
-		if ferr != nil {
-			break
-		}
-		if kind == "end" {
-			break
-		}
-		if len(chunk) > 0 {
-			if _, werr := w.Write(chunk); werr != nil {
-				abort = werr
-				break
-			}
-		}
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	s.Finish(abort)
 }

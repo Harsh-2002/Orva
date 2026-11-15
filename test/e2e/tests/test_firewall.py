@@ -5,9 +5,9 @@ Three parts:
   1. API surface — rule CRUD, wildcard refusal, validation, the NSTUN policy
      status snapshot, and a GET+PUT round-trip of the DNS config (restored).
   2. Enforcement (needs a real sandbox) — a rule actually refuses a
-     destination while an unblocked one still connects, the control-plane
-     carve-out survives the shipped RFC1918 suggestions (so orva.kv keeps
-     working), and a policy change recycles egress pools only.
+      destination while an unblocked one still connects, channel SDK access
+      survives the shipped RFC1918 suggestions without a control-plane
+      carve-out, and a policy change recycles egress pools only.
   3. Fail-closed (needs a real sandbox AND access to the instance's data dir) —
      with the compiled policy taken away, an egress worker must refuse to run
      while a network_mode=none worker keeps serving.
@@ -61,9 +61,8 @@ BLOCK_RULES = tuple(f"{h}/32" for h in BLOCK_CANDIDATES)
 # must not widen into a general allow for that host.
 CONTROL_TARGET = "8.8.8.8"
 
-# Shipped `suggested` rules (seeded disabled). Enabling them used to sever the
-# internal SDK, because the control-plane address orvad hands sandboxes is
-# itself RFC1918.
+# Shipped `suggested` rules are seeded disabled; channel SDK access must remain
+# independent of them and must not grant private HTTP reachability.
 RFC1918_VALUES = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 
 REQUIRE_SANDBOX = os.environ.get("ORVA_REQUIRE_SANDBOX", "") in ("1", "true", "yes")
@@ -432,11 +431,13 @@ def main():
         check("policy_rule_counts breaks the policy down",
               isinstance(counts, dict) and all(k in counts for k in ("v4", "v6", "allow", "reject")),
               str(counts)[:160])
-        check("compiled policy has allow rules (carve-outs)",
+        check("compiled policy retains gateway/DNS allow rules",
               isinstance(counts, dict) and (counts.get("allow") or 0) >= 1, str(counts)[:160])
         cp_allow = status.get("control_plane_allow")
-        check("control_plane_allow is reported",
-              isinstance(cp_allow, dict) and bool(cp_allow.get("addrs")), str(cp_allow)[:160])
+        check("no control-plane HTTP carve-out is reported",
+              cp_allow is None or (isinstance(cp_allow, dict)
+                                    and not cp_allow.get("addrs") and not cp_allow.get("port")),
+              str(cp_allow)[:160])
         check("policy is not stale", status.get("policy_stale") is False,
               f"policy_stale={status.get('policy_stale')} err={str(status.get('last_compile_error'))[:120]}")
 
@@ -686,11 +687,7 @@ def main():
               and restored_code != "ECONNREFUSED",
               f"status {rc2}: {str(restored)[:200]}")
 
-        section("RFC1918 suggestions keep the internal SDK reachable")
-        # Regression: the control-plane address orvad hands sandboxes is itself
-        # RFC1918, so enabling the shipped private-network suggestions used to
-        # break every orva.kv / jobs / F2F call. The compiler now emits the
-        # carve-out (and nsjail's own gateway) ahead of the rejects.
+        section("channel SDK works independently of RFC1918 HTTP blocks")
         enabled_any = False
         for value in RFC1918_VALUES:
             rule = _rule_by_value(c, value, kind="suggested")
@@ -704,7 +701,7 @@ def main():
               f"saved={saved_suggested}")
         force_cold_start(c, egress_fid)
         kc, kv_out = invoke(c, egress_fid, {"mode": "kv"})
-        check("orva.kv works from an egress function with RFC1918 blocked",
+        check("orva.kv still works over the channel with RFC1918 blocked",
               kc == 200 and kv_out.get("kv_ok") is True,
               f"status {kc}: {str(kv_out)[:240]}")
         restore_suggested(c, saved_suggested)
