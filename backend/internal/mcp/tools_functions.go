@@ -566,6 +566,13 @@ func updateFunction(deps Deps, in UpdateFunctionInput) (*database.Function, erro
 	if err != nil {
 		return nil, err
 	}
+	lk := deps.Registry.MutationLock(fn.ID)
+	lk.Lock()
+	defer lk.Unlock()
+	fn, err = deps.Registry.Get(fn.ID)
+	if err != nil {
+		return nil, err
+	}
 	drainPool := false
 	networkModeChanged := false
 

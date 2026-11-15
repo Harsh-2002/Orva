@@ -423,6 +423,13 @@ func rollbackFunction(deps Deps, in RollbackFunctionInput) (*mcpsdk.CallToolResu
 	lk := fnLockGuard(deps, fn.ID)
 	lk.Lock()
 	defer lk.Unlock()
+	mutation := deps.Registry.MutationLock(fn.ID)
+	mutation.Lock()
+	defer mutation.Unlock()
+	fn, err = deps.Registry.Get(fn.ID)
+	if err != nil {
+		return nil, RollbackFunctionOutput{}, err
+	}
 
 	started := time.Now()
 

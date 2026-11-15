@@ -41,6 +41,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Completing or failing an older deployment no longer overwrites configuration
+  changes accepted while it was building, including revoked SDK permission,
+  authentication settings and environment values. Changed runtime or entrypoint
+  inputs invalidate the older build instead of activating it.
 - Function-to-function recursion through `orva.invoke` is now bounded even when
   a function omits or forges the call-depth header. The depth is tracked by the
   host on each execution instead of being read from the caller's request, so a

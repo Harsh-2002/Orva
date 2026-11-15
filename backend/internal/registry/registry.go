@@ -11,8 +11,9 @@ import (
 
 // Registry provides a cache-first function registry backed by SQLite.
 type Registry struct {
-	db    *database.Database
-	cache sync.Map // map[string]*database.Function
+	db        *database.Database
+	cache     sync.Map // map[string]*database.Function
+	mutations sync.Map // function ID -> *sync.Mutex
 
 	// PublishEvent, if set, is fired on any mutation (Set / Delete) so
 	// SSE clients (FunctionsList page, etc.) can refresh without polling.
@@ -24,6 +25,13 @@ type Registry struct {
 // New creates a new Registry with the given database backend.
 func New(db *database.Database) *Registry {
 	return &Registry{db: db}
+}
+
+// MutationLock protects read-modify-write publication, including deployment snapshots.
+// Acquire the build/rollback lock first, if needed; never hold this across queued builds.
+func (r *Registry) MutationLock(id string) *sync.Mutex {
+	lk, _ := r.mutations.LoadOrStore(id, &sync.Mutex{})
+	return lk.(*sync.Mutex)
 }
 
 // GenerateID returns a new function ID — a UUIDv7 in canonical
@@ -56,8 +64,8 @@ func (r *Registry) Get(id string) (*database.Function, error) {
 	}
 
 	// Populate cache with our own copy, hand the caller theirs.
-	r.cache.Store(fn.ID, fn.Clone())
-	return fn, nil
+	v, _ := r.cache.LoadOrStore(fn.ID, fn.Clone())
+	return v.(*database.Function).Clone(), nil
 }
 
 // Exists reports whether a function id resolves, without paying for a copy.
@@ -70,7 +78,7 @@ func (r *Registry) Exists(id string) bool {
 	if err != nil || fn == nil {
 		return false
 	}
-	r.cache.Store(fn.ID, fn.Clone())
+	r.cache.LoadOrStore(fn.ID, fn.Clone())
 	return true
 }
 
@@ -122,7 +130,6 @@ func (r *Registry) set(fn *database.Function, publish bool) error {
 	// so storing the caller's pointer would leave the cache aliased to
 	// something still being written. Publish the copy, not the original.
 	cached := fn.Clone()
-	r.cache.Delete(fn.ID)
 	r.cache.Store(fn.ID, cached)
 	if publish && r.PublishEvent != nil {
 		// The SSE hub marshals this on another goroutine, arbitrarily later —
@@ -139,6 +146,9 @@ func (r *Registry) set(fn *database.Function, publish bool) error {
 // on a function with millions of executions (see database.DeleteFunction); a
 // cancelled ctx leaves the function 'deleting' and a later call finishes it.
 func (r *Registry) Delete(ctx context.Context, id string) error {
+	lk := r.MutationLock(id)
+	lk.Lock()
+	defer lk.Unlock()
 	// Show 'deleting' to every cache reader before the batches start; the
 	// invoke paths reject anything that is not 'active'. A missing function
 	// is left to the idempotent database delete.
