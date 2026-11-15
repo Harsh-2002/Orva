@@ -1194,8 +1194,8 @@
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, shallowRef, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
+import { useRoute, useRouter, onBeforeRouteUpdate, onBeforeRouteLeave } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare, FlaskConical, Eye, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
@@ -1473,40 +1473,69 @@ const snapshotForm = () => JSON.stringify({
   form: form.value,
   env: envVars.value.filter((p) => p.key.trim()).map((p) => [p.key, p.value]),
 })
-let baseline = { code: '', deps: '', form: '' }
+// A shallowRef that is replaced, never mutated: `isDirty` is a computed, and a
+// plain object read inside it would never re-run when a deploy moved the baseline.
+const emptyBaseline = () => ({ loaded: false, code: '', deps: '', form: '', formState: null })
+const baseline = shallowRef(emptyBaseline())
+const captureBaseline = () => ({
+  loaded: true,
+  code: code.value,
+  deps: dependencyText.value,
+  form: snapshotForm(),
+  formState: { form: { ...form.value }, env: envVars.value.map((p) => ({ ...p })) },
+})
 const markFormClean = () => {
-  baseline.form = snapshotForm()
-  baseline.formState = {
-    form: { ...form.value },
-    env: envVars.value.map((p) => ({ ...p })),
-  }
+  const b = captureBaseline()
+  baseline.value = { ...baseline.value, loaded: true, form: b.form, formState: b.formState }
 }
-const markSourceClean = () => { baseline.code = code.value; baseline.deps = dependencyText.value }
-const isDirty = computed(() => baseline.form !== '' && (
-  code.value !== baseline.code
-  || dependencyText.value !== baseline.deps
-  || snapshotForm() !== baseline.form
+const markSourceClean = () => { baseline.value = { ...baseline.value, code: code.value, deps: dependencyText.value } }
+const isDirty = computed(() => baseline.value.loaded && (
+  code.value !== baseline.value.code
+  || dependencyText.value !== baseline.value.deps
+  || snapshotForm() !== baseline.value.form
 ))
 const discardChanges = () => {
-  code.value = baseline.code
-  dependencyText.value = baseline.deps
-  if (baseline.formState) {
-    form.value = { ...baseline.formState.form }
-    envVars.value = baseline.formState.env.map((p) => ({ ...p }))
+  const b = baseline.value
+  code.value = b.code
+  dependencyText.value = b.deps
+  if (b.formState) {
+    form.value = { ...b.formState.form }
+    envVars.value = b.formState.env.map((p) => ({ ...p }))
   }
+}
+// What the last deploy request actually sent. Success adopts this, not the
+// buffer as it stands when the build finishes, so keystrokes made while it ran
+// stay unsaved.
+let deployBaseline = null
+const adoptDeployBaseline = () => {
+  if (deployBaseline) baseline.value = deployBaseline
+  deployBaseline = null
 }
 
 // Keeps ?mode in step with the switch so the page can be linked and reloaded
 // in either mode. replace, not push: flipping the switch is not a destination.
-const setModeQuery = (next) => {
+const routeTarget = () => ({ name: route.name, params: { ...route.params } })
+const sameRoute = (t) => route.name === t.name && JSON.stringify(route.params) === JSON.stringify(t.params)
+const setModeQuery = (next, target = routeTarget()) => {
+  // The confirm can outlive the page: never write ?mode onto a route the
+  // operator has since moved to.
+  if (!sameRoute(target)) return
   const query = { ...route.query }
   if (next === 'edit') query.mode = 'edit'
   else delete query.mode
-  router.replace({ query })
+  router.replace({ name: target.name, params: target.params, query })
+}
+const announceMode = (text) => {
+  modeAnnouncement.value = ''
+  nextTick(() => { modeAnnouncement.value = text })
 }
 const requestMode = async (next, fromUrl = false) => {
   if (!props.name || next === editorMode.value) return
+  const target = routeTarget()
   if (next === 'view' && isDirty.value) {
+    // A link that lost ?mode (list row, breadcrumb) is not a decision to throw
+    // work away: stay in Edit and put the flag back.
+    if (fromUrl) { setModeQuery('edit', target); return }
     const ok = await confirmStore.ask({
       title: 'Discard changes?',
       message: 'This function has unsaved changes. Switching to View discards them.',
@@ -1514,16 +1543,40 @@ const requestMode = async (next, fromUrl = false) => {
       cancelLabel: 'Keep editing',
       danger: true,
     })
-    if (!ok) {
-      if (fromUrl) setModeQuery('edit')
-      return
-    }
+    if (!ok || !sameRoute(target)) return
     discardChanges()
   }
   editorMode.value = next
-  modeAnnouncement.value = next === 'edit' ? 'Edit mode' : 'View mode, read-only'
-  if (!fromUrl) setModeQuery(next)
+  // The switch announces its own state; only a change the control did not make
+  // (URL, Back) needs saying.
+  if (fromUrl) announceMode(next === 'edit' ? 'Edit mode' : 'View mode, read-only')
+  else setModeQuery(next, target)
 }
+
+// Opening another function (or /functions/new) from a dirty Edit would run
+// resetEditorState and drop the buffer. Leaving for any other page keeps the
+// cached buffer, so only an Editor-to-Editor change of function is asked about.
+const guardFunctionChange = async (to) => {
+  if (to.name !== 'function-detail' && to.name !== 'function-new') return true
+  if ((to.params.name || '') === props.name) return true
+  if (viewMode.value || !isDirty.value) return true
+  return confirmStore.ask({
+    title: 'Discard changes?',
+    message: 'This function has unsaved changes. Opening another function discards them.',
+    confirmLabel: 'Discard',
+    cancelLabel: 'Keep editing',
+    danger: true,
+  })
+}
+onBeforeRouteUpdate(guardFunctionChange)
+onBeforeRouteLeave(guardFunctionChange)
+
+// A mode that turns to View (switch or URL) must not leave an editable panel up.
+watch(viewMode, (on) => {
+  if (!on) return
+  closeMenus()
+  for (const k of ['settings', 'envVars', 'deps', 'secrets']) modals.value[k] = false
+})
 
 // canTest: function has deployed code AND there's no active build in
 // flight. While `deploying` is true, the warm pool may be holding stale
@@ -1907,7 +1960,9 @@ const loadRouteData = async () => {
   // A different function (or /functions/new) starts from its own URL, never
   // from the mode the previous one was left in.
   editorMode.value = initialMode()
-  baseline = { code: '', deps: '', form: '' }
+  modeAnnouncement.value = ''
+  baseline.value = emptyBaseline()
+  deployBaseline = null
 
   if (props.name) {
     // Edit mode — load function metadata + actual deployed source code.
@@ -2013,6 +2068,9 @@ const reloadSource = async (fn) => {
 // editing session.
 const onWindowFocus = async () => {
   if (!fnId.value) return
+  // A dirty Edit session is the only copy of that work; refreshing would
+  // replace it and re-base the dirty check on the server's version.
+  if (!viewMode.value && isDirty.value) return
   try {
     const listRes = await apiClient.get('/functions')
     const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
@@ -2193,6 +2251,7 @@ const runDeploy = async () => {
   // that opens and closes inside that window is a flash, not information --
   // so Deploy carries its own progress and only a failure raises the log.
   const epoch = ++buildEpoch
+  deployBaseline = captureBaseline()
   deploying.value = true
   buildError.value = ''
   lastBuild.value = null
@@ -2279,8 +2338,7 @@ const runDeploy = async () => {
       // Legacy synchronous response — older backend without async pipeline.
       buildLogs.value.push(`Deployed! Hash: ${deployRes.data.code_hash || 'unknown'}`)
       deployedThisSession.value = true
-      markSourceClean()
-      markFormClean()
+      adoptDeployBaseline()
       lastBuild.value = { version: null, durationMs: null }
       deploying.value = false
       return
@@ -2335,8 +2393,7 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
     deploying.value = false
     if (ok) {
       deployedThisSession.value = true
-      markSourceClean()
-      markFormClean()
+      adoptDeployBaseline()
       lastDeployAt.value = new Date().toISOString()
       // The button no longer promises a new version, so the result names the
       // one it made; a response without `version` still reports its duration.
@@ -2652,6 +2709,7 @@ const loadSecrets = async () => {
 }
 
 const saveSecret = async () => {
+  if (viewMode.value) return
   const name = secretForm.value.name.trim()
   if (!name) return
   // Pre-deploy: queue locally; flush during deployFunction.
@@ -2686,6 +2744,7 @@ const removePendingSecret = (idx) => {
 }
 
 const removeSecret = async (key) => {
+  if (viewMode.value) return
   if (!fnId.value) return
   const ok = await confirmStore.ask({
     title: 'Delete secret?',

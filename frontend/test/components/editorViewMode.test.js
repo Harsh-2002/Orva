@@ -15,13 +15,19 @@ window.matchMedia = window.matchMedia || ((q) => ({
 const FN_A = { id: 'fn-a', name: 'alpha', runtime: 'python', entrypoint: 'handler.py', memory_mb: 64, cpus: 0.5, code_hash: 'ha' }
 const FN_B = { id: 'fn-b', name: 'beta', runtime: 'python', entrypoint: 'handler.py', memory_mb: 64, cpus: 0.5, code_hash: 'hb' }
 
+// Tests that need a build in flight park the deploy-inline response here.
+let deployGate = null
+let sourcePrefix = 'source of'
 const apiClient = {
   get: vi.fn(async (url) => {
     if (url === '/functions') return { data: { functions: [FN_A, FN_B] } }
-    if (url.endsWith('/source')) return { data: { code: `source of ${url}`, dependencies: '' } }
+    if (url.endsWith('/source')) return { data: { code: `${sourcePrefix} ${url}`, dependencies: '' } }
     return { data: {} }
   }),
-  post: vi.fn(async () => ({ data: {} })),
+  post: vi.fn(async (url) => {
+    if (deployGate && url.endsWith('/deploy-inline')) await deployGate
+    return { data: {} }
+  }),
   put: vi.fn(async () => ({ data: {} })),
   delete: vi.fn(async () => ({ data: {} })),
 }
@@ -60,6 +66,7 @@ vi.mock('@/components/common/CodeEditor.vue', async () => {
           'data-code': '',
           'data-readonly': String(props.readOnly),
           onClick: () => emit('update:modelValue', 'CHANGED'),
+          onContextmenu: () => emit('update:modelValue', 'LATE EDIT'),
         }, props.modelValue)
       },
     },
@@ -102,7 +109,7 @@ const isReadOnly = (w) => w.find('[data-code]').attributes('data-readonly')
 const radio = (w, label) => w.findAll('button[role="radio"]').find((b) => b.text() === label)
 const checkedLabel = (w) => w.findAll('button[role="radio"]').find((b) => b.attributes('aria-checked') === 'true')?.text()
 
-beforeEach(() => { vi.clearAllMocks() })
+beforeEach(() => { vi.clearAllMocks(); deployGate = null; sourcePrefix = 'source of' })
 afterEach(() => { while (mounted.length) mounted.pop().unmount() })
 
 describe('editor view / edit mode', () => {
@@ -177,16 +184,30 @@ describe('editor view / edit mode', () => {
     expect(checkedLabel(wrapper)).toBe('View')
   })
 
-  it('Back to the plain URL while dirty asks too, and Keep editing restores ?mode=edit', async () => {
+  // M3: a list row or breadcrumb link carries no ?mode. That is not a decision
+  // to discard work, so a dirty Edit stays in Edit and gets the flag back.
+  it('a link without ?mode keeps a dirty Edit and restores ?mode=edit, without asking', async () => {
     const { wrapper, router, confirm, go } = await boot('/functions/alpha?mode=edit')
     await wrapper.find('[data-code]').trigger('click')
     await settle()
     await go('/functions/alpha')
-    expect(confirm.visible).toBe(true)
-    confirm.settle(false)
-    await settle()
+    expect(confirm.visible).toBe(false)
     expect(checkedLabel(wrapper)).toBe('Edit')
     expect(router.currentRoute.value.query.mode).toBe('edit')
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+
+    await go('/elsewhere')
+    await go('/functions/alpha')
+    expect(confirm.visible).toBe(false)
+    expect(checkedLabel(wrapper)).toBe('Edit')
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+  })
+
+  it('a clean Edit reached by a link without ?mode drops to View', async () => {
+    const { wrapper, go } = await boot('/functions/alpha?mode=edit')
+    await go('/functions/alpha')
+    expect(checkedLabel(wrapper)).toBe('View')
+    expect(isReadOnly(wrapper)).toBe('true')
   })
 
   it('/functions/new is edit with no switch; another function opened from edit returns to view', async () => {
@@ -229,5 +250,108 @@ describe('editor view / edit mode', () => {
     window.dispatchEvent(new CustomEvent('orva:deploy'))
     await settle()
     expect(apiClient.put).toHaveBeenCalledTimes(1)
+  })
+
+  // H1: refocusing the window re-pulls the server's source. In a dirty Edit that
+  // replaced the only copy of the work (and re-based the dirty check on it).
+  it('window focus does not overwrite a dirty Edit, but does refresh a View', async () => {
+    const { wrapper } = await boot('/functions/alpha?mode=edit')
+    await wrapper.find('[data-code]').trigger('click')
+    await settle()
+    sourcePrefix = 'server changed'
+    window.dispatchEvent(new window.Event('focus'))
+    await settle()
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+
+    const view = await boot('/functions/beta')
+    sourcePrefix = 'server changed again'
+    window.dispatchEvent(new window.Event('focus'))
+    await settle()
+    expect(view.wrapper.find('[data-code]').text()).toContain('server changed again')
+  })
+
+  // M1 + H2: dirtiness tracks the baseline, a deploy moves the baseline to what
+  // was SENT, and keystrokes made while the build ran stay unsaved.
+  it('deploy success cleans the sent buffer; typing during a pending deploy stays dirty', async () => {
+    const first = await boot('/functions/alpha?mode=edit')
+    await first.wrapper.find('[data-code]').trigger('click')
+    await settle()
+    await radio(first.wrapper, 'View').trigger('click')
+    await settle()
+    expect(first.confirm.visible).toBe(true) // edited -> dirty
+    first.confirm.settle(false)
+    await settle()
+
+    window.dispatchEvent(new CustomEvent('orva:deploy'))
+    await settle()
+    await radio(first.wrapper, 'View').trigger('click')
+    await settle()
+    expect(first.confirm.visible).toBe(false) // same buffer deployed -> clean
+    expect(checkedLabel(first.wrapper)).toBe('View')
+    while (mounted.length) mounted.pop().unmount()
+
+    let release
+    deployGate = new Promise((r) => { release = r })
+    const second = await boot('/functions/alpha?mode=edit')
+    await second.wrapper.find('[data-code]').trigger('click')
+    await settle()
+    window.dispatchEvent(new CustomEvent('orva:deploy'))
+    await settle()
+    await second.wrapper.find('[data-code]').trigger('contextmenu') // typed while the build runs
+    await settle()
+    release()
+    await settle()
+    await radio(second.wrapper, 'View').trigger('click')
+    await settle()
+    expect(second.confirm.visible).toBe(true) // never deployed -> still dirty
+    second.confirm.settle(false)
+    await settle()
+    expect(second.wrapper.find('[data-code]').text()).toBe('LATE EDIT')
+  })
+
+  // M2
+  it('opening another function from a dirty Edit asks; Keep stays, Discard goes', async () => {
+    const { wrapper, router, confirm } = await boot('/functions/alpha?mode=edit')
+    await wrapper.find('[data-code]').trigger('click')
+    await settle()
+
+    let nav = router.push('/functions/beta')
+    await settle()
+    expect(confirm.visible).toBe(true)
+    confirm.settle(false)
+    await nav
+    await settle()
+    expect(router.currentRoute.value.path).toBe('/functions/alpha')
+    expect(wrapper.find('[data-code]').text()).toBe('CHANGED')
+
+    nav = router.push('/functions/beta')
+    await settle()
+    confirm.settle(true)
+    await nav
+    await settle()
+    expect(router.currentRoute.value.path).toBe('/functions/beta')
+    expect(wrapper.find('[data-code]').text()).toBe('source of /functions/fn-b/source')
+  })
+
+  it('a clean Edit, or any View, opens another function without asking', async () => {
+    const { router, confirm } = await boot('/functions/alpha?mode=edit')
+    await router.push('/functions/beta')
+    await settle()
+    expect(confirm.visible).toBe(false)
+    expect(router.currentRoute.value.path).toBe('/functions/beta')
+  })
+
+  // L1
+  it('closes an open editable panel when the mode turns to View', async () => {
+    const Editor = (await import('@/views/Editor.vue')).default
+    const { wrapper, go } = await boot('/functions/alpha?mode=edit')
+    const vm = wrapper.findComponent(Editor).vm
+    vm.modals.secrets = true
+    vm.modals.settings = true
+    await settle()
+    await go('/functions/alpha')
+    expect(checkedLabel(wrapper)).toBe('View')
+    expect(vm.modals.secrets).toBe(false)
+    expect(vm.modals.settings).toBe(false)
   })
 })
