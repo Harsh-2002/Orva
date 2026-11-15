@@ -41,6 +41,8 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Closing a Node SDK stream iterator while its open request is pending now
+  closes the handle when it arrives, instead of retaining it until lease end.
 - Completing or failing an older deployment no longer overwrites configuration
   changes accepted while it was building, including revoked SDK permission,
   authentication settings and environment values. Changed runtime or entrypoint

@@ -127,6 +127,13 @@ func okHandler(context.Context, SDKCaller, string, json.RawMessage) (any, *SDKEr
 
 func TestSDKRoundTripAndOutOfOrder(t *testing.T) {
 	first := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-first:
+		default:
+			close(first)
+		}
+	})
 	h := newSrvHarness(t, func(ctx context.Context, c SDKCaller, op string, args json.RawMessage) (any, *SDKError) {
 		var a struct{ N int }
 		_ = json.Unmarshal(args, &a)
@@ -134,12 +141,13 @@ func TestSDKRoundTripAndOutOfOrder(t *testing.T) {
 			<-first // reply 1 only after reply 2 has been produced
 			return "one", nil
 		}
-		defer close(first)
 		return "two", nil
 	}, nil, nil)
 	sendReq(t, h.client, 1, "kv.get", "", `{"n":1}`)
 	sendReq(t, h.client, 2, "kv.get", "", `{"n":2}`)
-	a, b := readReply(t, h.client), readReply(t, h.client)
+	a := readReply(t, h.client)
+	close(first)
+	b := readReply(t, h.client)
 	if a.ID != 2 || b.ID != 1 || !a.OK || !b.OK || string(a.R) != `"two"` || string(b.R) != `"one"` {
 		t.Fatalf("replies = %+v %+v, want id 2 then id 1", a, b)
 	}

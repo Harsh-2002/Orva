@@ -525,6 +525,10 @@ function invokeStream(functionName, payload = {}, { timeoutMs = DEFAULT_TIMEOUT_
               throw new OrvaError(`invokeStream(${functionName}) failed: ${res.body}`, res.status)
             }
             handle = _data(res).handle
+            if (finished) {
+              await closeHandle()
+              return { value: undefined, done: true }
+            }
           }
           return nextFromChannel()
         },

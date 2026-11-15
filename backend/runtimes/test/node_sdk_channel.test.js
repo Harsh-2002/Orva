@@ -426,6 +426,17 @@ test('invokeStream: 5 chunks, early break closes, mid-stream error, open error',
   noIdentity(frames)
 })
 
+test('return during pending stream open closes the subsequently issued handle', async () => {
+  const { out, frames } = await run('streamPendingReturn', (msg, ctx) => {
+    if (msg.op === 'invoke.stream.open') ctx.reply(msg.id, { handle: 'pending', status: 200, headers: {} })
+    else if (msg.op === 'invoke.stream.close') ctx.reply(msg.id, {})
+    else ctx.fail(msg.id, 500, 'UNEXPECTED', 'no stream reads expected')
+  })
+  assert.deepEqual(out, { returned: { done: true }, next: { done: true } })
+  assert.deepEqual(frames.map(f => f.op), ['invoke.stream.open', 'invoke.stream.close'])
+  assert.equal(frames[1].a.handle, 'pending')
+})
+
 test('channel EOF during a stream raises OrvaUnavailableError', async () => {
   const state = { eofAtThree: true }
   const { out } = await run('streamEof', opsHost(state), { env: IDENT_ENV })

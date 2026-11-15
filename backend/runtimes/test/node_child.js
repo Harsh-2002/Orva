@@ -150,6 +150,14 @@ const scenarios = {
     })
     return { full, early, mid, midErr, openErr }
   },
+  async streamPendingReturn() {
+    orva._setLease('L-1')
+    const iterator = orva.invokeStream('five')[Symbol.asyncIterator]()
+    const pending = iterator.next()
+    const returned = await iterator.return()
+    const next = await pending
+    return { returned, next }
+  },
   async streamEof() {
     orva._setLease('L-1')
     const got = []

@@ -150,11 +150,9 @@ context cancellation still marks/kills the worker. Do not reintroduce a
 goroutine per response frame on the warm path or allow concurrent dispatch on
 one worker.
 
-`server.detectInternalAPIBase` chooses a local interface IP (default-route
-interface first) for the sandbox SDK control plane. Do not reintroduce a
-gateway or generic health probe: it can select a separate Orva instance before
-this server begins listening. The environment override remains available for
-unusual routing.
+SDK traffic never selects a host interface or gateway: it uses the inherited
+worker channel. Do not restore HTTP endpoint discovery or an SDK firewall
+exception to work around an incompatible installed adapter.
 | `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), preserved independently of the removed SDK HTTP wrappers; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
@@ -222,8 +220,8 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 ## Runtime SDK channel tests
 
 `backend/runtimes/{node/orva.js,python/orva.py}` route every SDK operation over a private per-worker socketpair
-(fd `ORVA_SDK_FD` when `ORVA_SDK_PROTO=1`; missing channels fail closed); the routing set is `_CHANNEL_OPS`
-in each SDK. The adapters carry the literal `orva-sdk-proto:1` marker near the top (the host reads it
+(fd `ORVA_SDK_FD` when `ORVA_SDK_PROTO=1`; missing channels fail closed).
+The adapters carry the literal `orva-sdk-proto:1` marker near the top (the host reads it
 to detect adapter/host skew) and store the `{"type":"lease"}` stdin frame for the SDK. Tests play the
 host over a real socketpair and need no nsjail or Docker:
 
