@@ -32,9 +32,12 @@ unreleased range, and the sections below as the record for everything before it.
   preserved on restart. Outbound networking and public invocation auth are
   unchanged.
 
-- The SDK retains HTTP fallback for a missing channel or an older installed
-  runtime adapter. Keep the server binary and adapters refreshed together to
-  use the channel; the legacy HTTP endpoints remain supported.
+- **Channel-only SDK cut-over.** Refresh the server and runtime adapters
+  together. SDK-enabled functions now require a compatible inherited channel;
+  older adapters fail explicitly instead of falling back to HTTP. The former
+  internal SDK routes, worker tokens/base URL, `ORVA_INTERNAL_API_BASE` and
+  firewall control-plane exemption are removed. Public operator APIs remain
+  available with their normal authentication.
 
 ### Fixed
 

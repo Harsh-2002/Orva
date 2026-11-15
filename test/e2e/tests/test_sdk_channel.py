@@ -6,7 +6,7 @@ Needs the sandbox. Scenarios (dynamic, against real nsjail workers):
 module-scope + request-scope kv, every kv op, 200-way concurrency, cross-function
 isolation, a call that outlives its request (stale lease refused), a worker killed
 mid-call (timeout) and replaced, forked Python children, a subprocess, values at
-the size limit, per-op metrics, and the HTTP transport still working for egress.
+the size limit, per-op metrics, and channel-only SDK access for egress.
 """
 import ast
 import json
@@ -139,16 +139,15 @@ def handler(event):
 """
 
 EGRESS_CODE = r"""
-// Exercise the retained HTTP fallback rather than silently using the channel.
-delete process.env.ORVA_SDK_FD;
-delete process.env.ORVA_SDK_PROTO;
 const orva = require('orva');
 exports.handler = async () => {
-  // The HTTP transport (egress) still works, including function-to-function calls.
-  await orva.kv.put('http-kv', 1);
-  const viaKv = await orva.kv.get('http-kv');
+  await orva.kv.put('channel-kv', 1);
+  const viaKv = await orva.kv.get('channel-kv');
   const res = await orva.invoke('__NODE__', { op: 'basic' });
-  return { statusCode: 200, body: JSON.stringify({ viaKv, f2f: res.statusCode }) };
+  const exposed = Object.keys(process.env).filter(k =>
+    ['ORVA_SDK_FD', 'ORVA_SDK_PROTO', 'ORVA_INTERNAL_TOKEN', 'ORVA_API_BASE'].includes(k.toUpperCase())).sort();
+  return { statusCode: 200, body: JSON.stringify({ viaKv, f2f: res.statusCode, exposed,
+    fd: process.env.ORVA_SDK_FD, proto: process.env.ORVA_SDK_PROTO }) };
 };
 """.replace("__NODE__", NODE)
 
@@ -307,13 +306,16 @@ def main():
         viol = [ln for ln in body.splitlines() if ln.startswith("orva_sdk_protocol_violations_total ")]
         check("no protocol violations during the run", viol == ["orva_sdk_protocol_violations_total 0"], str(viol))
 
-        section("HTTP transport still works for egress functions (fallback until it is removed)")
+        section("egress functions also use only the SDK channel")
         eg = deploy(c, NODE_EGRESS, "node", EGRESS_CODE, "handler.js", net="egress")
         if eg:
             code, r = call(c, eg, {})
-            check("egress function: kv over HTTP and function-to-function invoke",
+            check("egress function: channel kv and function-to-function invoke",
                   code == 200 and isinstance(r, dict) and r.get("viaKv") == 1 and r.get("f2f") == 200,
-                  f"{code} {str(r)[:160]}")
+                   f"{code} {str(r)[:160]}")
+            check("egress worker has channel fd/protocol and no legacy token/base",
+                  isinstance(r, dict) and r.get('fd') == '3' and r.get('proto') == '1'
+                  and r.get('exposed') == ['ORVA_SDK_FD', 'ORVA_SDK_PROTO'], str(r)[:200])
         else:
             check("egress function active", False)
     finally:

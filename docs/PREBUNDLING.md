@@ -53,8 +53,8 @@ Do not copy the author package/lock, tools, `node_modules`, `tsconfig.json`, or
 a `package.json` with `"type":"module"` into this CommonJS upload root.
 The CLI retains `dist` and maps, skips `node_modules` and hidden directories,
 but does **not** generally exclude a visible tools directory: cleanliness is
-the author's responsibility. The SDK KV example requires `network_mode=egress`
-and the instance's normal SDK control-plane access; prebundling changes neither.
+the author's responsibility. The SDK KV example requires explicit `sdk: true` and a compatible installed
+worker channel, not outbound networking; prebundling changes neither.
 
 ## Source, diffs, rollback, and source maps
 

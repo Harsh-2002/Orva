@@ -334,7 +334,7 @@
             per-function key/value store, in-process calls to other Orva
             functions, a fire-and-forget background job queue, and structured
             logging. The first three reach orvad over loopback with a
-            process-signed, function-scoped credential injected at worker
+            host-bound function identity established at worker
             spawn time;
             <code class="doc-chip">orva.log.{debug,info,warn,error}(msg, fields)</code>
             instead writes to stderr and is parsed back out server-side, so it
@@ -343,8 +343,7 @@
             invocation drawer's <strong>Logs</strong> panel. Current adapters
             send permitted KV, invoke/invokeStream, jobs, crons, and trace.span over an
             inherited per-worker socket channel, so those operations work in
-            <code class="doc-chip">network_mode: "none"</code>. Missing-channel
-            and older-adapter cases retain legacy HTTP fallback; external
+            <code class="doc-chip">network_mode: "none"</code>. Missing channels fail closed; incompatible adapters must be refreshed; external
             network calls still require egress. KV can run at module scope
             (reads can become stale); invoke, jobs, crons, and spans require an
             active handler dispatch. Enable the function’s
@@ -449,7 +448,7 @@
         Current adapters use the inherited socket channel for supported SDK
         operations, including in
         <code class="doc-chip">network_mode: "none"</code>.
-        Legacy HTTP fallback remains for missing channels and older adapters.
+        SDK calls require the channel; refresh incompatible adapters when upgrading.
         Egress is still required for outbound network requests made by your
         function.
       </Callout>

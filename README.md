@@ -103,7 +103,6 @@ Defaults work out of the box. These are all supported server environment variabl
 | `ORVA_IMAGE` | image-stamped; unset on bare metal | Image identity reported by health and Settings. |
 | `ORVA_DISABLE_USERNS` | installer-selected; `0` in Docker | `0` uses user namespaces; `1` uses the installer-verified capability fallback. |
 | `ORVA_CGROUPV2_MOUNT` | auto-detected | Delegated cgroup v2 subtree used for hard CPU, memory, and process limits. |
-| `ORVA_INTERNAL_API_BASE` | auto-detected | Internal SDK base URL; override only when sandbox-to-host routing detection is wrong. |
 
 See [docs/CONFIG.md](docs/CONFIG.md) for validation rules, security implications, and examples.
 
@@ -130,8 +129,8 @@ Enable **Allow Orva SDK** in the function settings (API: `sdk: true`, CLI:
 `--sdk`). New functions default to disabled. Current adapters use a private
 worker channel, so SDK calls work with the default `network_mode: none`;
 outbound networking is a separate permission needed for external API calls.
-Legacy HTTP SDK fallback remains for older installed adapters until the
-channel-only cut-over.
+SDK calls require a compatible installed adapter and the private channel;
+refresh the runtime adapters when upgrading. No SDK HTTP fallback is used.
 
 Handler contract, event shape, and streaming: [docs/RUNTIMES.md](docs/RUNTIMES.md).
 

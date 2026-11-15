@@ -930,7 +930,7 @@ bundle bytes, then bundle-A/unbundled-B rollback in both directions without
 creating versions. It waits for active requests and all writer byte lanes to
 drain before deleting its functions. Use a scratch instance: the drain is
 instance-wide, and the journey needs a real sandbox plus a working SDK
-channel or legacy HTTP fallback.
+channel with the function's SDK permission enabled.
 Sandbox failures fail this module, never skip (also with
 `ORVA_REQUIRE_SANDBOX=1`). It is auto-discovered by the existing E2E runner;
 no new workflow or runtime bundler is involved.
@@ -1531,12 +1531,12 @@ rest under `<dataDir>/.master.key`.
 Setting or deleting a secret drains the warm pool, so the next invoke is a cold
 start. Budget for that in timing assertions.
 
-**`ORVA_INTERNAL_TOKEN` is visible to user code.** A handler printing
-`process.env` sees it. It is the SDK's credential for `/api/v1/_kv/` and
-`/api/v1/_internal/`, and the auth middleware accepts it on `/api/v1/*` when it
-matches exactly — so a function can reach the control plane as an authenticated
-principal. That is a design fact, not a regression, but a QA suite should assert
-the blast radius rather than assume isolation.
+**SDK authority is not an environment credential.** Workers receive no
+`ORVA_INTERNAL_TOKEN` or `ORVA_API_BASE`; SDK-enabled workers use their private
+inherited channel. Assert both legacy names are absent, user env/secrets cannot
+inject them, and missing channels fail closed without HTTP requests. Legacy
+internal route families are unavailable even with an operator key; public jobs
+still require ordinary operator authentication.
 
 ### 4.6 Custom routes
 
@@ -1605,14 +1605,23 @@ is the `--endpoint`/`--api-key` pair, as everywhere in this section), and
 
 **Current SDK transport:** KV, invoke/invokeStream, jobs, crons, and spans use
 an inherited per-worker socket channel and work in `network_mode: none`. The
-legacy HTTP endpoints and SDK fallback remain for older installed adapters or
-when the channel is missing. `test_sdk_channel.py` covers channel KV behavior: module-scope and
+SDK permission must be enabled; a compatible installed adapter and channel
+are required, with no HTTP fallback. `test_sdk_channel.py` covers channel KV behavior: module-scope and
 request-scope operations, concurrency, cross-function isolation, background KV
 after a dispatch ends, worker-kill recovery, Python fork/subprocess behavior, size limits,
-per-op metrics, and legacy HTTP transport. The new `test_sdk_channel_ops.py`
+per-op metrics, and egress-mode channel operation. The new `test_sdk_channel_ops.py`
 module covers the expanded SDK operation set; these entries
 describe test scope, not a claim that either module has passed in this checkout. External network requests still require
 `network_mode: egress`.
+
+`test_sdk_channel_only.py` exercises the cut-over: no legacy credentials, no
+HTTP fallback, removed routes, operator-only jobs enqueue, and SDK operation
+while the live numeric private Orva address is refused by the egress policy.
+The isolated runner discovers its own container address. External scratch runs
+must supply `--control-plane-url http://<private-ip>:<port>`; absent network
+coverage is reported as unavailable, not a pass. The module verifies that the
+address reaches its unique fixture before testing policy refusal, and restores
+any private-network suggestion it enabled.
 
 **A separate compatibility constraint:** the bundled `orva` module is
 CommonJS-only; ESM handlers cannot import it. `runtimes/node/adapter.js:30-33` patches `Module._nodeModulePaths`,

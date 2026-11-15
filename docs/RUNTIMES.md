@@ -192,9 +192,9 @@ Packages that are pure Python or pure JavaScript, or that use a stable ABI
 
 With the function's `sdk` permission enabled, current runtime adapters carry `kv`, `invoke`/`invokeStream`, `jobs`, `crons`,
 and `trace.span` calls over a private inherited per-worker socket channel. New functions default to `sdk: false`, independently of outbound networking. The
-host derives the function ID from the channel, not SDK arguments. If the channel
-is unavailable, including with an older installed adapter, the SDK falls back
-to its existing HTTP endpoints. Those HTTP endpoints remain supported.
+host derives the function ID from the channel, not SDK arguments. SDK calls require the channel; there is no HTTP fallback. SDK-enabled
+functions fail with an actionable error if the installed adapter is incompatible;
+refresh adapters with the server during upgrades.
 
 KV is usable at module scope because it is scoped to the worker function; a
 module-scope read can become stale. `invoke`, `invokeStream`, `jobs.enqueue`,

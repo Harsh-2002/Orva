@@ -40,78 +40,33 @@ Orva is **not** designed to defend against:
 
 ## Sandbox SDK identity
 
-Each SDK-enabled worker receives a signed legacy SDK credential naming its immutable function ID
-and the specific worker process it was issued to. Legacy HTTP SDK endpoints
-verify this credential for KV, function invoke/streaming, job enqueue, cron
-upsert, and user-span requests; they never trust
-`X-Orva-Caller-Function` for authorization or attribution. Current adapters
-use the inherited channel for these operations and derive function identity
-from the per-worker channel instead. Two things expire the HTTP credential. The signing key is random per process, so every
-credential dies when orvad restarts. And the per-spawn identifier is dropped
-when that worker's process is reaped, so a credential copied out of one worker
-stops working as soon as that worker does — including when a redeploy retires
-it.
+SDK authority is an explicit per-function `sdk` permission, independent of
+outbound networking. New functions default to disabled. Existing egress
+functions are enabled once during migration; explicit revocation survives
+restart. Receiving a function call does not grant the callee SDK access.
 
-KV access is limited to the credential's function namespace, cron upsert can
-only change that function's schedules, and user spans can only attach to an
-active execution owned by that function. Functions may intentionally invoke or
-enqueue work for another function, but the caller recorded in traces and jobs
-always comes from the signed claim. The SDK credential cannot authenticate to
-operator APIs.
+An enabled worker receives one private inherited socketpair endpoint. The host
+binds the function ID to the connection; request arguments cannot select another
+identity. Each dispatch receives a random lease, revoked when the invocation
+ends. Function calls, jobs, cron declarations and spans require that live
+execution; KV also works at module scope using the connection's function ID.
+A stale lease on KV is treated as module scope, not as another execution.
 
-### SDK channel and transitional credentials
+Permission changes retire existing workers: idle workers stop, while in-flight
+invocations retain their authority until completion/reaping. New work uses the
+new permission. User environment and secrets cannot inject the reserved channel
+settings or retired legacy credential variables.
 
-SDK authority is an explicit per-function `sdk` permission, separate from
-network mode. Disabled functions receive neither a worker channel nor the
-legacy SDK credential/base URL. Reserved SDK environment values cannot grant
-permission. Permission changes hard-drain workers; the SDK credential is
-released when each worker is reaped. New functions default to disabled. The
-retirement does not abort in-flight invocations: they retain their existing
-authority until they finish; no new work is assigned to those retired workers.
-The
-one-time migration enables existing egress functions only; a later explicit
-disable survives restart. Receiving a call does not grant the callee SDK access.
+SDK calls never use HTTP. No `ORVA_INTERNAL_TOKEN` or `ORVA_API_BASE` is issued,
+the internal SDK HTTP routes are removed, and `/api/v1/jobs` only accepts normal
+operator authentication. The channel cannot authenticate to operator APIs.
+SDK-enabled functions require a compatible installed adapter; upgrade the
+adapters with the server rather than expecting an HTTP fallback.
 
-Current adapters use an inherited per-worker socket channel for KV, function
-invoke/streaming, job enqueue, cron upsert, and user-span operations. The host
-derives function identity from the channel and checks a per-dispatch lease for
-operations that require an active handler. KV remains usable at module scope;
-that does not grant a dispatch lease, and module-scope reads may become stale.
-A missing channel (including an older installed adapter) still uses the legacy
-HTTP endpoints. Those endpoints and signed SDK credentials remain in place in
-this transition; credential/token and control-plane carve-outs are not removed
-by this change. The channel is transport, not a new operator authorization
-surface, and does not grant access to operator APIs. SDK calls on the channel
-work in `network_mode: none`; function-authored outbound network access still
-follows the egress policy.
-
-### What an exfiltrated SDK credential can do
-
-Your function's own code holds this credential. It is `ORVA_INTERNAL_TOKEN` in
-the sandbox environment by design, because the SDK needs it — so a compromised
-third-party dependency can read it and send it off the box.
-
-Such a copy can read and write **that one function's** KV namespace from
-anywhere that can reach the API. It cannot reach another function's KV, cannot
-authenticate to operator APIs, and cannot create or change a cron schedule —
-that requires a live execution of the function.
-
-**To remediate, remove the dependency and redeploy.** Redeploying retires all of
-that function's warm workers, and each worker's credential dies with its
-process, so a copy taken beforehand stops working. Credentials also expire when
-a worker is recycled — idle timeout, or its use limit — and when orvad restarts,
-because the signing key is random per process. Restarting invalidates every
-credential for every function at once, which is the bigger hammer if you want
-one.
-
-Redeploying used not to be enough: the credential was derived from the function
-ID alone, so the deploy meant to remove a compromised dependency re-minted the
-stolen token byte-identical, and only a restart cleared it. Each credential now
-also names the specific worker process it was issued to.
-
-Then check that function's Schedules page for anything you did not create
-(schedules added by the SDK carry a name and are badged as such) and its KV
-namespace for keys you do not recognise.
+Streams are connection/lease-scoped, limited to eight per worker channel, and
+cancelled at lease end or channel close. Frames are capped at 4 MiB, with 32
+in-flight calls and bounded pending replies. Function-call depth is host-derived
+and capped at eight. KV is function-namespaced with bounded page/batch replies.
 
 ## Credential classes and what revocation reaches
 
@@ -504,10 +459,8 @@ first-match-wins, so the compiler emits carve-outs before rejects:
 1. nsjail's own NSTUN gateway (`10.255.255.1`, `fc00::1`) — it lives
    inside `10.0.0.0/8`, so a private-network reject would otherwise cut
    the guest off from its own default route.
-2. The **control plane**: orvad's internal SDK address, exact host, exact
-   port, TCP only (see the bug fix below).
-3. The configured DNS resolvers, port 53, UDP + TCP.
-4. The operator's blocklist, as REJECT rules — routed by address family, so
+2. The configured DNS resolvers, port 53, UDP + TCP.
+3. The operator's blocklist, as REJECT rules — routed by address family, so
    an IPv4 target becomes a `rule4` and an IPv6 target a `rule6`. A hostname
    rule contributes a `/32` per resolved v4 answer and a `/128` per v6 one.
 
@@ -541,7 +494,7 @@ seeing it applied.
 
 Where to look: `GET /api/v1/firewall/rules` returns a `status` object with
 `backend` (always `nstun`), `enforced`, `policy_generation`,
-`policy_rule_counts`, `policy_stale`, `control_plane_allow`, and
+`policy_rule_counts`, `policy_stale`, and
 `unenforced_rules`. The old `nftables_available` field is **gone**, with no
 compatibility alias — see [`API.md`](API.md#firewall-status).
 
@@ -556,9 +509,8 @@ compatibility alias — see [`API.md`](API.md#firewall-status).
   a hole, orvad's own outbound connections are checked at the dialer
   against the same compiled rule set, in the same order — outbound
   webhooks, builder package installs (`npm install` / `pip install`), and
-  anything a cron trigger causes. Loopback and the control-plane address on
-  the internal API port are exempt so orvad cannot cut off its own internal
-  calls.
+  anything a cron trigger causes. There is no SDK control-plane address
+  exemption: SDK operations use the private worker channel.
 
   The AI gateway is the exception: the embedded Bifrost gateway owns its own
   transport and exposes no hook to install Orva's dialer, so Orva checks a
@@ -600,21 +552,11 @@ compatibility alias — see [`API.md`](API.md#firewall-status).
   (their `enabled` flag is never rewritten), excluded from the compiled
   policy, and listed in `status.unenforced_rules` with a reason. Use a CIDR
   or an exact hostname instead.
-- **A silent breakage is fixed.** Enabling any RFC1918 suggestion used to
-  break `orva.kv`, `orva.jobs`, and function-to-function `orva.invoke`,
-  because the internal SDK base handed to sandboxes is deliberately a
-  *non-loopback* address (from inside the jail, `127.0.0.1` is the jail's
-  own loopback) and is normally RFC1918. A narrow control-plane ALLOW —
-  exact address, exact port, TCP — now precedes the blocklist. If that
-  address is unavailable at startup, Orva warns and falls back to loopback;
-  set `ORVA_INTERNAL_API_BASE` to a sandbox-reachable address in that case.
-
-  Orva selects the SDK control-plane target only from an address assigned to
-  its own network interfaces (or an explicit operator override). It does not
-  probe the default gateway for any healthy Orva server: another instance can
-  run there, and a healthy response is not an identity check. Per-worker SDK
-  credentials are process-scoped, so a wrong-instance request is rejected, but
-  it must not be routed to that instance in the first place.
+- **SDK traffic has no network exemption.** The inherited channel works in
+  `network_mode: none` and is unaffected by private-network block rules.
+  Egress sandboxes have no automatic exception for Orva's HTTP address. The
+  operator's private-network blocklist applies to that destination like any
+  other private service; there is no `ORVA_INTERNAL_API_BASE` override.
 
 **Sharp edge — the RFC1918 suggestions now also apply to orvad.**
 Because the daemon is filtered by the same rules, enabling the shipped

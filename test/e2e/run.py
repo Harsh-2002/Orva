@@ -162,7 +162,11 @@ def main():
     ap.add_argument("--filter", default="")
     ap.add_argument("--url", default="")
     ap.add_argument("--api-key", default="")
+    ap.add_argument("--control-plane-url", default="",
+                    help="explicit safe private numeric Orva URL for sandbox egress checks with --url")
     args = ap.parse_args()
+    if args.control_plane_url and not args.url:
+        ap.error("--control-plane-url is only for an externally supplied --url")
 
     env = dict(os.environ)
     env["PYTHONPATH"] = HERE + os.pathsep + env.get("PYTHONPATH", "")
@@ -175,6 +179,8 @@ def main():
         target = args.url.rstrip("/")
         env["ORVA_URL"] = target
         env["ORVA_API_KEY"] = args.api_key or env.get("ORVA_API_KEY") or resolve_admin_key()
+        if args.control_plane_url:
+            env["ORVA_E2E_CONTROL_PLANE_URL"] = args.control_plane_url
         env.setdefault("MOCK_HOST", "127.0.0.1")
         target_desc = f"external instance {target}"
     else:
@@ -188,6 +194,7 @@ def main():
             inst.wait_healthy()
             env["ORVA_URL"] = inst.base_url
             env["ORVA_API_KEY"] = inst.admin_key()
+            env["ORVA_E2E_CONTROL_PLANE_URL"] = inst.control_plane_url()
             env.setdefault("MOCK_HOST", "host.docker.internal")
             target_desc = f"isolated Docker image `{envmod.IMAGE}` ({inst.base_url})"
         except Exception as e:
