@@ -68,7 +68,6 @@ func TestServerEnvDocumentationIsComplete(t *testing.T) {
 		"ORVA_CGROUPV2_MOUNT",
 		"ORVA_DISABLE_USERNS",
 		"ORVA_IMAGE",
-		"ORVA_INTERNAL_API_BASE",
 		"ORVA_PPROF_ADDR",
 	)
 

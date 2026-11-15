@@ -155,14 +155,14 @@ interface first) for the sandbox SDK control plane. Do not reintroduce a
 gateway or generic health probe: it can select a separate Orva instance before
 this server begins listening. The environment override remains available for
 unusual routing.
-| `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), the same ones the HTTP handlers use; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
+| `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), preserved independently of the removed SDK HTTP wrappers; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
 | `executionlogs` | Shared worker-stderr processing for HTTP, buffered/streaming F2F, scheduler, inbound webhook and replay paths. Extracts structured SDK records into the optional telemetry writer and preserves ordinary stderr and malformed records for invocation logs. |
 | `metrics` | Prometheus-text counters + histograms (no external deps, atomic ops) |
 | `safepath` | Containment for user-supplied relative paths. `Validate` on the write side so a bad `entrypoint` never reaches storage; `Join` on the read side, which must hold independently because rows written before validation still carry whatever they carry. Traversal is rejected, not collapsed. |
 | `secrets` | AES-256-GCM encrypted secrets per function. The key lives at `<dataDir>/.master.key`, outside the database — back it up with `orva.db` or restored secrets are undecryptable ciphertext |
-| `sdkauth` | Mints and verifies the worker credential (`ORVA_INTERNAL_TOKEN`). HMAC over the function id **and a per-spawn nonce**, under a process-random key — so a credential dies both when orvad restarts and when the worker it was issued to is reaped. `Mint` returns a release; the pool wires it to `sandbox.ExecConfig.OnExit` and must also call it on every spawn error path. `live` holds the nonces, `active` the executions the gated SDK surfaces check against |
+| `sdkauth` | Host-owned active execution identity, depth and trace/span bookkeeping. It no longer mints or verifies credentials; SDK authority comes from the private channel and per-dispatch lease. |
 | `scheduler` | Cron runner (`robfig/cron/v3`) |
 | `mcp` | MCP server (go-sdk); 73 operator-management tools OR channel-mode (one tool per bundled function, invoke-only). Auth accepts API keys, OAuth 2.1 access tokens, OR channel tokens. **Transport is stateless** (`StreamableHTTPOptions{Stateless: true}`) — the SDK serves protocol `2026-07-28` only in that mode, and older clients still negotiate down. No `initialize` handshake required, no `Mcp-Session-Id`, `GET`/`DELETE /mcp` → 405. Operator servers are cached by the four-bit permission surface (at most 16 variants); channel servers remain request-scoped. Actor identity and public origin live in request context, so cached servers cannot cross-label activity or leak one host into another's `invoke_url`. A process-wide `ServerOptions.SchemaCache` keeps `AddTool` reflection off first-build paths. `cacheScopeMiddleware` rewrites the SDK's hardcoded `cacheScope: "public"` to `"private"` — the catalog is permission- and channel-scoped, so a shared HTTP cache entry would leak one principal's tool surface to another. |
 | `oauth` | OAuth 2.1 authorization server (RFC 7591 DCR + RFC 8414 metadata + PKCE S256 + RFC 8707 resource indicators + RFC 7009 revocation). Lets claude.ai/ChatGPT add `/mcp` as a custom connector via the browser. Connected apps + sessions managed at `/api/v1/oauth/connected-apps`, `DELETE /api/v1/oauth/clients/{client_id}` (retires an application: revokes its grants, drops pending codes, blocks re-authorization without fresh consent) and `/api/v1/auth/sessions` and surfaced in the dashboard's Settings page. DCR default scope is `read invoke write admin`; a client's **registered** scope is a ceiling, applied via `IntersectScope` on both authorize paths, so a client registered `read` cannot be issued `admin`. |
@@ -213,7 +213,7 @@ Never persist the build's stale function record over a newer permission update.
 
 `CORS → BodySizeLimit → Auth → RequestID → Logger → Handler`
 
-Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/`, `/metrics`, `/webhook/`, `/mcp`, custom routes) bypasses the API-key check entirely — per-function auth for invocations is enforced inside `InvokeHandler`. Internal SDK paths (`/api/v1/_kv/`, `/api/v1/_internal/`) use process-signed, function-scoped credentials, and the gate **rejects an unverifiable one with 401 before the handler runs** (it used to discard the error and call the handler anyway, leaving the prefixes authenticated only by each handler remembering to re-check) instead of API keys.
+Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/`, `/metrics`, `/webhook/`, `/mcp`, custom routes) bypasses the API-key check entirely — per-function auth for invocations is enforced inside `InvokeHandler`. The former SDK HTTP routes (`/api/v1/_kv/`, `/api/v1/_internal/`) are removed. No SDK token bypass exists; public jobs enqueue uses normal operator authentication.
 
 ## Database
 
@@ -221,8 +221,8 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 
 ## Runtime SDK channel tests
 
-`backend/runtimes/{node/orva.js,python/orva.py}` route `kv.*` over a private per-worker socketpair
-(fd `ORVA_SDK_FD` when `ORVA_SDK_PROTO=1`, otherwise legacy HTTP); the routing set is `_CHANNEL_OPS`
+`backend/runtimes/{node/orva.js,python/orva.py}` route every SDK operation over a private per-worker socketpair
+(fd `ORVA_SDK_FD` when `ORVA_SDK_PROTO=1`; missing channels fail closed); the routing set is `_CHANNEL_OPS`
 in each SDK. The adapters carry the literal `orva-sdk-proto:1` marker near the top (the host reads it
 to detect adapter/host skew) and store the `{"type":"lease"}` stdin frame for the SDK. Tests play the
 host over a real socketpair and need no nsjail or Docker:
@@ -251,23 +251,18 @@ Edit `backend/runtimes/`, then run `make adapters-embed`.
 
 ## SDK surface rules that a later change could silently undo
 
-- **`crons.upsert` requires a live execution.** `CronHandler.UpsertInternal`
-  gates on `SDKAuth.OwnsExecution`, and there is a 25-schedule cap on that path.
-  This is deliberate and is the only SDK surface gated this way: a cron row is
-  the one thing a leaked `ORVA_INTERNAL_TOKEN` can create that survives the
-  process-random signing key it was minted under, and nothing in
-  `internal/scheduler` consults `auth_mode`. Removing the gate re-opens that.
+- **`crons.upsert` requires a live execution.** `sdkhost.cronsUpsert` checks
+  the host-bound execution lease before the shared core persists a caller-owned
+  schedule; the 25-schedule cap remains. Calls, jobs and spans are also scoped
+  to the active dispatch. Do not replace host identity with SDK arguments.
 - **KV is deliberately NOT gated the same way.** Module-scope code runs at
   spawn with no execution bound, and the docs tell operators to cache config
   there, so an execution gate on KV would break a documented pattern silently
   at cold start.
-- **The SDK credential's release is wired to the reaper, not to Kill or to
-  retire.** `Kill` and `retirePool` express an intention to stop a worker; a
-  busy one keeps serving until it drains, so releasing there would 401 a live
-  request. The reaper goroutine in `sandbox/worker.go` is the only place the
-  process is known to be gone, and it covers every exit path. A missed release
-  leaks a map entry and degrades to the old behaviour — a credential valid
-  until restart — which is why the pool releases on its error paths too.
+- **Channel lifetime follows the worker.** Lease revocation cancels callee work
+  and closes owned streams. Retired busy workers finish current calls but must
+  never return to the idle pool; the reaper closes their channel. Do not restore
+  a legacy credential, HTTP fallback, or control-plane network exemption.
 - **Revocation evicts.** Every path that deletes an API key or ends a session
   must evict the auth middleware's cache; the entries carry a 30s TTL as a
   backstop, not as the mechanism. `router.go` builds one `invalidateKey`
