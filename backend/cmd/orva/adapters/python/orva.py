@@ -314,7 +314,12 @@ class _Chan:
         msg: Dict[str, Any] = {"id": cid, "op": op, "a": args}
         if _lease:
             msg["lease"] = _lease
-        body = json.dumps(msg).encode("utf-8")
+        try:
+            # NaN/Infinity are not JSON: the host would treat the frame as a protocol
+            # violation and drop the worker, so refuse them here like the HTTP path did.
+            body = json.dumps(msg, allow_nan=False).encode("utf-8")
+        except ValueError as e:
+            raise OrvaError(f"{op}: value is not JSON-serialisable ({e})", status=400)
         if len(body) > MAX_FRAME:
             raise OrvaError(f"{op}: request too large ({len(body)} bytes, max {MAX_FRAME})", status=413)
         frame = struct.pack(">I", len(body)) + body

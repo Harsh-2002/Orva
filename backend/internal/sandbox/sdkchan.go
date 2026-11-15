@@ -37,6 +37,23 @@ var sdkOps = map[string]struct{}{
 	"crons.upsert": {}, "spans.emit": {},
 }
 
+// sdkOpNeedsExec lists the operations that act on behalf of a live execution.
+// The others (kv.*) are allowed without one, so a frame carrying a lease that
+// has since been revoked (a timer, a background thread, work after the response)
+// is served as module scope rather than refused.
+var sdkOpNeedsExec = map[string]bool{
+	"invoke": true, "invoke.stream.open": true, "invoke.stream.next": true,
+	"invoke.stream.close": true, "jobs.enqueue": true, "crons.upsert": true,
+	"spans.emit": true,
+}
+
+// maxSDKPendingReplies bounds replies that are computed but not yet written.
+// The in-flight slot is freed before the reply is written, so without this a
+// client that never reads could pipeline requests until the write deadline
+// killed it, each handler holding its payload meanwhile. At the limit the read
+// loop stops reading, which is the backpressure.
+const maxSDKPendingReplies = 2 * MaxSDKInflight
+
 // errSDKProtocol marks a framing/JSON violation: the connection is closed and
 // the worker is not reused.
 var errSDKProtocol = errors.New("sdk protocol violation")
@@ -167,6 +184,7 @@ type sdkServer struct {
 
 	wmu      sync.Mutex
 	inflight atomic.Int32
+	replySem chan struct{}
 	closeMu  sync.Once
 	connCtx  context.Context
 	cancel   context.CancelFunc
@@ -186,6 +204,7 @@ func (s *sdkServer) serve() {
 	if s.writeTimeout == 0 {
 		s.writeTimeout = sdkWriteTimeout
 	}
+	s.replySem = make(chan struct{}, maxSDKPendingReplies)
 	sdkOpenChannels.Add(1)
 	defer sdkOpenChannels.Add(-1)
 	defer s.closeConn()
@@ -221,15 +240,19 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 	ctx := s.connCtx
 	if req.Lease != "" {
 		st := s.state()
-		if st == nil || st.info.Lease != req.Lease {
+		switch {
+		case st != nil && st.info.Lease == req.Lease:
+			info := st.info
+			caller.Exec = &info
+			ctx = st.ctx
+		case sdkOpNeedsExec[req.Op]:
 			sdkRecord(req.Op, 403, 0)
 			s.reply(req.ID, nil, &SDKError{Status: 403, Code: "SDK_SCOPE_VIOLATION",
 				Message: "lease is not valid for a running execution"})
 			return
 		}
-		info := st.info
-		caller.Exec = &info
-		ctx = st.ctx
+		// Otherwise: a stale lease on an op that needs no execution is served
+		// as module scope (Exec stays nil).
 	}
 	if s.inflight.Add(1) > MaxSDKInflight {
 		s.inflight.Add(-1)
@@ -238,7 +261,14 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 			Message: "too many unanswered SDK requests"})
 		return
 	}
+	select {
+	case s.replySem <- struct{}{}:
+	case <-s.connCtx.Done():
+		s.inflight.Add(-1)
+		return
+	}
 	go func() {
+		defer func() { <-s.replySem }()
 		start := time.Now()
 		res, serr := s.call(ctx, caller, req)
 		status := 200

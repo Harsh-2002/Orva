@@ -210,6 +210,23 @@ test('oversized request is refused before anything is written', async () => {
   assert.equal(frames.length, 0)
 })
 
+test('a multi-megabyte reply arriving in small chunks is reassembled', async () => {
+  const host = (msg, ctx) => {
+    const body = Buffer.from(JSON.stringify({ id: msg.id, ok: true, r: { value: 'y'.repeat(3 << 20) } }))
+    const frame = Buffer.concat([Buffer.from([body.length >>> 24, (body.length >>> 16) & 255, (body.length >>> 8) & 255, body.length & 255]), body])
+    let off = 0
+    const pump = () => {
+      if (off >= frame.length) return
+      ctx.sock.write(frame.subarray(off, off + 7919))
+      off += 7919
+      setImmediate(pump)
+    }
+    pump()
+  }
+  const { out } = await run('bigreply', host)
+  assert.equal(out.len, 3 << 20)
+})
+
 test('reply length above 4 MiB closes the channel', async () => {
   const host = (msg, ctx) => {
     const hdr = Buffer.alloc(4)

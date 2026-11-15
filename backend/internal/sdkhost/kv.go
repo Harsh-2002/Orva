@@ -20,6 +20,14 @@ const (
 	limitSmall = 1 << 16
 	limitValue = 1 << 20
 	limitBatch = 8 << 20
+
+	// Reply-size bounds. A reply is capped by the 4 MiB frame, but building one
+	// close to it for every request would let a function make the host hold
+	// tens of megabytes per call. kv.list pages are cut here (with a cursor);
+	// a kv.batch whose results exceed the bound is refused.
+	maxListReplyBytes  = 2 << 20
+	maxBatchReplyBytes = 3 << 20
+	kvListSlice        = 100
 )
 
 func fail(status int, code, msg string) *sandbox.SDKError {
@@ -210,19 +218,46 @@ func (h *Host) kvList(ctx context.Context, fn string, args json.RawMessage) (any
 			}
 		}
 	}
-	page, err := h.DB.KVListWithCursorContext(ctx, fn, a.Prefix, a.Cursor, limit)
-	if err != nil {
-		return nil, fail(500, "INTERNAL", "kv list failed: "+err.Error())
+	if limit <= 0 || limit > 1000 {
+		limit = 100 // same normalisation the database applies
 	}
-	out := make([]listEntry, 0, len(page.Entries))
-	for _, e := range page.Entries {
-		out = append(out, listEntry{Key: e.Key, Value: json.RawMessage(e.Value), ExpiresAt: fmtTime(e)})
+	// A page can be limit x 64 KiB. Read it in slices and stop once the reply
+	// would be large, handing back a cursor so the caller simply asks again:
+	// the host never holds a multi-megabyte page for one small request.
+	out := make([]listEntry, 0, min(limit, 100))
+	size, cursor, next := 0, a.Cursor, ""
+	for remaining := limit; remaining > 0; {
+		page, err := h.DB.KVListWithCursorContext(ctx, fn, a.Prefix, cursor, min(remaining, kvListSlice))
+		if err != nil {
+			return nil, fail(500, "INTERNAL", "kv list failed: "+err.Error())
+		}
+		for _, e := range page.Entries {
+			if len(out) > 0 && size+len(e.Key)+len(e.Value) > maxListReplyBytes {
+				next = out[len(out)-1].Key
+				return listReply(out, next), nil
+			}
+			size += len(e.Key) + len(e.Value) + 64
+			out = append(out, listEntry{Key: e.Key, Value: json.RawMessage(e.Value), ExpiresAt: fmtTime(e)})
+		}
+		remaining -= len(page.Entries)
+		if page.NextCursor == "" {
+			next = ""
+			break
+		}
+		cursor, next = page.NextCursor, page.NextCursor
+		if len(page.Entries) == 0 {
+			break
+		}
 	}
+	return listReply(out, next), nil
+}
+
+func listReply(out []listEntry, next string) map[string]any {
 	resp := map[string]any{"keys": out}
-	if page.NextCursor != "" {
-		resp["next_cursor"] = page.NextCursor
+	if next != "" {
+		resp["next_cursor"] = next
 	}
-	return resp, nil
+	return resp
 }
 
 func (h *Host) kvBatch(ctx context.Context, fn string, args json.RawMessage) (any, *sandbox.SDKError) {
@@ -269,6 +304,13 @@ func (h *Host) kvBatch(ctx context.Context, fn string, args json.RawMessage) (an
 			ent.ExpiresAt = &s
 		}
 		wire[i] = ent
+	}
+	total := 0
+	for _, w := range wire {
+		total += len(w.Value)
+	}
+	if total > maxBatchReplyBytes {
+		return nil, fail(413, "RESULT_TOO_LARGE", "kv.batch results exceed the reply size limit; fetch fewer or smaller keys per batch")
 	}
 	return map[string]any{"results": wire}, nil
 }

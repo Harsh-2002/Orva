@@ -67,6 +67,10 @@ def big():
     return attempt(lambda: kv.put("k", "x" * (5 << 20)))
 
 
+def nan():
+    return attempt(lambda: kv.put("k", float("nan")))
+
+
 def badlen():
     return attempt(lambda: kv.get("k"))
 

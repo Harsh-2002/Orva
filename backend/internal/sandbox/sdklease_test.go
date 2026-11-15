@@ -101,7 +101,7 @@ func (h *workerHarness) expectAccepted(t *testing.T, lease string) {
 func (h *workerHarness) expectRefused(t *testing.T, lease string) {
 	t.Helper()
 	before := h.calls.Load()
-	r := h.frame(t, "kv.get", lease)
+	r := h.frame(t, "invoke", lease)
 	if r.OK || r.E == nil || r.E.Status != 403 || r.E.Code != "SDK_SCOPE_VIOLATION" {
 		t.Fatalf("frame with revoked lease = %+v, want 403 SDK_SCOPE_VIOLATION", r)
 	}

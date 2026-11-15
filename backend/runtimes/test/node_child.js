@@ -52,6 +52,10 @@ const scenarios = {
   async big() {
     return await attempt(() => kv.put('k', 'x'.repeat(5 << 20)))
   },
+  async bigreply() {
+    const v = await kv.get('k')
+    return { len: typeof v === 'string' ? v.length : -1 }
+  },
   async badlen() {
     return await attempt(() => kv.get('k'))
   },

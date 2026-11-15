@@ -239,6 +239,12 @@ class ChannelTests(unittest.TestCase):
         self.assertIn("too large", out["err"]["message"])
         self.assertEqual(frames, [])
 
+    def test_nan_is_refused_client_side_and_does_not_reach_the_host(self):
+        out, frames = run("nan", lambda m, c: None)
+        self.assertEqual(out["err"]["name"], "OrvaError")
+        self.assertEqual(out["err"].get("status"), 400)
+        self.assertEqual(frames, [])
+
     def test_reply_length_over_4mib_closes_channel(self):
         def host(msg, ctx):
             ctx.sock.sendall(struct.pack(">I", (4 << 20) + 1))

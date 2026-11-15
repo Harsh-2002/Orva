@@ -68,8 +68,8 @@ exports.handler = async (event) => {
       case 'put': await orva.kv.put(q.key, q.value); return ok({ done: true });
       case 'get': return ok({ value: await orva.kv.get(q.key, null) });
       case 'late': {
-        // Outlives the request: its lease is revoked when this dispatch ends.
-        setTimeout(() => { orva.kv.put('late', 'should-not-land').catch(() => {}); }, 400);
+        // Outlives the request: its lease is revoked when this dispatch ends; kv still works.
+        setTimeout(() => { orva.kv.put('late', 'after-response').catch(() => {}); }, 400);
         return ok({ scheduled: true });
       }
       case 'env': return ok({ fd: process.env.ORVA_SDK_FD || null, proto: process.env.ORVA_SDK_PROTO || null });
@@ -258,14 +258,16 @@ def main():
         code, r = call(c, fn, {"op": "basic"})
         check("the worker is still healthy after the refusal", code == 200)
 
-        section("stale lease: a call that outlives its request is refused")
+        section("a call that outlives its request keeps kv access (module-scope semantics)")
         call(c, fn, {"op": "put", "key": "late", "value": "before"})
         code, r = call(c, fn, {"op": "late"})
         check("request returns immediately", code == 200)
         time.sleep(1.5)
         code, r = call(c, fn, {"op": "get", "key": "late"})
-        check("the late write from the finished request did not land",
-              isinstance(r, dict) and r.get("value") == "before", str(r))
+        # kv needs no live execution, so a timer firing after the response is served
+        # as module scope rather than refused. Ops that do need one (invoke, jobs,
+        # crons, spans) are refused with a stale lease; unit tests cover that.
+        check("the background write after the response landed", isinstance(r, dict) and r.get("value") == "after-response", str(r))
 
         section("a worker killed mid-call is replaced")
         slow = deploy(c, NODE_SLOW, "node", SLOW_CODE, "handler.js", timeout_ms=1500)

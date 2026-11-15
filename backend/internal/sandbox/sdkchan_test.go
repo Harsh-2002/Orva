@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -271,6 +273,65 @@ func TestSDKClientEOFIsNotAViolation(t *testing.T) {
 	}
 }
 
+// A stale lease on an op that needs no execution (kv.*) is served as module
+// scope: a timer or background thread must keep its KV access after the request
+// that started it has finished.
+func TestSDKStaleLeaseOnKVIsServedWithoutExecution(t *testing.T) {
+	var sawNil atomic.Bool
+	h := newSrvHarness(t, func(_ context.Context, c SDKCaller, _ string, _ json.RawMessage) (any, *SDKError) {
+		sawNil.Store(c.Exec == nil)
+		return "ok", nil
+	}, func() *dispatchState { return nil }, nil)
+	sendReq(t, h.client, 1, "kv.get", "revoked-lease", "")
+	if r := readReply(t, h.client); !r.OK {
+		t.Fatalf("kv with a stale lease refused: %+v", r.E)
+	}
+	if !sawNil.Load() {
+		t.Fatal("a stale lease must not attach an execution")
+	}
+}
+
+// A client that never reads cannot make the host queue replies without bound:
+// the read loop stops reading at maxSDKPendingReplies and the stalled write
+// ends the worker.
+func TestSDKNonReadingClientIsBounded(t *testing.T) {
+	var calls atomic.Int32
+	host, child, err := newSDKPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := net.FileConn(child)
+	_ = child.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	killed := make(chan struct{}, 1)
+	big := strings.Repeat("x", 4_000) // small enough to marshal fast, large enough that the socket buffer fills after ~50 replies
+	srv := &sdkServer{
+		conn: host, functionID: "fn-host", writeTimeout: 300 * time.Millisecond,
+		handler: func(context.Context, SDKCaller, string, json.RawMessage) (any, *SDKError) {
+			calls.Add(1)
+			return big, nil
+		},
+		state: func() *dispatchState { return nil }, violation: func() {},
+		kill: func() { killed <- struct{}{} },
+	}
+	done := make(chan struct{})
+	go func() { srv.serve(); close(done) }()
+	t.Cleanup(func() { _ = client.Close(); _ = host.Close(); <-done })
+	go func() {
+		for id := uint64(1); id <= 5000; id++ {
+			if _, err := client.Write(encodeSDKFrame([]byte(fmt.Sprintf(`{"id":%d,"op":"kv.get","a":{"key":"k"}}`, id)))); err != nil {
+				return
+			}
+		}
+	}()
+	expectSignal(t, killed, "the stalled writer to be killed")
+	if n := calls.Load(); n > 4*maxSDKPendingReplies {
+		t.Fatalf("handler ran %d times for a client that never reads; want a bound near %d", n, maxSDKPendingReplies)
+	}
+}
+
 func TestSDKStaleLeaseRefusedWithoutCallingHandler(t *testing.T) {
 	var calls atomic.Int32
 	var st atomic.Pointer[dispatchState]
@@ -279,7 +340,7 @@ func TestSDKStaleLeaseRefusedWithoutCallingHandler(t *testing.T) {
 		return "ok", nil
 	}, st.Load, nil)
 	// No current dispatch at all.
-	sendReq(t, h.client, 1, "kv.get", "some-lease", "")
+	sendReq(t, h.client, 1, "invoke", "some-lease", "")
 	// A current dispatch with a different lease.
 	st.Store(newDispatchState(context.Background()))
 	sendReq(t, h.client, 2, "invoke", "wrong", "")

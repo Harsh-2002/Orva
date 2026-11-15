@@ -176,6 +176,9 @@ class _Channel {
     this.nextId = 1
     this.dead = null
     this.buf = Buffer.alloc(0)
+    this.parts = []
+    this.have = 0
+    this.need = 0
     this.sock.on('data', (chunk) => this._onData(chunk))
     this.sock.on('error', (err) => this._fail(new OrvaUnavailableError(`SDK channel error: ${err.message || err}`)))
     this.sock.on('close', () => this._fail(new OrvaUnavailableError('SDK channel closed')))
@@ -233,15 +236,26 @@ class _Channel {
   }
 
   _onData(chunk) {
-    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk
+    // Large frames arrive in many chunks: collect them and join once the whole
+    // frame is here, instead of re-copying the accumulated bytes per chunk.
+    this.parts.push(chunk)
+    this.have += chunk.length
+    if (this.need && this.have < this.need) return
+    this.buf = this.parts.length === 1 ? this.parts[0] : Buffer.concat(this.parts, this.have)
+    this.parts = []
+    this.have = 0
+    this.need = 0
     for (;;) {
-      if (this.buf.length < 4) return
+      if (this.buf.length < 4) break
       const n = this.buf.readUInt32BE(0)
       if (n < 1 || n > MAX_FRAME) {
         this._fail(new OrvaUnavailableError(`SDK channel protocol error: bad frame length ${n}`))
         return
       }
-      if (this.buf.length < 4 + n) return
+      if (this.buf.length < 4 + n) {
+        this.need = 4 + n
+        break
+      }
       let msg
       try {
         msg = JSON.parse(this.buf.subarray(4, 4 + n).toString('utf8'))
@@ -252,6 +266,11 @@ class _Channel {
       this.buf = this.buf.subarray(4 + n)
       this._onReply(msg)
     }
+    if (this.buf.length) {
+      this.parts.push(this.buf)
+      this.have = this.buf.length
+    }
+    this.buf = Buffer.alloc(0)
   }
 
   _onReply(msg) {
