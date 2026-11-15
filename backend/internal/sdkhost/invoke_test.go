@@ -240,6 +240,20 @@ func TestInvokeNeedsExecutionAndInvoker(t *testing.T) {
 	}
 }
 
+func TestStreamHandleArgumentsRejectUnknownFields(t *testing.T) {
+	e := newInvEnv(t)
+	ctx := context.Background()
+	for _, op := range []string{"invoke.stream.next", "invoke.stream.close"} {
+		t.Run(op, func(t *testing.T) {
+			_, err := e.host.Handle(ctx, e.exec(ctx, 0, "L"), op,
+				json.RawMessage(`{"handle":"anything","execution_id":"forged"}`))
+			if err == nil || err.Status != 400 || err.Code != "INVALID_JSON" {
+				t.Fatalf("unknown handle arguments accepted: %+v", err)
+			}
+		})
+	}
+}
+
 func TestInvokeRevokedCallerCancelsCalleeAndReleasesWorker(t *testing.T) {
 	e := newInvEnv(t)
 	ctx, cancel := context.WithCancel(context.Background())
