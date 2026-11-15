@@ -41,10 +41,12 @@ Orva is **not** designed to defend against:
 ## Sandbox SDK identity
 
 Each worker receives a signed SDK credential naming its immutable function ID
-and the specific worker process it was issued to. Orvad verifies the signature on KV,
-function invoke/streaming, job enqueue, cron upsert, and user-span requests;
-it never trusts `X-Orva-Caller-Function` for authorization or attribution.
-Two things expire it. The signing key is random per process, so every
+and the specific worker process it was issued to. Legacy HTTP SDK endpoints
+verify this credential for KV, function invoke/streaming, job enqueue, cron
+upsert, and user-span requests; they never trust
+`X-Orva-Caller-Function` for authorization or attribution. Current adapters
+use the inherited channel for these operations and derive function identity
+from the per-worker channel instead. Two things expire the HTTP credential. The signing key is random per process, so every
 credential dies when orvad restarts. And the per-spawn identifier is dropped
 when that worker's process is reaped, so a credential copied out of one worker
 stops working as soon as that worker does — including when a redeploy retires
@@ -56,6 +58,21 @@ active execution owned by that function. Functions may intentionally invoke or
 enqueue work for another function, but the caller recorded in traces and jobs
 always comes from the signed claim. The SDK credential cannot authenticate to
 operator APIs.
+
+### SDK channel and transitional credentials
+
+Current adapters use an inherited per-worker socket channel for KV, function
+invoke/streaming, job enqueue, cron upsert, and user-span operations. The host
+derives function identity from the channel and checks a per-dispatch lease for
+operations that require an active handler. KV remains usable at module scope;
+that does not grant a dispatch lease, and module-scope reads may become stale.
+A missing channel (including an older installed adapter) still uses the legacy
+HTTP endpoints. Those endpoints and signed SDK credentials remain in place in
+this transition; credential/token and control-plane carve-outs are not removed
+by this change. The channel is transport, not a new operator authorization
+surface, and does not grant access to operator APIs. SDK calls on the channel
+work in `network_mode: none`; function-authored outbound network access still
+follows the egress policy.
 
 ### What an exfiltrated SDK credential can do
 

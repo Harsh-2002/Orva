@@ -182,6 +182,8 @@ type sdkServer struct {
 	kill         func()
 	writeTimeout time.Duration
 
+	session SDKSession
+
 	wmu      sync.Mutex
 	inflight atomic.Int32
 	replySem chan struct{}
@@ -194,6 +196,7 @@ func (s *sdkServer) closeConn() {
 	s.closeMu.Do(func() {
 		s.cancel()
 		_ = s.conn.Close()
+		s.session.close()
 	})
 }
 
@@ -238,6 +241,8 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 	}
 	caller := SDKCaller{FunctionID: s.functionID}
 	ctx := s.connCtx
+	// ctx is replaced below by the lease ctx; the session rides on whichever
+	// one the op ends up with.
 	if req.Lease != "" {
 		st := s.state()
 		switch {
@@ -267,6 +272,7 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 		s.inflight.Add(-1)
 		return
 	}
+	ctx = context.WithValue(ctx, sessionCtxKey{}, &s.session)
 	go func() {
 		defer func() { <-s.replySem }()
 		start := time.Now()

@@ -3,8 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -240,17 +238,6 @@ func (h *CronHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, map[string]any{"schedules": rows})
 }
 
-// upsertInternalRequest carries the body for the SDK's crons.upsert call.
-// The function ID is derived from the verified scoped SDK credential rather
-// than a caller-controlled body or header.
-type upsertInternalRequest struct {
-	Name     string `json:"name"`
-	Schedule string `json:"schedule"`
-	Timezone string `json:"timezone,omitempty"`
-	Enabled  *bool  `json:"enabled,omitempty"`
-	Payload  any    `json:"payload,omitempty"`
-}
-
 // maxSDKSchedulesPerFunction bounds how many distinct named schedules one
 // function may declare for itself. Generous for any real use -- the pattern is
 // a handful of named jobs -- and low enough that a runaway or hostile loop
@@ -288,108 +275,22 @@ func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := readBoundedBody(r.Body, 1<<20)
+	body, err := readBoundedBody(r.Body, MaxCronUpsertBody)
 	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)
 		return
 	}
-	var req upsertInternalRequest
+	var req UpsertCronRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	req.Schedule = strings.TrimSpace(req.Schedule)
-	if req.Name == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "name is required", reqID)
+	res, serr := UpsertCron(h.DB, fnID, &req)
+	if serr != nil {
+		serr.write(w, reqID)
 		return
 	}
-	if req.Schedule == "" {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "schedule is required", reqID)
-		return
-	}
-	sched, err := scheduler.ParseCronExpr(req.Schedule)
-	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "invalid schedule: "+err.Error(), reqID)
-		return
-	}
-	loc, tzName, err := resolveTZ(req.Timezone)
-	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
-		return
-	}
-	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-	payload, err := encodePayload(req.Payload)
-	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
-		return
-	}
-	row := &database.CronSchedule{
-		FunctionID: fnID,
-		Name:       req.Name,
-		CronExpr:   req.Schedule,
-		Timezone:   tzName,
-		Enabled:    enabled,
-		Payload:    payload,
-	}
-	if enabled {
-		next := sched.Next(time.Now().In(loc)).UTC()
-		row.NextRunAt = &next
-	}
-	// Upsert is keyed by (function, name), so distinct names multiply without
-	// bound, and nothing validates the interval either -- "* * * * *" is
-	// accepted. One compromised execution could otherwise register hundreds of
-	// once-a-minute schedules against its own function and leave them running.
-	//
-	// The cap is on this path only. Schedules an operator creates from the
-	// dashboard are not limited; a function declaring its own is.
-	existing, listErr := h.DB.ListCronSchedulesForFunction(fnID)
-	if listErr != nil {
-		// Fail open rather than fail a deploy over a read, but say so: the cap
-		// is a guard rail, and a guard rail that silently stops applying is
-		// worse than one that was never there.
-		slog.Warn("could not count existing schedules; SDK schedule cap not applied",
-			"fn", fnID, "err", listErr)
-	} else {
-		declared, fresh := 0, true
-		for _, e := range existing {
-			// Only rows the SDK declared count against the cap. Operator
-			// schedules carry no name -- counting them would lock a function
-			// out of its FIRST self-declared schedule on a function that
-			// happens to have a busy Schedules page.
-			if e.Name == "" {
-				continue
-			}
-			declared++
-			if e.Name == req.Name {
-				fresh = false
-			}
-		}
-		if fresh && declared >= maxSDKSchedulesPerFunction {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				fmt.Sprintf("a function may declare at most %d schedules; delete one before adding another",
-					maxSDKSchedulesPerFunction), reqID)
-			return
-		}
-	}
-
-	id, err := h.DB.UpsertCronScheduleByName(row)
-	if err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL",
-			"upsert failed: "+err.Error(), reqID)
-		return
-	}
-	respond.JSON(w, http.StatusOK, map[string]any{
-		"id":          id,
-		"function_id": fnID,
-		"name":        req.Name,
-		"schedule":    req.Schedule,
-		"timezone":    tzName,
-		"enabled":     enabled,
-	})
+	respond.JSON(w, http.StatusOK, res)
 }
 
 // encodePayload normalizes a JSON value to a string for storage. Accepts

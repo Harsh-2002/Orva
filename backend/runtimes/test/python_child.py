@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "python"))
 import orva  # noqa: E402
@@ -96,8 +97,84 @@ def http():
     return {"v": v, "job": job}
 
 
-def fork():
-    kv.get("parent-before")
+def http_all():
+    job = orva.jobs.enqueue("fn2", {"a": 1})
+    cron = orva.crons.upsert("nightly", "0 3 * * *")
+    with orva.trace.span("work"):
+        pass
+    time.sleep(0.1)
+    inv = orva.invoke("callee", {"q": 1})
+    chunks = [c.decode() for c in orva.invoke_stream("callee")]
+    return {"job": job, "cron": cron, "inv": inv, "chunks": chunks}
+
+
+def ops_ok():
+    orva._set_lease("L-1")
+    job = orva.jobs.enqueue("fn2", {"a": 1}, max_attempts=5, idempotency_key="k", idempotency_window_seconds=60)
+    cron = orva.crons.upsert("nightly", "0 3 * * *", payload={"x": 1}, timezone="UTC", enabled=True)
+    with orva.trace.span("work", {"a": 1}):
+        pass
+    inv = orva.invoke("callee", {"q": 1})
+    inv_plain = orva.invoke("plain")
+    return {"job": job, "cron": cron, "inv": inv, "inv_plain": inv_plain}
+
+
+def ops_errors():
+    orva._set_lease("L-1")
+
+    def span_swallowed():
+        with orva.trace.span("s"):
+            return "fine"
+
+    return {
+        "not_found": attempt(lambda: orva.invoke("missing")),
+        "depth": attempt(lambda: orva.invoke("deep")),
+        "busy": attempt(lambda: orva.invoke("busy")),
+        "job": attempt(lambda: orva.jobs.enqueue("bad")),
+        "cron": attempt(lambda: orva.crons.upsert("x", "bad")),
+        "span_swallowed": span_swallowed(),
+    }
+
+
+def streams():
+    orva._set_lease("L-1")
+    full = [c.decode() + "|" + type(c).__name__ for c in orva.invoke_stream("five", {"p": 1})]
+    early = []
+    gen = orva.invoke_stream("five")
+    for c in gen:
+        early.append(c.decode() + "|" + type(c).__name__)
+        if len(early) == 2:
+            break
+    gen.close()  # early break: GeneratorExit must close the handle
+    mid = []
+
+    def run_mid():
+        for c in orva.invoke_stream("mid"):
+            mid.append(c.decode())
+
+    mid_err = attempt(run_mid)
+
+    def run_missing():
+        for _ in orva.invoke_stream("missing"):
+            pass
+
+    return {"full": full, "early": early, "mid": mid, "mid_err": mid_err, "open_err": attempt(run_missing)}
+
+
+def stream_eof():
+    orva._set_lease("L-1")
+    got = []
+
+    def run_it():
+        for c in orva.invoke_stream("five"):
+            got.append(c.decode())
+
+    return {"got": got, "res": attempt(run_it)}
+
+
+def fork(warm=True):
+    if warm:
+        kv.get("parent-before")
     r, w = os.pipe()
     pid = os.fork()
     if pid == 0:
@@ -109,6 +186,10 @@ def fork():
     child = json.loads(os.read(r, 65536).decode())
     os.waitpid(pid, 0)
     return {"child": child, "parent_after": kv.get("parent-after")}
+
+
+def fork_lazy():
+    return fork(warm=False)
 
 
 print(json.dumps(globals()[sys.argv[1]](), default=repr))

@@ -188,6 +188,25 @@ runtime changes rebuilds the dependencies instead of reusing the old directory.
 Packages that are pure Python or pure JavaScript, or that use a stable ABI
 (`abi3`, N-API), keep working across a runtime upgrade.
 
+## SDK operations and network mode
+
+Current runtime adapters automatically carry `kv`, `invoke`/`invokeStream`, `jobs`, `crons`,
+and `trace.span` calls over a private inherited per-worker socket channel. There is no user-facing SDK opt-in setting yet. The
+host derives the function ID from the channel, not SDK arguments. If the channel
+is unavailable, including with an older installed adapter, the SDK falls back
+to its existing HTTP endpoints. Those HTTP endpoints remain supported.
+
+KV is usable at module scope because it is scoped to the worker function; a
+module-scope read can become stale. `invoke`, `invokeStream`, `jobs.enqueue`,
+`crons.upsert`, and `trace.span` require an active handler dispatch and its
+per-dispatch lease. Invoke depth is capped at 8. Each channel allows at most 8
+open streams, with chunks of at most 256 KiB; cancellation/lease end closes stream state. Frames are at
+most 4 MiB, with 32 in-flight calls and bounded pending replies. KV list replies
+paginate at about 2 MiB; batches are capped at 100 operations and return
+`413 RESULT_TOO_LARGE` if their result exceeds 3 MiB. None of these SDK operations
+requires outbound networking on current adapters. Function-authored outbound
+HTTP requests still require `network_mode: egress`.
+
 ## Trace and log correlation
 
 Both SDKs expose `trace.span` and `log`. Custom code spans are direct children

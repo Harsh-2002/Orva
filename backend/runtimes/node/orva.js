@@ -143,8 +143,8 @@ const _fs = require('fs')
 const MAX_FRAME = 4 << 20 // 4 MiB, both directions
 const MAX_INFLIGHT = 32 // host refuses the 33rd with 429, so queue instead
 
-// Ops served over the channel. Everything else stays on HTTP; later work
-// only has to add names here.
+// Ops served over the channel. With no channel (or in test mode) every op
+// keeps using its HTTP route.
 const _CHANNEL_OPS = new Set([
   'kv.get',
   'kv.put',
@@ -153,6 +153,13 @@ const _CHANNEL_OPS = new Set([
   'kv.batch',
   'kv.incr',
   'kv.cas',
+  'invoke',
+  'invoke.stream.open',
+  'invoke.stream.next',
+  'invoke.stream.close',
+  'jobs.enqueue',
+  'crons.upsert',
+  'spans.emit',
 ])
 
 // The adapter stores the per-dispatch lease here (it does not import the SDK).
@@ -186,7 +193,8 @@ class _Channel {
     this.sock.unref() // only keeps the process alive while calls are pending
   }
 
-  call(op, args) {
+  call(op, args, timeoutMs) {
+    const limitMs = timeoutMs ?? _channelTimeoutMs
     if (this.dead) return Promise.reject(this.dead)
     const id = this.nextId++
     const msg = { id, op, a: args }
@@ -206,10 +214,10 @@ class _Channel {
         const qi = this.queue.indexOf(entry)
         if (qi >= 0) this.queue.splice(qi, 1)
         // A sent request keeps its in-flight slot until the host answers it.
-        reject(new OrvaError(`request timed out after ${_channelTimeoutMs}ms`, 0))
+        reject(new OrvaError(`request timed out after ${limitMs}ms`, 0))
         this._pump()
         this._refresh()
-      }, _channelTimeoutMs)
+      }, limitMs)
       this.queue.push(entry)
       this._pump()
       this._refresh()
@@ -346,9 +354,15 @@ function _channel() {
 function _kv(op, args, method, path, opts) {
   if (!(_testImpl && _testImpl.request) && _CHANNEL_OPS.has(op)) {
     const ch = _channel()
-    if (ch) return ch.call(op, args)
+    if (ch) return ch.call(op, args, opts && opts.timeoutMs)
   }
   return _request(method, path, opts)
+}
+
+// The channel, or null when this call must use HTTP (no channel, or test mode).
+function _chanFor(op) {
+  if ((_testImpl && _testImpl.request) || !_CHANNEL_OPS.has(op)) return null
+  return _channel()
 }
 
 // Parsed JSON of a reply from either transport.
@@ -514,21 +528,25 @@ function _assertAtomicBatch(data, operation) {
 // ── Function-to-function invoke ─────────────────────────────────────
 
 async function invoke(functionName, payload = {}, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  // Over the channel the host derives trace, span and depth itself: no headers.
   const headers = {}
   const incoming = process.env.ORVA_CALL_DEPTH
   if (incoming) headers['X-Orva-Call-Depth'] = incoming
 
-  const { status, body } = await _request(
+  const res = await _kv(
+    'invoke',
+    { name: functionName, body: payload },
     'POST',
     `/api/v1/_internal/invoke/${functionName}`,
     { body: payload, headers, timeoutMs }
   )
+  const { status, body } = res
 
   if (status === 404) throw new OrvaError(`function not found: ${functionName}`, 404)
   if (status === 507) throw new OrvaError('call depth exceeded', 507)
   if (status >= 400) throw new OrvaError(`invoke(${functionName}) failed: ${body}`, status)
 
-  const env = JSON.parse(body)
+  const env = _data(res)
   if (typeof env.body === 'string') {
     try {
       env.body = JSON.parse(env.body)
@@ -551,10 +569,62 @@ function invokeStream(functionName, payload = {}, { timeoutMs = DEFAULT_TIMEOUT_
     [Symbol.asyncIterator]() {
       let reader = null
       let started = false
+      let viaChannel = false
+      let handle = null // channel stream handle while the host holds it open
+      let finished = false
+      const closeHandle = async () => {
+        const h = handle
+        handle = null
+        if (h === null) return
+        const ch = _chanFor('invoke.stream.close')
+        if (ch) await ch.call('invoke.stream.close', { handle: h }, timeoutMs).catch(() => {})
+      }
+      // A channel reply is one chunk per call; empty non-final chunks are skipped.
+      const nextFromChannel = async () => {
+        const ch = _chanFor('invoke.stream.next')
+        for (;;) {
+          if (finished || handle === null) return { value: undefined, done: true }
+          let res
+          try {
+            res = await ch.call('invoke.stream.next', { handle }, timeoutMs)
+          } catch (err) {
+            await closeHandle()
+            finished = true
+            throw err
+          }
+          if (res.status >= 400) {
+            // The host has already closed the handle after a mid-stream failure.
+            handle = null
+            finished = true
+            throw new OrvaError(`invokeStream(${functionName}) failed: ${res.body}`, res.status)
+          }
+          const data = _data(res)
+          const b64 = data.chunk_b64 || ''
+          if (data.done) {
+            handle = null
+            finished = true
+          }
+          if (b64) return { value: new Uint8Array(Buffer.from(b64, 'base64')), done: false }
+          if (data.done) return { value: undefined, done: true }
+        }
+      }
       return {
         async next() {
+          if (finished) return { value: undefined, done: true }
           if (!started) {
             started = true
+            const ch = _chanFor('invoke.stream.open')
+            if (ch) {
+              viaChannel = true
+              const res = await ch.call('invoke.stream.open', { name: functionName, body: payload }, timeoutMs)
+              if (res.status === 404) throw new OrvaError(`function not found: ${functionName}`, 404)
+              if (res.status === 507) throw new OrvaError('call depth exceeded', 507)
+              if (res.status >= 400) {
+                throw new OrvaError(`invokeStream(${functionName}) failed: ${res.body}`, res.status)
+              }
+              handle = _data(res).handle
+              return nextFromChannel()
+            }
             const base = _apiBase()
             const token = _token()
             if (!base || !token) {
@@ -590,11 +660,14 @@ function invokeStream(functionName, payload = {}, { timeoutMs = DEFAULT_TIMEOUT_
             }
             reader = res.body.getReader()
           }
+          if (viaChannel) return nextFromChannel()
           const { value, done } = await reader.read()
           if (done) return { value: undefined, done: true }
           return { value, done: false }
         },
         async return() {
+          finished = true
+          await closeHandle()
           if (reader) await reader.cancel().catch(() => {})
           return { value: undefined, done: true }
         },
@@ -618,9 +691,10 @@ const jobs = {
       bodyObj.idempotency_window_seconds = opts.idempotencyWindowSeconds | 0
     }
 
-    const { status, body, headers } = await _request('POST', '/api/v1/jobs', { body: bodyObj })
+    const res = await _kv('jobs.enqueue', bodyObj, 'POST', '/api/v1/jobs', { body: bodyObj })
+    const { status, body, headers } = res
     if (status >= 400) throw new OrvaError(`jobs.enqueue failed: ${body}`, status)
-    const parsed = JSON.parse(body)
+    const parsed = _data(res)
     const replayed =
       (headers && headers.get && headers.get('x-idempotency-replayed') === 'true') ||
       parsed.replayed === true
@@ -641,11 +715,11 @@ const crons = {
     if (opts.payload !== undefined) bodyObj.payload = opts.payload
     if (opts.timezone) bodyObj.timezone = opts.timezone
     if (opts.enabled !== undefined) bodyObj.enabled = !!opts.enabled
-    const { status, body } = await _request('POST', '/api/v1/_internal/crons', {
+    const res = await _kv('crons.upsert', bodyObj, 'POST', '/api/v1/_internal/crons', {
       body: bodyObj,
     })
-    if (status >= 400) throw new OrvaError(`crons.upsert(${name}) failed: ${body}`, status)
-    return JSON.parse(body)
+    if (res.status >= 400) throw new OrvaError(`crons.upsert(${name}) failed: ${res.body}`, res.status)
+    return _data(res)
   },
 }
 
@@ -673,16 +747,15 @@ const trace = {
       // Fire-and-forget — never block the user's code waiting on span
       // ingestion. We deliberately swallow errors so a flaky loopback
       // never breaks the handler.
-      _request('POST', '/api/v1/_internal/spans', {
-        body: {
-          name,
-          started_at: startedAt.toISOString(),
-          duration_ms: durationMs,
-          status: ok ? 'ok' : 'error',
-          error_message: errMsg,
-          attributes: attrs,
-        },
-      }).catch(() => {})
+      const spanBody = {
+        name,
+        started_at: startedAt.toISOString(),
+        duration_ms: durationMs,
+        status: ok ? 'ok' : 'error',
+        error_message: errMsg,
+        attributes: attrs,
+      }
+      _kv('spans.emit', spanBody, 'POST', '/api/v1/_internal/spans', { body: spanBody }).catch(() => {})
     }
   },
 }

@@ -72,11 +72,72 @@ const scenarios = {
     return await attempt(() => kv.get('slow'))
   },
   async http() {
-    // channel absent: legacy HTTP transport; non-kv ops stay on HTTP too.
+    // channel absent: legacy HTTP transport; every op stays on HTTP.
     await kv.put('k', 'v')
     const v = await kv.get('k')
     const job = await orva.jobs.enqueue('fn2', { a: 1 })
     return { v, job }
+  },
+  async httpAll() {
+    const job = await orva.jobs.enqueue('fn2', { a: 1 })
+    const cron = await orva.crons.upsert('nightly', '0 3 * * *')
+    await orva.trace.span('work', async () => 1)
+    await new Promise((r) => setTimeout(r, 100))
+    const inv = await orva.invoke('callee', { q: 1 })
+    const chunks = []
+    for await (const c of orva.invokeStream('callee')) chunks.push(Buffer.from(c).toString())
+    return { job, cron, inv, chunks }
+  },
+  async opsOk() {
+    orva._setLease('L-1')
+    const job = await orva.jobs.enqueue('fn2', { a: 1 }, { maxAttempts: 5, idempotencyKey: 'k', idempotencyWindowSeconds: 60 })
+    const cron = await orva.crons.upsert('nightly', '0 3 * * *', { payload: { x: 1 }, timezone: 'UTC', enabled: true })
+    const spanRet = await orva.trace.span('work', async () => 7, { a: 1 })
+    await new Promise((r) => setTimeout(r, 100)) // span is fire-and-forget
+    const inv = await orva.invoke('callee', { q: 1 })
+    const invString = await orva.invoke('plain')
+    return { job, cron, spanRet, inv, invString }
+  },
+  async opsErrors() {
+    orva._setLease('L-1')
+    return {
+      notFound: await attempt(() => orva.invoke('missing')),
+      depth: await attempt(() => orva.invoke('deep')),
+      busy: await attempt(() => orva.invoke('busy')),
+      job: await attempt(() => orva.jobs.enqueue('bad')),
+      cron: await attempt(() => orva.crons.upsert('x', 'bad')),
+      spanSwallowed: await orva.trace.span('s', async () => 'fine'),
+    }
+  },
+  async streams() {
+    orva._setLease('L-1')
+    const text = (c) => `${Buffer.from(c).toString()}|${c.constructor.name}`
+    const full = []
+    for await (const c of orva.invokeStream('five', { p: 1 })) full.push(text(c))
+    const early = []
+    for await (const c of orva.invokeStream('five')) {
+      early.push(text(c))
+      if (early.length === 2) break
+    }
+    const mid = []
+    let midErr
+    try {
+      for await (const c of orva.invokeStream('mid')) mid.push(text(c))
+    } catch (e) {
+      midErr = errInfo(e)
+    }
+    const openErr = await attempt(async () => {
+      for await (const c of orva.invokeStream('missing')) void c
+    })
+    return { full, early, mid, midErr, openErr }
+  },
+  async streamEof() {
+    orva._setLease('L-1')
+    const got = []
+    const res = await attempt(async () => {
+      for await (const c of orva.invokeStream('five')) got.push(Buffer.from(c).toString())
+    })
+    return { got, res }
   },
 }
 

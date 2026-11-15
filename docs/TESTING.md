@@ -929,7 +929,8 @@ deployment ID, checks exact invoke responses and SDK KV writes, source/diff
 bundle bytes, then bundle-A/unbundled-B rollback in both directions without
 creating versions. It waits for active requests and all writer byte lanes to
 drain before deleting its functions. Use a scratch instance: the drain is
-instance-wide, and the journey needs a real sandbox and SDK egress access.
+instance-wide, and the journey needs a real sandbox plus a working SDK
+channel or legacy HTTP fallback.
 Sandbox failures fail this module, never skip (also with
 `ORVA_REQUIRE_SANDBOX=1`). It is auto-discovered by the existing E2E runner;
 no new workflow or runtime bundler is involved.
@@ -1584,7 +1585,7 @@ The execution row carries `"trigger":"job"`. Jobs tick every 5 s with
 concurrency 8. CLI: `orva jobs enqueue --fn X --data '…' [--at RFC3339]
 [--idempotency-key K] [--max-attempts N]`.
 
-### 4.9 KV — and the SDK's two hard prerequisites
+### 4.9 KV — channel behavior and compatibility
 
 ```js
 const { kv, context, log } = require('orva');
@@ -1602,18 +1603,19 @@ Operator view: `orva … kv list <fn>`, `orva … kv get <fn> qa-counter` (the `
 is the `--endpoint`/`--api-key` pair, as everywhere in this section), and
 `GET /api/v1/functions/{id}/kv` → entries with `value` and `size_bytes`.
 
-**Two failure modes worth their own test cases, both hit during the survey:**
+**Current SDK transport:** KV, invoke/invokeStream, jobs, crons, and spans use
+an inherited per-worker socket channel and work in `network_mode: none`. The
+legacy HTTP endpoints and SDK fallback remain for older installed adapters or
+when the channel is missing. `test_sdk_channel.py` covers channel KV behavior: module-scope and
+request-scope operations, concurrency, cross-function isolation, background KV
+after a dispatch ends, worker-kill recovery, Python fork/subprocess behavior, size limits,
+per-op metrics, and legacy HTTP transport. The new `test_sdk_channel_ops.py`
+module covers the expanded SDK operation set; these entries
+describe test scope, not a claim that either module has passed in this checkout. External network requests still require
+`network_mode: egress`.
 
-1. **`network_mode` must be `egress`.** The SDK reaches orvad over HTTP. With
-   the default `none`:
-   `HTTP 500 {"error":"Internal function error","message":"request failed: fetch failed"}`.
-   The builder emits `builder.SDKNoneWarning` on such a deploy (it predicts
-   `ENETUNREACH`; the observed text is `fetch failed` — recognizable, not
-   greppable). Fix with
-   `PUT /api/v1/functions/{id} {"network_mode":"egress"}` and expect a cold
-   start on the next invoke.
-2. **The bundled `orva` module is CommonJS-only; ESM handlers cannot import
-   it.** `runtimes/node/adapter.js:30-33` patches `Module._nodeModulePaths`,
+**A separate compatibility constraint:** the bundled `orva` module is
+CommonJS-only; ESM handlers cannot import it. `runtimes/node/adapter.js:30-33` patches `Module._nodeModulePaths`,
    which is the **CJS** resolver only — Node's ESM loader ignores it. Verified:
    `import { kv } from 'orva'` dies at load with
    `Cannot find package 'orva' imported from /code/handler.js`, surfaced as
@@ -1638,7 +1640,8 @@ return { callee_status: res.status ?? res.statusCode, depth: context.callDepth }
 The callee's execution row has `"trigger":"f2f"` and **shares the caller's
 `trace_id`** — that is how you assert causal propagation. Signature is
 `invoke(name, payload, {timeoutMs})`; 404 → `OrvaError`, 507 → call depth
-exceeded. Needs `network_mode: egress` like every SDK call.
+exceeded. Uses the SDK channel on current adapters; only function-authored outbound
+network requests need `network_mode: egress`.
 
 All four triggers — `cron`, `http`, `job`, `f2f` — were confirmed in one
 function's execution list.
