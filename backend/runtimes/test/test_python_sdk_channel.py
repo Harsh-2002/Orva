@@ -276,23 +276,12 @@ class ChannelTests(unittest.TestCase):
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     seen = []
-    traces = []
 
     def _do(self):
         n = int(self.headers.get("content-length") or 0)
         self.rfile.read(n)
         type(self).seen.append(f"{self.command} {self.path}")
-        type(self).traces.append(self.headers.get("x-orva-trace-id"))
-        if self.path.startswith("/api/v1/jobs"):
-            body = b'{"id":"job1"}'
-        elif self.path.endswith("/stream"):
-            body = b"aabb"
-        elif self.path.startswith("/api/v1/_internal/invoke/"):
-            body = b'{"statusCode":200,"headers":{},"body":"{\\"ok\\":1}"}'
-        elif self.path.startswith("/api/v1/_internal/crons"):
-            body = b'{"id":"c1"}'
-        else:
-            body = b'{"value":"v"}' if self.command == "GET" else b"{}"
+        body = b"{}"
         self.send_response(200)
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(body)))
@@ -305,10 +294,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-class HTTPFallbackTests(unittest.TestCase):
+class UnavailableTests(unittest.TestCase):
     def serve(self):
         _Handler.seen = []
-        _Handler.traces = []
         srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.server_close)
@@ -318,36 +306,41 @@ class HTTPFallbackTests(unittest.TestCase):
     def env(self, port):
         return {"ORVA_API_BASE": f"http://127.0.0.1:{port}", "ORVA_INTERNAL_TOKEN": "tok", "ORVA_FUNCTION_ID": "f1"}
 
-    def test_http_when_env_absent(self):
+    def test_all_operations_fail_closed_without_http(self):
         port = self.serve()
-        out, frames = run("http", lambda m, c: self.fail("channel used"), env=self.env(port), channel=False)
-        self.assertEqual(out["v"], "v")
-        self.assertEqual(frames, [])
-        self.assertEqual(_Handler.seen[:2], ["PUT /api/v1/_kv/f1/k", "GET /api/v1/_kv/f1/k"])
+        for name, env in [
+            ("SDK permission disabled", {}),
+            ("protocol missing", {"ORVA_SDK_FD": "3"}),
+            ("protocol unsupported", {"ORVA_SDK_FD": "3", "ORVA_SDK_PROTO": "2"}),
+            ("descriptor missing", {"ORVA_SDK_PROTO": "1"}),
+            ("descriptor invalid", {"ORVA_SDK_FD": "bad", "ORVA_SDK_PROTO": "1"}),
+            ("descriptor negative", {"ORVA_SDK_FD": "-1", "ORVA_SDK_PROTO": "1"}),
+            ("descriptor is standard I/O", {"ORVA_SDK_FD": "1", "ORVA_SDK_PROTO": "1"}),
+            ("descriptor not a socket", {"ORVA_TEST_NONSOCKET": "1", "ORVA_SDK_PROTO": "1"}),
+            ("descriptor closed", {"ORVA_SDK_FD": "999999", "ORVA_SDK_PROTO": "1"}),
+            ("descriptor out of range", {"ORVA_SDK_FD": "9" * 100, "ORVA_SDK_PROTO": "1"}),
+            ("descriptor non-ASCII", {"ORVA_SDK_FD": "²", "ORVA_SDK_PROTO": "1"}),
+        ]:
+            with self.subTest(name=name):
+                out, frames = run("unavailable", lambda m, c: self.fail("channel used"),
+                                  env={**self.env(port), **env}, channel=False)
+                self.assertEqual(len(out["errors"]), 13)
+                for op, result in out["errors"].items():
+                    self.assertEqual(result.get("err", {}).get("name"), "OrvaUnavailableError", op)
+                    self.assertEqual(result["err"]["status"], 0, op)
+                    self.assertRegex(result["err"]["message"], r"sdk permission.*refresh.*adapter", op)
+                self.assertTrue(out["span_ran"])
+                self.assertEqual(out["span_error"]["err"]["message"], "user failure")
+                self.assertEqual(frames, [])
+                self.assertEqual(_Handler.seen, [])
 
-    def test_http_when_proto_unset(self):
-        port = self.serve()
-        out, frames = run("http", lambda m, c: self.fail("channel used"),
-                          env={**self.env(port), "ORVA_SDK_FD": "3"}, channel=False)
-        self.assertEqual(out["v"], "v")
-
-    def test_every_op_stays_on_http_when_channel_absent(self):
-        port = self.serve()
-        out, frames = run("http_all", lambda m, c: self.fail("channel used"),
-                          env={**self.env(port), "ORVA_TRACE_ID": "tr1"}, channel=False)
+    def test_explicit_test_hook_and_reset(self):
+        out, frames = run("test_hook", lambda m, c: self.fail("channel used"),
+                          env={"ORVA_FUNCTION_ID": "f1"}, channel=False)
+        self.assertEqual(out["value"], "mock")
+        self.assertEqual(out["seen"], [{"method": "GET", "path": "/api/v1/_kv/f1/a%2Fb"}])
+        self.assertEqual(out["restored"]["err"]["name"], "OrvaUnavailableError")
         self.assertEqual(frames, [])
-        self.assertEqual(out["job"]["id"], "job1")
-        self.assertEqual(out["cron"], {"id": "c1"})
-        self.assertEqual(out["inv"], {"statusCode": 200, "headers": {}, "body": {"ok": 1}})
-        self.assertEqual("".join(out["chunks"]), "aabb")
-        self.assertEqual(
-            sorted(_Handler.seen),
-            sorted([
-                "POST /api/v1/jobs", "POST /api/v1/_internal/crons", "POST /api/v1/_internal/spans",
-                "POST /api/v1/_internal/invoke/callee", "POST /api/v1/_internal/invoke/callee/stream",
-            ]),
-        )
-        self.assertTrue(all(t == "tr1" for t in _Handler.traces), "HTTP keeps sending trace headers")
 
 
 IDENT_ENV = {"ORVA_TRACE_ID": "tr1", "ORVA_SPAN_ID": "sp1", "ORVA_EXECUTION_ID": "ex1",

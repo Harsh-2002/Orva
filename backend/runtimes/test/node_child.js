@@ -71,22 +71,41 @@ const scenarios = {
     orva._setChannelTimeout(150)
     return await attempt(() => kv.get('slow'))
   },
-  async http() {
-    // channel absent: legacy HTTP transport; every op stays on HTTP.
-    await kv.put('k', 'v')
-    const v = await kv.get('k')
-    const job = await orva.jobs.enqueue('fn2', { a: 1 })
-    return { v, job }
-  },
-  async httpAll() {
-    const job = await orva.jobs.enqueue('fn2', { a: 1 })
-    const cron = await orva.crons.upsert('nightly', '0 3 * * *')
-    await orva.trace.span('work', async () => 1)
+  async unavailable() {
+    if (process.env.ORVA_TEST_NONSOCKET) {
+      process.env.ORVA_SDK_FD = String(require('node:fs').openSync('/dev/null', 'r'))
+    }
+    const calls = {
+      get: () => kv.get('k'),
+      put: () => kv.put('k', 'v'),
+      delete: () => kv.delete('k'),
+      list: () => kv.list(),
+      getMany: () => kv.getMany(['k']),
+      putMany: () => kv.putMany([{ key: 'k', value: 1 }]),
+      deleteMany: () => kv.deleteMany(['k']),
+      incr: () => kv.incr('k'),
+      cas: () => kv.cas('k', null, 1),
+      invoke: () => orva.invoke('callee'),
+      stream: async () => { for await (const c of orva.invokeStream('callee')) void c },
+      job: () => orva.jobs.enqueue('fn2'),
+      cron: () => orva.crons.upsert('nightly', '0 3 * * *'),
+    }
+    const errors = {}
+    for (const [name, fn] of Object.entries(calls)) errors[name] = await attempt(fn)
+    const spanRet = await orva.trace.span('work', async () => 7)
+    const spanError = await attempt(() => orva.trace.span('error', () => { throw new Error('user failure') }))
     await new Promise((r) => setTimeout(r, 100))
-    const inv = await orva.invoke('callee', { q: 1 })
-    const chunks = []
-    for await (const c of orva.invokeStream('callee')) chunks.push(Buffer.from(c).toString())
-    return { job, cron, inv, chunks }
+    return { errors, spanRet, spanError }
+  },
+  async testHook() {
+    const seen = []
+    orva.__test_mode__({ request: async (method, path, opts) => {
+      seen.push({ method, path, opts })
+      return { status: 200, body: '{"value":"mock"}' }
+    } })
+    const value = await kv.get('a/b')
+    orva.__test_mode__(null)
+    return { value, seen, restored: await attempt(() => kv.get('k')) }
   },
   async opsOk() {
     orva._setLease('L-1')

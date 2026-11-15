@@ -90,22 +90,47 @@ def timeout():
     return attempt(lambda: kv.get("slow"))
 
 
-def http():
-    kv.put("k", "v")
-    v = kv.get("k")
-    job = orva.jobs.enqueue("fn2", {"a": 1})
-    return {"v": v, "job": job}
-
-
-def http_all():
-    job = orva.jobs.enqueue("fn2", {"a": 1})
-    cron = orva.crons.upsert("nightly", "0 3 * * *")
+def unavailable():
+    if os.environ.get("ORVA_TEST_NONSOCKET"):
+        os.environ["ORVA_SDK_FD"] = str(os.open("/dev/null", os.O_RDONLY))
+    calls = {
+        "get": lambda: kv.get("k"),
+        "put": lambda: kv.put("k", "v"),
+        "delete": lambda: kv.delete("k"),
+        "list": lambda: kv.list(),
+        "get_many": lambda: kv.get_many(["k"]),
+        "put_many": lambda: kv.put_many([{"key": "k", "value": 1}]),
+        "delete_many": lambda: kv.delete_many(["k"]),
+        "incr": lambda: kv.incr("k"),
+        "cas": lambda: kv.cas("k", None, 1),
+        "invoke": lambda: orva.invoke("callee"),
+        "stream": lambda: list(orva.invoke_stream("callee")),
+        "job": lambda: orva.jobs.enqueue("fn2"),
+        "cron": lambda: orva.crons.upsert("nightly", "0 3 * * *"),
+    }
+    errors = {name: attempt(fn) for name, fn in calls.items()}
+    span_ran = False
     with orva.trace.span("work"):
-        pass
-    time.sleep(0.1)
-    inv = orva.invoke("callee", {"q": 1})
-    chunks = [c.decode() for c in orva.invoke_stream("callee")]
-    return {"job": job, "cron": cron, "inv": inv, "chunks": chunks}
+        span_ran = True
+
+    def fail_span():
+        with orva.trace.span("error"):
+            raise ValueError("user failure")
+
+    return {"errors": errors, "span_ran": span_ran, "span_error": attempt(fail_span)}
+
+
+def test_hook():
+    seen = []
+
+    def request(method, path, opts):
+        seen.append({"method": method, "path": path})
+        return 200, b'{"value":"mock"}'
+
+    orva.__test_mode__({"request": request})
+    value = kv.get("a/b")
+    orva.__test_mode__(None)
+    return {"value": value, "seen": seen, "restored": attempt(lambda: kv.get("k"))}
 
 
 def ops_ok():

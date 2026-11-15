@@ -1,9 +1,7 @@
 // Orva Node.js SDK — kv, invoke, jobs, crons, trace, log, context.
 //
-// Routes through ORVA_API_BASE using the function-scoped ORVA_INTERNAL_TOKEN
-// injected at worker spawn. Both env vars must be present in
-// production; absent in tests where the SDK throws OrvaUnavailableError
-// (unless __test_mode__ has supplied an override implementation).
+// Uses only the inherited worker SDK channel. Without it, operations throw
+// OrvaUnavailableError (unless __test_mode__ supplies an implementation).
 //
 // One-file design: no build step, no deps beyond the Node standard
 // library. The shape mirrors the Python SDK byte-for-byte on the wire so
@@ -11,12 +9,8 @@
 
 'use strict'
 
-// SDK version baked at adapter-embed time. Bumped in lockstep with the
-// server. The string is sent on every internal-token call so operators
-// can see drift in deployment logs.
+// SDK version baked at adapter-embed time.
 const SDK_VERSION = '0.7.0'
-
-const COMMON_HEADERS = { 'Content-Type': 'application/json' }
 
 // ── Errors ──────────────────────────────────────────────────────────
 
@@ -30,7 +24,7 @@ class OrvaError extends Error {
 
 class OrvaUnavailableError extends OrvaError {
   constructor(message) {
-    super(message, 0)
+    super(`${message}. Check the function's sdk permission and refresh the runtime adapter.`, 0)
     this.name = 'OrvaUnavailableError'
   }
 }
@@ -55,8 +49,6 @@ function __test_mode__(impl) {
 
 // ── Environment accessors ───────────────────────────────────────────
 
-const _apiBase = () => process.env.ORVA_API_BASE || ''
-const _token = () => process.env.ORVA_INTERNAL_TOKEN || ''
 const _fnID = () => process.env.ORVA_FUNCTION_ID || ''
 const _execID = () => process.env.ORVA_EXECUTION_ID || ''
 const _traceID = () => process.env.ORVA_TRACE_ID || ''
@@ -65,68 +57,7 @@ const _callDepth = () => parseInt(process.env.ORVA_CALL_DEPTH || '0', 10) || 0
 const _timeoutMs = () => parseInt(process.env.ORVA_TIMEOUT_MS || '30000', 10) || 30000
 const _memoryMb = () => parseInt(process.env.ORVA_MEMORY_MB || '64', 10) || 64
 
-function _traceHeaders() {
-  const h = {}
-  const trace = _traceID()
-  const span = _spanID()
-  const fn = _fnID()
-  const exec = _execID()
-  if (trace) h['X-Orva-Trace-Id'] = trace
-  if (span) h['X-Orva-Span-Id'] = span
-  if (exec) h['X-Orva-Execution-Id'] = exec
-  h['X-Orva-SDK-Version'] = SDK_VERSION
-  return h
-}
-
-// ── HTTP transport ──────────────────────────────────────────────────
-
 const DEFAULT_TIMEOUT_MS = 30000
-
-async function _request(method, path, opts = {}) {
-  if (_testImpl && _testImpl.request) {
-    return _testImpl.request(method, path, opts)
-  }
-  const base = _apiBase()
-  const token = _token()
-  if (!base || !token) {
-    throw new OrvaUnavailableError(
-      'Orva SDK not available (missing ORVA_API_BASE or ORVA_INTERNAL_TOKEN)'
-    )
-  }
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const controller =
-    typeof AbortController === 'function' ? new AbortController() : null
-  const tid = controller
-    ? setTimeout(() => controller.abort(new Error('timeout')), timeoutMs)
-    : null
-  const init = {
-    method,
-    headers: {
-      'X-Orva-Internal-Token': token,
-      ...COMMON_HEADERS,
-      ..._traceHeaders(),
-      ...(opts.headers || {}),
-    },
-    signal: controller ? controller.signal : undefined,
-  }
-  if (opts.body != null) {
-    init.body =
-      typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)
-  }
-  let res
-  try {
-    res = await fetch(base + path, init)
-  } catch (err) {
-    if (tid) clearTimeout(tid)
-    if (err && err.name === 'AbortError') {
-      throw new OrvaError(`request timed out after ${timeoutMs}ms`, 0)
-    }
-    throw new OrvaError(`request failed: ${err.message || err}`, 0)
-  }
-  if (tid) clearTimeout(tid)
-  const text = await res.text()
-  return { status: res.status, body: text, headers: res.headers }
-}
 
 // ── SDK channel ─────────────────────────────────────────────────────
 //
@@ -134,33 +65,13 @@ async function _request(method, path, opts = {}) {
 // ORVA_SDK_FD (with ORVA_SDK_PROTO=1). Frames are [u32 BE length][JSON];
 // requests {id, op, lease?, a}, replies {id, ok, r | e:{status,code,message}}.
 // The client never sends identity: the host derives it from the connection
-// and the lease. Without the env pair (or with a bad fd) the SDK keeps using
-// HTTP, unchanged. Protocol: docs of the SDK channel, v1.
+// and the lease. Missing or invalid channel configuration fails closed.
 
 const _net = require('net')
 const _fs = require('fs')
 
 const MAX_FRAME = 4 << 20 // 4 MiB, both directions
 const MAX_INFLIGHT = 32 // host refuses the 33rd with 429, so queue instead
-
-// Ops served over the channel. With no channel (or in test mode) every op
-// keeps using its HTTP route.
-const _CHANNEL_OPS = new Set([
-  'kv.get',
-  'kv.put',
-  'kv.delete',
-  'kv.list',
-  'kv.batch',
-  'kv.incr',
-  'kv.cas',
-  'invoke',
-  'invoke.stream.open',
-  'invoke.stream.next',
-  'invoke.stream.close',
-  'jobs.enqueue',
-  'crons.upsert',
-  'spans.emit',
-])
 
 // The adapter stores the per-dispatch lease here (it does not import the SDK).
 const _LEASE_KEY = Symbol.for('orva.sdk.lease')
@@ -169,7 +80,7 @@ function _setLease(lease) {
   globalThis[_LEASE_KEY] = typeof lease === 'string' ? lease : ''
 }
 
-// Per-call deadline (queue wait included); same default as the HTTP path.
+// Per-call deadline includes queue wait.
 let _channelTimeoutMs = DEFAULT_TIMEOUT_MS
 function _setChannelTimeout(ms) {
   _channelTimeoutMs = ms
@@ -329,6 +240,7 @@ function _channel() {
   const raw = process.env.ORVA_SDK_FD || ''
   if (!/^\d+$/.test(raw)) return _chan
   const fd = parseInt(raw, 10)
+  if (!Number.isSafeInteger(fd) || fd < 3) return _chan
   try {
     if (!_fs.fstatSync(fd).isSocket()) return _chan
     _chan = new _Channel(fd)
@@ -340,9 +252,7 @@ function _channel() {
 
 // ── KV ──────────────────────────────────────────────────────────────
 //
-// Every kv call goes through _kv(): the op name picks the private SDK channel
-// when one is open (see "SDK channel" below) and the legacy HTTP route
-// otherwise. Channel args are the HTTP request bodies minus identity:
+// Every kv call goes through the private SDK channel, without identity fields:
 //   kv.get {key}                       -> {value, expires_at?}   (404 = missing)
 //   kv.put {key, value, ttl_seconds?}  -> {}
 //   kv.delete {key}                    -> {}                     (404 ignored)
@@ -351,21 +261,21 @@ function _channel() {
 //   kv.incr {key, delta, ttl_seconds?} -> {value}
 //   kv.cas {key, expected, new, ttl_seconds?} -> {ok, current?}
 
-function _kv(op, args, method, path, opts) {
-  if (!(_testImpl && _testImpl.request) && _CHANNEL_OPS.has(op)) {
-    const ch = _channel()
-    if (ch) return ch.call(op, args, opts && opts.timeoutMs)
+async function _kv(op, args, method, path, opts) {
+  // Method/path metadata exists only for the public unit-test hook.
+  if (_testImpl && _testImpl.request) {
+    return _testImpl.request(method, path, opts || {})
   }
-  return _request(method, path, opts)
+  return _requireChannel().call(op, args, opts && opts.timeoutMs)
 }
 
-// The channel, or null when this call must use HTTP (no channel, or test mode).
-function _chanFor(op) {
-  if ((_testImpl && _testImpl.request) || !_CHANNEL_OPS.has(op)) return null
-  return _channel()
+function _requireChannel() {
+  const ch = _channel()
+  if (!ch) throw new OrvaUnavailableError('Orva SDK channel unavailable (missing or invalid descriptor/protocol)')
+  return ch
 }
 
-// Parsed JSON of a reply from either transport.
+// Parsed JSON of a channel or test-hook reply.
 function _data(res) {
   return res.data !== undefined ? res.data : JSON.parse(res.body)
 }
@@ -559,29 +469,23 @@ async function invoke(functionName, payload = {}, { timeoutMs = DEFAULT_TIMEOUT_
 
 /**
  * Streaming variant. Returns an async iterable of Uint8Array chunks. The
- * server's chunked-transfer response is piped straight through; the
- * inner statusCode arrives via the response's HTTP status, inner headers
- * via X-Orva-Inner-* response headers (available on the iterable's
- * `.headers` after the first chunk).
+ * inherited channel supplies one response chunk per next call.
  */
 function invokeStream(functionName, payload = {}, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return {
     [Symbol.asyncIterator]() {
-      let reader = null
       let started = false
-      let viaChannel = false
       let handle = null // channel stream handle while the host holds it open
       let finished = false
       const closeHandle = async () => {
         const h = handle
         handle = null
         if (h === null) return
-        const ch = _chanFor('invoke.stream.close')
-        if (ch) await ch.call('invoke.stream.close', { handle: h }, timeoutMs).catch(() => {})
+        await _requireChannel().call('invoke.stream.close', { handle: h }, timeoutMs).catch(() => {})
       }
       // A channel reply is one chunk per call; empty non-final chunks are skipped.
       const nextFromChannel = async () => {
-        const ch = _chanFor('invoke.stream.next')
+        const ch = _requireChannel()
         for (;;) {
           if (finished || handle === null) return { value: undefined, done: true }
           let res
@@ -613,62 +517,20 @@ function invokeStream(functionName, payload = {}, { timeoutMs = DEFAULT_TIMEOUT_
           if (finished) return { value: undefined, done: true }
           if (!started) {
             started = true
-            const ch = _chanFor('invoke.stream.open')
-            if (ch) {
-              viaChannel = true
-              const res = await ch.call('invoke.stream.open', { name: functionName, body: payload }, timeoutMs)
-              if (res.status === 404) throw new OrvaError(`function not found: ${functionName}`, 404)
-              if (res.status === 507) throw new OrvaError('call depth exceeded', 507)
-              if (res.status >= 400) {
-                throw new OrvaError(`invokeStream(${functionName}) failed: ${res.body}`, res.status)
-              }
-              handle = _data(res).handle
-              return nextFromChannel()
-            }
-            const base = _apiBase()
-            const token = _token()
-            if (!base || !token) {
-              throw new OrvaUnavailableError(
-                'Orva SDK not available (missing ORVA_API_BASE or ORVA_INTERNAL_TOKEN)'
-              )
-            }
-            const controller = new AbortController()
-            const tid = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs)
-            let res
-            try {
-              res = await fetch(`${base}/api/v1/_internal/invoke/${functionName}/stream`, {
-                method: 'POST',
-                headers: {
-                  'X-Orva-Internal-Token': token,
-                  ...COMMON_HEADERS,
-                  ..._traceHeaders(),
-                  'X-Orva-Call-Depth': String(_callDepth()),
-                },
-                body: JSON.stringify(payload),
-                signal: controller.signal,
-              })
-            } catch (err) {
-              clearTimeout(tid)
-              throw new OrvaError(`invokeStream(${functionName}) failed: ${err.message || err}`, 0)
-            }
-            clearTimeout(tid)
+            const ch = _requireChannel()
+            const res = await ch.call('invoke.stream.open', { name: functionName, body: payload }, timeoutMs)
             if (res.status === 404) throw new OrvaError(`function not found: ${functionName}`, 404)
             if (res.status === 507) throw new OrvaError('call depth exceeded', 507)
             if (res.status >= 400) {
-              const text = await res.text()
-              throw new OrvaError(`invokeStream(${functionName}) failed: ${text}`, res.status)
+              throw new OrvaError(`invokeStream(${functionName}) failed: ${res.body}`, res.status)
             }
-            reader = res.body.getReader()
+            handle = _data(res).handle
           }
-          if (viaChannel) return nextFromChannel()
-          const { value, done } = await reader.read()
-          if (done) return { value: undefined, done: true }
-          return { value, done: false }
+          return nextFromChannel()
         },
         async return() {
           finished = true
           await closeHandle()
-          if (reader) await reader.cancel().catch(() => {})
           return { value: undefined, done: true }
         },
       }
@@ -745,7 +607,7 @@ const trace = {
     } finally {
       const durationMs = Date.now() - t0
       // Fire-and-forget — never block the user's code waiting on span
-      // ingestion. We deliberately swallow errors so a flaky loopback
+      // ingestion. We deliberately swallow errors so an unavailable channel
       // never breaks the handler.
       const spanBody = {
         name,
