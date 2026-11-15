@@ -84,6 +84,12 @@ type SandboxTemplate struct {
 	// network_mode=none have no network stack at all and cannot use the SDK.
 	APIBaseURL string
 
+	// SDKHandler serves SDK calls arriving over each worker's private channel
+	// (kv.* so far). The channel is enabled per worker only when this is set
+	// AND the installed adapter declares support, so a nil handler or an older
+	// adapter silently keeps the HTTP transport.
+	SDKHandler sandbox.SDKHandler
+
 	// EgressPolicy is consulted at every network_mode=egress spawn and returns
 	// the compiled NSTUN policy to run the worker under. Returning an error
 	// aborts the spawn: NSTUN allows anything no rule matches, so a worker
@@ -965,6 +971,9 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 				// RefreshForDeploy retires the function's workers, and each
 				// one's credential dies with its process.
 				OnExit: releaseSDKToken,
+				// SDK channel: identity is the function this worker serves.
+				FunctionID: fn.ID,
+				SDKHandler: tmpl.SDKHandler,
 			})
 			if err != nil {
 				// No process, so nothing will ever call OnExit for it.

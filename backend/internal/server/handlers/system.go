@@ -287,6 +287,7 @@ func (h *SystemHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	// Sandbox spawn-duration histogram, populated by the pool layer on every
 	// successful worker spawn.
 	writeHistogram(w, "orva_sandbox_spawn_duration_ms", "nsjail sandbox spawn duration in milliseconds.", h.Metrics.SnapshotSpawnHistogram())
+	sandbox.WriteSDKMetrics(w)
 	promHeader(w, "orva_sandbox_active", "gauge", "Sandboxes currently executing.")
 	fmt.Fprintf(w, "orva_sandbox_active %d\n", active)
 	promHeader(w, "orva_sandbox_total", "counter", "Lifetime sandbox executions.")

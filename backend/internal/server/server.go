@@ -26,6 +26,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/scheduler"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
+	"github.com/Harsh-2002/Orva/backend/internal/sdkhost"
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
@@ -140,7 +141,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 			ReapInterval:   30 * time.Second,
 			EagerWarmup:    true,
 		},
-		newSandboxTemplate(cfg, met, sdkAuth.Mint, apiBase),
+		newSandboxTemplate(cfg, met, sdkAuth.Mint, apiBase, sdkhost.New(db).Handle),
 		db, reg, limiter,
 	)
 
@@ -323,7 +324,7 @@ func New(cfg *config.Config, db *database.Database) *Server {
 	}
 }
 
-func newSandboxTemplate(cfg *config.Config, met *metrics.Metrics, sdkToken func(string) (string, func()), apiBase string) pool.SandboxTemplate {
+func newSandboxTemplate(cfg *config.Config, met *metrics.Metrics, sdkToken func(string) (string, func()), apiBase string, sdkHandler sandbox.SDKHandler) pool.SandboxTemplate {
 	return pool.SandboxTemplate{
 		NsjailBin:      cfg.Sandbox.NsjailBin,
 		RootfsDir:      cfg.Sandbox.RootfsDir,
@@ -332,6 +333,7 @@ func newSandboxTemplate(cfg *config.Config, met *metrics.Metrics, sdkToken func(
 		DefaultMaxPids: cfg.Functions.DefaultMaxPids,
 		SDKToken:       sdkToken,
 		APIBaseURL:     apiBase,
+		SDKHandler:     sdkHandler,
 		Metrics:        met,
 	}
 }

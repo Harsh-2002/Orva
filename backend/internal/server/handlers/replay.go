@@ -15,6 +15,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
@@ -195,6 +196,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 
 	releaseExecution := h.SDKAuth.BindExecution(newExecID, fn.ID, traceID, spanID, start, 0)
 	defer releaseExecution()
+	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, newExecID, traceID, spanID, 0, start))
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	duration := time.Since(start)
 	stderr = executionlogs.Process(h.DB, stderr, fn.ID, newExecID, traceID, spanID)

@@ -25,6 +25,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
@@ -416,6 +417,7 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 
 	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, ranAt, 0)
 	defer releaseExecution()
+	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, 0, ranAt))
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {
 		reqErr = err
@@ -759,6 +761,7 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *datab
 
 	releaseExecution := s.sdkAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt, 0)
 	defer releaseExecution()
+	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, 0, startedAt))
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	if err != nil {
 		reqErr = err

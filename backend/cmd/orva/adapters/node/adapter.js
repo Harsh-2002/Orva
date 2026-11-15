@@ -1,3 +1,4 @@
+// orva-sdk-proto:1
 // Orva Node.js adapter — universal handler loader.
 //
 // Accepts a wide range of export conventions so existing code from AWS
@@ -471,6 +472,12 @@ writeFrame({ type: 'ready', stderr_sync: true });
     if (frame.type === 'quit') {
       writeFrame({ type: 'bye' });
       process.exit(0);
+    }
+    if (frame.type === 'lease') {
+      // Per-dispatch SDK-channel lease; the SDK reads it from this global
+      // and attaches it to every frame. Not a request: keep reading.
+      globalThis[Symbol.for('orva.sdk.lease')] = typeof frame.lease === 'string' ? frame.lease : '';
+      continue;
     }
     if (frame.type !== 'request') continue;
 

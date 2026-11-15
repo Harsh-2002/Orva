@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,15 @@ type Worker struct {
 	stderr  io.ReadCloser
 	Spawned time.Time
 	Served  atomic.Int64
+
+	// sdk is the host end of the per-worker SDK channel (nil when disabled).
+	sdk net.Conn
+	// sdkEnabled gates the lease frame: a worker without the channel must see
+	// exactly the stdin bytes it always did.
+	sdkEnabled bool
+	// disp is the dispatch currently running on the worker; the SDK server
+	// validates every frame's lease against it. Nil between dispatches.
+	disp atomic.Pointer[dispatchState]
 
 	// CgroupPath is resolved asynchronously after Spawn (nsjail names the
 	// cgroup after its jailed child's PID, which isn't known until after fork).
@@ -131,6 +141,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.sdkChannel = cfg.SDKHandler != nil && adapterSupportsSDK(rootfs, cfg.Language)
 	args, childEnv, err := buildArgs(cfg, rootfs, entrypoint)
 	if err != nil {
 		return nil, err
@@ -163,10 +174,29 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	// nsjail + everything inside the sandbox.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
+	var sdkHost net.Conn
+	if cfg.sdkChannel {
+		host, child, perr := newSDKPair()
+		if perr != nil {
+			stdinPipe.Close()
+			stdoutPipe.Close()
+			stderrPipe.Close()
+			return nil, perr
+		}
+		sdkHost = host
+		cmd.ExtraFiles = []*os.File{child}
+		// Whatever happens next the parent must not keep the child's end:
+		// the host only sees EOF when every copy of it is gone.
+		defer child.Close()
+	}
+
 	if err := cmd.Start(); err != nil {
 		stdinPipe.Close()
 		stdoutPipe.Close()
 		stderrPipe.Close()
+		if sdkHost != nil {
+			sdkHost.Close()
+		}
 		return nil, fmt.Errorf("start nsjail: %w", err)
 	}
 
@@ -181,8 +211,23 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		stderrDone: make(chan struct{}),
 		frames:     make(chan frameRead),
 		readStop:   make(chan struct{}),
+		sdk:        sdkHost,
+		sdkEnabled: sdkHost != nil,
 	}
 	go w.readLoop()
+	if sdkHost != nil {
+		srv := &sdkServer{
+			conn:       sdkHost,
+			functionID: cfg.FunctionID,
+			handler:    cfg.SDKHandler,
+			state:      w.disp.Load,
+			// A protocol violation means the sandbox is misbehaving: do not
+			// reuse it. A reply that cannot be written means it stopped reading.
+			violation: w.markDead,
+			kill:      func() { _ = w.Kill() },
+		}
+		go srv.serve()
+	}
 
 	// Start draining before Wait. exec.Cmd.Wait closes its parent-side pipes
 	// after process exit, so reversing this order can lose stderr from a fast
@@ -207,6 +252,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		<-w.stderrDone
 		_ = cmd.Wait()
 		w.dead.Store(true)
+		w.revokeLease()
 		close(w.waitDone)
 
 		// The worker is genuinely gone now, so anything scoped to its
@@ -217,6 +263,9 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		// serving until it drains. Releasing there would 401 a live request.
 		if cfg.OnExit != nil {
 			cfg.OnExit()
+		}
+		if w.sdk != nil {
+			_ = w.sdk.Close()
 		}
 
 		// Reclaim the cgroup HERE, not at Kill time. nsjail is SIGKILLed, so
@@ -554,6 +603,9 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 	unlock := func() {
 		if !unlocked {
 			unlocked = true
+			// Every exit path, including the end of a stream, runs through
+			// here, so the lease cannot outlive the dispatch.
+			w.revokeLease()
 			w.mu.Unlock()
 		}
 	}
@@ -569,9 +621,19 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 	// Compose the request frame: {"type":"request","event":<raw>}.
 	reqFrame, _ := json.Marshal(frameRequest{Type: "request", Event: json.RawMessage(eventJSON)})
 
+	// The lease is published before anything is written, so a frame the
+	// adapter sends the instant it reads the request is already attributable.
+	leaseFrame := w.beginLease(ctx)
+
 	// Wire write must complete or we bail.
 	writeErrCh := make(chan error, 1)
 	go func() {
+		if leaseFrame != nil {
+			if err := writeFrame(w.stdin, leaseFrame); err != nil {
+				writeErrCh <- err
+				return
+			}
+		}
 		writeErrCh <- writeFrame(w.stdin, reqFrame)
 	}()
 
@@ -769,8 +831,31 @@ func (w *Worker) IsExpired(ttl time.Duration, maxUses int64) bool {
 	return false
 }
 
+// beginLease publishes this dispatch's identity and returns the lease frame to
+// write ahead of the request, or nil for a channel-less worker.
+func (w *Worker) beginLease(ctx context.Context) []byte {
+	if !w.sdkEnabled {
+		return nil
+	}
+	st := newDispatchState(ctx)
+	if old := w.disp.Swap(st); old != nil {
+		old.cancel()
+	}
+	frame, _ := json.Marshal(map[string]string{"type": "lease", "lease": st.info.Lease})
+	return frame
+}
+
+// revokeLease ends the current dispatch's authority: later frames carrying its
+// lease are refused and callee work derived from its ctx is cancelled.
+func (w *Worker) revokeLease() {
+	if st := w.disp.Swap(nil); st != nil {
+		st.cancel()
+	}
+}
+
 func (w *Worker) markDead() {
 	w.dead.Store(true)
+	w.revokeLease()
 	if w.readStop != nil {
 		w.readStopOnce.Do(func() { close(w.readStop) })
 	}

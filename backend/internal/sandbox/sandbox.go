@@ -45,6 +45,16 @@ func (l Language) IsPython() bool { return l == Python }
 
 // ExecConfig holds everything needed to run user code in nsjail.
 type ExecConfig struct {
+	// FunctionID is the host's own record of whose worker this is; SDK frames
+	// are attributed to it, never to anything the sandbox sends.
+	FunctionID string
+	// SDKHandler serves the worker's private SDK channel. Nil disables the
+	// channel; it is also off when the installed adapter does not declare
+	// support (adapterSupportsSDK), in which case the SDK uses its HTTP path.
+	SDKHandler SDKHandler
+	// sdkChannel is set by Spawn once both conditions above hold.
+	sdkChannel bool
+
 	Language Language
 	CodeDir  string // Directory containing user code
 	Stdin    []byte // Request JSON piped to stdin
@@ -335,6 +345,16 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) (args, childEnv []stri
 		}
 		args = append(args, "--env", k)
 		childEnv = append(childEnv, k+"="+getenvOr(cfg.Env, k, ""))
+	}
+
+	if cfg.sdkChannel {
+		// --pass_fd keeps the inherited channel descriptor open across nsjail's
+		// fd sweep. It sits with the other flags, after the --config prefix.
+		args = append(args, "--pass_fd", strconv.Itoa(sdkChannelFD),
+			"--env", "ORVA_SDK_FD", "--env", "ORVA_SDK_PROTO")
+		childEnv = append(childEnv,
+			"ORVA_SDK_FD="+strconv.Itoa(sdkChannelFD),
+			"ORVA_SDK_PROTO="+strconv.Itoa(SDKProtoV1))
 	}
 
 	args = append(args, "--", entrypoint)
