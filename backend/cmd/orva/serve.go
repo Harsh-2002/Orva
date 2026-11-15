@@ -169,6 +169,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	}()
 
 	go srv.Prewarm(ctx)
+	go resumeFunctionDeletes(ctx, srv, cfg.Data.Dir)
 
 	// Start the scheduler after the HTTP listener so health probes don't
 	// block on it. The scheduler runs cron triggers, KV TTL sweep,
@@ -211,4 +212,40 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// resumeFunctionDeletes finishes deletes a crash or restart interrupted: the row
+// stays 'deleting' and nothing else would ever complete it.
+func resumeFunctionDeletes(ctx context.Context, srv *server.Server, dataDir string) {
+	res, err := srv.Registry.List(database.ListFunctionsParams{Status: database.FunctionStatusDeleting, Limit: 100000})
+	if err != nil {
+		slog.Warn("resume function deletes: list failed", "error", err)
+		return
+	}
+	for _, fn := range res.Functions {
+		if !resumeOneFunctionDelete(ctx, srv, dataDir, fn) {
+			return
+		}
+	}
+}
+
+// resumeOneFunctionDelete reports whether the caller should go on to the next function.
+func resumeOneFunctionDelete(ctx context.Context, srv *server.Server, dataDir string, fn *database.Function) bool {
+	if srv.PoolMgr != nil {
+		lk := srv.PoolMgr.FunctionLock(fn.ID)
+		lk.Lock()
+		defer lk.Unlock()
+	}
+	if err := srv.Registry.Delete(ctx, fn.ID); err != nil {
+		slog.Warn("resume function delete failed; will retry on next start or DELETE", "fn", fn.ID, "error", err)
+		return ctx.Err() == nil
+	}
+	if srv.PoolMgr != nil {
+		srv.PoolMgr.DrainAndRemove(fn.ID)
+	}
+	if err := builder.PurgeFunctionFiles(dataDir, fn.ID); err != nil {
+		slog.Warn("resume function delete: on-disk cleanup incomplete", "fn", fn.ID, "error", err)
+	}
+	slog.Info("resumed interrupted function delete", "fn", fn.ID, "name", fn.Name)
+	return true
 }

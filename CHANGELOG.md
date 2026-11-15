@@ -16,6 +16,25 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Deleting a function with a large history no longer stops every other
+  function's writes. `DeleteFunction` removed all of a function's executions in
+  one transaction on the database's only write connection, so deleting a
+  function with about 2 million executions held that connection for over a
+  minute and requests were rejected with `429 STORAGE_BACKPRESSURE`. It now marks
+  the function `deleting` and removes executions (with their logs, requests and
+  spans), KV rows, jobs and build logs in batches of 500 with a 20 ms pause, then
+  deletes the row in one short transaction. Measured on a throwaway database with
+  200,000 executions, 100,000 KV rows and 50,000 jobs: the old code let 1
+  probe write through with a worst wait of 8.0 s; the new code let 6,838
+  through with a worst wait of 46 ms, in 23 s rather than 8 s.
+  **Upgrade notes:** a function being deleted now has `status: "deleting"`;
+  `PUT`, rollback and redeploy return `409 CONFLICT` for it, and cron and jobs do
+  not fire. The `DELETE` call is still synchronous and still answers 200, but may
+  run for minutes on a very large function (it is not cancelled when the client
+  gives up; repeat it to resume, and the server resumes it at startup). The MCP
+  `delete_function` tool now takes the same per-function lock as the HTTP call
+  and removes the function's code and build cache, which it previously left
+  behind.
 - The daily execution-history purge and the 5-minute KV expiry sweep had the
   same flaw as the activity sweep: each ran as one unbounded `DELETE` on the
   database's only write connection, which also carries the execution-record

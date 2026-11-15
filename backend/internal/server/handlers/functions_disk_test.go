@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -224,5 +225,51 @@ func TestPurgeBuildCacheUnknownFunctionIs404(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "build-cache", "sensitive", "blob")); err != nil {
 		t.Errorf("nothing outside a resolved function may be removed: %v", err)
+	}
+}
+
+// A DELETE retried against a function a cancelled delete left 'deleting'
+// finishes it and answers 200; a PUT against it is refused with 409.
+func TestDeleteResumesAFunctionLeftDeleting(t *testing.T) {
+	const fnID = "019df200-7b00-7e00-9c00-aab1cd2e3f41"
+	h, dataDir := newFnDiskHandler(t, fnID)
+	writeTree(t, filepath.Join(dataDir, "functions", fnID, "versions", "abc"))
+	fn, err := h.DB.GetFunction(fnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn.Status = database.FunctionStatusDeleting
+	if err := h.DB.UpdateFunction(fn); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Registry.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/functions/"+fnID, strings.NewReader(`{"description":"late edit"}`))
+	put.SetPathValue("fn_id", fnID)
+	pw := httptest.NewRecorder()
+	h.Update(pw, put)
+	if pw.Code != http.StatusConflict {
+		t.Fatalf("PUT on a deleting function = %d (%s), want 409", pw.Code, pw.Body.String())
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ { // the second finds nothing left and still answers 200
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/functions/"+fnID, nil)
+		req.SetPathValue("fn_id", fnID)
+		w := httptest.NewRecorder()
+		h.Delete(w, req)
+		if attempt == 1 && w.Code != http.StatusOK {
+			t.Fatalf("delete attempt %d = %d, body %s", attempt, w.Code, w.Body.String())
+		}
+		if attempt == 2 && w.Code != http.StatusOK && w.Code != http.StatusNotFound {
+			t.Fatalf("delete attempt %d = %d, body %s", attempt, w.Code, w.Body.String())
+		}
+	}
+	if _, err := h.DB.GetFunction(fnID); err == nil {
+		t.Fatal("function row survived the resumed delete")
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "functions", fnID)); !os.IsNotExist(err) {
+		t.Fatalf("code tree not reclaimed: %v", err)
 	}
 }

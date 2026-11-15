@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -109,7 +110,7 @@ func TestFunctionCRUD(t *testing.T) {
 	}
 
 	// Delete
-	if err := db.DeleteFunction("fn_test123456"); err != nil {
+	if err := db.DeleteFunction(context.Background(), "fn_test123456"); err != nil {
 		t.Fatal(err)
 	}
 	_, err = db.GetFunction("fn_test123456")
@@ -292,7 +293,7 @@ func TestFixtureCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.write.Exec("PRAGMA foreign_keys = ON")
-	if err := db.DeleteFunction(fn.ID); err != nil {
+	if err := db.DeleteFunction(context.Background(), fn.ID); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ = db.ListFixtures(fn.ID)
@@ -372,7 +373,7 @@ func TestInboundWebhookCRUD(t *testing.T) {
 
 	// Cascade: deleting the function removes its inbound webhooks.
 	db.write.Exec("PRAGMA foreign_keys = ON")
-	if err := db.DeleteFunction(fn.ID); err != nil {
+	if err := db.DeleteFunction(context.Background(), fn.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.GetInboundWebhook(hook.ID); err == nil {
@@ -453,7 +454,7 @@ func TestCascadeDelete(t *testing.T) {
 	// Enable foreign keys for this connection
 	db.write.Exec("PRAGMA foreign_keys = ON")
 
-	if err := db.DeleteFunction("fn_cascade1234"); err != nil {
+	if err := db.DeleteFunction(context.Background(), "fn_cascade1234"); err != nil {
 		t.Fatal(err)
 	}
 

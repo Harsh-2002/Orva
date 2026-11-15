@@ -875,12 +875,15 @@ func (a *asyncWriter) filterDeleted(ctx context.Context, batch []writeJob) ([]wr
 				var found bool
 				found, ok = known[job.functionID]
 				if !ok {
-					var exists int
-					if err := a.db.write.QueryRowContext(ctx,
-						"SELECT EXISTS(SELECT 1 FROM functions WHERE id = ?)", job.functionID).Scan(&exists); err != nil {
+					// A 'deleting' function is not alive: re-adding it here
+					// would let its rows be written back mid-delete.
+					var status string
+					err := a.db.write.QueryRowContext(ctx,
+						"SELECT status FROM functions WHERE id = ?", job.functionID).Scan(&status)
+					if err != nil && !errors.Is(err, sql.ErrNoRows) {
 						return nil, 0, err
 					}
-					found = exists != 0
+					found = err == nil && status != FunctionStatusDeleting
 					known[job.functionID] = found
 					if found {
 						a.db.liveFunctions.Store(job.functionID, struct{}{})

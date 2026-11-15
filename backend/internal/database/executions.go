@@ -876,6 +876,12 @@ func (db *Database) purgeExecutions(ctx context.Context, cutoff string) (removed
 // together with their children, in one transaction so an execution is never
 // deleted while a child survives, nor a child left without its parent.
 func (db *Database) purgeExecutionBatch(ctx context.Context, cutoff string) (int, error) {
+	return db.deleteExecutionBatch(ctx, "started_at < ?", cutoff)
+}
+
+// deleteExecutionBatch is the shared batch: up to purgeChunk executions
+// matching cond, with their children, in one transaction.
+func (db *Database) deleteExecutionBatch(ctx context.Context, cond string, args ...any) (int, error) {
 	tx, err := db.write.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -883,7 +889,7 @@ func (db *Database) purgeExecutionBatch(ctx context.Context, cutoff string) (int
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
-		"SELECT id FROM executions WHERE started_at < ? LIMIT "+strconv.Itoa(purgeChunk), cutoff)
+		"SELECT id FROM executions WHERE "+cond+" LIMIT "+strconv.Itoa(purgeChunk), args...)
 	if err != nil {
 		return 0, err
 	}

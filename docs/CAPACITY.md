@@ -1556,11 +1556,12 @@ bounded batches the same way. Their effect was measured on a throwaway 200,000
 row database, not under load on the rig above: the old purge held the writer
 for up to 2.8 s and let 6 probe writes through, the new one let 3,909 through
 with a 39 ms worst wait (the KV sweep: 1 probe and 0.80 s before, 3,951 and
-34 ms after). **Still open:** `DeleteFunction` removes every execution row of a
-function in one transaction (deleting a function with about 2 million
-executions held the writer for over a minute during this work). Ramp steps are
-10 s, so a step can land on a sweep tick; that may account for part of the
-run-to-run spread in the knees above.
+34 ms after). `DeleteFunction` is chunked the same way (200,000 executions,
+100,000 KV rows and 50,000 jobs on a throwaway host database: 1 probe and an
+8.0 s worst wait before, 6,838 probes and 46 ms after; it takes about three
+times longer end to end). None of these was measured under load on the rig.
+Ramp steps are 10 s, so a step can land on a sweep tick; that may account for
+part of the run-to-run spread in the knees above.
 
 **Durability signals.** Across all 76 five-second windows, `critical_failures`
 and `critical_timeouts` were 0. Only best-effort telemetry and activity were

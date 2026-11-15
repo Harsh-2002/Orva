@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -144,7 +146,7 @@ func TestDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := reg.Delete(fn.ID); err != nil {
+	if err := reg.Delete(context.Background(), fn.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -152,6 +154,57 @@ func TestDelete(t *testing.T) {
 	_, err := reg.Get(fn.ID)
 	if err == nil {
 		t.Fatal("expected error after delete, got nil")
+	}
+}
+
+// A delete cancelled before it starts leaves the cache matching the database.
+func TestDeleteCancelledBeforeStartKeepsCacheCoherent(t *testing.T) {
+	db := testDB(t)
+	reg := New(db)
+	fn := &database.Function{Name: "not-deleted", Runtime: "node", Entrypoint: "handler.js", Status: "active"}
+	if err := reg.Set(fn); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := reg.Delete(ctx, fn.ID); err == nil {
+		t.Fatal("a cancelled delete should report an error")
+	}
+	got, err := reg.Get(fn.ID)
+	if err != nil || got.Status != "active" {
+		t.Fatalf("cache after a delete that never started: %+v, %v; want status active", got, err)
+	}
+}
+
+// A function whose delete has started cannot be revived by a late build,
+// rollback or PUT, and a later Delete finishes it.
+func TestSetRefusedWhileDeletingAndDeleteResumes(t *testing.T) {
+	db := testDB(t)
+	reg := New(db)
+	fn := &database.Function{Name: "half-deleted", Runtime: "node", Entrypoint: "handler.js", Status: "active"}
+	if err := reg.Set(fn); err != nil {
+		t.Fatal(err)
+	}
+	deleting := fn.Clone()
+	deleting.Status = database.FunctionStatusDeleting
+	if err := db.UpdateFunction(deleting); err != nil { // the state a cancelled delete leaves
+		t.Fatal(err)
+	}
+
+	revive := fn.Clone()
+	revive.Status = "active"
+	if err := reg.Set(revive); !errors.Is(err, database.ErrFunctionDeleting) {
+		t.Fatalf("Set on a deleting function = %v, want ErrFunctionDeleting", err)
+	}
+	if err := reg.SetSilent(revive); !errors.Is(err, database.ErrFunctionDeleting) {
+		t.Fatalf("SetSilent on a deleting function = %v, want ErrFunctionDeleting", err)
+	}
+
+	if err := reg.Delete(context.Background(), fn.ID); err != nil {
+		t.Fatalf("resume delete: %v", err)
+	}
+	if _, err := reg.Get(fn.ID); err == nil {
+		t.Fatal("function still present after the resumed delete")
 	}
 }
 

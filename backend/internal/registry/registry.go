@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -111,7 +112,7 @@ func (r *Registry) set(fn *database.Function, publish bool) error {
 			return err
 		}
 		if err2 := r.db.UpdateFunction(fn); err2 != nil {
-			return fmt.Errorf("set function: insert=%w, update=%v", err, err2)
+			return fmt.Errorf("set function: insert=%w, update=%w", err, err2)
 		}
 		action = "updated"
 	}
@@ -134,13 +135,34 @@ func (r *Registry) set(fn *database.Function, publish bool) error {
 	return nil
 }
 
-// Delete removes a function from both SQLite and the cache.
-func (r *Registry) Delete(id string) error {
-	if err := r.db.DeleteFunction(id); err != nil {
+// Delete removes a function from SQLite and the cache. It can run for minutes
+// on a function with millions of executions (see database.DeleteFunction); a
+// cancelled ctx leaves the function 'deleting' and a later call finishes it.
+func (r *Registry) Delete(ctx context.Context, id string) error {
+	// Show 'deleting' to every cache reader before the batches start; the
+	// invoke paths reject anything that is not 'active'. A missing function
+	// is left to the idempotent database delete.
+	existed := false
+	if fn, err := r.Get(id); err == nil {
+		existed = true
+		fn.Status = database.FunctionStatusDeleting
+		r.cache.Store(id, fn.Clone())
+		if r.PublishEvent != nil {
+			r.PublishEvent("function", map[string]any{"action": "updated", "function": fn})
+		}
+	}
+	if err := r.db.DeleteFunction(ctx, id); err != nil {
+		// The cache must say what the database says: a delete that failed
+		// before the flip left the row as it was.
+		if fn, gerr := r.db.GetFunction(id); gerr == nil {
+			r.cache.Store(id, fn.Clone())
+		} else {
+			r.cache.Delete(id)
+		}
 		return err
 	}
 	r.cache.Delete(id)
-	if r.PublishEvent != nil {
+	if existed && r.PublishEvent != nil { // a repeat DELETE must not announce a second deletion
 		r.PublishEvent("function", map[string]any{
 			"action": "deleted",
 			"id":     id,

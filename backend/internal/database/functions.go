@@ -1,8 +1,10 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -234,7 +236,7 @@ func (db *Database) UpdateFunction(fn *Function) error {
 			auth_mode = ?, rate_limit_per_min = ?,
 			version = ?, status = ?, code_hash = ?, active_deployment_id = ?, run_entrypoint = ?,
 			image_size = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
+		WHERE id = ? AND status != 'deleting'
 		RETURNING created_at, updated_at`,
 		fn.Name, fn.Description, fn.Runtime, fn.Entrypoint, fn.Image,
 		fn.TimeoutMS, fn.MemoryMB, fn.CPUs, string(envJSON),
@@ -243,40 +245,145 @@ func (db *Database) UpdateFunction(fn *Function) error {
 		fn.Version, fn.Status, fn.CodeHash, fn.ActiveDeploymentID, fn.RunEntrypoint,
 		fn.ImageSize, fn.ID,
 	).Scan(&fn.CreatedAt, &fn.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		var status string
+		if db.write.QueryRow("SELECT status FROM functions WHERE id = ?", fn.ID).Scan(&status) == nil &&
+			status == FunctionStatusDeleting {
+			return ErrFunctionDeleting
+		}
+	}
 	return err
 }
 
-// DeleteFunction cascades to executions, but the child tables that dropped
-// their FK for async insert ordering are unreachable once that row goes, so
-// they are deleted first — same transaction, same shared list as the purge.
-func (db *Database) DeleteFunction(id string) error {
+// FunctionStatusDeleting marks a function whose delete is in progress. It is
+// persisted so a restart resumes the delete (ResumeFunctionDeletes).
+const FunctionStatusDeleting = "deleting"
+
+// ErrFunctionDeleting is returned by UpdateFunction for a function whose
+// delete has started, so a late build, rollback or PUT cannot revive it.
+var ErrFunctionDeleting = errors.New("function is being deleted")
+
+// DeleteFunction removes a function in bounded batches: db.write is the single
+// connection the async writer commits through, so one transaction deleting
+// millions of executions starved every other function (STORAGE_BACKPRESSURE).
+// It flips the row to 'deleting', drains the large tables in batches without
+// lifecycleMu, then removes the stragglers and the row in one short transaction.
+// Idempotent; a cancelled ctx leaves the function 'deleting' and a later call
+// finishes it.
+func (db *Database) DeleteFunction(ctx context.Context, id string) error {
+	// lifecycleMu is held only for the flip: a writer waiting on an RWMutex
+	// blocks new RLock calls, which would stall the async commit pass.
+	db.lifecycleMu.Lock()
+	_, err := db.write.ExecContext(ctx,
+		"UPDATE functions SET status = ? WHERE id = ?", FunctionStatusDeleting, id)
+	if err == nil {
+		db.liveFunctions.Delete(id)
+	}
+	db.lifecycleMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("delete %s: mark deleting: %w", id, err)
+	}
+
+	for {
+		n, err := db.deleteExecutionBatch(ctx, "function_id = ?", id)
+		if err != nil {
+			return fmt.Errorf("delete %s: executions: %w", id, err)
+		}
+		if n < purgeChunk {
+			break
+		}
+		if err := sleepCtx(ctx, purgePause); err != nil {
+			return fmt.Errorf("delete %s: %w", id, err)
+		}
+	}
+
+	for _, t := range executionOwnedChildTables {
+		if _, err := db.deleteRowsChunked(ctx, t, "function_id = ?", id); err != nil {
+			return fmt.Errorf("delete %s: %s: %w", id, t, err)
+		}
+	}
+	// The other cascade tables that grow with use. deployments, routes, crons,
+	// secrets, fixtures, inbound webhooks, pool_config and channel_functions are
+	// operator-authored and small, so the final cascade removes them.
+	for _, c := range []struct{ table, cond string }{
+		{"kv_store", "function_id = ?"},
+		{"jobs", "function_id = ?"},
+		{"build_logs", "deployment_id IN (SELECT id FROM deployments WHERE function_id = ?)"},
+	} {
+		if _, err := db.deleteRowsChunked(ctx, c.table, c.cond, id); err != nil {
+			return fmt.Errorf("delete %s: %s: %w", id, c.table, err)
+		}
+	}
+	return db.finishFunctionDelete(ctx, id)
+}
+
+// finishFunctionDelete sweeps whatever the batches missed (rows an in-flight
+// async batch committed meanwhile) and deletes the row, atomically.
+func (db *Database) finishFunctionDelete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("delete %s: %w", id, err)
+	}
 	db.lifecycleMu.Lock()
 	defer db.lifecycleMu.Unlock()
-	tx, err := db.write.Begin()
+	tx, err := db.write.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete %s: %w", id, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	for _, t := range executionChildTables {
-		if _, err := tx.Exec("DELETE FROM "+t+" WHERE execution_id IN ("+
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t+" WHERE execution_id IN ("+
 			"SELECT id FROM executions WHERE function_id = ?)", id); err != nil {
-			return fmt.Errorf("delete %s: %w", t, err)
+			return fmt.Errorf("delete %s: %s: %w", id, t, err)
 		}
 	}
 	for _, t := range executionOwnedChildTables {
-		if _, err := tx.Exec("DELETE FROM "+t+" WHERE function_id = ?", id); err != nil {
-			return fmt.Errorf("delete orphan %s: %w", t, err)
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t+" WHERE function_id = ?", id); err != nil {
+			return fmt.Errorf("delete %s: orphan %s: %w", id, t, err)
 		}
 	}
-	if _, err := tx.Exec("DELETE FROM functions WHERE id = ?", id); err != nil {
-		return fmt.Errorf("delete function: %w", err)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM executions WHERE function_id = ?", id); err != nil {
+		return fmt.Errorf("delete %s: executions: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM functions WHERE id = ?", id); err != nil {
+		return fmt.Errorf("delete %s: function: %w", id, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return err
+		return fmt.Errorf("delete %s: %w", id, err)
 	}
 	db.liveFunctions.Delete(id)
 	return nil
+}
+
+// ResumeFunctionDeletes finishes deletes interrupted by a crash or a cancelled
+// context, returning how many it completed.
+func (db *Database) ResumeFunctionDeletes(ctx context.Context) (int, error) {
+	rows, err := db.read.QueryContext(ctx, "SELECT id FROM functions WHERE status = ?", FunctionStatusDeleting)
+	if err != nil {
+		return 0, fmt.Errorf("list deleting functions: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	done := 0
+	for _, id := range ids {
+		if err := db.DeleteFunction(ctx, id); err != nil {
+			return done, err
+		}
+		done++
+	}
+	return done, nil
 }
 
 func scanFunction(row *sql.Row) (*Function, error) {
