@@ -10,7 +10,6 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/scheduler"
-	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
@@ -21,7 +20,6 @@ import (
 type CronHandler struct {
 	DB       *database.Database
 	Registry *registry.Registry
-	SDKAuth  *sdkauth.Authenticator
 }
 
 // cronRequest is the shape of POST/PUT bodies. Payload is optional and
@@ -243,55 +241,6 @@ func (h *CronHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 // a handful of named jobs -- and low enough that a runaway or hostile loop
 // cannot fill the scheduler.
 const maxSDKSchedulesPerFunction = 25
-
-// UpsertInternal handles POST /api/v1/_internal/crons. SDK-only path
-// guarded by X-Orva-Internal-Token; the function being scheduled is the
-// signed caller's own function, so the SDK doesn't need to send its UUID.
-func (h *CronHandler) UpsertInternal(w http.ResponseWriter, r *http.Request) {
-	reqID := r.Header.Get("X-Request-ID")
-	fnID, authErr := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
-	if authErr != nil {
-		respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED",
-			"missing or invalid SDK credential", reqID)
-		return
-	}
-
-	// A signature alone is not enough here, unlike KV.
-	//
-	// A schedule is a standing invocation that nothing in internal/scheduler
-	// checks auth_mode for, and it is a database row — so it outlives the
-	// process-random signing key that authorised it. Restarting orvad
-	// invalidates every other use of a leaked ORVA_INTERNAL_TOKEN and does not
-	// touch a schedule that token planted. That asymmetry, not symmetry with
-	// the other SDK surfaces, is why this one gets the gate: it is the only
-	// capability here that a restart cannot clean up.
-	//
-	// OwnsExecution rather than TraceContext: cron needs no trace context, and
-	// this fails closed on a missing header for free, because BindExecution
-	// refuses to store under an empty execution ID so the lookup always misses.
-	if !h.SDKAuth.OwnsExecution(r.Header.Get("X-Orva-Execution-Id"), fnID) {
-		respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
-			"crons.upsert must be called from inside your handler, not at module scope", reqID)
-		return
-	}
-
-	body, err := readBoundedBody(r.Body, MaxCronUpsertBody)
-	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)
-		return
-	}
-	var req UpsertCronRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
-		return
-	}
-	res, serr := UpsertCron(h.DB, fnID, &req)
-	if serr != nil {
-		serr.write(w, reqID)
-		return
-	}
-	respond.JSON(w, http.StatusOK, res)
-}
 
 // encodePayload normalizes a JSON value to a string for storage. Accepts
 // either a JSON-serializable value or a pre-encoded string. Empty input

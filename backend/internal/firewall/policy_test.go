@@ -13,10 +13,6 @@ import (
 // (a wildcard where a narrow rule was intended) are invisible at the struct
 // level.
 
-func testCP() ControlPlane {
-	return ControlPlane{Addrs: []netip.Addr{netip.MustParseAddr("172.17.0.2")}, Port: 8443}
-}
-
 func noResolve(string) []string { return nil }
 
 func cidrRule(id int64, v string) *database.BlocklistRule {
@@ -28,7 +24,7 @@ func cidrRule(id int64, v string) *database.BlocklistRule {
 // on the rendered bytes.
 func mustCompile(t *testing.T, rules []*database.BlocklistRule, dns []netip.Addr) (compiled, []byte) {
 	t.Helper()
-	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(), dns)
+	c, err := compile(rules, noResolve, DefaultGuestNet(), dns)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -47,21 +43,18 @@ func indexOf(lines []string, sub string) int {
 
 // ── ordering: first-match-wins makes these security properties ──────────
 
-func TestCompileEmitsControlPlaneAllowBeforeAnyReject(t *testing.T) {
-	// The shipped RFC1918 "suggested" rules cover the control-plane address,
-	// so without this ordering every orva.kv / orva.jobs / F2F call breaks.
-	_, out := mustCompile(t, []*database.BlocklistRule{
+func TestCompileHasNoHTTPControlPlaneAllow(t *testing.T) {
+	c, out := mustCompile(t, []*database.BlocklistRule{
 		cidrRule(1, "172.16.0.0/12"),
 	}, nil)
 	lines := strings.Split(string(out), "\n")
-
 	allow := indexOf(lines, `dst_ip: "172.17.0.2/32"`)
 	reject := indexOf(lines, `dst_ip: "172.16.0.0/12"`)
-	if allow < 0 || reject < 0 {
-		t.Fatalf("missing rules; got:\n%s", out)
+	if allow >= 0 || reject < 0 || strings.Contains(string(out), "dport: 8443") {
+		t.Fatalf("expected covering reject with no HTTP exception; got:\n%s", out)
 	}
-	if allow > reject {
-		t.Fatalf("control-plane ALLOW (line %d) must precede the covering REJECT (line %d)", allow, reject)
+	if c.allows != 2 {
+		t.Fatalf("expected only the two NSTUN gateway allows, got %d", c.allows)
 	}
 }
 
@@ -98,19 +91,25 @@ func TestCompileEmitsDNSAllowBeforeAnyReject(t *testing.T) {
 	}
 }
 
-func TestControlPlaneAllowIsExactHostExactPortTCPOnly(t *testing.T) {
-	_, out := mustCompile(t, nil, nil)
-	block := ruleBlockContaining(t, out, `dst_ip: "172.17.0.2/32"`)
-
-	for _, want := range []string{
-		"action: ALLOW", "proto: TCP", "dport: 8443", "dport_end: 8443",
-	} {
-		if !strings.Contains(block, want) {
-			t.Errorf("control-plane rule missing %q; block:\n%s", want, block)
+func TestDNSAllowIsExactHostExactPortForBothTransports(t *testing.T) {
+	_, out := mustCompile(t, nil, []netip.Addr{netip.MustParseAddr("192.0.2.53")})
+	var count int
+	for _, block := range allRuleBlocks(string(out)) {
+		if !strings.Contains(block, `dst_ip: "192.0.2.53/32"`) {
+			continue
+		}
+		count++
+		for _, want := range []string{"action: ALLOW", "dport: 53", "dport_end: 53"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("DNS rule missing %q; block:\n%s", want, block)
+			}
+		}
+		if !strings.Contains(block, "proto: TCP") && !strings.Contains(block, "proto: UDP") {
+			t.Errorf("DNS rule must be TCP or UDP; block:\n%s", block)
 		}
 	}
-	if strings.Contains(block, "proto: ANY") {
-		t.Errorf("control-plane rule must not be proto ANY; block:\n%s", block)
+	if count != 2 {
+		t.Fatalf("expected TCP and UDP DNS allows, got %d", count)
 	}
 }
 
@@ -240,19 +239,10 @@ func TestRuleBlockCountMatchesCompiled(t *testing.T) {
 	}
 }
 
-// ── control-plane failure must be fatal, never a broad allow ────────────
-
-func TestCompileFailsWhenControlPlaneUnknown(t *testing.T) {
-	if _, err := compile(nil, noResolve, ControlPlane{Port: 8443},
-		DefaultGuestNet(), nil); err == nil {
-		t.Fatal("expected compile to fail with no control-plane address")
-	}
-}
-
-func TestCompileFailsOnBadControlPlanePort(t *testing.T) {
-	cp := ControlPlane{Addrs: []netip.Addr{netip.MustParseAddr("10.1.2.3")}, Port: 0}
-	if _, err := compile(nil, noResolve, cp, DefaultGuestNet(), nil); err == nil {
-		t.Fatal("expected compile to fail on out-of-range port")
+func TestCompileNeedsNoControlPlaneConfiguration(t *testing.T) {
+	c, err := compile(nil, noResolve, DefaultGuestNet(), nil)
+	if err != nil || c.allows != 2 || c.rejects != 0 {
+		t.Fatalf("gateway-only policy = %+v, %v", c, err)
 	}
 }
 
@@ -293,7 +283,7 @@ func TestWildcardIsUnenforcedNotApexOnly(t *testing.T) {
 	// emitted an apex-only rule, which blocked the bare domain and none of its
 	// subdomains while the UI claimed the whole domain was covered.
 	c, err := compile(rules, func(string) []string { return []string{"203.0.113.9"} },
-		testCP(), DefaultGuestNet(), nil)
+		DefaultGuestNet(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -315,7 +305,7 @@ func TestHostnameSnapshotsEveryResolvedAddress(t *testing.T) {
 		Value: "bad.example", Enabled: true,
 	}}
 	resolve := func(string) []string { return []string{"203.0.113.1", "203.0.113.2", "2001:db8::1"} }
-	c, err := compile(rules, resolve, testCP(), DefaultGuestNet(), nil)
+	c, err := compile(rules, resolve, DefaultGuestNet(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -405,9 +395,7 @@ func TestBlocksMatchesCompiledRules(t *testing.T) {
 	}
 }
 
-func TestBlocksNeverBlocksLoopbackOrControlPlane(t *testing.T) {
-	// 172.16.0.0/12 covers the control-plane address; orvad must still be able
-	// to reach its own API.
+func TestBlocksPreservesLoopbackButNotFormerControlPlane(t *testing.T) {
 	p := buildPolicy(t, []*database.BlocklistRule{
 		cidrRule(1, "172.16.0.0/12"), cidrRule(2, "127.0.0.0/8"),
 	}, nil)
@@ -415,8 +403,8 @@ func TestBlocksNeverBlocksLoopbackOrControlPlane(t *testing.T) {
 	if p.Blocks(netip.MustParseAddr("127.0.0.1"), 8443) {
 		t.Error("loopback must never be blocked daemon-side")
 	}
-	if p.Blocks(netip.MustParseAddr("172.17.0.2"), 8443) {
-		t.Error("control-plane address must never be blocked daemon-side")
+	if !p.Blocks(netip.MustParseAddr("172.17.0.2"), 8443) {
+		t.Error("former control-plane address must obey the operator blocklist")
 	}
 	if !p.Blocks(netip.MustParseAddr("172.20.1.1"), 443) {
 		t.Error("other addresses in the blocked range must still be blocked")
@@ -441,13 +429,12 @@ func TestBlocksNilPolicyIsSafe(t *testing.T) {
 
 func buildPolicy(t *testing.T, rules []*database.BlocklistRule, dns []netip.Addr) *Policy {
 	t.Helper()
-	c, err := compile(rules, noResolve, testCP(), DefaultGuestNet(), dns)
+	c, err := compile(rules, noResolve, DefaultGuestNet(), dns)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	return &Policy{
 		rules4: c.rules4, rules6: c.rules6,
-		exemptAddrs: testCP().Addrs, exemptPort: uint16(testCP().Port),
 	}
 }
 
@@ -565,7 +552,7 @@ func TestUnspecifiedHostnameResolutionNeverBecomesAWildcardReject(t *testing.T) 
 	// net.LookupHost("0.0.0.0") really does return ["0.0.0.0"], which is how
 	// this reached the compiler in the first place.
 	c, err := compile(rules, func(string) []string { return []string{"0.0.0.0", "::"} },
-		testCP(), DefaultGuestNet(), nil)
+		DefaultGuestNet(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -584,25 +571,12 @@ func TestUnspecifiedHostnameResolutionNeverBecomesAWildcardReject(t *testing.T) 
 	}
 }
 
-// TestDaemonExemptionIsPortScopedLikeTheSandboxRule pins the other half of the
-// review finding. The compiled carve-out is ALLOW TCP <addr> dport=<port>, so
-// exempting the whole address daemon-side made orvad strictly less restricted
-// than a sandbox — on a single-node install the control-plane address is the
-// host's own LAN IP, so an operator who blocklisted it still had webhook
-// deliveries reaching every other port on that host.
-func TestDaemonExemptionIsPortScopedLikeTheSandboxRule(t *testing.T) {
-	cp := testCP()
-	addr := cp.Addrs[0]
-	// Blocklist the control-plane host itself.
+func TestPrivateOrvaHostHasNoPortExemption(t *testing.T) {
+	addr := netip.MustParseAddr("10.1.1.20")
 	p := buildPolicy(t, []*database.BlocklistRule{cidrRule(1, addr.String()+"/32")}, nil)
-
-	if p.Blocks(addr, uint16(cp.Port)) {
-		t.Error("the SDK port must stay reachable or orvad cannot serve its own internal API")
-	}
-	for _, other := range []uint16{80, 443, 22, 9200} {
+	for _, other := range []uint16{80, 443, 8443, 22, 9200} {
 		if !p.Blocks(addr, other) {
-			t.Errorf("port %d on a blocklisted control-plane host must be blocked "+
-				"daemon-side; exempting the whole address is an SSRF hole", other)
+			t.Errorf("port %d on a blocklisted Orva host must be blocked", other)
 		}
 	}
 }
@@ -620,7 +594,7 @@ func TestUnresolvedHostnameRuleIsReportedUnenforced(t *testing.T) {
 		Value: "does-not-resolve.invalid", Enabled: true,
 	}}
 	c, err := compile(rules, func(string) []string { return nil },
-		testCP(), DefaultGuestNet(), nil)
+		DefaultGuestNet(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -647,7 +621,7 @@ func TestResolvedHostnameRuleIsNotReportedUnenforced(t *testing.T) {
 		Value: "bad.example", Enabled: true,
 	}}
 	c, err := compile(rules, func(string) []string { return []string{"203.0.113.7"} },
-		testCP(), DefaultGuestNet(), nil)
+		DefaultGuestNet(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -658,15 +632,7 @@ func TestResolvedHostnameRuleIsNotReportedUnenforced(t *testing.T) {
 	}
 }
 
-// TestPortConversionRejectsOutOfRange guards a silent-truncation hazard that
-// CodeQL flagged as high severity (go/incorrect-integer-conversion).
-//
-// A bare uint16(port) truncates rather than failing: 70000 becomes 4464 and
-// 65536+8443 becomes 8443. Both conversions sit on a security boundary — the
-// compiled control-plane ALLOW and the daemon's exemption — so a truncated
-// value would scope them to a port the operator never exempted, reintroducing
-// the bypass the port-scoping fix closed. Out of range must yield 0, which
-// matches no real port, so the failure direction is "no exemption".
+// A bare uint16(port) truncates: 65536+8443 becomes 8443.
 func TestPortConversionRejectsOutOfRange(t *testing.T) {
 	for _, bad := range []int{0, -1, 65536, 70000, 65536 + 8443, 1 << 20} {
 		if got, ok := portToUint16(bad); ok || got != 0 {
@@ -681,11 +647,13 @@ func TestPortConversionRejectsOutOfRange(t *testing.T) {
 	}
 }
 
-// A control-plane port outside the valid range must fail the compile outright,
-// not silently produce a carve-out on a truncated port.
-func TestCompileRejectsTruncatingControlPlanePort(t *testing.T) {
-	cp := ControlPlane{Addrs: []netip.Addr{netip.MustParseAddr("10.1.1.20")}, Port: 65536 + 8443}
-	if _, err := compile(nil, noResolve, cp, DefaultGuestNet(), nil); err == nil {
-		t.Fatal("a port that truncates onto 8443 must fail the compile, not become an 8443 carve-out")
+func TestDNSResolverHostDoesNotExemptHTTP(t *testing.T) {
+	addr := netip.MustParseAddr("10.1.1.20")
+	p := buildPolicy(t, []*database.BlocklistRule{cidrRule(1, addr.String())}, []netip.Addr{addr})
+	if p.Blocks(addr, 53) {
+		t.Fatal("DNS resolver must remain reachable")
+	}
+	if !p.Blocks(addr, 8443) {
+		t.Fatal("DNS allow must not create an HTTP-to-Orva exception")
 	}
 }

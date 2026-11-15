@@ -7,44 +7,18 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
-	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
-// JobsHandler exposes the background-job queue. It accepts requests both
-// from the dashboard (session/API-key auth via the standard middleware)
-// AND from inside worker sandboxes (X-Orva-Internal-Token). The internal
-// path is what powers orva.jobs.enqueue() in the SDK.
+// JobsHandler exposes the operator-authenticated background-job queue.
 type JobsHandler struct {
 	DB       *database.Database
 	Registry *registry.Registry
-	SDKAuth  *sdkauth.Authenticator
-}
-
-// sdkCaller returns immutable caller attribution from a verified scoped SDK
-// credential. Public session/API-key requests have no SDK caller.
-func (h *JobsHandler) sdkCaller(r *http.Request) string {
-	caller, _ := h.SDKAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
-	return caller
 }
 
 // Enqueue handles POST /api/v1/jobs.
 func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
-	callerFnID := h.sdkCaller(r)
-	callerTraceID := ""
-	callerSpanID := ""
-	if callerFnID != "" {
-		var active bool
-		callerTraceID, callerSpanID, _, active = h.SDKAuth.TraceContext(
-			r.Header.Get("X-Orva-Execution-Id"), callerFnID,
-		)
-		if !active {
-			respond.Error(w, http.StatusForbidden, "SDK_SCOPE_VIOLATION",
-				"SDK request is not associated with an active caller execution", reqID)
-			return
-		}
-	}
 
 	body, err := readBoundedBody(r.Body, MaxEnqueueBody)
 	if err != nil {
@@ -56,7 +30,7 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}
-	job, serr := EnqueueJob(h.DB, callerFnID, callerTraceID, callerSpanID, &req)
+	job, serr := EnqueueJob(h.DB, "", "", "", &req)
 	if serr != nil {
 		serr.write(w, reqID)
 		return

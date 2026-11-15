@@ -33,10 +33,6 @@ func newManagerTestDB(t *testing.T) *database.Database {
 	return db
 }
 
-// uncompilableCP is a control plane with no address. compile refuses it rather
-// than guessing, which is the cheapest way to drive the failure paths here.
-func uncompilableCP() ControlPlane { return ControlPlane{Port: 8443} }
-
 func TestStartWritesDNSFilesEvenWhenNoPolicyCompiles(t *testing.T) {
 	// Regression guard: the nftables implementation gated the whole refresh
 	// loop on nft availability and returned early, which silently stopped
@@ -51,7 +47,14 @@ func TestStartWritesDNSFilesEvenWhenNoPolicyCompiles(t *testing.T) {
 	}
 
 	dataDir := t.TempDir()
-	m := NewManager(db, dataDir, uncompilableCP())
+	// DNS files remain writable while the policy directory cannot be created.
+	if err := os.MkdirAll(filepath.Join(dataDir, "firewall"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "firewall", "policy"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(db, dataDir)
 	m.Start(context.Background())
 	t.Cleanup(func() {
 		if err := m.Stop(context.Background()); err != nil {
@@ -91,7 +94,7 @@ func TestStartWritesDNSFilesEvenWhenNoPolicyCompiles(t *testing.T) {
 func TestPolicyAccessorsFailClosedBeforeFirstCompile(t *testing.T) {
 	// An egress spawn must abort rather than run unfiltered: NSTUN allows
 	// anything no rule matches, so a missing policy is not a strict default.
-	m := NewManager(newManagerTestDB(t), t.TempDir(), uncompilableCP())
+	m := NewManager(newManagerTestDB(t), t.TempDir())
 
 	if _, err := m.CurrentPolicy(); !errors.Is(err, ErrPolicyUnavailable) {
 		t.Fatalf("CurrentPolicy: want ErrPolicyUnavailable, got %v", err)
@@ -107,7 +110,7 @@ func TestPolicyAccessorsFailClosedBeforeFirstCompile(t *testing.T) {
 
 func TestFailedRecompileKeepsLastKnownGoodPolicy(t *testing.T) {
 	dataDir := t.TempDir()
-	m := NewManager(newManagerTestDB(t), dataDir, testCP())
+	m := NewManager(newManagerTestDB(t), dataDir)
 
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("initial compile: %v", err)
@@ -123,8 +126,14 @@ func TestFailedRecompileKeepsLastKnownGoodPolicy(t *testing.T) {
 		t.Fatalf("published generation file is missing: %v", err)
 	}
 
-	// Break compilation the same way a lost control-plane probe would.
-	m.cp = uncompilableCP()
+	// Force a new generation, then make publication fail without touching the old file.
+	if err := m.db.SetSystemConfig("dns_servers", "192.0.2.53"); err != nil {
+		t.Fatal(err)
+	}
+	m.dataDir = filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(m.dataDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.ForceRefresh(); err == nil {
 		t.Fatal("expected the recompile to fail")
 	}
@@ -160,7 +169,7 @@ func TestPolicyChangeCallbackFiresOnlyOnGenerationChange(t *testing.T) {
 	// The poll loop recompiles every 10s. Firing on every recompile rather
 	// than on every *change* would recycle warm egress workers continuously.
 	db := newManagerTestDB(t)
-	m := NewManager(db, t.TempDir(), testCP())
+	m := NewManager(db, t.TempDir())
 
 	var fired []string
 	m.SetOnPolicyChange(func(gen string) { fired = append(fired, gen) })
@@ -204,7 +213,7 @@ func TestCoalescedPolicyChangeIsDrainedAfterTheWindow(t *testing.T) {
 	// inside the rate-limit window is published immediately (so new spawns are
 	// correct) and the recycle is deferred to the window boundary.
 	db := newManagerTestDB(t)
-	m := NewManager(db, t.TempDir(), testCP())
+	m := NewManager(db, t.TempDir())
 
 	var fired []string
 	m.SetOnPolicyChange(func(gen string) { fired = append(fired, gen) })
@@ -246,7 +255,7 @@ func TestCoalescedPolicyChangeIsDrainedAfterTheWindow(t *testing.T) {
 }
 
 func TestSnapshotReportsNstunBackendAndNoNftablesKey(t *testing.T) {
-	m := NewManager(newManagerTestDB(t), t.TempDir(), testCP())
+	m := NewManager(newManagerTestDB(t), t.TempDir())
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -258,15 +267,12 @@ func TestSnapshotReportsNstunBackendAndNoNftablesKey(t *testing.T) {
 	if len(snap.PolicyGeneration) != 16 {
 		t.Errorf("policy_generation = %q, want 16 hex chars", snap.PolicyGeneration)
 	}
-	if snap.PolicyRuleCounts.Allow < 1 {
-		t.Errorf("policy must carry at least the control-plane allow, got %+v", snap.PolicyRuleCounts)
+	if snap.PolicyRuleCounts.Allow < 2 {
+		t.Errorf("policy must carry the NSTUN gateway allows, got %+v", snap.PolicyRuleCounts)
 	}
 	if snap.PolicyRuleCounts.V4+snap.PolicyRuleCounts.V6 !=
 		snap.PolicyRuleCounts.Allow+snap.PolicyRuleCounts.Reject {
 		t.Errorf("rule counts do not add up: %+v", snap.PolicyRuleCounts)
-	}
-	if len(snap.ControlPlane.Addrs) == 0 || snap.ControlPlane.Port != 8443 {
-		t.Errorf("control_plane_allow must show what is permitted, got %+v", snap.ControlPlane)
 	}
 
 	// The wire shape matters as much as the struct: the dashboard and the MCP
@@ -283,9 +289,12 @@ func TestSnapshotReportsNstunBackendAndNoNftablesKey(t *testing.T) {
 	if _, ok := wire["nftables_available"]; ok {
 		t.Errorf("nftables_available must not be reported: %s", raw)
 	}
+	if _, ok := wire["control_plane_allow"]; ok {
+		t.Errorf("removed HTTP control-plane exception must not be reported: %s", raw)
+	}
 	for _, key := range []string{
 		"backend", "enforced", "policy_generation", "policy_rule_counts",
-		"policy_stale", "control_plane_allow", "ipv4", "ipv6", "hostname_map",
+		"policy_stale", "ipv4", "ipv6", "hostname_map",
 	} {
 		if _, ok := wire[key]; !ok {
 			t.Errorf("snapshot is missing %q: %s", key, raw)
@@ -303,7 +312,7 @@ func TestSnapshotReportsStoredWildcardRowAsUnenforced(t *testing.T) {
 		t.Fatalf("insert wildcard row: %v", err)
 	}
 
-	m := NewManager(db, t.TempDir(), testCP())
+	m := NewManager(db, t.TempDir())
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -350,7 +359,7 @@ func TestSnapshotReportsStoredWildcardRowAsUnenforced(t *testing.T) {
 // compile there is no previous policy, so publication always happens.
 func TestWildcardAddedAfterFirstCompileIsStillReportedUnenforced(t *testing.T) {
 	db := newManagerTestDB(t)
-	m := NewManager(db, t.TempDir(), testCP())
+	m := NewManager(db, t.TempDir())
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("initial compile: %v", err)
 	}
@@ -398,7 +407,7 @@ func TestWildcardAddedAfterFirstCompileIsStillReportedUnenforced(t *testing.T) {
 // published reject count must never decrease.
 func TestConcurrentRefreshNeverPublishesAnOlderPolicy(t *testing.T) {
 	db := newManagerTestDB(t)
-	m := NewManager(db, t.TempDir(), testCP())
+	m := NewManager(db, t.TempDir())
 	if err := m.ForceRefresh(); err != nil {
 		t.Fatalf("initial compile: %v", err)
 	}

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
-	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 )
 
 // sessionCacheEntry is a short-TTL memo of a successful session lookup so
@@ -49,7 +48,7 @@ const keyCacheTTL = 30 * time.Second
 // owned by the Router and shared so every path that revokes a key can evict its
 // entry immediately; the TTL on those entries is the backstop for the one that
 // forgets.
-func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, sdkAuth *sdkauth.Authenticator, next http.Handler) http.Handler {
+func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth on public endpoints: health, UI, root redirect, auth routes.
@@ -69,56 +68,6 @@ func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, sdk
 		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") {
 			next.ServeHTTP(w, r)
 			return
-		}
-		// Internal SDK endpoints authenticate with a process-signed,
-		// function-scoped credential rather than an API key. Handlers still
-		// enforce route-specific scope (which function's namespace, whether a
-		// live execution is required); the gate enforces that there is a
-		// verified caller at all.
-		//
-		// It did not used to. The Verify error was discarded here and every
-		// request under these two prefixes reached its handler regardless,
-		// which made "requests under /api/v1/_internal/ are authenticated" a
-		// convention re-derived by hand in each handler rather than a property
-		// of the gate. Every route behind them happened to re-verify, so
-		// nothing was exploitable -- but the next one added would have been
-		// open unless its author remembered, and that is the same shape as the
-		// revocation bug that prompted this audit: a security property held by
-		// repetition instead of by construction.
-		//
-		// Strip the legacy caller header: the verified claim travels in the
-		// request actor context, never in a header a caller could set.
-		if strings.HasPrefix(r.URL.Path, "/api/v1/_kv/") ||
-			strings.HasPrefix(r.URL.Path, "/api/v1/_internal/") {
-			caller, err := sdkAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
-			if err != nil {
-				writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
-					"missing or invalid SDK credential", RequestID(r.Context()))
-				return
-			}
-			r.Header.Del("X-Orva-Caller-Function")
-			actor := &Actor{Source: "sdk", Type: "scoped_token", ID: caller, Label: caller}
-			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
-			return
-		}
-		// Worker SDK requests bearing a valid scoped credential bypass the
-		// public auth gate; this lets jobs.enqueue() from inside a sandbox
-		// share the /api/v1/jobs route with the dashboard. The token MUST
-		// verify against the process signing key — a merely-present header is not
-		// enough (a non-empty check would let any value skip authentication
-		// entirely, and the downstream handler trusts this middleware to
-		// have authenticated). On mismatch we do NOT short-circuit: fall
-		// through to normal session/API-key auth, so a stray header on a
-		// real request still authenticates and a bogus-token-only request
-		// gets a 401 like any other unauthenticated caller.
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/jobs" {
-			r.Header.Del("X-Orva-Caller-Function")
-			caller, err := sdkAuth.Verify(r.Header.Get("X-Orva-Internal-Token"))
-			if err == nil {
-				actor := &Actor{Source: "sdk", Type: "scoped_token", ID: caller, Label: caller}
-				next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
-				return
-			}
 		}
 		r.Header.Del("X-Orva-Caller-Function")
 
