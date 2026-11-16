@@ -598,6 +598,22 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- The next inactive composition, `workloadspawn`, freezes a prepared generation/
+  config/secrets snapshot with opaque code/runtime leases into a one-use spawn
+  plan. Its host fingerprint includes durable generation and actual content/
+  store identities plus non-secret execution configuration, never plaintext
+  environment/secret values. Frozen generation maintenance must cover their
+  changes before this identifier can be authoritative. Constructor validation
+  precedes lease transfer; Spawn/Close consumption is shared across copied
+  handles. Host-owned environment fields override supplied values. No pool,
+  approval, current-generation or provenance service is installed. Direct
+  fingerprint/owner/SDK-success cases and independent verification remain gates.
+  Direct tests now cover actual manifest/store-generation fingerprint changes,
+  stable inputs, owner rejection without lease consumption, private-channel SDK
+  attribution and Close/Spawn ownership races. Five package race repetitions
+  and vet pass. Independent acceptance is still required; fake jails do not
+  qualify real nsjail, pool admission or live generation authority.
+
 - Internal opt-in verified-path consumption now transfers opaque code/runtime
   pairs into sandbox execution, checks owner/runtime labels and chooses the
   concrete leased paths. Old copied preparer handles cannot release transferred
