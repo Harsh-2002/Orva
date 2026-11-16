@@ -289,6 +289,11 @@ function/artifact/policy CAS, generation rotation, environment persistence, and
 review-required policy/audit update commit together. It preserves quarantine and
 retained grants/approval without rebinding authority. Live admin checks and
 deny-state/pool publication remain service obligations; no serving caller uses it.
+`session_identity*.go` is an inert additive UUID-reference/backfill seam for
+browser sessions. Its initializer is test-only and reads rowids, never bearer
+tokens, during backfill. Token-free lookups recheck row/user/expiry in the DB.
+Legacy login writers, cookies, auth actors and caches are unchanged; NULL-ID
+sessions deny these new lookups. Identity records are provenance, not admin grants.
 
 ## Runtime SDK channel tests
 
