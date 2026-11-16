@@ -28,12 +28,13 @@ const (
 	KindAPIKey  = "api_key"
 	KindOAuth   = "oauth"
 	KindChannel = "channel"
+	KindSession = "session"
 )
 
 // Principal is the resolved caller identity. Every auth path returns
 // one of these. Fields populated depend on Kind.
 type Principal struct {
-	// Kind is one of KindAPIKey / KindOAuth / KindChannel.
+	// KindSession is reserved for future host-resolved stable browser sessions.
 	Kind string
 
 	// ID is the storage row id (uuidv7) of the underlying credential —
@@ -63,6 +64,9 @@ type Principal struct {
 	// callers don't need to re-check — but it's available for
 	// telemetry / "expires in" rendering.
 	Expires *time.Time
+
+	// ExpectedResource is the OAuth audience validated by the resolver, never an SDK argument.
+	ExpectedResource string
 }
 
 // PermSet is a string-keyed bitset for Orva permissions: read, invoke,

@@ -8,18 +8,15 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 )
 
 var ErrOperatorDenied = errors.New("operator publication denied")
 
 // OperatorCredentialReference is host-resolved submission provenance, not authentication by ID.
 // Never construct it from function-author input; capture it only after trusted authentication.
-type OperatorCredentialReference struct {
-	Kind string
-	ID   string
-	// ExpectedResource is the host-validated initial OAuth audience, not a request-supplied override.
-	ExpectedResource string
-}
+type OperatorCredentialReference = auth.OperatorReference
 
 const maxOperatorMetadataBytes = 4096
 

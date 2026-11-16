@@ -188,11 +188,12 @@ func resolveOAuthAccessToken(db *database.Database, plaintext string, r *http.Re
 		}
 	}
 	return &auth.Principal{
-		Kind:    auth.KindOAuth,
-		ID:      row.ID,
-		Label:   label,
-		Perms:   permSet,
-		Expires: &row.AccessExpiresAt,
+		Kind:             auth.KindOAuth,
+		ID:               row.ID,
+		Label:            label,
+		Perms:            permSet,
+		Expires:          &row.AccessExpiresAt,
+		ExpectedResource: row.Resource,
 	}, true
 }
 

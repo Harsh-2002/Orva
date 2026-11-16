@@ -1,7 +1,7 @@
 # workloadiam foundation (inert)
 
 No serving callers, boot migrations, public routes or activation are included.
-The SDK host has internal opt-in KV integration and a staged buffered-F2F seam;
+The SDK host has internal opt-in KV integration and staged buffered/streaming F2F;
 serving construction omits these options. Inert database storage is a separate foundation. Existing serving
 SDK behavior is unchanged. This package uses only the standard library.
 

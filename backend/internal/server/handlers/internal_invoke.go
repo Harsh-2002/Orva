@@ -279,6 +279,12 @@ type F2FStream struct {
 // OpenStream dispatches a streaming F2F call and returns once the callee's
 // response head (or complete single-frame response) is known.
 func (h *InternalInvokeHandler) OpenStream(parent context.Context, c F2FCaller, fn *database.Function, body []byte, reqID string) (*F2FStream, *InvokeError) {
+	return h.OpenStreamWithAdmission(parent, c, fn, body, reqID, nil)
+}
+
+// OpenStreamWithAdmission checks the acquired worker before execution binding
+// or dispatch. The hook runs outside worker locks and response-head waits.
+func (h *InternalInvokeHandler) OpenStreamWithAdmission(parent context.Context, c F2FCaller, fn *database.Function, body []byte, reqID string, beforeDispatch func(*sandbox.Worker) *InvokeError) (*F2FStream, *InvokeError) {
 	if err := parent.Err(); err != nil {
 		return nil, invokeErrorFrom(err, fn, reqID)
 	}
@@ -293,6 +299,13 @@ func (h *InternalInvokeHandler) OpenStream(parent context.Context, c F2FCaller, 
 	if err != nil {
 		executionLease.Cancel()
 		return nil, invokeErrorFrom(err, fn, reqID)
+	}
+	if beforeDispatch != nil {
+		if ierr := beforeDispatch(acq.Worker); ierr != nil {
+			h.Pool.Release(acq, nil)
+			executionLease.Cancel()
+			return nil, ierr
+		}
 	}
 	s.acq = acq
 	s.ctx, s.cancel = context.WithTimeout(parent, calleeTimeout(fn))

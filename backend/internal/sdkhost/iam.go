@@ -47,6 +47,12 @@ func (h *Host) handleIAM(ctx context.Context, caller sandbox.SDKCaller, op strin
 	if op == "invoke" {
 		return h.invokeIAM(ctx, caller, args)
 	}
+	if op == "invoke.stream.open" {
+		return h.streamOpenIAM(ctx, caller, args)
+	}
+	if op == "invoke.stream.next" {
+		return h.streamNextIAM(ctx, caller, args)
+	}
 	switch op {
 	case "kv.get", "kv.put", "kv.delete", "kv.list", "kv.incr", "kv.cas", "kv.batch":
 	default:

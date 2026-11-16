@@ -20,6 +20,10 @@ func WithIAMTargetState(observe func(string, *sandbox.Worker) workloadiam.Target
 }
 
 func (h *Host) beginIAMInvoke(ctx context.Context, caller sandbox.SDKCaller, args json.RawMessage) (*prepared, *workloadiam.Admission, *sandbox.SDKError) {
+	return h.beginIAMCall(ctx, caller, args, workloadiam.OpInvoke)
+}
+
+func (h *Host) beginIAMCall(ctx context.Context, caller sandbox.SDKCaller, args json.RawMessage, op workloadiam.Operation) (*prepared, *workloadiam.Admission, *sandbox.SDKError) {
 	inv := h.invoker.Load()
 	if h.iam == nil || h.iamTargetState == nil || inv == nil || caller.Exec == nil || caller.Exec.Ctx == nil {
 		return nil, nil, iamDenied()
@@ -52,7 +56,7 @@ func (h *Host) beginIAMInvoke(ctx context.Context, caller sandbox.SDKCaller, arg
 	targetID := fn.ID
 	call, err := h.iam.BeginCallObserved(exec.Ctx, func() workloadiam.Context {
 		return iamInvokeContext(ctx, caller, exec)
-	}, workloadiam.Request{Operation: workloadiam.OpInvoke, FunctionID: caller.FunctionID,
+	}, workloadiam.Request{Operation: op, FunctionID: caller.FunctionID,
 		Resource: workloadiam.Resource{Function: &workloadiam.FunctionResource{ID: targetID}}})
 	if err != nil {
 		return nil, nil, iamDenied()
@@ -73,25 +77,28 @@ func iamInvokeContext(ctx context.Context, caller sandbox.SDKCaller, exec sandbo
 
 func (h *Host) admitIAMInvoke(ctx context.Context, caller sandbox.SDKCaller, exec sandbox.ExecInfo, call *workloadiam.Admission, targetID string, worker *sandbox.Worker) *handlers.InvokeError {
 	err := call.AdmitObserved(func() (workloadiam.Context, workloadiam.TargetState) {
-		c := iamInvokeContext(ctx, caller, exec)
-		if h.iamTargetState == nil {
-			return c, workloadiam.TargetState{}
-		}
-		s, ok := worker.WorkloadState()
-		if !ok || !s.Alive || !s.Ready || s.Identity.FunctionID != targetID {
-			return c, workloadiam.TargetState{}
-		}
-		target := h.iamTargetState(targetID, worker)
-		actual := workloadiam.Principal{FunctionID: s.Identity.FunctionID, WorkerID: s.Identity.WorkerID, ArtifactRevision: s.Identity.ArtifactRevision}
-		if target.Principal != actual {
-			return c, workloadiam.TargetState{}
-		}
-		return c, target
+		return iamInvokeContext(ctx, caller, exec), h.iamInvokeTarget(targetID, worker)
 	})
 	if err != nil {
 		return &handlers.InvokeError{Status: 403, Opts: respond.ErrorOpts{Code: "IAM_DENIED", Message: "SDK operation denied"}}
 	}
 	return nil
+}
+
+func (h *Host) iamInvokeTarget(targetID string, worker *sandbox.Worker) workloadiam.TargetState {
+	if h.iamTargetState == nil {
+		return workloadiam.TargetState{}
+	}
+	s, ok := worker.WorkloadState()
+	if !ok || !s.Alive || !s.Ready || s.Identity.FunctionID != targetID {
+		return workloadiam.TargetState{}
+	}
+	target := h.iamTargetState(targetID, worker)
+	actual := workloadiam.Principal{FunctionID: s.Identity.FunctionID, WorkerID: s.Identity.WorkerID, ArtifactRevision: s.Identity.ArtifactRevision}
+	if target.Principal != actual {
+		return workloadiam.TargetState{}
+	}
+	return target
 }
 
 func (h *Host) invokeIAM(ctx context.Context, caller sandbox.SDKCaller, args json.RawMessage) (any, *sandbox.SDKError) {

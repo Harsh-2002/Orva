@@ -15,11 +15,25 @@ require a live UUID-backed session/user and expiry. Audit actors are derived
 from the checked reference, not treated as authorization. Checks occur before
 mutation and commit; expiry during commit cannot be excluded.
 
-This is an internal opt-in seam, **not a serving authorization feature**.
-Credential UUIDs are not authenticators: references must be captured after
-trusted authentication, never accepted from function authors. Request/AI/MCP
-submitter capture, ordered live IAM/pool publication and normal session UUID
-writes are not wired. The existing persistence-only publisher is unchanged.
+`SaveIAMPolicyAsOperator` applies the same live checks to policy CAS, epoch and
+audit. The internal `workloadpolicy` core joins ordered registry/IAM publication
+with that transaction, but requires a trusted current-artifact observer which
+serving has not installed. Explicit review, not ordinary replacement, clears
+quarantine/review flags. Empty-policy revocation does not require usable runtime
+artifacts and never activates retained grants.
+
+These remain **not serving authorization features**. Credential UUIDs are not
+authenticators. API-key REST authentication and MCP bearer resolution capture
+token-free immutable credential references in a private context key; OAuth
+includes its initially validated audience, never a request override. AI request
+contexts inherit these values. This carries provenance, not frozen permissions;
+publication still rechecks current credentials transactionally.
+
+Legacy browser sessions do not turn cookie prefixes into references and clear
+inherited operator context. Stable session writers/capture, queued build capture,
+authoritative current-artifact/pool publication and public IAM adapters are not
+wired. Audience-less legacy OAuth authentication remains unchanged, but supplies
+no IAM publication reference. Persistence-only APIs retain their existing behavior.
 See `docs/FUNCTION_IAM_PLAN.md` for the remaining cut-over gates.
 
 ## Threat model

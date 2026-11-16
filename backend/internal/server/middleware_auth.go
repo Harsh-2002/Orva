@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	authpkg "github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 )
 
@@ -77,7 +78,8 @@ func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, nex
 			if cached, ok := sessionCache.Load(cookie.Value); ok {
 				if entry := cached.(sessionCacheEntry); now.Before(entry.validUntil) {
 					actor := &Actor{Source: "web", Type: "session", ID: cookie.Value[:8], Label: "session"}
-					next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
+					ctx := authpkg.WithOperator(WithActor(r.Context(), actor), nil)
+					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
 				sessionCache.Delete(cookie.Value)
@@ -89,7 +91,8 @@ func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, nex
 					label = user.Username
 				}
 				actor := &Actor{Source: "web", Type: "session", ID: cookie.Value[:8], Label: label}
-				next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
+				ctx := authpkg.WithOperator(WithActor(r.Context(), actor), nil)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 		}
@@ -181,7 +184,8 @@ func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, nex
 		// downstream observers (notably the activity log) know who
 		// called us.
 		actor := &Actor{Source: "api", Type: "api_key", ID: key.ID, Label: key.Name}
-		next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
+		ctx := authpkg.WithOperator(WithActor(r.Context(), actor), &authpkg.Principal{Kind: authpkg.KindAPIKey, ID: key.ID})
+		next.ServeHTTP(w, r.WithContext(ctx))
 
 		// Update last_used_at asynchronously (db.Async so db.Close waits).
 		db.Async(func() { db.UpdateAPIKeyLastUsed(keyHash) })

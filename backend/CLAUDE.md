@@ -32,6 +32,7 @@ go vet ./...
 | `artifactfs` | Inert Linux-only staging, manifest verification and code/runtime lifetime leases. Explicit persistent publication and inspection-only recovery; recovered trees cannot be activated or deleted. No legacy adoption, serving or GC integration; see its README. |
 | `workloadspawn` | Inert one-use composition of owned generation/config/secrets snapshots and verified path leases. Freezes spawn inputs and host fingerprint; it is not current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
+| `workloadpolicy` | Internal unregistered management core joining ordered registry/IAM publication with live-operator policy transactions. Requires a trusted current-artifact observer; replacement preserves quarantine/review flags and only explicit review clears them. No serving observer or public adapter is installed. |
 | `config` | Config struct; environment variables only — there is no config file or YAML loader (see docs/CONFIG.md) |
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
@@ -209,7 +210,7 @@ The canonical UUIDv7 generator (`ids`) and HTTP client (`client`) live at **repo
 
 All Cobra subcommands share one binary with the server. `orva serve` starts the daemon; every other command is a CLI client that reads `~/.orva/config.yaml`. The command library lives at repo-root `cli/commands/` (NOT under `backend/cmd/orva/`, which holds only `main.go`/`serve.go`/`setup.go` + the embedded `adapters/`); both binaries register it via `commands.NewRoot()`. See `cli/CLAUDE.md`.
 
-Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.go`, `invoke.go`, `logs.go`, `executions.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `dns.go`, `firewall.go`, `fixtures.go`, `channels.go`, `traces.go`, `pool.go`, `keys.go`, `system.go`, `backup.go`, `activity.go`, `chat.go`, `docs.go`, `completion.go`.
+Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.go`, `invoke.go`, `logs.go`, `executions.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `dns.go`, `firewall.go`, `fixtures.go`, `channels.go`, `traces.go`, `pool.go`, `keys.go`, `system.go`, `backup.go`, `activity.go`, `docs.go`, `completion.go`.
 
 ## Key Patterns
 
@@ -250,9 +251,11 @@ retain their legacy `LIKE` semantics until the coordinated IAM cut-over.
 Omitting it preserves current behavior; explicitly passing nil denies protected
 operations. It authorizes KV under fresh observed admission, including all batch
 selectors before the transaction, and binds literal-list cursors to owner/prefix.
-Buffered F2F has a staged acquired-worker admission seam behind a separate trusted
-target-state observer; missing observers or unbound pool artifacts deny. Streams,
-jobs, cron and spans still deny; owned stream close is cleanup. Target-state
+Buffered and streaming F2F have staged acquired-worker admission behind a trusted
+target-state observer; missing observers or unbound pool artifacts deny. Stream
+heads, chunks, completion and errors reauthorize at bounded handoff; frame I/O,
+encoding and cleanup stay outside admission. Jobs, cron and spans still deny;
+owned stream close is cleanup. Target-state
 observers must read active/current-generation facts under the same IAM gate,
 never infer activity from policy existence or perform DB/I/O/worker-lock reads.
 Never enable the partial path in serving configuration before coordinated cut-over.
@@ -297,13 +300,18 @@ sessions deny these new lookups. Identity records are provenance, not admin gran
 `PublishWorkloadEnvironmentAsOperator` rechecks live credential/admin facts in the
 same transaction as publication. References must come from trusted authentication,
 never author input. It derives audit actors and checks expiry before mutation and
-commit; request capture, live IAM publication and serving wiring remain absent.
+commit; browser-session/queued-build capture and serving wiring remain absent.
 `SaveIAMPolicyAsOperator` applies the same live operator checks to policy CAS,
 authority-epoch advancement and bounded audit in one transaction. It derives
 actors and rechecks credentials before commit, preserving the persistence-only
 save API. It does not verify current runtime/code artifacts or install authority:
 the shared management service must bind reviewed current artifacts and publish
 under the registry mutation lock and IAM gate before exposing a serving API.
+`auth.OperatorReference` is the shared token-free credential reference. API-key
+REST authentication and MCP capture it under a private context key; OAuth retains
+its validated stored audience. AI request contexts inherit it. It carries no
+frozen permissions or bearer. Legacy browser sessions clear inherited references
+instead of promoting cookie prefixes; normal UUID session capture is still absent.
 
 ## Runtime SDK channel tests
 

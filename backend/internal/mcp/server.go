@@ -290,7 +290,7 @@ func NewHandler(deps Deps) http.Handler {
 
 		// Hand request-varying identity and origin to the cached server through
 		// context. Neither value may be captured by a shared registration.
-		ctx := context.WithValue(r.Context(), principalCtxKey{}, principal)
+		ctx := context.WithValue(authpkg.WithOperator(r.Context(), principal), principalCtxKey{}, principal)
 		ctx = context.WithValue(ctx, baseURLCtxKey{}, urlhint.BaseURL(r))
 		mcpHandler.ServeHTTP(w, r.WithContext(ctx))
 	})

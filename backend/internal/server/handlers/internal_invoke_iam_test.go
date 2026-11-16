@@ -65,9 +65,9 @@ func TestIAMInvokeCoreDenialBeforeBindingAndDispatch(t *testing.T) {
 	h := &InternalInvokeHandler{DB: db, Pool: pm}
 	denied := &InvokeError{Status: 403, Opts: respond.ErrorOpts{Code: "IAM_DENIED", Message: "SDK operation denied"}}
 	var actual *sandbox.Worker
-	for range 2 {
+	for _, streaming := range []bool{false, true, false, true} {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		result, ierr := h.RunInvokeWithAdmission(ctx, F2FCaller{FunctionID: id}, fn, []byte(`{}`), "", func(w *sandbox.Worker) *InvokeError {
+		hook := func(w *sandbox.Worker) *InvokeError {
 			if actual != nil && actual != w {
 				t.Error("healthy denied worker was not reused")
 			}
@@ -77,10 +77,24 @@ func TestIAMInvokeCoreDenialBeforeBindingAndDispatch(t *testing.T) {
 				t.Error("hook did not observe an acquired, undispatched worker")
 			}
 			return denied
-		})
+		}
+		var ierr *InvokeError
+		if streaming {
+			result, err := h.OpenStreamWithAdmission(ctx, F2FCaller{FunctionID: id}, fn, []byte(`{}`), "", hook)
+			ierr = err
+			if result != nil {
+				t.Fatal("denied stream returned")
+			}
+		} else {
+			result, err := h.RunInvokeWithAdmission(ctx, F2FCaller{FunctionID: id}, fn, []byte(`{}`), "", hook)
+			ierr = err
+			if result != nil {
+				t.Fatal("denied invoke returned")
+			}
+		}
 		cancel()
-		if result != nil || ierr != denied {
-			t.Fatalf("denial changed: %s %v", result, ierr)
+		if ierr != denied {
+			t.Fatalf("denial changed: %v", ierr)
 		}
 	}
 	if actual == nil {
