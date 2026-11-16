@@ -316,7 +316,127 @@ func scan(ctx context.Context, root string, limits Limits, reserved int64) (map[
 	return out, nil
 }
 
-func checkLinks(kind Kind, tree map[string]observed) error {
+const runtimeLinkHops = 40
+
+func runtimeTarget(target string, limits Limits) ([]string, bool, error) {
+	if target == "" || len(target) > limits.LinkBytes || !utf8.ValidString(target) || strings.ContainsAny(target, "\x00\\") {
+		return nil, false, ErrUnsupported
+	}
+	absolute := strings.HasPrefix(target, "/")
+	if absolute {
+		target = target[1:]
+	}
+	if target == "" {
+		return nil, absolute, nil
+	}
+	parts := strings.Split(target, "/")
+	for _, part := range parts {
+		if part == "" {
+			return nil, false, ErrUnsupported
+		}
+	}
+	return parts, absolute, nil
+}
+
+func resolutionFits(current string, pending []string, limits Limits) bool {
+	bytes, components := 0, 0
+	if current != "." {
+		bytes, components = len(current), strings.Count(current, "/")+1
+	}
+	for _, part := range pending {
+		if components != 0 {
+			bytes++
+		}
+		bytes += len(part)
+		components++
+	}
+	return bytes <= limits.PathBytes && components <= limits.Entries
+}
+
+// Resolve only manifest nodes: cleaning before expansion changes link/.. semantics.
+func resolveRuntimeLink(rel string, tree map[string]observed, limits Limits) (string, error) {
+	current, pending := ".", strings.Split(rel, "/")
+	seen := make(map[string]struct{})
+	hops, steps := 0, 0
+	for len(pending) != 0 {
+		if !resolutionFits(current, pending, limits) || steps >= (runtimeLinkHops+1)*limits.PathBytes {
+			return "", ErrUnsupported
+		}
+		steps++
+		if parent, ok := tree[current]; !ok || parent.entry.Type != TypeDirectory {
+			return "", ErrUnsupported
+		}
+		component := pending[0]
+		pending = pending[1:]
+		switch component {
+		case ".":
+			continue
+		case "..":
+			if current == "." {
+				return "", ErrUnsupported
+			}
+			current = path.Dir(current)
+			continue
+		}
+		next := component
+		if current != "." {
+			next = current + "/" + component
+		}
+		node, ok := tree[next]
+		if !ok {
+			return "", ErrUnsupported
+		}
+		if node.entry.Type != TypeSymlink {
+			current = next
+			continue
+		}
+		hops++
+		state := next + "\x00" + strings.Join(pending, "/")
+		if _, repeated := seen[state]; repeated || hops > runtimeLinkHops {
+			return "", ErrUnsupported
+		}
+		seen[state] = struct{}{}
+		parts, absolute, err := runtimeTarget(node.entry.LinkTarget, limits)
+		if err != nil {
+			return "", err
+		}
+		if absolute {
+			current = "."
+		}
+		pending = append(parts, pending...)
+	}
+	if !resolutionFits(current, nil, limits) {
+		return "", ErrUnsupported
+	}
+	return current, nil
+}
+
+func resolveCodeLink(rel, target string, tree map[string]observed, limits Limits) (string, error) {
+	for _, component := range strings.Split(target, "/") {
+		if component == ".." || component == "." {
+			return "", ErrUnsupported
+		}
+	}
+	if path.IsAbs(target) || path.Clean(target) != target {
+		return "", ErrUnsupported
+	}
+	resolved := path.Join(path.Dir(rel), target)
+	if !validPath(resolved, limits.PathBytes) {
+		return "", ErrUnsupported
+	}
+	for current := resolved; ; current = path.Dir(current) {
+		entry, ok := tree[current]
+		if !ok || entry.entry.Type == TypeSymlink || (current != resolved && entry.entry.Type != TypeDirectory) {
+			return "", ErrUnsupported
+		}
+		if current == "." {
+			break
+		}
+	}
+	return resolved, nil
+}
+
+func checkLinks(kind Kind, tree map[string]observed, limits Limits) error {
 	directories := make(map[string][]string)
 	indegree := make(map[string]int)
 	for rel, o := range tree {
@@ -332,43 +452,18 @@ func checkLinks(kind Kind, tree map[string]observed) error {
 		if o.entry.Type != TypeSymlink {
 			continue
 		}
-		target := o.entry.LinkTarget
-		for _, component := range strings.Split(target, "/") {
-			if component == ".." || component == "." {
-				return ErrUnsupported
-			}
-		}
 		var resolved string
-		if path.IsAbs(target) {
-			if kind != KindRuntime || path.Clean(target) != target {
-				return ErrUnsupported
-			}
-			resolved = strings.TrimPrefix(path.Clean(target), "/")
-			if resolved == "" {
-				resolved = "."
-			}
+		var err error
+		if kind == KindRuntime {
+			resolved, err = resolveRuntimeLink(rel, tree, limits)
 		} else {
-			if path.Clean(target) != target {
-				return ErrUnsupported
-			}
-			resolved = path.Join(path.Dir(rel), target)
+			resolved, err = resolveCodeLink(rel, o.entry.LinkTarget, tree, limits)
 		}
-		if !validPath(resolved, 4096) {
-			return ErrUnsupported
+		if err != nil {
+			return err
 		}
 		if resolved == "." || strings.HasPrefix(rel, resolved+"/") {
 			return ErrUnsupported
-		}
-		// This deliberately small profile rejects all symlink chains/cycles,
-		// dangling targets and symlinked target parents, without following them.
-		for current := resolved; ; current = path.Dir(current) {
-			entry, ok := tree[current]
-			if !ok || entry.entry.Type == TypeSymlink || (current != resolved && entry.entry.Type != TypeDirectory) {
-				return ErrUnsupported
-			}
-			if current == "." {
-				break
-			}
 		}
 		if tree[resolved].entry.Type == TypeDirectory {
 			parent := path.Dir(rel)
@@ -414,7 +509,7 @@ func verify(ctx context.Context, root string, kind Kind, expected Manifest, limi
 			return ErrIntegrity
 		}
 	}
-	if err := checkLinks(kind, first); err != nil {
+	if err := checkLinks(kind, first, limits); err != nil {
 		return err
 	}
 	second, err := scan(ctx, root, limits, reserved)

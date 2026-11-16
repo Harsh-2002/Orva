@@ -598,6 +598,28 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Stopped-container metadata inventory of the local artifactfs test image
+  (`19e0ad4ad621…`) found 6,530 Node and 6,689 Python entries, including 156/160
+  direct symlink chains, relative dotdot targets and symlinked target parents.
+  This is metadata evidence, not content/provenance/xattr acceptance. The owned
+  stopped container was removed.
+- A runtime-only manifest resolver now expands chains and parent links in
+  chroot-relative component order, including contained dotdot and absolute
+  targets. It enforces 40-hop, component/path/step and cycle bounds without host
+  symlink resolution. Code artifacts keep the original strict profile. Missing
+  targets, escapes, file parents and directory cycles still deny. Package race
+  tests/vet pass; independent acceptance and real-runtime profile qualification
+  remain separate gates. Genuine dangling links and metadata blockers persist.
+  Independent scoped resolver acceptance at `3f47321` passed 20 race repetitions,
+  vet and 560 additional overlay subtest passes, including exact 40/41-hop
+  boundaries and graph/component-order cases. Actual packaged content/provenance/
+  metadata and runtime-consumer integration remain unverified.
+  A static package test binary also passed five complete runs as root in a
+  disposable network-disabled Debian microVM. Capability-xattr rejection ran
+  and passed there (it had skipped on the host). The VM skipped its ACL fixture;
+  host-focused ACL tests passed. The VM was removed. These complementary fixture
+  checks do not establish actual packaged runtime metadata compatibility.
+
 - The inert Linux `artifactfs` module owns new private staging trees, verifies
   complete bounded typed manifests against a trusted expected digest, atomically
   seals generations, and issues opaque code/runtime lifetime leases. Retirement
