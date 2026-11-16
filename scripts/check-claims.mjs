@@ -72,9 +72,17 @@ const CLAIMS = [
     site: /73<\/span> tools|73 tools/,
   },
   {
-    what: 'Cold start is ~50 to 500 ms, warm hit ~2 to 15 ms',
+    what: 'Documented two-vCPU fixtures have ~30 to 120 ms cold starts and ~2 to 15 ms warm hits',
     file: 'docs/RUNTIMES.md',
-    want: /~50[–-]500\s*ms[\s\S]{0,200}~2[–-]15\s*ms/,
+    want: /pool \(~2[–-]15 ms\)[\s\S]{0,300}\| node \| ~30[–-]39 ms \| ~95[–-]120 ms[\s\S]{0,100}\| python \| ~90 ms \| ~96 ms/,
+    site: /~30 to 120 ms[\s\S]{0,150}~2 to 15 ms/,
+  },
+  {
+    what: 'SDK operations use the private per-worker channel, independently of egress',
+    file: 'docs/reference.md',
+    want: /current adapters route `kv`, `invoke`\/`invokeStream`, `jobs`, `crons`, and\s*`trace\.span` operations over a private inherited per-worker socket channel[\s\S]{0,300}no HTTP fallback/,
+    site: /SDK operations[\s\S]{0,500}private inherited per-worker channel/i,
+    forbidSite: /SDK credential handed to a sandbox|ORVA_INTERNAL_API_BASE/,
   },
   {
     what: 'The 2-CPU / 4-GB size is a reference, not a rate guarantee',
@@ -116,7 +124,6 @@ const SERVER_ENVIRONMENT = [
   'ORVA_IMAGE',
   'ORVA_DISABLE_USERNS',
   'ORVA_CGROUPV2_MOUNT',
-  'ORVA_INTERNAL_API_BASE',
 ];
 
 for (const name of SERVER_ENVIRONMENT) {
