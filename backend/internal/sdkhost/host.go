@@ -12,6 +12,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 )
 
 // Metrics receives one observation per handled op. status is the HTTP-like
@@ -27,6 +28,12 @@ type Option func(*Host)
 // WithMetrics supplies an external metrics sink in addition to the built-in
 // counters returned by Host.Stats.
 func WithMetrics(m Metrics) Option { return func(h *Host) { h.metrics = m } }
+
+// WithIAM opts into staged IAM enforcement. A nil authority denies; omission
+// preserves legacy behavior. Serving code must not enable this partial slice.
+func WithIAM(a *workloadiam.Authority) Option {
+	return func(h *Host) { h.iamEnabled, h.iam = true, a }
+}
 
 // OpStats is a cumulative per-op counter set.
 type OpStats struct {
@@ -52,10 +59,12 @@ type opCounter struct{ count, errs, ns atomic.Uint64 }
 
 // Host is the server-side SDK operation dispatcher.
 type Host struct {
-	DB      *database.Database
-	metrics Metrics
-	invoker atomic.Pointer[handlers.InternalInvokeHandler]
-	ops     [len(opNames)]opCounter
+	DB         *database.Database
+	metrics    Metrics
+	invoker    atomic.Pointer[handlers.InternalInvokeHandler]
+	ops        [len(opNames)]opCounter
+	iamEnabled bool
+	iam        *workloadiam.Authority
 }
 
 // New builds a Host over db.
@@ -117,12 +126,19 @@ func (h *Host) Handle(ctx context.Context, caller sandbox.SDKCaller, op string, 
 		}
 	}()
 
-	if caller.FunctionID == "" {
-		return nil, &sandbox.SDKError{Status: 403, Code: "SDK_SCOPE_VIOLATION", Message: "no function identity"}
-	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if h.iamEnabled {
+		return h.handleIAM(ctx, caller, op, args)
+	}
+	if caller.FunctionID == "" {
+		return nil, &sandbox.SDKError{Status: 403, Code: "SDK_SCOPE_VIOLATION", Message: "no function identity"}
+	}
+	return h.dispatch(ctx, caller, op, args)
+}
+
+func (h *Host) dispatch(ctx context.Context, caller sandbox.SDKCaller, op string, args json.RawMessage) (any, *sandbox.SDKError) {
 	switch op {
 	case "kv.get":
 		return h.kvGet(ctx, caller.FunctionID, args)

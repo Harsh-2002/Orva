@@ -192,9 +192,26 @@ func (h *Host) kvDelete(ctx context.Context, fn string, args json.RawMessage) (a
 }
 
 func (h *Host) kvList(ctx context.Context, fn string, args json.RawMessage) (any, *sandbox.SDKError) {
+	return h.kvListMode(ctx, fn, args, false)
+}
+
+func (h *Host) kvListMode(ctx context.Context, fn string, args json.RawMessage, literal bool) (any, *sandbox.SDKError) {
 	var a listArgs
 	if e := decodeArgs(args, limitSmall, &a); e != nil {
 		return nil, e
+	}
+	if literal {
+		cursor, err := decodeIAMCursor(fn, a.Prefix, a.Cursor)
+		if err != nil {
+			return nil, fail(400, "VALIDATION", "invalid list cursor")
+		}
+		a.Cursor = cursor
+	}
+	reply := func(out []listEntry, next string) map[string]any {
+		if literal && next != "" {
+			next = encodeIAMCursor(fn, a.Prefix, next)
+		}
+		return listReply(out, next)
 	}
 	// SDKs send Number(limit), which may be fractional (or null for NaN/Infinity).
 	// Retain the default of 100 when it does not parse as an integer.
@@ -225,15 +242,19 @@ func (h *Host) kvList(ctx context.Context, fn string, args json.RawMessage) (any
 	// the host never holds a multi-megabyte page for one small request.
 	out := make([]listEntry, 0, min(limit, 100))
 	size, cursor, next := 0, a.Cursor, ""
+	query := h.DB.KVListWithCursorContext
+	if literal {
+		query = h.DB.KVListLiteralWithCursorContext
+	}
 	for remaining := limit; remaining > 0; {
-		page, err := h.DB.KVListWithCursorContext(ctx, fn, a.Prefix, cursor, min(remaining, kvListSlice))
+		page, err := query(ctx, fn, a.Prefix, cursor, min(remaining, kvListSlice))
 		if err != nil {
 			return nil, fail(500, "INTERNAL", "kv list failed: "+err.Error())
 		}
 		for _, e := range page.Entries {
 			if len(out) > 0 && size+len(e.Key)+len(e.Value) > maxListReplyBytes {
 				next = out[len(out)-1].Key
-				return listReply(out, next), nil
+				return reply(out, next), nil
 			}
 			size += len(e.Key) + len(e.Value) + 64
 			out = append(out, listEntry{Key: e.Key, Value: json.RawMessage(e.Value), ExpiresAt: fmtTime(e)})
@@ -248,7 +269,7 @@ func (h *Host) kvList(ctx context.Context, fn string, args json.RawMessage) (any
 			break
 		}
 	}
-	return listReply(out, next), nil
+	return reply(out, next), nil
 }
 
 func listReply(out []listEntry, next string) map[string]any {

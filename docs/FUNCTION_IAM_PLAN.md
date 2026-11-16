@@ -521,6 +521,27 @@ Minimum scenario matrix:
 
 ### Implementation record
 
+- Internal opt-in SDK-host KV enforcement is implemented for testing only.
+  `WithIAM(nil)` denies; omission keeps legacy behavior. Fresh host identity and
+  lease observations join the admission gate through DB completion. Whole-batch
+  authorization precedes the transaction; literal listing binds bounded opaque
+  cursors to namespace/prefix and reauthorizes every page. Unintegrated protected
+  operations deny, except ownership-checked stream cleanup. No serving constructor
+  enables this partial path; `IAM_DENIED` is its generic internal SDK denial.
+  A full SDK-host race run passed after the test-policy correction; the first
+  five-repeat command exceeded its 240-second shell budget (one run took 80s).
+  Five complete race repetitions and vet subsequently passed. Independent KV
+  acceptance at `a1e9b20` passed the full scoped race suites and additional
+  authorization/cursor probes. Full real-sandbox E2E nevertheless failed Node
+  span persistence once; the isolated unchanged module then passed 50 checks.
+  This remains an overall compatibility blocker, not a dismissed flaky test.
+- Investigation confirmed a Node `trace.span` fire-and-forget submission race
+  with deterministic socketpair regressions. Its isolated fix awaits bounded
+  channel ACK/failure while preserving wrapped results/errors and best-effort
+  storage. Independent acceptance at `2d9cd5a` passed Node/Python channel tests
+  and queue/timeout probes. Full sandbox qualification and exact-head CI remain
+  required; this mechanism does not definitively attribute the earlier timeout.
+
 - Design approval recorded on the feature branch; no rollout authorized.
 - Literal KV cursor-range foundation added without changing active list callers.
   Race-enabled tests cover case, `%`/`_`, Unicode composition, NUL, scalar-boundary
