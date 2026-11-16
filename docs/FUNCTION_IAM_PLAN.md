@@ -575,6 +575,12 @@ Minimum scenario matrix:
   seam; neither installs lifecycle hooks or activates IAM. Parent race/vet
   checks pass, including observer-panic lock cleanup. Live host integration must
   use observed entrypoints, not cached context values.
+- Optional worker lifecycle hooks now cover readiness, lease replacement/end
+  and death atomics, with cancellation/session cleanup after the hook returns.
+  Nil hooks preserve current behavior. A joined test binds real sandbox worker
+  observation methods to the coordinator and proves bootstrap closure, live
+  execution admission, stale-lease rejection and no replacement-execution
+  upgrade. This is an in-process/fake-worker test, not live SDK enforcement.
 
 Source integration map at baseline:
 

@@ -58,6 +58,16 @@ type WorkloadIdentity struct {
 	ArtifactRevision string
 }
 
+// WorkloadTransitionHook optionally serializes trusted worker state changes with
+// an external admission gate; it grants no policy or SDK authority. It must call
+// change synchronously, exactly once before returning, never retain it or start
+// asynchronous work. Neither the hook nor change may do I/O, database work,
+// cancellation, session teardown, Close or Kill; change only updates atomics.
+// Dispatch may hold Worker.mu when invoking the hook: lock order is worker mu →
+// admission gate. Gate-held observers must read atomics only, never acquire the
+// worker lock or call dispatch/lifecycle methods (including from the hook).
+type WorkloadTransitionHook func(change func())
+
 type WorkloadPhase string
 
 const (
