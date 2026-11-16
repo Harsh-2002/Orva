@@ -30,6 +30,7 @@ go vet ./...
 | Package | Purpose |
 |---|---|
 | `artifactfs` | Inert Linux-only store-owned staging, manifest verification and code/runtime lifetime leases. Strict supported tree profile, no legacy adoption, crash recovery, serving or GC integration; see its README. |
+| `workloadspawn` | Inert one-use composition of owned generation/config/secrets snapshots and verified path leases. Freezes spawn inputs and host fingerprint; it is not current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `config` | Config struct; environment variables only — there is no config file or YAML loader (see docs/CONFIG.md) |
 | `database` | SQLite schema, migrations, all CRUD helpers |

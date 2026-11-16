@@ -23,6 +23,20 @@ orders of magnitude, not SLAs.
 
 ## 1. The shortest path to "I have verified Orva works"
 
+Function-deletion fairness has two complementary gates. The existing responsiveness
+test retains its minimum probe count, median ≤250 ms and maximum ≤3 s. Its
+earlier-monolithic/later-maximum wall-clock comparison is diagnostic only:
+bursty CPU contention reproduced ratio failures on both unchanged baseline and
+candidate, without identifying the original failure's precise cause.
+`TestDeleteFunctionCommittedWriterProgress` gates committed writer progress
+between real batches: with one contender queued on the occupied writer, it must
+commit while 537 of 1,037 phase rows remain. The monolithic negative control must
+be rejected by committed row state, not a timeout. Cancellation and batch-rollback
+tests also require consistent resumable deletion. These test-local driver checks
+quiesce the async consumer; they do not prove active async-fence ordering or
+end-to-end capacity. This methodology change was explicitly owner-approved;
+absolute latency thresholds are unchanged.
+
 For tracing repairs, run `test_tracing_logs.py` through the isolated E2E runner.
 It deploys owned Node/Python functions and checks actual HTTP, buffered/streaming
 F2F, failed-child, job, signed-inbound and replay logs, including raw stderr,

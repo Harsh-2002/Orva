@@ -608,6 +608,22 @@ and policy together. Serving wiring remains absent until the full proof gates.
   No hash-derived/prefix identity or new role model is introduced. Live trusted
   principal flow and commit-time authorization integration remain required.
 
+- The next inactive composition, `workloadspawn`, freezes a prepared generation/
+  config/secrets snapshot with opaque code/runtime leases into a one-use spawn
+  plan. Its host fingerprint includes durable generation and actual content/
+  store identities plus non-secret execution configuration, never plaintext
+  environment/secret values. Frozen generation maintenance must cover their
+  changes before this identifier can be authoritative. Constructor validation
+  precedes lease transfer; Spawn/Close consumption is shared across copied
+  handles. Host-owned environment fields override supplied values. No pool,
+  approval, current-generation or provenance service is installed. Direct
+  fingerprint/owner/SDK-success cases and independent verification remain gates.
+  Direct tests now cover actual manifest/store-generation fingerprint changes,
+  stable inputs, owner rejection without lease consumption, private-channel SDK
+  attribution and Close/Spawn ownership races. Five package race repetitions
+  and vet pass. Independent acceptance is still required; fake jails do not
+  qualify real nsjail, pool admission or live generation authority.
+
 - Internal opt-in verified-path consumption now transfers opaque code/runtime
   pairs into sandbox execution, checks owner/runtime labels and chooses the
   concrete leased paths. Old copied preparer handles cannot release transferred
@@ -618,6 +634,11 @@ and policy together. Serving wiring remains absent until the full proof gates.
   links before host traversal. Five refined artifactfs/sandbox race repetitions
   and vet pass; independent review and real-runtime/approval integration remain
   required. Fake-jail tests are not nsjail pinning or live IAM acceptance.
+  Independent scoped acceptance at `33154ad` passed ten artifactfs/sandbox race
+  repetitions, vet and extra ownership/one-shot/endpoint probes. `waitDone`
+  precedes exit callbacks and lease release; Kill/Quit/waitDone are not completed
+  cleanup fences. Real nsjail/pinned-package and generation-approval integration
+  remain unaccepted.
 
 - Stopped-container metadata inventory of the local artifactfs test image
   (`19e0ad4ad621…`) found 6,530 Node and 6,689 Python entries, including 156/160

@@ -111,6 +111,9 @@ it. Host runtime-endpoint probes support contained relative links only and rejec
 absolute endpoint links before following them; this is narrower than runtime
 manifest link support. Generation/config/secrets approval and actual packaged
 runtime compatibility remain separate obligations.
+Worker `waitDone` closes before exit callbacks, channel/cgroup cleanup and lease
+release. Kill/Quit or `waitDone` therefore cannot be used as a lease-release fence;
+the store continues to reject reclamation while references remain.
 
 ## Manifest version 1 and supported profile
 
