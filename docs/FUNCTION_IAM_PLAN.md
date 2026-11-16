@@ -612,6 +612,13 @@ and policy together. Serving wiring remains absent until the full proof gates.
   the operator-denial sentinel. Mutation/commit cancellation now preserves both
   denial and context identity. A trigger-driven cancellation regression checks
   complete rollback; twenty cancellation race repetitions and vet pass.
+  Independent acceptance at `bd9fddc` passed: original full database race
+  (472.695 s), original/fixed vet, unchanged cancellation repro and fixed
+  cancellation/rollback/CAS probes. Full database race was not repeated after
+  the narrow cancellation fix. Strict OAuth whitespace/duplicate-scope parsing
+  remains a fail-closed compatibility consideration before cut-over. Original
+  verification used task-owned transient systemd isolation; those units and
+  namespaces were removed. Fixed checks used ordinary offline worktrees.
 
 - Explicit `artifactfs.NewPersistent` adds bounded canonical metadata and ordered
   fsync/intent/tree-rename/commit publication. `OpenRecovering` verifies recognized
@@ -628,6 +635,11 @@ and policy together. Serving wiring remains absent until the full proof gates.
   interrupted Abort retains an untyped reservation/delete intent instead.
   Added a regression for failed Seal plus permission-denied cleanup; twenty
   package race repetitions and vet pass. Independent re-verification is pending.
+  Independent corrected acceptance at `8aa6146` passed the unchanged real
+  permission-error reproduction, twenty race repetitions and extra probes,
+  including 220 subprocess-exit crash cases, 800 concurrent lifecycles and
+  180 failure-stage cases. These are process/fault tests, not actual power-loss
+  durability or surviving-worker-fence acceptance. No recovery activation exists.
 
 - Stable browser-session UUID references are implemented as an inert additive
   schema/read seam. The explicit test-only initializer backfills independent
