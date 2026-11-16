@@ -53,7 +53,7 @@ func runRuntimeQualification(t *testing.T, recipe bool) {
 	}
 }
 
-func qualifyRuntime(t *testing.T, dir, jail, lang string, recipe bool) {
+func newQualificationStore(t *testing.T) *artifactfs.Store {
 	t.Helper()
 	limits := runtimePackageLimits()
 	root := t.TempDir()
@@ -69,6 +69,12 @@ func qualifyRuntime(t *testing.T, dir, jail, lang string, recipe bool) {
 			t.Error(err)
 		}
 	})
+	return store
+}
+
+func sealQualificationRuntime(t *testing.T, store *artifactfs.Store, dir, lang string, recipe bool) string {
+	t.Helper()
+	limits := runtimePackageLimits()
 	stage, err := store.Begin(t.Context(), (1<<30)-4096)
 	if err != nil {
 		t.Fatal(err)
@@ -159,15 +165,19 @@ func qualifyRuntime(t *testing.T, dir, jail, lang string, recipe bool) {
 		t.Logf("consuming trusted recipe archive sha256=%s", archiveSHA)
 	}
 	runtimeID, err := stage.Seal(t.Context(), artifactfs.KindRuntime, lang, m, hash)
-	if runtimeID != "" {
-		defer reclaimQualified(t, store, runtimeID)
-	}
 	if err != nil {
+		if runtimeID != "" {
+			reclaimQualified(t, store, runtimeID)
+		}
 		logMissingPackageTargets(t, m)
 		t.Fatalf("runtime rejected by strict Seal (recipe=%t): %v", recipe, err)
 	}
-	owner := ids.New()
-	entrypoint, source, lazyName, lazy := qualificationSources(lang)
+	return runtimeID
+}
+
+func sealQualificationCode(t *testing.T, store *artifactfs.Store, owner, entrypoint, source, lazyName, lazy string) (string, string) {
+	t.Helper()
+	limits := runtimePackageLimits()
 	codeStage, err := store.Begin(t.Context(), 4096)
 	if err != nil {
 		t.Fatal(err)
@@ -192,12 +202,25 @@ func qualifyRuntime(t *testing.T, dir, jail, lang string, recipe bool) {
 		t.Fatal(err)
 	}
 	codeID, err := codeStage.Seal(t.Context(), artifactfs.KindCode, owner, codeManifest, codeHash)
-	if codeID != "" {
-		defer reclaimQualified(t, store, codeID)
-	}
 	if err != nil {
+		if codeID != "" {
+			reclaimQualified(t, store, codeID)
+		}
 		t.Fatal(err)
 	}
+	t.Logf("authored code source sha256=%s manifest=%s", digest(source), codeHash)
+	return codeID, codeHash
+}
+
+func qualifyRuntime(t *testing.T, dir, jail, lang string, recipe bool) {
+	t.Helper()
+	store := newQualificationStore(t)
+	runtimeID := sealQualificationRuntime(t, store, dir, lang, recipe)
+	defer reclaimQualified(t, store, runtimeID)
+	owner := ids.New()
+	entrypoint, source, lazyName, lazy := qualificationSources(lang)
+	codeID, _ := sealQualificationCode(t, store, owner, entrypoint, source, lazyName, lazy)
+	defer reclaimQualified(t, store, codeID)
 	paths, err := artifactfs.PreparePaths(store, codeID, store, runtimeID)
 	if err != nil {
 		t.Fatal(err)

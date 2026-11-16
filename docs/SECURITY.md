@@ -36,6 +36,20 @@ wired. Audience-less legacy OAuth authentication remains unchanged, but supplies
 no IAM publication reference. Persistence-only APIs retain their existing behavior.
 See `docs/FUNCTION_IAM_PLAN.md` for the remaining cut-over gates.
 
+The inactive `workloadspawn.Factory` retains exact code/runtime anchors and
+owned config/secrets; prepared-plan quotas do not bound live workers or global
+provider memory. Retirement prevents new preparations, not already-issued
+execution. Current-generation denial must still publish under the IAM gate
+before obsolete bootstrap code can obtain authority.
+
+`workloadfence` separately owns a durable Linux cgroup epoch, enrolls trusted
+commands before exec and mints an opaque death proof only after durable entry
+closure and kernel recursive emptiness. Captured service budgets and jail-parent
+capabilities constrain resource delegation and relocation within that epoch.
+Trusted-host ownership and stable/no-reuse assumptions remain prerequisites.
+No serving constructor or artifact recovery consumer uses this package; passing
+kernel checks does not authorize recovered artifacts, reclamation or IAM grants.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many

@@ -30,9 +30,10 @@ go vet ./...
 | Package | Purpose |
 |---|---|
 | `artifactfs` | Inert Linux-only staging, manifest verification and code/runtime lifetime leases. Explicit persistent publication and inspection-only recovery; recovered trees cannot be activated or deleted. No legacy adoption, serving or GC integration; see its README. |
-| `workloadspawn` | Inert one-use composition of owned generation/config/secrets snapshots and verified path leases. Freezes spawn inputs and host fingerprint; it is not current-generation proof, policy approval or serving-pool wiring. |
+| `workloadspawn` | Inactive frozen-generation factories issue bounded one-use spawn plans from owned config/secrets and concrete code/runtime leases. Matching resource facts do not establish current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `workloadpolicy` | Internal unregistered management core joining ordered registry/IAM publication with live-operator policy transactions. Requires a trusted current-artifact observer; replacement preserves quarantine/review flags and only explicit review clears them. No serving observer or public adapter is installed. |
+| `workloadfence` | Linux cgroup-v2 epoch ownership, pre-exec enrollment and kernel-verified descendant fencing. Package-only acceptance does not authorize artifact recovery, reclamation or IAM admission; see its README for ownership and relocation constraints. |
 | `config` | Config struct; environment variables only — there is no config file or YAML loader (see docs/CONFIG.md) |
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |

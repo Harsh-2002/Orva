@@ -612,6 +612,97 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- A fresh UID-1001 lifecycle-candidate build combined the independently reviewed
+  factory, real-runtime harness and resource-capable fence with the accepted
+  policy/context/stream baseline. Actual UI/server build, canonical lint/tests
+  and frontend lint/tests passed; the owned VM was removed. Its frozen manifest
+  explicitly excludes ongoing sandbox Domain integration. This is not full
+  API/sandbox E2E, migration/restore or serving-IAM acceptance.
+
+- The inactive frozen-generation factory now owns bounded config/secrets and
+  concrete code/runtime anchors, issues same-generation one-use spawn plans,
+  and exposes resource facts from the same frozen inputs. Prepared count/byte
+  reservations remain charged through Spawn completion and release exactly
+  once. Independent full package race tests and quota/lease/retirement probes
+  passed, with source hashes and worktree cleanup verified. Those tests use a
+  fake jail. Independent normal/race qualification now also passed with two
+  real Node and two real Python workers, frozen inputs despite source mutation,
+  distinct worker identities, quota release, retirement, private SDK/lazy imports
+  and post-Wait leases; original runtime controls passed and the VM was removed.
+  Current
+  generation/bootstrap admission, provider budgets and pool wiring remain absent.
+
+- Fresh frozen-candidate qualification builds the actual UI/server and runs as
+  UID 1001, excluding concurrent factory and sandbox-integration work. Its first
+  build/lint passed but canonical tests failed in the minimal Node image:
+  Python-backed fake-jail fixtures had no `python3` interpreter. The original
+  failures are retained; Python was installed only inside the disposable VM.
+  The unchanged canonical `make lint`/`make test` and frontend lint/tests then
+  passed, including 228 component checks. The owned candidate VM was removed.
+  This accepts the frozen snapshot, not concurrent factory/jail-parent work,
+  E2E behavior or serving IAM.
+
+- `workloadpolicy` now joins registry mutation ordering, immutable IAM
+  publication and the live-operator policy transaction. Replacement preserves
+  quarantine/review flags; explicit review approves unchanged policy against
+  exact current-artifact expectations. Total empty-policy revocation remains
+  possible when current runtime facts are unavailable. Independent real-SQLite
+  tests passed, including stale artifact during lock wait, queued revocation,
+  cancellation and deferred COMMIT failure. Its current-artifact observer is a
+  trusted atomic host contract, not an installed or attested serving provider.
+  No public adapter or boot initializer is registered.
+
+- Internal management decoders require exact authorable fields and positive
+  signed-64-bit decimal revision strings, with nullable SHA-256 expectations.
+  They reject duplicate/unknown host fields, coercion, malformed input and
+  exceeded bounds. Shared token-free operator context captures authenticated
+  API-key identity and MCP OAuth's validated stored audience; AI request
+  contexts inherit it. Independent VM tests/probes passed for this decoder and
+  capture slice. Browser-session UUID capture, queued-build capture and
+  end-to-end management-tool wiring remain absent; cookie prefixes and
+  audience-less OAuth do not become publication credentials.
+
+- Staged streaming SDK admission now checks the acquired worker before binding
+  or dispatch, retains registration through the stream and reauthorizes bounded
+  handoffs. Independent testing found a nil-byte handoff followed by an
+  oversized dynamic error. The corrected implementation serializes the actual
+  SDKError before handoff and returns only the admitted copy; the unchanged
+  overflow probe now yields a bounded generic denial. Repeated package race
+  tests/vet and independent boundary/lease/lock probes pass. Real pooled
+  artifact binding, nested-runtime IAM and serving remain separate gates.
+
+- A scratch-only runtime producer authenticates reviewed release bases, checks
+  fourteen exact packaging-link omissions and overlays hash-pinned current SDK
+  sources. Emitted archives are imported into fresh stages and sealed against
+  original producer expectations. Node/Python real nsjail readiness, private
+  SDK, lazy imports and post-Wait lease retention were independently reproduced
+  normally and under race detection. That review found a blocking FIFO input
+  open before file-type checks; the producer now opens no-follow/nonblocking
+  and rejects nonregular files. Corrected independent verification passed the
+  unchanged FIFO witness promptly, 100 race repetitions of negative inputs and
+  fresh normal/race Node/Python execution. Emitted archives and producer records
+  matched previous hashes exactly; non-root artifactfs regressions passed and
+  the owned VM was removed.
+  This is not published runtime packaging or serving qualification.
+
+- `workloadfence` adds a package-only durable cgroup epoch and pre-exec entry
+  wrapper, serializes closure against starts, and mints opaque proof only after
+  durable close plus kernel recursive emptiness. Worker and independent
+  original suites passed real-kernel race repetitions. Independent additional
+  probes/vet passed, including copied-handle closure, fresh owner-bound proofs,
+  recovery ownership and durable-state denial; the owned VM was removed.
+  Host ownership/no-reuse and in-epoch trusted command
+  relocation remain prerequisites. Legacy nsjail's global cgroup parent is not
+  integrated; no artifact recovery consumer or reboot adoption is enabled.
+
+- The fence now has owned jail-parent capabilities and a process-local service
+  budget captured from the exact current non-root cgroup before daemon-leaf
+  relocation. Ordinary Create ancestor/sibling/root denials remain. Independent
+  current-source race repetitions and adversarial probes passed controller
+  readback, descendant fencing, copied capabilities, stale state and mount-alias
+  rejection, with mount/subtree/VM cleanup verified. This is not resource-stress,
+  real nsjail sandbox integration, boot wiring or recovery acceptance.
+
 - Completion work after the approved UI now includes an internal
   `SaveIAMPolicyAsOperator` transaction: live credential validation, policy CAS,
   authority-epoch advancement and derived audit actor commit together, with a

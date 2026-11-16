@@ -50,9 +50,10 @@ type planState struct {
 }
 
 type inputs struct {
-	fn      *database.Function
-	secrets map[string]string
-	paths   *artifactfs.PreparedPaths
+	fn           *database.Function
+	secrets      map[string]string
+	paths        *artifactfs.PreparedPaths
+	preparedDone func()
 }
 
 // NewPlan transfers paths only after validating and cloning every input.
@@ -224,6 +225,9 @@ func (p *SpawnPlan) take() *inputs {
 func (p *SpawnPlan) Close() {
 	if in := p.take(); in != nil {
 		in.paths.Release()
+		if in.preparedDone != nil {
+			in.preparedDone()
+		}
 	}
 }
 
@@ -233,6 +237,9 @@ func (p *SpawnPlan) Spawn(ctx context.Context, template sandbox.ExecConfig) (*sa
 	in := p.take()
 	if in == nil {
 		return nil, ErrUsed
+	}
+	if in.preparedDone != nil {
+		defer in.preparedDone()
 	}
 	defer in.paths.Release()
 	if ctx == nil {

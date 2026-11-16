@@ -1,0 +1,299 @@
+# Surviving-process fence foundation (Linux, inert)
+
+`workloadfence` owns a newly created cgroup-v2 epoch, enrolls trusted host commands
+at process creation, and can close entry and prove the entire epoch unpopulated.
+There are **no serving, sandbox, pool, builder, artifactfs, boot, GC, or IAM
+consumers**. A proof does not authorize artifact recovery, activation, deletion,
+reclamation, policy approval, or current-generation admission. Recovered
+artifact stores remain inspection-only.
+
+## Ownership and prerequisites
+
+- Supply an existing empty absolute metadata directory owned by the effective
+  UID, mode exactly 0700, with no symlink components. It must be on a durable
+  filesystem supporting directory `flock`, file fsync, atomic same-directory
+  rename, and directory fsync. Files are owned by this package alone.
+- Supply an existing host-owned writable cgroup-v2 parent explicitly delegated
+  to this owner. Ordinary `Create` requires a **strict child of this process's own non-root
+  service/container cgroup**, as resolved from `/proc/self/cgroup` under the
+  verified `/sys/fs/cgroup` mount. Root, the daemon group itself, ancestors,
+  siblings, traversal, and ambiguous/namespace-root membership deny. A writable
+  ancestor is not an approved budget. The supplied parent must remain inside
+  that budget; Start/Fence/Check revalidate it. This path constraint supplements,
+  but does not mint, the host's explicit ownership/delegation approval.
+  `CreateUnderBudget` below is a separate explicit captured-budget path; ordinary
+  Create's ancestor/sibling/root denials are unchanged.
+  The package never selects a writable ancestor, moves the daemon, enables
+  ancestor controllers, or scans/kills unrelated processes.
+  Unsupported lifetime delegation or clone-into-cgroup fails closed, without a
+  post-Start PID-write fallback. Linux must support `cgroup.kill` and clone3
+  `CLONE_INTO_CGROUP`; the tested kernel is 6.12.113.
+- Lifetime fencing does **not** require cpu, memory or pids resource controllers.
+  Create enables none. Explicit jail-parent preparation below can enable only
+  requested controllers inside the owned epoch and makes no hard-limit claim. Existing
+  sandbox rlimit-only behavior is unchanged; that is separate from whether
+  kernel process-domain membership and death can be proved.
+- The metadata and cgroup ancestors, mount topology, namespace, and privileged
+  host writers are trusted and must remain stable. No outside writer may alter,
+  rename, delete, recreate, import, restore, or reuse an epoch or its control
+  records. Never grant workload code access to the host cgroup filesystem,
+  metadata, or descriptors. Same-UID/privileged hostile host mutation is not an
+  isolation boundary this package can enforce.
+- `Start` accepts **trusted host commands only**, not SDK/user-provided commands
+  for direct host execution. Such commands must not relocate themselves or
+  descendants outside their epoch, hand processes to an outside supervisor, or
+  grant outside processes access to the epoch. Fork/exec alone inherits cgroup
+  membership; privileged cgroup migration does not. This is not an nsjail or
+  general hostile-command sandbox.
+- The durable random epoch, kernel boot ID, metadata-root identity, parent
+  identity and cgroup identity are checked together. Caller-supplied expected
+  paths, inode numbers, released flock, PID absence, SDK EOF, and kill intent
+  alone never constitute proof. Inode numbers can be recycled: same-boot
+  inode equality is meaningful only under exclusive ownership and **no
+  deletion/recreation/reuse**. A reboot, missing group, changed identity, or
+  ambiguous record denies; there is no reboot adoption or inode-reuse recovery.
+
+## API and ordering
+
+1. `Create(root, parent)` takes a nonblocking exclusive directory flock and
+   rejects nonempty metadata. It creates a random `epoch-<32 lowercase hex>`
+   domain with an empty `supervisors` leaf and a `jails` subtree. No resource
+   controllers are enabled. This split allows future controller delegation on
+   the empty epoch/jails parents without violating the no-internal-process rule.
+2. Before exposing the domain, it persists a version-1 `epoch.json`: write an
+   exclusively created mode-0600 temporary file, fsync, rename, directory fsync.
+   The canonical record binds the exact boot/root/parent/group identities.
+   Initializer failure leaves state for investigation, never automatic removal;
+   it may leave an unassociated empty cgroup, but cannot have started a process.
+3. `Domain.Start(ctx, cmd)` serializes command Start under the domain's private
+   entry gate. It rechecks identity and metadata, checks closed/cancellation
+   state, then uses Go `SysProcAttr.UseCgroupFD/CgroupFD` to enroll the **host
+   command itself before exec** in `supervisors`. It preserves other attributes,
+   rejects an existing cgroup binding, restores the command's original attribute
+   pointer, and exports no raw cgroup FD. An optional owned JailParent is
+   revalidated under the same gate. Callers exclusively own the command during
+   Start; they retain responsibility for exactly one `Wait`.
+4. `Fence(ctx)` permanently closes entry, then acquires that same gate. A Start
+   already inside the gate may finish; Fence waits for it before killing.
+   Prepared/queued/future Starts cannot enter after closure, including through
+   copied handles. No cancellation or retry reopens entry.
+5. Fence validates the exact domain and durable metadata, persists `closed:true`
+   with the same fsync protocol, writes the epoch's `cgroup.kill`, and waits for
+   the kernel's recursive `cgroup.events populated=0`. It rechecks identity
+   before minting an opaque `*Proof`. The domain gate stays held through this
+   sequence, so no old prepared binding can start after the observed emptiness.
+6. `Check(ctx, proof)` accepts only a package-minted proof for that same still-owned
+   domain, with matching durable closed metadata, current identities and fresh
+   kernel emptiness. A zero proof, foreign domain, or closed ownership handle
+   denies. Proofs are not serializable authority.
+7. `Close()` closes entry and releases descriptors/flock, without killing,
+   deleting, reclaiming, or certifying anything. It is idempotent across copied
+   handles. A new owner must use `OpenRecovering`, not Create.
+8. `OpenRecovering(root, parent)` requires the exact same-boot durable identities,
+   takes the flock, and **always disables Start**, even if the crashed owner's
+   record was open. It may Fence and mint a new proof; an old proof is not
+   transferable to the new owner.
+
+Run all Start/Fence/Check/Close work **outside IAM gates, pool locks, registry
+mutation locks, and database transactions**. This package's entry gate orders only
+process entry and fencing; it is not the IAM authorization gate. Context bounds
+gate acquisition and drain polling, but cannot interrupt a kernel filesystem
+operation or Go `cmd.Start` already in progress. Close has no context and waits
+for such work; it is not a bounded process-kill operation.
+
+## Failure and strict metadata handling
+
+Reads open no-follow/nonblocking, require an euid-owned exact mode-0600
+single-link regular file, and cap reads at 4096 bytes. Canonical typed JSON
+reencoding rejects unknown/duplicate fields, omitted fields, null/wrong types,
+noncanonical encodings and invalid UTF-8. Format, lowercase hex epoch, boot-ID
+shape and nonzero inode identities are checked. Unknown names, pending temporary
+records, links, FIFOs, oversize metadata, changed directory mode/identity,
+corruption and unsupported filesystem deny without deleting or repairing data.
+These checks supplement exclusive ownership, not adversarial concurrent-writer
+atomicity or protection from a trusted host restoring forged records.
+
+Cancellation/deadline or I/O failure yields **no proof**, with entry still closed.
+No kill occurs before a successful durable closed commit. Cancellation before
+the entry gate does not imply descendants have stopped. Retry can complete an
+ordinary cancelled/failed kill. A visible closed rename after directory-fsync
+failure is accepted only as the exact monotonic closed transition and is
+persisted/fsynced again before kill/proof. Failed file-fsync or rename leaves the
+temporary record intact; retries/reopen deny rather than discard it. An operator
+must investigate such state; there is no package repair or cleanup API.
+The package deliberately never removes metadata or cgroups, including on
+constructor failure, so cleanup failure cannot silently erase evidence or
+release artifact ownership. No artifact data is managed here.
+
+## Owned jail-parent extension (requires new independent acceptance)
+
+The original package-only acceptance is a historical snapshot; its preserved
+hashes/logs do not cover this extension. No durable record/schema changes are
+made. Create additionally pins its newly created `jails` directory until Close.
+Recovered domains do not reconstruct live path authority and cannot prepare or
+start jails.
+
+`PrepareJails(ctx, controllers...)` returns an opaque `*JailParent`. The only
+accepted controller names are `cpu`, `memory`, `pids`, each at most once; the
+request and returned capability have constant-size owned state. An empty request
+means lifetime-only. Preparation holds the domain entry gate, rejects
+closed/recovering/disposed domains, and validates exact epoch/metadata/jails
+identities and domain type. It rejects unknown epoch children and unknown jail
+directory names. Expected child names are canonical `NSJAIL.<positive uint32>`
+labels, not proof of their provenance; exclusive trusted host writers remain a
+precondition. Enumeration is capped at 2048 entries per inspected directory,
+including kernel files; this intentionally bounds the number of accepted jails.
+The shared pinned descriptor is never exported; preparing capabilities does not
+allocate more persistent descriptors.
+
+For a resource request, availability is read from the epoch, not inferred from
+writability or host-root controls. The package enables the union of explicitly
+requested controllers on **only the epoch and its jails subtree**, and verifies
+kernel readback. It never enables controllers on the supervisors leaf, service
+parent, ancestor, daemon or global worker subtree. Missing delegation returns
+`ErrUnsupported`, without changing existing lifetime authority or falling back
+to fewer requested controllers. Partial/unverifiable kernel writes permanently
+close entry without undoing or deleting state; Fence remains available for
+cleanup. Successful delegation is not proof of per-jail limits: the eventual
+consumer must set and verify those and independently test enforcement.
+
+`parent.Path()` is a value for trusted host argument construction, **not durable
+approval or permission to enter a cgroup directly**. Pass the capability to
+`domain.Start(ctx, cmd, parent)`. Start rechecks ownership, pinned identity,
+kernel domain/controller state and names under its existing entry/fence gate.
+Detected jail identity/topology/controller corruption closes entry permanently;
+it is not repaired by retrying preparation.
+Foreign/zero/nil capabilities, replacement, unexpected changes, post-Fence or
+post-Close bindings deny. Copies share the same domain lifetime; a previously
+prepared path cannot bypass a subsequently closed Start. Code using this API
+must not start the command by another route or substitute a different
+`--cgroupv2_mount` after argument construction.
+
+## Captured service budget (new, not production boot integration)
+
+Linux's no-internal-process constraint prevents a populated non-root daemon
+cgroup from distributing memory to children. Ordinary Create still requires a
+parent below current membership; it does not infer a service ancestor after the
+daemon moves into a leaf.
+
+`CaptureBudget()` accepts **no path or persisted identity**. Before a trusted
+boot owner moves the daemon, it captures the exact current non-root unified
+cgroup from `/proc/self/cgroup`, verifies its ownership and cgroup-v2 filesystem,
+and pins that cgroup, the `/sys/fs/cgroup` mount, and both cgroup/mount namespaces.
+The process-local capability binds PID, kernel boot ID, path, device/inode
+identities, and the mount's kernel `mnt_id` from bounded fdinfo. No raw descriptor
+is exported. Root/ambiguous membership, wrong identities and unsupported mount
+identity deny; there is no writable-ancestor scan or caller-string anchor.
+Both the captured budget and each supplied parent must belong to that exact
+mount; a nested bind mount cannot substitute a foreign cgroup at a lexical child.
+
+`CreateUnderBudget(budget, root, parent)` requires a live package-minted
+capability and a strict descendant of its exact captured budget. The daemon's
+current membership must still be that budget or a descendant of it. Mount,
+namespaces, boot, PID, pinned budget identity and current path identity are
+rechecked at creation and through the Domain's normal Start/Prepare/Fence/Check
+identity verification. A daemon leaf and an epoch parent may therefore be
+siblings **inside the same captured budget**, without authorizing any path
+outside it. A capture made only after moving into a leaf cannot reconstruct or
+mint its ancestor's authority.
+
+The trusted boot owner must exclusively own the service budget and its stable
+ancestors, move **only its own daemon** to a known owned leaf, verify the
+captured budget has no direct processes, and explicitly arrange resource
+delegation before creating resource domains. This package performs **none** of
+those moves, empty-budget boot operations or service-parent controller writes.
+PrepareJails still modifies only owned epoch/jails descendants and fails when
+requested delegation is unavailable. Stable mount topology/namespaces and
+no deletion/recreation/inode reuse remain trusted-host preconditions; the
+capability is not a defense against a privileged host violating them.
+
+Budget copies share one state. At most 1024 domains may retain that state.
+`Budget.Close` prevents later creation reservations through every copy;
+already-retained creations may complete. Existing domains keep independent
+entry/fence lifetimes and pinned references: Close returns ErrBusy until these
+references are released, and the last release disposes the pins. Budget closure
+is **not** worker death, process revocation, or permission to reclaim artifacts.
+The domain gate may acquire the budget mutex for bounded identity checks; budget
+methods never acquire domain/IAM/pool locks or call user callbacks.
+
+No durable schema changes are made. No capability can be restored from a
+database/path/record, and no budget-aware recovery constructor or serving boot
+owner is installed. Existing OpenRecovering remains inspection/fence-only under
+its original current-membership constraint. Restart placement, recapturing a
+service budget after a crash, and production delegation remain integration
+obligations, not acceptance established by this process-local API.
+See the kernel's [no-internal-process constraint](https://docs.kernel.org/admin-guide/cgroup-v2.html#no-internal-process-constraint).
+
+## Mandatory future sandbox integration (not implemented)
+
+Every nsjail **host command**, every worker/build child, and all descendants must
+remain inside the same durable instance epoch, from before their first exec
+through termination. The supervisor belongs in `supervisors`; nsjail-created
+child cgroups must be rooted under that epoch's `jails` subtree (or an equivalent
+owned in-epoch layout). Its `--cgroupv2_mount` / effective cgroup parent **must be
+inside that epoch**. Both worker and build startup paths need this invariant.
+
+When nsjail resource cgroup flags are enabled, its effective cgroup parent must
+be inside the epoch; the future adapter must enable and verify the required
+controllers in that owned subtree. Without resource cgroup flags, children
+naturally inherit their enrolled host command's domain; no relocation is needed.
+
+The current sandbox's legacy global `orva.workers` mount is **not compatible**:
+nsjail relocating a jailed child there escapes this fence even though the host
+nsjail command was enrolled correctly. Do not enable this package by wrapping
+Start alone. A future adapter must own argument construction and cgroup parent
+selection, prevent raw-FD reentry, join every startup path, and prove real nsjail
+relocation/lifecycle behavior before it can consume proofs. No such adapter or
+artifact recovery consumer is provided by this change.
+
+## Focused verification
+
+Kernel tests require an explicit, exclusively owned disposable-VM subtree;
+unset variables skip them without touching host cgroups. Never point them at a
+shared/production cgroup. A fresh guest-root fixture delegates cpu/memory/pids
+from the guest's cgroup root to the test service budget. The test binary alone
+must occupy that budget (no go driver or waiting shell there). Resource fixtures
+capture it, move only the test process to an owned daemon leaf, check the anchor
+empty, then explicitly enable budget/fixture-parent controllers. They restore
+membership/controller state and remove only their own directories afterward.
+The root-capture negative moves only the test process temporarily to the
+disposable guest's root; production CaptureBudget never moves anything.
+Run from the copied package directory:
+
+```sh
+env -i PATH=/usr/local/go/bin:/usr/bin:/bin HOME=/tmp GOCACHE=/tmp/gocache \
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GO111MODULE=off \
+  go test -race -c -o /workloadfence.test .
+# Execute directly via msb exec, not through a waiting guest shell:
+env -i PATH=/usr/local/go/bin:/usr/bin:/bin HOME=/tmp \
+  ORVA_FENCE_TEST_PARENT=/sys/fs/cgroup/microsandbox-workload/iam-budget-tests \
+  ORVA_FENCE_TEST_SCRATCH=disposable-vm /workloadfence.test -test.v -test.count=20
+env -i PATH=/usr/local/go/bin:/usr/bin:/bin HOME=/tmp GOCACHE=/tmp/gocache \
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GO111MODULE=off go vet .
+```
+
+The stdlib-only package can be copied alone into the guest; module-off execution
+avoids unrelated repository dependency/toolchain downloads. Tests use real
+kernel cgroups for enrollment, nested child/grandchild death, populated-to-empty
+proof, entry/fence races, deadline/cancellation closure, crash/reopen, and
+identity/corruption denials. A deleted target-cgroup kernel rejection proves there is no
+unenrolled fallback. Private fault injection exercises file-fsync/rename/
+directory-fsync handling with real descendants; it is **not** an actual
+power-loss or storage-hardware durability experiment.
+
+New budget tests verify real cpu/memory/pids delegation, exact per-child
+memory.max/pids.max/cpu.max values, enrolled helper plus grandchild membership,
+and kernel-empty fencing. These are controller installation/readback and
+lifetime proofs, **not** OOM/CPU-throttling/PID-exhaustion enforcement stress
+tests or real nsjail evidence. Other cases cover actual root capture rejection,
+actual out-of-budget process movement/path replacement, nested foreign
+bind-mount rejection, copied/closed/zero
+capabilities, constructor-reservation release and concurrent Close/Create.
+Wrong boot/inode/mount/namespace/PID cases alter expected binding fields and
+must deny; they are not actual reboot, remount or namespace-transition tests.
+
+The crash-owner helper skips direct top-level invocation but runs as a real
+subprocess of the crash/reopen test. Unkillable D-state timeout, actual
+unsupported-clone3 kernels, namespace/mount changes, hostile host writers,
+production nsjail, real artifacts, full repository tests/E2E, and serving IAM
+acceptance are not established by these focused checks.
