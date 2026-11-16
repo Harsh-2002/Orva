@@ -1,7 +1,8 @@
 # workloadiam foundation (inert)
 
-No callers, storage, migrations, routes, runtime changes or activation are included.
-Existing SDK behavior is unchanged. The package uses only the standard library.
+No production callers, boot migrations, routes, runtime changes or activation
+are included. Inert database storage is a separate foundation. Existing SDK
+behavior is unchanged. This package uses only the standard library.
 
 ## Version 1 document
 
@@ -76,11 +77,43 @@ grants or vice versa. The host must keep readiness monotonic and stop admitting
 bootstrap requests at readiness; a pure evaluator cannot reconstruct worker history.
 Active-lease background tasks have worker authority, not isolated task identity.
 
+## Inert admission/publication coordinator
+
+`NewAuthority(maxRegistered, initial)` owns immutable policy snapshots and a
+single RW admission gate. Its zero value denies. `Do` evaluates a short effect
+under read admission through completion; calls/streams must use `BeginCall`.
+Jobs/cron check inbound acceptance at creation, not eventual execution authority.
+
+`BeginCall` registers a bounded cancellable waiting edge. Always defer `Finish`,
+including on acquisition errors or parent cancellation. Pool acquisition uses
+`Admission.Context` outside the gate. `Admit` takes fresh caller/lease and acquired
+target state, verifies both approved artifacts and original identities, then
+marks the operation admitted. Dispatch and all protocol I/O happen outside.
+
+`HandoffFrame` rechecks an admitted stream and transfers at most 256 KiB of
+decoded chunk data to already-reserved storage under admission; `NextFrame`,
+base64/serialization and protocol writes happen outside it. The transfer callback
+must not block. Handed-off data can physically arrive after a subsequent revoke.
+
+`Publish(expectedRevision, candidate, persist)` holds exclusive admission through
+synchronous persistence and snapshot publication. Failure/conflict leaves current
+authority intact. A successful change marks every registered edge touching that
+owner revoked, then cancels their contexts after releasing locks and before
+returning. Revoked calls keep their capacity slot until `Finish`; later grants
+cannot revive them. Stream owners still must close handles on cancellation.
+
+Callbacks are trusted host code, synchronous and bounded. They cannot reenter the
+coordinator, acquire earlier build/registry locks, spawn work, do protocol I/O,
+or await an IAM-acquiring writer. Lock order is build/mutation, IAM gate,
+registration lock (if needed), then database lifecycle/write resources. Actual
+source publication is not a callback responsibility. Host-state invalidation,
+policy storage and current credential validation must use the coordinated
+publication boundary in future integration; this coordinator does not create it.
+
 ## Not implemented / obligations before cut-over
 
-Storage CAS/revision monotonicity, quarantine, authority epochs, current policy
-publication, admission locking, cancellation and async attempt/firing checks remain
-outside this package. Resolve names to immutable UUIDs before evaluation. Host
+Live storage/admin integration, quarantine, authority epochs and async attempt/
+firing checks remain outside this package. Resolve names to immutable UUIDs before evaluation. Host
 integration must check target existence/availability generically, current/acquired
 callee artifact binding, depth limits, stream worker/lease/target ownership and
 cursor namespace/prefix binding. `Accepts` intentionally takes no fabricated lease

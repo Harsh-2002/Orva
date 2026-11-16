@@ -74,7 +74,7 @@ Rules union together; absence denies. Reject unknown actions, resource types,
 versions, contradictory fields and malformed IDs. Bound policy bytes, statement
 count and target count: proposed first-release limits are 32 KiB serialized
 policy, 64 outbound statements and 256 total outbound targets/inbound callers.
-Keys/prefixes use existing KV byte limits; never truncate to fit. All limits
+Keys/prefixes use existing KV UTF-8 and character limits; never truncate to fit. All limits
 are validated server-side and covered at boundary plus one-over-limit.
 Use one combined revision for outbound rules, inbound acceptance and reviewed
 artifact binding; every change requires expected revision. Inbound trigger
@@ -114,6 +114,14 @@ authorization bypass for reading another execution. Best-effort span failures
 remain observable host-side even if SDK convenience wrappers suppress errors.
 No cross-function secrets/env API is introduced. Existing secret injection is
 explicitly separate from this first IAM release.
+
+Authorize the resource that the shared core will actually persist. In particular,
+cron upsert currently trims schedule names: perform that normalization once before
+matching the policy, then persist the same normalized name. Never authorize a
+raw selector and mutate a different normalized selector afterward. Preserve the
+25-schedule bound with a transactional count/upsert under the owner mutation
+ordering; count failure denies instead of bypassing the quota. Quotas remain
+distinct from IAM decisions.
 
 First-release API examples and exact wire schema are intentionally deferred to
 design freeze. Pin an operation-to-required-actions table shared by evaluator,
@@ -522,11 +530,23 @@ Minimum scenario matrix:
 - Pure `workloadiam` parser/evaluator foundation implemented. Its package README
   pins the version-1 document and host integration seam; example documents are
   future IAM inputs, not accepted by current function APIs. Race-enabled package
-  tests and vet pass; independent verification remains a separate gate.
+  tests and vet pass. Independent evaluator acceptance at `a7d5478` passed race
+  tests, vet, decoder fuzzing (754,097 executions), strict nested-field probes,
+  source-alias mutation checks and README example execution. This accepts only
+  pure policy decisions, not trusted host-context construction or enforcement.
 - Independent literal-KV verification passed the full database race suite and
   vet, including an EXPLAIN check proving bounded function/key index lookup.
 - No IAM boot migration, route/tool, channel default or scheduler enforcement
-  has been activated. Revision storage is the next inert foundation slice.
+  has been activated.
+- Inert storage implements strict policy persistence, revision/approval CAS,
+  signed-range exhaustion checks, digest/actor audit retention and read-only
+  legacy preflight. Its schema initializer is called only by tests. The stored
+  approval comparison is not yet a live deployment/config check; service gates
+  and filtering review-required/quarantined rows remain mandatory.
+- Inert admission/publication coordination registers waiting calls, rechecks
+  acquired targets, authorizes bounded stream handoff and cancels affected work
+  outside locks. It remains unconnected to workers/shared cores/storage. Parent
+  review aligned its decoded chunk cap with the existing 256 KiB SDK limit.
 
 Source integration map at baseline:
 

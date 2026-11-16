@@ -29,7 +29,7 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
-| `workloadiam` | Inert function-IAM policy parser and immutable evaluator. Not wired into SDK, scheduler, storage migration or public APIs yet; see the package README and `docs/FUNCTION_IAM_PLAN.md`. |
+| `workloadiam` | Inert function-IAM policy parser, immutable evaluator and admission/publication coordinator. Not wired into SDK, scheduler, boot migration or public APIs yet; see the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `config` | Config struct; environment variables only — there is no config file or YAML loader (see docs/CONFIG.md) |
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
@@ -222,6 +222,14 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 operator routes. It queries case-sensitive literal UTF-8 prefix ranges using
 binary index bounds; existing cursor-list callers retain their legacy `LIKE`
 semantics until the coordinated IAM cut-over.
+
+`workload_iam*.go` holds inert policy storage and read-only legacy preflight.
+Its explicit schema initializer is test-only for now, never called on boot.
+CAS saves validate signed revisions and atomically append digest/actor audit
+records (32 retained per live function). Policy and audit rows cascade on
+function deletion; host-level deletion audit remains a cut-over obligation.
+Storage is not admin authorization or live artifact verification. Quarantine
+flags must prevent snapshot admission when the future loader is connected.
 
 ## Runtime SDK channel tests
 
