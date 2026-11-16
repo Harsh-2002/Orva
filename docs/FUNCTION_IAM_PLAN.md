@@ -610,6 +610,15 @@ and policy together. Serving wiring remains absent until the full proof gates.
   targets, escapes, file parents and directory cycles still deny. Package race
   tests/vet pass; independent acceptance and real-runtime profile qualification
   remain separate gates. Genuine dangling links and metadata blockers persist.
+  Independent scoped resolver acceptance at `3f47321` passed 20 race repetitions,
+  vet and 560 additional overlay subtest passes, including exact 40/41-hop
+  boundaries and graph/component-order cases. Actual packaged content/provenance/
+  metadata and runtime-consumer integration remain unverified.
+  A static package test binary also passed five complete runs as root in a
+  disposable network-disabled Debian microVM. Capability-xattr rejection ran
+  and passed there (it had skipped on the host). The VM skipped its ACL fixture;
+  host-focused ACL tests passed. The VM was removed. These complementary fixture
+  checks do not establish actual packaged runtime metadata compatibility.
 
 - The inert Linux `artifactfs` module owns new private staging trees, verifies
   complete bounded typed manifests against a trusted expected digest, atomically
