@@ -606,6 +606,11 @@ and policy together. Serving wiring remains absent until the full proof gates.
   metadata and malformed inputs deny without partial snapshots. Initialization
   remains test-only; legacy CRUD does not rotate generations. This is not yet
   authoritative for admission or atomic config/policy publication.
+  Independent review caught lossy environment JSON decoding (null values and
+  invalid UTF-8 could become altered strings). The snapshot now requires a
+  duplicate-free string object, valid UTF-8 and paired Unicode escapes, rejecting
+  malformed input rather than normalizing it. Added regressions and three focused
+  race repetitions pass; independent re-verification remains required.
 
 - Strict secret snapshot decoding is implemented as an inert preparation helper:
   canonical owner, consistent rows, unique valid keys, caller-selected bounded

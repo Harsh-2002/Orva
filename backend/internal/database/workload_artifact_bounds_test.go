@@ -47,3 +47,28 @@ func TestWorkloadArtifactSnapshotBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkloadArtifactRejectsLossyEnvironment(t *testing.T) {
+	db, r := artifactTestSetup(t)
+	for _, raw := range []string{
+		`null`, `{"K":null}`, `{"K":1}`, `{"K":"first","K":"second"}`,
+		`{"K":"first","\u004b":"second"}`, "{\"K\":\"\xff\"}",
+		`{"K":"\uD800"}`, `{"\uDC00":"v"}`, `{"K":"v"} {}`,
+	} {
+		if _, err := db.write.Exec(`UPDATE functions SET env_vars=? WHERE id=?`, raw, r.OwnerID); err != nil {
+			t.Fatal(err)
+		}
+		got, err := db.GetWorkloadArtifactSnapshot(context.Background(), r.OwnerID)
+		if got != nil || !errors.Is(err, ErrWorkloadArtifactInvalid) {
+			t.Fatal("malformed environment yielded an altered snapshot")
+		}
+	}
+	for _, raw := range []string{`{}`, `{"K":"\uD83D\uDE00"}`, `{"K":"\\uD800"}`, `{"K":"�"}`} {
+		if _, err := db.write.Exec(`UPDATE functions SET env_vars=? WHERE id=?`, raw, r.OwnerID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.GetWorkloadArtifactSnapshot(context.Background(), r.OwnerID); err != nil {
+			t.Fatalf("valid environment rejected: %v", err)
+		}
+	}
+}

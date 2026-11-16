@@ -1,11 +1,14 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -124,9 +127,84 @@ func readWorkloadArtifactFunctionTx(ctx context.Context, tx *sql.Tx, ownerID str
 		return nil, ErrFunctionDeleting
 	}
 	// Unlike legacy scanners, an invalid environment cannot become partial config.
-	if err := json.Unmarshal([]byte(envJSON), &fn.EnvVars); err != nil {
+	fn.EnvVars, err = decodeArtifactEnvironment([]byte(envJSON))
+	if err != nil {
 		return nil, ErrWorkloadArtifactInvalid
 	}
 	fn.Image, fn.CodeHash = image.String, codeHash.String
 	return &fn, nil
+}
+
+func decodeArtifactEnvironment(data []byte) (map[string]string, error) {
+	if !utf8.Valid(data) || !validArtifactUnicodeEscapes(data) {
+		return nil, ErrWorkloadArtifactInvalid
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, ErrWorkloadArtifactInvalid
+	}
+	env := map[string]string{}
+	for d.More() {
+		token, err := d.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, ErrWorkloadArtifactInvalid
+		}
+		if _, exists := env[key]; exists {
+			return nil, ErrWorkloadArtifactInvalid
+		}
+		token, err = d.Token()
+		value, ok := token.(string)
+		if err != nil || !ok {
+			return nil, ErrWorkloadArtifactInvalid
+		}
+		env[key] = value
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+		return nil, ErrWorkloadArtifactInvalid
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return nil, ErrWorkloadArtifactInvalid
+	}
+	return env, nil
+}
+
+// encoding/json replaces unpaired UTF-16 escapes rather than rejecting them.
+func validArtifactUnicodeEscapes(data []byte) bool {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(data) {
+			return false
+		}
+		if data[i] != 'u' {
+			continue
+		}
+		if i+4 >= len(data) {
+			return false
+		}
+		unit, err := strconv.ParseUint(string(data[i+1:i+5]), 16, 16)
+		if err != nil {
+			return false
+		}
+		i += 4
+		if unit >= 0xDC00 && unit <= 0xDFFF {
+			return false
+		}
+		if unit < 0xD800 || unit > 0xDBFF {
+			continue
+		}
+		if i+6 >= len(data) || data[i+1] != '\\' || data[i+2] != 'u' {
+			return false
+		}
+		low, err := strconv.ParseUint(string(data[i+3:i+7]), 16, 16)
+		if err != nil || low < 0xDC00 || low > 0xDFFF {
+			return false
+		}
+		i += 6
+	}
+	return true
 }
