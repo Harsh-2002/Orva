@@ -521,6 +521,17 @@ Minimum scenario matrix:
 
 ### Implementation record
 
+- A staged buffered-F2F seam registers observed caller/target admission before
+  pool acquisition and checks the actual acquired worker before execution binding
+  or dispatch. A separate trusted target-state observer must supply current
+  active/generation facts through bounded gate-held reads; missing observers deny.
+  Failed admission releases the acquired worker healthy and finishes registration.
+  Current pool spawns have no reviewed artifact revision, so pool-backed IAM
+  calls still deny. Successful pool-backed authorization, genuine queued state
+  changes, post-dispatch revocation and queued self-call cancellation remain
+  unproved. Fake-jail helper tests are not end-to-end F2F IAM acceptance. Streams
+  and other unintegrated operations still deny; serving options remain absent.
+
 - Worker dispatch now refuses cancellation already observed at entry, after
   mutex acquisition or before lease publication/submission. Early refusal does
   not write frames, revoke another lease or poison a reusable worker. Focused

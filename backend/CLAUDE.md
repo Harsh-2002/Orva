@@ -243,7 +243,11 @@ retain their legacy `LIKE` semantics until the coordinated IAM cut-over.
 Omitting it preserves current behavior; explicitly passing nil denies protected
 operations. It authorizes KV under fresh observed admission, including all batch
 selectors before the transaction, and binds literal-list cursors to owner/prefix.
-Other protected operations deny until integrated; owned stream close is cleanup.
+Buffered F2F has a staged acquired-worker admission seam behind a separate trusted
+target-state observer; missing observers or unbound pool artifacts deny. Streams,
+jobs, cron and spans still deny; owned stream close is cleanup. Target-state
+observers must read active/current-generation facts under the same IAM gate,
+never infer activity from policy existence or perform DB/I/O/worker-lock reads.
 Never enable the partial path in serving configuration before coordinated cut-over.
 
 `workload_iam*.go` holds inert policy storage and read-only legacy preflight.

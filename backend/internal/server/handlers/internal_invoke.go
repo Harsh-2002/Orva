@@ -141,6 +141,12 @@ func (h *InternalInvokeHandler) recordMetrics(coldStart bool, durationMS int64, 
 // RunInvoke runs one buffered F2F call. parent bounds it: cancelling parent
 // cancels the callee. It returns the worker envelope verbatim.
 func (h *InternalInvokeHandler) RunInvoke(parent context.Context, c F2FCaller, fn *database.Function, body []byte, reqID string) ([]byte, *InvokeError) {
+	return h.RunInvokeWithAdmission(parent, c, fn, body, reqID, nil)
+}
+
+// RunInvokeWithAdmission checks the actual acquired worker before binding or
+// dispatch. The hook runs outside worker locks; denial releases it as healthy.
+func (h *InternalInvokeHandler) RunInvokeWithAdmission(parent context.Context, c F2FCaller, fn *database.Function, body []byte, reqID string, beforeDispatch func(*sandbox.Worker) *InvokeError) ([]byte, *InvokeError) {
 	if err := parent.Err(); err != nil {
 		return nil, invokeErrorFrom(err, fn, reqID)
 	}
@@ -166,6 +172,11 @@ func (h *InternalInvokeHandler) RunInvoke(parent context.Context, c F2FCaller, f
 	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
+	if beforeDispatch != nil {
+		if ierr := beforeDispatch(acq.Worker); ierr != nil {
+			return nil, ierr
+		}
+	}
 
 	// A distinct execution so the F2F child shows in the executions log and
 	// the trace tree.
