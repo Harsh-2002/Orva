@@ -511,6 +511,17 @@ Minimum scenario matrix:
 
 ## 9. References and non-goals
 
+### Implementation record
+
+- Design approval recorded on the feature branch; no rollout authorized.
+- Literal KV cursor-range foundation added without changing active list callers.
+  Race-enabled tests cover case, `%`/`_`, Unicode composition, NUL, scalar-boundary
+  ranges, exclusive cursors, namespace separation and expiry. Generated range
+  property checks compare with Go literal-prefix matching. This helper is not
+  authorization; policy enforcement must precede its use at cut-over.
+- Pure policy parser/evaluator foundation is in progress. No IAM migration,
+  route/tool, channel default or scheduler enforcement has been activated.
+
 Source integration map at baseline:
 
 - `sandbox/sdkchan.go:dispatch`, `sandbox/sdkapi.go:SDKCaller/ExecInfo`: identity,

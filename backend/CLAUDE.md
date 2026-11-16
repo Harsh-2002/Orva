@@ -217,6 +217,11 @@ Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/
 
 SQLite WAL mode. All migrations in `internal/database/migrations.go` — additive only. `VACUUM INTO` produces consistent backup snapshots without a write lock.
 
+`KVListLiteralWithCursorContext` is IAM foundation code, not yet used by SDK or
+operator routes. It queries case-sensitive literal UTF-8 prefix ranges using
+binary index bounds; existing cursor-list callers retain their legacy `LIKE`
+semantics until the coordinated IAM cut-over.
+
 ## Runtime SDK channel tests
 
 `backend/runtimes/{node/orva.js,python/orva.py}` route every SDK operation over a private per-worker socketpair
