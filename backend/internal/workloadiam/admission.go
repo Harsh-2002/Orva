@@ -68,7 +68,15 @@ func copyEvaluator(e *Evaluator) (*Evaluator, error) {
 // Calls/streams must use BeginCall instead. Jobs/cron also check current inbound
 // acceptance; this method does not authorize their later execution.
 func (a *Authority) Do(c Context, r Request, effect func() error) error {
-	if a == nil || effect == nil {
+	return a.DoObserved(func() Context { return c }, r, effect)
+}
+
+// DoObserved snapshots host state once under the read gate, before evaluation.
+// Observers must be synchronous, bounded atomic host-state reads: no DB/I/O,
+// worker waits, earlier locks or coordinator reentry. Lifecycle invalidation
+// still needs a future host transition hook sharing the exclusive gate.
+func (a *Authority) DoObserved(observe func() Context, r Request, effect func() error) error {
+	if a == nil || observe == nil || effect == nil {
 		return ErrDenied
 	}
 	switch r.Operation {
@@ -77,6 +85,7 @@ func (a *Authority) Do(c Context, r Request, effect func() error) error {
 	}
 	a.gate.RLock()
 	defer a.gate.RUnlock()
+	c := observe()
 	if !a.allows(c, r) {
 		return ErrDenied
 	}
@@ -126,27 +135,31 @@ type Admission struct {
 
 // BeginCall registers a waiting edge without retaining a gate during pool wait.
 func (a *Authority) BeginCall(parent context.Context, c Context, r Request) (*Admission, error) {
-	if a == nil || parent == nil || parent.Err() != nil || (r.Operation != OpInvoke && r.Operation != OpStreamOpen) {
+	return a.BeginCallObserved(parent, func() Context { return c }, r)
+}
+
+// BeginCallObserved copies one caller snapshot under the read gate, before
+// taking the registration lock. The observer follows DoObserved's contract.
+func (a *Authority) BeginCallObserved(parent context.Context, observe func() Context, r Request) (*Admission, error) {
+	if a == nil || observe == nil || parent == nil || parent.Err() != nil || (r.Operation != OpInvoke && r.Operation != OpStreamOpen) {
 		return nil, ErrDenied
 	}
 	a.gate.RLock()
+	defer a.gate.RUnlock()
+	c := observe()
 	if !a.allows(c, r) {
-		a.gate.RUnlock()
 		return nil, ErrDenied
 	}
 	// A validated call has only this resource; never retain the caller's pointer.
 	r.Resource = Resource{Function: &FunctionResource{ID: r.Resource.Function.ID}}
 	a.registrationMu.Lock()
+	defer a.registrationMu.Unlock()
 	if a.maxRegistered <= 0 || len(a.registrations) >= a.maxRegistered {
-		a.registrationMu.Unlock()
-		a.gate.RUnlock()
 		return nil, ErrCapacity
 	}
 	ctx, cancel := context.WithCancel(parent)
 	call := &Admission{authority: a, ctx: ctx, cancel: cancel, caller: c, request: r, targetID: r.Resource.Function.ID}
 	a.registrations[call] = struct{}{}
-	a.registrationMu.Unlock()
-	a.gate.RUnlock()
 	return call, nil
 }
 
@@ -177,12 +190,20 @@ func (call *Admission) live(c Context, target TargetState) bool {
 // Admit is the waiting-to-admitted linearization point. Revalidate the original
 // caller/lease and the acquired target's approved artifact using fresh host state.
 func (call *Admission) Admit(c Context, target TargetState) error {
-	if call == nil || call.authority == nil {
+	return call.AdmitObserved(func() (Context, TargetState) { return c, target })
+}
+
+// AdmitObserved copies fresh caller and target state once under the read gate,
+// before taking the registration lock; original caller/lease identity must match.
+// The observer follows DoObserved's contract and is not retained.
+func (call *Admission) AdmitObserved(observe func() (Context, TargetState)) error {
+	if call == nil || call.authority == nil || observe == nil {
 		return ErrDenied
 	}
 	a := call.authority
 	a.gate.RLock()
 	defer a.gate.RUnlock()
+	c, target := observe()
 	a.registrationMu.Lock()
 	defer a.registrationMu.Unlock()
 	if call.admitted || !call.live(c, target) {
@@ -198,12 +219,20 @@ func (call *Admission) Admit(c Context, target TargetState) error {
 // Frame acquisition and protocol delivery happen outside the gate. A transfer
 // completed before revocation may physically reach its caller afterward.
 func (call *Admission) HandoffFrame(c Context, target TargetState, frame []byte, transfer func([]byte) error) error {
-	if call == nil || call.authority == nil || transfer == nil || len(frame) > MaxHandoffBytes {
+	return call.HandoffFrameObserved(func() (Context, TargetState) { return c, target }, frame, transfer)
+}
+
+// HandoffFrameObserved snapshots caller and target once under the read gate,
+// before taking the registration lock, then applies HandoffFrame's checks and
+// transfer contract. The observer follows DoObserved's contract and is not retained.
+func (call *Admission) HandoffFrameObserved(observe func() (Context, TargetState), frame []byte, transfer func([]byte) error) error {
+	if call == nil || call.authority == nil || observe == nil || transfer == nil || len(frame) > MaxHandoffBytes {
 		return ErrDenied
 	}
 	a := call.authority
 	a.gate.RLock()
 	defer a.gate.RUnlock()
+	c, target := observe()
 	a.registrationMu.Lock()
 	defer a.registrationMu.Unlock()
 	if !call.admitted || call.request.Operation != OpStreamOpen || target.Principal != call.target || !call.live(c, target) {

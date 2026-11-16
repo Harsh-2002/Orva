@@ -102,6 +102,20 @@ owner revoked, then cancels their contexts after releasing locks and before
 returning. Revoked calls keep their capacity slot until `Finish`; later grants
 cannot revive them. Stream owners still must close handles on cancellation.
 
+Live host integration must use `DoObserved`, `BeginCallObserved`,
+`AdmitObserved` and `HandoffFrameObserved` so fresh worker/lease/target snapshots
+are constructed exactly once inside read admission, before registration locking.
+The value-based forms are conveniences for already-fixed test contexts; a cached
+context does not become fresh merely because evaluation happens under the gate.
+Observers are bounded atomic reads, not DB lookups or worker-lock acquisition.
+
+`ChangeHostState` takes exclusive admission for synchronous atomic readiness or
+lease-state changes. Its callback does not cancel contexts, close streams, do
+I/O or acquire earlier locks. Cleanup follows after it returns. This permits
+future lifecycle hooks to share the publication boundary; it does not itself
+install those hooks or validate their binding. Invalid/zero coordinators reject
+transitions rather than run them outside the gate.
+
 Callbacks are trusted host code, synchronous and bounded. They cannot reenter the
 coordinator, acquire earlier build/registry locks, spawn work, do protocol I/O,
 or await an IAM-acquiring writer. Lock order is build/mutation, IAM gate,

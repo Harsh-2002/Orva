@@ -569,6 +569,12 @@ Minimum scenario matrix:
 - A storage-to-admission snapshot helper validates retained records and compiles
   empty authority for quarantine/review-required flags without losing combined
   revision metadata. Focused race tests pass; no runtime loader uses it yet.
+  Its independent focused follow-up passed five race repetitions and vet.
+- Observed admission entrypoints construct fresh host snapshots under the read
+  gate. `ChangeHostState` provides the matching exclusive atomic transition
+  seam; neither installs lifecycle hooks or activates IAM. Parent race/vet
+  checks pass, including observer-panic lock cleanup. Live host integration must
+  use observed entrypoints, not cached context values.
 
 Source integration map at baseline:
 
