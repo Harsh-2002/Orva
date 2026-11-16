@@ -612,6 +612,22 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Internal builder runtime binding now captures one concrete generation at Build
+  entry, retains a pipeline anchor and leases each command through cleanup.
+  Syntax/install/compiler steps do not reselect mutable runtimes; full identity
+  is recorded separately from ABI cache hashing and unproven managed cache hits
+  deny. Independent normal/race suites, repeated adversarial probes, vet and
+  real Node/npm/TypeScript and Python/pip pipelines passed; the VM was removed.
+  Parent canonical checks exposed a fixture-mode mismatch under umask 0077.
+  The fixture now explicitly sets the permissions declared by its manifest;
+  verifier rules are unchanged and the original failure is retained. Parent
+  race runs under both umasks and canonical lint/tests now pass. Independent
+  fixture metadata, normal/race tests, repeats and vet also pass under both
+  umasks, with exact implementation hashes unchanged and worktree removed.
+  No serving constructor enables it.
+  Captured Domain placement is not exclusive build ownership, writer fencing
+  or sealed-code/current-generation publication.
+
 - Optional sandbox Domain integration now enrolls Spawn, Execute and RunBuild
   with verified same-epoch jail placement and required-controller denial.
   Independent real-nsjail tests passed worker/SDK, one-shot/build descendants,

@@ -38,6 +38,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 )
 
@@ -81,6 +82,9 @@ const (
 
 // BuildConfig describes one build step to run inside nsjail.
 type BuildConfig struct {
+	// Runtime selects a concrete store generation. Non-nil never uses RootfsDir.
+	// RunBuild acquires its own lease; callers retain no release alias.
+	Runtime *BuildRuntime
 	// Domain is optional host-owned epoch placement, never an author setting.
 	Domain     *workloadfence.Domain
 	jailParent *workloadfence.JailParent
@@ -145,6 +149,12 @@ type BuildConfig struct {
 	RootfsDir string
 }
 
+// BuildRuntime is trusted lifetime metadata, not runtime approval or a path.
+type BuildRuntime struct {
+	Store      *artifactfs.Store
+	Generation string
+}
+
 // ErrBuildTimedOut means the step hit its own deadline (not the caller's).
 var ErrBuildTimedOut = errors.New("build step timed out")
 
@@ -168,7 +178,25 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 		return nil, err
 	}
 
-	rootfs, err := resolveBuildRuntime(cfg)
+	var runtimeLease *artifactfs.Lease
+	if cfg.Runtime != nil {
+		binding := *cfg.Runtime
+		if binding.Store == nil || binding.Generation == "" {
+			return nil, fmt.Errorf("build runtime binding: %w", artifactfs.ErrInvalid)
+		}
+		var err error
+		runtimeLease, err = binding.Store.Acquire(binding.Generation)
+		if err != nil {
+			return nil, fmt.Errorf("acquire build runtime: %w", err)
+		}
+		defer runtimeLease.Release()
+		id := runtimeLease.Identity()
+		if id.Kind != artifactfs.KindRuntime || id.Owner != string(cfg.Language) ||
+			(cfg.Language != Node && cfg.Language != Python) {
+			return nil, fmt.Errorf("build runtime language/kind: %w", artifactfs.ErrInvalid)
+		}
+	}
+	rootfs, err := resolveBuildRuntimeLease(cfg, runtimeLease)
 	if err != nil {
 		return nil, err
 	}
@@ -279,12 +307,22 @@ func prepareCacheDirs(cacheDir string) error {
 // it. Without this check a missing toolchain surfaces as nsjail exit 255 with
 // no explanation of what was missing.
 func resolveBuildRuntime(cfg BuildConfig) (string, error) {
+	return resolveBuildRuntimeLease(cfg, nil)
+}
+
+func resolveBuildRuntimeLease(cfg BuildConfig, lease *artifactfs.Lease) (string, error) {
 	switch cfg.Language {
 	case Node, Python:
 	default:
 		return "", fmt.Errorf("unsupported language: %s", cfg.Language)
 	}
 	rootfs := filepath.Join(cfg.RootfsDir, string(cfg.Language))
+	if cfg.Runtime != nil {
+		if lease == nil {
+			return "", fmt.Errorf("build runtime requires owned lease: %w", artifactfs.ErrInvalid)
+		}
+		rootfs = lease.Path()
+	}
 	info, err := os.Stat(rootfs)
 	if err != nil {
 		return "", fmt.Errorf("rootfs not found at %s: %w", rootfs, err)
@@ -297,6 +335,12 @@ func resolveBuildRuntime(cfg BuildConfig) (string, error) {
 		return "", fmt.Errorf("build command must be an absolute in-jail path, got %q", bin)
 	}
 	binPath := filepath.Join(rootfs, filepath.FromSlash(strings.TrimPrefix(bin, "/")))
+	if cfg.Runtime != nil {
+		binPath, err = resolveVerifiedEndpoint(rootfs, strings.TrimPrefix(bin, "/"))
+		if err != nil {
+			return "", fmt.Errorf("build runtime endpoint: %w", err)
+		}
+	}
 	binInfo, err := os.Stat(binPath)
 	if err != nil || binInfo.IsDir() || binInfo.Mode()&0o111 == 0 {
 		return "", fmt.Errorf("build tool is missing or not executable at %s", binPath)

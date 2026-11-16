@@ -58,6 +58,14 @@ same validated quota in argv. Nil-domain behavior is unchanged. Independent
 kernel membership and limit readback checks are not resource-exhaustion stress,
 serving integration or proof that completed build outputs have no surviving writer.
 
+The builder's internal runtime-binding option captures one runtime generation
+for syntax, dependency and compiler steps, retaining a pipeline anchor and
+command leases through Wait/cleanup. Full runtime identity is distinct from the
+interpreter ABI used for dependency caching. Invalid/retired bindings and managed
+cache hits without provenance deny rather than resolving mutable rootfs paths.
+The serving constructor does not enable this option. Capturing a supplied Domain
+does not confer exclusive ownership or prove all build descendants have exited.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many
