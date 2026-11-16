@@ -4,6 +4,24 @@ This document explains how Orva isolates user-supplied code from the host
 and from other functions. It is descriptive, not prescriptive — every
 claim below is grounded in a specific file/line that you can audit.
 
+## Staged function-IAM publication boundary (inactive)
+
+`database.PublishWorkloadEnvironmentAsOperator` revalidates current operator
+credentials and admin permission inside the same transaction as the protected
+environment/generation/policy/audit mutation. It reads no bearer or token hashes.
+API keys require current admin permission and valid expiry; OAuth also requires
+a live client/user, client scope ceiling and exact trusted audience; sessions
+require a live UUID-backed session/user and expiry. Audit actors are derived
+from the checked reference, not treated as authorization. Checks occur before
+mutation and commit; expiry during commit cannot be excluded.
+
+This is an internal opt-in seam, **not a serving authorization feature**.
+Credential UUIDs are not authenticators: references must be captured after
+trusted authentication, never accepted from function authors. Request/AI/MCP
+submitter capture, ordered live IAM/pool publication and normal session UUID
+writes are not wired. The existing persistence-only publisher is unchanged.
+See `docs/FUNCTION_IAM_PLAN.md` for the remaining cut-over gates.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many

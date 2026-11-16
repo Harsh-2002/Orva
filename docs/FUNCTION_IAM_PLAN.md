@@ -598,6 +598,17 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- `PublishWorkloadEnvironmentAsOperator` joins live operator revalidation with
+  environment/generation/policy/audit publication in one transaction. It checks
+  current API-key permissions/expiry, OAuth token and client scopes/revocation/
+  audience/user/expiry, or live UUID-backed session/user/expiry; actor provenance
+  is derived, not accepted as permission. References must be captured by trusted
+  authentication and never supplied by function authors. Expiry is checked
+  before mutation and commit; expiry during commit itself cannot be excluded.
+  The original persistence-only method retains its behavior. Serving capture,
+  live IAM/pool publication and normal session UUID writes remain unwired.
+  Focused race tests and vet pass; independent acceptance is pending.
+
 - Explicit `artifactfs.NewPersistent` adds bounded canonical metadata and ordered
   fsync/intent/tree-rename/commit publication. `OpenRecovering` verifies recognized
   committed content and inspects interrupted states, retaining accounting.
