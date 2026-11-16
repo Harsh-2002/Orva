@@ -1,8 +1,9 @@
 # workloadiam foundation (inert)
 
-No production callers, boot migrations, routes, runtime changes or activation
-are included. Inert database storage is a separate foundation. Existing SDK
-behavior is unchanged. This package uses only the standard library.
+No serving callers, boot migrations, public routes or activation are included.
+The SDK host has an internal opt-in KV integration; serving construction omits
+that option. Inert database storage is a separate foundation. Existing serving
+SDK behavior is unchanged. This package uses only the standard library.
 
 ## Version 1 document
 
@@ -115,6 +116,11 @@ I/O or acquire earlier locks. Cleanup follows after it returns. This permits
 future lifecycle hooks to share the publication boundary; it does not itself
 install those hooks or validate their binding. Invalid/zero coordinators reject
 transitions rather than run them outside the gate.
+
+`DoBatchObserved` authorizes every bounded get/put/delete request before running
+one synchronous effect under read admission. The SDK host uses it for the whole
+KV transaction; denial performs no member access or partial mutation. It does
+not expand the supported KV batch operation set.
 
 Callbacks are trusted host code, synchronous and bounded. They cannot reenter the
 coordinator, acquire earlier build/registry locks, spawn work, do protocol I/O,

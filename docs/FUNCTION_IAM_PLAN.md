@@ -521,6 +521,17 @@ Minimum scenario matrix:
 
 ### Implementation record
 
+- Internal opt-in SDK-host KV enforcement is implemented for testing only.
+  `WithIAM(nil)` denies; omission keeps legacy behavior. Fresh host identity and
+  lease observations join the admission gate through DB completion. Whole-batch
+  authorization precedes the transaction; literal listing binds bounded opaque
+  cursors to namespace/prefix and reauthorizes every page. Unintegrated protected
+  operations deny, except ownership-checked stream cleanup. No serving constructor
+  enables this partial path; `IAM_DENIED` is its generic internal SDK denial.
+  A full SDK-host race run passed after the test-policy correction; the first
+  five-repeat command exceeded its 240-second shell budget (one run took 80s).
+  Independent verification remains pending for this integration slice.
+
 - Design approval recorded on the feature branch; no rollout authorized.
 - Literal KV cursor-range foundation added without changing active list callers.
   Race-enabled tests cover case, `%`/`_`, Unicode composition, NUL, scalar-boundary

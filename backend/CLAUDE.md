@@ -29,7 +29,7 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
-| `workloadiam` | Inert function-IAM policy parser, immutable evaluator and admission/publication coordinator. Not wired into SDK, scheduler, boot migration or public APIs yet; see the package README and `docs/FUNCTION_IAM_PLAN.md`. |
+| `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `config` | Config struct; environment variables only — there is no config file or YAML loader (see docs/CONFIG.md) |
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
@@ -230,10 +230,17 @@ Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/
 
 SQLite WAL mode. All migrations in `internal/database/migrations.go` — additive only. `VACUUM INTO` produces consistent backup snapshots without a write lock.
 
-`KVListLiteralWithCursorContext` is IAM foundation code, not yet used by SDK or
-operator routes. It queries case-sensitive literal UTF-8 prefix ranges using
-binary index bounds; existing cursor-list callers retain their legacy `LIKE`
-semantics until the coordinated IAM cut-over.
+`KVListLiteralWithCursorContext` is used only by the internal opt-in SDK-host IAM
+path, never serving/operator routes yet. It queries case-sensitive literal UTF-8
+prefix ranges using binary index bounds; existing serving cursor-list callers
+retain their legacy `LIKE` semantics until the coordinated IAM cut-over.
+
+`sdkhost.WithIAM` is a staged constructor option, not an operator feature flag.
+Omitting it preserves current behavior; explicitly passing nil denies protected
+operations. It authorizes KV under fresh observed admission, including all batch
+selectors before the transaction, and binds literal-list cursors to owner/prefix.
+Other protected operations deny until integrated; owned stream close is cleanup.
+Never enable the partial path in serving configuration before coordinated cut-over.
 
 `workload_iam*.go` holds inert policy storage and read-only legacy preflight.
 Its explicit schema initializer is test-only for now, never called on boot.
