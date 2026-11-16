@@ -64,18 +64,9 @@ func prepareWorkloadEnvironment(env map[string]string) (string, error) {
 func (db *Database) PublishWorkloadEnvironment(ctx context.Context, c WorkloadEnvironmentChange) (*WorkloadEnvironmentPublication, error) {
 	// A future mutation service must hold ordered host locks, revalidate live admin
 	// authority, then publish the deny snapshot and retirement after durable commit.
-	envJSON, err := prepareWorkloadEnvironment(c.Env)
+	envJSON, err := prepareWorkloadEnvironmentChange(c)
 	if err != nil {
 		return nil, err
-	}
-	if err := validateWorkloadArtifactChange(c.WorkloadArtifactChange); err != nil {
-		return nil, err
-	}
-	if c.ExpectedFunctionVersion <= 0 || c.ExpectedFunctionVersion == math.MaxInt {
-		return nil, ErrWorkloadArtifactInvalid
-	}
-	if c.ExpectedPolicyRevision == 0 || c.ExpectedPolicyRevision > math.MaxInt64 {
-		return nil, ErrIAMInvalidPolicy
 	}
 	db.lifecycleMu.RLock()
 	defer db.lifecycleMu.RUnlock()
@@ -84,6 +75,34 @@ func (db *Database) PublishWorkloadEnvironment(ctx context.Context, c WorkloadEn
 		return nil, workloadArtifactStorageError(ctx, "publication begin")
 	}
 	defer tx.Rollback()
+	publication, err := publishWorkloadEnvironmentTx(ctx, tx, c, envJSON, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, workloadArtifactStorageError(ctx, "publication commit")
+	}
+	return publication, nil
+}
+
+func prepareWorkloadEnvironmentChange(c WorkloadEnvironmentChange) (string, error) {
+	envJSON, err := prepareWorkloadEnvironment(c.Env)
+	if err != nil {
+		return "", err
+	}
+	if err := validateWorkloadArtifactChange(c.WorkloadArtifactChange); err != nil {
+		return "", err
+	}
+	if c.ExpectedFunctionVersion <= 0 || c.ExpectedFunctionVersion == math.MaxInt {
+		return "", ErrWorkloadArtifactInvalid
+	}
+	if c.ExpectedPolicyRevision == 0 || c.ExpectedPolicyRevision > math.MaxInt64 {
+		return "", ErrIAMInvalidPolicy
+	}
+	return envJSON, nil
+}
+
+func publishWorkloadEnvironmentTx(ctx context.Context, tx *sql.Tx, c WorkloadEnvironmentChange, envJSON string, authorizationExpiry time.Time) (*WorkloadEnvironmentPublication, error) {
 	fn, err := readWorkloadArtifactFunctionTx(ctx, tx, c.OwnerID)
 	if err != nil {
 		return nil, err
@@ -101,6 +120,9 @@ func (db *Database) PublishWorkloadEnvironment(ctx context.Context, c WorkloadEn
 	}
 	if policy.Revision == math.MaxInt64 || policy.AuthorityEpoch == math.MaxInt64 {
 		return nil, ErrIAMRevisionExhausted
+	}
+	if !authorizationExpiry.IsZero() && !authorizationExpiry.After(time.Now().UTC()) {
+		return nil, operatorDenied(ctx)
 	}
 	artifact, err := rotateWorkloadArtifactTx(ctx, tx, c.WorkloadArtifactChange, "rotate")
 	if err != nil {
@@ -140,9 +162,6 @@ func (db *Database) PublishWorkloadEnvironment(ctx context.Context, c WorkloadEn
 	fn, err = readWorkloadArtifactFunctionTx(ctx, tx, c.OwnerID)
 	if err != nil {
 		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, workloadArtifactStorageError(ctx, "publication commit")
 	}
 	return &WorkloadEnvironmentPublication{Artifact: *artifact, Policy: policy, Function: fn}, nil
 }

@@ -294,6 +294,10 @@ browser sessions. Its initializer is test-only and reads rowids, never bearer
 tokens, during backfill. Token-free lookups recheck row/user/expiry in the DB.
 Legacy login writers, cookies, auth actors and caches are unchanged; NULL-ID
 sessions deny these new lookups. Identity records are provenance, not admin grants.
+`PublishWorkloadEnvironmentAsOperator` rechecks live credential/admin facts in the
+same transaction as publication. References must come from trusted authentication,
+never author input. It derives audit actors and checks expiry before mutation and
+commit; request capture, live IAM publication and serving wiring remain absent.
 
 ## Runtime SDK channel tests
 
