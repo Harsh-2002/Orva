@@ -616,3 +616,166 @@ export function buildReviewPayload(snapshot) {
   }
   return { ok: true, problems: [], payload: { policy: clonePolicy(snapshot.policy), expected: expectedOf(snapshot) } }
 }
+
+// ------------------------------------------------------- guided builder
+// Helpers for the step-by-step builder. They only describe and assemble; every
+// statement still passes through buildStatement/validatePolicy before it joins
+// a draft, so the guided path can never produce what the parser would refuse.
+
+export const SERVICE_ORDER = Object.freeze(['storage', 'functions', 'schedules', 'tracing'])
+export const SERVICES = Object.freeze({
+  storage: { label: 'Storage', purpose: "Read and write this function's own stored keys." },
+  functions: { label: 'Functions', purpose: 'Call other functions or queue background jobs for them.' },
+  schedules: { label: 'Schedules', purpose: 'Create and update schedules that run this function.' },
+  tracing: { label: 'Tracing', purpose: "Add spans to this function's own running execution." },
+})
+
+export const serviceOf = (stmt) => {
+  const r = stmt.resource
+  if (r.own_kv) return 'storage'
+  if (r.function) return 'functions'
+  if (r.own_cron) return 'schedules'
+  return 'tracing'
+}
+
+// What each action lets the function do, in plain words, grouped for step 2.
+export const ACTION_HELP = Object.freeze({
+  'kv.get': 'Look up the value stored under a key.',
+  'kv.list': 'See which keys exist. Needs a prefix or every key, not one exact key.',
+  'kv.put': 'Create a key or overwrite its value.',
+  'kv.delete': 'Remove keys.',
+  'kv.incr': 'Add to a number stored under a key. Also needs Read a key.',
+  'kv.cas': 'Change a value only if it still holds the one you expect. Also needs Read a key.',
+  'functions.invoke': 'Run the function and wait for its reply.',
+  'jobs.enqueue': 'Queue a background job that runs the function later.',
+  'crons.upsert': 'Add a schedule or change an existing one.',
+  'spans.emit': 'Record timing spans on the execution that is running.',
+})
+
+export const SERVICE_ACTIONS = Object.freeze({
+  storage: [
+    { group: 'Read', ids: ['kv.get', 'kv.list'] },
+    { group: 'Write', ids: ['kv.put', 'kv.delete', 'kv.incr', 'kv.cas'] },
+  ],
+  functions: [{ group: '', ids: ['functions.invoke', 'jobs.enqueue'] }],
+  schedules: [{ group: '', ids: ['crons.upsert'] }],
+  tracing: [{ group: '', ids: ['spans.emit'] }],
+})
+
+const VERBS = {
+  'kv.get': 'read', 'kv.list': 'list', 'kv.put': 'write', 'kv.delete': 'delete', 'kv.incr': 'increment', 'kv.cas': 'compare and set',
+  'functions.invoke': 'call', 'jobs.enqueue': 'queue jobs for', 'crons.upsert': 'create or update schedules', 'spans.emit': 'emit spans',
+}
+const joinWords = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`)
+const quote = (v) => `“${v}”`
+
+// One sentence a first-time reader can act on. Literals are quoted exactly.
+export function humanStatement(stmt, targetLabel = null, selfId = null) {
+  const r = stmt.resource
+  const verbs = joinWords(stmt.actions.map((a) => VERBS[a] || a))
+  const when = stmt.context === 'bootstrap' ? ' at startup' : ''
+  if (r.own_kv) {
+    const prefix = own(r.own_kv, 'prefix')
+    const v = prefix ? r.own_kv.prefix : r.own_kv.key
+    const what = !prefix ? `the key ${quote(v)}` : v === '' ? 'every key' : `keys starting with ${quote(v)}`
+    return `Can ${verbs} ${what} in its own storage${when}.`
+  }
+  if (r.function) return `Can ${verbs} ${targetLabel || `function ${r.function.id}`}${when}.`
+  if (r.own_cron) {
+    if (selfId && r.own_cron.target_id !== selfId) {
+      return `Unsupported stored schedule target ${r.own_cron.target_id}. Schedules may run only this function.`
+    }
+    const prefix = own(r.own_cron, 'prefix')
+    const v = prefix ? r.own_cron.prefix : r.own_cron.name
+    const which = !prefix ? `named ${quote(v)}` : v === '' ? 'of any name' : `whose names start with ${quote(v)}`
+    const target = selfId ? 'this function' : `function ${r.own_cron.target_id}`
+    return `Can ${verbs} ${which}, running ${target}${when}.`
+  }
+  return `Can ${verbs} on its own running execution${when}.`
+}
+
+// ---- form <-> statement. mode: storage key|prefix|all, schedules name|prefix.
+export const emptyForm = () => ({
+  service: '', mode: '', value: '', targetId: '', context: 'execution', actions: [],
+})
+
+export function formToInput(form, selfId) {
+  const base = { context: form.service === 'storage' ? form.context : 'execution', actions: form.actions }
+  if (form.service === 'storage') {
+    if (form.mode === 'key') return { ...base, kind: 'kv-key', value: form.value }
+    return { ...base, kind: 'kv-prefix', value: form.mode === 'all' ? '' : form.value }
+  }
+  if (form.service === 'functions') return { ...base, kind: 'function', targetId: form.targetId }
+  if (form.service === 'schedules') {
+    const prefix = form.mode === 'prefix' || form.mode === 'all'
+    return { ...base, kind: prefix ? 'cron-prefix' : 'cron-name', value: form.mode === 'all' ? '' : form.value, targetId: form.targetId || selfId }
+  }
+  if (form.service === 'tracing') return { ...base, kind: 'spans' }
+  return { ...base, kind: '' }
+}
+
+export function statementToForm(stmt) {
+  const f = { ...emptyForm(), service: serviceOf(stmt), context: stmt.context, actions: [...stmt.actions] }
+  const r = stmt.resource
+  if (r.own_kv) {
+    const prefix = own(r.own_kv, 'prefix')
+    f.mode = !prefix ? 'key' : r.own_kv.prefix === '' ? 'all' : 'prefix'
+    f.value = prefix ? r.own_kv.prefix : r.own_kv.key
+  } else if (r.function) {
+    f.targetId = r.function.id
+  } else if (r.own_cron) {
+    const prefix = own(r.own_cron, 'prefix')
+    f.mode = !prefix ? 'name' : r.own_cron.prefix === '' ? 'all' : 'prefix'
+    f.value = prefix ? r.own_cron.prefix : r.own_cron.name
+    f.targetId = r.own_cron.target_id
+  }
+  return f
+}
+
+export const statementsEqual = (a, b) => statementKey(a) === statementKey(b)
+
+// Replaces one statement in place. Every other entry is carried over untouched.
+export function replaceStatement(policy, index, statement) {
+  const p = clonePolicy(policy)
+  if (!Number.isInteger(index) || index < 0 || index >= p.allow.length) {
+    return { ok: false, policy: null, problems: ['That permission is no longer in the draft.'] }
+  }
+  p.allow[index] = statement
+  return finish(p)
+}
+
+export function replaceInbound(policy, index, callerId, triggers) {
+  const p = clonePolicy(policy)
+  if (!Number.isInteger(index) || index < 0 || index >= p.inbound.length) {
+    return { ok: false, policy: null, problems: ['That caller is no longer in the draft.'] }
+  }
+  if (!isDense(triggers) || triggers.some((t, i) => !TRIGGER_IDS.includes(t) || triggers.indexOf(t) !== i)) {
+    return { ok: false, policy: null, problems: ['These triggers are not recognised or are repeated.'] }
+  }
+  if (p.inbound.some((a, i) => i !== index && a.caller_id === callerId)) {
+    return { ok: false, policy: null, problems: ['That caller is already accepted.'] }
+  }
+  p.inbound[index] = { caller_id: callerId, triggers: TRIGGER_IDS.filter((t) => triggers.includes(t)) }
+  return finish(p)
+}
+
+export const TRIGGER_HELP = Object.freeze({
+  f2f: 'It calls this function directly.',
+  job: 'It queues a background job that runs this function.',
+  cron: 'It sets up a schedule that runs this function.',
+})
+
+// Schedule acceptance is enforced for the function's own schedules only, so a
+// cron trigger from any other caller can never work. The structural validator
+// still accepts it (it may already be stored); the guided path refuses to author it.
+export function callerTriggerProblem(callerId, triggers, ownerId) {
+  return triggers.includes('cron') && callerId !== ownerId
+    ? "Schedule acceptance works only for this function's own schedules, so the caller must be this function. Untick Schedule, or choose this function."
+    : ''
+}
+
+// Read-only canonical JSON of an authorable policy: no host metadata at all.
+export function canonicalPolicyJson(policy) {
+  const v = validatePolicy(policy)
+  return v.ok ? JSON.stringify(v.policy, null, 2) : ''
+}

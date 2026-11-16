@@ -5,6 +5,8 @@ import {
   buildStatement, addStatement, removeStatement, addInbound, diffPolicies, policyWarnings,
   deriveAccess, buildSavePayload, buildReviewPayload, hostFingerprint, describeStatement,
   presetActions, emptyPolicy, targetInfo, parseCounter, statementSummary,
+  SERVICE_ORDER, SERVICE_ACTIONS, serviceOf, humanStatement, emptyForm, formToInput, statementToForm,
+  statementsEqual, replaceStatement, replaceInbound, canonicalPolicyJson, callerTriggerProblem, ACTION_IDS,
 } from '../src/utils/permissionsModel.js'
 import { makeSnapshot, policy, caps, ACTOR_ID, FN_ID, OTHER_FN_ID, CALLER_ID, MISSING_ID, DIGEST_A, DIGEST_B } from './fixtures/permissionsFixtures.js'
 
@@ -300,4 +302,94 @@ test('descriptions never claim effect and unresolved targets stay UUID-bound', (
   assert.deepEqual(targetInfo(snap, OTHER_FN_ID), { id: OTHER_FN_ID, label: 'preview-renderer', resolved: true })
   assert.deepEqual(targetInfo(snap, CALLER_ID), { id: CALLER_ID, label: null, resolved: false })
   assert.equal(targetInfo(snap, MISSING_ID).label, null)
+})
+
+test('every action belongs to exactly one service group, and each statement maps to a service', () => {
+  const grouped = SERVICE_ORDER.flatMap((id) => SERVICE_ACTIONS[id].flatMap((g) => g.ids))
+  assert.deepEqual([...grouped].sort(), [...ACTION_IDS].sort())
+  assert.equal(serviceOf(stmt()), 'storage')
+  assert.equal(serviceOf(stmt({ resource: { function: { id: OTHER_FN_ID } }, actions: ['functions.invoke'] })), 'functions')
+  assert.equal(serviceOf(stmt({ resource: { own_cron: { name: 'n', target_id: FN_ID } }, actions: ['crons.upsert'] })), 'schedules')
+  assert.equal(serviceOf(stmt({ resource: { own_execution: {} }, actions: ['spans.emit'] })), 'tracing')
+})
+
+test('schedule descriptions bind "this function" to the actual owner', () => {
+  const schedule = stmt({ actions: ['crons.upsert'], resource: { own_cron: { name: 'nightly', target_id: OTHER_FN_ID } } })
+  assert.match(humanStatement(schedule, null, FN_ID), /Unsupported stored schedule target/)
+  assert.doesNotMatch(humanStatement(schedule, null, FN_ID), /running this function/)
+  assert.match(humanStatement(schedule, null, OTHER_FN_ID), /running this function/)
+  assert.match(humanStatement(schedule), new RegExp(OTHER_FN_ID))
+  assert.equal(formToInput(statementToForm(schedule), FN_ID).targetId, OTHER_FN_ID)
+})
+
+test('humanStatement quotes literals exactly and says startup and broad scope plainly', () => {
+  assert.equal(humanStatement(stmt({ actions: ['kv.get', 'kv.put'], resource: { own_kv: { key: ' Key ' } } })),
+    'Can read and write the key \u201c Key \u201d in its own storage.')
+  assert.equal(humanStatement(stmt({ actions: ['kv.get', 'kv.list'], resource: { own_kv: { prefix: '' } }, context: 'bootstrap' })),
+    'Can read and list every key in its own storage at startup.')
+  assert.equal(humanStatement(stmt({ resource: { function: { id: OTHER_FN_ID } }, actions: ['functions.invoke', 'jobs.enqueue'] }), 'worker'),
+    'Can call and queue jobs for worker.')
+  assert.match(humanStatement(stmt({ resource: { function: { id: OTHER_FN_ID } }, actions: ['functions.invoke'] })), new RegExp(OTHER_FN_ID))
+})
+
+test('the guided form always builds what the parser accepts, and round-trips a statement', () => {
+  const cases = [
+    { service: 'storage', mode: 'key', value: 'k', actions: ['kv.get', 'kv.put'] },
+    { service: 'storage', mode: 'prefix', value: 'p/', actions: ['kv.list'] },
+    { service: 'storage', mode: 'all', actions: ['kv.get', 'kv.list'], context: 'bootstrap' },
+    { service: 'functions', targetId: OTHER_FN_ID, actions: ['jobs.enqueue'] },
+    { service: 'schedules', mode: 'prefix', value: 'nightly-', actions: ['crons.upsert'] },
+    { service: 'tracing', actions: ['spans.emit'] },
+  ]
+  for (const c of cases) {
+    const form = { ...emptyForm(), ...c }
+    const built = buildStatement(formToInput(form, FN_ID))
+    assert.equal(built.ok, true, JSON.stringify(c))
+    assert.deepEqual(statementToForm(built.statement).actions, c.actions)
+    assert.equal(statementToForm(built.statement).service, c.service)
+    assert.equal(validatePolicy(withAllow(built.statement)).ok, true)
+  }
+  // Schedules run this function; the target is never typed.
+  assert.equal(buildStatement(formToInput({ ...emptyForm(), service: 'schedules', mode: 'name', value: 'x', actions: ['crons.upsert'] }, FN_ID)).statement.resource.own_cron.target_id, FN_ID)
+  // Listing needs a prefix; an exact key with List is refused rather than rewritten.
+  assert.equal(buildStatement(formToInput({ ...emptyForm(), service: 'storage', mode: 'key', value: 'k', actions: ['kv.list'] }, FN_ID)).ok, false)
+  // Startup is storage only: any other service ignores a stale context.
+  assert.equal(formToInput({ ...emptyForm(), service: 'tracing', context: 'bootstrap', actions: ['spans.emit'] }, FN_ID).context, 'execution')
+})
+
+test('replacing one statement or caller keeps every other entry and refuses a duplicate caller', () => {
+  const base = policy()
+  const edited = replaceStatement(base, 1, stmt({ actions: ['kv.get', 'kv.put', 'kv.delete'], resource: { own_kv: { key: 'state' } } }))
+  assert.equal(edited.ok, true)
+  assert.deepEqual(edited.policy.allow[0], base.allow[0])
+  assert.deepEqual(edited.policy.allow[2], base.allow[2])
+  assert.equal(edited.policy.allow.length, 3)
+  assert.equal(replaceStatement(base, 9, stmt()).ok, false)
+  assert.equal(statementsEqual(stmt({ actions: ['kv.put', 'kv.get'] }), stmt({ actions: ['kv.get', 'kv.put'] })), true)
+
+  const two = { ...base, inbound: [...base.inbound, { caller_id: MISSING_ID, triggers: ['cron'] }] }
+  assert.equal(replaceInbound(two, 0, CALLER_ID, ['cron']).ok, true)
+  assert.equal(replaceInbound(two, 0, MISSING_ID, ['cron']).ok, false)
+  assert.equal(replaceInbound(two, 5, CALLER_ID, ['cron']).ok, false)
+  assert.equal(replaceInbound(two, 0, CALLER_ID, ['nope']).ok, false)
+})
+
+test('canonical JSON is the authorable policy only, and empty for an invalid one', () => {
+  const json = canonicalPolicyJson(policy())
+  assert.deepEqual(JSON.parse(json), policy())
+  assert.deepEqual(Object.keys(JSON.parse(json)), ['schema_version', 'allow', 'inbound'])
+  assert.equal(canonicalPolicyJson({ schema_version: 1, allow: [{}], inbound: [] }), '')
+  assert.equal(canonicalPolicyJson({ ...policy(), revision: '7' }), '')
+})
+
+test('wizard self-cron checks do not change structural validation of retained policies', () => {
+  assert.equal(callerTriggerProblem(FN_ID, ['cron'], FN_ID), '')
+  assert.equal(callerTriggerProblem(OTHER_FN_ID, ['f2f', 'job'], FN_ID), '')
+  assert.match(callerTriggerProblem(OTHER_FN_ID, ['f2f', 'cron'], FN_ID), /caller must be this function/)
+  const retained = { ...policy(), inbound: [{ caller_id: OTHER_FN_ID, triggers: ['cron'] }] }
+  assert.equal(validatePolicy(retained).ok, true)
+  assert.equal(statementToForm(stmt({ resource: { own_kv: { prefix: '' } } })).mode, 'all')
+  assert.equal(statementToForm(stmt({
+    actions: ['crons.upsert'], resource: { own_cron: { prefix: '', target_id: FN_ID } },
+  })).mode, 'all')
 })

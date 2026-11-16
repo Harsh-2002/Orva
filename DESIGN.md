@@ -655,14 +655,19 @@ convention that decays.
 
 ### Function permissions (staged)
 
-The dedicated permissions page uses an authority sheet: outbound effects,
-inbound callers, artifact review, then bounded history. Friendly effects lead;
-literal selectors, action IDs and immutable UUIDs remain inspectable. Phone
-and desktop retain the same information and actions, with wrapping rows rather
-than a permission matrix.
+The dedicated permissions page starts with current stored access, grouped by
+service, and one Edit/Create action. The owner rejected the original authority
+sheet as confusing and chose an AWS-style guided builder: service, actions,
+resources, permission review, then review the complete policy draft before Save.
+Inbound callers are edited separately within that same draft. Phone and desktop
+retain the same choices and actions.
 
-Permission drafts are separate from source/deployment edits. A dirty-only save
-bar exposes changes, discard and explicit save. Unknown capabilities deny
+Permission drafts are separate from source/deployment edits. Save appears only
+on the final changes screen; adding a permission does not save it. Step changes
+focus and scroll the task into view rather than repeating page context. Unknown capabilities deny
 editing; preview labels do not grant authority. Retained grants awaiting review
 are described as not in force, not faded into illegibility. Technical digests
-and audit details use disclosures. This page remains unrouted and API-unwired.
+and audit details, plus read-only canonical JSON, use Advanced disclosures.
+Scope or context changes never silently broaden resources or remove selected
+actions; access to every key requires an explicit choice in the builder.
+This page remains unrouted and API-unwired.

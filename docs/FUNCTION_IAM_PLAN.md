@@ -434,13 +434,27 @@ must not invent a restore or reapprove suspended work.
 
 ## 7. UX, audit and documentation
 
-Replace SDK checkbox with a Permissions section: effective summary; explicit
+Replace SDK checkbox with a link to the dedicated Permissions page: current
+stored-access summary, clearly distinguished from active authority; explicit
 actions; own-KV prefix rows; target name with stable ID; caller/trigger acceptance;
 revision and last-change actor. Missing/deleted targets remain visible as broken
 grants, never rebound by name. Save policy separately from Deploy; source dirty
 state/Reset/Discard cannot edit IAM. Non-admins see policy read-only and why code
 editing is restricted. Broadening grants shows a review diff and confirmation.
 Templates suggest a policy for review, never silently grant it.
+
+The owner rejected the initial authority-sheet UX after hands-on use and chose
+an AWS-style guided policy builder. Default to current stored access with one
+Edit/Create action; guide service → actions → resources → permission review,
+then review the complete draft before Save. Keep current policy and unsaved
+changes separate. Canonical JSON belongs under Advanced, not in the required
+first-use path. Retain Orva's design system and phone/desktop action parity.
+
+The same policy inspection, validation, update, review/revocation and history
+operations must be available through REST, CLI and MCP, backed by shared
+server-side authorization, CAS and audit behavior. The in-product Chat UI
+remains supported; the owner separately requested removing terminal `orva chat`.
+External agent workflows use MCP rather than requiring a CLI chat client.
 
 Denials: stable code, action, safe resource identity and policy revision; no keys'
 values, bodies or secrets. Audit grants/revokes and bounded/sampled denial events
@@ -900,6 +914,33 @@ Behavioral acceptance is scoped to the staged seam and its documented future
 controller ordering/correlation contract, not live IAM. Visual review found no blockers;
 effective touch regions, complete accessibility, real Layout/auth lifecycle,
 live API integration and runtime IAM acceptance are separate gates.
+
+The owner subsequently rejected the authority-sheet workflow as confusing.
+The guided replacement now starts with stored access and explicit Edit/Create,
+then service → actions → resources → permission review, followed by a separate
+whole-policy changes review and Save. Canonical JSON is read-only under Advanced.
+Fresh visual review required compact editing context, task-focused scrolling,
+accurate stored-versus-draft copy and removal of the ambiguous Done exit; the
+reviewer scored all three material findings resolved after recapture.
+
+Independent behavior review caught six builder defects despite passing baseline
+tests: implicit scope broadening, implicit all-key access, selected-action loss,
+foreign caller cron acceptance, premature Save callbacks and busy discard.
+A later check caught editing a retained foreign schedule target. All were
+corrected without silently changing stored targets or tightening Go's structural
+policy format. Unsupported retained entries are described honestly and cannot
+be reauthored through the guided wizard.
+
+Final component/model acceptance passed 67 independent checks, all 34 prior
+state guards, 22 original model checks, and 105 Node / 211 repository component
+tests. The old diagnostic witness asserting defective foreign-target behavior
+was retained and remains red as expected; it is not an acceptance requirement.
+Parent lint, production and explicit-page builds passed; 48 rendered workflow
+states across both themes and 375/768/1440px showed no horizontal overflow or
+browser errors. Additional browser negatives verified explicit scope intent,
+startup correction, Done protection and the foreign schedule-target block.
+This accepts the staged workflow, not live routes, controller correlation,
+operator authentication, CLI/MCP policy controls or runtime enforcement.
 
 Source integration map at baseline:
 

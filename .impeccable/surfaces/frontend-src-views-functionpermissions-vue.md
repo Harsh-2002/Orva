@@ -12,23 +12,24 @@ to subagents. This extends Orva's existing design; it does not replace it.
 
 ## Direction contract
 
-THESIS: Make each permission's effect and scope inspectable before saving.
-Reject a dense action matrix that hides selectors or loses mobile parity.
+THESIS: A first-time operator can see current access and build a policy without
+understanding its JSON schema. The user rejected the original authority sheet
+as confusing and explicitly chose an AWS-style guided builder.
 
 OWN-WORLD: Preserve Orva's current warm day/night tokens, Inter and purposeful
 mono identifiers, semantic statuses and existing controls. No new palette.
 
-STORY: Read enforcement/review status, inspect outbound rights and inbound
-callers, edit an independent draft, then inspect changes before an explicit save.
-Unknown capabilities deny edits. Empty grants do not imply an unavailable SDK.
+STORY: Inspect current stored access, choose Edit/Create, select a service,
+choose actions, scope resources, add the permission, then review and save the
+whole draft. Current access and unsaved changes never share an ambiguous label.
 
-FIRST VIEWPORT: Function identity and a compact state line precede outbound and
-inbound sections. Human effects lead; UUIDs remain inspectable. Review and bounded
-history follow. A dirty-only save bar retains the same actions on phone/desktop.
+FIRST VIEWPORT: Function identity, concise state and current-access summaries
+lead to one primary Edit/Create action. Editing reveals a numbered guided path,
+not all forms at once. History and canonical JSON are secondary disclosures.
 
-FORM: Sectioned authority sheet chosen through delegated expert review.
-Surface exploration reference: seed:831b72e0fd427e2f. Existing navigation and controls
-remain authoritative; no catalog visual-world replacement is adopted.
+FORM: User-confirmed guided builder: service → actions → resources → review.
+seed: none (pinned). User: “AWS like IAM policy maker”; structured confirmation:
+“Guided builder (Recommended)”. Existing Orva tokens and primitives remain fixed.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
@@ -42,7 +43,8 @@ No production or website deployment.
 
 ## Rendered finish review (2026-11-16)
 
-Independent Claude visual review found no blocking design issues in actual
+The superseded authority-sheet implementation received an independent visual
+review finding no blocking design issues in actual
 night/day phone, tablet and desktop captures, including dirty diffs and review
 disclosures. The repeated selector-kind word in diff text was corrected.
 Parent browser checks verified bottom History reachability with the expanded
@@ -56,3 +58,24 @@ delayed-conflict ordering: 30 unchanged probes and four new ordering cases.
 Acceptance assumes the future controller's documented response correlation
 contract, not production integration. No raster assets
 were added to the shipping UI; evidence PNGs are browser screenshots.
+
+The user's subsequent hands-on rejection overrides that visual verdict.
+The guided replacement requires fresh first-use journey and rendered review;
+the earlier acceptance is behavioral evidence for preserved guards, not UX
+acceptance of the replacement.
+
+## Guided replacement verification
+
+Fresh first-use review required three material corrections: compact editing
+context and task-focused scrolling, accurate stored-versus-draft copy, and no
+Done exit while a permission is half-filled. All three were scored resolved
+after recapture. At 375px the service choices and Next fit together; desktop
+actions and Next fit in one frame. Quarantine and conflict warnings remain.
+
+The corrected staged workflow passed 67 independent acceptance checks, 105 Node
+and 211 repository component tests, explicit-page build and browser journeys.
+Forty-eight rendered states covered both themes at 375/768/1440px; negative
+browser checks confirmed deliberate scope changes and unsupported-target denial.
+The old defect-expecting diagnostic witness remains recorded as expected red.
+No new palette or raster assets ship. This is not live IAM/API/CLI/MCP or complete
+accessibility acceptance; the future controller's correlation contract remains.

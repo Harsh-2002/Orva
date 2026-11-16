@@ -24,6 +24,7 @@
         <div class="min-w-0 flex-1 space-y-2">
           <h3 class="text-sm font-medium text-foreground-strong">
             {{ c.target.resolved ? c.target.label : 'Unresolved function' }}
+            <span class="font-normal text-foreground">{{ c.usable.length ? `may start this function by ${how(c.usable)}.` : 'is listed, but nothing it can do here is supported.' }}</span>
           </h3>
           <code class="block break-all font-mono text-xs text-foreground-strong">{{ c.caller_id }}</code>
           <ul
@@ -40,146 +41,91 @@
             </li>
           </ul>
           <p
-            v-if="c.triggers.includes('cron')"
+            v-if="c.unsupportedCron"
+            role="note"
+            class="flex items-start gap-2 rounded-md border border-warning-ring bg-warning-tint px-3 py-2 text-xs text-warning-fg"
+          >
+            <TriangleAlert
+              class="mt-0.5 h-3.5 w-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            <span>Not supported: schedule acceptance works only when the caller is this function itself, so this entry does not let that function start this one by a schedule.</span>
+          </p>
+          <p
+            v-else-if="c.triggers.includes('cron')"
             class="text-xs text-foreground-muted"
           >
             Schedule acceptance covers a function's own schedules only.
           </p>
         </div>
-        <Button
-          v-if="editable"
-          variant="secondary"
-          size="sm"
-          class="self-start"
-          :disabled="disabled"
-          :aria-label="`Remove accepted caller ${c.caller_id}`"
-          @click="$emit('remove', i)"
-        >
-          <Trash2
-            class="h-3.5 w-3.5"
-            aria-hidden="true"
-          />
-          Remove
-        </Button>
-      </li>
-    </ul>
-
-    <div
-      v-if="editable"
-      class="space-y-4 border-t border-border px-4 py-4"
-      role="group"
-      aria-labelledby="add-caller-title"
-    >
-      <h3
-        id="add-caller-title"
-        class="text-sm font-medium text-foreground-strong"
-      >
-        Accept a caller
-      </h3>
-      <Input
-        v-model="callerId"
-        label="Caller function UUID"
-        hint="Lowercase UUID. Callers are matched by this ID, never by name."
-        :error="errors.callerId || ''"
-        :disabled="disabled"
-        @keydown.enter.prevent="submit"
-      />
-      <div class="space-y-2">
-        <p
-          id="add-caller-triggers"
-          class="text-xs font-medium uppercase tracking-wide text-foreground-muted"
-        >
-          Triggers
-        </p>
         <div
-          class="flex flex-wrap gap-2"
-          role="group"
-          aria-labelledby="add-caller-triggers"
+          v-if="editable"
+          class="flex flex-wrap gap-2 self-start"
         >
           <Button
-            v-for="t in TRIGGER_IDS"
-            :key="t"
-            variant="chip"
-            size="xs"
-            :active="triggers.includes(t)"
+            variant="secondary"
+            size="sm"
             :disabled="disabled"
-            @click="toggle(t)"
+            :aria-label="`Edit accepted caller ${c.caller_id}`"
+            @click="$emit('edit', i)"
           >
-            {{ TRIGGER_LABELS[t] }}
-            <code class="font-mono text-[11px]">{{ t }}</code>
+            <Pencil
+              class="h-3.5 w-3.5"
+              aria-hidden="true"
+            />
+            Edit
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            :disabled="disabled"
+            :aria-label="`Remove accepted caller ${c.caller_id}`"
+            @click="$emit('remove', i)"
+          >
+            <Trash2
+              class="h-3.5 w-3.5"
+              aria-hidden="true"
+            />
+            Remove
           </Button>
         </div>
-        <p
-          v-if="errors.triggers"
-          role="alert"
-          class="text-xs text-danger-fg"
-        >
-          {{ errors.triggers }}
-        </p>
-      </div>
-      <p
-        v-if="problem"
-        role="alert"
-        class="text-xs text-danger-fg"
-      >
-        {{ problem }}
-      </p>
-      <div class="flex flex-wrap items-center gap-3">
-        <Button
-          variant="secondary"
-          :disabled="disabled"
-          @click="submit"
-        >
-          <Plus
-            class="h-4 w-4"
-            aria-hidden="true"
-          />
-          Accept caller
-        </Button>
-        <span class="text-xs text-foreground-muted">Nothing changes until you press Save permissions.</span>
-      </div>
-    </div>
+      </li>
+    </ul>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { Plus, Trash2 } from '@lucide/vue'
+import { computed } from 'vue'
+import { Pencil, Trash2, TriangleAlert } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
-import Input from '@/components/common/Input.vue'
-import { TRIGGER_IDS, TRIGGER_LABELS, isCanonicalUuid, targetInfo } from '@/utils/permissionsModel.js'
+import { TRIGGER_LABELS, targetInfo } from '@/utils/permissionsModel.js'
 
 const props = defineProps({
   callers: { type: Array, required: true },
   targets: { type: Array, default: () => [] },
-  problem: { type: String, default: '' },
   // '' | 'loading' | 'error': an empty list is not shown as a fact while set.
   unconfirmed: { type: String, default: '' },
+  // The function being shown. Empty means schedule acceptance cannot be confirmed.
+  ownerId: { type: String, default: '' },
   editable: Boolean,
   disabled: Boolean,
 })
 
-const emit = defineEmits(['add', 'remove'])
+defineEmits(['edit', 'remove'])
 
-const callerId = ref('')
-const triggers = ref([])
-const errors = ref({})
+const rows = computed(() => props.callers.map((c) => {
+  const unsupportedCron = c.triggers.includes('cron') && c.caller_id !== props.ownerId
+  return {
+    ...c,
+    target: targetInfo({ targets: props.targets }, c.caller_id),
+    unsupportedCron,
+    usable: c.triggers.filter((t) => t !== 'cron' || !unsupportedCron),
+  }
+}))
 
-const rows = computed(() => props.callers.map((c) => ({ ...c, target: targetInfo({ targets: props.targets }, c.caller_id) })))
-
-const toggle = (t) => {
-  triggers.value = triggers.value.includes(t) ? triggers.value.filter((x) => x !== t) : [...triggers.value, t]
+const WORDS = { f2f: 'a direct call', job: 'a background job', cron: 'a schedule' }
+const how = (triggers) => {
+  const w = triggers.map((t) => WORDS[t])
+  return w.length < 2 ? w.join('') : `${w.slice(0, -1).join(', ')} or ${w[w.length - 1]}`
 }
-
-function submit() {
-  const next = {}
-  if (!isCanonicalUuid(callerId.value)) next.callerId = 'Enter the caller UUID in lowercase.'
-  if (!triggers.value.length) next.triggers = 'Pick at least one trigger.'
-  errors.value = next
-  if (Object.keys(next).length) return
-  emit('add', { callerId: callerId.value, triggers: [...triggers.value] })
-}
-
-// The parent clears these by remounting through a key after a successful add.
-defineExpose({ reset: () => { callerId.value = ''; triggers.value = []; errors.value = {} } })
 </script>

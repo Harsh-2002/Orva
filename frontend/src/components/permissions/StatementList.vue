@@ -13,7 +13,7 @@
   <ul
     v-else
     class="divide-y divide-border"
-    aria-label="Allowed platform actions"
+    :aria-label="listLabel"
   >
     <li
       v-for="row in rows"
@@ -21,18 +21,9 @@
       class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
     >
       <div class="min-w-0 flex-1 space-y-2">
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h3 class="text-sm font-medium text-foreground-strong">
-            {{ row.d.title }}
-          </h3>
-          <Badge
-            v-if="row.d.context === 'bootstrap'"
-            size="sm"
-            variant="info"
-          >
-            {{ row.d.contextLabel }}
-          </Badge>
-        </div>
+        <h3 class="text-sm font-medium text-foreground-strong">
+          {{ row.sentence }}
+        </h3>
 
         <p
           v-if="row.d.selector"
@@ -46,7 +37,7 @@
           <span
             v-else
             class="text-foreground"
-          >empty, matches every key</span>
+          >{{ row.d.kind === 'cron' ? 'empty, matches every schedule' : 'empty, matches every key' }}</span>
           <span
             v-if="row.padded"
             class="text-foreground"
@@ -105,52 +96,75 @@
         </p>
       </div>
 
-      <Button
+      <div
         v-if="editable"
-        variant="secondary"
-        size="sm"
-        class="self-start"
-        :disabled="disabled"
-        :aria-label="`Remove ${row.d.title} ${row.d.selector ? row.d.selector.value : row.d.targetId || ''}`.trim()"
-        @click="$emit('remove', row.index)"
+        class="flex flex-wrap gap-2 self-start"
       >
-        <Trash2
-          class="h-3.5 w-3.5"
-          aria-hidden="true"
-        />
-        Remove
-      </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          :disabled="disabled"
+          :aria-label="`Edit ${label(row)}`"
+          @click="$emit('edit', row.index)"
+        >
+          <Pencil
+            class="h-3.5 w-3.5"
+            aria-hidden="true"
+          />
+          Edit
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          :disabled="disabled"
+          :aria-label="`Remove ${label(row)}`"
+          @click="$emit('remove', row.index)"
+        >
+          <Trash2
+            class="h-3.5 w-3.5"
+            aria-hidden="true"
+          />
+          Remove
+        </Button>
+      </div>
     </li>
   </ul>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { Trash2, TriangleAlert } from '@lucide/vue'
+import { Pencil, Trash2, TriangleAlert } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
-import Badge from '@/components/common/Badge.vue'
-import { describeStatement, targetInfo } from '@/utils/permissionsModel.js'
+import { describeStatement, humanStatement, targetInfo } from '@/utils/permissionsModel.js'
 
 const props = defineProps({
   statements: { type: Array, required: true },
+  functionId: { type: String, default: '' },
   targets: { type: Array, default: () => [] },
   warnings: { type: Array, default: () => [] },
   // '' | 'loading' | 'error': an empty list is not shown as a fact while set.
   unconfirmed: { type: String, default: '' },
+  // Show only these statement positions (a service group), keeping their real index.
+  only: { type: Array, default: null },
+  listLabel: { type: String, default: 'Allowed platform actions' },
   editable: Boolean,
   disabled: Boolean,
 })
 
-defineEmits(['remove'])
+defineEmits(['remove', 'edit'])
+
+const label = (row) => `${row.d.title} ${row.d.selector ? row.d.selector.value : row.d.targetId || ''}`.trim()
 
 const rows = computed(() => props.statements.map((s, index) => {
   const d = describeStatement(s)
+  const target = d.targetId ? targetInfo({ targets: props.targets }, d.targetId) : null
   return {
     index,
     d,
+    sentence: humanStatement(s, target && target.resolved ? target.label : null, props.functionId || null),
     padded: !!d.selector && /^\s|\s$/.test(d.selector.value),
-    target: d.targetId ? targetInfo({ targets: props.targets }, d.targetId) : null,
+    target,
     warnings: props.warnings.filter((w) => w.index === index),
   }
-}))
+}).filter((r) => !props.only || props.only.includes(r.index)))
 </script>
