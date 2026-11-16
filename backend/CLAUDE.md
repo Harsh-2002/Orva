@@ -260,6 +260,21 @@ Storage is not admin authorization or live artifact verification.
 empty authority for quarantined/review-required records; the future loader must
 use it rather than compiling retained grants directly.
 
+`secrets.Manager.SnapshotForIAM` strictly decrypts caller-supplied snapshot rows
+into a bounded owned map or returns an error without partial output. It checks
+owner/key consistency and ciphertext bounds before decoding; unlike the legacy
+best-effort getter, corruption denies. It is not serving-wired or proof that rows
+and artifact generation were read atomically; the future snapshot service owns
+that DB boundary.
+
+`workload_artifact*.go` provides inert generation CAS and transactional reads of
+generation, function configuration and sorted ciphertext rows. Its schema
+initializer is test-only. Explicit secret mutations rotate generation in the
+same transaction; legacy CRUD does not maintain these records, so they are not
+yet authoritative for admission. Snapshots bound ciphertext/config allocations;
+strict decryption, concrete path/runtime pinning and policy publication remain
+separate integration obligations.
+
 ## Runtime SDK channel tests
 
 `backend/runtimes/{node/orva.js,python/orva.py}` route every SDK operation over a private per-worker socketpair
