@@ -146,6 +146,12 @@ Selecting a code span therefore shows its containing execution's logs, with an
 explicit scope notice. It does not establish that a log occurred inside that
 code span. Concurrent child executions remain separate log scopes.
 
+Node `await trace.span(...)` retains the dispatch lease while awaiting telemetry
+channel ACK/failure, bounded by the existing 30-second request deadline including
+queue wait. It preserves the wrapped result/error and records only the wrapped
+function's duration. Telemetry errors remain swallowed. ACK means queued, not
+committed to storage; this is not a durability guarantee.
+
 Worker stderr is synchronised with each reply, so a log written just before a
 handler returns is not lost to a read race. Structured log records are extracted from worker stderr for HTTP invocations,
 function-to-function calls, scheduler executions (cron and jobs), and inbound

@@ -18,11 +18,18 @@ function run(scenario, host, { env = {}, channel = true, onSocket } = {}) {
     delete e.ORVA_SDK_PROTO
     if (channel) Object.assign(e, { ORVA_SDK_FD: '3', ORVA_SDK_PROTO: '1' })
     Object.assign(e, env)
-    const child = spawn(process.execPath, [CHILD, scenario], {
+    const args = typeof scenario === 'function'
+      ? ['-e', `const orva = require(${JSON.stringify(path.join(__dirname, '../node/orva.js'))}); (${scenario.toString()})().then(r => process.stdout.write(JSON.stringify(r)), e => { console.error(e); process.exitCode = 1 })`]
+      : [CHILD, scenario]
+    const child = spawn(process.execPath, args, {
       env: e,
       stdio: ['ignore', 'pipe', 'inherit', 'pipe'],
     })
     const sock = child.stdio[3]
+    const watchdog = typeof scenario === 'function' ? setTimeout(() => {
+      child.kill()
+      reject(new Error('SDK scenario did not exit within 5 seconds'))
+    }, 5000) : undefined
     const frames = []
     const ctx = { frames, sock, child }
     const reply = (id, r) => send({ id, ok: true, r })
@@ -53,6 +60,7 @@ function run(scenario, host, { env = {}, channel = true, onSocket } = {}) {
     child.stdout.on('data', (d) => (out += d))
     child.on('error', reject)
     child.on('close', () => {
+      clearTimeout(watchdog)
       try {
         resolve({ out: JSON.parse(out), frames })
       } catch (err) {
@@ -399,6 +407,76 @@ test('op errors preserve public OrvaError statuses', async () => {
   assert.equal(out.cron.err.status, 403)
   assert.equal(out.spanSwallowed, 'fine') // span ingestion errors never reach user code
 })
+
+async function spanOutcomes() {
+  const mode = process.env.ORVA_TEST_SPAN_MODE
+  if (mode === 'timeout') orva._setChannelTimeout(150)
+  const outcomes = []
+  for (const throwing of [false, true]) {
+    orva._setLease(mode === 'bootstrap' ? '' : `L-${outcomes.length + 1}`)
+    const value = { result: 'original' }
+    const error = new Error('original failure')
+    let settled = false
+    const started = Date.now()
+    const pending = orva.trace.span('work', () => {
+      if (throwing) throw error
+      return value
+    }, { throwing }).then(
+      result => ({ kind: 'value', same: result === value }),
+      failure => ({ kind: 'error', same: failure === error }),
+    ).then(outcome => {
+      settled = true
+      orva._setLease('') // model the adapter finishing the dispatch
+      return outcome
+    })
+    // Drain microtasks without letting the host accept/acknowledge the span yet.
+    await new Promise(resolve => setImmediate(resolve))
+    if (mode !== 'missing') {
+      await orva.kv.put('span-checkpoint', { settled }).catch(() => {})
+    }
+    const outcome = await pending
+    outcomes.push({ ...outcome, elapsed: Date.now() - started })
+    if (!['missing', 'eof'].includes(mode)) await orva.kv.get('after-span')
+  }
+  return outcomes
+}
+
+for (const mode of ['ack', 'rejected', 'eof', 'timeout', 'missing', 'bootstrap']) {
+  test(`trace.span preserves exact outcomes and bounds telemetry completion: ${mode}`, async () => {
+    let held
+    const checkpoints = []
+    const { out, frames } = await run(spanOutcomes, (msg, ctx) => {
+      if (msg.op === 'spans.emit') {
+        held = msg
+      } else if (msg.op === 'kv.put' && msg.a.key === 'span-checkpoint') {
+        checkpoints.push(msg.a.value.settled)
+        if (mode === 'eof') return ctx.sock.destroy()
+        if (mode === 'ack') ctx.reply(held.id, {})
+        if (mode === 'rejected' || mode === 'bootstrap') ctx.fail(held.id, 403, 'SDK_SCOPE_VIOLATION', 'no active execution')
+        ctx.reply(msg.id, {})
+      } else if (msg.op === 'kv.get' && msg.a.key === 'after-span') {
+        ctx.reply(msg.id, { value: null })
+      } else {
+        ctx.fail(msg.id, 400, 'UNEXPECTED', msg.op)
+      }
+    }, { channel: mode !== 'missing', env: { ORVA_TEST_SPAN_MODE: mode } })
+    assert.deepEqual(out.map(({ kind, same }) => ({ kind, same })), [
+      { kind: 'value', same: true }, { kind: 'error', same: true },
+    ])
+    const spans = frames.filter(f => f.op === 'spans.emit')
+    const expectedSpans = mode === 'missing' ? 0 : mode === 'eof' ? 1 : 2
+    assert.equal(spans.length, expectedSpans)
+    assert.deepEqual(spans.map(f => f.a.status), ['ok', 'error'].slice(0, expectedSpans))
+    if (spans.length === 2) assert.equal(spans[1].a.error_message, 'original failure')
+    assert.deepEqual(spans.map(f => f.lease), mode === 'bootstrap' ? [undefined, undefined] : ['L-1', 'L-2'].slice(0, expectedSpans))
+    assert.deepEqual(checkpoints, Array(mode === 'missing' ? 0 : mode === 'eof' ? 1 : 2).fill(false))
+    assert.ok(frames.filter(f => f.a.key === 'after-span').every(f => f.lease === undefined))
+    assert.equal(new Set(frames.map(f => f.id)).size, frames.length)
+    assert.equal(frames.length, mode === 'missing' ? 0 : mode === 'eof' ? 2 : 6)
+    if (mode === 'timeout') assert.ok(out.every(o => o.elapsed >= 100), 'existing 150ms test channel deadline must settle the span')
+    noIdentity(frames)
+  })
+}
 
 test('invokeStream: 5 chunks, early break closes, mid-stream error, open error', async () => {
   const state = {}
