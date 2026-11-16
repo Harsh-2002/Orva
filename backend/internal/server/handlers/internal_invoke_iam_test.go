@@ -37,6 +37,10 @@ func TestIAMInvokeCoreDenialBeforeBindingAndDispatch(t *testing.T) {
 	if err := db.InsertFunction(fn); err != nil {
 		t.Fatal(err)
 	}
+	// Exact-worker reuse is only deterministic when autoscaling cannot add peers.
+	if err := db.UpsertPoolConfig(&database.PoolConfig{FunctionID: id, MaxWarm: 1, IdleTTLS: 60, ScaleToZero: true}); err != nil {
+		t.Fatal(err)
+	}
 	root := t.TempDir()
 	exe, err := os.Executable()
 	if err != nil {
