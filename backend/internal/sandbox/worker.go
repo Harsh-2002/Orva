@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
@@ -41,8 +42,9 @@ type Worker struct {
 	Spawned time.Time
 	Served  atomic.Int64
 
-	identity *WorkloadIdentity // set once by Spawn, never exposed by reference
-	ready    atomic.Bool       // readiness permanently ends bootstrap for this worker
+	identity      *WorkloadIdentity         // set once by Spawn, never exposed by reference
+	ready         atomic.Bool               // readiness permanently ends bootstrap for this worker
+	verifiedPaths *artifactfs.PreparedPaths // owned until post-Wait cleanup, never exposed
 
 	workloadTransition WorkloadTransitionHook // immutable trusted Spawn configuration
 
@@ -146,6 +148,11 @@ type frameRead struct {
 // Worker and is responsible for eventually calling Quit or Kill.
 func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	cfg = applyExecDefaults(cfg)
+	owned, err := bindVerifiedPaths(&cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { owned.Release() }()
 	rootfs, entrypoint, err := resolveRuntime(cfg)
 	if err != nil {
 		return nil, err
@@ -227,7 +234,9 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		sdkEnabled:         sdkHost != nil,
 		identity:           &WorkloadIdentity{FunctionID: cfg.FunctionID, WorkerID: ids.New(), ArtifactRevision: cfg.ArtifactRevision},
 		workloadTransition: cfg.WorkloadTransitionHook,
+		verifiedPaths:      owned,
 	}
+	owned = nil // only the reaper may release a successfully started worker's pair
 	go w.readLoop()
 	if sdkHost != nil {
 		srv := &sdkServer{
@@ -287,6 +296,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		// exit path, including a worker that exits on its own, which Kill
 		// never observes.
 		w.removeCgroup()
+		w.verifiedPaths.Release()
 	}()
 
 	// Resolve the nsjail cgroup path asynchronously. nsjail names the cgroup

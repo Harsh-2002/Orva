@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 )
 
 // Language identifies a supported runtime.
@@ -51,6 +53,11 @@ type ExecConfig struct {
 	// ArtifactRevision is the trusted host's immutable code/config/secret revision.
 	// Empty stays unknown; never derive it from Env or SDK frames.
 	ArtifactRevision string
+	// VerifiedPaths optionally transfers opaque code/runtime leases to execution.
+	// This proves tree lifetime only, not generation/config/secrets approval.
+	// Non-nil ignores legacy CodeDir/RootfsDir; nil preserves legacy resolution.
+	VerifiedPaths *artifactfs.PreparedPaths
+	runtimeRootfs string // concrete leased tree, never a language-parent directory
 	// WorkloadTransitionHook is trusted host configuration, captured once at
 	// Spawn. Nil applies state changes directly, preserving legacy behavior.
 	WorkloadTransitionHook WorkloadTransitionHook
@@ -143,6 +150,11 @@ type ExecResult struct {
 func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 	start := time.Now()
 	cfg = applyExecDefaults(cfg)
+	paths, err := bindVerifiedPaths(&cfg)
+	if err != nil {
+		return &ExecResult{Error: err, Duration: time.Since(start)}
+	}
+	defer paths.Release()
 
 	rootfs, entrypoint, err := resolveRuntime(cfg)
 	if err != nil {
@@ -209,6 +221,26 @@ func applyExecDefaults(cfg ExecConfig) ExecConfig {
 	return cfg
 }
 
+func bindVerifiedPaths(cfg *ExecConfig) (*artifactfs.PreparedPaths, error) {
+	cfg.runtimeRootfs = ""
+	if cfg.VerifiedPaths == nil {
+		return nil, nil
+	}
+	owned, err := cfg.VerifiedPaths.Transfer()
+	cfg.VerifiedPaths = nil
+	if err != nil {
+		return nil, fmt.Errorf("transfer verified paths: %w", err)
+	}
+	code, runtime := owned.Identities()
+	if code.Kind != artifactfs.KindCode || code.Owner != cfg.FunctionID ||
+		runtime.Kind != artifactfs.KindRuntime || runtime.Owner != string(cfg.Language) {
+		owned.Release()
+		return nil, fmt.Errorf("verified paths binding: %w", artifactfs.ErrInvalid)
+	}
+	cfg.CodeDir, cfg.runtimeRootfs = owned.Paths()
+	return owned, nil
+}
+
 func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
 	adapter := ""
 	switch cfg.Language {
@@ -223,6 +255,9 @@ func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
 	default:
 		return "", "", fmt.Errorf("unsupported language: %s", cfg.Language)
 	}
+	if cfg.runtimeRootfs != "" {
+		rootfs = cfg.runtimeRootfs
+	}
 
 	rootInfo, err := os.Stat(rootfs)
 	if err != nil {
@@ -232,16 +267,72 @@ func resolveRuntime(cfg ExecConfig) (rootfs, entrypoint string, err error) {
 		return "", "", fmt.Errorf("rootfs path is not a directory: %s", rootfs)
 	}
 	entrypointPath := filepath.Join(rootfs, filepath.FromSlash(strings.TrimPrefix(entrypoint, "/")))
+	adapterPath := filepath.Join(rootfs, filepath.FromSlash(strings.TrimPrefix(adapter, "/")))
+	if cfg.runtimeRootfs != "" {
+		// Host probes must not follow a chroot-absolute link into the host tree.
+		// Such endpoints need chroot-aware probing before they can be supported.
+		entrypointPath, err = resolveVerifiedEndpoint(rootfs, strings.TrimPrefix(entrypoint, "/"))
+		if err != nil {
+			return "", "", err
+		}
+		adapterPath, err = resolveVerifiedEndpoint(rootfs, strings.TrimPrefix(adapter, "/"))
+		if err != nil {
+			return "", "", err
+		}
+	}
 	entrypointInfo, err := os.Stat(entrypointPath)
 	if err != nil || entrypointInfo.IsDir() || entrypointInfo.Mode()&0o111 == 0 {
 		return "", "", fmt.Errorf("runtime entrypoint is missing or not executable at %s", entrypointPath)
 	}
-	adapterPath := filepath.Join(rootfs, filepath.FromSlash(strings.TrimPrefix(adapter, "/")))
 	adapterInfo, err := os.Stat(adapterPath)
 	if err != nil || adapterInfo.IsDir() {
 		return "", "", fmt.Errorf("runtime adapter is missing at %s", adapterPath)
 	}
 	return rootfs, entrypoint, nil
+}
+
+func resolveVerifiedEndpoint(root, relative string) (string, error) {
+	pending := strings.Split(relative, "/")
+	var resolved []string
+	hops := 0
+	for steps := 0; len(pending) != 0; steps++ {
+		if steps >= 4096 || len(strings.Join(resolved, "/"))+len(strings.Join(pending, "/")) > 4096 {
+			return "", artifactfs.ErrInvalid
+		}
+		parent := filepath.Join(append([]string{root}, resolved...)...)
+		info, err := os.Lstat(parent)
+		if err != nil || !info.IsDir() {
+			return "", artifactfs.ErrInvalid
+		}
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(resolved) == 0 {
+				return "", artifactfs.ErrInvalid
+			}
+			resolved = resolved[:len(resolved)-1]
+			continue
+		}
+		next := filepath.Join(parent, part)
+		info, err = os.Lstat(next)
+		if err != nil {
+			return "", artifactfs.ErrInvalid
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			resolved = append(resolved, part)
+			continue
+		}
+		hops++
+		target, err := os.Readlink(next)
+		if err != nil || hops > 40 || len(target) > 4096 || filepath.IsAbs(target) {
+			return "", artifactfs.ErrInvalid
+		}
+		pending = append(strings.Split(target, "/"), pending...)
+	}
+	return filepath.Join(append([]string{root}, resolved...)...), nil
 }
 
 // buildArgs returns nsjail's argv and the environment its child process must
