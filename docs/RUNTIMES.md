@@ -207,6 +207,11 @@ paginate at about 2 MiB; batches are capped at 100 operations and return
 requires outbound networking on current adapters. Function-authored outbound
 HTTP requests still require `network_mode: egress`.
 
+A dispatch whose cancellation is observed before lease publication/submission
+does not send a request or invalidate its healthy worker. Cancellation after
+submission begins still retires the worker; the pre-submission check is not
+atomic with cancellation racing the subsequent wire write.
+
 ## Trace and log correlation
 
 Both SDKs expose `trace.span` and `log`. Custom code spans are direct children

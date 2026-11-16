@@ -412,8 +412,8 @@ func (w *Worker) readNext(ctx context.Context) ([]byte, error) {
 }
 
 // Dispatch writes a request frame and reads the response frame. Returns
-// (respBody, stderrSnapshot, err). On context cancellation or protocol
-// error the worker is marked dead and must not be reused.
+// (respBody, stderrSnapshot, err). On cancellation after submission begins or
+// protocol error the worker is marked dead and must not be reused.
 //
 // Backwards-compatible non-streaming wrapper around DispatchEx. For
 // streaming responses (v0.4 C1) callers should prefer DispatchEx so they
@@ -644,6 +644,9 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 		return &DispatchResult{w: w, errBefore: 0},
 			fmt.Errorf("%w: process exited before dispatch", ErrWorkerExited)
 	}
+	if err := ctx.Err(); err != nil {
+		return &DispatchResult{w: w, errBefore: w.errBuf.Len()}, err
+	}
 	w.mu.Lock()
 	// We can't unconditionally defer Unlock here because streaming holds
 	// the lock until NextFrame finishes. Both terminal paths (non-stream
@@ -664,11 +667,22 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 		return &DispatchResult{w: w, errBefore: 0},
 			fmt.Errorf("%w: process exited before dispatch", ErrWorkerExited)
 	}
+	if err := ctx.Err(); err != nil {
+		w.mu.Unlock()
+		return &DispatchResult{w: w, errBefore: w.errBuf.Len()}, err
+	}
 
 	errBefore := w.errBuf.Len()
 
 	// Compose the request frame: {"type":"request","event":<raw>}.
 	reqFrame, _ := json.Marshal(frameRequest{Type: "request", Event: json.RawMessage(eventJSON)})
+
+	// Refuse cancellation observed before lease publication/submission; this
+	// check is not atomic with cancellation racing the subsequent wire write.
+	if err := ctx.Err(); err != nil {
+		w.mu.Unlock()
+		return &DispatchResult{w: w, errBefore: errBefore}, err
+	}
 
 	// The lease is published before anything is written, so a frame the
 	// adapter sends the instant it reads the request is already attributable.
