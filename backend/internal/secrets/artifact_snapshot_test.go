@@ -6,9 +6,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -53,20 +57,8 @@ func preparedArtifactFixture(t *testing.T, schema bool) (*Manager, *sql.DB, *dat
 	if !schema {
 		return manager, conn, nil
 	}
-	// The initializer is database-private and deliberately not serving-wired;
-	// reproduce only its canonical metadata DDL on this scratch connection.
-	if _, err := conn.Exec(`
-CREATE TABLE IF NOT EXISTS workload_artifact_generations (
- function_id TEXT PRIMARY KEY REFERENCES functions(id) ON DELETE CASCADE,
- revision INTEGER NOT NULL CHECK(typeof(revision) = 'integer' AND revision > 0),
- epoch INTEGER NOT NULL CHECK(typeof(epoch) = 'integer' AND epoch > 0),
- generation TEXT NOT NULL CHECK(length(generation) = 36),
- actor_kind TEXT NOT NULL CHECK(actor_kind IN ('api_key','session','oauth','system')),
- actor_id TEXT NOT NULL CHECK(length(actor_id) = 36),
- change_kind TEXT NOT NULL CHECK(change_kind IN ('initialize','rotate','secret_upsert','secret_delete')),
- created_at TEXT NOT NULL,
- updated_at TEXT NOT NULL
-);`); err != nil {
+	// Use canonical SQL without exporting or activating the private initializer.
+	if _, err := conn.Exec(canonicalArtifactSchema(t)); err != nil {
 		t.Fatal(err)
 	}
 	r, err := db.NewWorkloadArtifact(context.Background(), snapshotOwner, database.IAMActorReference{
@@ -76,6 +68,45 @@ CREATE TABLE IF NOT EXISTS workload_artifact_generations (
 		t.Fatal(err)
 	}
 	return manager, conn, r
+}
+
+func canonicalArtifactSchema(t *testing.T) string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "database", "workload_artifact_schema.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statements []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "initWorkloadArtifactSchema" {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) < 2 {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel.Name != "ExecContext" {
+				return true
+			}
+			literal, ok := call.Args[1].(*ast.BasicLit)
+			if !ok || literal.Kind != token.STRING {
+				t.Fatal("canonical schema SQL changed shape; update fixture extraction")
+			}
+			sql, err := strconv.Unquote(literal.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			statements = append(statements, sql)
+			return true
+		})
+	}
+	if len(statements) != 1 {
+		t.Fatal("expected one canonical artifact schema statement")
+	}
+	return statements[0]
 }
 
 func preparedArtifactChange(r *database.WorkloadArtifactRecord) database.WorkloadArtifactChange {
