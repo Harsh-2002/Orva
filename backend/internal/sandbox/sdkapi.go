@@ -64,12 +64,14 @@ const (
 	WorkloadBootstrap  WorkloadPhase = "bootstrap"
 	WorkloadExecution  WorkloadPhase = "execution"
 	WorkloadUnbound    WorkloadPhase = "unbound"
+	WorkloadNoChannel  WorkloadPhase = "no_channel"
 	WorkloadStaleLease WorkloadPhase = "stale_lease"
 	WorkloadInactive   WorkloadPhase = "inactive"
 )
 
 // WorkloadState is an observation, not admission authority. Future IAM integration
 // must read it under its gate and serialize readiness/lease invalidation with that gate.
+// Channel-less workers expose identity/readiness only, never bootstrap or execution.
 type WorkloadState struct {
 	Identity    WorkloadIdentity
 	Ready       bool

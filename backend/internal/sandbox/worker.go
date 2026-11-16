@@ -350,6 +350,8 @@ func (w *Worker) observeWorkload(original *dispatchState, lease string, ctx cont
 	switch {
 	case !s.Alive || (ctx != nil && ctx.Err() != nil):
 		s.Phase = WorkloadInactive
+	case !w.sdkEnabled:
+		s.Phase = WorkloadNoChannel
 	case lease != "":
 		s.Phase = WorkloadStaleLease
 		if original != nil {

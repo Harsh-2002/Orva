@@ -74,7 +74,7 @@ func TestWorkloadObservation(t *testing.T) {
 }
 
 func TestWorkloadReadinessValidation(t *testing.T) {
-	w := &Worker{identity: &WorkloadIdentity{WorkerID: ids.New()}, frames: make(chan frameRead, 1)}
+	w := &Worker{sdkEnabled: true, identity: &WorkloadIdentity{WorkerID: ids.New()}, frames: make(chan frameRead, 1)}
 	c := workloadCaller(w, nil, "")
 	for _, payload := range []string{`{`, `{"type":"response","ready":true}`, `{"type":"ready"}`} {
 		w.frames <- frameRead{payload: []byte(payload)}
@@ -94,6 +94,24 @@ func TestWorkloadReadinessValidation(t *testing.T) {
 		t.Fatal("invalid second handshake accepted")
 	}
 	workloadState(t, c, WorkloadUnbound)
+}
+
+func TestWorkloadChannelLessObservationIsNotAuthority(t *testing.T) {
+	w := &Worker{identity: &WorkloadIdentity{FunctionID: ids.New(), WorkerID: ids.New(), ArtifactRevision: "reviewed"}}
+	for _, ready := range []bool{false, true} {
+		w.ready.Store(ready)
+		if frame := w.beginLease(WithExecution(context.Background(), ExecInfo{ExecutionID: ids.New(), Lease: "not-issued"})); frame != nil {
+			t.Fatal("channel-less worker received a lease frame")
+		}
+		s, ok := w.WorkloadState()
+		if !ok || s.Phase != WorkloadNoChannel || s.Ready != ready || !s.Alive || s.ExecutionID != "" || s.Lease != "" || s.Identity != *w.identity {
+			t.Fatalf("channel-less worker claimed authority: %+v, attached=%v", s, ok)
+		}
+		w.revokeLease()
+		workloadState(t, workloadCaller(w, nil, ""), WorkloadNoChannel)
+	}
+	w.markDead()
+	workloadState(t, workloadCaller(w, nil, ""), WorkloadInactive)
 }
 
 func TestWorkloadConcurrentObservation(t *testing.T) {

@@ -560,6 +560,10 @@ Minimum scenario matrix:
   original lease status. It preserves current SDK routing and stale-KV behavior;
   fresh observation/invalidation is not yet serialized under the IAM gate.
   Independent verification and integration qualification remain separate gates.
+  The review's channel-less observation edge is explicitly classified as
+  `no_channel`, not bootstrap/execution; only identity/readiness are observable
+  there. This preserves the channel-less wire path and denies accidental use
+  of incomplete metadata as authority.
 
 Source integration map at baseline:
 
