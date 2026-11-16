@@ -20,6 +20,7 @@ execute it.**
 | `CONCURRENCY_OPTIMIZATION_PLAN.md` | Historical design and implementation log, not a live release gate |
 | `CLI.md` | `orva` CLI reference — every subcommand, flags, examples |
 | `CONFIG.md` | All configuration keys, environment variables, and defaults |
+| `FUNCTION_IAM_PLAN.md` | Proposed function IAM design, decisions and acceptance gates; not implemented API behavior |
 | `CONTRIBUTING.md` | Dev environment setup, PR process, code style conventions |
 | `DEPLOYMENT.md` | Docker, bare-metal, reverse proxy setup, TLS termination |
 | `ERRORS.md` | Error slug catalog — `SLUG → HTTP status → human meaning` |
