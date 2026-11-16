@@ -277,6 +277,11 @@ separate integration obligations.
 `secrets.Manager.PrepareArtifactSnapshot` composes that transactional read with
 strict decryption outside IAM/pool locks. It returns owned durable inputs only,
 not approval or pinned runtime/code paths; publication must revalidate generation.
+`PublishWorkloadEnvironment` is an inert environment-only transaction seam: exact
+function/artifact/policy CAS, generation rotation, environment persistence, and
+review-required policy/audit update commit together. It preserves quarantine and
+retained grants/approval without rebinding authority. Live admin checks and
+deny-state/pool publication remain service obligations; no serving caller uses it.
 
 ## Runtime SDK channel tests
 
