@@ -610,9 +610,8 @@ const trace = {
       throw e
     } finally {
       const durationMs = Date.now() - t0
-      // Fire-and-forget — never block the user's code waiting on span
-      // ingestion. We deliberately swallow errors so an unavailable channel
-      // never breaks the handler.
+      // Keep the dispatch lease alive through the bounded channel request;
+      // telemetry failures must never replace the user's result or error.
       const spanBody = {
         name,
         started_at: startedAt.toISOString(),
@@ -621,7 +620,7 @@ const trace = {
         error_message: errMsg,
         attributes: attrs,
       }
-      _kv('spans.emit', spanBody, 'POST', '/api/v1/_internal/spans', { body: spanBody }).catch(() => {})
+      await _kv('spans.emit', spanBody, 'POST', '/api/v1/_internal/spans', { body: spanBody }).catch(() => {})
     }
   },
 }
