@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // ErrWorkerExited signals that the worker process died (stdout EOF, fatal
@@ -38,6 +40,11 @@ type Worker struct {
 	stderr  io.ReadCloser
 	Spawned time.Time
 	Served  atomic.Int64
+
+	identity *WorkloadIdentity // set once by Spawn, never exposed by reference
+	ready    atomic.Bool       // readiness permanently ends bootstrap for this worker
+
+	workloadTransition WorkloadTransitionHook // immutable trusted Spawn configuration
 
 	// sdk is the host end of the per-worker SDK channel (nil when disabled).
 	sdk net.Conn
@@ -206,18 +213,20 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	}
 
 	w := &Worker{
-		Cmd:        cmd,
-		stdin:      stdinPipe,
-		stdout:     stdoutPipe,
-		stderr:     stderrPipe,
-		Spawned:    time.Now(),
-		errBuf:     newRingBuffer(64 * 1024),
-		waitDone:   make(chan struct{}),
-		stderrDone: make(chan struct{}),
-		frames:     make(chan frameRead),
-		readStop:   make(chan struct{}),
-		sdk:        sdkHost,
-		sdkEnabled: sdkHost != nil,
+		Cmd:                cmd,
+		stdin:              stdinPipe,
+		stdout:             stdoutPipe,
+		stderr:             stderrPipe,
+		Spawned:            time.Now(),
+		errBuf:             newRingBuffer(64 * 1024),
+		waitDone:           make(chan struct{}),
+		stderrDone:         make(chan struct{}),
+		frames:             make(chan frameRead),
+		readStop:           make(chan struct{}),
+		sdk:                sdkHost,
+		sdkEnabled:         sdkHost != nil,
+		identity:           &WorkloadIdentity{FunctionID: cfg.FunctionID, WorkerID: ids.New(), ArtifactRevision: cfg.ArtifactRevision},
+		workloadTransition: cfg.WorkloadTransitionHook,
 	}
 	go w.readLoop()
 	if sdkHost != nil {
@@ -226,6 +235,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 			functionID: cfg.FunctionID,
 			handler:    cfg.SDKHandler,
 			state:      w.disp.Load,
+			worker:     w,
 			// A protocol violation means the sandbox is misbehaving: do not
 			// reuse it. A reply that cannot be written means it stopped reading.
 			violation: w.markDead,
@@ -257,8 +267,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	go func() {
 		<-w.stderrDone
 		_ = cmd.Wait()
-		w.dead.Store(true)
-		w.revokeLease()
+		w.invalidateWorkload()
 		close(w.waitDone)
 
 		// A retired busy worker keeps its channel until the process is gone.
@@ -317,7 +326,46 @@ func (w *Worker) AwaitReady(ctx context.Context) error {
 		return fmt.Errorf("%w: invalid adapter startup frame", ErrWorkerExited)
 	}
 	w.stderrSync.Store(frame.StderrSync)
+	w.transitionWorkload(func() { w.ready.Store(true) })
 	return nil
+}
+
+// WorkloadState returns a detached host snapshot, or false for an unowned Worker.
+// Like SDKCaller.WorkloadState, this does not provide atomic IAM admission.
+func (w *Worker) WorkloadState() (WorkloadState, bool) {
+	if w == nil {
+		return WorkloadState{}, false
+	}
+	st := w.disp.Load()
+	lease := ""
+	if st != nil {
+		lease = st.info.Lease
+	}
+	return w.observeWorkload(st, lease, nil)
+}
+
+func (w *Worker) observeWorkload(original *dispatchState, lease string, ctx context.Context) (WorkloadState, bool) {
+	if w == nil || w.identity == nil {
+		return WorkloadState{}, false
+	}
+	s := WorkloadState{Identity: *w.identity, Ready: w.ready.Load(), Alive: !w.dead.Load(), Phase: WorkloadUnbound}
+	switch {
+	case !s.Alive || (ctx != nil && ctx.Err() != nil):
+		s.Phase = WorkloadInactive
+	case !w.sdkEnabled:
+		s.Phase = WorkloadNoChannel
+	case lease != "":
+		s.Phase = WorkloadStaleLease
+		if original != nil {
+			s.ExecutionID, s.Lease = original.info.ExecutionID, original.info.Lease
+			if w.disp.Load() == original && original.info.Lease == lease && original.ctx.Err() == nil {
+				s.Phase = WorkloadExecution
+			}
+		}
+	case !s.Ready:
+		s.Phase = WorkloadBootstrap
+	}
+	return s, true
 }
 
 func (w *Worker) readLoop() {
@@ -839,15 +887,37 @@ func (w *Worker) beginLease(ctx context.Context) []byte {
 		return nil
 	}
 	st := newDispatchState(ctx)
-	w.endDispatch(w.disp.Swap(st))
 	frame, _ := json.Marshal(map[string]string{"type": "lease", "lease": st.info.Lease})
+	var previous *dispatchState
+	w.transitionWorkload(func() { previous = w.disp.Swap(st) })
+	w.endDispatch(previous)
 	return frame
 }
 
 // revokeLease ends the current dispatch's authority: later frames carrying its
 // lease are refused and callee work derived from its ctx is cancelled.
 func (w *Worker) revokeLease() {
-	w.endDispatch(w.disp.Swap(nil))
+	var previous *dispatchState
+	w.transitionWorkload(func() { previous = w.disp.Swap(nil) })
+	w.endDispatch(previous)
+}
+
+func (w *Worker) transitionWorkload(change func()) {
+	if w.workloadTransition == nil {
+		change()
+		return
+	}
+	w.workloadTransition(change)
+}
+
+// Reaping and markDead share one transition, without nesting hooks or teardown.
+func (w *Worker) invalidateWorkload() {
+	var previous *dispatchState
+	w.transitionWorkload(func() {
+		w.dead.Store(true)
+		previous = w.disp.Swap(nil)
+	})
+	w.endDispatch(previous)
 }
 
 // endDispatch cancels a finished dispatch's ctx and tells the channel session
@@ -863,8 +933,7 @@ func (w *Worker) endDispatch(st *dispatchState) {
 }
 
 func (w *Worker) markDead() {
-	w.dead.Store(true)
-	w.revokeLease()
+	w.invalidateWorkload()
 	if w.readStop != nil {
 		w.readStopOnce.Do(func() { close(w.readStop) })
 	}

@@ -46,6 +46,27 @@ type IAMPolicyRecord struct {
 	UpdatedAt      time.Time
 }
 
+// AdmissionEvaluator retains the current revision while withholding unapproved
+// authority. Hosts must still coordinate live publication and worker admission.
+func (r *IAMPolicyRecord) AdmissionEvaluator() (*workloadiam.Evaluator, error) {
+	if r == nil || r.AuthorityEpoch == 0 || r.AuthorityEpoch > math.MaxInt64 {
+		return nil, ErrIAMInvalidPolicy
+	}
+	canonical, err := canonicalIAMPolicy(r.Metadata, []byte(r.PolicyJSON))
+	if err != nil || canonical != r.PolicyJSON {
+		return nil, ErrIAMInvalidPolicy
+	}
+	p, err := workloadiam.Decode([]byte(canonical))
+	if err != nil {
+		return nil, ErrIAMInvalidPolicy
+	}
+	if r.ReviewRequired || r.Quarantined {
+		p.Allow = []workloadiam.Statement{}
+		p.Inbound = []workloadiam.Acceptance{}
+	}
+	return workloadiam.Compile(r.Metadata, p)
+}
+
 type IAMPolicyChange struct {
 	OwnerID                  string
 	ExpectedRevision         uint64

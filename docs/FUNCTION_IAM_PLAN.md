@@ -555,6 +555,32 @@ Minimum scenario matrix:
 - `make lint` and `make test` passed on the inert foundation candidate. These
   checks do not qualify migration, real runtime IAM or rollout; those gates
   await integration.
+- Host worker/caller observation now carries immutable spawn identity and
+  optional trusted artifact revision, monotonic readiness and the caller's
+  original lease status. It preserves current SDK routing and stale-KV behavior;
+  fresh observation/invalidation is not yet serialized under the IAM gate.
+  Independent verification and integration qualification remain separate gates.
+  The review's channel-less observation edge is explicitly classified as
+  `no_channel`, not bootstrap/execution; only identity/readiness are observable
+  there. This preserves the channel-less wire path and denies accidental use
+  of incomplete metadata as authority.
+  Independent host-identity and channel-less delta reviews accepted this seam;
+  they do not verify real runtime IAM admission.
+- A storage-to-admission snapshot helper validates retained records and compiles
+  empty authority for quarantine/review-required flags without losing combined
+  revision metadata. Focused race tests pass; no runtime loader uses it yet.
+  Its independent focused follow-up passed five race repetitions and vet.
+- Observed admission entrypoints construct fresh host snapshots under the read
+  gate. `ChangeHostState` provides the matching exclusive atomic transition
+  seam; neither installs lifecycle hooks or activates IAM. Parent race/vet
+  checks pass, including observer-panic lock cleanup. Live host integration must
+  use observed entrypoints, not cached context values.
+- Optional worker lifecycle hooks now cover readiness, lease replacement/end
+  and death atomics, with cancellation/session cleanup after the hook returns.
+  Nil hooks preserve current behavior. A joined test binds real sandbox worker
+  observation methods to the coordinator and proves bootstrap closure, live
+  execution admission, stale-lease rejection and no replacement-execution
+  upgrade. This is an in-process/fake-worker test, not live SDK enforcement.
 
 Source integration map at baseline:
 

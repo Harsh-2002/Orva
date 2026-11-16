@@ -154,6 +154,18 @@ one worker.
 SDK traffic never selects a host interface or gateway: it uses the inherited
 worker channel. Do not restore HTTP endpoint discovery or an SDK firewall
 exception to work around an incompatible installed adapter.
+`Worker.WorkloadState` and `SDKCaller.WorkloadState` expose host-owned identity,
+monotonic readiness and original-lease observations for future IAM integration.
+Artifact revisions are trusted spawn configuration, never environment/frame
+claims. Empty artifacts stay unknown. These snapshots do not provide atomic
+admission; readiness/lease invalidation must join the IAM gate at cut-over.
+Channel-less workers report `no_channel` with identity/readiness only, never
+bootstrap/execution authority; their dispatch path still emits no SDK lease frame.
+`ExecConfig.WorkloadTransitionHook` optionally wraps readiness/lease/death atomics.
+Nil preserves current behavior. Bind it to the same gate as observed admission
+at cut-over; cancellation, session teardown and I/O must remain outside the hook.
+Dispatch can hold its worker mutex before the gate; gate-held observers must
+never acquire that mutex. No serving instance binds an IAM hook yet.
 | `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), preserved independently of the removed SDK HTTP wrappers; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
@@ -228,8 +240,10 @@ Its explicit schema initializer is test-only for now, never called on boot.
 CAS saves validate signed revisions and atomically append digest/actor audit
 records (32 retained per live function). Policy and audit rows cascade on
 function deletion; host-level deletion audit remains a cut-over obligation.
-Storage is not admin authorization or live artifact verification. Quarantine
-flags must prevent snapshot admission when the future loader is connected.
+Storage is not admin authorization or live artifact verification.
+`IAMPolicyRecord.AdmissionEvaluator` preserves revision metadata but compiles
+empty authority for quarantined/review-required records; the future loader must
+use it rather than compiling retained grants directly.
 
 ## Runtime SDK channel tests
 

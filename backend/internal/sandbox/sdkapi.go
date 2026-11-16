@@ -47,6 +47,65 @@ type SDKCaller struct {
 	// Exec is nil at module scope or after the dispatch ended; operations that
 	// need a live execution must refuse a nil Exec.
 	Exec *ExecInfo
+
+	workload *sdkWorkloadSource
+}
+
+// WorkloadIdentity is captured once at Spawn, independently of sandbox inputs.
+type WorkloadIdentity struct {
+	FunctionID       string
+	WorkerID         string
+	ArtifactRevision string
+}
+
+// WorkloadTransitionHook optionally serializes trusted worker state changes with
+// an external admission gate; it grants no policy or SDK authority. It must call
+// change synchronously, exactly once before returning, never retain it or start
+// asynchronous work. Neither the hook nor change may do I/O, database work,
+// cancellation, session teardown, Close or Kill; change only updates atomics.
+// Dispatch may hold Worker.mu when invoking the hook: lock order is worker mu →
+// admission gate. Gate-held observers must read atomics only, never acquire the
+// worker lock or call dispatch/lifecycle methods (including from the hook).
+type WorkloadTransitionHook func(change func())
+
+type WorkloadPhase string
+
+const (
+	WorkloadBootstrap  WorkloadPhase = "bootstrap"
+	WorkloadExecution  WorkloadPhase = "execution"
+	WorkloadUnbound    WorkloadPhase = "unbound"
+	WorkloadNoChannel  WorkloadPhase = "no_channel"
+	WorkloadStaleLease WorkloadPhase = "stale_lease"
+	WorkloadInactive   WorkloadPhase = "inactive"
+)
+
+// WorkloadState is an observation, not admission authority. Future IAM integration
+// must read it under its gate and serialize readiness/lease invalidation with that gate.
+// Channel-less workers expose identity/readiness only, never bootstrap or execution.
+type WorkloadState struct {
+	Identity    WorkloadIdentity
+	Ready       bool
+	Alive       bool
+	Phase       WorkloadPhase
+	ExecutionID string
+	Lease       string
+}
+
+type sdkWorkloadSource struct {
+	worker   *Worker
+	original *dispatchState
+	lease    string
+	ctx      context.Context
+}
+
+// WorkloadState observes current host state for this caller's ORIGINAL lease.
+// Exported caller fields cannot change the capture; unattached callers return false.
+func (c SDKCaller) WorkloadState() (WorkloadState, bool) {
+	if c.workload == nil {
+		return WorkloadState{}, false
+	}
+	s := c.workload
+	return s.worker.observeWorkload(s.original, s.lease, s.ctx)
 }
 
 // SDKHandler executes one SDK operation. args is the raw "a" object of the frame.
