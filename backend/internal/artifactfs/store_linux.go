@@ -71,30 +71,38 @@ const (
 )
 
 type record struct {
-	identity Identity
-	path     string
-	reserved int64
-	phase    phase
-	refs     int
-	isStage  bool
+	identity      Identity
+	path          string
+	reserved      int64
+	phase         phase
+	refs          int
+	isStage       bool
+	durable       persistentRecord
+	manifestBytes int
+	treeOwned     bool
 }
 
 type Store struct {
-	mu        sync.Mutex
-	root      string
-	limits    Limits
-	lock      *os.File
-	records   map[string]*record
-	bytes     int64
-	stages    int
-	leases    int
-	closed    bool
-	removeAll func(string) error
+	mu         sync.Mutex
+	root       string
+	limits     Limits
+	lock       *os.File
+	records    map[string]*record
+	bytes      int64
+	stages     int
+	leases     int
+	closed     bool
+	removeAll  func(string) error
+	persistent *persistentState
 }
 
 // New accepts only an existing empty, private, euid-owned directory without
 // symlink components. There is deliberately no recovery or legacy adoption.
 func New(root string, limits Limits) (*Store, error) {
+	return openStore(root, limits, true)
+}
+
+func openStore(root string, limits Limits, empty bool) (*Store, error) {
 	if !limits.valid() || !filepath.IsAbs(root) || filepath.Clean(root) != root {
 		return nil, ErrInvalid
 	}
@@ -123,9 +131,11 @@ func New(root string, limits Limits) (*Store, error) {
 	if err := noXattrs(root); err != nil {
 		return nil, err
 	}
-	names, err := f.Readdirnames(1)
-	if len(names) != 0 || (err != nil && !errors.Is(err, io.EOF)) {
-		return nil, ErrInvalid
+	if empty {
+		names, err := f.Readdirnames(1)
+		if len(names) != 0 || (err != nil && !errors.Is(err, io.EOF)) {
+			return nil, ErrInvalid
+		}
 	}
 	ok = true
 	return &Store{root: root, limits: limits, lock: f, records: make(map[string]*record), removeAll: os.RemoveAll}, nil
@@ -137,6 +147,9 @@ type Staging struct {
 }
 
 func (s *Store) Begin(ctx context.Context, reservedBytes int64) (*Staging, error) {
+	if s.persistent != nil {
+		return s.beginPersistent(ctx, reservedBytes)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -221,6 +234,9 @@ func (st *Staging) Seal(ctx context.Context, kind Kind, owner string, manifest M
 	if st == nil || st.store == nil || st.rec == nil {
 		return "", ErrInvalid
 	}
+	if st.store.persistent != nil {
+		return st.sealPersistent(ctx, kind, owner, manifest, expectedDigest)
+	}
 	s, r := st.store, st.rec
 	s.mu.Lock()
 	if s.closed {
@@ -304,6 +320,9 @@ func (s *Store) Acquire(generation string) (*Lease, error) {
 	if s.closed {
 		return nil, ErrClosed
 	}
+	if s.persistent != nil && s.persistent.recovered {
+		return nil, ErrRetired
+	}
 	r := s.records[generation]
 	if r == nil {
 		return nil, ErrInvalid
@@ -346,6 +365,9 @@ func (l *Lease) Release() {
 }
 
 func (s *Store) Retire(generation string) error {
+	if s.persistent != nil {
+		return s.retirePersistent(generation)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.records[generation]
@@ -373,6 +395,9 @@ func (s *Store) Reclaim(generation string) error {
 }
 
 func (s *Store) remove(r *record, abort bool) error {
+	if s.persistent != nil {
+		return s.removePersistent(r, abort)
+	}
 	s.mu.Lock()
 	if r.phase == deleted {
 		s.mu.Unlock()
@@ -415,7 +440,7 @@ func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
-	if len(s.records) != 0 {
+	if len(s.records) != 0 && (s.persistent == nil || !s.persistent.recovered) {
 		return ErrBusy
 	}
 	if s.lock == nil {

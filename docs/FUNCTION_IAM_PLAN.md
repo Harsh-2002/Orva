@@ -598,6 +598,22 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Explicit `artifactfs.NewPersistent` adds bounded canonical metadata and ordered
+  fsync/intent/tree-rename/commit publication. `OpenRecovering` verifies recognized
+  committed content and inspects interrupted states, retaining accounting.
+  Recovered stores cannot acquire, publish, retire or reclaim trees: releasing
+  the old process lock does not prove old workers are dead. No approval or
+  activation is recovered. The strict memory-only `New` behavior remains intact.
+  Package race repetitions and vet pass; independent crash-state/durability
+  review is pending. Fault injection is not real power-loss or live-worker
+  integration acceptance.
+  Independent review of `31ee397` found that failed verification could leak an
+  oversized unverified manifest into cleanup metadata, blocking later recovery.
+  Manifest authority now enters durable state only after verification; an
+  interrupted Abort retains an untyped reservation/delete intent instead.
+  Added a regression for failed Seal plus permission-denied cleanup; twenty
+  package race repetitions and vet pass. Independent re-verification is pending.
+
 - Stable browser-session UUID references are implemented as an inert additive
   schema/read seam. The explicit test-only initializer backfills independent
   host UUIDs in 128-row chunks with transaction-wide rollback, preserving valid
@@ -607,6 +623,16 @@ and policy together. Serving wiring remains absent until the full proof gates.
   permissions remain unchanged; legacy NULL-ID rows deny these new lookups.
   No hash-derived/prefix identity or new role model is introduced. Live trusted
   principal flow and commit-time authorization integration remain required.
+  Independent scoped acceptance passed full database race (360.947 s), vet and
+  focused/overlay probes. The first canonical run failed the pre-existing writer
+  timing-ratio gate; that failure remains recorded. Owner-approved PR #176
+  replaced the ratio assertion with committed inter-batch progress and monolithic
+  negative controls, retaining absolute responsiveness thresholds and diagnostic
+  ratios. Independent full database race and 75 idle/bursty-CPU invocations passed.
+  Fresh combined session snapshot `78f2717` passed lint, canonical tests and all
+  1,226 real-sandbox compatibility checks. PR #177 and merge commit `2996354`
+  passed CI; task-owned test resources were removed. This does not activate
+  session UUID writes or live authorization.
 
 - The next inactive composition, `workloadspawn`, freezes a prepared generation/
   config/secrets snapshot with opaque code/runtime leases into a one-use spawn
@@ -616,13 +642,15 @@ and policy together. Serving wiring remains absent until the full proof gates.
   changes before this identifier can be authoritative. Constructor validation
   precedes lease transfer; Spawn/Close consumption is shared across copied
   handles. Host-owned environment fields override supplied values. No pool,
-  approval, current-generation or provenance service is installed. Direct
-  fingerprint/owner/SDK-success cases and independent verification remain gates.
+  approval, current-generation or provenance service is installed.
   Direct tests now cover actual manifest/store-generation fingerprint changes,
   stable inputs, owner rejection without lease consumption, private-channel SDK
   attribution and Close/Spawn ownership races. Five package race repetitions
-  and vet pass. Independent acceptance is still required; fake jails do not
-  qualify real nsjail, pool admission or live generation authority.
+  and vet pass. Independent scoped acceptance at `b9c2dce` passed race, vet and
+  44 validation/fingerprint subcases. PR #175 and its merge commit `cc13008`
+  passed CI; the frozen candidate passed canonical tests and all 1,226 sandbox
+  compatibility checks. Fake jails do not qualify real pinned-runtime execution,
+  pool admission or live generation authority.
 
 - Internal opt-in verified-path consumption now transfers opaque code/runtime
   pairs into sandbox execution, checks owner/runtime labels and chooses the
