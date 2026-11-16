@@ -4,9 +4,9 @@ import {
   LIMITS, isCanonicalUuid, isValidLiteral, parseDecimal, validatePolicy, normalizeSnapshot,
   buildStatement, addStatement, removeStatement, addInbound, diffPolicies, policyWarnings,
   deriveAccess, buildSavePayload, buildReviewPayload, hostFingerprint, describeStatement,
-  presetActions, emptyPolicy, targetInfo,
+  presetActions, emptyPolicy, targetInfo, parseCounter, statementSummary,
 } from '../src/utils/permissionsModel.js'
-import { makeSnapshot, policy, caps, FN_ID, OTHER_FN_ID, CALLER_ID, MISSING_ID, DIGEST_A, DIGEST_B } from './fixtures/permissionsFixtures.js'
+import { makeSnapshot, policy, caps, ACTOR_ID, FN_ID, OTHER_FN_ID, CALLER_ID, MISSING_ID, DIGEST_A, DIGEST_B } from './fixtures/permissionsFixtures.js'
 
 const stmt = (over) => ({ actions: ['kv.get'], resource: { own_kv: { key: 'k' } }, context: 'execution', ...over })
 const withAllow = (...allow) => ({ schema_version: 1, allow, inbound: [] })
@@ -41,10 +41,90 @@ test('revision and epoch stay decimal strings beyond MAX_SAFE_INTEGER', () => {
   assert.equal(parseDecimal('-9223372036854775808', { signed: true }), -9223372036854775808n)
   assert.equal(parseDecimal('9223372036854775808', { signed: true }), null)
   for (const bad of ['01', '1.0', '1e3', ' 1', '', '-0', 7, null]) assert.equal(parseDecimal(bad, { signed: true }), null)
-  const s = normalizeSnapshot(makeSnapshot({ host: { revision: '9007199254740993', authorityEpoch: '-5' } }))
+  const s = normalizeSnapshot(makeSnapshot({ host: { revision: '9007199254740993', authorityEpoch: '9223372036854775807' } }))
   assert.equal(s.snapshot.host.revision, '9007199254740993')
-  assert.equal(s.snapshot.host.authorityEpoch, '-5')
+  assert.equal(s.snapshot.host.authorityEpoch, '9223372036854775807')
   assert.equal(normalizeSnapshot(makeSnapshot({ host: { revision: 7 } })).status, 'unavailable')
+})
+
+// workload_iam_schema.go: revision and authority_epoch are INTEGER CHECK(> 0),
+// so 0, negatives and anything above 2^63-1 can never be a stored value.
+test('host and history counters are positive signed 64-bit decimal strings', () => {
+  assert.equal(parseCounter('1'), 1n)
+  assert.equal(parseCounter('9223372036854775807'), 9223372036854775807n)
+  for (const bad of ['0', '-5', '-0', '01', '1.0', '9223372036854775808', '', ' 1', 7, null, undefined]) {
+    assert.equal(parseCounter(bad), null, String(bad))
+  }
+  for (const host of [{ revision: '0' }, { revision: '9223372036854775808' }, { authorityEpoch: '0' }, { authorityEpoch: '-5' }]) {
+    assert.equal(normalizeSnapshot(makeSnapshot({ host })).status, 'unavailable', JSON.stringify(host))
+  }
+  const h = makeSnapshot()
+  h.history[0].authorityEpoch = '0'
+  h.history[1].revision = '9223372036854775808'
+  assert.equal(normalizeSnapshot(h).snapshot.history.length, 0)
+})
+
+test('the snapshot owner must be a canonical UUID', () => {
+  for (const id of ['', 'not-a-uuid', FN_ID.toUpperCase(), '00000000-0000-0000-0000-000000000000']) {
+    const s = makeSnapshot()
+    s.function.id = id
+    assert.equal(normalizeSnapshot(s).status, 'unavailable', id)
+  }
+})
+
+// workload_iam.go validateIAMActor: kind in api_key|session|oauth|system and a
+// canonical UUID. Nothing else reaches the audit table, so nothing else renders.
+test('history actors have a closed kind and a canonical UUID, never free text', () => {
+  const kept = (actor) => {
+    const s = makeSnapshot()
+    s.history[0].actor = actor
+    return normalizeSnapshot(s).snapshot.history.length
+  }
+  for (const kind of ['api_key', 'session', 'oauth', 'system']) assert.equal(kept({ kind, id: ACTOR_ID }), 2, kind)
+  for (const actor of [
+    { kind: 'api_key', id: 'Bearer SYNTHETIC_NOT_A_REAL_CREDENTIAL' },
+    { kind: 'system', id: 'token' },
+    { kind: 'user', id: ACTOR_ID },
+    { kind: 'admin', id: OTHER_FN_ID },
+    { kind: 'API_KEY', id: ACTOR_ID },
+    { kind: 'session', id: ACTOR_ID.toUpperCase() },
+    { kind: 'oauth' },
+  ]) assert.equal(kept(actor), 1, JSON.stringify(actor))
+})
+
+test('sparse policy arrays are rejected before holes can serialise as null', () => {
+  assert.equal(validatePolicy({ schema_version: 1, allow: Array(1), inbound: [] }).ok, false)
+  assert.equal(validatePolicy({ schema_version: 1, allow: [], inbound: Array(1) }).ok, false)
+  const sparseActions = { actions: Array(1), resource: { own_kv: { key: 'k' } }, context: 'execution' }
+  assert.equal(validatePolicy(withAllow(sparseActions)).ok, false)
+  assert.equal(validatePolicy({ schema_version: 1, allow: [], inbound: [{ caller_id: CALLER_ID, triggers: Array(1) }] }).ok, false)
+  assert.equal(normalizeSnapshot(makeSnapshot({ policy: { schema_version: 1, allow: Array(1), inbound: [] } })).snapshot.policy, null)
+})
+
+test('the add forms reject unknown or repeated actions and triggers instead of filtering them', () => {
+  const kv = (actions) => buildStatement({ kind: 'kv-key', value: 'k', actions })
+  assert.equal(kv(['kv.get']).ok, true)
+  for (const actions of [['kv.get', 'unknown'], ['kv.get', 'kv.get'], Array(1), null, 'kv.get']) {
+    assert.equal(kv(actions).ok, false, JSON.stringify(actions))
+  }
+  const base = { schema_version: 1, allow: [], inbound: [] }
+  assert.equal(addInbound(base, OTHER_FN_ID, ['f2f', 'job']).ok, true)
+  for (const triggers of [['f2f', 'unknown'], ['f2f', 'f2f'], Array(1), null]) {
+    assert.equal(addInbound(base, OTHER_FN_ID, triggers).ok, false, JSON.stringify(triggers))
+  }
+})
+
+test('change lines drop only the redundant selector word and keep literals and actions exact', () => {
+  const kvKey = { actions: ['kv.get', 'kv.put'], resource: { own_kv: { key: 'state' } }, context: 'execution' }
+  assert.equal(statementSummary(kvKey), 'Own storage, one key state: kv.get, kv.put')
+  assert.equal(statementSummary({ ...kvKey, resource: { own_kv: { prefix: ' config/ ' } } }), 'Own storage, keys with a prefix  config/ : kv.get, kv.put')
+  assert.equal(statementSummary({ ...kvKey, resource: { own_kv: { prefix: '' } } }), 'Own storage, every key prefix (empty): kv.get, kv.put')
+  const cron = { actions: ['crons.upsert'], resource: { own_cron: { name: 'nightly', target_id: FN_ID } }, context: 'execution' }
+  assert.equal(statementSummary(cron), 'Own schedule name nightly: crons.upsert')
+  assert.equal(statementSummary({ ...cron, resource: { own_cron: { prefix: 'nt-', target_id: FN_ID } } }), 'Own schedules, by prefix nt-: crons.upsert')
+  assert.equal(statementSummary(policy().allow[2]), `Another function ${OTHER_FN_ID}: functions.invoke`)
+  assert.equal(statementSummary(policy().allow[0]), 'Own storage, keys with a prefix config/: kv.get, kv.list (at startup)')
+  assert.doesNotMatch(statementSummary(kvKey), /key key/)
 })
 
 test('a valid policy round-trips to an owned copy in Go field order', () => {

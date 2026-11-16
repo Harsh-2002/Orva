@@ -39,3 +39,20 @@ No router/Editor/SDK-toggle changes until server-authoritative contracts and
 cut-over enforcement exist. Preview fixtures must be clearly synthetic and cannot
 claim permissions were applied. Policy never joins source/deployment dirty state.
 No production or website deployment.
+
+## Rendered finish review (2026-11-16)
+
+Independent Claude visual review found no blocking design issues in actual
+night/day phone, tablet and desktop captures, including dirty diffs and review
+disclosures. The repeated selector-kind word in diff text was corrected.
+Parent browser checks verified bottom History reachability with the expanded
+save bar at 375px in both themes. Optional caller-field width refinement is
+deferred; unresolved-target wording must not invent visibility/deletion facts.
+
+Forty synthetic render cases passed without horizontal overflow or browser
+errors. This is not complete accessibility or production Layout/auth acceptance.
+Independent behavioral re-review passed after correcting stale adoption and
+delayed-conflict ordering: 30 unchanged probes and four new ordering cases.
+Acceptance assumes the future controller's documented response correlation
+contract, not production integration. No raster assets
+were added to the shipping UI; evidence PNGs are browser screenshots.

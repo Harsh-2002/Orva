@@ -104,6 +104,24 @@ export function parseDecimal(s, { signed = false } = {}) {
   return v
 }
 
+// Policy revisions, authority epochs and audit rows are SQLite INTEGER columns
+// checked `> 0`, so the only valid values are 1..2^63-1 as decimal strings.
+export function parseCounter(s) {
+  if (typeof s !== 'string' || s.length === 0 || s.length > 19 || !/^[1-9][0-9]*$/.test(s)) return null
+  const v = BigInt(s)
+  return v > I64_MAX ? null : v
+}
+
+// Array(n) has holes that map/filter skip and JSON.stringify writes as null.
+const isDense = (a) => {
+  if (!Array.isArray(a)) return false
+  for (let i = 0; i < a.length; i += 1) if (!(i in a)) return false
+  return true
+}
+
+// Mirrors the workload_iam_audit CHECK constraint and validateIAMActor.
+export const ACTOR_KINDS = Object.freeze(['api_key', 'session', 'oauth', 'system'])
+
 export const shortDigest = (d) => (isSha256(d) ? d.slice(0, 12) : '')
 
 // ---------------------------------------------------------------- policy
@@ -205,7 +223,7 @@ function readStatement(s, path, problems) {
   }
   const resource = readResource(s.resource, `${path}.resource`, problems)
   const actions = []
-  if (!Array.isArray(s.actions) || s.actions.length === 0 || s.actions.length > LIMITS.maxActionsPerStatement) {
+  if (!Array.isArray(s.actions) || s.actions.length === 0 || s.actions.length > LIMITS.maxActionsPerStatement || !isDense(s.actions)) {
     problems.push(`${path}.actions must list 1 to ${LIMITS.maxActionsPerStatement} actions`)
     return null
   }
@@ -234,7 +252,7 @@ function readAcceptance(a, path, problems) {
     ok = false
   }
   const triggers = []
-  if (!Array.isArray(a.triggers) || a.triggers.length === 0 || a.triggers.length > LIMITS.maxTriggers) {
+  if (!Array.isArray(a.triggers) || a.triggers.length === 0 || a.triggers.length > LIMITS.maxTriggers || !isDense(a.triggers)) {
     problems.push(`${path}.triggers must list 1 to ${LIMITS.maxTriggers} triggers`)
     return null
   }
@@ -273,6 +291,9 @@ export function validatePolicy(raw) {
   if (raw.allow.length > LIMITS.maxStatements) problems.push(`at most ${LIMITS.maxStatements} statements`)
   if (raw.inbound.length > LIMITS.maxTargets) problems.push(`at most ${LIMITS.maxTargets} callers`)
   if (problems.length) return { ok: false, problems, policy: null }
+  if (!isDense(raw.allow) || !isDense(raw.inbound)) {
+    return { ok: false, problems: ['allow and inbound must not contain empty slots'], policy: null }
+  }
 
   const allow = raw.allow.map((s, i) => readStatement(s, `allow[${i}]`, problems))
   const inbound = raw.inbound.map((a, i) => readAcceptance(a, `inbound[${i}]`, problems))
@@ -321,6 +342,21 @@ export function describeStatement(stmt) {
   return out
 }
 
+// One-line text for a statement in change lists. The selector literal and the
+// action IDs are printed exactly. The selector mode word is dropped only when
+// the title already says it ("one key", "keys with a prefix", "by prefix").
+export function statementSummary(stmt) {
+  const d = describeStatement(stmt)
+  let where = ''
+  if (d.selector) {
+    const redundant = d.title.toLowerCase().includes(d.selector.mode)
+    where = ` ${redundant ? '' : `${d.selector.mode} `}${d.selector.value === '' ? '(empty)' : d.selector.value}`
+  } else if (d.targetId) {
+    where = ` ${d.targetId}`
+  }
+  return `${d.title}${where}: ${d.actions.map((a) => a.id).join(', ')}${d.context === 'bootstrap' ? ' (at startup)' : ''}`
+}
+
 // Statements that cannot work as written. These explain; they never edit.
 export function policyWarnings(policy) {
   const warnings = []
@@ -356,10 +392,14 @@ export function presetActions(preset, kind, context) {
 export function buildStatement({ kind, value = '', targetId = '', context = 'execution', actions = [] }) {
   const errors = {}
   if (!KINDS[kind]) return { ok: false, errors: { kind: 'Choose what this grants access to.' }, statement: null }
-  const picked = ACTION_IDS.filter((a) => actions.includes(a))
-  if (!picked.length) errors.actions = 'Pick at least one action.'
+  // Unknown or repeated actions are rejected, never filtered away: the draft
+  // must contain exactly what the operator picked or nothing.
+  const wellFormed = isDense(actions) && actions.every((a, i) => ACTION_IDS.includes(a) && actions.indexOf(a) === i)
+  const picked = wellFormed ? ACTION_IDS.filter((a) => actions.includes(a)) : []
+  if (!wellFormed) errors.actions = 'These actions are not recognised or are repeated.'
+  else if (!picked.length) errors.actions = 'Pick at least one action.'
   if (context === 'bootstrap' && !kind.startsWith('kv-')) errors.context = 'Startup access applies to storage only.'
-  if (context === 'bootstrap' && picked.some((a) => a !== 'kv.get' && a !== 'kv.list')) errors.actions = 'Startup access allows only reading and listing.'
+  if (wellFormed && context === 'bootstrap' && picked.some((a) => a !== 'kv.get' && a !== 'kv.list')) errors.actions = 'Startup access allows only reading and listing.'
   let resource
   if (kind === 'kv-key' || kind === 'kv-prefix') {
     const prefix = kind === 'kv-prefix'
@@ -399,6 +439,9 @@ export const removeStatement = (policy, index) => {
 
 export function addInbound(policy, callerId, triggers) {
   const p = clonePolicy(policy)
+  if (!isDense(triggers) || triggers.some((t, i) => !TRIGGER_IDS.includes(t) || triggers.indexOf(t) !== i)) {
+    return { ok: false, policy: null, problems: ['These triggers are not recognised or are repeated.'] }
+  }
   if (p.inbound.some((a) => a.caller_id === callerId)) {
     return { ok: false, policy: null, problems: ['That caller is already accepted. Remove it first to change its triggers.'] }
   }
@@ -461,13 +504,13 @@ function unavailable(problem) {
 export function normalizeSnapshot(raw) {
   if (!isObject(raw)) return unavailable('No permissions snapshot.')
   const fn = raw.function
-  if (!isObject(fn) || typeof fn.id !== 'string' || fn.id === '' || typeof fn.name !== 'string') {
+  if (!isObject(fn) || !isCanonicalUuid(fn.id) || typeof fn.name !== 'string') {
     return unavailable('The snapshot does not identify a function.')
   }
   const h = raw.host
   if (!isObject(h)) return unavailable('The snapshot has no host state.')
-  const revision = parseDecimal(h.revision)
-  const epoch = parseDecimal(h.authorityEpoch, { signed: true })
+  const revision = parseCounter(h.revision)
+  const epoch = parseCounter(h.authorityEpoch)
   const artifactOk = (a) => a === null || isSha256(a)
   if (revision === null || epoch === null) return unavailable('Revision or authority epoch is not a valid decimal string.')
   if (!artifactOk(h.currentArtifact) || !artifactOk(h.approvedArtifact)) return unavailable('An artifact digest is not valid.')
@@ -510,8 +553,10 @@ export function normalizeSnapshot(raw) {
     snapshot.targets.push({ id: t.id, label: t.label, state: t.state })
   }
   for (const e of Array.isArray(raw.history) ? raw.history.slice(0, LIMITS.maxHistory) : []) {
-    if (!isObject(e) || parseDecimal(e.revision) === null || parseDecimal(e.authorityEpoch, { signed: true }) === null) continue
-    if (!isSha256(e.digest) || !isObject(e.actor) || typeof e.actor.kind !== 'string' || typeof e.actor.id !== 'string') continue
+    if (!isObject(e) || parseCounter(e.revision) === null || parseCounter(e.authorityEpoch) === null) continue
+    // The kind set is closed and the ID a canonical UUID, so nothing
+    // credential-shaped can reach the page through the history list.
+    if (!isSha256(e.digest) || !isObject(e.actor) || !ACTOR_KINDS.includes(e.actor.kind) || !isCanonicalUuid(e.actor.id)) continue
     if (typeof e.changedAt !== 'string' || Number.isNaN(Date.parse(e.changedAt))) continue
     snapshot.history.push({
       revision: e.revision, authorityEpoch: e.authorityEpoch, digest: e.digest,

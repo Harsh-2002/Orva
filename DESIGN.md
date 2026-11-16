@@ -652,3 +652,17 @@ number in this section was measured that way, across the shipped route set at
 375/390/430/768/820/1280/1920 with `pointer: coarse` emulated on the phone widths. It is there because every rule above was already true in
 at least one view and false in another; a convention nothing checks is a
 convention that decays.
+
+### Function permissions (staged)
+
+The dedicated permissions page uses an authority sheet: outbound effects,
+inbound callers, artifact review, then bounded history. Friendly effects lead;
+literal selectors, action IDs and immutable UUIDs remain inspectable. Phone
+and desktop retain the same information and actions, with wrapping rows rather
+than a permission matrix.
+
+Permission drafts are separate from source/deployment edits. A dirty-only save
+bar exposes changes, discard and explicit save. Unknown capabilities deny
+editing; preview labels do not grant authority. Retained grants awaiting review
+are described as not in force, not faded into illegibility. Technical digests
+and audit details use disclosures. This page remains unrouted and API-unwired.

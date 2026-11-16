@@ -118,6 +118,15 @@ which violet is correct.
 
 ## Non-obvious
 
+- **The staged Permissions page is not its future request controller.** Preserve
+  owner-scoped response ordering; never publish a stale response as a save
+  acknowledgement. Set `saving` false before supplying a fresh successful
+  snapshot, and deliver a terminal error before any subsequent refresh result.
+  Matching snapshots received in flight retain the draft and original CAS
+  expectations. The page keeps an owner-lifetime revision high-water mark,
+  including across Discard; older responses deny Save and Review. The future
+  controller must correlate results and reject stale successes and failures.
+
 - **SDK access is an explicit function setting**, separate from `network_mode`.
   Editor Settings defaults `sdk` to false, preserves it through dirty/discard,
   Reset, deploy, and rollback, and disables the checkbox in View. Only explicit

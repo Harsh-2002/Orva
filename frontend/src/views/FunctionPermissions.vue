@@ -166,8 +166,8 @@
       >
         <p class="leading-snug text-warning-fg">
           The server version changed while you were editing (revision
-          <code class="font-mono">{{ base.fp.split('|')[0] }}</code> to
-          <code class="font-mono">{{ latest.host.revision }}</code>). Saving is off. Your draft is kept.
+          <code class="font-mono">{{ conflict.from }}</code> to
+          <code class="font-mono">{{ water === null ? latest.host.revision : String(water) }}</code>). Saving is off until you discard the draft and reload. Your draft is kept.
         </p>
         <div class="flex flex-wrap gap-2">
           <Button
@@ -255,6 +255,7 @@
             :statements="shownPolicy.allow"
             :targets="latest.targets"
             :warnings="warnings"
+            :unconfirmed="unconfirmed"
             :editable="canEdit"
             :disabled="busy"
             @remove="onRemoveStatement"
@@ -289,6 +290,7 @@
             :callers="shownPolicy.inbound"
             :targets="latest.targets"
             :problem="inboundProblem"
+            :unconfirmed="unconfirmed"
             :editable="canEdit"
             :disabled="busy"
             @add="onAddInbound"
@@ -315,7 +317,7 @@
           :can-review="access.canReview"
           :dirty="dirty"
           :pending="reviewLatched"
-          :disabled="busy || loading || !!loadError || reviewLatched"
+          :disabled="reviewBlocked"
           @review="onReview"
         />
       </section>
@@ -333,7 +335,10 @@
             History
           </h2>
         </header>
-        <HistoryList :entries="latest.history" />
+        <HistoryList
+          :entries="latest.history"
+          :unconfirmed="!!unconfirmed"
+        />
       </section>
 
       <SaveBar
@@ -365,8 +370,8 @@ import HistoryList from '@/components/permissions/HistoryList.vue'
 import SaveBar from '@/components/permissions/SaveBar.vue'
 import {
   addInbound, addStatement, buildReviewPayload, buildSavePayload, clonePolicy, deriveAccess,
-  describeStatement, diffPolicies, hostFingerprint, normalizeSnapshot, policyWarnings,
-  removeInbound, removeStatement, validatePolicy, TRIGGER_LABELS,
+  diffPolicies, hostFingerprint, normalizeSnapshot, policyWarnings, parseCounter,
+  removeInbound, removeStatement, statementSummary, validatePolicy, TRIGGER_LABELS,
 } from '@/utils/permissionsModel.js'
 
 // Presentational. The page owns a local draft and emits events; it never
@@ -409,6 +414,11 @@ const draft = ref(null)
 const latched = ref(false)
 const reviewLatched = ref(false)
 const conflictFp = ref('')
+// conflict: held until an explicit discard, so a later A cannot undo A, B, A.
+// candidate: only a matching snapshot seen mid-save, never an acknowledgement.
+const conflict = ref(null)
+// Newest revision seen for this owner. Only an owner change resets it.
+const water = ref(null)
 const compareOpen = ref(false)
 const statementFormKey = ref(0)
 const inboundFormKey = ref(0)
@@ -425,15 +435,23 @@ const diff = computed(() => (base.value && draft.value
   ? diffPolicies(base.value.policy, draft.value)
   : { statements: { added: [], removed: [] }, inbound: { added: [], removed: [] }, total: 0 }))
 const dirty = computed(() => diff.value.total > 0)
-const stale = computed(() => dirty.value && !!latest.value && !!base.value && base.value.fp !== latestFp.value)
+const stale = computed(() => dirty.value && !!conflict.value)
+const shownRevision = computed(() => (latest.value && access.value.identityOk ? parseCounter(latest.value.host.revision) : null))
+const obsolete = computed(() => water.value !== null && shownRevision.value !== null && shownRevision.value < water.value)
 const conflictLocked = computed(() => !!props.saveError && props.saveError.kind === 'conflict'
   && !!base.value && conflictFp.value === base.value.fp && latestFp.value === base.value.fp)
+// Same guards as save: a refused or conflicting request must be refreshed first.
+const reviewBlocked = computed(() => busy.value || props.loading || !!props.loadError
+  || reviewLatched.value || forbidden.value || conflictLocked.value || obsolete.value)
+// While a refresh is pending or failed, an empty list is old news, not a fact.
+const unconfirmed = computed(() => (props.loading ? 'loading' : props.loadError ? 'error' : ''))
 const canSave = computed(() => dirty.value && canEdit.value && !stale.value && !busy.value
-  && !conflictLocked.value && !!draft.value && validatePolicy(draft.value).ok)
+  && !obsolete.value && !conflictLocked.value && !!draft.value && validatePolicy(draft.value).ok)
 const warnings = computed(() => (shownPolicy.value ? policyWarnings(shownPolicy.value) : []))
 
 function sync() {
   const l = latest.value
+  conflict.value = null
   if (l && l.policy && l.function.id === props.functionId) {
     base.value = { fp: hostFingerprint(l), policy: clonePolicy(l.policy) }
     draft.value = clonePolicy(l.policy)
@@ -441,6 +459,15 @@ function sync() {
     base.value = null
     draft.value = null
   }
+}
+
+// Returns true when this snapshot is older than one already seen.
+function observe(l) {
+  const rev = l && l.function.id === props.functionId ? parseCounter(l.host.revision) : null
+  if (rev === null) return false
+  if (water.value !== null && rev < water.value) return true
+  water.value = rev
+  return false
 }
 
 // Throw away the draft and every transient message, then start from the server.
@@ -456,22 +483,51 @@ function adopt() {
 }
 
 sync()
+observe(latest.value)
 // Declared first so an owner change clears state before the snapshot watcher.
-watch(() => props.functionId, adopt)
+watch(() => props.functionId, () => {
+  water.value = null
+  adopt()
+  observe(latest.value)
+})
 watch(latest, (l) => {
+  const older = observe(l)
   if (!l || !l.policy || l.function.id !== props.functionId) return
-  // A clean page follows the server. A dirty one keeps its draft, unless the
-  // new snapshot already contains exactly what the draft asked for.
-  if (!dirty.value || (draft.value && diffPolicies(l.policy, draft.value).total === 0)) sync()
+  if (!dirty.value) {
+    sync()
+    return
+  }
+  // A dirty draft settles only on a clean, current, post-completion snapshot
+  // that already holds exactly what it asked for. Anything else keeps the base.
+  const clean = !older && !props.saveError && !props.loadError && !props.loading
+    && !!draft.value && diffPolicies(l.policy, draft.value).total === 0
+  const inFlight = props.saving || latched.value
+  if (clean && !inFlight && (!conflict.value || conflict.value.candidate)) {
+    sync()
+  } else if (conflict.value) {
+    if (!clean) conflict.value = { ...conflict.value, candidate: false }
+  } else if (base.value && base.value.fp !== hostFingerprint(l)) {
+    conflict.value = { from: base.value.fp.split('|')[0], candidate: clean }
+  }
 })
 watch(latestFp, () => { latched.value = false; reviewLatched.value = false })
-watch(() => props.saving, (now, was) => { if (was && !now) latched.value = false })
+watch(() => props.saving, (now, was) => {
+  if (!was || now) return
+  latched.value = false
+  if (props.saveError) reviewLatched.value = false
+})
 watch(() => props.loading, (now, was) => { if (was && !now) reviewLatched.value = false })
 watch(() => props.saveError, (e) => {
   latched.value = false
+  // A terminal error with nothing in flight frees a review request to retry.
+  if (e && !props.saving) reviewLatched.value = false
+  if (e && conflict.value) conflict.value = { ...conflict.value, candidate: false }
   if (e && e.kind === 'conflict') conflictFp.value = base.value ? base.value.fp : latestFp.value
 })
-watch(dirty, (v) => emit('dirty-change', v))
+watch(dirty, (v) => {
+  emit('dirty-change', v)
+  if (!v && conflict.value) sync()
+})
 
 const view = computed(() => {
   if (!latest.value) {
@@ -519,6 +575,7 @@ const enforcementNotice = computed(() => {
 const lockNote = computed(() => {
   if (!readable.value) return ''
   if (props.readOnlyReason) return props.readOnlyReason
+  if (obsolete.value) return `This response is older than revision ${water.value}, which was already received. Saving and review stay off until a newer one arrives. Refresh.`
   if (props.loading || props.loadError || !latest.value.policy) return ''
   if (!access.value.canManage) {
     return dirty.value
@@ -534,6 +591,7 @@ const saveErrorText = computed(() => ({
   error: 'Saving failed. Your draft is kept. Use Retry save to try again.',
 }[props.saveError && props.saveError.kind] || 'Saving failed. Your draft is kept.'))
 const saveHint = computed(() => {
+  if (obsolete.value) return 'Saving is off: this response is older than one already received.'
   if (stale.value) return 'Saving is off until you reload the server version.'
   if (conflictLocked.value) return 'Refresh to continue.'
   if (forbidden.value) return 'Saving is locked.'
@@ -542,11 +600,7 @@ const saveHint = computed(() => {
 })
 
 // ---- change text (diff entries to readable lines)
-const statementLine = (s) => {
-  const d = describeStatement(s)
-  const where = d.selector ? ` ${d.selector.mode} ${d.selector.value === '' ? '(empty)' : d.selector.value}` : d.targetId ? ` ${d.targetId}` : ''
-  return `${d.title}${where}: ${d.actions.map((a) => a.id).join(', ')}${d.context === 'bootstrap' ? ' (at startup)' : ''}`
-}
+const statementLine = statementSummary
 const callerLine = (a) => `Caller ${a.caller_id}: ${a.triggers.map((t) => TRIGGER_LABELS[t]).join(', ')}`
 const linesOf = (d) => [
   ...d.statements.added.map((s) => ({ kind: 'Added', text: statementLine(s) })),
@@ -600,7 +654,7 @@ function onSave() {
 }
 
 function onReview() {
-  if (!access.value.canReview || dirty.value || busy.value || reviewLatched.value || props.loading || props.loadError) return
+  if (!access.value.canReview || dirty.value || reviewBlocked.value) return
   const r = buildReviewPayload(latest.value)
   if (!r.ok) return
   reviewLatched.value = true

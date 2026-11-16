@@ -24,7 +24,7 @@
         v-if="open && !entries.length"
         class="px-4 pb-4 text-sm text-foreground"
       >
-        No revisions recorded.
+        {{ unconfirmed ? 'Not confirmed. The last loaded history was empty.' : 'No revisions recorded.' }}
       </p>
       <ol
         v-else-if="open"
@@ -44,7 +44,7 @@
             >{{ when(e.changedAt) }}</time>
           </p>
           <p class="break-all text-foreground">
-            By {{ e.actor.kind }}
+            By {{ ACTOR_LABELS[e.actor.kind] }}
             <code class="font-mono text-foreground-strong">{{ e.actor.id }}</code>
           </p>
           <p class="break-all text-foreground">
@@ -69,7 +69,12 @@ import { ChevronDown } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import { LIMITS } from '@/utils/permissionsModel.js'
 
-defineProps({ entries: { type: Array, required: true } })
+defineProps({
+  entries: { type: Array, required: true },
+  unconfirmed: Boolean,
+})
+
+const ACTOR_LABELS = { api_key: 'API key', session: 'session', oauth: 'OAuth app', system: 'system' }
 
 const open = ref(false)
 const when = (iso) => new Date(iso).toLocaleString()

@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import FunctionPermissions from '@/views/FunctionPermissions.vue'
 import {
-  CALLER_ID, DIGEST_A, DIGEST_B, FN_ID, OTHER_FN_ID, caps, makeSnapshot, policy,
+  ACTOR_ID, CALLER_ID, DIGEST_A, DIGEST_B, FN_ID, OTHER_FN_ID, caps, makeSnapshot, policy,
 } from '../fixtures/permissionsFixtures.js'
 
 // jsdom has no matchMedia; Popover (inside FilterSelect) reads it on mount.
@@ -343,5 +343,257 @@ describe('FunctionPermissions review', () => {
     expect(btn(w, 'Request review').attributes('disabled')).toBeDefined()
     await btn(w, 'Request review').trigger('click')
     expect(w.emitted('review')).toBeUndefined()
+  })
+})
+
+describe('FunctionPermissions conflict, review and unconfirmed-state regressions', () => {
+  const saveBtn = (w) => btn(w, 'Save permissions')
+
+  it('a conflict survives an A, B, A snapshot sequence until the operator discards', async () => {
+    const w = make()
+    await removeFirst(w)
+    await w.setProps({ snapshot: makeSnapshot({ host: { revision: '8' } }) })
+    await flushPromises()
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    // A late response that looks like the original base must not release it.
+    await w.setProps({ snapshot: makeSnapshot() })
+    await flushPromises()
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('The server version changed while you were editing')
+    // The banner reports the newest revision seen, not the late one.
+    expect(w.find('[role="alert"]').text()).toMatch(/revision\s*7\s*to\s*8/)
+    await saveBtn(w).trigger('click')
+    expect(w.emitted('save')).toBeUndefined()
+    await btn(w, 'Discard draft and reload').trigger('click')
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(false)
+  })
+
+  it('a matching snapshot beside a conflict error neither adopts the draft nor moves the expected tokens', async () => {
+    const w = make()
+    await removeFirst(w)
+    const next = makeSnapshot({ host: { revision: '8' } })
+    next.policy.allow.shift()
+    await w.setProps({ snapshot: next, saveError: { kind: 'conflict', message: 'revision moved' } })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    // Clearing the error alone does not release the held conflict either.
+    await w.setProps({ saveError: null })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    expect(w.emitted('save')).toBeUndefined()
+  })
+
+  it('a matching snapshot adopts only when loading, errors and conflicts are all absent', async () => {
+    for (const blocker of [{ loading: true }, { loadError: 'could not load' }]) {
+      const w = make()
+      await removeFirst(w)
+      const next = makeSnapshot({ host: { revision: '8' } })
+      next.policy.allow.shift()
+      await w.setProps({ snapshot: next, ...blocker })
+      await flushPromises()
+      expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+    }
+  })
+
+  describe('review retry', () => {
+    const reviewer = () => makeSnapshot({ host: { capabilities: caps({ canReview: true }) } })
+    const requested = async (props = {}) => {
+      const w = make({ snapshot: reviewer(), ...props })
+      await btn(w, 'Request review').trigger('click')
+      await w.setProps({ saving: true })
+      return w
+    }
+
+    it.each(['error', 'validation'])('a terminal %s error with nothing in flight allows a second request', async (kind) => {
+      const w = await requested()
+      await w.setProps({ saving: false, saveError: { kind, message: 'synthetic' } })
+      expect(btn(w, 'Request review').attributes('disabled')).toBeUndefined()
+      await btn(w, 'Request review').trigger('click')
+      expect(w.emitted('review')).toHaveLength(2)
+    })
+
+    it('an error that lands while the request is still in flight frees it once saving ends', async () => {
+      const w = await requested()
+      await w.setProps({ saveError: { kind: 'error', message: 'synthetic' } })
+      expect(btn(w, 'Request review').attributes('disabled')).toBeDefined()
+      await w.setProps({ saving: false })
+      expect(btn(w, 'Request review').attributes('disabled')).toBeUndefined()
+    })
+
+    it('stays locked while the request is in flight', async () => {
+      const w = await requested()
+      expect(btn(w, 'Request review').attributes('disabled')).toBeDefined()
+      expect(w.emitted('review')).toHaveLength(1)
+    })
+
+    it.each(['forbidden', 'conflict'])('a %s error keeps review off', async (kind) => {
+      const w = await requested()
+      await w.setProps({ saving: false, saveError: { kind, message: 'synthetic' } })
+      expect(btn(w, 'Request review').attributes('disabled')).toBeDefined()
+      await btn(w, 'Request review').trigger('click')
+      expect(w.emitted('review')).toHaveLength(1)
+    })
+  })
+
+  describe('an empty list is not success copy while unconfirmed', () => {
+    const empty = () => makeSnapshot({
+      policy: { schema_version: 1, allow: [], inbound: [] },
+      history: [],
+    })
+    const SUCCESS = ['No protected platform actions allowed', 'No callers accepted', 'No other function is accepted']
+
+    it.each([
+      ['loading', { loading: true }],
+      ['a load error', { loadError: 'synthetic load failure' }],
+    ])('with an old empty snapshot and %s', async (_name, over) => {
+      const w = make({ snapshot: empty(), ...over })
+      for (const copy of SUCCESS) expect(w.text()).not.toContain(copy)
+      expect(w.text()).toContain('Not confirmed')
+      expect(w.text()).not.toContain('No revisions recorded')
+    })
+
+    it('with no snapshot at all while loading', () => {
+      const w = make({ snapshot: null, loading: true })
+      expect(w.text()).toContain('Loading permissions')
+      for (const copy of SUCCESS) expect(w.text()).not.toContain(copy)
+    })
+
+    it('shows the success copy once the data is confirmed', () => {
+      const w = make({ snapshot: empty() })
+      expect(w.text()).toContain('No protected platform actions allowed.')
+      expect(w.text()).toContain('No callers accepted.')
+    })
+  })
+
+  it('the unsaved-change list names the selector once, not twice', async () => {
+    const w = make()
+    await w.find('button[aria-label^="Remove"]').trigger('click')
+    await flushPromises()
+    await btn(w, 'Review changes').trigger('click')
+    const text = w.find('#permissions-change-list').text()
+    expect(text).toContain('Removed')
+    expect(text).toMatch(/keys with a prefix config\/: kv\.get, kv\.list \(at startup\)/)
+    expect(text).not.toMatch(/\bprefix prefix\b|\bkey key\b/)
+  })
+
+  it('history shows a labelled, canonical actor and never a free-text one', async () => {
+    const s = makeSnapshot()
+    s.history[0].actor = { kind: 'api_key', id: 'Bearer SYNTHETIC_NOT_A_REAL_CREDENTIAL' }
+    const w = make({ snapshot: s })
+    await btn(w, 'revision').trigger('click')
+    expect(w.text()).not.toContain('Bearer')
+    expect(w.find('#permissions-history-list').text()).toContain('Revision 6')
+    expect(w.find('#permissions-history-list').text()).not.toContain('Revision 7')
+    const ok = make()
+    await btn(ok, 'revisions').trigger('click')
+    expect(ok.find('#permissions-history-list').text()).toContain('By API key')
+    expect(ok.find('#permissions-history-list').text()).toContain(ACTOR_ID)
+  })
+})
+
+describe('FunctionPermissions revision ordering and in-flight snapshots', () => {
+  const rev = (n, over = {}) => makeSnapshot({ host: { revision: String(n), ...over } })
+  const saveBtn = (w) => btn(w, 'Save permissions')
+  const matching = (n) => {
+    const s = rev(n)
+    s.policy.allow.shift()
+    return s
+  }
+
+  it('a clean page that saw 8 will not save against a late 7, and recovers at 8 or newer', async () => {
+    const w = make()
+    await w.setProps({ snapshot: rev(8) })
+    await w.setProps({ snapshot: rev(7) })
+    await removeFirst(w)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('older than revision 8')
+    await saveBtn(w).trigger('click')
+    expect(w.emitted('save')).toBeUndefined()
+    await w.setProps({ snapshot: rev(9) })
+    await flushPromises()
+    await btn(w, 'Discard draft and reload').trigger('click')
+    await removeFirst(w)
+    expect(saveBtn(w).attributes('disabled')).toBeUndefined()
+    expect(w.text()).not.toContain('older than revision')
+  })
+
+  it('discarding against an obsolete response does not lower the high-water mark', async () => {
+    const w = make()
+    await removeFirst(w)
+    await w.setProps({ snapshot: rev(8) })
+    await w.setProps({ snapshot: rev(7) })
+    await btn(w, 'Discard draft and reload').trigger('click')
+    await removeFirst(w)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('older than revision 8')
+  })
+
+  it('an obsolete response also denies review, while its capability revocation still applies', async () => {
+    const reviewer = (n, caps2) => rev(n, { capabilities: caps({ canReview: true, ...caps2 }) })
+    const w = make({ snapshot: reviewer(8) })
+    await w.setProps({ snapshot: reviewer(7) })
+    expect(btn(w, 'Request review').attributes('disabled')).toBeDefined()
+    await btn(w, 'Request review').trigger('click')
+    expect(w.emitted('review')).toBeUndefined()
+    await w.setProps({ snapshot: reviewer(7, { canManage: false }) })
+    expect(has(w, 'Remove')).toBe(false)
+  })
+
+  it('an owner change resets the high-water mark, nothing else does', async () => {
+    const w = make({ snapshot: rev(8) })
+    const theirs = makeSnapshot({ host: { revision: '3' } })
+    theirs.function.id = OTHER_FN_ID
+    await w.setProps({ functionId: OTHER_FN_ID, snapshot: theirs })
+    await flushPromises()
+    await removeFirst(w)
+    expect(saveBtn(w).attributes('disabled')).toBeUndefined()
+  })
+
+  it('a matching snapshot mid-save is not an acknowledgement, and a delayed conflict keeps the base', async () => {
+    const w = make()
+    await removeFirst(w)
+    await saveBtn(w).trigger('click')
+    await w.setProps({ saving: true })
+    await w.setProps({ snapshot: matching(8) })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+    await w.setProps({ saving: false, saveError: { kind: 'conflict', message: 'synthetic delayed conflict' } })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    expect(w.emitted('save')).toHaveLength(1)
+    expect(w.emitted('save')[0][0].expected.revision).toBe('7')
+    // Even a later matching snapshot cannot settle a conflict that was reported.
+    await w.setProps({ saveError: null, snapshot: matching(9) })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+  })
+
+  it('a matching snapshot mid-save settles only on a fresh one after completion', async () => {
+    const w = make()
+    await removeFirst(w)
+    await saveBtn(w).trigger('click')
+    await w.setProps({ saving: true })
+    await w.setProps({ snapshot: matching(8) })
+    await w.setProps({ saving: false })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+    await w.setProps({ snapshot: matching(8) })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(false)
+    expect(w.text()).toContain('Revision 8')
+  })
+
+  it('without a saving prop, a snapshot right after Save is still not an acknowledgement', async () => {
+    const w = make()
+    await removeFirst(w)
+    await saveBtn(w).trigger('click')
+    await w.setProps({ snapshot: matching(8) })
+    await flushPromises()
+    expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(true)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
   })
 })

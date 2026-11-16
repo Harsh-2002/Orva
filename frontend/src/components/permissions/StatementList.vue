@@ -3,7 +3,12 @@
     v-if="!rows.length"
     class="px-4 py-4 text-sm text-foreground"
   >
-    No protected platform actions allowed.
+    <template v-if="unconfirmed">
+      {{ unconfirmed === 'error' ? 'Not confirmed. The refresh failed, and the last loaded list was empty.' : 'Not confirmed yet. The last loaded list was empty; refreshing.' }}
+    </template>
+    <template v-else>
+      No protected platform actions allowed.
+    </template>
   </p>
   <ul
     v-else
@@ -130,6 +135,8 @@ const props = defineProps({
   statements: { type: Array, required: true },
   targets: { type: Array, default: () => [] },
   warnings: { type: Array, default: () => [] },
+  // '' | 'loading' | 'error': an empty list is not shown as a fact while set.
+  unconfirmed: { type: String, default: '' },
   editable: Boolean,
   disabled: Boolean,
 })

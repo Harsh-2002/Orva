@@ -870,6 +870,37 @@ and policy together. Serving wiring remains absent until the full proof gates.
   execution admission, stale-lease rejection and no replacement-execution
   upgrade. This is an in-process/fake-worker test, not live SDK enforcement.
 
+### Dedicated permissions UI staging (2026-11-16)
+
+`FunctionPermissions.vue` and its permission-specific components implement an
+independent policy draft over a validated internal snapshot. They are not routed
+or connected to a production API. Preview never widens capabilities, and save
+or review events carry only policy and expected revision/artifact values.
+
+Independent negative testing rejected the initial candidate despite passing
+ordinary tests: metadata bounds/actor references, ABA conflict handling, review
+retry, sparse arrays and loading/error empty-state copy needed correction.
+Regression cases now cover those failures; the original independent probes are
+retained in task evidence rather than weakened. Dirty conflicts preserve old
+expectations until explicit discard/reload. Server CAS and authorization remain
+mandatory; this advisory model is not an enforcement boundary.
+
+Parent isolated Node 26 checks passed frontend lint/tests, the app build and an
+explicit HTML entry build importing the otherwise-unreferenced page. The fixed
+candidate passed 40 synthetic render cases across both themes and
+375/390/768/1440px without horizontal overflow or browser errors, plus explicit
+save/revocation, ABA/review-retry and phone History reachability checks.
+Independent behavioral re-review first found three further ordering failures:
+clean/adopted revision rollback and a matching snapshot preceding a delayed
+conflict error. The corrected candidate passed all 30 unchanged independent
+probes and four additional ordering probes, plus 98 Node and 181 repository
+component tests in an independent disposable Node 26 VM. Parent canonical lint
+and tests, explicit page build, and browser reproductions also passed.
+Behavioral acceptance is scoped to the staged seam and its documented future
+controller ordering/correlation contract, not live IAM. Visual review found no blockers;
+effective touch regions, complete accessibility, real Layout/auth lifecycle,
+live API integration and runtime IAM acceptance are separate gates.
+
 Source integration map at baseline:
 
 - `sandbox/sdkchan.go:dispatch`, `sandbox/sdkapi.go:SDKCaller/ExecInfo`: identity,

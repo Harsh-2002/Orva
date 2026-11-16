@@ -4,7 +4,12 @@
       v-if="!callers.length"
       class="px-4 py-4 text-sm text-foreground"
     >
-      No callers accepted. No other function is accepted as a caller.
+      <template v-if="unconfirmed">
+        {{ unconfirmed === 'error' ? 'Not confirmed. The refresh failed, and the last loaded list was empty.' : 'Not confirmed yet. The last loaded list was empty; refreshing.' }}
+      </template>
+      <template v-else>
+        No callers accepted. No other function is accepted as a caller.
+      </template>
     </p>
     <ul
       v-else
@@ -148,6 +153,8 @@ const props = defineProps({
   callers: { type: Array, required: true },
   targets: { type: Array, default: () => [] },
   problem: { type: String, default: '' },
+  // '' | 'loading' | 'error': an empty list is not shown as a fact while set.
+  unconfirmed: { type: String, default: '' },
   editable: Boolean,
   disabled: Boolean,
 })
