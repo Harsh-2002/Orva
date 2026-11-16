@@ -598,6 +598,15 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- The first durable publication seam is environment-only and fail-closed:
+  `PublishWorkloadEnvironment` checks expected function version, artifact
+  revision/epoch/generation and policy revision/stored approval, then commits
+  environment, fresh generation, advanced policy counters, review-required state
+  and bounded audit together. Retained policy/approval and quarantine are
+  preserved, not rebound or cleared. Environment input is owned and bounded at
+  1,024 entries/8 MiB JSON. No serving caller, live admin revalidation, host-state
+  publication or pool retirement is installed. It is not active authorization.
+
 - `PrepareArtifactSnapshot` composes the one-transaction generation/config/
   ciphertext read with strict decryption and owned output, checking cancellation
   before and after preparation. Errors expose no partial data. It runs outside
