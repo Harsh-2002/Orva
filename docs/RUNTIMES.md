@@ -214,6 +214,12 @@ of the containing execution, even when code-span calls are nested. SDK logs
 carry the execution's span ID, not a currently active custom-span ID. The trace
 viewer therefore labels code-span log selection as execution-scoped.
 
+Await Node `trace.span`: it waits for telemetry channel ACK/failure, bounded by
+the existing 30-second request deadline including queue wait, before returning
+the wrapped value or rethrowing the original error. Telemetry failures are
+swallowed; recorded duration covers only the wrapped function. ACK means queued,
+not durably stored. This keeps the dispatch lease alive through span submission.
+
 Structured SDK logs are extracted from worker stderr for HTTP, F2F, cron/jobs,
 and inbound-webhook invocations. Ordinary stderr and malformed structured
 records remain in invocation logs. Structured telemetry is best-effort, not an

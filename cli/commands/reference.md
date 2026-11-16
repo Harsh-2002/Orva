@@ -527,6 +527,11 @@ execution paths, including replays. Ordinary stderr and malformed log
 records remain in invocation logs. Structured telemetry is best-effort and may
 arrive after the response or be dropped under pressure.
 
+Await Node `trace.span`: completion waits for the telemetry channel ACK/failure
+or its existing 30-second request deadline (including queue wait). The original
+value/error is preserved and recorded duration excludes this submission wait.
+Telemetry errors are swallowed; ACK means queued, not durable persistence.
+
 ### Streaming F2F
 
 ```js

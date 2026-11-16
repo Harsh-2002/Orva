@@ -14,6 +14,15 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Upgrade notes
+
+- Awaited Node `trace.span` now waits for its bounded telemetry channel request
+  before completing, preventing handler return from racing lease revocation.
+  Submission may add latency up to the existing 30-second request deadline
+  (including queue wait); wrapped values/errors are unchanged and telemetry
+  failures remain swallowed. ACK confirms queueing, not durable storage. Refresh
+  runtime adapters together with the server when upgrading.
+
 ### Added
 
 - Current Node and Python adapters automatically route KV, function

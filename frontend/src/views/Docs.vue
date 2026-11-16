@@ -910,6 +910,14 @@
         Ordinary stderr and malformed structured records remain in invocation logs.
       </p>
 
+      <p class="doc-prose">
+        Await Node trace.span: it waits for telemetry channel acknowledgement or
+        failure, bounded by the existing 30-second request deadline including queue
+        wait. The wrapped value or original error is preserved; recorded duration
+        excludes submission wait. Telemetry errors are swallowed. Acknowledgement
+        means queued, not durably stored.
+      </p>
+
       <h3 class="doc-h3">
         What user code sees
       </h3>
