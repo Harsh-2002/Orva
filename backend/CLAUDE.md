@@ -298,6 +298,12 @@ sessions deny these new lookups. Identity records are provenance, not admin gran
 same transaction as publication. References must come from trusted authentication,
 never author input. It derives audit actors and checks expiry before mutation and
 commit; request capture, live IAM publication and serving wiring remain absent.
+`SaveIAMPolicyAsOperator` applies the same live operator checks to policy CAS,
+authority-epoch advancement and bounded audit in one transaction. It derives
+actors and rechecks credentials before commit, preserving the persistence-only
+save API. It does not verify current runtime/code artifacts or install authority:
+the shared management service must bind reviewed current artifacts and publish
+under the registry mutation lock and IAM gate before exposing a serving API.
 
 ## Runtime SDK channel tests
 

@@ -612,6 +612,34 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Completion work after the approved UI now includes an internal
+  `SaveIAMPolicyAsOperator` transaction: live credential validation, policy CAS,
+  authority-epoch advancement and derived audit actor commit together, with a
+  second credential check before commit. Existing persistence-only saves reuse
+  the same transaction helper. This is not current-artifact verification or a
+  serving management API; shared ordered publication and trusted request
+  identity capture remain required. Parent targeted database race tests and vet
+  pass. Independent targeted/compatibility race checks, vet and adversarial
+  probes passed, including deferred-FK COMMIT failure, trigger-driven credential
+  revocation, queued expiry/cancellation and stored-approval CAS. The full
+  database race suite and parent canonical `make lint`/`make test` passed.
+  The first test run exposed test-only scalar-function registration after
+  opening SQLite; registration now precedes opening the fixture, with the
+  original failing output retained.
+
+- The inert spawn fingerprint now uses the v2 domain and excludes the generic
+  function row version. Description-only edits increment that version, so it
+  could not identify execution content without violating the cosmetic-edit
+  exemption. Explicit execution fields, code/runtime store identities and
+  durable generation/revision/epoch remain fingerprinted; positive row-version
+  validation remains. Environment/secret invalidation still requires
+  authoritative transactional generation rotation. The exact wire-format oracle
+  is updated to v2, not removed; parent full package race tests and vet pass.
+  Independent fingerprint verification passed targeted race checks, 32
+  additional cases and vet, including cosmetic stability, positive-version
+  rejection and execution/store/generation input sensitivity. This accepts only
+  fingerprint construction, not authoritative current-artifact publication.
+
 - `PublishWorkloadEnvironmentAsOperator` joins live operator revalidation with
   environment/generation/policy/audit publication in one transaction. It checks
   current API-key permissions/expiry, OAuth token and client scopes/revocation/

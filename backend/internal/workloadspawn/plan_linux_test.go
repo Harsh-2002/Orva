@@ -528,19 +528,35 @@ func TestFingerprint(t *testing.T) {
 	if same.ArtifactRevision() != baseHash {
 		t.Fatal("environment or secrets fingerprinted")
 	}
+	for _, change := range []func(*database.Function){
+		func(fn *database.Function) { fn.Version++ },
+		func(fn *database.Function) { fn.Description = "cosmetic description"; fn.Version++ },
+	} {
+		cosmetic := *f.prepared
+		cosmetic.Function = cosmetic.Function.Clone()
+		change(cosmetic.Function)
+		got := makePlan(&cosmetic, f.pair(t))
+		if got.ArtifactRevision() != baseHash {
+			t.Fatal("cosmetic metadata or its row mutation counter invalidated artifact identity")
+		}
+		got.Close()
+	}
 	for name, change := range map[string]func(*secrets.PreparedArtifactSnapshot){
-		"generation": func(p *secrets.PreparedArtifactSnapshot) { p.Artifact.Generation = ids.New() },
-		"revision":   func(p *secrets.PreparedArtifactSnapshot) { p.Artifact.Revision++ },
-		"epoch":      func(p *secrets.PreparedArtifactSnapshot) { p.Artifact.Epoch++ },
-		"version":    func(p *secrets.PreparedArtifactSnapshot) { p.Function.Version++ },
-		"code hash":  func(p *secrets.PreparedArtifactSnapshot) { p.Function.CodeHash = digest("another source") },
-		"name":       func(p *secrets.PreparedArtifactSnapshot) { p.Function.Name = "another-name" },
-		"memory":     func(p *secrets.PreparedArtifactSnapshot) { p.Function.MemoryMB++ },
-		"cpu":        func(p *secrets.PreparedArtifactSnapshot) { p.Function.CPUs++ },
-		"timeout":    func(p *secrets.PreparedArtifactSnapshot) { p.Function.TimeoutMS++ },
-		"sdk":        func(p *secrets.PreparedArtifactSnapshot) { p.Function.SDK = true },
-		"network":    func(p *secrets.PreparedArtifactSnapshot) { p.Function.NetworkMode = "egress" },
-		"entrypoint": func(p *secrets.PreparedArtifactSnapshot) { p.Function.RunEntrypoint = "other.js" },
+		"generation":          func(p *secrets.PreparedArtifactSnapshot) { p.Artifact.Generation = ids.New() },
+		"revision":            func(p *secrets.PreparedArtifactSnapshot) { p.Artifact.Revision++ },
+		"epoch":               func(p *secrets.PreparedArtifactSnapshot) { p.Artifact.Epoch++ },
+		"code hash":           func(p *secrets.PreparedArtifactSnapshot) { p.Function.CodeHash = digest("another source") },
+		"name":                func(p *secrets.PreparedArtifactSnapshot) { p.Function.Name = "another-name" },
+		"memory":              func(p *secrets.PreparedArtifactSnapshot) { p.Function.MemoryMB++ },
+		"cpu":                 func(p *secrets.PreparedArtifactSnapshot) { p.Function.CPUs++ },
+		"timeout":             func(p *secrets.PreparedArtifactSnapshot) { p.Function.TimeoutMS++ },
+		"sdk":                 func(p *secrets.PreparedArtifactSnapshot) { p.Function.SDK = true },
+		"network":             func(p *secrets.PreparedArtifactSnapshot) { p.Function.NetworkMode = "egress" },
+		"entrypoint":          func(p *secrets.PreparedArtifactSnapshot) { p.Function.RunEntrypoint = "other.js" },
+		"authored entrypoint": func(p *secrets.PreparedArtifactSnapshot) { p.Function.Entrypoint = "authored.js" },
+		"concurrency":         func(p *secrets.PreparedArtifactSnapshot) { p.Function.MaxConcurrency++ },
+		"auth mode":           func(p *secrets.PreparedArtifactSnapshot) { p.Function.AuthMode = "platform_key" },
+		"deployment":          func(p *secrets.PreparedArtifactSnapshot) { p.Function.ActiveDeploymentID = ids.New() },
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := *f.prepared
@@ -663,18 +679,18 @@ func (f *fixture) extraGeneration(t *testing.T, kind artifactfs.Kind, owner, lan
 	return id
 }
 
-// A v1 wire-format oracle catches omitted digests even though resealing also changes generation.
+// A v2 wire-format oracle catches omitted digests even though resealing also changes generation.
 func fixtureFingerprint(t *testing.T, f *fixture, code, runtime artifactfs.Identity) string {
 	t.Helper()
 	fn, artifact := f.prepared.Function, f.prepared.Artifact
 	fields := []string{
-		"Domain", "Owner", "Generation", "Version", "SourceCodeHash", "Code", "Runtime",
+		"Domain", "Owner", "Generation", "SourceCodeHash", "Code", "Runtime",
 		"Name", "Language", "Authored", "Run", "Network", "Memory", "Timeout", "CPUs",
 		"SDK", "MaxConcurrency", "RateLimit", "ConcurrencyPolicy", "AuthMode", "Deployment",
 	}
 	values := []any{
-		"orva.workloadspawn.v1", fn.ID, Generation{artifact.Generation, artifact.Revision, artifact.Epoch},
-		fn.Version, fn.CodeHash, code, runtime, fn.Name, fn.Runtime, fn.Entrypoint, fn.RunEntrypoint,
+		"orva.workloadspawn.v2", fn.ID, Generation{artifact.Generation, artifact.Revision, artifact.Epoch},
+		fn.CodeHash, code, runtime, fn.Name, fn.Runtime, fn.Entrypoint, fn.RunEntrypoint,
 		fn.NetworkMode, fn.MemoryMB, fn.TimeoutMS, fn.CPUs, fn.SDK, fn.MaxConcurrency,
 		fn.RateLimitPerMin, fn.ConcurrencyPolicy, fn.AuthMode, fn.ActiveDeploymentID,
 	}
@@ -730,7 +746,7 @@ func TestFingerprintStoreInputs(t *testing.T) {
 				defer original.Release()
 				oldCode, oldRuntime := original.Identities()
 				if base.ArtifactRevision() != fixtureFingerprint(t, f, oldCode, oldRuntime) {
-					t.Fatal("base fingerprint omitted or changed v1 immutable inputs")
+					t.Fatal("base fingerprint omitted or changed v2 immutable inputs")
 				}
 				before, after := oldCode, code
 				if kind == artifactfs.KindRuntime {
