@@ -521,6 +521,13 @@ Minimum scenario matrix:
 
 ### Implementation record
 
+- Worker dispatch now refuses cancellation already observed at entry, after
+  mutex acquisition or before lease publication/submission. Early refusal does
+  not write frames, revoke another lease or poison a reusable worker. Focused
+  tests cover cancellation/deadline, mutex wait, dead-worker precedence and
+  reuse. This prerequisite does not make cancellation atomic with starting a
+  dispatch; admission remains the plan's logical start boundary.
+
 - Internal opt-in SDK-host KV enforcement is implemented for testing only.
   `WithIAM(nil)` denies; omission keeps legacy behavior. Fresh host identity and
   lease observations join the admission gate through DB completion. Whole-batch
