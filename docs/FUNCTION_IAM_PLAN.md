@@ -607,6 +607,12 @@ and policy together. Serving wiring remains absent until the full proof gates.
   Package race repetitions and vet pass; independent crash-state/durability
   review is pending. Fault injection is not real power-loss or live-worker
   integration acceptance.
+  Independent review of `31ee397` found that failed verification could leak an
+  oversized unverified manifest into cleanup metadata, blocking later recovery.
+  Manifest authority now enters durable state only after verification; an
+  interrupted Abort retains an untyped reservation/delete intent instead.
+  Added a regression for failed Seal plus permission-denied cleanup; twenty
+  package race repetitions and vet pass. Independent re-verification is pending.
 
 - Stable browser-session UUID references are implemented as an inert additive
   schema/read seam. The explicit test-only initializer backfills independent
