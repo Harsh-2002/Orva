@@ -382,3 +382,25 @@ func TestWorkloadOperatorCancellationAndPublicationFirst(t *testing.T) {
 		t.Fatal("later credential revocation altered already committed publication")
 	}
 }
+
+func TestWorkloadOperatorCancellationDuringMutation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	function := "test_operator_cancel_" + strings.ReplaceAll(ids.New(), "-", "")
+	if err := sqlite.RegisterScalarFunction(function, 0, func(*sqlite.FunctionContext, []driver.Value) (driver.Value, error) {
+		cancel()
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db, ref, c := operatorPublishSetup(t, "api_key")
+	before := artifactTestSnapshot(t, db, c.OwnerID)
+	policy, audit := environmentPublishPolicy(t, db)
+	operatorExec(t, db, fmt.Sprintf(`CREATE TRIGGER operator_cancel BEFORE UPDATE ON functions BEGIN SELECT %s(); END`, function))
+	result, err := db.PublishWorkloadEnvironmentAsOperator(ctx, ref, c)
+	if result != nil || !errors.Is(err, ErrOperatorDenied) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("mutation cancellation did not preserve denial and cancellation: %v", err)
+	}
+	artifactTestUnchanged(t, db, before)
+	iamTestUnchanged(t, db, policy, audit)
+}

@@ -167,6 +167,9 @@ func (db *Database) PublishWorkloadEnvironmentAsOperator(ctx context.Context, re
 	c.Actor = actor
 	publication, err := publishWorkloadEnvironmentTx(ctx, tx, c, envJSON, expiry)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, operatorDenied(ctx)
+		}
 		return nil, err
 	}
 	// Final expiry check linearizes before commit; time passing during commit cannot be excluded.
@@ -174,6 +177,9 @@ func (db *Database) PublishWorkloadEnvironmentAsOperator(ctx context.Context, re
 		return nil, operatorDenied(ctx)
 	}
 	if err := tx.Commit(); err != nil {
+		if ctx.Err() != nil {
+			return nil, operatorDenied(ctx)
+		}
 		return nil, workloadArtifactStorageError(ctx, "publication commit")
 	}
 	return publication, nil

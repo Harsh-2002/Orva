@@ -608,6 +608,10 @@ and policy together. Serving wiring remains absent until the full proof gates.
   The original persistence-only method retains its behavior. Serving capture,
   live IAM/pool publication and normal session UUID writes remain unwired.
   Focused race tests and vet pass; independent acceptance is pending.
+  Independent probes found mutation-time cancellation rolled back but omitted
+  the operator-denial sentinel. Mutation/commit cancellation now preserves both
+  denial and context identity. A trigger-driven cancellation regression checks
+  complete rollback; twenty cancellation race repetitions and vet pass.
 
 - Explicit `artifactfs.NewPersistent` adds bounded canonical metadata and ordered
   fsync/intent/tree-rename/commit publication. `OpenRecovering` verifies recognized
