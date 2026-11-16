@@ -175,10 +175,10 @@ func TestDeleteFunctionDoesNotMonopoliseTheWriter(t *testing.T) {
 		return db.DeleteFunction(context.Background(), "fn-big")
 	})
 	assertWriterStayedResponsive(t, "function delete", waits)
-	// Self-calibrating: slow or -race hosts scale both sides alike.
-	if w := waits[len(waits)-1]; unbounded > 100*time.Millisecond && w > unbounded/3 {
-		t.Fatalf("worst write wait %s vs %s for one unbounded transaction", w, unbounded)
-	}
+	// Separate wall-clock windows do not scale alike under scheduler contention.
+	// CommittedWriterProgress and its monolithic control gate inter-batch progress.
+	t.Logf("diagnostic: worst write wait %s vs %s for one unbounded transaction",
+		waits[len(waits)-1], unbounded)
 	if fnRowCounts(t, db, "fn-big")["executions"] != 0 {
 		t.Fatal("executions survived")
 	}
