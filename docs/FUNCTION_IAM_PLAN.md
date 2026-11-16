@@ -608,6 +608,11 @@ and policy together. Serving wiring remains absent until the full proof gates.
   links before host traversal. Five refined artifactfs/sandbox race repetitions
   and vet pass; independent review and real-runtime/approval integration remain
   required. Fake-jail tests are not nsjail pinning or live IAM acceptance.
+  Independent scoped acceptance at `33154ad` passed ten artifactfs/sandbox race
+  repetitions, vet and extra ownership/one-shot/endpoint probes. `waitDone`
+  precedes exit callbacks and lease release; Kill/Quit/waitDone are not completed
+  cleanup fences. Real nsjail/pinned-package and generation-approval integration
+  remain unaccepted.
 
 - Stopped-container metadata inventory of the local artifactfs test image
   (`19e0ad4ad621…`) found 6,530 Node and 6,689 Python entries, including 156/160
