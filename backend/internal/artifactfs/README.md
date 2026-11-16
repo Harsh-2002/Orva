@@ -122,13 +122,33 @@ tree (`st_nlink` equals observed count). For a multi-name group every member's
 Every name is hashed/charged, conservatively counting repeated hardlink bytes.
 Hardlinked symlinks are rejected.
 
-Code symlinks must be relative and contained; runtime symlinks may also be
-absolute **chroot-relative** targets. Absolute targets are validated against the
-manifest tree, never resolved on the host. This intentionally narrow profile
-rejects dot/dotdot segments even when lexically contained, redundant separators,
-dangling links, all link chains/cycles, symlinked target parents, and links to
-root/ancestors. It may reject ordinary distribution rootfs trees; compatibility
-must be reviewed before extending the profile, not bypassed by adopting paths.
+Code symlinks remain relative and contained: dot/dotdot segments, redundant
+separators, all link chains and symlinked target parents deny.
+
+Runtime symlinks additionally support contained relative dot/dotdot segments,
+link chains, symlinked target parents and absolute **chroot-relative** targets.
+After all expected entries have been validated and matched, resolution consumes
+components against the manifest tree only; it never follows host filesystem
+links. Each encountered link is expanded before processing the remaining
+components, including `..`; absolute expansions reset to the manifest root.
+For example, if `a/p -> /other/deep`, `a/p/../file` names `other/file`, not
+`a/file`. A packaged-style `bin -> usr/bin`, `usr/bin/pager ->
+/etc/alternatives/pager`, `etc/alternatives/pager -> /bin/more` chain resolves to
+the manifest's `usr/bin/more`. Exact original link text remains in the digest
+and is not rewritten on disk.
+
+Both profiles reject dangling/missing targets, files used as parents (even before
+`.` or `..`), links resolving to root/ancestors, and directory traversal cycles,
+including cycles through resolved chains or symlinked parents. Runtime resolution
+also rejects `..` at root rather than clamping it, repeated resolution states and
+over-budget expansions. Invalid UTF-8, NUL and backslash deny. Empty components
+still deny: repeated or trailing `/` is unsupported; the lone `/` is parsed as
+root but a link resolving there still denies. No distribution-rootfs acceptance
+follows: genuinely dangling targets (for example removed manpages),
+xattrs/capabilities and other profile blockers remain unsupported. A missing
+direct target alone is not dangling-link proof when its parents may be links.
+Compatibility must be reviewed, not bypassed by adopting existing paths. This
+extension activates no runtime consumer.
 
 Every node, including root and symlinks, must have **no xattrs**: Linux
 `llistxattr` is used without following links; ACLs, capabilities, and other xattrs
@@ -163,10 +183,19 @@ growth beyond the stat size/reservation. A second complete hash/metadata walk
 must match the first. Metadata, directory overhead and producer-time disk writes
 are not byte quotas; entry/path/manifest limits bound metadata work separately.
 
+Runtime resolution permits at most 40 symlink expansions per link. At each step,
+the resolved path plus pending components must fit `PathBytes` (including
+separators), and their combined component count must not exceed `Entries`.
+Target text independently fits `LinkBytes`. A total step ceiling of
+`41 * PathBytes` bounds component processing; at most 40 bounded resolution
+states are retained. These conservative budgets may reject an ultimately short
+target whose intermediate expansion is too large. The existing directory-edge
+cycle check uses fully resolved destinations and remains bounded by tree entries.
+
 Focused offline checks:
 
 ```sh
-GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -race -count=5 ./backend/internal/artifactfs
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -race -count=20 ./backend/internal/artifactfs
 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./backend/internal/artifactfs
 ```
 

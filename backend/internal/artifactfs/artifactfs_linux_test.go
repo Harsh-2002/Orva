@@ -8,9 +8,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -335,6 +337,260 @@ func TestLinksAndSpecialFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func linkFixture(t *testing.T, root string, dirs, files []string, links map[string]string) Manifest {
+	t.Helper()
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range files {
+		write(t, filepath.Join(root, file), "x")
+	}
+	for name, target := range links {
+		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return fixtureManifest(t, root)
+}
+
+func manifestTree(m Manifest) map[string]observed {
+	tree := make(map[string]observed, len(m.Entries))
+	for _, e := range m.Entries {
+		tree[e.Path] = observed{entry: e}
+	}
+	return tree
+}
+
+func TestRuntimeLinkResolution(t *testing.T) {
+	cases := []struct {
+		name, probe, want string
+		dirs, files       []string
+		links             map[string]string
+	}{
+		{
+			name: "relative-dotdot", probe: "sub/link", want: "file",
+			dirs: []string{"sub"}, files: []string{"file"},
+			links: map[string]string{"sub/link": "../file"},
+		},
+		{
+			name: "packaged-os-release", probe: "etc/os-release", want: "usr/lib/os-release",
+			dirs: []string{"etc", "usr/lib"}, files: []string{"usr/lib/os-release"},
+			links: map[string]string{"etc/os-release": "../usr/lib/os-release"},
+		},
+		{
+			name: "dot-component", probe: "link", want: "dir/file",
+			dirs: []string{"dir"}, files: []string{"dir/file"},
+			links: map[string]string{"link": "dir/./file"},
+		},
+		{
+			name: "chain", probe: "b", want: "file", files: []string{"file"},
+			links: map[string]string{"a": "file", "b": "a"},
+		},
+		{
+			name: "absolute-chain-resets-root", probe: "sub/b", want: "file",
+			dirs: []string{"sub"}, files: []string{"file", "sub/file"},
+			links: map[string]string{"sub/a": "/file", "sub/b": "a"},
+		},
+		{
+			name: "parent-chain", probe: "b", want: "dir/file",
+			dirs: []string{"dir"}, files: []string{"dir/file"},
+			links: map[string]string{"a": "dir", "b": "a/file"},
+		},
+		{
+			name: "expand-before-dotdot", probe: "link", want: "other/file",
+			dirs: []string{"a", "other/deep"}, files: []string{"a/file", "other/file"},
+			links: map[string]string{"a/p": "/other/deep", "link": "a/p/../file"},
+		},
+		{
+			name: "lexical-escape-is-not-resolution", probe: "sub/link", want: "file",
+			dirs: []string{"sub", "x/y"}, files: []string{"file"},
+			links: map[string]string{"sub/a": "/x/y", "sub/link": "a/../../file"},
+		},
+		{
+			name: "same-link-different-tail", probe: "link", want: "dir/file",
+			dirs: []string{"dir"}, files: []string{"dir/file"},
+			links: map[string]string{"alias": "dir", "link": "alias/../alias/file"},
+		},
+		{
+			name: "packaged-alternatives-through-bin", probe: "usr/bin/pager", want: "usr/bin/more",
+			dirs: []string{"usr/bin", "etc/alternatives"}, files: []string{"usr/bin/more"},
+			links: map[string]string{
+				"bin": "usr/bin", "usr/bin/pager": "/etc/alternatives/pager",
+				"etc/alternatives/pager": "/bin/more",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t, testLimits())
+			st, p := begin(t, s, 100)
+			m := linkFixture(t, p, tc.dirs, tc.files, tc.links)
+			got, err := resolveRuntimeLink(tc.probe, manifestTree(m), s.limits)
+			if err != nil || got != tc.want {
+				t.Fatalf("resolved %q, want %q: %v", got, tc.want, err)
+			}
+			// The same fixture must not widen the existing code profile.
+			if err := checkLinks(KindCode, manifestTree(m), s.limits); err != ErrUnsupported {
+				t.Fatalf("code profile accepted runtime-only links: %v", err)
+			}
+			digest, err := Digest(m, s.limits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := st.Seal(context.Background(), KindRuntime, "node", m, digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, err := s.Acquire(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lease.Release()
+			if lease.Identity().Digest != digest {
+				t.Fatal("resolution changed manifest identity")
+			}
+			for name, target := range tc.links {
+				got, err := os.Readlink(filepath.Join(lease.Path(), name))
+				if err != nil || got != target {
+					t.Fatalf("link text changed for %q: %q, %v", name, got, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeLinkRejections(t *testing.T) {
+	cases := []struct {
+		name        string
+		dirs, files []string
+		links       map[string]string
+	}{
+		{name: "escape", links: map[string]string{"link": "../file"}},
+		{name: "absolute-escape", links: map[string]string{"link": "/../file"}},
+		{
+			name: "escape-after-parent-expansion", dirs: []string{"a", "dir"},
+			links: map[string]string{"a/p": "/dir", "link": "a/p/../../file"},
+		},
+		{name: "dangling-chain", links: map[string]string{"a": "absent", "link": "a"}},
+		{name: "missing-before-dotdot", links: map[string]string{"link": "absent/../file"}},
+		{name: "file-parent", links: map[string]string{"link": "file/child"}},
+		{name: "file-dotdot", links: map[string]string{"link": "file/../file"}},
+		{name: "file-dot", links: map[string]string{"link": "file/."}},
+		{name: "file-parent-chain", links: map[string]string{"a": "file", "link": "a/../file"}},
+		{name: "root", links: map[string]string{"link": "/"}},
+		{
+			name: "ancestor-through-parent-chain", dirs: []string{"a/deep"},
+			links: map[string]string{"alias": "a/deep", "a/link": "/alias/.."},
+		},
+		{name: "self", links: map[string]string{"link": "link"}},
+		{name: "two-link-cycle", links: map[string]string{"a": "b", "b": "a"}},
+		{name: "absolute-cycle", dirs: []string{"sub"}, links: map[string]string{"a": "/sub/b", "sub/b": "/a"}},
+		{name: "growing-cycle", links: map[string]string{"a": "a/x"}},
+		{
+			name: "directory-cycle-through-parent-chain", dirs: []string{"a", "b/deep"},
+			links: map[string]string{"alias": "b", "a/link": "/alias/deep", "b/deep/back": "/a"},
+		},
+		{name: "double-slash", links: map[string]string{"link": "//file"}},
+		{name: "empty-component", dirs: []string{"dir"}, links: map[string]string{"link": "dir//../file"}},
+		{name: "trailing-slash", dirs: []string{"dir"}, links: map[string]string{"link": "dir/"}},
+		{name: "backslash", links: map[string]string{"link": "dir\\file"}},
+		{name: "invalid-utf8", links: map[string]string{"link": "bad\xff"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t, testLimits())
+			st, p := begin(t, s, 100)
+			m := linkFixture(t, p, tc.dirs, append([]string{"file"}, tc.files...), tc.links)
+			digest, err := Digest(m, s.limits)
+			if tc.name == "backslash" || tc.name == "invalid-utf8" {
+				if err != ErrInvalid {
+					t.Fatalf("invalid typed target accepted: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.Seal(context.Background(), KindRuntime, "python", m, digest); err != ErrUnsupported {
+				t.Fatalf("unsupported runtime link accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestRuntimeResolutionBounds(t *testing.T) {
+	for _, count := range []int{40, 41} {
+		t.Run(fmt.Sprintf("hops-%d", count), func(t *testing.T) {
+			s := newStore(t, testLimits())
+			st, p := begin(t, s, 100)
+			links := make(map[string]string)
+			for i := 0; i < count; i++ {
+				target := "file"
+				if i+1 < count {
+					target = fmt.Sprintf("link%d", i+1)
+				}
+				links[fmt.Sprintf("link%d", i)] = target
+			}
+			m := linkFixture(t, p, nil, []string{"file"}, links)
+			_, err := sealManifest(t, st, KindRuntime, "node", m)
+			if count == 40 && err != nil || count == 41 && err != ErrUnsupported {
+				t.Fatalf("hop boundary %d: %v", count, err)
+			}
+		})
+	}
+	for _, which := range []string{"expanded-path", "resolved-path", "components"} {
+		t.Run(which, func(t *testing.T) {
+			s := newStore(t, testLimits())
+			_, p := begin(t, s, 100)
+			m := linkFixture(t, p, []string{"long-directory"}, []string{"long-directory/file"}, map[string]string{
+				"a": "long-directory", "link": "a/././././file",
+			})
+			limits := s.limits
+			switch which {
+			case "expanded-path":
+				limits.PathBytes = len("long-directory/file")
+			case "resolved-path":
+				limits.PathBytes = len("long-directory") - 1
+			case "components":
+				limits.Entries = 5
+			}
+			if _, err := resolveRuntimeLink("link", manifestTree(m), limits); err != ErrUnsupported {
+				t.Fatalf("resolution %s budget ignored: %v", which, err)
+			}
+		})
+	}
+	t.Run("typed-target-validation", func(t *testing.T) {
+		for _, target := range []string{"bad\x00target", "bad\xff", "bad\\target", strings.Repeat("x", 257)} {
+			m := Manifest{Version: 1, Entries: []Entry{{Path: ".", Type: TypeDirectory}, {Path: "link", Type: TypeSymlink, LinkTarget: target}}}
+			if _, err := Digest(m, testLimits()); err != ErrInvalid {
+				t.Fatalf("invalid target accepted: %v", err)
+			}
+			if _, _, err := runtimeTarget(target, testLimits()); err != ErrUnsupported {
+				t.Fatalf("resolver accepted invalid target: %v", err)
+			}
+		}
+	})
+}
+
+func TestRuntimeLinkTextRemainsDigestAuthority(t *testing.T) {
+	m := Manifest{Version: 1, Entries: []Entry{
+		{Path: ".", Type: TypeDirectory},
+		{Path: "file", Type: TypeFile, SHA256: strings.Repeat("a", 64)},
+		{Path: "link", Type: TypeSymlink, LinkTarget: "file"},
+	}}
+	d1, err := Digest(m, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Entries[2].LinkTarget = "/file"
+	d2, err := Digest(m, testLimits())
+	if err != nil || d1 == d2 {
+		t.Fatal("equivalent runtime targets lost distinct manifest identity", err)
 	}
 }
 
