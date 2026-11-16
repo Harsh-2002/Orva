@@ -608,6 +608,11 @@ and policy together. Serving wiring remains absent until the full proof gates.
   There is no crash recovery, packaging/installer/GC/sandbox serving integration
   or actual IAM runtime pinning yet. Five final package race repetitions and vet
   pass; capability-fixture coverage is limited by test-user permissions.
+  Independent scoped acceptance at `bf848d5` passed 20 package race repetitions,
+  vet and 20 overlay-probe repetitions for reservations, reclaim/release races,
+  path/tamper/link/xattr and partial-pair failures. Capability fixtures remained
+  skipped; hostile writers, mounts, crash recovery and existing distribution
+  runtime compatibility were not accepted. Verification worktree cleanup is complete.
 
 - The first durable publication seam is environment-only and fail-closed:
   `PublishWorkloadEnvironment` checks expected function version, artifact
