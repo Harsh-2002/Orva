@@ -274,6 +274,9 @@ same transaction; legacy CRUD does not maintain these records, so they are not
 yet authoritative for admission. Snapshots bound ciphertext/config allocations;
 strict decryption, concrete path/runtime pinning and policy publication remain
 separate integration obligations.
+`secrets.Manager.PrepareArtifactSnapshot` composes that transactional read with
+strict decryption outside IAM/pool locks. It returns owned durable inputs only,
+not approval or pinned runtime/code paths; publication must revalidate generation.
 
 ## Runtime SDK channel tests
 

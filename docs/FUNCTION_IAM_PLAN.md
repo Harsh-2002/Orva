@@ -598,6 +598,13 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- `PrepareArtifactSnapshot` composes the one-transaction generation/config/
+  ciphertext read with strict decryption and owned output, checking cancellation
+  before and after preparation. Errors expose no partial data. It runs outside
+  IAM/pool locks and supplies no code/runtime path, approval or current-state
+  guarantee; publication must revalidate generation. Serving callers remain
+  absent. Focused race/vet and independent verification are separate gates.
+
 - Inert artifact-generation storage now provides fresh UUID generations on
   create/rotation, exact revision/epoch/generation CAS, atomic explicit secret
   mutation plus rotation, and one-transaction reads of generation/config/secrets.
