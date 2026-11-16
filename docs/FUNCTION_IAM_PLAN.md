@@ -564,6 +564,11 @@ Minimum scenario matrix:
   `no_channel`, not bootstrap/execution; only identity/readiness are observable
   there. This preserves the channel-less wire path and denies accidental use
   of incomplete metadata as authority.
+  Independent host-identity and channel-less delta reviews accepted this seam;
+  they do not verify real runtime IAM admission.
+- A storage-to-admission snapshot helper validates retained records and compiles
+  empty authority for quarantine/review-required flags without losing combined
+  revision metadata. Focused race tests pass; no runtime loader uses it yet.
 
 Source integration map at baseline:
 

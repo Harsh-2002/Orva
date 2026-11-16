@@ -235,8 +235,10 @@ Its explicit schema initializer is test-only for now, never called on boot.
 CAS saves validate signed revisions and atomically append digest/actor audit
 records (32 retained per live function). Policy and audit rows cascade on
 function deletion; host-level deletion audit remains a cut-over obligation.
-Storage is not admin authorization or live artifact verification. Quarantine
-flags must prevent snapshot admission when the future loader is connected.
+Storage is not admin authorization or live artifact verification.
+`IAMPolicyRecord.AdmissionEvaluator` preserves revision metadata but compiles
+empty authority for quarantined/review-required records; the future loader must
+use it rather than compiling retained grants directly.
 
 ## Runtime SDK channel tests
 
