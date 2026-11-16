@@ -598,6 +598,17 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- The inert Linux `artifactfs` module owns new private staging trees, verifies
+  complete bounded typed manifests against a trusted expected digest, atomically
+  seals generations, and issues opaque code/runtime lifetime leases. Retirement
+  stops acquisition; zero-reference reclamation and failed-cleanup retries retain
+  accounting. Existing paths cannot be adopted. Exclusive trusted writers are a
+  precondition, not hostile-writer isolation or release provenance. Its strict
+  symlink/no-xattr/no-special-file profile may reject existing runtime trees.
+  There is no crash recovery, packaging/installer/GC/sandbox serving integration
+  or actual IAM runtime pinning yet. Five final package race repetitions and vet
+  pass; capability-fixture coverage is limited by test-user permissions.
+
 - The first durable publication seam is environment-only and fail-closed:
   `PublishWorkloadEnvironment` checks expected function version, artifact
   revision/epoch/generation and policy revision/stored approval, then commits
