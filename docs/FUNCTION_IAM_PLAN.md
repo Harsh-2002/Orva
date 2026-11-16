@@ -598,6 +598,15 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Inert artifact-generation storage now provides fresh UUID generations on
+  create/rotation, exact revision/epoch/generation CAS, atomic explicit secret
+  mutation plus rotation, and one-transaction reads of generation/config/secrets.
+  Snapshot allocation is capped at 1,024 secret rows, 12 MiB combined ciphertext
+  and key bytes, and 8 MiB environment JSON before loading those values. Missing
+  metadata and malformed inputs deny without partial snapshots. Initialization
+  remains test-only; legacy CRUD does not rotate generations. This is not yet
+  authoritative for admission or atomic config/policy publication.
+
 - Strict secret snapshot decoding is implemented as an inert preparation helper:
   canonical owner, consistent rows, unique valid keys, caller-selected bounded
   count/bytes, ciphertext pre-decode ceiling and all-or-nothing decryption.

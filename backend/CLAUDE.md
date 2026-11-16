@@ -267,6 +267,14 @@ best-effort getter, corruption denies. It is not serving-wired or proof that row
 and artifact generation were read atomically; the future snapshot service owns
 that DB boundary.
 
+`workload_artifact*.go` provides inert generation CAS and transactional reads of
+generation, function configuration and sorted ciphertext rows. Its schema
+initializer is test-only. Explicit secret mutations rotate generation in the
+same transaction; legacy CRUD does not maintain these records, so they are not
+yet authoritative for admission. Snapshots bound ciphertext/config allocations;
+strict decryption, concrete path/runtime pinning and policy publication remain
+separate integration obligations.
+
 ## Runtime SDK channel tests
 
 `backend/runtimes/{node/orva.js,python/orva.py}` route every SDK operation over a private per-worker socketpair
