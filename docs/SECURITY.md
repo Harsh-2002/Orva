@@ -50,6 +50,14 @@ Trusted-host ownership and stable/no-reuse assumptions remain prerequisites.
 No serving constructor or artifact recovery consumer uses this package; passing
 kernel checks does not authorize recovered artifacts, reclamation or IAM grants.
 
+Optional sandbox Domain inputs compose that epoch with Spawn, Execute and
+RunBuild. Host nsjail and its jailed descendants remain inside the same domain;
+requested controller failure denies rather than falling back to global placement.
+Opt-in CPU quotas require exact integer-millisecond representation and use that
+same validated quota in argv. Nil-domain behavior is unchanged. Independent
+kernel membership and limit readback checks are not resource-exhaustion stress,
+serving integration or proof that completed build outputs have no surviving writer.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many

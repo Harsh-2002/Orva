@@ -148,6 +148,9 @@ type frameRead struct {
 // Worker and is responsible for eventually calling Quit or Kill.
 func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	cfg = applyExecDefaults(cfg)
+	if err := validateDomainLimits(cfg.Domain, cfg.MemoryMB, cfg.MaxPids, cfg.MaxCPUs); err != nil {
+		return nil, err
+	}
 	owned, err := bindVerifiedPaths(&cfg)
 	if err != nil {
 		return nil, err
@@ -159,6 +162,10 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	}
 	if cfg.SDKHandler != nil && !adapterSupportsSDK(rootfs, cfg.Language) {
 		return nil, fmt.Errorf("SDK channel requires a readable adapter with orva-sdk-proto:1: update the installed %s runtime adapter or disable SDK for this function", cfg.Language)
+	}
+	cfg.jailParent, err = prepareDomain(ctx, cfg.Domain)
+	if err != nil {
+		return nil, err
 	}
 	cfg.sdkChannel = cfg.SDKHandler != nil
 	args, childEnv, err := buildArgs(cfg, rootfs, entrypoint)
@@ -209,14 +216,20 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		defer child.Close()
 	}
 
-	if err := cmd.Start(); err != nil {
+	var startErr error
+	if cfg.Domain == nil {
+		startErr = cmd.Start()
+	} else {
+		startErr = cfg.Domain.Start(ctx, cmd, cfg.jailParent)
+	}
+	if startErr != nil {
 		stdinPipe.Close()
 		stdoutPipe.Close()
 		stderrPipe.Close()
 		if sdkHost != nil {
 			sdkHost.Close()
 		}
-		return nil, fmt.Errorf("start nsjail: %w", err)
+		return nil, fmt.Errorf("start nsjail: %w", startErr)
 	}
 
 	w := &Worker{
@@ -304,7 +317,8 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 	// background goroutine to avoid blocking Spawn. The pool reads CgroupPath
 	// at acquire time; by then (first real request) the goroutine has long
 	// finished. CgroupPath="" is safe — resource sampling is silently skipped.
-	if mount := CgroupV2Mount(); mount != "" && cmd.Process != nil {
+	mount, _ := domainCgroupMount(cfg.Domain, cfg.jailParent)
+	if mount != "" && cmd.Process != nil {
 		nsjailPid := cmd.Process.Pid
 		go func() {
 			p := FindJailedCgroupPath(mount, nsjailPid)

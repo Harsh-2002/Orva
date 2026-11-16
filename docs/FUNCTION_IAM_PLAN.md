@@ -612,6 +612,18 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Optional sandbox Domain integration now enrolls Spawn, Execute and RunBuild
+  with verified same-epoch jail placement and required-controller denial.
+  Independent real-nsjail tests passed worker/SDK, one-shot/build descendants,
+  cancellation, FD/lease ownership and fencing. Review found CPU truncation;
+  exact millisecond conversion now rejects unrepresentable requests and real
+  readback for 1.001 CPUs is `1001000 1000000`. Independent physical race runs,
+  compatibility/vet and parent canonical lint/tests passed. One unchanged
+  historical diagnostic retains a fixture-only failure because correct rejection
+  now precedes its old unconditional no-error check; that red evidence and the
+  replacement independent denial oracle are both retained. Serving, build-output
+  writer fencing, pinned build runtimes, resource stress and recovery remain open.
+
 - A fresh UID-1001 lifecycle-candidate build combined the independently reviewed
   factory, real-runtime harness and resource-capable fence with the accepted
   policy/context/stream baseline. Actual UI/server build, canonical lint/tests

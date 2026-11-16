@@ -27,6 +27,7 @@ package sandbox
 //   - the limits are an order of magnitude above an invoke's
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -36,6 +37,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 )
 
 // Paths inside a build jail. Callers compose argv from these: the code
@@ -78,7 +81,10 @@ const (
 
 // BuildConfig describes one build step to run inside nsjail.
 type BuildConfig struct {
-	Language Language
+	// Domain is optional host-owned epoch placement, never an author setting.
+	Domain     *workloadfence.Domain
+	jailParent *workloadfence.JailParent
+	Language   Language
 
 	// CodeDir is the host directory bind-mounted READ-WRITE at BuildCodeDir.
 	// This is the version scratch dir; the step is expected to mutate it.
@@ -149,14 +155,24 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 	if len(cfg.Argv) == 0 {
 		return nil, errors.New("build step has no command")
 	}
+	if cfg.Domain != nil && (cfg.MemoryMB < 0 || cfg.MaxPids < 0) {
+		return nil, errors.New("sandbox epoch build limits cannot be negative")
+	}
 	if cfg.MemoryMB <= 0 {
 		cfg.MemoryMB = defaultBuildMemoryMB
 	}
 	if cfg.MaxPids <= 0 {
 		cfg.MaxPids = defaultBuildMaxPids
 	}
+	if err := validateDomainLimits(cfg.Domain, cfg.MemoryMB, cfg.MaxPids, 0); err != nil {
+		return nil, err
+	}
 
 	rootfs, err := resolveBuildRuntime(cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.jailParent, err = prepareDomain(ctx, cfg.Domain)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +236,20 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 		"network_mode", cfg.NetworkMode,
 		"egress_policy_gen", cfg.EgressPolicyGen)
 
-	out, runErr := exec.CommandContext(ctx, cfg.NsjailBin, args...).CombinedOutput()
+	var out []byte
+	var runErr error
+	if cfg.Domain == nil {
+		out, runErr = exec.CommandContext(ctx, cfg.NsjailBin, args...).CombinedOutput()
+	} else {
+		cmd := exec.CommandContext(ctx, cfg.NsjailBin, args...)
+		var combined bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &combined, &combined
+		runErr = cfg.Domain.Start(ctx, cmd, cfg.jailParent)
+		if runErr == nil {
+			runErr = cmd.Wait()
+		}
+		out = combined.Bytes()
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return out, fmt.Errorf("%w after %s", ErrBuildTimedOut, cfg.Timeout)
 	}
@@ -320,7 +349,11 @@ func buildJailArgs(cfg BuildConfig, rootfs, scratch string) ([]string, error) {
 
 	args = append(args, egressNetArgs(cfg.NetworkMode, cfg.ResolvConfPath, cfg.HostsPath)...)
 
-	if mount := cgroupv2Delegate(); mount != "" {
+	mount, err := domainCgroupMount(cfg.Domain, cfg.jailParent)
+	if err != nil {
+		return nil, err
+	}
+	if mount != "" {
 		memMaxBytes := int64(cfg.MemoryMB) * 1024 * 1024 * 3 / 2
 		args = append(args,
 			"--use_cgroupv2",
