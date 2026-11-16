@@ -543,10 +543,18 @@ Minimum scenario matrix:
   legacy preflight. Its schema initializer is called only by tests. The stored
   approval comparison is not yet a live deployment/config check; service gates
   and filtering review-required/quarantined rows remain mandatory.
+  Independent storage acceptance at `a6895e8` passed the full database race
+  suite, vet and additional concurrent Get/Save/Delete and rollback probes.
 - Inert admission/publication coordination registers waiting calls, rechecks
   acquired targets, authorizes bounded stream handoff and cancels affected work
   outside locks. It remains unconnected to workers/shared cores/storage. Parent
   review aligned its decoded chunk cap with the existing 256 KiB SDK limit.
+  Independent acceptance at `a6895e8` passed ten race-enabled repetitions and
+  seven additional concurrency probes, including synchronous cancellation-entry
+  reentry and the marked-but-unsignalled revocation window.
+- `make lint` and `make test` passed on the inert foundation candidate. These
+  checks do not qualify migration, real runtime IAM or rollout; those gates
+  await integration.
 
 Source integration map at baseline:
 
