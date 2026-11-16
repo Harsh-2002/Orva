@@ -258,12 +258,17 @@ func (st *Staging) sealPersistent(ctx context.Context, kind Kind, owner string, 
 		} else {
 			r.manifestBytes = len(raw)
 			s.persistent.manifestBytes += len(raw)
-			r.durable.Kind, r.durable.Owner, r.durable.Digest, r.durable.Manifest = kind, owner, digest, owned
 		}
 		s.mu.Unlock()
 	}
 	if err == nil {
 		err = verify(ctx, r.path, kind, owned, s.limits, r.reserved)
+	}
+	if err == nil {
+		// Failed verification must not make unverified claims durable during Abort.
+		s.mu.Lock()
+		r.durable.Kind, r.durable.Owner, r.durable.Digest, r.durable.Manifest = kind, owner, digest, owned
+		s.mu.Unlock()
 	}
 	if err == nil {
 		err = s.syncTree(ctx, r.path, owned)

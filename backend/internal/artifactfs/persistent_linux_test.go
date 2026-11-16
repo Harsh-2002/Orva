@@ -106,6 +106,40 @@ func assertQuarantined(t *testing.T, s *Store, id string) {
 	}
 }
 
+func TestPersistentFailedSealInterruptedAbortRecovers(t *testing.T) {
+	s := persistentStore(t, testLimits())
+	st, m, _ := persistentStage(t, s)
+	for i := range m.Entries {
+		if m.Entries[i].Type == TypeFile {
+			m.Entries[i].Size = 101 // Reservation is 100; actual handler is five bytes.
+		}
+	}
+	digest, err := Digest(m, s.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Seal(context.Background(), KindCode, ids.New(), m, digest); err != ErrIntegrity {
+		t.Fatalf("invalid manifest was not rejected: %v", err)
+	}
+	s.removeAll = func(string) error { return syscall.EACCES }
+	if err := st.Abort(); err != ErrIO {
+		t.Fatalf("interrupted cleanup: %v", err)
+	}
+	if s.bytes != 100 || s.stages != 1 {
+		t.Fatal("failed cleanup lost reservations")
+	}
+	d := diskRecord(t, s, st.rec.identity.Generation)
+	if d.Phase != "delete_intent" || d.Kind != "" || len(d.Manifest.Entries) != 0 {
+		t.Fatal("cleanup persisted an unverified manifest")
+	}
+	recovered := recoverStore(t, s)
+	entries := recovered.SnapshotRecovery()
+	if len(entries) != 1 || entries[0].Phase != "delete_intent" || entries[0].ReservedBytes != 100 || !entries[0].StagingPresent {
+		t.Fatal("interrupted cleanup was not retained for inspection")
+	}
+	assertQuarantined(t, recovered, st.rec.identity.Generation)
+}
+
 func TestPersistentLifetimeAndMetadataSeparation(t *testing.T) {
 	s := persistentStore(t, testLimits())
 	if _, err := New(s.root, s.limits); err != ErrBusy {
