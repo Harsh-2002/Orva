@@ -18,7 +18,8 @@ code/config/secrets publication. An unknown existing runtime cannot be acquired.
   `New(root, limits)` takes a nonblocking exclusive `flock` on that directory.
   A second cooperating writer fails; **all nonempty state is rejected**, even
   recognizable generation names after a process restart. There is no adoption,
-  recovery index, filesystem journaling or crash-durability promise.
+  recovery index, filesystem journaling or crash-durability promise through
+  **`New`**. The separate persistent constructors below do not change this API.
 - The store and its trusted producer are the **exclusive writers** to the root
   and its trees. Ancestors must remain stable. Producers must obey reservations
   while producing, create no mounts, and close all writable descriptors/mappings,
@@ -117,8 +118,9 @@ the store continues to reject reclamation while references remain.
 
 ## Manifest version 1 and supported profile
 
-Only typed inputs are accepted: there is deliberately no raw JSON parser,
-unknown-field normalization or self-manifest producer API. Caller-owned input
+Only typed producer inputs are accepted: there is no producer JSON parser,
+unknown-field normalization or self-manifest producer API. The persistent-store
+reader below parses only its own bounded control records. Caller-owned input
 must not be concurrently mutated while passed to Digest/Seal. Digest sorts an
 owned entry slice by bytewise path and hashes `encoding/json.Marshal` of the
 version-1 structs, compact JSON without newline. Field order is:
@@ -225,3 +227,103 @@ setup. Xattr/ACL/capability fixtures explicitly skip only when the local
 filesystem/UID cannot create them; those skips are not capability-test passes.
 No real-sandbox, full-suite, release or live-IAM acceptance follows from these
 checks.
+
+## Explicit persistent foundation (not serving recovery)
+
+`NewPersistent(root, limits)` initializes **only an empty root**, under the same
+private-directory/exclusive-writer contract and nonblocking exclusive `flock`.
+It creates `.artifactfs-control/format.json` with version 1. Control metadata is
+a sibling of `staging-<UUIDv7>` and `generation-<UUIDv7>`, never part of a content
+manifest. `New` still rejects every nonempty root, including this layout.
+A failed initializer can leave an incomplete layout; neither constructor adopts
+or repairs it automatically.
+
+Live persistent stores retain the ordinary lease API, with additional ordering:
+
+1. `Begin` charges capacity and atomically persists a `staging` reservation
+   **before** creating its staging directory, then fsyncs the root. An I/O error
+   returns a staging cleanup handle and keeps its reservation charged.
+2. `Seal` fully verifies the typed, owned manifest, fsyncs every regular file and
+   directory child-first, and verifies again. It does not chmod, chown, copy or
+   rewrite content. All filesystem work runs outside the store mutex.
+3. It writes a complete `publish_intent` record by exclusive temporary-file
+   creation, write, file fsync, rename and control-directory fsync; renames the
+   stage to its generation; and fsyncs the root.
+4. It atomically writes/fsyncs a `committed` record by the same protocol
+   **before** publishing active state in memory. A failure after tree rename
+   returns the generation ID for explicit `Reclaim`, preserving the actual
+   generation path and all accounting. Cancellation/Close deny publication;
+   already-written intent or commit evidence remains for inspection. Cancellation
+   racing an in-progress metadata commit is not an atomic cancellation fence.
+5. `Retire` first denies new leases, then persists `retired`; a failed durable
+   write stays denied and is retryable. `Abort`/`Reclaim` persist `delete_intent`
+   before tree removal, fsync the root, unlink metadata, and fsync the control
+   directory. Any failure retains the entire reservation until an explicit
+   cleanup retry succeeds, even if a prior removal was partial.
+
+The canonical compact JSON record emits, in order: `version`, `generation`,
+`kind`, `owner`, `digest`, `reserved`, `phase`, `manifest`. A staging reservation
+has empty kind/owner/digest and manifest `{"version":0,"entries":[]}`; sealed
+records carry the complete canonical version-1 manifest and content digest.
+Only public content metadata is stored: no environment, secret values, config
+snapshots, approval, policy grants or worker identities. Record names and their
+embedded generation must agree on a canonical UUIDv7.
+
+Record reads use no-follow, nonblocking opens and descriptor stats; require
+euid-owned mode-0600 single-link regular files without xattrs; and bound size
+before reading. The control directory is euid-owned mode 0700 without xattrs.
+The JSON reader rejects duplicate/unknown fields, null anywhere, invalid UTF-8,
+noncanonical encodings, invalid identities/phases, and digest mismatch. It bounds
+depth, object keys, token count and entry-array count before struct allocation,
+then requires byte-identical canonical reencoding. Existing root/path ownership
+and stable-ancestor assumptions still apply; this is not hostile-host isolation.
+
+Besides the existing logical reservation/count/entry limits, **all live
+persisted manifests together** fit `Limits.ManifestBytes`, not one such budget
+per generation. Metadata has an additional fixed budget of at most 1024 bytes
+per generation plus the 128-byte format-record cap. At most one temporary record
+per generation is recognized; recovery bounds total primary+temporary metadata
+to twice the manifest-plus-fixed-overhead budget (plus format). Counts and byte
+sums are checked without unchecked aggregate multiplication/addition overflow.
+These are conservative work/allocation bounds, not physical disk quotas.
+
+### Quarantine-only reopening
+
+`OpenRecovering(ctx, root, limits)` requires the recognized versioned layout,
+holds the exclusive directory lock, validates all control records and root names,
+and completely verifies **every committed or retired tree before registering any
+catalog record**. Unknown files, missing committed trees, metadata links,
+corruption, unsupported committed content and exceeded bounds fail closed.
+Failure performs no cleanup, repair, legacy adoption or `RemoveAll`.
+
+Staging reservations (including reservation-before-mkdir), `publish_intent`
+before/after generation rename, and `delete_intent` partial removals are retained
+and charged but never activated or resumed. Incomplete staging/deleting contents
+are deliberately not traversed; unsupported producer nodes remain quarantined.
+Canonical pending `.json.tmp` records are recognized and checked against the
+primary transition when both exist; malformed/partial temporary JSON fails
+closed rather than being silently discarded. A missing or malformed format
+record also fails closed.
+
+`SnapshotRecovery()` returns detached identity/phase/reservation/manifest records
+with staging/generation presence and pending-metadata observations, **no
+authoritative paths**. It is nil on ordinary live stores. The recovered store
+blocks **Begin, Acquire, PreparePaths, Retire, Reclaim and Abort**, regardless of
+whether its record says committed, retired or deleting. There is no activation
+switch, approval flag, lifecycle-fence argument, auto-GC or recovery mutator.
+`Close` may release a recovered store's process lock with catalog records still
+present because that store cannot grant leases or mutations.
+
+**A released flock does not prove old workers dead.** A worker surviving its
+daemon may still hold the old tree; this package neither discovers nor fences
+it. A future lifecycle service must establish that boundary independently
+before any activation or cleanup API is considered. Recovered verification is
+not policy approval, runtime provenance/packaging, current-generation proof,
+atomic code/config/secrets publication or permission to serve.
+
+Package-private fault seams test writes, fsyncs, renames and removals, including
+intent-before-rename, rename-before-commit, committed-record/directory-fsync
+failure, explicit cleanup retries and mocked surviving old-worker access.
+Passing these tests demonstrates the implemented **fsync protocol and
+fail-closed states**, not a power-loss/filesystem hardware durability experiment.
+There is still no boot, pool, GC, database, installer or runtime-packaging wiring.
