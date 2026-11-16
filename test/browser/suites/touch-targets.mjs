@@ -25,7 +25,7 @@
 //   a real height in proportion to their type and buy the rest of the target
 //   with a bounded transparent ::after. So `getBoundingClientRect()` on the
 //   element is the wrong ruler -- it reports the ink, not the target -- and
-//   this suite has to grow the rect by that pseudo-element's insets.
+//   this suite unions the border box with the pseudo-element's padding-box geometry.
 
 export const meta = {
   id: 'touch-targets',
@@ -34,7 +34,7 @@ export const meta = {
 
 const FLOOR = 43.5 // half a pixel of slack for sub-pixel layout
 
-const PROBE = (floor) => {
+export const PROBE = (floor) => {
   if (!matchMedia('(pointer: coarse)').matches) return { skipped: true, small: [] }
 
   const describe = (el) => {
@@ -60,18 +60,30 @@ const PROBE = (floor) => {
     const base = label || el
     const box = base.getBoundingClientRect()
 
-    // Grow by the hit-extension pseudo-element, if this control has one. The
-    // insets are negative offsets on ::after, so `-parseFloat` is the outward
-    // distance. A control with no such rule yields NaN, which coerces to 0.
+    // Absolute offsets originate inside the borders, not at the border-box edge.
     const after = getComputedStyle(base, '::after')
-    const grow = (v) => {
-      const n = -parseFloat(v)
-      return Number.isFinite(n) && n > 0 ? n : 0
+    const bs = getComputedStyle(base)
+    let w = box.width
+    let h = box.height
+    if (after.content !== 'none' && after.content !== 'normal' &&
+        after.position === 'absolute' && after.pointerEvents !== 'none' &&
+        after.transform === 'none' && after.display !== 'none') {
+      const px = value => parseFloat(value) || 0
+      const left = parseFloat(after.left)
+      const top = parseFloat(after.top)
+      let width = parseFloat(after.width)
+      let height = parseFloat(after.height)
+      if (after.boxSizing !== 'border-box') {
+        width += px(after.paddingLeft) + px(after.paddingRight) + px(after.borderLeftWidth) + px(after.borderRightWidth)
+        height += px(after.paddingTop) + px(after.paddingBottom) + px(after.borderTopWidth) + px(after.borderBottomWidth)
+      }
+      if ([left, top, width, height].every(Number.isFinite)) {
+        const x = px(bs.borderLeftWidth) + left
+        const y = px(bs.borderTopWidth) + top
+        w = Math.max(box.width, x + width) - Math.min(0, x)
+        h = Math.max(box.height, y + height) - Math.min(0, y)
+      }
     }
-    const gy = after.content !== 'none' ? grow(after.top) + grow(after.bottom) : 0
-    const gx = after.content !== 'none' ? grow(after.left) + grow(after.right) : 0
-    const w = box.width + gx
-    const h = box.height + gy
 
     if (h < floor || w < floor) {
       small.push({
@@ -80,7 +92,7 @@ const PROBE = (floor) => {
         h: Math.round(h),
         box: `${Math.round(box.width)}x${Math.round(box.height)}`,
         viaLabel: !!label,
-        extended: gx > 0 || gy > 0,
+        extended: w > box.width || h > box.height,
       })
     }
   }

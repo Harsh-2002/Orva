@@ -79,3 +79,8 @@ browser checks confirmed deliberate scope changes and unsupported-target denial.
 The old defect-expecting diagnostic witness remains recorded as expected red.
 No new palette or raster assets ship. This is not live IAM/API/CLI/MCP or complete
 accessibility acceptance; the future controller's correlation contract remains.
+
+Owner subsequently approved the guided UI (“UI looks good”) and requested full
+UI/UX/responsive validation without changing that direction. Separately, the
+sidebar now requires every existing section as a direct link, with no collapsible
+groups; full browser verification includes the flat mobile drawer.

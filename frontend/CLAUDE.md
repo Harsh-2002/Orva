@@ -38,6 +38,7 @@ change.
 | `src/api/client.js` | Axios instance; injects `X-Orva-API-Key`, and dispatches an `orva:unauthorized` window event on any 401 — `App.vue` listens and redirects to sign-in, because an expired session used to leave every list silently blank |
 | `src/api/endpoints.js` | Every API helper function (one per endpoint) |
 | `src/router/` | Vue Router route table |
+| `src/components/layout/Sidebar.vue` | Flat, direct links to all sections on desktop and in the mobile drawer. No grouped disclosures. The navigation scrolls on short screens; choosing a link closes the drawer. |
 | `src/stores/auth.js` | Auth state + login/logout |
 | `src/stores/confirm.js` | Global confirmation modal store |
 | `src/stores/events.js` | Persistent SSE connection to `/api/v1/events` |
@@ -105,6 +106,7 @@ re-declaring tokens flips the app without touching markup.
 | `components/common/RuntimeTag.vue` | The one place a runtime is drawn. Renders the mark **icon-only** with the word in the accessible name and tooltip: in a dense list the glyph resolves faster than the text, and the set is two items wide, stable, and has marks operators already know. Pass `withLabel` where the operator is *choosing* a runtime rather than recognising one. Icon-only is deliberately **not** applied to status, which keeps its word. |
 | `components/layout/BrandLockup.vue` | One logo + wordmark lockup, used by both the mobile top bar and the drawer header so the two cannot drift apart. |
 | `composables/useMenuFocus.js` | Shared focus handling for menu-style popovers. |
+| `components/common/Popover.vue` | Keyboard activation enters the first enabled desktop menu control; Escape from trigger or panel restores trigger focus. Pointer-outside dismissal preserves destination focus. Mobile focus belongs to Drawer. |
 | `components/common/FilterSelect.vue` | The **only** picker. There are no native `<select>`s left and `test/responsive.test.js` fails the build if one comes back: a `<select>` opens the OS wheel on a phone while everything beside it opens a sheet. Three shapes — a filter chip (default), `wide` for a form field, `bare` for a dense inline bar. An option with `header: true` is a group heading. |
 | `components/common/Button.vue` | `variant` covers primary / secondary / danger / ghost / chip. The `danger` fill uses `--color-danger-solid`, which is darker than `--color-danger`: white on the lighter red measures 3.76:1 and misses AA. Use the lighter red for text, borders and tints; the solid one only behind white text. |
 
@@ -129,6 +131,12 @@ which violet is correct.
   Builder scope/context changes never silently broaden resources or drop
   selected actions. Blank Prefix is not Every key; unsupported foreign cron
   callers/targets remain inspectable but cannot be newly authored by the wizard.
+
+- **Touch expansion is not row spacing.** Compact standalone controls use a
+  centered 44px pseudo-element target; its absolute positioning is relative to
+  the padding box, so adding negative insets to the border box overcounts.
+  Stacked picker/navigation rows use `touch-expand-row` and actual 44px coarse
+  height, never outward extensions that intercept a neighboring row.
 
 - **SDK access is an explicit function setting**, separate from `network_mode`.
   Editor Settings defaults `sdk` to false, preserves it through dirty/discard,

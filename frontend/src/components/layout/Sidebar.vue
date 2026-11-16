@@ -62,19 +62,19 @@
   >
     <!-- h-14 and no border below lg: the mobile top bar already draws a rule
          at that exact y, and a second one 7.6px lower reads as a misalignment. -->
-    <div class="h-14 lg:h-16 flex items-center px-6 lg:border-b border-border">
+    <div class="h-14 lg:h-16 shrink-0 flex items-center px-6 lg:border-b border-border">
       <BrandLockup />
     </div>
 
     <!-- The drawer's vertical edge starts below the header rather than cutting
          through it; above lg the aside carries a full-height one instead. -->
-    <nav class="flex-1 p-3 space-y-1 overflow-y-auto scrollable border-r border-border lg:border-r-0">
+    <nav class="min-h-0 flex-1 p-3 space-y-1 overflow-y-auto scrollable border-r border-border lg:border-r-0">
       <router-link
-        v-for="item in primaryItems"
+        v-for="item in navItems"
         :key="item.path"
         :to="item.path"
         :class="[
-          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+          'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring',
           isActive(item.path)
             ? 'text-foreground-strong bg-primary/15'
             : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
@@ -88,82 +88,12 @@
         />
         <span>{{ item.label }}</span>
       </router-link>
-
-      <div
-        v-for="group in navGroups"
-        :key="group.id"
-        class="pt-1"
-      >
-        <button
-          type="button"
-          class="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium touch-expand-row text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-          :class="groupIsActive(group) ? 'text-foreground-strong' : ''"
-          :aria-expanded="expandedGroups[group.id]"
-          :aria-controls="`nav-group-${group.id}`"
-          @click="expandedGroups[group.id] = !expandedGroups[group.id]"
-        >
-          <component
-            :is="group.icon"
-            class="h-4 w-4"
-          />
-          <span class="flex-1 text-left">{{ group.label }}</span>
-          <ChevronDown
-            class="h-3.5 w-3.5 transition-transform"
-            :class="expandedGroups[group.id] ? 'rotate-0' : '-rotate-90'"
-          />
-        </button>
-        <div
-          v-show="expandedGroups[group.id]"
-          :id="`nav-group-${group.id}`"
-          class="ml-3 mt-1 space-y-0.5 border-l border-border pl-2"
-        >
-          <router-link
-            v-for="item in group.items"
-            :key="item.path"
-            :to="item.path"
-            :class="[
-              'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
-              isActive(item.path)
-                ? 'text-foreground-strong bg-primary/15'
-                : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
-            ]"
-            @click="open = false"
-          >
-            <component
-              :is="item.icon"
-              class="h-4 w-4"
-            />
-            <span>{{ item.label }}</span>
-          </router-link>
-        </div>
-      </div>
-
-      <div class="mt-2 space-y-1 border-t border-border pt-2">
-        <router-link
-          v-for="item in secondaryItems"
-          :key="item.path"
-          :to="item.path"
-          :class="[
-            'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors duration-150 group font-medium touch-expand-row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
-            isActive(item.path)
-              ? 'text-foreground-strong bg-primary/15'
-              : 'text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover'
-          ]"
-          @click="open = false"
-        >
-          <component
-            :is="item.icon"
-            class="h-4 w-4"
-          />
-          <span>{{ item.label }}</span>
-        </router-link>
-      </div>
     </nav>
   </aside>
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import BrandLockup from './BrandLockup.vue'
 import {
@@ -183,7 +113,6 @@ import {
   LibraryBig,
   Menu,
   X,
-  ChevronDown,
 } from '@lucide/vue'
 
 const route = useRoute()
@@ -195,62 +124,49 @@ const isActive = (path) => {
   return route.path.startsWith(path)
 }
 
-const primaryItems = [
+const navItems = [
   { path: '/',          label: 'Overview',  icon: Gauge },
   { path: '/ai',        label: 'Chat',      icon: MessagesSquare },
   { path: '/functions', label: 'Functions', icon: Boxes },
-]
-
-const navGroups = [
-  {
-    id: 'automation',
-    label: 'Automation',
-    icon: CalendarClock,
-    items: [
-      { path: '/cron', label: 'Schedules', icon: CalendarClock },
-      { path: '/jobs', label: 'Jobs', icon: ListChecks },
-    ],
-  },
-  {
-    id: 'observe',
-    label: 'Observe',
-    icon: Activity,
-    items: [
-      { path: '/activity', label: 'Activity', icon: Activity },
-      { path: '/invocations', label: 'Invocations', icon: ListTree },
-      { path: '/traces', label: 'Traces', icon: Network },
-    ],
-  },
-  {
-    id: 'connect',
-    label: 'Connect',
-    icon: Plug,
-    items: [
-      { path: '/api-keys', label: 'Keys', icon: Fingerprint },
-      { path: '/channels', label: 'Channels', icon: Plug },
-      { path: '/webhooks', label: 'Webhooks', icon: Webhook },
-      { path: '/firewall', label: 'Egress', icon: ShieldHalf },
-    ],
-  },
-]
-
-const secondaryItems = [
+  { path: '/cron', label: 'Schedules', icon: CalendarClock },
+  { path: '/jobs', label: 'Jobs', icon: ListChecks },
+  { path: '/activity', label: 'Activity', icon: Activity },
+  { path: '/invocations', label: 'Invocations', icon: ListTree },
+  { path: '/traces', label: 'Traces', icon: Network },
+  { path: '/api-keys', label: 'Keys', icon: Fingerprint },
+  { path: '/channels', label: 'Channels', icon: Plug },
+  { path: '/webhooks', label: 'Webhooks', icon: Webhook },
+  { path: '/firewall', label: 'Egress', icon: ShieldHalf },
   { path: '/settings', label: 'Settings', icon: Settings },
   { path: '/docs', label: 'Docs', icon: LibraryBig },
 ]
 
-const expandedGroups = ref(Object.fromEntries(navGroups.map((group) => [group.id, false])))
-const groupIsActive = (group) => group.items.some((item) => isActive(item.path))
-const revealActiveGroup = () => {
-  const active = navGroups.find(groupIsActive)
-  if (active) expandedGroups.value[active.id] = true
-}
-
-revealActiveGroup()
 watch(() => route.fullPath, () => {
   open.value = false
-  revealActiveGroup()
 })
+
+function onDrawerKeydown(event) {
+  if (!open.value || window.innerWidth >= 1024) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    open.value = false
+    return
+  }
+  if (event.key !== 'Tab') return
+  const links = Array.from(drawerEl.value?.querySelectorAll('a[href]') || [])
+  const controls = [toggleBtn.value, ...links].filter(Boolean)
+  const first = controls[0]
+  const last = controls[controls.length - 1]
+  const active = document.activeElement
+  if (!controls.includes(active) || (event.shiftKey && active === first)) {
+    event.preventDefault()
+    const target = event.shiftKey ? last : first
+    target?.focus()
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault()
+    first?.focus()
+  }
+}
 
 // Focus discipline: when the drawer opens, move focus into it (first
 // nav link) so keyboard users land where they can navigate. When it
@@ -260,6 +176,8 @@ watch(() => route.fullPath, () => {
 // from the drawer (which closes it) returns focus to the page link
 // rather than yanking back to the toggle.
 watch(open, async (isOpen) => {
+  if (isOpen) document.addEventListener('keydown', onDrawerKeydown)
+  else document.removeEventListener('keydown', onDrawerKeydown)
   await nextTick()
   if (isOpen) {
     const firstLink = drawerEl.value?.querySelector('a[href]')
@@ -271,6 +189,7 @@ watch(open, async (isOpen) => {
     }
   }
 })
+onBeforeUnmount(() => document.removeEventListener('keydown', onDrawerKeydown))
 
 // Swipe-left-to-close on the drawer. Threshold of 60 px horizontal
 // movement, with vertical movement under 40 px (so a normal vertical

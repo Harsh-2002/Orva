@@ -17,6 +17,7 @@
   <span
     ref="triggerEl"
     :class="wide ? 'flex w-full' : 'inline-flex'"
+    @keydown.esc="onEscape"
   >
     <slot
       name="trigger"
@@ -34,7 +35,7 @@
         class="fixed z-50 min-w-[200px] max-w-[min(30rem,calc(100vw-1rem))] bg-background border border-border rounded-lg shadow-xl overflow-y-auto overflow-x-hidden scrollable"
         :style="panelStyle"
         role="menu"
-        @keydown.esc="close"
+        @keydown.esc="onEscape"
       >
         <slot :close="close" />
       </div>
@@ -145,12 +146,22 @@ function place() {
   })
 }
 
-function open() {
+function open(event) {
   isOpen.value = true
   if (!isMobile.value) {
     nextTick(() => {
+      if (!isOpen.value || isMobile.value) return
       place()
       observePanel(panelEl.value)
+      // Native keyboard/assistive activation clicks have no pointer click count.
+      if (event?.detail === 0 && triggerEl.value?.contains(document.activeElement)) {
+        const entries = panelEl.value?.querySelectorAll(
+          'input:not([type="hidden"]), button, [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]',
+        )
+        const first = Array.from(entries || []).find((el) =>
+          !el.matches(':disabled') && !el.closest('[aria-disabled="true"], [hidden], [inert], [aria-hidden="true"]'))
+        first?.focus()
+      }
     })
   }
 }
@@ -159,7 +170,15 @@ function close() {
   ro?.disconnect()
   ro = null
 }
-function toggle() { isOpen.value ? close() : open() }
+function toggle(event) { isOpen.value ? close() : open(event) }
+
+function onEscape(event) {
+  if (!isOpen.value || isMobile.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  close()
+  triggerEl.value?.querySelector('button, [role="button"], [tabindex]')?.focus()
+}
 
 function onDocPointer(e) {
   if (!isOpen.value || isMobile.value) return

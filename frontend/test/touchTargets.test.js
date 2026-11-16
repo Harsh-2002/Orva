@@ -20,8 +20,7 @@ function coarseBlock() {
   throw new Error('unbalanced coarse-pointer block')
 }
 
-// Tier -> the box height it takes on a phone, and the outward inset that buys
-// the rest of the 44px target. These are the numbers the section's comment
+// Tier -> the box height it takes on a phone. These are the numbers the section's comment
 // claims; the point of the test is that the claim and the CSS cannot drift.
 const TIERS = { xs: 32, sm: 36, md: 40, iconbtn: 40 }
 
@@ -37,18 +36,25 @@ function declaredHeight(block, tier) {
   return Number(m[1])
 }
 
-function declaredInset(block, tier) {
-  // The tiers share one ::after rule for `content`/`position`, then each sets
-  // its own insets. A plain search finds the shared rule first when the tier is
-  // last in that selector list, so take the match that actually carries insets.
-  const all = [...block.matchAll(new RegExp(`\\.touch-expand-${tier}::after\\s*\\{([^}]*)\\}`, 'g'))]
-  const m = all.find((hit) => /top:\s*-?\d+px/.test(hit[1]))
-  assert.ok(m, `.touch-expand-${tier}::after is missing; the tier has no hit extension`)
-  const top = /top:\s*(-?\d+)px/.exec(m[1])
-  const bottom = /bottom:\s*(-?\d+)px/.exec(m[1])
-  assert.ok(top && bottom, `.touch-expand-${tier}::after sets no vertical inset`)
-  assert.equal(top[1], bottom[1], `.touch-expand-${tier}::after is asymmetric; it would pull the target off centre`)
-  return -Number(top[1])
+function declaredTarget(block, tier) {
+  const declarations = {}
+  const css = block.replace(/\/\*[\s\S]*?\*\//g, '')
+  for (const [, selectors, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!selectors.split(',').map(value => value.trim()).includes(`.touch-expand-${tier}::after`)) continue
+    for (const declaration of body.split(';')) {
+      const [name, value] = declaration.split(':')
+      if (value) declarations[name.trim()] = value.trim()
+    }
+  }
+  assert.equal(declarations.position, 'absolute')
+  assert.equal(declarations.content, "''")
+  assert.equal(declarations.top, 'calc(50% - 22px)', 'target must stay centered in the padding box')
+  assert.equal(declarations.height, '44px', 'target height must not lose pixels to the control border')
+  if (tier === 'iconbtn') {
+    assert.equal(declarations.left, 'calc(50% - 22px)')
+    assert.equal(declarations.width, '44px')
+  }
+  return Number.parseFloat(declarations.height)
 }
 
 test('no tier meets the touch floor by inflating its own box', () => {
@@ -76,19 +82,17 @@ test('each tier keeps its own height, in proportion to its type', () => {
   assert.ok(seen.size >= 3, 'the tiers have collapsed back into a single height')
 })
 
-test('box plus extension is exactly the 44px target, in every tier', () => {
+test('centered extension is exactly the 44px target, in every tier', () => {
   const block = coarseBlock()
   for (const [tier, height] of Object.entries(TIERS)) {
-    const inset = declaredInset(block, tier)
-    assert.equal(height + inset * 2, 44,
-      `.touch-expand-${tier}: ${height}px box + 2 x ${inset}px = ${height + inset * 2}px, not 44`)
+    assert.equal(Math.max(height, declaredTarget(block, tier)), 44)
   }
 })
 
 test('no extension reaches far enough to land on a neighbour', () => {
   const block = coarseBlock()
   for (const tier of Object.keys(TIERS)) {
-    const inset = declaredInset(block, tier)
+    const inset = (declaredTarget(block, tier) - declaredHeight(block, tier)) / 2
     assert.ok(inset <= MAX_INSET,
       `.touch-expand-${tier} extends ${inset}px, past the ${MAX_INSET}px bound. ` +
       'A gap-2 toolbar leaves 7.6px between controls; anything wider overlaps the next one.')
@@ -102,6 +106,14 @@ test('a stacked row takes real height, because it has no gap to borrow', () => {
   assert.doesNotMatch(block, /\.touch-expand-row::(?:after|before)/,
     'a stacked row must not extend outward: its neighbour is flush against it, ' +
     'which is how the sidebar produced 97 overlapping targets across the route set')
+})
+
+test('stacked picker options use actual row height, not overlapping hit extensions', () => {
+  const picker = readFileSync(new URL('../src/components/common/FilterSelect.vue', import.meta.url), 'utf8')
+  const option = picker.match(/<button\b[^>]*role="menuitemradio"[^>]*>/)?.[0]
+  assert.ok(option, 'the picker option button must be inspected')
+  assert.match(option, /\btouch-expand-row\b/)
+  assert.doesNotMatch(option, /\btouch-expand-(?:xs|sm|md|iconbtn)\b/)
 })
 
 test('leaving overlays stop intercepting clicks immediately', () => {

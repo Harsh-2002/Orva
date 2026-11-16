@@ -942,6 +942,32 @@ startup correction, Done protection and the foreign schedule-target block.
 This accepts the staged workflow, not live routes, controller correlation,
 operator authentication, CLI/MCP policy controls or runtime enforcement.
 
+The owner approved the guided appearance and requested flat sidebar navigation
+plus responsive/keyboard QA without redesign. Independent browser testing
+covered 336 state/viewport/theme checkpoints, then found picker Escape/focus,
+sub-44px effective targets and overlapping stacked picker targets. These were
+fixed in the shared controls: keyboard opening enters the menu, Escape restores
+the trigger, fixed centered hit targets retain visible size tiers, and stacked
+picker options take actual 44px row height. The touch probe now accounts for
+padding-box pseudo-element positioning instead of overcounting border widths.
+The flat drawer also closes with Escape and contains Tab/Shift-Tab focus.
+
+Final independent live retest passed 76/76 assigned checks in both themes,
+including actual edge-hit ownership. Isolated frontend validation passed lint
+(one pre-existing Editor attribute-order warning), 106 Node tests, 228 component
+tests and production build. Canonical `make lint`/`make test` and four browser
+probe regression tests passed. Parent browser checks passed 13 service/caller
+journey checks at both 390px and 1440px, plus nine Advanced/clipboard/error
+checks. Error recovery models the future controller's required error clearing;
+the synthetic save controller is not a production integration.
+
+Evidence is retained locally under `/tmp/opencode/iam-full-ui-qa/` and
+`/tmp/opencode/orva-flat-sidebar-qa/`. Prior HOLD reports and failing diagnostic
+witnesses remain in the record. This is scoped Chromium preview acceptance,
+not exhaustive WCAG, assistive-technology, Safari, production Layout/auth,
+runtime IAM or full API/sandbox E2E acceptance. No release or production
+deployment occurred.
+
 Source integration map at baseline:
 
 - `sandbox/sdkchan.go:dispatch`, `sandbox/sdkapi.go:SDKCaller/ExecInfo`: identity,
