@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -260,6 +261,19 @@ func (db *Database) KVListWithCursor(functionID, prefix, cursor string, limit in
 }
 
 func (db *Database) KVListWithCursorContext(ctx context.Context, functionID, prefix, cursor string, limit int) (pageResult *KVListPage, err error) {
+	return db.kvListWithCursorContext(ctx, functionID, prefix, cursor, limit, false)
+}
+
+// KVListLiteralWithCursorContext is reserved for IAM's literal, case-sensitive ranges.
+// It does not authorize a range; the caller must do that before querying it.
+func (db *Database) KVListLiteralWithCursorContext(ctx context.Context, functionID, prefix, cursor string, limit int) (*KVListPage, error) {
+	if !utf8.ValidString(prefix) || !utf8.ValidString(cursor) {
+		return nil, errors.New("kv: prefix and cursor must be valid UTF-8")
+	}
+	return db.kvListWithCursorContext(ctx, functionID, prefix, cursor, limit, true)
+}
+
+func (db *Database) kvListWithCursorContext(ctx context.Context, functionID, prefix, cursor string, limit int, literal bool) (pageResult *KVListPage, err error) {
 	started := time.Now()
 	defer func() { db.observeKV("list", started, err) }()
 	if limit <= 0 || limit > 1000 {
@@ -268,43 +282,30 @@ func (db *Database) KVListWithCursorContext(ctx context.Context, functionID, pre
 	now := time.Now().UTC()
 	probe := limit + 1
 
-	var (
-		rows *sql.Rows
-	)
-	switch {
-	case prefix != "" && cursor != "":
-		rows, err = db.read.QueryContext(ctx, `
-			SELECT function_id, key, value, expires_at, created_at, updated_at
-			FROM kv_store
-			WHERE function_id = ? AND key LIKE ? AND key > ?
-			  AND (expires_at IS NULL OR expires_at > ?)
-			ORDER BY key ASC LIMIT ?`,
-			functionID, prefix+"%", cursor, now, probe)
-	case prefix != "":
-		rows, err = db.read.QueryContext(ctx, `
-			SELECT function_id, key, value, expires_at, created_at, updated_at
-			FROM kv_store
-			WHERE function_id = ? AND key LIKE ?
-			  AND (expires_at IS NULL OR expires_at > ?)
-			ORDER BY key ASC LIMIT ?`,
-			functionID, prefix+"%", now, probe)
-	case cursor != "":
-		rows, err = db.read.QueryContext(ctx, `
-			SELECT function_id, key, value, expires_at, created_at, updated_at
-			FROM kv_store
-			WHERE function_id = ? AND key > ?
-			  AND (expires_at IS NULL OR expires_at > ?)
-			ORDER BY key ASC LIMIT ?`,
-			functionID, cursor, now, probe)
-	default:
-		rows, err = db.read.QueryContext(ctx, `
-			SELECT function_id, key, value, expires_at, created_at, updated_at
-			FROM kv_store
-			WHERE function_id = ?
-			  AND (expires_at IS NULL OR expires_at > ?)
-			ORDER BY key ASC LIMIT ?`,
-			functionID, now, probe)
+	var query strings.Builder
+	query.WriteString(`SELECT function_id, key, value, expires_at, created_at, updated_at
+		FROM kv_store WHERE function_id = ? AND (expires_at IS NULL OR expires_at > ?)`)
+	args := []any{functionID, now}
+	if prefix != "" {
+		if literal {
+			query.WriteString(" AND key COLLATE BINARY >= ?")
+			args = append(args, prefix)
+			if upper := kvPrefixUpperBound(prefix); upper != "" {
+				query.WriteString(" AND key COLLATE BINARY < ?")
+				args = append(args, upper)
+			}
+		} else {
+			query.WriteString(" AND key LIKE ?")
+			args = append(args, prefix+"%")
+		}
 	}
+	if cursor != "" {
+		query.WriteString(" AND key COLLATE BINARY > ?")
+		args = append(args, cursor)
+	}
+	query.WriteString(" ORDER BY key COLLATE BINARY ASC LIMIT ?")
+	args = append(args, probe)
+	rows, err := db.read.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -333,6 +334,22 @@ func (db *Database) KVListWithCursorContext(ctx context.Context, functionID, pre
 		page.NextCursor = out[limit-1].Key
 	}
 	return page, nil
+}
+
+func kvPrefixUpperBound(prefix string) string {
+	for end := len(prefix); end > 0; {
+		r, size := utf8.DecodeLastRuneInString(prefix[:end])
+		end -= size
+		if r == utf8.MaxRune {
+			continue
+		}
+		next := r + 1
+		if next == 0xD800 {
+			next = 0xE000
+		}
+		return prefix[:end] + string(next)
+	}
+	return ""
 }
 
 // KVIncr atomically reads the integer value at (function_id, key),
