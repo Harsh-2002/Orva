@@ -59,12 +59,13 @@ type opCounter struct{ count, errs, ns atomic.Uint64 }
 
 // Host is the server-side SDK operation dispatcher.
 type Host struct {
-	DB         *database.Database
-	metrics    Metrics
-	invoker    atomic.Pointer[handlers.InternalInvokeHandler]
-	ops        [len(opNames)]opCounter
-	iamEnabled bool
-	iam        *workloadiam.Authority
+	DB             *database.Database
+	metrics        Metrics
+	invoker        atomic.Pointer[handlers.InternalInvokeHandler]
+	ops            [len(opNames)]opCounter
+	iamEnabled     bool
+	iam            *workloadiam.Authority
+	iamTargetState func(string, *sandbox.Worker) workloadiam.TargetState
 }
 
 // New builds a Host over db.
