@@ -598,6 +598,13 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Strict secret snapshot decoding is implemented as an inert preparation helper:
+  canonical owner, consistent rows, unique valid keys, caller-selected bounded
+  count/bytes, ciphertext pre-decode ceiling and all-or-nothing decryption.
+  Empty snapshots avoid key loading. Existing serving secret lookup is unchanged;
+  generation/rows must still come from one transactional DB snapshot. Package
+  race tests and vet are required separately from independent acceptance.
+
 - A staged buffered-F2F seam registers observed caller/target admission before
   pool acquisition and checks the actual acquired worker before execution binding
   or dispatch. A separate trusted target-state observer must supply current
