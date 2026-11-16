@@ -521,6 +521,83 @@ Minimum scenario matrix:
 
 ### Implementation record
 
+#### Spawn binding refinement — scoped design reviewed, not implemented
+
+The current pool captures function configuration but spawns through `current`
+and fetches secrets afresh. Neither a captured function row nor a fresh
+function-ID lookup proves the actual worker artifact. Before connecting pooled
+IAM, implement and independently verify this refinement:
+
+- Maintain a durable, host-generated artifact-generation UUID per function.
+  Rotate it transactionally with execution-relevant code/config changes and
+  secret mutations, not cosmetic metadata edits. Keep policy revision separate.
+  Secret rows and their generation must be read in the same snapshot; do not
+  derive a public secret fingerprint from plaintext or put secret values in
+  audit records. Existing map-only secret lookup is insufficient.
+- Capture one immutable spawn snapshot: owner UUID, concrete validated
+  `versions/<code_hash>` directory, authored/run entrypoints, execution-relevant
+  function config, exact injected secret snapshot and generation, and trusted
+  runtime/rootfs/adapter identity. Clone referenced maps. Unknown or mismatched
+  components deny IAM; never fall back to `current` or a new function-ID lookup
+  while stamping an old pool closure.
+- Derive the host artifact identifier from that generation and runtime identity.
+  A provider must return the complete snapshot actually used to spawn, not an
+  approval string alongside independently refreshed config or secrets. Runtime
+  identity must remain stable for its lifetime and change with packaged runtime
+  or adapter content; interpreter version alone is not enough.
+- Capture/publish using build/rollback lock (when applicable), function mutation
+  lock, IAM gate, pool lifecycle, then synchronous DB resources. Never acquire
+  the function mutation lock from inside `poolMu`. Slow snapshot reads and
+  preparation occur before gate admission and are revalidated before publish.
+  Secret writes must join this boundary across REST/MCP/internal callers.
+- Publish active/current-generation observations and approved policy snapshots
+  together. Busy old workers retain their original artifact and cannot inherit
+  approval for a different generation. Retired late spawns never become usable.
+  Restore quarantine remains independent and mandatory.
+
+Required proofs: deploy/rollback racing an old spawn; secret mutation without
+mixed-generation injection; code/config/secret changes invalidating old approval;
+runtime/adapter identity changes; and mutation/pool lock ordering plus retired
+spawn rejection. This is a proposed implementation refinement, not existing
+storage behavior or proof of a production-authoritative generation service.
+
+Source-only independent architecture review found this refinement scoped
+design-ready subject to these publication contracts; no new owner decision is
+needed:
+
+- Policy approval compares expected policy revision and expected reviewed
+  artifact against the authoritative current generation/runtime identity under
+  mutation lock plus IAM gate. Storage's `ExpectedApprovedArtifact` compares the
+  previous policy approval only; it is not the current-artifact check. Privileged
+  mutations commit function generation, explicit policy rebind and audit together.
+- All secret mutation callers share one ordered service operation. Exact
+  snapshots fail on any read/decryption error, unlike the current best-effort
+  getter that skips corrupt rows. Persist ciphertext plus secret/artifact
+  generation together; publish and retire obsolete pools before acknowledging.
+- The committed generation and concrete version path are authoritative, never
+  `current`. Failed DB commits publish nothing. A post-commit cache/activation
+  failure closes protected admission until reconciliation; it cannot restore an
+  old approval over changed inputs. Filesystem preparation stays outside the gate.
+- Runtime identity names the actual tree throughout spawn. Sampling a digest and
+  later resolving a mutable path is insufficient: pin the tree or exclude
+  replacement through an explicit stop/drain protocol. Identical-content rollback
+  still creates a fresh generation; restore invalidates prepared snapshots and
+  requires quarantine/reapproval.
+- Bound prepared snapshot count/bytes and stale retries. Concrete code/runtime
+  lifetimes must exclude replacement/GC while owned. Memory/CPU accounting derives
+  from the same snapshot as worker spawn. Release secret-map references on
+  retirement/failure/completion without promising reliable erasure of Go strings.
+  Detach/mark retirement under locks, then cancel/kill/perform I/O outside them.
+  Import-time bootstrap must deny obsolete generations before readiness, not rely
+  solely on rejecting a late spawn from the idle pool.
+
+The next internal seam is prepare → validate/commit → publish: prepare immutable
+owned inputs outside pool/IAM locks, validate the expected identity under ordered
+locks, atomically commit related durable changes, then publish bounded host state
+and policy together. Serving wiring remains absent until the full proof gates.
+
+#### Verified stages and current limits
+
 - A staged buffered-F2F seam registers observed caller/target admission before
   pool acquisition and checks the actual acquired worker before execution binding
   or dispatch. A separate trusted target-state observer must supply current
