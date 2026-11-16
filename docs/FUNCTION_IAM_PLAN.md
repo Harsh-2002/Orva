@@ -555,6 +555,11 @@ Minimum scenario matrix:
 - `make lint` and `make test` passed on the inert foundation candidate. These
   checks do not qualify migration, real runtime IAM or rollout; those gates
   await integration.
+- Host worker/caller observation now carries immutable spawn identity and
+  optional trusted artifact revision, monotonic readiness and the caller's
+  original lease status. It preserves current SDK routing and stale-KV behavior;
+  fresh observation/invalidation is not yet serialized under the IAM gate.
+  Independent verification and integration qualification remain separate gates.
 
 Source integration map at baseline:
 

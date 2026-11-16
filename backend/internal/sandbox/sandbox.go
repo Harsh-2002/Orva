@@ -48,6 +48,9 @@ type ExecConfig struct {
 	// FunctionID is the host's own record of whose worker this is; SDK frames
 	// are attributed to it, never to anything the sandbox sends.
 	FunctionID string
+	// ArtifactRevision is the trusted host's immutable code/config/secret revision.
+	// Empty stays unknown; never derive it from Env or SDK frames.
+	ArtifactRevision string
 	// SDKHandler serves the worker's private SDK channel. Nil disables the
 	// channel; a non-nil handler requires a channel-capable installed adapter.
 	SDKHandler SDKHandler

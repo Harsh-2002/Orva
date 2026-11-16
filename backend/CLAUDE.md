@@ -154,6 +154,11 @@ one worker.
 SDK traffic never selects a host interface or gateway: it uses the inherited
 worker channel. Do not restore HTTP endpoint discovery or an SDK firewall
 exception to work around an incompatible installed adapter.
+`Worker.WorkloadState` and `SDKCaller.WorkloadState` expose host-owned identity,
+monotonic readiness and original-lease observations for future IAM integration.
+Artifact revisions are trusted spawn configuration, never environment/frame
+claims. Empty artifacts stay unknown. These snapshots do not provide atomic
+admission; readiness/lease invalidation must join the IAM gate at cut-over.
 | `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), preserved independently of the removed SDK HTTP wrappers; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |

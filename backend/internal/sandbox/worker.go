@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // ErrWorkerExited signals that the worker process died (stdout EOF, fatal
@@ -38,6 +40,9 @@ type Worker struct {
 	stderr  io.ReadCloser
 	Spawned time.Time
 	Served  atomic.Int64
+
+	identity *WorkloadIdentity // set once by Spawn, never exposed by reference
+	ready    atomic.Bool       // readiness permanently ends bootstrap for this worker
 
 	// sdk is the host end of the per-worker SDK channel (nil when disabled).
 	sdk net.Conn
@@ -218,6 +223,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		readStop:   make(chan struct{}),
 		sdk:        sdkHost,
 		sdkEnabled: sdkHost != nil,
+		identity:   &WorkloadIdentity{FunctionID: cfg.FunctionID, WorkerID: ids.New(), ArtifactRevision: cfg.ArtifactRevision},
 	}
 	go w.readLoop()
 	if sdkHost != nil {
@@ -226,6 +232,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 			functionID: cfg.FunctionID,
 			handler:    cfg.SDKHandler,
 			state:      w.disp.Load,
+			worker:     w,
 			// A protocol violation means the sandbox is misbehaving: do not
 			// reuse it. A reply that cannot be written means it stopped reading.
 			violation: w.markDead,
@@ -317,7 +324,44 @@ func (w *Worker) AwaitReady(ctx context.Context) error {
 		return fmt.Errorf("%w: invalid adapter startup frame", ErrWorkerExited)
 	}
 	w.stderrSync.Store(frame.StderrSync)
+	w.ready.Store(true)
 	return nil
+}
+
+// WorkloadState returns a detached host snapshot, or false for an unowned Worker.
+// Like SDKCaller.WorkloadState, this does not provide atomic IAM admission.
+func (w *Worker) WorkloadState() (WorkloadState, bool) {
+	if w == nil {
+		return WorkloadState{}, false
+	}
+	st := w.disp.Load()
+	lease := ""
+	if st != nil {
+		lease = st.info.Lease
+	}
+	return w.observeWorkload(st, lease, nil)
+}
+
+func (w *Worker) observeWorkload(original *dispatchState, lease string, ctx context.Context) (WorkloadState, bool) {
+	if w == nil || w.identity == nil {
+		return WorkloadState{}, false
+	}
+	s := WorkloadState{Identity: *w.identity, Ready: w.ready.Load(), Alive: !w.dead.Load(), Phase: WorkloadUnbound}
+	switch {
+	case !s.Alive || (ctx != nil && ctx.Err() != nil):
+		s.Phase = WorkloadInactive
+	case lease != "":
+		s.Phase = WorkloadStaleLease
+		if original != nil {
+			s.ExecutionID, s.Lease = original.info.ExecutionID, original.info.Lease
+			if w.disp.Load() == original && original.info.Lease == lease && original.ctx.Err() == nil {
+				s.Phase = WorkloadExecution
+			}
+		}
+	case !s.Ready:
+		s.Phase = WorkloadBootstrap
+	}
+	return s, true
 }
 
 func (w *Worker) readLoop() {

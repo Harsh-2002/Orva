@@ -175,6 +175,7 @@ type sdkServer struct {
 	functionID string
 	handler    SDKHandler
 	state      func() *dispatchState
+	worker     *Worker // optional; standalone protocol servers have no workload authority
 	// violation is called after the conn is closed for a protocol violation;
 	// the worker must not be reused. kill is called when a reply cannot be
 	// written within writeTimeout.
@@ -240,6 +241,7 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 		return
 	}
 	caller := SDKCaller{FunctionID: s.functionID}
+	var original *dispatchState
 	ctx := s.connCtx
 	// ctx is replaced below by the lease ctx; the session rides on whichever
 	// one the op ends up with.
@@ -247,6 +249,7 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 		st := s.state()
 		switch {
 		case st != nil && st.info.Lease == req.Lease:
+			original = st
 			info := st.info
 			caller.Exec = &info
 			ctx = st.ctx
@@ -258,6 +261,9 @@ func (s *sdkServer) dispatch(req sdkRequest) {
 		}
 		// Otherwise: a stale lease on an op that needs no execution is served
 		// as module scope (Exec stays nil).
+	}
+	if s.worker != nil {
+		caller.workload = &sdkWorkloadSource{worker: s.worker, original: original, lease: req.Lease, ctx: s.connCtx}
 	}
 	if s.inflight.Add(1) > MaxSDKInflight {
 		s.inflight.Add(-1)
