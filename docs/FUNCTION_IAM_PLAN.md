@@ -1,6 +1,6 @@
 # Function IAM — design proposal and implementation gates
 
-Status: **design approved for staged implementation; not implemented or approved for rollout**.
+Status: **design approved; foundation implementation underway, IAM not activated or approved for rollout**.
 Baseline: `311dd91d77aa8601489c72f51c76ec6837540e72` (16 November 2026).
 This proposal consolidates independent architecture, security and UX reviews.
 It is not the current API reference. Releases remain paused; no production
@@ -519,8 +519,14 @@ Minimum scenario matrix:
   ranges, exclusive cursors, namespace separation and expiry. Generated range
   property checks compare with Go literal-prefix matching. This helper is not
   authorization; policy enforcement must precede its use at cut-over.
-- Pure policy parser/evaluator foundation is in progress. No IAM migration,
-  route/tool, channel default or scheduler enforcement has been activated.
+- Pure `workloadiam` parser/evaluator foundation implemented. Its package README
+  pins the version-1 document and host integration seam; example documents are
+  future IAM inputs, not accepted by current function APIs. Race-enabled package
+  tests and vet pass; independent verification remains a separate gate.
+- Independent literal-KV verification passed the full database race suite and
+  vet, including an EXPLAIN check proving bounded function/key index lookup.
+- No IAM boot migration, route/tool, channel default or scheduler enforcement
+  has been activated. Revision storage is the next inert foundation slice.
 
 Source integration map at baseline:
 

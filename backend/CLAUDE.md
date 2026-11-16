@@ -29,6 +29,7 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
+| `workloadiam` | Inert function-IAM policy parser and immutable evaluator. Not wired into SDK, scheduler, storage migration or public APIs yet; see the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `config` | Config struct; environment variables only — there is no config file or YAML loader (see docs/CONFIG.md) |
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
