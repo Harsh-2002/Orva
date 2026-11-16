@@ -598,6 +598,16 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Stable browser-session UUID references are implemented as an inert additive
+  schema/read seam. The explicit test-only initializer backfills independent
+  host UUIDs in 128-row chunks with transaction-wide rollback, preserving valid
+  existing IDs. It never loads cookie values during backfill. Token-free identity
+  records can be resolved by bearer or UUID with live DB user/expiry checks and
+  generic errors. Boot, login writers, middleware, actor/cache identity and
+  permissions remain unchanged; legacy NULL-ID rows deny these new lookups.
+  No hash-derived/prefix identity or new role model is introduced. Live trusted
+  principal flow and commit-time authorization integration remain required.
+
 - Internal opt-in verified-path consumption now transfers opaque code/runtime
   pairs into sandbox execution, checks owner/runtime labels and chooses the
   concrete leased paths. Old copied preparer handles cannot release transferred
