@@ -171,6 +171,11 @@ Dispatch rejects cancellation observed before lease publication/submission,
 including after waiting for its mutex, without invalidating a healthy worker.
 Cancellation after submission still marks the worker dead. This does not make
 cancellation atomic with the subsequent wire write.
+`ExecConfig.VerifiedPaths` is internal opt-in lease transfer for concrete code/
+runtime trees. Nil keeps legacy resolution. Function/runtime labels must match;
+spawn failure releases ownership, and successful workers release only during
+centralized post-Wait cleanup. It does not mint artifact approval. Host endpoint
+probes reject absolute links before following them; pools still supply no leases.
 | `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), preserved independently of the removed SDK HTTP wrappers; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |

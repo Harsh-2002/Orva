@@ -5,8 +5,9 @@ host-trusted manifest expectations, renames them into private generations, and
 excludes its own reclamation while a lease is held. It is not a registry that
 approves arbitrary existing paths.
 
-**Nothing serves through this package.** There is no pool, sandbox, installer,
-GC, database, IAM-gate, boot, restore, or release wiring. This is not proof of
+**Nothing serves through this package.** A sandbox opt-in consumer exists, but
+pools do not supply it. There is no installer, GC, database, IAM-gate, boot,
+restore, or release wiring. This is not proof of
 actual runtime pinning, packaged-runtime provenance, policy approval, or atomic
 code/config/secrets publication. An unknown existing runtime cannot be acquired.
 
@@ -93,6 +94,23 @@ stores and does not prove current function/artifact generation or IAM approval.
 Future publication must revalidate its own authoritative generation under its
 ordered locks. Run preparation and cleanup outside IAM/pool locks. The package
 starts no goroutines, timers, retries or background processes.
+
+`PreparedPaths.Transfer()` atomically consumes a pair and all copied handles,
+returning a new owner. Old handles expose empty paths/identities, cannot transfer
+again, and cannot release the new owner's leases. `Identities()` returns detached
+store-minted labels, not policy approval. Transfer and Release serialize against
+one another.
+
+The sandbox's internal opt-in `ExecConfig.VerifiedPaths` consumes the pair,
+validates function/runtime ownership and uses its concrete code/runtime paths
+instead of legacy mutable paths. Spawn failures release it; successful workers
+retain it through readiness, retirement, lazy imports and process termination
+until centralized post-Wait cleanup. One-shot execution retains it through
+process completion. Nil preserves legacy behavior; serving pools do not supply
+it. Host runtime-endpoint probes support contained relative links only and reject
+absolute endpoint links before following them; this is narrower than runtime
+manifest link support. Generation/config/secrets approval and actual packaged
+runtime compatibility remain separate obligations.
 
 ## Manifest version 1 and supported profile
 

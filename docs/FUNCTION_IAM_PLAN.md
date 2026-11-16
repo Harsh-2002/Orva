@@ -598,6 +598,17 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Internal opt-in verified-path consumption now transfers opaque code/runtime
+  pairs into sandbox execution, checks owner/runtime labels and chooses the
+  concrete leased paths. Old copied preparer handles cannot release transferred
+  leases. Failure releases ownership; workers retain leases until centralized
+  post-Wait cleanup, not pool release or kill request. One-shot execution also
+  owns its pair through completion. Nil preserves serving behavior. Host endpoint
+  probes conservatively allow contained relative links only, rejecting absolute
+  links before host traversal. Five refined artifactfs/sandbox race repetitions
+  and vet pass; independent review and real-runtime/approval integration remain
+  required. Fake-jail tests are not nsjail pinning or live IAM acceptance.
+
 - Stopped-container metadata inventory of the local artifactfs test image
   (`19e0ad4ad621…`) found 6,530 Node and 6,689 Python entries, including 156/160
   direct symlink chains, relative dotdot targets and symlinked target parents.

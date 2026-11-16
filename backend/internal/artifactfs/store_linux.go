@@ -430,6 +430,11 @@ func (s *Store) Close() error {
 }
 
 type PreparedPaths struct {
+	state *preparedPathsState
+}
+
+type preparedPathsState struct {
+	mu            sync.Mutex
 	code, runtime *Lease
 }
 
@@ -451,19 +456,54 @@ func PreparePaths(codeStore *Store, codeGeneration string, runtimeStore *Store, 
 		runtime.Release()
 		return nil, ErrInvalid
 	}
-	return &PreparedPaths{code: code, runtime: runtime}, nil
+	return &PreparedPaths{state: &preparedPathsState{code: code, runtime: runtime}}, nil
 }
 
 func (p *PreparedPaths) Paths() (code, runtime string) {
-	if p == nil {
+	if p == nil || p.state == nil {
 		return "", ""
 	}
-	return p.code.Path(), p.runtime.Path()
+	p.state.mu.Lock()
+	defer p.state.mu.Unlock()
+	return p.state.code.Path(), p.state.runtime.Path()
+}
+
+// Identities returns detached store-minted bindings, not policy approval.
+func (p *PreparedPaths) Identities() (code, runtime Identity) {
+	if p == nil || p.state == nil {
+		return Identity{}, Identity{}
+	}
+	p.state.mu.Lock()
+	defer p.state.mu.Unlock()
+	return p.state.code.Identity(), p.state.runtime.Identity()
+}
+
+// Transfer consumes this handle and all its copies as one ownership operation.
+// A deferred Release on the old handle cannot release the returned pair.
+func (p *PreparedPaths) Transfer() (*PreparedPaths, error) {
+	if p == nil || p.state == nil {
+		return nil, ErrInvalid
+	}
+	s := p.state
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.code == nil || s.runtime == nil {
+		return nil, ErrInvalid
+	}
+	next := &PreparedPaths{state: &preparedPathsState{code: s.code, runtime: s.runtime}}
+	s.code, s.runtime = nil, nil
+	return next, nil
 }
 
 func (p *PreparedPaths) Release() {
-	if p != nil {
-		p.code.Release()
-		p.runtime.Release()
+	if p == nil || p.state == nil {
+		return
 	}
+	s := p.state
+	s.mu.Lock()
+	code, runtime := s.code, s.runtime
+	s.code, s.runtime = nil, nil
+	s.mu.Unlock()
+	code.Release()
+	runtime.Release()
 }
