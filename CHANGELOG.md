@@ -14,6 +14,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Removed
+
+- Removed the `orva chat` CLI command. The dashboard AI assistant and server-side
+  AI/MCP interfaces are unchanged.
+
 ### Upgrade notes
 
 - Awaited Node `trace.span` now waits for its bounded telemetry channel request

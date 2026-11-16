@@ -77,8 +77,8 @@ func stdoutIsTerminal() bool {
 
 // styles resolves the Orva color palette for this command, honoring the same
 // gate as colorEnabled (--no-color / NO_COLOR / JSON mode / non-TTY). Every
-// command and the chat renderer style through the returned set so the look is
-// consistent and color control stays in one place.
+// command and the diff colorizer style through the returned set, so color
+// control stays in one place.
 func styles(cmd *cobra.Command) *theme.Styles {
 	return theme.New(colorEnabled(cmd))
 }

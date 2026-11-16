@@ -1,6 +1,9 @@
 package commands
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestCommandTree proves every advertised subcommand path resolves via
 // cobra.Command.Find. A new subcommand that's forgotten in RegisterClient
@@ -41,7 +44,6 @@ func TestCommandTree(t *testing.T) {
 		{"login"},
 		{"completion"},
 		{"upgrade"},
-		{"chat"},
 		{"docs"},
 	}
 	for _, p := range paths {
@@ -55,6 +57,19 @@ func TestCommandTree(t *testing.T) {
 		if cmd.Name() != p[len(p)-1] {
 			t.Errorf("Find %v: got %q want %q", p, cmd.Name(), p[len(p)-1])
 		}
+	}
+}
+
+func TestChatCommandIsNotRegistered(t *testing.T) {
+	root := NewRoot()
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "chat" {
+			t.Fatal("chat command is still registered")
+		}
+	}
+	root.SetArgs([]string{"chat"})
+	if _, err := root.ExecuteC(); err == nil || !strings.Contains(err.Error(), `unknown command "chat"`) {
+		t.Fatalf("executing chat returned %v, want an unknown-command error", err)
 	}
 }
 
@@ -112,13 +127,6 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"pool", "set"}, "fn"},
 		{[]string{"diff"}, "from"},
 		{[]string{"diff"}, "to"},
-		{[]string{"chat"}, "prompt"},
-		{[]string{"chat"}, "provider"},
-		{[]string{"chat"}, "model"},
-		{[]string{"chat"}, "thinking"},
-		{[]string{"chat"}, "conversation"},
-		{[]string{"chat"}, "auto-approve"},
-		{[]string{"chat"}, "raw"},
 		{[]string{"docs"}, "raw"},
 	}
 	root := NewRoot()

@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"net/url"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -93,44 +92,6 @@ func completeRuntimes(cmd *cobra.Command, _ []string, _ string) ([]string, cobra
 	return ids, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeChatModels suggests model ids of the operator's active provider for
-// `orva chat --model`.
-func completeChatModels(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-	client, ok := completionClient(cmd)
-	if !ok {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	settingsResp, err := client.Get("/api/v1/ai/settings")
-	if err != nil || checkResponse(settingsResp) != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	var st struct {
-		Settings struct {
-			ActiveProviderID string `json:"active_provider_id"`
-		} `json:"settings"`
-	}
-	if decodeJSON(settingsResp, &st) != nil || st.Settings.ActiveProviderID == "" {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	resp, err := client.Get("/api/v1/ai/providers/" + url.PathEscape(st.Settings.ActiveProviderID) + "/models")
-	if err != nil || checkResponse(resp) != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	var out struct {
-		Models []struct {
-			ID string `json:"id"`
-		} `json:"models"`
-	}
-	if decodeJSON(resp, &out) != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	ids := make([]string, 0, len(out.Models))
-	for _, m := range out.Models {
-		ids = append(ids, m.ID)
-	}
-	return ids, cobra.ShellCompDirectiveNoFileComp
-}
-
 // wireCompletions attaches dynamic completions to the command tree. Commands
 // are resolved via root.Find so this stays decoupled from how each subcommand
 // var is named/scoped.
@@ -169,9 +130,6 @@ func wireCompletions(root *cobra.Command) {
 	// Enum + resource flags.
 	if c, _, err := root.Find([]string{"deploy"}); err == nil {
 		_ = c.RegisterFlagCompletionFunc("runtime", completeRuntimes)
-	}
-	if c, _, err := root.Find([]string{"chat"}); err == nil {
-		_ = c.RegisterFlagCompletionFunc("model", completeChatModels)
 	}
 	// Global --output enum.
 	_ = root.RegisterFlagCompletionFunc("output", fixedCompletion("table", "json"))

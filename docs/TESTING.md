@@ -862,7 +862,7 @@ PYTHONPATH=/home/dev/Orva/test/e2e \
   python3 tests/test_system.py
 ```
 
-Add `ORVA_BIN=/abs/path/build/orva` for `test_cli.py` / `test_cli_chat.py`, and
+Add `ORVA_BIN=/abs/path/build/orva` for `test_cli.py` / `test_cli_removed.py`, and
 `MOCK_HOST=127.0.0.1` (the default) for AI modules.
 
 Real observed output:
@@ -915,8 +915,8 @@ conversation on the instance**, not only the ones it created. Pointing it at a
 real instance wipes the user's entire AI chat history. This directly violates
 `test/e2e/CLAUDE.md`'s own rule.
 
-**Conversation leaks.** `test_ai_chat`, `test_ai_advanced`, `test_ai_perms`,
-`test_cli_chat` create conversations and contain **zero** conversation-delete
+**Conversation leaks.** `test_ai_chat`, `test_ai_advanced`, and
+`test_ai_perms` create conversations and contain **zero** conversation-delete
 call sites. They clean up their functions and leave the conversation and
 message rows.
 
@@ -1837,10 +1837,9 @@ was rejected with `description is required: pass a one-sentence summary…`, whi
 the same body via `POST /api/v1/functions` returns 201. Validation tests must
 use genuinely invalid input, not merely incomplete input.
 
-CLI equivalent: `orva --endpoint "$B" --api-key "$K" chat` (REPL, `/help
-/model /thinking /new /clear /yolo /exit`) or the same with `chat -p "…"` for a
-one-shot. Both write conversations and drive `ai_settings` on whatever endpoint
-they reach — the flags are not optional here either.
+The CLI does not provide an AI chat client. Positive coverage of the server's
+AI chat and approval flow remains in `tests/test_ai_chat.py`; CLI removal
+coverage is in `tests/test_cli_removed.py`.
 
 ### 4.14 Streaming responses
 

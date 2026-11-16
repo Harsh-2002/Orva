@@ -55,7 +55,6 @@ const (
 	groupData      = "data"
 	groupEventing  = "eventing"
 	groupNetwork   = "network"
-	groupAI        = "ai"
 	groupSystem    = "system"
 )
 
@@ -87,14 +86,12 @@ func commandGroups() map[*cobra.Command]string {
 		dnsCmd:      groupNetwork,
 		firewallCmd: groupNetwork,
 
-		chatCmd: groupAI,
-		docsCmd: groupAI,
-
 		systemCmd:     groupSystem,
 		activityCmd:   groupSystem,
 		backupCmd:     groupSystem,
 		keysCmd:       groupSystem,
 		loginCmd:      groupSystem,
+		docsCmd:       groupSystem,
 		completionCmd: groupSystem,
 		upgradeCmd:    groupSystem,
 	}
@@ -109,14 +106,12 @@ func RegisterClient(root *cobra.Command) {
 		&cobra.Group{ID: groupData, Title: "State (kv, secrets):"},
 		&cobra.Group{ID: groupEventing, Title: "Eventing (cron, jobs, webhooks, channels):"},
 		&cobra.Group{ID: groupNetwork, Title: "Network (routes, dns, firewall):"},
-		&cobra.Group{ID: groupAI, Title: "AI:"},
 		&cobra.Group{ID: groupSystem, Title: "System & maintenance:"},
 	)
 	root.AddCommand(
 		activityCmd,
 		backupCmd,
 		channelsCmd,
-		chatCmd,
 		completionCmd,
 		cronCmd,
 		deployCmd,

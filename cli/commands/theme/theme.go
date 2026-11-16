@@ -26,8 +26,6 @@ type Styles struct {
 	Warn     lipgloss.Style // amber — warnings
 	Info     lipgloss.Style // sky — informational
 	Muted    lipgloss.Style // dim — secondary text, thinking, hints
-	Banner   lipgloss.Style // bold primary — the chat banner line
-	Prompt   lipgloss.Style // the REPL input glyph
 	DiffAdd  lipgloss.Style // green — added diff lines
 	DiffDel  lipgloss.Style // red — removed diff lines
 	DiffHunk lipgloss.Style // cyan — @@ hunk headers
@@ -52,8 +50,6 @@ func New(enabled bool) *Styles {
 			Warn:     plain,
 			Info:     plain,
 			Muted:    plain,
-			Banner:   plain,
-			Prompt:   plain,
 			DiffAdd:  plain,
 			DiffDel:  plain,
 			DiffHunk: plain,
@@ -78,8 +74,6 @@ func New(enabled bool) *Styles {
 		Warn:     lipgloss.NewStyle().Foreground(warn),
 		Info:     lipgloss.NewStyle().Foreground(info),
 		Muted:    lipgloss.NewStyle().Foreground(muted),
-		Banner:   lipgloss.NewStyle().Foreground(primary).Bold(true),
-		Prompt:   lipgloss.NewStyle().Foreground(primary).Bold(true),
 		DiffAdd:  lipgloss.NewStyle().Foreground(success),
 		DiffDel:  lipgloss.NewStyle().Foreground(danger),
 		DiffHunk: lipgloss.NewStyle().Foreground(cyan),

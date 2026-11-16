@@ -24,7 +24,7 @@ const docsPlaceholderOrigin = "https://your-orva-instance.example.com"
 
 var docsCmd = &cobra.Command{
 	Use:     "docs",
-	GroupID: groupAI,
+	GroupID: groupSystem,
 	Short:   "Show the Orva reference documentation",
 	Long: `Render the full Orva reference in the terminal.
 
