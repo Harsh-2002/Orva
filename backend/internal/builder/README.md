@@ -1,4 +1,4 @@
-# Builder runtime pinning (internal opt-in)
+# Builder runtime pinning and owned output (internal opt-in)
 
 `New(WithRuntimeBinding(provider))` captures a host-trusted runtime binding
 **once at actual `Build` entry**. There is no serving constructor, queue
@@ -61,7 +61,7 @@ cache or existing version-directory replacement algorithm was changed.
 
 **Supervisor Wait does not prove grandchildren or output writers have died.**
 Domain handles are copyable and this API cannot establish exclusive per-build
-ownership. Build therefore does **not** Fence, Check, Close or otherwise claim
+ownership. Runtime-only Build therefore does **not** Fence, Check, Close or otherwise claim
 ownership of a supplied Domain. Its trusted lifecycle owner remains responsible
 for surviving descendants and must retain any broader lifetime leases until
 real fencing completes. In particular, releasing the pipeline/command leases
@@ -141,3 +141,163 @@ directories; `workloadpolicy.Service` still requires a trusted current-state
 observer; `artifactfs.OpenRecovering` remains inspection-only; and
 `workloadfence.Domain.Fence`/`Check` require ownership/proof not supplied by
 this binding. None is activated or bypassed here.
+
+## Owned managed output — separate opt-in
+
+`New(WithRuntimeBinding(provider), WithManagedOutput(owner))` selects a distinct
+actual `Build` path. Construct `owner` with `NewOutputOwner(OutputConfig)` from
+a trusted code store, a live `workloadfence.CaptureBudget` capability, an
+explicitly delegated child parent, and a fresh empty private metadata root.
+No serving constructor or queue enables it. Nil owner, absent runtime binding,
+invalid budgets/limits, provider-supplied Domain, `BuildFunc`, and syntax hooks
+deny; host hooks are never invoked in this mode.
+
+### Deliberately narrow production profile
+
+The owner approved a **plain Node/Python, no-dependency, no-TypeScript** first
+slice. Root `package.json`, `requirements.txt`, or `tsconfig.json` denies before
+any command, even if the manifest is empty. Entrypoints must be plain
+`.js`/`.cjs`/`.mjs` or `.py`. No npm/pip/npx process runs here.
+The bounded data-only archive extractor refuses links, special entries,
+extended metadata, duplicates and over-budget inputs. Archive UID/GID do not
+authorize host chown; newly produced files belong to the host producer.
+Actual output UID/GID, POSIX modes, link text and hardlink relationships are
+observed without rewriting or filtering when constructing expectations.
+
+This restriction matters: existing `RunBuild` grants writable code and unlimited
+file size, not an aggregate disk quota. A post-fence scan cannot retroactively
+enforce a byte reservation during arbitrary install scripts. Until a reviewed
+storage-quota boundary exists, installing/compiling third-party code is not part
+of this managed profile. The pinned interpreter's syntax-only tools are trusted
+not to execute author code or make unbounded writes. This is not a general
+disk-quota or hostile-runtime containment claim.
+
+### Exclusive epoch and staging ownership
+
+The output owner reserves job count and bytes **before** the provider call.
+Build copies builder configuration and only its consumed function identity/
+runtime/entrypoint scalars (not unused environment/description maps or strings)
+under that admission, then captures the runtime once through the
+accepted runtime path. An arbitrary Domain returned by that provider is rejected,
+never fenced. Instead, Build creates a fresh private metadata directory, a fresh
+child cgroup parent, and its own `CreateUnderBudget` Domain. No Domain, proof,
+stage handle, writable descriptor or staging path is exported by the output API.
+The host must provision delegation and move only its own daemon into a leaf;
+production code does not capture budgets or alter ancestor controls for it.
+Keep code-store/metadata namespaces outside legacy GC-swept directories.
+Trusted provider/logger callbacks must cooperate with cancellation and return;
+admission bounds their outstanding jobs, not arbitrary host callback execution.
+
+The source is extracted into **new** `CodeStore.Begin` staging under explicit
+compressed/decompressed archive, header/entry, path, total-file and per-file
+bounds. No legacy `versions/`, current symlink, cache entry, `.orva-ready` or
+installed tree is adopted, overwritten or used as code authority. The
+no-install syntax command uses the same private Domain and pinned runtime.
+No legacy adapter wrapper or ready marker is needed or written.
+
+After the command returns—or build context/finite build timeout expires—the
+owner uses a separate bounded cleanup context for **Fence and Check on that
+exact private epoch**. It also waits for the command runner to finish. Only then
+may its private producer inspect the completed stage, compute bounded typed
+manifest expectations and call strict `Stage.Seal(KindCode, functionID, ...)`.
+The producer accepts no arbitrary path or caller-supplied "fenced" flag. It
+checks the opaque proof before and after inspection. The store independently
+verifies the complete tree. Unsupported links/xattrs/special nodes deny, without
+stripping them or changing the verifier. The runtime anchor survives fencing,
+stage cleanup and metadata/cgroup cleanup; no supervisor-Wait writer proof is
+substituted.
+
+### Failure and bounded explicit cleanup
+
+Errors and cancellation return **no BuildResult**. Before Stage.Abort/removal or
+runtime-anchor release, cleanup closes entry, fences and checks all writers.
+If no Domain could be created, no Start capability or build writer ever existed.
+If a fence/check/runner-completion or later cleanup fails, the output owner
+retains the stage/returned failed-seal generation, runtime lease, Domain/proof,
+private metadata, and logical reservation. The error includes `ErrOutputPending`.
+`Usage()` exposes bounded active/pending counts and reserved bytes; new work
+denies with `ErrOutputCapacity` when active plus pending slots/bytes are full.
+
+`RetryCleanup(ctx)` is explicit, serialized per pending job and bounded by the
+configured cleanup timeout. It never seals or promotes quarantined output.
+Once proof and command completion are available, it aborts/reclaims and removes
+only its own private groups/metadata, then releases the runtime anchor and slot.
+After successful fencing and Domain closure, partial filesystem/group-removal
+retries continue only that already-closed private ownership; they never reopen
+entry or manufacture a new epoch. Host repair may be needed for integrity or
+permission failures.
+
+OutputOwner copies share one state. Retain the owner/Builder until `Close`
+succeeds; Close denies new work and returns `ErrOutputPending` while any job
+remains. There are no cleanup finalizers, automatic background retry loops,
+GC-based reclamation, or process-restart adoption. Limits bound one owner's
+logical prepared/cleanup state, not global jail counts, disk usage or kernel
+resource enforcement. Surviving owners must explicitly retry; after process
+loss, persisted metadata/stores require separate host inspection/recovery.
+
+### Result and remaining boundaries
+
+A successful managed `BuildResult` records `CodeArtifact`, `RuntimeArtifact`,
+`RuntimeABI`, `SourceArchiveSHA256`, `AuthoredEntrypoint`, and resolved
+`Entrypoint`. `CodeHash` retains the archive+ABI fingerprint input; it is **not**
+the sealed code digest. `CodeArtifact.Digest` is that separate full manifest
+identity. New metadata is excluded from legacy JSON. Managed `VersionDir` and
+`ImageTag` remain empty and `Cached` is false. The caller consumes the exact
+generations via store-acquired leases; retirement may deny that later acquisition.
+Successful sealed generations remain under store ownership until explicit
+retirement/reclamation, not under the output owner's active-job quota.
+
+Neither a successful build, the closed epoch proof, nor either artifact digest
+is policy approval, current-generation authority, a source/config/secrets
+transaction, or a serving grant. Durable output/runtime mapping, queued
+submitter live authorization, registry/policy publication, serving/pool cut-over,
+and power-loss/restore reconciliation and activation are still separate gates.
+Stable trusted ancestor directories, exclusive cooperative host ownership,
+no outside writable aliases/mounts, and no reuse/tampering of live metadata,
+stage or epoch paths are prerequisites—not defenses against a privileged host.
+
+### Owned-output qualification — 17 November 2026
+
+This is a new five-file builder acceptance scope on
+`8985523155b0d32ae805fd196be84e2c179ddd62`, not an inferred extension of the
+earlier runtime-only result. Artifactfs, workloadfence, Sandbox.RunBuild,
+runtime pinning helpers, and strict runtime recipe functions were unchanged.
+In a fresh 2-vCPU / 4-GiB / 20-GiB guest with Go 1.27.3, the final Go source passed:
+
+- all builder/sandbox/workloadspawn package tests normally and under race
+  detection, plus vet, offline under explicit env-i allowlists;
+- physical managed-output tests under umasks 022 and 077 and three race
+  repetitions: pre-exec same-private-epoch membership, frozen input capture,
+  delayed-grandchild fencing before Seal, error/cancel fencing before Abort,
+  fence-failure quarantine with retained runtime lease/quota, eight concurrent
+  cleanup retries, capacity races, bad binding/budget denial, unsupported
+  link/xattr denial, no legacy replacement, and no-install/hook rejection;
+- actual Node 26.13.0 and Python 3.15.2 Build → private Domain Fence/Check →
+  strict fresh code Seal → Factory → real worker, under both ordinary umasks
+  and race detection. The workers used the exact returned code/runtime pair,
+  executed SDK/lazy imports after retirement, and retained both leases during
+  deliberately blocked post-Wait cleanup.
+
+The independently authored fixture code manifests matched the builder's sealed
+digests in every run: Node
+`e0f14915b2fb81aee0eb4fb71930ee18aa6ee97f83d52bd77edf82d54a889121`,
+Python `c97bc06093cfda393807a6f2c2c1355731357111b2f73654d189f7542d9b2a03`.
+Runtime recipe archive hashes remained exactly the earlier authenticated recipe
+values; no installed-tree adoption or verifier/profile relaxation was used.
+Unlike the earlier runtime-only qualification, build and worker epochs here
+used explicitly delegated cpu/memory/pids domains. This proves the tested
+enrollment/fencing paths, not a CPU/memory overload or global-capacity guarantee.
+The SDK remained an identity fixture, not live IAM admission.
+
+Exact commands, final source manifests, full runtime and authored code manifests,
+returned identities/fingerprint inputs and physical logs are retained under
+`/tmp/opencode/iam-managed-output/`. The verified tested-source snapshot SHA-256
+is `716fdcc0830ed195e0cb87d85e7d0820701ae04d14bef99a2fbe79f31e9615c9`;
+its Go hashes match the final checkout. This qualification text was appended
+afterward without editing tested Go files. The task-owned guest and all its
+explicit test budgets were removed; the final sandbox listing was empty.
+
+Full repository make lint/test, build-all and sandbox-required full E2E were
+not run. Installation/TypeScript output, durable publication/live submitter
+authorization, current-generation/IAM/serving cut-over and restore activation
+remain outside this result.

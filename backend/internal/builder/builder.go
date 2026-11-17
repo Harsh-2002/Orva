@@ -43,8 +43,11 @@ type BuildResult struct {
 	// pool's buildEnv can publish it as ORVA_ENTRYPOINT to the sandbox.
 	Entrypoint string `json:"entrypoint"`
 	// RuntimeArtifact records what ran, not current authority or sealed output.
-	RuntimeArtifact artifactfs.Identity `json:"-"`
-	RuntimeABI      string              `json:"-"`
+	RuntimeArtifact     artifactfs.Identity `json:"-"`
+	RuntimeABI          string              `json:"-"`
+	CodeArtifact        artifactfs.Identity `json:"-"`
+	SourceArchiveSHA256 string              `json:"-"`
+	AuthoredEntrypoint  string              `json:"-"`
 }
 
 // ErrInsufficientDisk is returned by Build when the data directory has
@@ -98,6 +101,8 @@ type Builder struct {
 	runtimeProvider       RuntimeProvider
 	buildRuntime          *sandbox.BuildRuntime
 	buildDomain           *workloadfence.Domain
+	managedOutputEnabled  bool
+	outputOwner           *OutputOwner
 }
 
 // New creates a new Builder.
@@ -127,6 +132,9 @@ func (b *Builder) SetEgressPolicy(fn func() (string, string, error)) {
 // and returns the existing path with Cached=true. This makes redeploys of
 // identical content nearly free.
 func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchivePath string) (*BuildResult, error) {
+	if b.managedOutputEnabled {
+		return b.buildManaged(ctx, fn, codeArchivePath)
+	}
 	start := time.Now()
 	var runtimeArtifact artifactfs.Identity
 	var runtimeABI string

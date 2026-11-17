@@ -66,6 +66,15 @@ cache hits without provenance deny rather than resolving mutable rootfs paths.
 The serving constructor does not enable this option. Capturing a supplied Domain
 does not confer exclusive ownership or prove all build descendants have exited.
 
+The separate managed-output mode creates its own exclusive build Domain and
+fresh artifact staging. Fence/Check must succeed before output inspection,
+sealing or deletion. Failed cleanup retains staging, runtime and finite quota
+ownership for explicit retry; it never returns an approved output. Host hooks,
+provider-supplied Domains, dependency manifests and TypeScript deny in this
+limited plain Node/Python profile. Archive parent components reject before
+normalization. This does not bind stores to an instance epoch, publish current
+generations, enable recovery or restore approval.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many

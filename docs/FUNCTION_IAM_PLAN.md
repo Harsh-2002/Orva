@@ -612,6 +612,20 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Managed-output work now drives actual Build through fresh private staging,
+  an exclusive build Domain and Fence/Check before inspection, Seal or Abort.
+  Unresolved cleanup retains runtime/stage ownership and bounded capacity for
+  explicit retry. Independent writer-fencing and real plain Node/Python
+  Build→Seal→Factory→worker checks passed, but raw contained `..` archive paths
+  normalized rather than rejected. The corrected producer rejects raw parent
+  components; parent race suites under both umasks and canonical lint/tests
+  pass. Corrected independent rejection/compatibility/metadata checks under both
+  umasks, normal/race suites, vet and fresh physical Node/Python pipelines also
+  pass, with original HOLD evidence retained and the owned VM removed.
+  Dependency manifests,
+  TypeScript and host build hooks deny in this limited profile. No serving,
+  durable publication, current authority or recovery activation is included.
+
 - Internal builder runtime binding now captures one concrete generation at Build
   entry, retains a pipeline anchor and leases each command through cleanup.
   Syntax/install/compiler steps do not reselect mutable runtimes; full identity

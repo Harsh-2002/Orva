@@ -49,6 +49,10 @@ holds a pipeline anchor and gives commands independent leases through cleanup.
 Managed cache hits without provenance deny; legacy construction is unchanged.
 No serving caller enables this path. Runtime pinning does not fence build
 descendants or seal/approve code output; see `builder/README.md`.
+Separate internal managed-output mode owns fresh staging and an exclusive build
+Domain, fencing before inspection, Seal or Abort. Failed cleanup retains bounded
+ownership for retry. Only plain no-dependency Node/Python is qualified; no
+serving caller, durable publication, current authority or recovery is enabled.
 | `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; pending counts derive from the detected memory/FD envelope, with a reserved share for other functions. Saturated pools wait at most 2 seconds; a pool that can still grow or is spawning waits up to the 10-second adapter-readiness budget plus one scaler tick. The HTTP proxy reserves a conservative share of daemon memory before body read; unknown-length bodies are charged at the configured cap. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. Failed asynchronous spawns wake pending callers with the original error, preserving fail-closed egress-policy responses. |
 
 `pool/hostmem.go` discovers the process's cgroup-v2 ancestry via
