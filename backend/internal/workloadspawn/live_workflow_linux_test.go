@@ -31,6 +31,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	orvamcp "github.com/Harsh-2002/Orva/backend/internal/mcp"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/proxy"
@@ -68,6 +69,7 @@ func TestLiveWorkflow(t *testing.T) {
 		t.Skip("explicit disposable VM only")
 	}
 	evidence := os.Getenv("ORVA_RUNTIME_RECIPE_OUTPUT")
+	managedPolicies := os.Getenv("ORVA_MANAGED_POLICIES") == "1"
 	if evidence == "" {
 		t.Fatal("missing evidence directory")
 	}
@@ -128,7 +130,11 @@ func TestLiveWorkflow(t *testing.T) {
 			Version: 1, MemoryMB: 256, CPUs: 1, TimeoutMS: 10000, MaxConcurrency: 1, NetworkMode: "none", SDK: true,
 			EnvVars: map[string]string{"SCRATCH_CONFIG": "frozen-config"}}
 		liveMust(t, db.InsertFunction(fn))
-		liveMust(t, db.KVPut(id, "demo", []byte(`"scratch-value"`), nil))
+		demo := []byte(`"scratch-value"`)
+		if managedPolicies {
+			demo, _ = json.Marshal("scratch-value-" + lang)
+		}
+		liveMust(t, db.KVPut(id, "demo", demo, nil))
 		record, err := db.NewIAMPolicy(t.Context(), id, false, database.IAMActorReference{Kind: "system", ID: ids.New()})
 		liveMust(t, err)
 		e, err := record.AdmissionEvaluator()
@@ -146,6 +152,28 @@ func TestLiveWorkflow(t *testing.T) {
 		input.Function.SDK, input.Function.NetworkMode = false, "egress"
 		defer factory.Close()
 		functions[id] = &liveFunction{fn: fn, factory: factory}
+	}
+	if managedPolicies {
+		source, err := parser.ParseFile(token.NewFileSet(), "../database/workload_managed_schema.go", nil, 0)
+		liveMust(t, err)
+		var schema string
+		ast.Inspect(source, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				text, _ := strconv.Unquote(lit.Value)
+				if strings.Contains(text, "CREATE TABLE IF NOT EXISTS workload_iam_inline") {
+					schema = text
+				}
+			}
+			return true
+		})
+		if schema == "" {
+			t.Fatal("canonical managed schema absent")
+		}
+		conn, err := sql.Open("sqlite", path)
+		liveMust(t, err)
+		_, err = conn.Exec(schema)
+		liveMust(t, err)
+		liveMust(t, conn.Close())
 	}
 	authority, err := workloadiam.NewAuthority(32, initial)
 	liveMust(t, err)
@@ -222,7 +250,11 @@ func TestLiveWorkflow(t *testing.T) {
 		defer cancel()
 		liveMust(t, manager.Shutdown(ctx))
 	}()
-	service, err := workloadpolicy.New(db, reg, authority, func(id string) workloadpolicy.ArtifactState {
+	newService := workloadpolicy.New
+	if managedPolicies {
+		newService = workloadpolicy.NewManaged
+	}
+	service, err := newService(db, reg, authority, func(id string) workloadpolicy.ArtifactState {
 		artifact := manager.CurrentArtifact(id)
 		return workloadpolicy.ArtifactState{OwnerID: id, Artifact: artifact, Known: artifact != ""}
 	})
@@ -264,9 +296,14 @@ func TestLiveWorkflow(t *testing.T) {
 		}
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/v1/functions/{id}/permissions", adapter)
-	mux.Handle("PUT /api/v1/functions/{id}/permissions", adapter)
-	mux.Handle("POST /api/v1/functions/{id}/permissions/review", adapter)
+	if managedPolicies {
+		(&workloadpolicy.ManagedHTTPAdapter{Service: service, Authenticate: resolve}).Register(mux)
+		mux.Handle("/mcp", orvamcp.NewHandler(orvamcp.Deps{DB: db, Registry: reg, IAM: service, Version: "scratch-managed"}))
+	} else {
+		mux.Handle("GET /api/v1/functions/{id}/permissions", adapter)
+		mux.Handle("PUT /api/v1/functions/{id}/permissions", adapter)
+		mux.Handle("POST /api/v1/functions/{id}/permissions/review", adapter)
+	}
 	mux.HandleFunc("GET /api/scratch/functions", func(w http.ResponseWriter, r *http.Request) {
 		p, err := resolve(r)
 		if err != nil || !p.Perms.Has("read") {
@@ -353,39 +390,48 @@ func TestLiveWorkflow(t *testing.T) {
 		recordEvent(map[string]any{"kind": "http", "method": method, "path": path, "status": response.StatusCode, "body": out})
 		return out
 	}
-	for id, f := range functions {
-		path := "/api/v1/functions/" + id + "/permissions"
-		snapshot := call("GET", path, keys["admin"], nil, 200)
-		call("GET", path, "", nil, 401)
-		call("GET", path, "orva_chn_invalid", nil, 401)
-		call("POST", "/fn/"+id+"/demo", "", nil, 401)
-		call("POST", "/fn/"+id+"/demo", keys["reader"], nil, 403)
-		host := snapshot["host"].(map[string]any)
-		payload := func(policy any) map[string]any {
-			return map[string]any{"expected": map[string]any{"revision": host["revision"], "current_artifact": host["currentArtifact"], "approved_artifact": host["approvedArtifact"]}, "policy": policy}
+	if !managedPolicies {
+		for id, f := range functions {
+			path := "/api/v1/functions/" + id + "/permissions"
+			snapshot := call("GET", path, keys["admin"], nil, 200)
+			call("GET", path, "", nil, 401)
+			call("GET", path, "orva_chn_invalid", nil, 401)
+			call("POST", "/fn/"+id+"/demo", "", nil, 401)
+			call("POST", "/fn/"+id+"/demo", keys["reader"], nil, 403)
+			host := snapshot["host"].(map[string]any)
+			payload := func(policy any) map[string]any {
+				return map[string]any{"expected": map[string]any{"revision": host["revision"], "current_artifact": host["currentArtifact"], "approved_artifact": host["approvedArtifact"]}, "policy": policy}
+			}
+			empty := json.RawMessage(`{"schema_version":1,"allow":[],"inbound":[]}`)
+			allow := json.RawMessage(`{"schema_version":1,"allow":[{"actions":["kv.get"],"context":"execution","resource":{"own_kv":{"key":"demo"}}}],"inbound":[]}`)
+			for _, key := range []string{keys["reader"], keys["writer"]} {
+				call("PUT", path, key, payload(allow), 403)
+			}
+			assertDecision := func(want string) {
+				t.Helper()
+				out := call("POST", "/fn/"+id+"/demo", keys["admin"], nil, 200)
+				if out["decision"] != want {
+					t.Fatalf("%s expected actual SDK %s, got %v", f.fn.Runtime, want, out)
+				}
+			}
+			assertDecision("IAM_DENIED")
+			old := payload(allow)
+			snapshot = call("PUT", path, keys["admin"], old, 200)
+			assertDecision("ALLOWED")
+			call("PUT", path, keys["admin"], old, 409)
+			host = snapshot["host"].(map[string]any)
+			call("PUT", path, keys["admin"], map[string]any{"actor": "author"}, 400)
+			call("PUT", path, keys["admin"], payload(empty), 200)
+			assertDecision("IAM_DENIED")
+			t.Logf("%s: public InvokeHandler/Proxy -> real Manager -> Factory worker -> private SDK deny/allow/revoke; execution DB correlation PASS", f.fn.Runtime)
 		}
-		empty := json.RawMessage(`{"schema_version":1,"allow":[],"inbound":[]}`)
-		allow := json.RawMessage(`{"schema_version":1,"allow":[{"actions":["kv.get"],"context":"execution","resource":{"own_kv":{"key":"demo"}}}],"inbound":[]}`)
-		for _, key := range []string{keys["reader"], keys["writer"]} {
-			call("PUT", path, key, payload(allow), 403)
-		}
-		assertDecision := func(want string) {
-			t.Helper()
+	} else {
+		for id := range functions {
 			out := call("POST", "/fn/"+id+"/demo", keys["admin"], nil, 200)
-			if out["decision"] != want {
-				t.Fatalf("%s expected actual SDK %s, got %v", f.fn.Runtime, want, out)
+			if out["decision"] != "IAM_DENIED" {
+				t.Fatal("managed fixture inherited legacy SDK grants")
 			}
 		}
-		assertDecision("IAM_DENIED")
-		old := payload(allow)
-		snapshot = call("PUT", path, keys["admin"], old, 200)
-		assertDecision("ALLOWED")
-		call("PUT", path, keys["admin"], old, 409)
-		host = snapshot["host"].(map[string]any)
-		call("PUT", path, keys["admin"], map[string]any{"actor": "author"}, 400)
-		call("PUT", path, keys["admin"], payload(empty), 200)
-		assertDecision("IAM_DENIED")
-		t.Logf("%s: public InvokeHandler/Proxy -> real Manager -> Factory worker -> private SDK deny/allow/revoke; execution DB correlation PASS", f.fn.Runtime)
 	}
 	if callsEnabled {
 		owners := map[string]string{}

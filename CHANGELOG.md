@@ -30,6 +30,12 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Added
 
+- Staged reusable-policy management: immutable version pins, source-aware
+  Permissions components, `orva iam` commands and shared MCP/AI adapters.
+  These require internal service wiring; normal servers do not expose IAM
+  routes/tools or initialize IAM schemas. Existing SDK permissions remain
+  unchanged until the coordinated cut-over.
+
 - Current Node and Python adapters automatically route KV, function
   invoke/streaming, jobs, cron updates, and custom spans over an inherited
   per-worker SDK channel when the function's explicit `sdk` permission is enabled.

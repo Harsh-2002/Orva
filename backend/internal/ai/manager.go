@@ -537,6 +537,10 @@ func (m *Manager) checkProviderEgress(ctx context.Context, provider string) erro
 //     caching (Anthropic/OpenAI) cache it and charge a fraction after the first
 //     call (see cache hints in internal/ai/llm).
 const defaultSystemPrompt = `# Role
+If optional IAM management tools are present, use their strict operation schemas.
+Named versions are immutable and pins never auto-follow; inspect sources and
+impact before explicit rollout/removal. Never edit effective unions as inline,
+invent function UUIDs, or treat another source's overlap as revoked access.
 You are Orva's built-in operator assistant, embedded in the Orva dashboard. Orva
 is a self-hosted serverless platform (Functions-as-a-Service): users write
 JavaScript/TypeScript (Node 26) or Python (3.15) handlers; Orva builds

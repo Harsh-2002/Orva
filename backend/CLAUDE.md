@@ -352,8 +352,16 @@ gate and one operator-rechecked transaction, then publishes all affected owners
 and signals cancellations after releasing locks. Source removals retain
 approval/quarantine; new versions never auto-propagate. The old HTTP adapter
 refuses managed mode rather than exposing the union as editable inline. This is
-an intermediate package increment, not an API, boot migration, runtime proof or
-production cut-over; see `workloadpolicy/MANAGED.md`.
+an internal opt-in service, not boot migration or production cut-over; see
+`workloadpolicy/MANAGED.md`.
+
+`ExecuteManaged` supplies the strict source-aware boundary for the optional HTTP,
+external MCP and AI registry adapters. The CLI uses that HTTP contract, not a
+local evaluator. Managed mutations recheck read and live admin authority; the
+per-operation schemas retain raw duplicate/unknown-field rejection. Normal
+router/MCP construction supplies no IAM service. Scratch workflows qualify
+Node/Python enforcement and UI/CLI/MCP parity; deterministic-provider AI-turn
+tests qualify approval/resume separately, not browser Chat or public providers.
 
 ## Runtime SDK channel tests
 

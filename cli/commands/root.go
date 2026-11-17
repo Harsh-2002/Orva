@@ -73,6 +73,7 @@ func commandGroups() map[*cobra.Command]string {
 		fixturesCmd:    groupFunctions,
 		tracesCmd:      groupFunctions,
 		poolCmd:        groupFunctions,
+		iamCmd:         groupFunctions,
 
 		kvCmd:      groupData,
 		secretsCmd: groupData,
@@ -124,6 +125,7 @@ func RegisterClient(root *cobra.Command) {
 		fixturesCmd,
 		functionsCmd,
 		invokeCmd,
+		iamCmd,
 		jobsCmd,
 		keysCmd,
 		kvCmd,

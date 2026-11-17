@@ -125,3 +125,10 @@ separate inline sources and bounded all-owner publication without activation.
 The legacy HTTP adapter refuses this mode until its draft contract becomes
 source-aware. See [MANAGED.md](MANAGED.md) for the host contract, caps, reduction
 proof, cancellation ordering, tests and unfinished adapter/lifecycle gates.
+
+`ManagedHTTPAdapter` now supplies explicit source-aware DTOs to the scratch
+named-policy shell. `ExecuteManaged` is shared by that adapter and the optional
+external/in-process MCP family; neither is production-registered. Strict raw
+decoding, operation-specific schemas and live read/admin checks precede
+inspection/publication. See `docs/IAM_MANAGEMENT.md` and
+`test/live-iam/MANAGED.md` for the wire and actual-runtime workflow contracts.

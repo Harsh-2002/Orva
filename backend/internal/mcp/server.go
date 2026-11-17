@@ -34,6 +34,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -41,6 +42,8 @@ import (
 // Deps wires Orva's existing services into the MCP layer. Tool
 // handlers reach into these directly — no HTTP marshaling.
 type Deps struct {
+	// IAM is explicit scratch/test wiring only; serving constructors leave nil.
+	IAM        *workloadpolicy.Service
 	DB         *database.Database
 	Registry   *registry.Registry
 	Builder    *builder.Builder
@@ -155,6 +158,7 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 	registerFixtureTools(rc)
 	registerTraceTools(rc)
 	registerDocsTools(rc)
+	registerIAMTools(rc)
 	registerResources(s, deps, perms)
 	return s
 }
@@ -266,6 +270,9 @@ func NewHandler(deps Deps) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if deps.IAM != nil {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		// Origin validation — the spec mandates it for the Streamable HTTP
 		// transport. A request with NO Origin is always allowed: that is every
 		// non-browser MCP client, which is nearly all of them. Deliberately not

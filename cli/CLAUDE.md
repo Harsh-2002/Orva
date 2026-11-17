@@ -141,6 +141,11 @@ runs only for published releases, manual dispatches, and the weekly schedule.
 
 ## Adding a new subcommand
 
+`orva iam policies` manages named versions and attachments; `orva iam permissions`
+inspects effective/source-aware access and edits only inline authority. Both use
+the optional server-side management contract. Command registration does not
+activate IAM on a normal server; unavailable instances return an error.
+
 1. Create `cli/commands/<name>.go` with `package commands`.
 2. Define `var <name>Cmd = &cobra.Command{…}` + an `init()` for flags.
 3. Add `<name>Cmd` to the `root.AddCommand(...)` list in `RegisterClient` (`root.go`)

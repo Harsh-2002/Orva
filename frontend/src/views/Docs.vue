@@ -53,6 +53,20 @@
       </div>
     </header>
 
+    <section class="space-y-3">
+      <h2 class="text-lg font-semibold text-foreground-strong">
+        Staged named permissions
+      </h2>
+      <p class="max-w-prose text-sm text-foreground-muted">
+        Named-policy management is available only in explicit scratch hosts, not
+        normal production routing. Versions are immutable, attachments stay pinned,
+        and effective access is read-only. Inline edits never replace attached
+        sources. Detach or revoke can leave overlapping grants from other sources.
+        Consult the source repository's IAM_MANAGEMENT contract before using the
+        staged CLI or optional MCP tools.
+      </p>
+    </section>
+
     <!-- ── 1. Handler contract ─────────────────────────────── -->
     <section
       id="handler"

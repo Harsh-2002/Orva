@@ -67,6 +67,7 @@ type IAMOwnerExpectation struct {
 // IAMManagedMutation is a host-service input, not a wire decoder or an identity.
 // Attach also performs explicit version-pinned rollout to already-attached owners.
 type IAMManagedMutation struct {
+	RequireRead        bool   // Host management-adapter requirement, never an authorable field.
 	Operation          string // create, update, attach, detach, revoke, delete, inline, review
 	PolicyID           string
 	Name               string
@@ -395,6 +396,11 @@ func (db *Database) PrepareIAMManagedMutation(ctx context.Context, ref OperatorC
 	if err != nil {
 		return nil, err
 	}
+	if r.RequireRead {
+		if _, _, err := authorizeOperatorPermissionTx(ctx, tx, ref, "read"); err != nil {
+			return nil, err
+		}
+	}
 	if r.Operation == "create" {
 		if r.PolicyID != "" || r.DefinitionRevision != 0 || r.MembershipRevision != 0 ||
 			len(r.Name) == 0 || len(r.Name) > 128 || !utf8.ValidString(r.Name) || strings.TrimSpace(r.Name) != r.Name || strings.ContainsAny(r.Name, "\x00\r\n") {
@@ -590,6 +596,11 @@ func (db *Database) CommitIAMManagedMutation(ctx context.Context, ref OperatorCr
 	if err != nil || actor != p.actor {
 		return operatorDenied(ctx)
 	}
+	if p.request.RequireRead {
+		if _, _, err := authorizeOperatorPermissionTx(ctx, tx, ref, "read"); err != nil {
+			return err
+		}
+	}
 	r := p.request
 	var committed *IAMManagedPolicy
 	if p.after != nil {
@@ -719,6 +730,11 @@ func (db *Database) CommitIAMManagedMutation(ctx context.Context, ref OperatorCr
 	}
 	if _, _, err := authorizeOperatorTx(ctx, tx, ref); err != nil || ctx.Err() != nil {
 		return operatorDenied(ctx)
+	}
+	if p.request.RequireRead {
+		if _, _, err := authorizeOperatorPermissionTx(ctx, tx, ref, "read"); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		if ctx.Err() != nil {

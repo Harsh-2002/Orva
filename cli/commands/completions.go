@@ -96,6 +96,16 @@ func completeRuntimes(cmd *cobra.Command, _ []string, _ string) ([]string, cobra
 // are resolved via root.Find so this stays decoupled from how each subcommand
 // var is named/scoped.
 func wireCompletions(root *cobra.Command) {
+	for _, op := range []string{"get", "put", "review"} {
+		if c, _, err := root.Find([]string{"iam", "permissions", op}); err == nil {
+			c.ValidArgsFunction = completeFunctionNames
+		}
+	}
+	for _, op := range []string{"get", "update", "impact", "attach", "detach", "revoke", "delete"} {
+		if c, _, err := root.Find([]string{"iam", "policies", op}); err == nil {
+			c.ValidArgsFunction = completeIAMPolicyIDs
+		}
+	}
 	// First positional = function name.
 	for _, path := range [][]string{
 		{"invoke"}, {"diff"}, {"rollback"}, {"logs"},
@@ -133,4 +143,32 @@ func wireCompletions(root *cobra.Command) {
 	}
 	// Global --output enum.
 	_ = root.RegisterFlagCompletionFunc("output", fixedCompletion("table", "json"))
+}
+
+func completeIAMPolicyIDs(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	c, ok := completionClient(cmd)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	response, err := c.Get("/api/v1/iam/policies")
+	if err != nil || checkResponse(response) != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var payload struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if decodeJSON(response, &payload) != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	out := make([]string, 0, len(payload.Items))
+	for _, p := range payload.Items {
+		out = append(out, p.ID+"\t"+p.Name)
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }

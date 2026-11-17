@@ -12,6 +12,8 @@ import (
 func TestCommandTree(t *testing.T) {
 	root := NewRoot()
 	paths := [][]string{
+		{"iam"}, {"iam", "policies", "list"}, {"iam", "policies", "get"}, {"iam", "policies", "create"}, {"iam", "policies", "update"}, {"iam", "policies", "impact"}, {"iam", "policies", "attach"}, {"iam", "policies", "detach"}, {"iam", "policies", "revoke"}, {"iam", "policies", "delete"},
+		{"iam", "permissions", "get"}, {"iam", "permissions", "put"}, {"iam", "permissions", "review"},
 		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"}, {"functions", "update"}, {"functions", "purge-cache"},
 		{"deploy"},
 		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
@@ -81,6 +83,18 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		path []string
 		flag string
 	}{
+		{[]string{"iam", "policies", "create"}, "request"},
+		{[]string{"iam", "policies", "update"}, "request"},
+		{[]string{"iam", "policies", "impact"}, "request"},
+		{[]string{"iam", "policies", "attach"}, "request"},
+		{[]string{"iam", "policies", "detach"}, "request"},
+		{[]string{"iam", "policies", "revoke"}, "request"},
+		{[]string{"iam", "policies", "delete"}, "request"},
+		{[]string{"iam", "permissions", "put"}, "request"},
+		{[]string{"iam", "permissions", "review"}, "request"},
+		{[]string{"iam", "policies", "get"}, "history"},
+		{[]string{"iam", "policies", "get"}, "version"},
+		{[]string{"iam", "policies", "list"}, "offset"},
 		{[]string{"deploy"}, "name"},
 		{[]string{"deploy"}, "runtime"},
 		{[]string{"deploy"}, "entrypoint"},

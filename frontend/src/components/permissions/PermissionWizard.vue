@@ -24,7 +24,7 @@
         Pick what this permission is about. You choose what it can do next.
       </p>
       <label
-        v-for="id in SERVICE_ORDER"
+        v-for="id in availableServices"
         :key="id"
         :class="[ROW, form.service === id ? 'border-primary bg-surface-hover' : 'border-border hover:border-foreground-muted']"
       >
@@ -374,8 +374,10 @@ const props = defineProps({
   // A policy-level reason the last add was refused (duplicate, limits, size).
   problem: { type: String, default: '' },
   disabled: Boolean,
+  managed: Boolean,
 })
 const emit = defineEmits(['commit', 'cancel'])
+const availableServices = computed(() => SERVICE_ORDER.filter((id) => !props.managed || id !== 'schedules'))
 
 const STEPS = ['Service', 'Actions', 'Resources', 'Review']
 const MANUAL = '__manual__'

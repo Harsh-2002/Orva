@@ -4,8 +4,14 @@
       v-if="!callers.length"
       class="px-4 py-4 text-sm text-foreground"
     >
-      <template v-if="unconfirmed">
+      <template v-if="unconfirmed === 'stale'">
+        Current caller acceptance is not verified. Do not infer absence from this unconfirmed summary; inspect the last known stored sources separately.
+      </template>
+      <template v-else-if="unconfirmed">
         {{ unconfirmed === 'error' ? 'Not confirmed. The refresh failed, and the last loaded list was empty.' : 'Not confirmed yet. The last loaded list was empty; refreshing.' }}
+      </template>
+      <template v-else-if="inlineOnly">
+        No inline caller grants. Attached policy sources may still accept callers.
       </template>
       <template v-else>
         No callers accepted. No other function is accepted as a caller.
@@ -23,7 +29,7 @@
       >
         <div class="min-w-0 flex-1 space-y-2">
           <h3 class="text-sm font-medium text-foreground-strong">
-            {{ c.target.resolved ? c.target.label : 'Unresolved function' }}
+            {{ inlineOnly ? 'Inline caller: ' : '' }}{{ c.target.resolved ? c.target.label : 'Unresolved function' }}
             <span class="font-normal text-foreground">{{ c.usable.length ? `may start this function by ${how(c.usable)}.` : 'is listed, but nothing it can do here is supported.' }}</span>
           </h3>
           <code class="block break-all font-mono text-xs text-foreground-strong">{{ c.caller_id }}</code>
@@ -109,6 +115,7 @@ const props = defineProps({
   ownerId: { type: String, default: '' },
   editable: Boolean,
   disabled: Boolean,
+  inlineOnly: Boolean,
 })
 
 defineEmits(['edit', 'remove'])

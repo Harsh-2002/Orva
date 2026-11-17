@@ -944,3 +944,13 @@ This does not qualify migration/restore, function deletion, privileged deploymen
 async enforcement or real SDK/UI/CLI/MCP behavior. The legacy inline-only HTTP
 adapter refuses managed mode. The precise internal contract and remaining gates
 are in `backend/internal/workloadpolicy/MANAGED.md`.
+## Scratch source-aware management adapters
+
+The optional named-policy adapters reject duplicate/unknown raw fields on both
+external MCP and in-process agent paths before generic decoding discards
+evidence. Live read is required before inspection; live read plus admin are
+rechecked inside the final mutation transaction. Tool visibility and confirm
+flags are not authority. Function responses keep editable inline policy separate
+from read-only effective union and attributed version pins. These adapters and
+schema initialization remain explicitly scratch-only, not serving activation.
+See `IAM_MANAGEMENT.md` for the exact staged wire contract and limitations.

@@ -981,3 +981,12 @@ Planned path when triggered:
 
 Until then, the documented xattr / `Unblock-File` workflow is the
 supported path.
+# Staged `orva iam` commands
+
+`orva iam policies` provides list/get/create/update/impact/attach/detach/revoke/
+delete; `orva iam permissions` provides get/put/review. The commands require an
+explicitly activated compatible scratch endpoint; normal serving routes remain
+off. Mutations read bounded exact JSON from `--request @file` or `@-`, never inline
+argv. Destructive operations require normal confirmation plus `confirm:true`.
+All payloads use JSON stdout. See [IAM_MANAGEMENT.md](IAM_MANAGEMENT.md) for exact
+request shapes, decimal counters, pinned versions and source-aware inspection.

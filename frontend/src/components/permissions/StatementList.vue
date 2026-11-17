@@ -3,8 +3,14 @@
     v-if="!rows.length"
     class="px-4 py-4 text-sm text-foreground"
   >
-    <template v-if="unconfirmed">
+    <template v-if="unconfirmed === 'stale'">
+      Current grants are not verified. Do not infer absence from this unconfirmed summary; inspect the last known stored sources separately.
+    </template>
+    <template v-else-if="unconfirmed">
       {{ unconfirmed === 'error' ? 'Not confirmed. The refresh failed, and the last loaded list was empty.' : 'Not confirmed yet. The last loaded list was empty; refreshing.' }}
+    </template>
+    <template v-else-if="inlineOnly">
+      No inline platform grants. Attached policy sources may still grant access.
     </template>
     <template v-else>
       No protected platform actions allowed.
@@ -22,7 +28,7 @@
     >
       <div class="min-w-0 flex-1 space-y-2">
         <h3 class="text-sm font-medium text-foreground-strong">
-          {{ row.sentence }}
+          {{ inlineOnly ? 'Inline allowance: ' : '' }}{{ row.sentence }}
         </h3>
 
         <p
@@ -147,6 +153,7 @@ const props = defineProps({
   // Show only these statement positions (a service group), keeping their real index.
   only: { type: Array, default: null },
   listLabel: { type: String, default: 'Allowed platform actions' },
+  inlineOnly: Boolean,
   editable: Boolean,
   disabled: Boolean,
 })

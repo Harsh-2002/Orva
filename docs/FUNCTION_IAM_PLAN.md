@@ -691,6 +691,60 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- The named-policy management surfaces passed independent
+  functional REST/slim-CLI/external-MCP/private-SDK checks, including pinned
+  versions, reviewed rollout, residual-source detach/revoke and stale-owner
+  rollback. Initial source-aware UI acceptance was blocked: both runtime captures showed
+  ALLOWED through an enabled managed attachment while the empty inline card
+  claimed no platform actions were allowed. Hidden effective JSON and an
+  inline-only banner did not fix that contradictory summary. A separate
+  correction added human-readable effective authority and explicitly scoped
+  inline editing. Registry-only dispatch tests likewise did not establish
+  actual AI-turn approval/resume. Both gaps received the follow-up checks below;
+  verifier browser/services/VM cleanup was verified.
+  Follow-up verification closed the original summary contradiction, but
+  reproduced a second blocker: after concurrent revocation and a stale save
+  returning 409, the SDK denied access while the effective card still described
+  the prior grant as applying "now." Draft retention and disabled Save passed;
+  they do not make that effective snapshot current. Conflict/ambiguous-failure
+  states must explicitly invalidate authority freshness and restore current
+  claims only from an owner-correlated authoritative response.
+  Independent re-verification of the final conflict correction now closes that
+  409 blocker: real Node/Python revocation produced SDK denial and stale-save
+  409; authority became explicitly unverified immediately, then fresh GET showed
+  no grants while the unsaved draft remained and Save stayed disabled. All
+  106 unit and 269 component tests, lint and both builds passed. Final evidence
+  uses a 36-file safe allowlist; rejected raw events containing unverified
+  `generation.Token` fields were privately quarantined, not published or assumed
+  harmless. Browser/services/VM cleanup was verified.
+  The separate test-only deterministic-provider AI-turn increment now has
+  independent normal and race acceptance: actual Manager/Runner/Bifrost/shared
+  registry/service publication waits for approval, resumes exactly once, and
+  rejects replay, rejected approval, false destructive confirmation, revoked
+  pending credentials, forced read-only writes and strict-input violations.
+  Its initially interrupted race run remains recorded; a completed follow-up
+  passed and removed its disposable snapshot. This does not establish browser
+  Chat, public-provider compatibility, actual worker identity in the AI fixture
+  or production activation.
+  The accepted surfaces, both UI corrections and AI-turn test are integrated.
+  Independent merge-critical source review preserved accepted calls/session
+  behavior. Fresh UID-1001 server/UI/slim-CLI builds, canonical lint/tests,
+  policy/MCP/AI/CLI race checks, database regressions, 106 unit and 270 component
+  tests, and both scratch UI builds passed. Separate real race-enabled calls
+  and managed fixture modes passed; simultaneous flags were not qualified.
+  The combined VM was removed. Normal router/boot/catalog activation and full
+  E2E/cut-over remain off and unaccepted.
+
+- Isolated Jobs44 has independent nine-package normal/race and real self-target
+  Node/Python CLI/MCP acceptance, but remains on HOLD for a timezone-dependent
+  test fixture and missing browser/distinct-function proof. The database race
+  suite passed with an adequate 15-minute budget after its earlier timeout;
+  neither that timeout nor the author's older no-output timeouts were relabelled
+  successful. Isolated Cron CORE24 has scoped independent storage/admission and
+  real firing acceptance, but depends on Jobs44 and lacks accepted public
+  controls/UI. Neither async increment is integrated or activated. Adoption,
+  reissue, restore and retained deleted-target history remain full-plan gates.
+
 - Conditional browser-session UUID capture has scoped independent acceptance.
   Once the explicit identity schema is installed, new session rows receive
   independent UUIDs transactionally; fresh and cached browser auth and AI

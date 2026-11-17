@@ -3,13 +3,21 @@
     <!-- Page header -->
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0">
-        <h1 class="text-xl font-semibold tracking-tight text-foreground-strong">
-          Permissions
-        </h1>
+        <component
+          :is="inlineOnly ? 'h2' : 'h1'"
+          class="text-xl font-semibold tracking-tight text-foreground-strong"
+        >
+          {{ inlineOnly ? 'Inline permissions' : 'Permissions' }}
+        </component>
         <p class="mt-1.5 max-w-prose text-sm leading-body text-foreground-muted">
-          What
+          <template v-if="inlineOnly">
+            The independent inline source for
+          </template>
+          <template v-else>
+            What
+          </template>
           <span class="font-medium text-foreground-strong">{{ displayName }}</span>
-          may do with platform actions, and which callers it accepts.
+          {{ inlineOnly ? '. Changes here never edit attached policies or replace effective access.' : 'may do with platform actions, and which callers it accepts.' }}
         </p>
         <code class="mt-1 block break-all font-mono text-xs text-foreground-strong">{{ functionId }}</code>
       </div>
@@ -23,7 +31,7 @@
             class="h-4 w-4"
             aria-hidden="true"
           />
-          {{ isEmptyPolicy ? 'Create policy' : 'Edit permissions' }}
+          {{ inlineOnly ? (isEmptyPolicy ? 'Create inline permissions' : 'Edit inline permissions') : (isEmptyPolicy ? 'Create policy' : 'Edit permissions') }}
         </Button>
         <Button
           v-else-if="screen === 'edit' && !dirty && !wizard"
@@ -264,10 +272,10 @@
               id="perm-outbound-title"
               class="text-sm font-semibold text-foreground-strong"
             >
-              What this function may do
+              {{ inlineOnly ? (authorityUnconfirmed ? 'Last known inline platform grants (unverified)' : 'Inline platform grants') : 'What this function may do' }}
             </h2>
             <p class="mt-1 max-w-prose text-xs text-foreground-muted">
-              {{ isEmptyPolicy ? 'No permissions are stored. Where enforcement is on, protected actions are denied by default.' : 'The stored policy, by service. An allowance to call another function is one half: that function must also accept this one as a caller.' }}
+              {{ inlineOnly ? 'Only the inline source is shown here. Attached sources are listed in effective access above.' : (isEmptyPolicy ? 'No permissions are stored. Where enforcement is on, protected actions are denied by default.' : 'The stored policy, by service. An allowance to call another function is one half: that function must also accept this one as a caller.') }}
             </p>
           </header>
           <AccessSummary
@@ -277,6 +285,7 @@
             :targets="latest.targets"
             :warnings="warnings"
             :unconfirmed="unconfirmed"
+            :inline-only="inlineOnly"
           />
         </section>
 
@@ -289,10 +298,10 @@
               id="perm-inbound-title"
               class="text-sm font-semibold text-foreground-strong"
             >
-              Who may call this function
+              {{ inlineOnly ? (authorityUnconfirmed ? 'Last known inline caller grants (unverified)' : 'Inline caller grants') : 'Who may call this function' }}
             </h2>
             <p class="mt-1 max-w-prose text-xs text-foreground-muted">
-              Callers are matched by function ID. A caller also needs its own allowance to call this function.
+              {{ inlineOnly ? 'Only inline caller acceptance, not acceptance from attached sources. Callers also need their own outbound allowance.' : 'Callers are matched by function ID. A caller also needs its own allowance to call this function.' }}
             </p>
           </header>
           <InboundCallers
@@ -300,6 +309,7 @@
             :callers="stored.inbound"
             :targets="latest.targets"
             :unconfirmed="unconfirmed"
+            :inline-only="inlineOnly"
           />
         </section>
       </template>
@@ -316,7 +326,7 @@
               id="perm-edit-title"
               class="text-sm font-semibold text-foreground-strong"
             >
-              Edit permissions
+              {{ inlineOnly ? 'Edit inline permissions' : 'Edit permissions' }}
             </h2>
             <p class="mt-1 max-w-prose text-xs text-foreground-muted">
               Changes stay in a draft until you review and save.
@@ -369,6 +379,7 @@
               :unconfirmed="unconfirmed"
               :editable="canEdit"
               :disabled="busy"
+              :inline-only="inlineOnly"
               @edit="(i) => openWizard('permission', i)"
               @remove="onRemoveStatement"
             />
@@ -414,6 +425,7 @@
               :unconfirmed="unconfirmed"
               :editable="canEdit"
               :disabled="busy"
+              :inline-only="inlineOnly"
               @edit="(i) => openWizard('caller', i)"
               @remove="onRemoveInbound"
             />
@@ -478,11 +490,11 @@
             @review="onReview"
           />
           <h3 class="border-y border-border bg-background px-4 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">
-            Policy JSON
+            {{ inlineOnly ? 'Inline policy JSON' : 'Policy JSON' }}
           </h3>
           <PolicyJson
             :policy="screen === 'edit' ? draft : stored"
-            :label="screen === 'edit' ? 'Your draft as it would be saved.' : 'The stored policy as the server reads it.'"
+            :label="inlineOnly ? 'Only this inline source is editable; the effective union is never saved as inline.' : (screen === 'edit' ? 'Your draft as it would be saved.' : 'The stored policy as the server reads it.')"
           />
           <h3 class="border-y border-border bg-background px-4 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">
             History
@@ -552,6 +564,8 @@ const props = defineProps({
   readOnlyReason: { type: String, default: '' },
   // Adds the synthetic-preview banner. It never widens capabilities.
   preview: { type: Boolean, default: false },
+  inlineOnly: { type: Boolean, default: false },
+  authorityUnconfirmed: { type: String, default: '' },
 })
 
 const emit = defineEmits(['retry', 'save', 'review', 'dirty-change'])
@@ -619,7 +633,7 @@ const conflictLocked = computed(() => !!props.saveError && props.saveError.kind 
 const reviewBlocked = computed(() => busy.value || props.loading || !!props.loadError
   || reviewLatched.value || forbidden.value || conflictLocked.value || obsolete.value)
 // While a refresh is pending or failed, an empty list is old news, not a fact.
-const unconfirmed = computed(() => (props.loading ? 'loading' : props.loadError ? 'error' : ''))
+const unconfirmed = computed(() => (props.loading ? 'loading' : props.loadError ? 'error' : props.authorityUnconfirmed))
 const canSave = computed(() => dirty.value && canEdit.value && !stale.value && !busy.value
   && !obsolete.value && !conflictLocked.value && !!draft.value && validatePolicy(draft.value).ok)
 // Editing needs a stored policy and a live right to change it. Transient states
@@ -746,6 +760,7 @@ const blockText = computed(() => (view.value === 'unavailable'
   : (blocks[view.value] || ['', ''])[1]))
 
 const enforcementBadge = computed(() => {
+  if (props.inlineOnly && props.authorityUnconfirmed) return { variant: 'warning', text: 'Snapshot stale' }
   const e = access.value.enforcement
   if (e === 'active') return { variant: 'success', text: 'Enforcement active' }
   if (e === 'inactive') return { variant: 'warning', text: 'Enforcement off' }
@@ -753,6 +768,7 @@ const enforcementBadge = computed(() => {
 })
 // Only a problem is a badge. Reviewed / not reviewed lives under Advanced.
 const reviewBadge = computed(() => {
+  if (props.inlineOnly && props.authorityUnconfirmed) return null
   const h = latest.value.host
   if (h.quarantined) return { variant: 'error', text: 'Quarantined' }
   if (h.reviewRequired) return { variant: 'warning', text: 'Review required' }
@@ -760,6 +776,8 @@ const reviewBadge = computed(() => {
 })
 const enforcementText = computed(() => {
   const e = access.value.enforcement
+  if (props.inlineOnly && props.authorityUnconfirmed) return 'This inline baseline and its approval are last known, not currently verified. Your unsaved draft is retained, not effective access. Refreshing the independent inspector does not reload or approve this draft.'
+  if (props.inlineOnly) return 'These are stored inline grants, not the total or active access. Effective access and approval state are shown above; drafts change only this source.'
   if (e === 'inactive') return 'Permission enforcement is not enabled on this server. This is the stored policy; it does not restrict the function, and editing is off.'
   if (e === 'unknown') return 'The server did not report whether permissions are enforced, so editing is off.'
   return screen.value === 'view'

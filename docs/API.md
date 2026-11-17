@@ -871,3 +871,9 @@ OAuth-capable MCP clients discover and authorize through:
 - `GET|POST /oauth/authorize`
 - `POST /oauth/token`
 - `POST /oauth/revoke`
+# Staged named Function IAM management
+
+The source-aware REST adapter is **scratch-only and unregistered in normal
+serving**. Its explicit DTOs, routes, authorization, errors and version/source
+semantics are documented in [IAM_MANAGEMENT.md](IAM_MANAGEMENT.md).
+Do not interpret client command availability as production route activation.
