@@ -1,5 +1,36 @@
 # Operations runbook
 
+## Internal IAM jobs fixture
+
+No production upgrade action is required for this inactive increment. Do not
+call its explicit schema initializer or wire its constructors in normal serving.
+The fixture's Jobs view distinguishes stored execution status from authority:
+suspended/quarantined work is not runnable. Regrant is not resume. An admin can
+explicitly resume one eligible pending job after revalidating its original
+creator/target; retry never adopts it as operator work.
+
+The independent cron core uses separate explicit initialization/options. Its
+separate controls fixture is not a production route/catalog activation. Explicit
+admin HTTP/CLI/MCP/shared-AI resume and the CronJobs view delegate to the service,
+require inspected decimal CAS revisions and preserve source identity. Resume revalidates
+original authority and schedules only a future cron time. Do not clear authority
+fields or infer operator origin from old names. Regrant is not resume. Preserve
+the same target-deletion/restore HOLD as jobs; cascade deletion is not retained
+suspension history.
+
+In the staged view, Enabled describes stored configuration, not permission to
+execute. A stale snapshot blocks mutation and does not display authority as
+current. On 409, refresh and review; do not retry automatically with replaced
+revisions. A failed refresh retains the prior snapshot as stale and leaves the
+mutation error visible. Read-only users can inspect source/reason/revisions but
+cannot resume, edit, disable or delete.
+
+Legacy function hints stay suspended for review; unknown origins stay
+quarantined. There is no adoption/restore procedure in this slice. Do not clear
+authority fields with SQL or edit a row to bypass review. Target-deletion history
+retention remains unresolved because the legacy FK cascades job rows; missing
+UUIDs fail closed, and recreation by name does not grant authority.
+
 What to do when something goes wrong. Each section: symptom →
 diagnosis → fix.
 

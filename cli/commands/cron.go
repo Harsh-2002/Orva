@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -13,7 +14,7 @@ import (
 var cronCmd = &cobra.Command{
 	Use:   "cron",
 	Short: "Manage cron schedules",
-	Long:  "List, create, update, and delete cron schedules attached to functions.",
+	Long:  "List, create, update, delete, or explicitly resume cron schedules. IAM fixture mutations require admin and exact revisions; normal-serving resume remains unavailable until cut-over.",
 }
 
 var cronListCmd = &cobra.Command{
@@ -78,6 +79,12 @@ Examples:
 	RunE: runCronDelete,
 }
 
+var cronResumeCmd = &cobra.Command{
+	Use: "resume [id]", Short: "Explicitly resume one suspended IAM cron schedule (admin only)",
+	Long: "Revalidate original authority and resume at the next future cron time, without missed catch-up. Requires --config-revision and --authority-generation from the inspected row. Use --fn <owner-uuid> with exact revisions for admin-only credentials, without a read request. A function name or omitted --fn requires read for name/owner lookup. Normal serving has no resume route until IAM cut-over.",
+	Args: cobra.ExactArgs(1), RunE: runCronResume,
+}
+
 func init() {
 	cronListCmd.Flags().String("fn", "", "scope to a single function (name or ID); omit to list all")
 
@@ -95,11 +102,19 @@ func init() {
 	cronUpdateCmd.Flags().String("enabled", "", "enable/disable the schedule (true|false)")
 
 	cronDeleteCmd.Flags().String("fn", "", "function name or ID (optional; auto-resolved from cron id when omitted)")
+	cronResumeCmd.Flags().String("fn", "", "function UUID skips read; a name or omitted flag requires read-authorized lookup")
+	for _, cmd := range []*cobra.Command{cronUpdateCmd, cronDeleteCmd, cronResumeCmd} {
+		cmd.Flags().String("config-revision", "", "exact inspected decimal configuration revision (required by IAM fixture)")
+		cmd.Flags().String("authority-generation", "", "exact inspected decimal authority generation (required by IAM fixture)")
+	}
+	cronResumeCmd.MarkFlagRequired("config-revision")
+	cronResumeCmd.MarkFlagRequired("authority-generation")
 
 	cronCmd.AddCommand(cronListCmd)
 	cronCmd.AddCommand(cronCreateCmd)
 	cronCmd.AddCommand(cronUpdateCmd)
 	cronCmd.AddCommand(cronDeleteCmd)
+	cronCmd.AddCommand(cronResumeCmd)
 }
 
 func runCronList(cmd *cobra.Command, args []string) error {
@@ -242,6 +257,7 @@ func runCronUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{}
+	addCronExpectations(cmd, body)
 	if expr, _ := cmd.Flags().GetString("expr"); expr != "" {
 		body["cron_expr"] = expr
 	}
@@ -312,7 +328,18 @@ func runCronDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	resp, err := client.Delete("/api/v1/functions/" + fnID + "/cron/" + id)
+	query := url.Values{}
+	expectations := map[string]any{}
+	addCronExpectations(cmd, expectations)
+	for key, value := range expectations {
+		query.Set(key, value.(string))
+	}
+	path := "/api/v1/functions/" + fnID + "/cron/" + id
+	if len(query) > 0 {
+		query.Set("confirm", "true")
+		path += "?" + query.Encode()
+	}
+	resp, err := client.Delete(path)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
@@ -325,6 +352,52 @@ func runCronDelete(cmd *cobra.Command, args []string) error {
 		return emitJSON(map[string]any{"deleted": true, "id": id})
 	}
 	okf(cmd, "Deleted cron schedule %s", id)
+	return nil
+}
+
+func addCronExpectations(cmd *cobra.Command, body map[string]any) {
+	for flag, key := range map[string]string{"config-revision": "expected_config_revision", "authority-generation": "expected_authority_generation"} {
+		value, _ := cmd.Flags().GetString(flag)
+		if value != "" {
+			body[key] = value
+		}
+	}
+}
+func runCronResume(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+	fnID, _ := cmd.Flags().GetString("fn")
+	if fnID != "" {
+		fnID, err = resolveFnID(client, fnID)
+		if err != nil {
+			return err
+		}
+	} else {
+		fnID, err = lookupCronFunctionID(client, args[0])
+		if err != nil {
+			return err
+		}
+	}
+	body := map[string]any{}
+	addCronExpectations(cmd, body)
+	resp, err := client.Post("/api/v1/functions/"+fnID+"/cron/"+args[0]+"/resume", body)
+	if err != nil {
+		return fmt.Errorf("resume cron: %w", err)
+	}
+	if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+	okf(cmd, "Resumed cron schedule %s for its next future firing", args[0])
 	return nil
 }
 

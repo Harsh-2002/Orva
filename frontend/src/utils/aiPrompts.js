@@ -133,6 +133,10 @@ Requires the caller's SDK permission and dispatches through the warm pool. The p
     }
 
 ## orva.jobs — durable background queue with retries
+
+Origin, creator and authority are host-owned. Never put operator identity or authority fields into jobs.enqueue requests. In an explicitly IAM-managed environment, later attempts can suspend when current grants deny; regrant alone is not resume, and retry never adopts function work as operator work. Normal serving IAM remains inactive until coordinated cut-over.
+
+In an explicitly enabled cron-controls fixture only, durable schedule management requires live admin and inspected decimal configuration/authority revisions. Resume revalidates the original function/operator source and selects the next future firing, never catch-up or adoption. Inspection requires read; an identified mutation does not additionally require read. Destructive confirmation remains separate from AI approval. Normal-serving cron IAM controls are not enabled; never fabricate source or approval fields.
 Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff in SECONDS (attempt 1 → 2s, 2 → 4s, 3 → 8s, …), capped at 1h, up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
 
   Python:

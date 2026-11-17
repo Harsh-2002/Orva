@@ -283,8 +283,9 @@ const _decorateSchedule = (row) => ({
 
 export const listCronSchedules = async () => {
   const res = await apiClient.get('/cron')
-  const schedules = (res.data.schedules || []).map(_decorateSchedule)
-  return { data: { schedules } }
+  if (!Array.isArray(res.data.schedules)) throw new Error('Invalid schedule response')
+  const schedules = res.data.schedules.map(_decorateSchedule)
+  return { data: { ...res.data, schedules } }
 }
 
 export const getCronSchedule = async (id) => {
@@ -317,6 +318,8 @@ export const updateCronSchedule = async (scheduleId, body) => {
   if (body.timezone !== undefined) payload.timezone  = body.timezone
   if (body.enabled !== undefined)  payload.enabled   = body.enabled
   if (body.payload !== undefined)  payload.payload   = body.payload
+  if (body.expected_config_revision !== undefined) payload.expected_config_revision = body.expected_config_revision
+  if (body.expected_authority_generation !== undefined) payload.expected_authority_generation = body.expected_authority_generation
   const res = await apiClient.put(`/functions/${fnId}/cron/${scheduleId}`, payload)
   return { data: _decorateSchedule(res.data) }
 }
@@ -335,10 +338,11 @@ export const browserTimezone = () => {
 // deleteCronSchedule(scheduleId, functionId) — both required because the
 // backend route is /functions/{fn}/cron/{id}. CronJobs.vue currently
 // passes (function_name) only; the view will be updated to pass both.
-export const deleteCronSchedule = async (scheduleId, functionId) => {
+export const deleteCronSchedule = async (scheduleId, functionId, expectations = {}) => {
   if (!functionId) throw new Error('deleteCronSchedule: functionId is required')
-  return apiClient.delete(`/functions/${functionId}/cron/${scheduleId}`)
+  return apiClient.delete(`/functions/${functionId}/cron/${scheduleId}`, { params: expectations.expected_config_revision ? { ...expectations, confirm: true } : {} })
 }
+export const resumeCronSchedule = (id, owner, expectations) => apiClient.post(`/functions/${owner}/cron/${id}/resume`, expectations)
 
 // ── Jobs queue (Phase 5) ────────────────────────────────────────────
 
@@ -352,6 +356,7 @@ export const getJob = (id) => apiClient.get(`/jobs/${id}`)
 export const enqueueJob = (body) => apiClient.post('/jobs', body)
 
 export const retryJob = (id) => apiClient.post(`/jobs/${id}/retry`)
+export const resumeJob = (id) => apiClient.post(`/jobs/${encodeURIComponent(id)}/resume`)
 
 export const deleteJob = (id) => apiClient.delete(`/jobs/${id}`)
 

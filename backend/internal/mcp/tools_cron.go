@@ -113,6 +113,10 @@ type CronOpOutput struct {
 func registerCronTools(rc *regCtx) {
 	deps := rc.deps
 	rc.group = "cron"
+	if deps.CronEnabled {
+		registerIAMCronTools(rc)
+		return
+	}
 
 	regAddTool(rc, permRead,
 		&mcpsdk.Tool{

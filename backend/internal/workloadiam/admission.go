@@ -23,11 +23,12 @@ const MaxHandoffBytes = 256 << 10
 // No callback may activate source. Host state must be fresh and host-owned;
 // callers must serialize its invalidation with the same publication boundary.
 type Authority struct {
-	gate           sync.RWMutex
-	policies       map[string]*Evaluator
-	registrationMu sync.Mutex
-	registrations  map[*Admission]struct{}
-	maxRegistered  int
+	gate               sync.RWMutex
+	policies           map[string]*Evaluator
+	registrationMu     sync.Mutex
+	registrations      map[*Admission]struct{}
+	asyncRegistrations map[*AsyncAdmission]struct{}
+	maxRegistered      int
 }
 
 // NewAuthority copies and validates compiled snapshots. maxRegistered bounds
@@ -154,7 +155,7 @@ func (a *Authority) BeginCallObserved(parent context.Context, observe func() Con
 	r.Resource = Resource{Function: &FunctionResource{ID: r.Resource.Function.ID}}
 	a.registrationMu.Lock()
 	defer a.registrationMu.Unlock()
-	if a.maxRegistered <= 0 || len(a.registrations) >= a.maxRegistered {
+	if a.maxRegistered <= 0 || len(a.registrations)+len(a.asyncRegistrations) >= a.maxRegistered {
 		return nil, ErrCapacity
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -285,6 +286,12 @@ func (a *Authority) Publish(expected uint64, candidate *Evaluator, persist func(
 	var cancelled []context.CancelFunc
 	for call := range a.registrations {
 		if call.caller.Principal.FunctionID == frozen.metadata.OwnerID || call.targetID == frozen.metadata.OwnerID {
+			call.revoked = true
+			cancelled = append(cancelled, call.cancel)
+		}
+	}
+	for call := range a.asyncRegistrations {
+		if call.origin.CreatorID == frozen.metadata.OwnerID || call.origin.TargetID == frozen.metadata.OwnerID {
 			call.revoked = true
 			cancelled = append(cancelled, call.cancel)
 		}

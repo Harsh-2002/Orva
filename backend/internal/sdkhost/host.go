@@ -12,6 +12,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 )
 
@@ -24,6 +25,12 @@ type Metrics interface {
 
 // Option configures a Host.
 type Option func(*Host)
+
+// WithAsyncIAM enables only the explicit async fixture service; omission denies
+// async operations in IAM mode rather than falling back to legacy enqueue.
+func WithAsyncIAM(s *workloadasync.Service) Option {
+	return func(h *Host) { h.asyncIAM = s }
+}
 
 // WithMetrics supplies an external metrics sink in addition to the built-in
 // counters returned by Host.Stats.
@@ -74,6 +81,9 @@ type Host struct {
 	iamTargetState    func(string, *sandbox.Worker) workloadiam.TargetState
 	iamCurrentEnabled bool
 	iamCurrent        func(string, string) bool
+	asyncIAM          *workloadasync.Service
+	cronIAM           *workloadasync.Service
+	cronEnabled       bool
 }
 
 // New builds a Host over db.
@@ -137,6 +147,9 @@ func (h *Host) Handle(ctx context.Context, caller sandbox.SDKCaller, op string, 
 
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if op == "crons.upsert" && h.cronEnabled && !h.iamEnabled {
+		return nil, iamDenied()
 	}
 	if h.iamEnabled {
 		return h.handleIAM(ctx, caller, op, args)

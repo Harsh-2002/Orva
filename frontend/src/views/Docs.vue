@@ -449,6 +449,27 @@
         <div class="doc-microlabel">
           Background jobs: jobs.enqueue()
         </div>
+        <details class="text-sm text-foreground-muted max-w-prose">
+          <summary>Internal IAM jobs fixture (not active in normal serving)</summary>
+          <p class="mt-2">
+            Origin and creator are host-owned. Current grants and target acceptance
+            are checked again at each attempt. Denial suspends without spending an
+            attempt; regrant does not resume stored work. Admin resume revalidates
+            one suspended pending job, and retry never adopts it as operator work.
+            Cron, adoption and restore are not enabled by this fixture.
+          </p>
+        </details>
+        <details class="text-sm text-foreground-muted max-w-prose">
+          <summary>Separate cron controls fixture (not active in normal serving)</summary>
+          <p class="mt-2">
+            Schedule source and authority are host-owned. Explicit admin Resume
+            revalidates the original source and selects the next future firing,
+            without catch-up or adoption. Mutations use inspected decimal
+            configuration and authority revisions; stale conflicts require refresh
+            and review. Inspection requires read, while identified mutations require
+            admin without an additional read grant. Restore and adoption remain unavailable.
+          </p>
+        </details>
         <TabbedCode
           :tabs="sdkJobsTabs"
           storage-key="docs.sdk.jobs"

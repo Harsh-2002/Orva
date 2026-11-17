@@ -431,10 +431,64 @@ legacy SDK tokens are not accepted.
 
 ## Jobs
 
+### Opt-in cron IAM controls (normal router remains unchanged)
+
+Explicit `CronHandler{CronEnabled: true, CronIAM: service}` uses the existing
+`GET /cron`, `GET|POST /functions/{fn_id}/cron` and
+`PUT|DELETE /functions/{fn_id}/cron/{id}` shapes under `/api/v1`. A scratch
+constructor additionally binds `POST /functions/{fn_id}/cron/{id}/resume`.
+These controls are not enabled by normal boot, router or schema construction.
+
+Inspection still requires `read`; create/update/enable/disable/delete/resume
+require live `admin`, not `read` plus `admin`. Trusted authentication supplies
+the API-key/OAuth/session reference; the service rechecks current credentials at
+commit. Request-supplied origin, creator, operator or approval fields are rejected.
+Create accepts the existing cron expression/timezone/enabled/payload body and
+assigns durable operator origin. It does not impersonate a function.
+
+Update and resume require decimal-string `expected_config_revision` and
+`expected_authority_generation`. Delete requires those as query parameters plus
+`confirm=true`. Missing, malformed or stale CAS, or ineligible state, returns
+`409 CONFLICT`; authority denial returns `403 IAM_DENIED`, invalid configuration
+`400 VALIDATION`, missing schedule `404 NOT_FOUND`, and unavailable storage
+`503 INTERNAL`. Resume accepts no edited configuration, preserves original
+provenance, revalidates current original rights and schedules only the next future
+fire. Enabling or regranting cannot resume suspended/quarantined work. Adoption
+and restore remain unavailable.
+
+List responses include `cron_controls: true` and advisory `can_manage`. Each row
+includes authority state/reason, host origin/source, immutable creation revisions,
+admission revisions, authority generation and config revision (decimal strings).
+Unknown historic schedules quarantine. The dashboard distinguishes Enabled from
+current authority, and disables mutations on stale/failed snapshots. A conflict
+requires an explicit refresh/review; refresh never acknowledges a failed mutation.
+
 - `POST /api/v1/jobs` — enqueue a background job.
 - `GET /api/v1/jobs` and `GET /api/v1/jobs/{id}` — list or inspect jobs.
 - `POST /api/v1/jobs/{id}/retry` — retry a failed job.
 - `DELETE /api/v1/jobs/{id}` — delete a job.
+
+### Staged IAM jobs fixture (not normal serving API)
+
+The internal, explicitly initialized jobs fixture additionally binds
+`POST /api/v1/jobs/{id}/resume`. It requires live `admin`, as do enqueue, retry
+and delete in that fixture; reads retain `read`. Normal routes and their
+permission gates are unchanged until coordinated cut-over.
+
+Fixture job responses add `authority_state` (`active`, `suspended`,
+`quarantined`), bounded `authority_reason`, host-set `origin_kind`, immutable
+creator/operator provenance, creation revisions, admission revisions and an
+authority generation. Revisions/generation are decimal strings. List responses
+include advisory `async_controls: true` and `can_manage`; the server still
+reauthorizes each mutation. Enqueue rejects unknown origin/authority fields.
+
+Resume rechecks the original creator UUID/current target rights and only
+reactivates suspended pending work. Terminal/quarantined jobs are not reopened.
+Retry keeps original provenance/idempotency scope; it is not operator adoption.
+Regrant alone does not resume old work. Denied management returns `403
+IAM_DENIED`, stale/ineligible state `409 CONFLICT`, and unavailable storage
+`503 INTERNAL`, without dispatch. See `backend/internal/workloadasync/README.md`
+for the fixture's exclusions and target-deletion retention limit.
 
 ## Inbound webhooks — the public receiver
 

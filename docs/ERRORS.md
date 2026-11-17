@@ -81,7 +81,8 @@ session writers.
 | `CONVERSATION_BUSY` | 409 | AI chat: another turn is already running in this conversation | yes — wait for it to finish, then retry |
 | `VACUUM_IN_PROGRESS` | 409 | `POST /system/vacuum` while another VACUUM holds the lock | yes — retry shortly |
 | `KV_INCR_FAILED` | 409 | KV `incr` on a value that is not an integer | no — overwrite the key with a numeric value |
-| `CONFLICT` | 409 | `PUT /functions/{id}` renaming onto a name that already exists. Used to surface as a 500. | no — pick another name |
+| `CONFLICT` | 409 | `PUT /functions/{id}` name collision, or stale/ineligible job state in the explicit IAM jobs fixture. | no — refresh and review |
+| `IAM_DENIED` | 403 | Protected operation denied in the explicit IAM fixture, including jobs management without current admin/original-origin rights. Not a normal-serving IAM activation. | no — review current rights |
 | `CHECKPOINT_BUSY` | 409 | `POST /system/vacuum` could not checkpoint the WAL because another connection holds a read lock. Previously the checkpoint's busy result was discarded and VACUUM ran against a stale WAL. | yes — retry shortly |
 | `VERSION_GCD` | 410 | rollback / diff target's version tree was pruned by the GC; `details.available_hashes` lists survivors | no — pick a still-archived hash |
 | `INACTIVE` | 410 | inbound webhook trigger is disabled | no — enable the trigger |
@@ -97,7 +98,7 @@ session writers.
 
 | code | HTTP | when | retry? |
 |---|---|---|---|
-| `INTERNAL` | 500 | unmapped server fault | no — file a bug with `request_id` |
+| `INTERNAL` | 500 / 503 | Unmapped server fault; the staged async fixture uses 503 for unavailable storage without dispatch. | no — file a bug with `request_id` |
 | `SIGNING_NOT_CONFIGURED` | 500 | a function with `auth_mode=signed` was invoked but its `ORVA_SIGNING_SECRET` secret is not set | no — set the secret, or switch the function's `auth_mode` |
 | `DB_ERROR` | 500 | AI conversation store read/write failed | no — retry; if it persists, file a bug with `request_id` |
 | `NO_STREAM` | 500 | an AI SSE endpoint could not take over the response writer (a proxy/server that does not support streaming) | no — fix the proxy or use a streaming-capable path |

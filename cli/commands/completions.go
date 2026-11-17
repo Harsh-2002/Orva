@@ -121,7 +121,7 @@ func wireCompletions(root *cobra.Command) {
 
 	// --fn flag = function name.
 	for _, path := range [][]string{
-		{"pool", "get"}, {"pool", "set"}, {"cron", "create"}, {"jobs", "list"},
+		{"pool", "get"}, {"pool", "set"}, {"cron", "create"}, {"cron", "update"}, {"cron", "delete"}, {"cron", "resume"}, {"jobs", "list"},
 	} {
 		if c, _, err := root.Find(path); err == nil {
 			_ = c.RegisterFlagCompletionFunc("fn", completeFunctionNames)

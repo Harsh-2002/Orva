@@ -1300,6 +1300,43 @@ Requires the caller's SDK permission and dispatches through the warm pool. The p
     }
 
 ## orva.jobs — durable background queue with retries
+
+**Independent cron core fixture:** explicitly configured SDK/scheduler
+`WithCronIAM` supports leased self `crons.upsert`, durable host-owned origin and
+standing/current-managed-target revalidation on firing. Edits/disables invalidate
+stale queued revisions. Regrant does not resume suspended schedules; shared-service
+admin resume revalidates original rights and selects only the next future firing.
+Normal boot is not activated by this core. A separate explicit controls fixture
+uses the same service through HTTP, CLI, external MCP and the shared AI registry.
+Legacy rows quarantine; restore/adoption and retained deleted-target history remain
+pending. Jobs-only construction still leaves cron disabled.
+
+**Cron controls fixture:** normal HTTP/router/catalog defaults remain legacy.
+An explicitly enabled handler/tool dependency exposes admin-only create/update/
+delete/resume with decimal-string config/authority CAS. `resume_cron_schedule`
+and `orva cron resume <id> --fn <owner-uuid> --config-revision <n>
+--authority-generation <n>` revalidate the original source and schedule only the
+next future firing. They do not adopt function work as operator work. Inspection
+remains read-only; admin does not additionally require read for a fully identified
+mutation. `delete_cron_schedule` separately requires `confirm=true`, regardless
+of AI approval policy. Origin/approval fields cannot be authored.
+
+The CronJobs view displays stored enabled state separately from current authority,
+source/reason and exact revisions, with explicit admin Resume. Missing authority,
+stale snapshots, conflicts and failed refreshes do not claim runnable authority.
+Quarantined legacy schedules explain why resume is unavailable. Regrant and
+enable never substitute for resume.
+
+**Internal IAM jobs fixture only:** normal serving IAM remains off. The opt-in
+fixture records host-only function/operator provenance and scopes idempotency by
+origin, creator and target UUID. Delayed attempts and retries recheck current
+standing grants/target acceptance, then the actual acquired worker generation.
+Authorization denial suspends without spending an attempt. Regrant alone does
+not resume work. Admin-only `resume_job` / `orva jobs resume <id>` explicitly
+revalidates one suspended pending job; terminal/quarantined jobs are not reopened.
+Fixture enqueue/retry/delete are also admin-only; reads remain read-only.
+Retry never elevates function work into operator work. These controls are not
+registered in normal serving; cron/adoption/restore are outside this slice.
 Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff in SECONDS (attempt 1 → 2s, 2 → 4s, 3 → 8s, …), capped at 1h, up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
 
   Python:

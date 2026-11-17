@@ -1,5 +1,37 @@
 # Security model
 
+## Staged jobs authority (inactive in normal serving)
+
+The explicit jobs fixture reauthorizes host-recorded function origin/current
+standing grants and target `job` acceptance before claim and again after real
+pool wait, including the acquired target's approved artifact. It does not
+fabricate an SDK execution lease for scheduled work. Creation revisions are
+provenance, not grants; admission revision changes conservatively require
+explicit admin revalidation. Regrant never revives a cancelled registration.
+
+Function-origin retry/resume cannot inherit operator bypass. Accepted operator
+jobs are durable admin-owned work, independent of later key expiry; management
+mutations still recheck live admin credentials in their own transaction. New
+idempotency records isolate origin/creator/target, leaving the legacy index
+unchanged. Restore, cron and adoption are not implemented by this fixture.
+Target-FK deletion still removes job rows; retained deletion history is not
+claimed, and stale final admission fails closed. See the `workloadasync` README.
+
+The independent cron core fixture is also inactive in normal serving. It requires
+explicit schema and SDK/scheduler options separate from jobs. SDK registration
+uses a live leased self caller, scoped own-cron grant and self cron acceptance;
+host firing uses standing rights and the actual managed worker after pool wait.
+Authority/configuration CAS rejects stale queued firings after edit/disable, and
+completion CAS prevents an older result from overwriting newer configuration.
+Admin-service resume revalidates original rights and selects the next future time,
+never missed catch-up. Separate opt-in HTTP/MCP/shared-AI controls capture only
+trusted authentication references and delegate to that service. Mutations are
+admin-only (not read-plus-admin), require exact configuration/authority CAS, and
+reject author origin/approval fields. Destructive confirmation is enforced by code
+separately from AI approval hints. Normal routes/catalog and restore/adoption are
+not activated. Historic cron rows quarantine, including named rows; the existing
+target-FK cascade is not retained suspension history.
+
 This document explains how Orva isolates user-supplied code from the host
 and from other functions. It is descriptive, not prescriptive — every
 claim below is grounded in a specific file/line that you can audit.

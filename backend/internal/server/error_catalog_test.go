@@ -21,7 +21,29 @@ var emitPatterns = []*regexp.Regexp{
 }
 
 // These documented errors moved from REST wrappers to the channel, not out of the product.
-var migratedSDKErrorPattern = regexp.MustCompile(`\b(?:fail|serr)\([^"\n]*"(KV_UNAVAILABLE|SDK_SCOPE_VIOLATION)"`)
+var migratedSDKErrorPattern = regexp.MustCompile(`\b(?:fail|serr)\([^"\n]*"(KV_UNAVAILABLE|SDK_SCOPE_VIOLATION|IAM_DENIED)"`)
+
+func TestSDKErrorCatalogPattern(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   string
+	}{
+		{`return fail(403, "IAM_DENIED", "SDK operation denied")`, "IAM_DENIED"},
+		{`return serr(403, "SDK_SCOPE_VIOLATION", "scope denied")`, "SDK_SCOPE_VIOLATION"},
+		{`return fail(503, "KV_UNAVAILABLE", "unavailable")`, "KV_UNAVAILABLE"},
+		{`const code = "IAM_DENIED"`, ""},
+		{`return fail(403, "UNRECOGNIZED", "IAM_DENIED")`, ""},
+	} {
+		match := migratedSDKErrorPattern.FindStringSubmatch(tc.source)
+		got := ""
+		if len(match) > 1 {
+			got = match[1]
+		}
+		if got != tc.want {
+			t.Errorf("source %q: got %q, want %q", tc.source, got, tc.want)
+		}
+	}
+}
 
 var catalogRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]+)` \\|")
 

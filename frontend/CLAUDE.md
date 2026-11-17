@@ -123,6 +123,12 @@ which violet is correct.
 
 ## Non-obvious
 
+- CronJobs keeps authority separate from Enabled. Staged management requires the
+  server's advisory admin capability plus a current snapshot and inspected string
+  revisions, but server commit-time checks remain authoritative. A 409 or failed
+  refresh retains errors and marks the snapshot stale; no automatic CAS retry or
+  implicit resume occurs. Request ownership ends on deactivation/unmount.
+
 - **The staged Permissions page is not its future request controller.** Preserve
   owner-scoped response ordering; never publish a stale response as a save
   acknowledgement. Set `saving` false before supplying a fresh successful

@@ -71,6 +71,12 @@ func (a *Authority) PublishBatchDeferred(batch []Publication, persist func() err
 			cancelled = append(cancelled, call.cancel)
 		}
 	}
+	for call := range a.asyncRegistrations {
+		if frozen[call.origin.CreatorID] != nil || frozen[call.origin.TargetID] != nil {
+			call.revoked = true
+			cancelled = append(cancelled, call.cancel)
+		}
+	}
 	a.registrationMu.Unlock()
 	locked = false
 	a.gate.Unlock()

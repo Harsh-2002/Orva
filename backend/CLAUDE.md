@@ -281,11 +281,25 @@ selectors before the transaction, and binds literal-list cursors to owner/prefix
 Buffered and streaming F2F have staged acquired-worker admission behind a trusted
 target-state observer; missing observers or unbound pool artifacts deny. Stream
 heads, chunks, completion and errors reauthorize at bounded handoff; frame I/O,
-encoding and cleanup stay outside admission. Jobs, cron and spans still deny;
+encoding and cleanup stay outside admission. Jobs require the separate explicit
+`workloadasync` fixture service; cron requires separate explicit `WithCronIAM`;
+spans still deny;
 owned stream close is cleanup. Target-state
 observers must read active/current-generation facts under the same IAM gate,
 never infer activity from policy existence or perform DB/I/O/worker-lock reads.
 Never enable the partial path in serving configuration before coordinated cut-over.
+
+`workloadasync` composes staged jobs through the same Authority and actual managed
+target observer. Its schema/HTTP/MCP/scheduler options are explicit fixture-only;
+normal constructors and boot migration remain unchanged. See its README for
+standing provenance, admission-revision invalidation, admin-only controls and the
+unresolved target-FK history-retention limit. Cron remains disabled in jobs-only
+mode. The independent cron core fixture adds explicit schema, leased self-upsert,
+standing/final managed-target firing and admin-service future-only resume; no
+normal boot activation is installed. Separate opt-in `CronHandler` / MCP cron
+dependencies delegate management to the same service with exact string CAS and
+live admin checks. Normal router/catalog defaults remain unchanged. The explicit
+scratch controls UI entry compiles the real CronJobs view, not API snapshots.
 
 `workload_iam*.go` holds inert policy storage and read-only legacy preflight.
 Its explicit schema initializer is test-only for now, never called on boot.

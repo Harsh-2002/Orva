@@ -233,6 +233,39 @@ from the appropriate generation, never expose another creator's lookup. Test
 concurrent equal keys from different creators, legacy collisions, expiry and
 transaction rollback without orphan reservations.
 
+#### Deleted-target retention refinement — narrow core accepted, integration pending
+
+Keep existing target foreign keys and additive migration rules. Target deletion
+must preserve metadata-only history for pending/running jobs and all schedules,
+covering the existing explicit cleanup as well as cascades. History is not an
+executable suspended row: it cannot be claimed, resumed or adopted. Preserve
+original UUIDs/provenance, state/reason and bounded timing/configuration metadata,
+but not payloads, secrets or environment data. Creator deletion with a surviving
+target still suspends live work and retains the original creator UUID.
+
+Use unique `(work kind, original work ID)` tombstones without resource foreign
+keys. Bound the archive to 100,000 rows and 64 MiB of canonical serialized
+metadata, not physical SQLite/index bytes. Ninety days is purge eligibility,
+not automatic expiry. Explicit audited admin purge is required; never silently
+evict history to make a function deletion fit.
+
+Reserve capacity before marking a function deleting, using the ordered function
+mutation lock, IAM gate and synchronous DB transaction. Capacity refusal leaves
+function/work state unchanged. Close admission at that publication boundary;
+persist reservation/progress and archive/delete each bounded batch atomically.
+Retries must match existing tombstones and cannot double-charge reservations.
+Purge must not consume reserved capacity. Callback signalling and process
+retirement remain outside IAM/owner locks.
+
+Explicit admin reissue supplies and reviews fresh payload/configuration and an
+exact current target UUID, creates a new work ID and operator origin, and audits
+the old-to-new provenance change. It never revives the archived ID, resolves a
+same-name replacement automatically, or reuses an old idempotency lookup.
+Inspection requires read; purge/reissue require live admin and confirmation.
+Restore preserves history as inspection-only and does not restore authority.
+This is a deliberate retention/privacy refinement of target-deletion suspension,
+not proof that the current async candidates implement it.
+
 For migration, a nonempty existing `enqueued_by_function_id` is evidence of
 function origin but still requires review and remains suspended. An absent
 creator is not proof of operator origin. Historic cron rows have no reliable
@@ -735,15 +768,42 @@ and policy together. Serving wiring remains absent until the full proof gates.
   The combined VM was removed. Normal router/boot/catalog activation and full
   E2E/cut-over remain off and unaccepted.
 
-- Isolated Jobs44 has independent nine-package normal/race and real self-target
-  Node/Python CLI/MCP acceptance, but remains on HOLD for a timezone-dependent
-  test fixture and missing browser/distinct-function proof. The database race
-  suite passed with an adequate 15-minute budget after its earlier timeout;
-  neither that timeout nor the author's older no-output timeouts were relabelled
-  successful. Isolated Cron CORE24 has scoped independent storage/admission and
-  real firing acceptance, but depends on Jobs44 and lacks accepted public
-  controls/UI. Neither async increment is integrated or activated. Adoption,
-  reissue, restore and retained deleted-target history remain full-plan gates.
+- Jobs44's timezone fixture and browser/distinct-function holds are closed by
+  independent completion QA: all six timezone normal/race checks, hostile SDK
+  boundaries, real Node↔Python jobs and retained-worker replacement denial pass.
+  Thirty-one browser checks verify both real UI resumes, target SDK writes,
+  immutable function provenance and one admin audit each. The earlier database
+  race timeout remains recorded; the unfiltered rerun passed with an adequate
+  15-minute budget. Older author no-output timeouts remain cause-unproved.
+  Jobs is integrated. The verifier's test-only CLI
+  environment-auth overlay is retained instead of credential argv.
+  Cron CORE24 and final formatted CONTROL37 have scoped independent admission,
+  real firing, schema-precision and four browser/runtime-combination acceptance.
+  The cron verifier's initial wrong-cwd host launch failed isolation and was
+  excluded; isolated reruns supplied acceptance. Aggregate jobs/cron integration
+  now passes independent merge-critical source review and fresh combined checks:
+  UID-1001 server/UI/slim-CLI builds, canonical lint/tests, unfiltered affected
+  package race checks including database (611 seconds), 106 unit and 283
+  component tests, and four scratch UI builds. Race-enabled real self-target
+  and cross-runtime jobs and all four cron browser/runtime combinations passed.
+  Only the existing Editor lint warning remains; the owned VM was removed.
+  The first aggregate attempt failed the error-catalog scanner, which omitted
+  actual SDK `IAM_DENIED` emissions. Its log remains; the scanner fix includes
+  positive/negative regression cases, and the complete rerun passed.
+  A new combined managed-publication/standing-job unit regression passed normal
+  and three race runs: failed CAS cancels nothing, detach/revoke cancels before
+  ACK outside owner/IAM locks, and residual inline grants remain effective.
+  Full lifecycle, restore and coordinated production activation remain
+  unaccepted; no production activation follows from these tests.
+
+- Isolated HISTORY28 has independent scoped normal/race/vet, SQLite fault/auth
+  and real Node/Python deletion/archive/fresh-reissue acceptance. The verifier
+  rebuilt against the final source and observed new target SDK effects and
+  operator-origin audits; old IDs and same-name recreation did not resurrect
+  work. Its VM/worktree were removed and 42 safe evidence files hash-checked.
+  Managed-policy membership/revision/deletion-audit coordination, public history
+  CLI/MCP/AI/UI and restore remain unfinished. History is not integrated, and its
+  frozen Jobs44 timezone defect is not silently replaced by the later correction.
 
 - Conditional browser-session UUID capture has scoped independent acceptance.
   Once the explicit identity schema is installed, new session rows receive

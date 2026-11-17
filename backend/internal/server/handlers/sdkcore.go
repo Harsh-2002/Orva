@@ -56,6 +56,18 @@ type EnqueueJobRequest struct {
 // EnqueueJob validates req and inserts the job. callerFnID/trace/span are the
 // attribution of an SDK caller and are empty for dashboard/API-key requests.
 func EnqueueJob(db *database.Database, callerFnID, callerTraceID, callerSpanID string, req *EnqueueJobRequest) (*database.Job, *StatusErr) {
+	job, serr := PrepareEnqueueJob(db, callerFnID, callerTraceID, callerSpanID, req)
+	if serr != nil {
+		return nil, serr
+	}
+	if err := db.EnqueueJob(job); err != nil {
+		return nil, statusErr(http.StatusInternalServerError, "INTERNAL", "enqueue failed: "+err.Error())
+	}
+	return job, nil
+}
+
+// PrepareEnqueueJob resolves once without persistence; IAM authorizes that UUID.
+func PrepareEnqueueJob(db *database.Database, callerFnID, callerTraceID, callerSpanID string, req *EnqueueJobRequest) (*database.Job, *StatusErr) {
 	// Resolve function_id from either field. Adapter SDK sends function_name;
 	// dashboard sends function_id directly.
 	fnID := req.FunctionID
@@ -94,9 +106,6 @@ func EnqueueJob(db *database.Database, callerFnID, callerTraceID, callerSpanID s
 	job.TraceID = callerTraceID
 	job.ParentSpanID = callerSpanID
 	job.EnqueuedByFunctionID = callerFnID
-	if err := db.EnqueueJob(job); err != nil {
-		return nil, statusErr(http.StatusInternalServerError, "INTERNAL", "enqueue failed: "+err.Error())
-	}
 	return job, nil
 }
 

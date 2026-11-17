@@ -14,6 +14,37 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Internal cron controls and UI (not activated)
+
+- Adds opt-in HTTP, compiled CLI, external-MCP/shared-AI controls and schedule
+  authority/source/reason/revision UI over the existing cron service.
+- **Future breaking cut-over requirement:** durable cron mutations require admin
+  and exact decimal configuration/authority CAS; delete also requires explicit
+  confirmation. Inspection remains read-gated. Normal router/catalog/schema
+  defaults remain unchanged; restore/adoption/deleted-target retention are HOLDs.
+
+### Internal IAM cron core (not activated)
+
+- Adds independent opt-in leased self-cron registration, host provenance,
+  standing and acquired-worker admission, revision-CAS stale-firing rejection,
+  suspension and future-only admin-service resume. Normal boot/routes/catalog
+  and existing jobs-only options are unchanged.
+- **Future cut-over requirement:** cron management must be admin-gated, with live
+  credential checks; historical cron rows quarantine. Public management controls,
+  UI, restore/adoption and retained deleted-target history are still pending.
+
+### Internal IAM jobs fixture (not activated)
+
+- Adds opt-in provenance-scoped jobs, current standing/acquired-worker admission,
+  suspension, and explicit admin resume through the Jobs UI, CLI and shared
+  external-MCP/AI registry. Normal router construction and boot migration remain off.
+- **Future breaking cut-over requirement:** IAM jobs enqueue/retry/resume/delete
+  require admin rather than write. Existing function-origin work retains its
+  original rights on retry; key expiry does not revoke accepted operator work.
+  Legacy hints need review and unknown origins quarantine. No production upgrade
+  procedure is enabled yet. Cron, adoption/reissue, restore and retained
+  deleted-target history remain pending.
+
 ### Removed
 
 - Removed the `orva chat` CLI command. The dashboard AI assistant and server-side

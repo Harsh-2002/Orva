@@ -375,6 +375,29 @@ Secrets ride along with the function as `process.env.STRIPE_KEY` /
 
 ### Schedules + background jobs
 
+The opt-in IAM cron fixture adds `orva cron resume <id> --fn <owner-uuid>
+--config-revision <decimal> --authority-generation <decimal>`. It requires current
+admin and resumes the original authority at the next future fire, without
+catch-up or adoption. Providing owner UUID and exact revisions lets an admin-only
+credential mutate without requiring read; omitting `--fn` performs a read-authorized
+owner lookup. Inspection remains read-gated.
+A function name in `--fn` also requires read for name resolution; only the UUID
+fast path skips that lookup.
+
+`cron update` and `cron delete` accept the same revision flags, required by the
+explicit IAM fixture. They never replace the supplied CAS with a fresh lookup.
+Delete retains the normal `--yes`/interactive confirmation convention and sends
+`confirm=true` to the staged endpoint. Use `cron list -o json` to inspect authority,
+source and revisions without rounding. Normal-serving resume is still a 404:
+these routes are fixture-only until coordinated cut-over.
+
+The CLI also has `orva jobs resume <id>` for the explicit IAM jobs fixture only.
+It requires live admin authority and revalidates the job's original creator and
+target; it never adopts function work or reopens terminal/quarantined jobs.
+Normal serving has no resume route yet (404 is expected). The fixture also
+requires admin for enqueue/retry/delete; this is not yet a normal API gate change.
+Use `jobs get/list -o json` to inspect authority state, reason and source metadata.
+
 ```bash
 # Cron: fire greeter at 09:00 IST every day.
 orva cron create --fn greeter --expr "0 9 * * *" --tz Asia/Kolkata \
