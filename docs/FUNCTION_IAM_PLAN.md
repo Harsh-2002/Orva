@@ -612,6 +612,20 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- The first live visible KV milestone now connects the unchanged approved UI,
+  real request controller, authenticated HTTP adapter, policy transaction and
+  Authority to actual Node/Python private-SDK workers. Independent browser
+  journeys passed deny → UI grant → allow → UI revoke → deny on the same worker
+  and artifact, matching audit revisions; phone/desktop captures had no browser
+  errors or overflow and were shown in the conversation. Stale response/CAS/
+  credential and controller lifecycle tests passed. This uses direct Factory
+  dispatch in an explicitly labelled scratch shell, not serving-pool or full
+  IAM integration. Production routes, boot schemas and SDK defaults remain off.
+  The exact accepted patch is integrated. Fresh UID-1001 actual server/UI build,
+  canonical lint/tests, frontend lint/tests and separate live-entry build passed;
+  the combined-check VM was removed. This does not extend acceptance to the
+  ongoing serving-pool integration.
+
 - The internal two-store Owner now binds code/runtime roots to instance epochs
   with one durable commit barrier. Exact same-boot fencing gates committed-asset
   recovery; incomplete state denies and unfinished assets remain quarantined.

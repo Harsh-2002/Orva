@@ -92,6 +92,13 @@ unfinished assets remain quarantined. Unbound recovery remains inspection-only.
 This does not restore policy authority, enable serving, repair interrupted
 transitions or solve cold-start/reboot budget capture. See `artifactfs/OWNER.md`.
 
+The unregistered permissions HTTP adapter authenticates a live operator and
+derives its reference/capabilities server-side. Policy mutations still recheck
+live admin authority in the shared transaction. The separate live scratch
+fixture connects this adapter and the real UI controller to Factory-created
+Node/Python workers and private-SDK KV enforcement. It is not the serving pool,
+production browser login, complete SDK enforcement or production route wiring.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many

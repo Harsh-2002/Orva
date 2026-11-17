@@ -63,6 +63,45 @@ token work are bounded before constructing the request. Decoded policy bytes
 are owned canonical JSON. This pins a decoder seam, not a registered REST/MCP
 contract or a claim that ordinary MCP decoding retains duplicate keys.
 
-The staged Vue page's internal event uses camelCase expectation fields; its
-future controller must explicitly map these snake_case wire names without
+The Vue page's internal event uses camelCase expectation fields.
+`frontend/src/api/permissions.js` explicitly maps those to snake_case without
 coercing revision strings or adding host authority claims.
+
+## Unregistered HTTP adapter (scratch KV integration)
+
+`HTTPAdapter` is reusable but is **not installed in the production router**.
+The live scratch fixture alone binds GET/PUT
+`/api/v1/functions/{id}/permissions` and POST
+`/api/v1/functions/{id}/permissions/review`.
+
+The caller must provide a trusted, live credential resolver. The adapter rejects
+missing/channel/invalid operator references; all reads require explicit `read`,
+mutations require both `read` and `admin`. The fixture resolves actual API-key
+hashes/expiry from its scratch database on every request, without a cache.
+Mutation commits additionally recheck live credentials inside `Service`'s
+database transaction. This does not change normal REST or browser-session auth.
+
+GET and mutation acknowledgements return a freshly read, camelCase snapshot
+validated by `normalizeSnapshot`: function identity, decimal-string revision
+and epoch, nullable current/approved artifacts, review/quarantine flags,
+server-derived capabilities, stored policy, and at most 32 actual audit records
+(digest/credential UUID/kind/time, never bearer material or historical policy).
+Targets are currently unresolved (empty list). Responses are `no-store`.
+`active` describes this adapter's enforced scratch host, **not** the production
+instance. Only install it in a host whose SDK and transition hooks share this
+Authority and whose observer describes the actual pinned Factory.
+
+Invalid wire requests return 400, read/admin denial 403, stale CAS 409,
+unavailable current artifacts 409, and internal read failures 500. The strict
+decoders remain authoritative; no caller can submit actor or capability fields.
+Review takes only expectations, never a replacement policy.
+
+The controller queues refresh during mutation, cancels obsolete requests,
+discards stale successes and errors (including owner A/B/A), and publishes
+`saving=false` on a separate Vue tick before an acknowledgement snapshot. Errors
+reach the page before queued refresh results. Unmount/deactivation cancel both
+lanes; reactivation reloads. The presentational page and its guard tests remain
+unchanged.
+
+See `test/live-iam/README.md` for the explicit real-runtime scratch workflow.
+It is a KV milestone, not serving-pool/provider integration or full SDK cut-over.
