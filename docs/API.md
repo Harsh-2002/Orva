@@ -1,5 +1,47 @@
 # HTTP API reference
 
+The optional history deletion root can include `managed_sources`: bounded
+owner/policy UUID, owner revision/epoch, pin/enabled, before/after membership and
+digest metadata. It is inspection-only, contains no policy body or payload, and
+survives the function FK cascade. Its opt-in coordinator shares the managed
+service's source CAS, owner/definition locks and live-admin transaction. Normal
+routes remain unchanged; see `backend/internal/workloadpolicy/OWNER_DELETION.md`.
+
+## Internal opt-in deleted-work history (not normal routes)
+
+The scratch `workloadhistory.HTTPAdapter` registers POST
+`/api/v1/work-history/{list,get,purge,reissue}` only when explicitly supplied with
+the service and a trusted live authenticator. Normal router construction does
+not register these endpoints. READ is required for list/get; ADMIN is required
+for purge/reissue, rechecked against live credentials. See
+[`workloadhistory/README.md`](../backend/internal/workloadhistory/README.md).
+
+- `list`: `{target_id?, after?:{kind,id}, limit:1..100}`; returns metadata entries
+  in `(kind,id)` order, including a `reserved` flag. Omit target to inspect all.
+- `get`: `{kind,id}`; returns one metadata entry. Archives are non-executable;
+  payload is unavailable.
+- `purge`: `{selected:[{kind,id}], confirm:true}`; 1–32 exact records, no
+  duplicates, no reservations, and only records eligible after 90 days.
+- `reissue`: `{source:{kind:"job"|"cron",id}, target_id, payload, reviewed:true,
+  confirm:true, ...fresh_config}`; job config requires `scheduled_at` and
+  `max_attempts` (1–100). Cron config requires `name`, `expression`, `timezone`
+  and `enabled`; enabled cron starts at a fresh future time. The target is an
+  exact new UUID, never a name. Returns `{new_id,origin:"operator"}`.
+
+Success is 200 with `Cache-Control:no-store`. Invalid, duplicate/unknown-field,
+ineligible/missing source or unavailable target-authority requests return 400
+`VALIDATION`; live permission denial returns 403 `FORBIDDEN`; history capacity
+refusal returns 409 `CONFLICT`. Missing authentication returns 401
+`UNAUTHORIZED`; an explicitly registered but unavailable adapter returns 503
+`UNAVAILABLE`. There is no old-work resume/retry/adopt endpoint.
+
+With the opt-in registry deletion hook, function DELETE first reserves history
+before pool retirement or deleting status. A preparation failure may leave the
+function fully active; an interrupted committed deletion remains `deleting` and
+is resumable. The existing function-delete handler reports refused/incomplete
+deletion as `INTERNAL` and directs the caller to inspect current state before
+retrying. Nil-hook legacy deletion keeps its existing behavior.
+
 Management endpoints live under `/api/v1/`; invocation, MCP, metrics,
 and OAuth discovery/authorization also expose the public paths called out
 below. Management auth uses either:

@@ -1,5 +1,20 @@
 # Operations runbook
 
+## Internal history fixture recovery limits
+
+Normal boot does not initialize or activate deleted-work history. In the
+explicit scratch composition, a failed capacity preflight leaves the function
+active; a committed reservation followed by interrupted cleanup leaves durable
+`deleting` progress. Retry through the same configured registry hook with fresh
+trusted admin authentication, never by editing rows or disabling history to
+fall back to legacy deletion. Each bounded archive/live-cleanup batch commits
+atomically. Child-process fault resumption is tested, not power-loss/reboot
+recovery. Ninety days is purge eligibility only: explicit confirmed/admin purge
+is audited and cannot consume reservations. Full capacity refuses new deletion;
+there is no silent eviction. Restore remains a separate gate: archives must stay
+inspection-only and live work must be quarantined, not replayed. See the
+history package README for unqualified cut-over obligations.
+
 ## Internal IAM jobs fixture
 
 No production upgrade action is required for this inactive increment. Do not

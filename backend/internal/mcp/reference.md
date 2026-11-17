@@ -1,5 +1,18 @@
 # Orva — Documentation
 
+> Internal qualification note: deleted-work metadata history and explicit
+> fresh-work reissue exist only in an opt-in scratch composition, not normal
+> serving routes/catalogs. History stores no old payload, environment, secrets or
+> raw keys and can never execute. READ protects inspection; live ADMIN plus
+> explicit review/confirmation and fresh payload/config/target UUID are required
+> to create NEW OPERATOR-origin work. Capacity is 100,000 canonical metadata
+> records / 64 MiB including reservations; 90 days permits explicit audited purge,
+> never automatic expiry. Function deletion reserves first and fails closed on
+> insufficient capacity. CLI/MCP/AI history tools, UI, independent managed-deletion
+> acceptance and restore quarantine/cut-over remain pending. See the repository
+> `docs/API.md` and `backend/internal/workloadhistory/README.md`; do not activate
+> the partial fixture in production.
+
 > Everything you need to write, deploy, and operate functions on Orva.
 > Generated from the in-app Docs page (`{{ORIGIN}}/web/docs`).
 

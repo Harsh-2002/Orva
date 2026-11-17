@@ -272,6 +272,9 @@ var ErrFunctionDeleting = errors.New("function is being deleted")
 // Idempotent; a cancelled ctx leaves the function 'deleting' and a later call
 // finishes it.
 func (db *Database) DeleteFunction(ctx context.Context, id string) error {
+	if err := db.historyDeleteReady(ctx, id); err != nil {
+		return err
+	}
 	// lifecycleMu is held only for the flip: a writer waiting on an RWMutex
 	// blocks new RLock calls, which would stall the async commit pass.
 	db.lifecycleMu.Lock()
@@ -348,6 +351,11 @@ func (db *Database) finishFunctionDelete(ctx context.Context, id string) error {
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM functions WHERE id = ?", id); err != nil {
 		return fmt.Errorf("delete %s: function: %w", id, err)
+	}
+	if db.historyEnabled.Load() {
+		if err := historyFinishTx(ctx, tx, id); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete %s: %w", id, err)

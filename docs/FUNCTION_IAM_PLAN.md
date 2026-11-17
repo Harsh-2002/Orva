@@ -233,7 +233,7 @@ from the appropriate generation, never expose another creator's lookup. Test
 concurrent equal keys from different creators, legacy collisions, expiry and
 transaction rollback without orphan reservations.
 
-#### Deleted-target retention refinement — narrow core accepted, integration pending
+#### Deleted-target retention refinement — coordinated core accepted, public controls pending
 
 Keep existing target foreign keys and additive migration rules. Target deletion
 must preserve metadata-only history for pending/running jobs and all schedules,
@@ -546,7 +546,7 @@ authorized by this completion request. Source-level coordinated cut-over still
 requires the complete acceptance gates; a working scratch workflow alone does
 not authorize activating a partial API.
 
-### Reusable-policy decisions — core accepted, management surfaces pending
+### Reusable-policy decisions — staged core and management surfaces accepted
 
 - Named definitions have immutable versions. Attachments pin a version; editing
   creates a new version without changing existing attachments. Impact preview
@@ -801,9 +801,23 @@ and policy together. Serving wiring remains absent until the full proof gates.
   rebuilt against the final source and observed new target SDK effects and
   operator-origin audits; old IDs and same-name recreation did not resurrect
   work. Its VM/worktree were removed and 42 safe evidence files hash-checked.
-  Managed-policy membership/revision/deletion-audit coordination, public history
-  CLI/MCP/AI/UI and restore remain unfinished. History is not integrated, and its
-  frozen Jobs44 timezone defect is not silently replaced by the later correction.
+  The subsequent managed-deletion coordination initially failed its exact-byte
+  Node lifecycle with `SQLITE_BUSY` during fixture schema staging after invocation
+  had begun asynchronous writes; Python and independent SQLite CAS/fault/
+  concurrency probes passed. The original failure is retained. A two-test-file
+  correction stages schema/source setup before invocation and applies bounded
+  per-connection SQLite pragmas. Independent re-verification passed three fresh
+  dual-runtime processes (six subtests) without weakening lifecycle assertions.
+  History, coordination and the fixture correction are integrated alongside the
+  accepted Jobs44 timezone correction and controls, not silently substituted in
+  earlier frozen-source verdicts.
+  Independent merge-critical source review passed. Fresh combined UID-1001
+  server/UI/slim-CLI builds, canonical lint/tests and full affected-package race
+  checks passed, including database (623 seconds). Race-enabled real coordinated
+  Node/Python history, distinct-function jobs and cron lifecycles passed; the
+  combined VM was removed. Public history adapters have separate scoped QA, but
+  are not part of this combined run. Complete CLI/UI/browser workflow, restore,
+  broader lifecycle and full E2E/cut-over remain unaccepted.
 
 - Conditional browser-session UUID capture has scoped independent acceptance.
   Once the explicit identity schema is installed, new session rows receive

@@ -25,6 +25,7 @@ const MaxHandoffBytes = 256 << 10
 type Authority struct {
 	gate               sync.RWMutex
 	policies           map[string]*Evaluator
+	retired            map[string]bool
 	registrationMu     sync.Mutex
 	registrations      map[*Admission]struct{}
 	asyncRegistrations map[*AsyncAdmission]struct{}
@@ -272,6 +273,10 @@ func (a *Authority) Publish(expected uint64, candidate *Evaluator, persist func(
 		return ErrConflict
 	}
 	a.gate.Lock()
+	if a.retired[frozen.metadata.OwnerID] {
+		a.gate.Unlock()
+		return ErrDenied
+	}
 	current := a.policies[frozen.metadata.OwnerID].Metadata().Revision
 	if a.policies == nil || current != expected {
 		a.gate.Unlock()

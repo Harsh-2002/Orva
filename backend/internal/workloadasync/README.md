@@ -1,5 +1,12 @@
 # Opt-in jobs lifecycle
 
+The separate `workloadhistory` opt-in registry hook can capture bounded
+non-executable target-deletion metadata before existing target FK cascades.
+It does not alter ordinary job deletion/purge or activate normal boot. Archives
+cannot resume/retry; explicit admin review with fresh payload/config/new target
+UUID creates new OPERATOR-origin work. Public history CLI/MCP/AI/UI controls,
+managed-policy deletion coordination and restore acceptance remain pending.
+
 This package is internal and inactive in normal serving construction. Explicit
 `InitAsyncSchemaForFixture`, SDK-host `WithIAM` + `WithAsyncIAM`, scheduler
 `WithAsyncIAM`, and opted-in HTTP/MCP dependencies are required together. A nil

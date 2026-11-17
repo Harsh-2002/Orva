@@ -1,5 +1,26 @@
 # Security model
 
+The optional managed/history deletion coordinator atomically removes named
+membership with archive reservation and terminal admission closure. It preserves
+survivor authority and retains only bounded source/audit metadata under the
+existing history budget. Current trusted operator references are rechecked in
+the commit transaction. Failed preparation never falls back to cascade-only
+removal. This internal composition is not boot activation or universal SQL
+fencing; independent acceptance and restore/queued-build integration remain gates.
+
+## Opt-in deleted-work metadata boundary
+
+The internal history service uses trusted current-request operator references
+and live transaction-time admin/read checks; request bodies and SDK identity
+claims cannot grant operator reissue authority. Metadata remains sensitive and
+requires READ. It retains no old payload, env, secret, raw deduplication key,
+generation token or lease. Archives never execute; explicit confirmed/admin
+reissue creates new operator work, payload and target UUID without restoring
+original policy approval. Capacity denial precedes status/admission closure.
+This is an opt-in tested service boundary, not universal raw-SQL fencing or
+production activation. Managed-policy deletion membership/audit coordination and
+restore quarantine remain unqualified; see `workloadhistory/README.md`.
+
 ## Staged jobs authority (inactive in normal serving)
 
 The explicit jobs fixture reauthorizes host-recorded function origin/current

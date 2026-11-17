@@ -1,5 +1,10 @@
 # Managed policies: internal publication contract
 
+History deletion has a separate opt-in coordinator using the same owner/
+definition locks and publication gate. It validates owned source CAS, removes
+only retired membership and retains metadata audit without changing survivor
+authority. See `OWNER_DELETION.md`; no normal serving/boot activation is implied.
+
 This is a tested **intermediate storage/service increment**, not the reusable
 policy UI/CLI/MCP milestone or production IAM. Nothing initializes these tables
 at boot, registers a route/tool, changes SDK defaults, or loads authority after

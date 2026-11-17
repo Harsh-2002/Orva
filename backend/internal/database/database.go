@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 	"time"
@@ -26,8 +27,9 @@ type Database struct {
 	// lifecycleMu serializes function deletion with the async writer's
 	// commit pass, not with request enqueues. liveFunctions caches only
 	// existing ids, so deleting functions does not grow a tombstone map.
-	lifecycleMu   sync.RWMutex
-	liveFunctions sync.Map
+	lifecycleMu    sync.RWMutex
+	liveFunctions  sync.Map
+	historyEnabled atomic.Bool
 
 	// asyncWG tracks fire-and-forget goroutines (log inserts, last-used
 	// updates) so Close() can wait for them to finish before tearing the

@@ -1,5 +1,10 @@
 # Orva error catalog
 
+The unregistered, internal work-history HTTP adapter uses `UNAVAILABLE` (503)
+when explicitly registered without a usable service/authenticator. Its other
+refusals use `VALIDATION` (400), `FORBIDDEN` (403), `CONFLICT` (409) and
+`UNAUTHORIZED` (401), as scoped in `API.md`. These are not normal server routes.
+
 Orva's REST API errors return the same envelope:
 
 ```json

@@ -1,5 +1,17 @@
 # Backend
 
+`workloadhistory` is an internal opt-in deletion/history service. Its explicit
+schema and registry hook are absent from normal boot/router construction.
+Capacity and canonical metadata capture commit before deleting status and IAM
+retirement; process callbacks run outside the gate. History is inspection-only;
+confirmed/admin reissue creates new operator work with a fresh target UUID and
+payload. Real Node/Python sealed-pool scratch lifecycle tests qualify this narrow
+path, not complete function lifecycle or restore. Explicit managed-policy
+coordination removes the retiring owner's attachments and advances membership/
+audit in the history reservation transaction; surviving owners are unchanged.
+Public history controls, boot/restore and complete lifecycle remain separate
+cut-over gates. See its README.
+
 Go 1.27 (the embedded Bifrost AI gateway requires go ≥1.27; the Dockerfile + all CI workflows pin golang 1.27 in lock-step). Module: `github.com/Harsh-2002/Orva` (rooted at the repo, not at
 `backend/`). SQLite with no CGO (`modernc.org/sqlite`).
 

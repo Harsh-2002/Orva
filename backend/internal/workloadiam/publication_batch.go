@@ -53,6 +53,9 @@ func (a *Authority) PublishBatchDeferred(batch []Publication, persist func() err
 		return nil, ErrInvalid
 	}
 	for owner, revision := range expected {
+		if a.retired[owner] {
+			return nil, ErrDenied
+		}
 		if a.policies[owner].Metadata().Revision != revision {
 			return nil, ErrConflict
 		}

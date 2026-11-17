@@ -585,13 +585,18 @@ func (h *FunctionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), functionDeleteTimeout)
 	defer cancel()
 	// Stop new work first so the pool does not refill while rows are removed.
-	if h.PoolDrain != nil {
-		h.PoolDrain(fnID)
-	}
-	if err := h.Registry.Delete(ctx, fnID); err != nil {
+	if err := h.Registry.DeleteWithDrain(ctx, fnID, func() {
+		if h.PoolDrain != nil {
+			h.PoolDrain(fnID)
+		}
+	}); err != nil {
 		slog.Error("delete function failed", "fn", fnID, "err", err)
+		message := "function delete did not finish; it is marked deleting, retry DELETE to resume"
+		if h.Registry.DeletionHook != nil {
+			message = "function delete refused or incomplete; inspect current state before retrying"
+		}
 		respond.Error(w, http.StatusInternalServerError, "INTERNAL",
-			"function delete did not finish; it is marked deleting, retry DELETE to resume", reqID)
+			message, reqID)
 		return
 	}
 	if h.PoolDrain != nil {

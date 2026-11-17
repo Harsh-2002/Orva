@@ -59,6 +59,11 @@ func (s *Service) MutateManaged(ctx context.Context, ref database.OperatorCreden
 		lock.Lock()
 		locks = append(locks, lock)
 	}
+	if request.PolicyID != "" {
+		lock := s.registry.PolicyMutationLock(request.PolicyID)
+		lock.Lock()
+		locks = append(locks, lock)
+	}
 	unlock := func() {
 		for i := len(locks) - 1; i >= 0; i-- {
 			locks[i].Unlock()

@@ -705,18 +705,7 @@ func (db *Database) CommitIAMManagedMutation(ctx context.Context, ref OperatorCr
 		if p.after != nil {
 			id = p.after.ID
 		}
-		var seq int64
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM workload_iam_managed_audit WHERE policy_id=?`, id).Scan(&seq); err != nil {
-			return err
-		}
-		if seq == math.MaxInt64 {
-			return ErrIAMRevisionExhausted
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO workload_iam_managed_audit(policy_id,sequence,operation,digest,actor_kind,actor_id,changed_at) VALUES(?,?,?,?,?,?,?)`,
-			id, seq+1, r.Operation, p.auditDigest, actor.Kind, actor.ID, p.changedAt.Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM workload_iam_managed_audit WHERE policy_id=? AND sequence NOT IN(SELECT sequence FROM workload_iam_managed_audit WHERE policy_id=? ORDER BY sequence DESC LIMIT 32)`, id, id); err != nil {
+		if err := appendManagedAuditTx(ctx, tx, id, r.Operation, p.auditDigest, actor, p.changedAt); err != nil {
 			return err
 		}
 	}
