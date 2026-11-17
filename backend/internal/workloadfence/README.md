@@ -3,10 +3,11 @@
 `workloadfence` owns a newly created cgroup-v2 epoch, enrolls trusted host commands
 at process creation, and can close entry and prove the entire epoch unpopulated.
 Sandbox and managed-builder consumers are internal opt-ins; there are **no
-serving, pool, artifactfs recovery, boot, GC, or IAM consumers**.
-A proof does not authorize artifact recovery, activation, deletion,
+serving, pool, boot, GC, or IAM consumers**. The internal artifactfs lifecycle
+owner is a separate proof-gated same-boot asset-recovery consumer.
+A proof alone does not authorize artifact recovery, activation, deletion,
 reclamation, policy approval, or current-generation admission. Recovered
-artifact stores remain inspection-only.
+unbound artifact stores remain inspection-only.
 
 ## Ownership and prerequisites
 
@@ -159,15 +160,18 @@ No package can protect against privileged host migrations or forged metadata.
 
 ### Remaining recovery/publication obligations
 
-Persistent artifact stores currently carry no Domain association. Before any
-recovery activation, publication must atomically bind the exact store/epoch/
-generation identities to an instance lineage, pin every worker/build under that
-instance, and durably order publication/intents with closed/fenced ownership.
-A loader must verify the complete association, boot and stable mount/topology,
-and mint fresh kernel proof before any reclamation; mismatches and new boots
-must quarantine rather than adopt by path/inode. Root proof alone, a reference,
-or released flock is not artifact-store authority. No such binding, loader,
-reboot proof, serving activation or recovery mutator is installed here.
+Unbound persistent stores carry no embedded Domain association. The separate
+artifactfs lifecycle owner now supplies a single wrapper record for both stores
+and narrowly proof-gated same-boot committed-asset recovery; see its OWNER.md.
+It does not make an unbound inspection record authoritative or bind an asset
+generation to current function/config/policy publication.
+
+Serving publication must separately order exact generation/current-state
+identities, all worker/build ancestry and crash intents with closed/fenced
+ownership. The loader must verify boot and stable topology and obtain fresh
+kernel proof, never adopt by path/inode. Root proof alone, a reference or
+released flock is not artifact-store authority. Reboot proof, serving activation,
+policy restoration and general quarantine reclamation remain absent.
 
 ## Failure and strict metadata handling
 
@@ -285,15 +289,17 @@ is **not** worker death, process revocation, or permission to reclaim artifacts.
 The domain gate may acquire the budget mutex for bounded identity checks; budget
 methods never acquire domain/IAM/pool locks or call user callbacks.
 
-No durable schema changes are made. No capability can be restored from a
-database/path/record, and no budget-aware recovery constructor or serving boot
-owner is installed. Existing OpenRecovering remains inspection/fence-only under
-its original current-membership constraint. Restart placement, recapturing a
+No durable budget schema changes are made. No capability can be restored from a
+database/path/record. `OpenRecoveringUnderBudget` retains a valid freshly
+captured capability and verifies a same-boot root; it never restores Start or
+child adoption. Ordinary OpenRecovering remains inspection/fence-only under
+its original current-membership constraint. No serving boot owner is installed.
+Restart placement, recapturing a
 service budget after a crash, and production delegation remain integration
 obligations, not acceptance established by this process-local API.
 See the kernel's [no-internal-process constraint](https://docs.kernel.org/admin-guide/cgroup-v2.html#no-internal-process-constraint).
 
-## Mandatory future sandbox integration (not implemented)
+## Sandbox integration contract (internal opt-in only)
 
 Every nsjail **host command**, every worker/build child, and all descendants must
 remain inside the same durable instance epoch, from before their first exec
@@ -307,13 +313,15 @@ be inside the epoch; the future adapter must enable and verify the required
 controllers in that owned subtree. Without resource cgroup flags, children
 naturally inherit their enrolled host command's domain; no relocation is needed.
 
-The current sandbox's legacy global `orva.workers` mount is **not compatible**:
+The sandbox's legacy global `orva.workers` mount is **not compatible**:
 nsjail relocating a jailed child there escapes this fence even though the host
 nsjail command was enrolled correctly. Do not enable this package by wrapping
 Start alone. A future adapter must own argument construction and cgroup parent
 selection, prevent raw-FD reentry, join every startup path, and prove real nsjail
-relocation/lifecycle behavior before it can consume proofs. No such adapter or
-artifact recovery consumer is provided by this change.
+relocation/lifecycle behavior before it can consume proofs. The sandbox now
+provides an internal Domain opt-in for this owned placement path; serving pools
+still do not enable it. The lifecycle owner is a separate internal asset consumer,
+not boot or serving activation.
 
 ## Focused verification
 

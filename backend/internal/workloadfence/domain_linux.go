@@ -174,7 +174,20 @@ func initialize(s *state) (result *Domain, err error) {
 // OpenRecovering verifies the exact same-boot epoch. Reopened domains never
 // allow Start, even when the crashed owner's record had entry open.
 func OpenRecovering(root, parent string) (*Domain, error) {
-	s, err := openOwner(root, parent)
+	return openRecovering(root, parent, nil)
+}
+
+// OpenRecoveringUnderBudget retains a freshly captured boot-owner budget.
+// It verifies the old same-boot root only; it never restores entry authority.
+func OpenRecoveringUnderBudget(budget *Budget, root, parent string) (*Domain, error) {
+	if budget == nil || budget.s == nil {
+		return nil, ErrInvalid
+	}
+	return openRecovering(root, parent, budget.s)
+}
+
+func openRecovering(root, parent string, budget *budgetState) (*Domain, error) {
+	s, err := openOwnerWithBudget(root, parent, budget)
 	if err != nil {
 		return nil, err
 	}

@@ -612,6 +612,17 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- The internal two-store Owner now binds code/runtime roots to instance epochs
+  with one durable commit barrier. Exact same-boot fencing gates committed-asset
+  recovery; incomplete state denies and unfinished assets remain quarantined.
+  Independent normal/race, physical pipelines, crash recovery, adversarial
+  probes and final source checks passed, with the owned VM removed. The race
+  crash replay was rerun manually after its driver timeout, not counted as a
+  green original run. Canonical lint/tests passed on the exact overlay.
+  ACL validation, cold-start
+  budget capture, reboot, interrupted-transition repair, serving, restore and
+  policy/current-generation publication remain open.
+
 - Typed nested Domains now gate child creation/entry against every ancestor,
   preserve cleanup pins and integrate with actual managed Build through the
   mutually exclusive ParentDomain profile. Independent physical race tests,

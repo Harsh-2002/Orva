@@ -29,7 +29,7 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
-| `artifactfs` | Inert Linux-only staging, manifest verification and code/runtime lifetime leases. Explicit persistent publication and inspection-only recovery; recovered trees cannot be activated or deleted. No legacy adoption, serving or GC integration; see its README. |
+| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only; an internal Owner binds both stores to an instance epoch and gates committed-asset recovery on exact same-boot fencing. No serving, cold-start/reboot, approval restoration or GC wiring; see OWNER.md. |
 | `workloadspawn` | Inactive frozen-generation factories issue bounded one-use spawn plans from owned config/secrets and concrete code/runtime leases. Matching resource facts do not establish current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `workloadpolicy` | Internal unregistered management core joining ordered registry/IAM publication with live-operator policy transactions. Requires a trusted current-artifact observer; replacement preserves quarantine/review flags and only explicit review clears them. No serving observer or public adapter is installed. |

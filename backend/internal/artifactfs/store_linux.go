@@ -80,6 +80,7 @@ type record struct {
 	durable       persistentRecord
 	manifestBytes int
 	treeOwned     bool
+	quarantined   bool
 }
 
 type Store struct {
@@ -94,6 +95,9 @@ type Store struct {
 	closed     bool
 	removeAll  func(string) error
 	persistent *persistentState
+	binding    *ownerState
+	detached   bool
+	boundKind  Kind
 }
 
 // New accepts only an existing empty, private, euid-owned directory without
@@ -327,7 +331,7 @@ func (s *Store) Acquire(generation string) (*Lease, error) {
 	if r == nil {
 		return nil, ErrInvalid
 	}
-	if r.phase != active {
+	if r.phase != active || r.quarantined {
 		return nil, ErrRetired
 	}
 	if s.leases >= s.limits.Leases {
@@ -440,6 +444,12 @@ func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	if s.binding != nil {
+		if s.detached {
+			return ErrClosed
+		}
+		return ErrBusy
+	}
 	if len(s.records) != 0 && (s.persistent == nil || !s.persistent.recovered) {
 		return ErrBusy
 	}
@@ -465,6 +475,9 @@ type preparedPathsState struct {
 
 func PreparePaths(codeStore *Store, codeGeneration string, runtimeStore *Store, runtimeGeneration string) (*PreparedPaths, error) {
 	if codeStore == nil || runtimeStore == nil {
+		return nil, ErrInvalid
+	}
+	if codeStore.binding != runtimeStore.binding {
 		return nil, ErrInvalid
 	}
 	code, err := codeStore.Acquire(codeGeneration)

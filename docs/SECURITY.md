@@ -84,6 +84,14 @@ Trusted-host topology, no outside entrants and deliberate boot-owner wiring
 remain prerequisites. Nested placement alone does not bind persistent stores
 to the instance epoch or permit recovery.
 
+Internal `artifactfs.Owner` uses one durable association record for both code
+and runtime stores. Its same-boot recovery verifies the bound epochs and
+Fence/Checks them before inspecting assets, then commits a new association
+before exposing verified committed generations. Incomplete transitions deny;
+unfinished assets remain quarantined. Unbound recovery remains inspection-only.
+This does not restore policy authority, enable serving, repair interrupted
+transitions or solve cold-start/reboot budget capture. See `artifactfs/OWNER.md`.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many
