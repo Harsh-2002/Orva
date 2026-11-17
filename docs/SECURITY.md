@@ -30,9 +30,14 @@ contexts inherit these values. This carries provenance, not frozen permissions;
 publication still rechecks current credentials transactionally.
 
 Legacy browser sessions do not turn cookie prefixes into references and clear
-inherited operator context. Stable session writers/capture, queued build capture,
-authoritative current-artifact/pool publication and public IAM adapters are not
-wired. Audience-less legacy OAuth authentication remains unchanged, but supplies
+inherited operator context. After explicit session-identity schema initialization,
+new sessions receive independent UUIDs transactionally. Browser authentication
+and its cache carry only that stable reference and display label, with cache
+validity bounded by observed session expiry. The reference is never serialized
+into the session API response and does not replace commit-time live checks.
+Normal boot still does not initialize that schema. Queued build capture,
+authoritative production artifact publication and public IAM adapters remain
+unwired. Audience-less legacy OAuth authentication remains unchanged, but supplies
 no IAM publication reference. Persistence-only APIs retain their existing behavior.
 See `docs/FUNCTION_IAM_PLAN.md` for the remaining cut-over gates.
 
@@ -918,3 +923,24 @@ is required by a Bifrost release that builds with this tree.
 If you find a security issue please open a private security advisory
 on the GitHub repository (Settings → Security → Advisories) rather
 than a public issue.
+
+## Internal managed Function IAM increment (inactive)
+
+The staged named-policy store/service is not registered in production and its
+schema is not initialized at boot. Immutable versions are attached by explicit
+pin, never followed automatically. Effective authority is a union of separately
+retained inline and managed sources. Detach and terminal global revoke remove
+only their own contribution; overlapping grants can remain.
+
+The internal service validates at most 25 affected owners, takes sorted mutation
+locks followed by the IAM gate, rechecks live admin and source/definition/
+membership CAS in one transaction, then publishes every owner together. Failed
+COMMIT changes neither live authority nor cancellations. Source-only reductions
+preserve approval and quarantine/review state and can proceed with explicitly
+unknown current artifacts; they never approve different code. Cancellation
+callbacks run after IAM and owner locks are released and before acknowledgement.
+
+This does not qualify migration/restore, function deletion, privileged deployment,
+async enforcement or real SDK/UI/CLI/MCP behavior. The legacy inline-only HTTP
+adapter refuses managed mode. The precise internal contract and remaining gates
+are in `backend/internal/workloadpolicy/MANAGED.md`.

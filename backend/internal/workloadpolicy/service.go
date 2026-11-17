@@ -37,6 +37,7 @@ type Service struct {
 	registry  *registry.Registry
 	authority *workloadiam.Authority
 	observe   ObserveArtifact
+	managed   bool
 }
 
 func New(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, observe ObserveArtifact) (*Service, error) {
@@ -49,6 +50,9 @@ func New(db *database.Database, reg *registry.Registry, authority *workloadiam.A
 // Replace preserves quarantine/review flags; changing stored policy is not a review.
 // ref is captured by trusted authentication, never read from authorable requests.
 func (s *Service) Replace(ctx context.Context, ref database.OperatorCredentialReference, owner string, expected Expected, body []byte) (*database.IAMPolicyRecord, error) {
+	if s != nil && s.managed {
+		return s.replaceManaged(ctx, ref, owner, expected, body, false)
+	}
 	p, err := workloadiam.Decode(body)
 	if err != nil {
 		return nil, database.ErrIAMInvalidPolicy
@@ -58,6 +62,9 @@ func (s *Service) Replace(ctx context.Context, ref database.OperatorCredentialRe
 
 // Review explicitly approves the unchanged stored policy against the reviewed current artifact.
 func (s *Service) Review(ctx context.Context, ref database.OperatorCredentialReference, owner string, expected Expected) (*database.IAMPolicyRecord, error) {
+	if s != nil && s.managed {
+		return s.replaceManaged(ctx, ref, owner, expected, nil, true)
+	}
 	return s.publish(ctx, ref, owner, expected, nil, true)
 }
 

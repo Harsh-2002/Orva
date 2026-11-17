@@ -132,6 +132,13 @@ publication boundary in future integration; this coordinator does not create it.
 
 ## Not implemented / obligations before cut-over
 
+`PublishBatch` commits and installs up to 25 owner snapshots under one write
+gate, or changes none on any CAS/persistence failure. Its deferred form lets the
+shared management service release sorted owner locks before signalling context
+callbacks; it must signal before acknowledging. Duplicate owners and zero
+authorities deny. Candidates and expected revisions are owned before admission.
+The managed source service contract is in `../workloadpolicy/MANAGED.md`.
+
 Live storage/admin integration, quarantine, authority epochs and async attempt/
 firing checks remain outside this package. Resolve names to immutable UUIDs before evaluation. Host
 integration must check target existence/availability generically, current/acquired

@@ -1,12 +1,14 @@
 package database
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"time"
 
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -19,6 +21,7 @@ type User struct {
 }
 
 type Session struct {
+	ID        string    `json:"-"`
 	Token     string    `json:"token"`
 	UserID    int64     `json:"user_id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -98,11 +101,33 @@ func (db *Database) CreateSession(userID int64, ttl time.Duration) (*Session, er
 		ExpiresAt: time.Now().UTC().Add(ttl),
 	}
 
-	_, err := db.write.Exec(
-		"INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-		session.Token, session.UserID, session.CreatedAt, session.ExpiresAt,
-	)
-	return session, err
+	ctx := context.Background()
+	tx, err := db.write.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	hasIdentity, err := sessionIdentityColumn(ctx, tx)
+	if err != nil {
+		return nil, sessionIdentityError(ctx)
+	}
+	if hasIdentity {
+		session.ID = ids.New()
+		_, err = tx.ExecContext(ctx,
+			"INSERT INTO sessions (id, token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+			session.ID, session.Token, session.UserID, session.CreatedAt, session.ExpiresAt)
+	} else {
+		_, err = tx.ExecContext(ctx,
+			"INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+			session.Token, session.UserID, session.CreatedAt, session.ExpiresAt)
+	}
+	if err != nil {
+		return nil, sessionIdentityError(ctx)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, sessionIdentityError(ctx)
+	}
+	return session, nil
 }
 
 // GetSessionUser returns the user for a valid session token.

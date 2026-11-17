@@ -322,8 +322,11 @@ deny-state/pool publication remain service obligations; no serving caller uses i
 `session_identity*.go` is an inert additive UUID-reference/backfill seam for
 browser sessions. Its initializer is test-only and reads rowids, never bearer
 tokens, during backfill. Token-free lookups recheck row/user/expiry in the DB.
-Legacy login writers, cookies, auth actors and caches are unchanged; NULL-ID
-sessions deny these new lookups. Identity records are provenance, not admin grants.
+Before explicit initialization, login writers retain legacy NULL-ID behavior.
+Afterward, new sessions receive independent UUIDs transactionally; browser auth
+captures those token-free references on fresh and cached paths and keeps cache
+validity within observed session expiry. NULL-ID sessions still clear inherited
+operator references. Identity records are provenance, not admin grants.
 `PublishWorkloadEnvironmentAsOperator` rechecks live credential/admin facts in the
 same transaction as publication. References must come from trusted authentication,
 never author input. It derives audit actors and checks expiry before mutation and
@@ -338,7 +341,19 @@ under the registry mutation lock and IAM gate before exposing a serving API.
 REST authentication and MCP capture it under a private context key; OAuth retains
 its validated stored audience. AI request contexts inherit it. It carries no
 frozen permissions or bearer. Legacy browser sessions clear inherited references
-instead of promoting cookie prefixes; normal UUID session capture is still absent.
+instead of promoting cookie prefixes. Explicitly initialized UUID sessions retain
+stable provenance through browser auth and AI request contexts; commit-time live
+checks remain mandatory.
+
+`workload_managed*.go` adds test-initialized named definitions, immutable versions,
+version-pinned attachments and separately preserved inline sources. Explicit
+`workloadpolicy.NewManaged` composes these through sorted owner locks, one IAM
+gate and one operator-rechecked transaction, then publishes all affected owners
+and signals cancellations after releasing locks. Source removals retain
+approval/quarantine; new versions never auto-propagate. The old HTTP adapter
+refuses managed mode rather than exposing the union as editable inline. This is
+an intermediate package increment, not an API, boot migration, runtime proof or
+production cut-over; see `workloadpolicy/MANAGED.md`.
 
 ## Runtime SDK channel tests
 

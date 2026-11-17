@@ -98,16 +98,19 @@ func TestSessionIdentityExplicitSchemaOnly(t *testing.T) {
 			t.Fatal("session initialization activated an unrelated schema")
 		}
 	}
-	legacy, err := db.CreateSession(userID, time.Hour)
+	session, err := db.CreateSession(userID, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var id sql.NullString
-	if err := db.read.QueryRow(`SELECT id FROM sessions WHERE token=?`, legacy.Token).Scan(&id); err != nil || id.Valid {
-		t.Fatal("legacy writer unexpectedly assigned an identity")
+	if err := db.read.QueryRow(`SELECT id FROM sessions WHERE token=?`, session.Token).Scan(&id); err != nil || !id.Valid || !validIAMUUID(id.String) || id.String != session.ID {
+		t.Fatal("initialized session writer did not assign an independent identity")
 	}
-	sessionIdentityAssertDenied(t, db, legacy.Token, ids.New())
-	if user, err := db.GetSessionUser(legacy.Token); err != nil || user.ID != userID {
+	identity, err := db.ResolveSessionIdentityByToken(context.Background(), session.Token)
+	if err != nil || identity.ID != session.ID || identity.UserID != userID {
+		t.Fatal("new identity did not resolve to the live session")
+	}
+	if user, err := db.GetSessionUser(session.Token); err != nil || user.ID != userID {
 		t.Fatal("legacy session authentication changed")
 	}
 }

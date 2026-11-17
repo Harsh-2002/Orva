@@ -117,3 +117,11 @@ unchanged.
 See `test/live-iam/README.md` for the explicit real-runtime scratch workflow.
 It exercises actual managed pools and two-sided buffered calls, not production
 pool activation or full SDK cut-over. Streams remain unqualified by this fixture.
+
+## Named managed policies (intermediate increment)
+
+`NewManaged` and `MutateManaged` add immutable versions, pinned attachments,
+separate inline sources and bounded all-owner publication without activation.
+The legacy HTTP adapter refuses this mode until its draft contract becomes
+source-aware. See [MANAGED.md](MANAGED.md) for the host contract, caps, reduction
+proof, cancellation ordering, tests and unfinished adapter/lifecycle gates.

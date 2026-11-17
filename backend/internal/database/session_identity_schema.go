@@ -10,7 +10,7 @@ import (
 const sessionIdentityBatchSize = 128
 
 // initSessionIdentitySchema is test-only, never called by New, Migrate or serve.
-// Legacy CreateSession still writes NULL IDs; login/cookie behavior is unchanged.
+// CreateSession assigns IDs only after this explicit schema has been installed.
 func (db *Database) initSessionIdentitySchema(ctx context.Context) error {
 	tx, err := db.write.BeginTx(ctx, nil)
 	if err != nil {

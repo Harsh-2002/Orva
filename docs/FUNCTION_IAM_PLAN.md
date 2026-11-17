@@ -513,7 +513,7 @@ authorized by this completion request. Source-level coordinated cut-over still
 requires the complete acceptance gates; a working scratch workflow alone does
 not authorize activating a partial API.
 
-### Reusable-policy decisions — design approved, implementation pending
+### Reusable-policy decisions — core accepted, management surfaces pending
 
 - Named definitions have immutable versions. Attachments pin a version; editing
   creates a new version without changing existing attachments. Impact preview
@@ -690,6 +690,32 @@ locks, atomically commit related durable changes, then publish bounded host stat
 and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
+
+- Conditional browser-session UUID capture has scoped independent acceptance.
+  Once the explicit identity schema is installed, new session rows receive
+  independent UUIDs transactionally; fresh and cached browser auth and AI
+  contexts retain token-free provenance. Legacy-schema/NULL-ID behavior stays
+  unchanged and clears inherited references. Full database/server normal/race
+  and vet passed; independent focused identity/cache/revocation/commit-time
+  denial checks passed, with its verification worktree removed. An initial
+  missing ignored UI asset prevented server compilation; reusing that asset
+  enabled tests, not a fresh UI build. Normal boot initialization, public IAM
+  routing and full browser IAM acceptance remain separate gates.
+
+- The isolated reusable-policy core has scoped independent acceptance for
+  immutable versions, pinned attachments, separate inline sources, independent
+  definition/membership CAS and bounded all-or-none multi-owner publication.
+  Real SQLite probes verified 25-owner failed-COMMIT rollback, credential
+  revocation/expiry, cancellation, exact-source/membership interleavings and
+  reentrant cancellation callbacks. Full three-package normal/race/vet checks
+  passed; the owned verification worktree was removed. Source-aware management
+  surfaces, real SDK workflows, boot/restore and function-deletion integration
+  are not established by this core acceptance. The core and conditional session
+  capture are integrated; combined canonical lint/tests and focused four-package
+  race checks passed. Existing ignored UI assets were reused for Go compilation,
+  not claimed as a fresh UI build. The verification worktree was removed;
+  cleanup inventory initially failed from its deleted cwd, then directory and
+  Git-registration absence were verified from the main tree.
 
 - The first live visible KV milestone now connects the unchanged approved UI,
   real request controller, authenticated HTTP adapter, policy transaction and

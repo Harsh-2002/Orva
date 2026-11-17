@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -24,9 +25,27 @@ import (
 // of those paths evicts.
 type sessionCacheEntry struct {
 	validUntil time.Time // re-check DB after this
+	identityID string
+	label      string
 }
 
 const sessionCacheTTL = 30 * time.Second
+
+func sessionContext(ctx context.Context, token string, entry sessionCacheEntry) context.Context {
+	actorID := token[:min(8, len(token))]
+	var principal *authpkg.Principal
+	if entry.identityID != "" {
+		actorID = entry.identityID
+		principal = &authpkg.Principal{Kind: authpkg.KindSession, ID: entry.identityID}
+	}
+	label := entry.label
+	if label == "" {
+		label = "session"
+	}
+	return authpkg.WithOperator(WithActor(ctx, &Actor{
+		Source: "web", Type: "session", ID: actorID, Label: label,
+	}), principal)
+}
 
 // keyCacheEntry memos a successful API-key lookup, on the same short TTL as
 // sessionCacheEntry above and for the same reason -- plus one more.
@@ -77,21 +96,25 @@ func authMiddleware(db *database.Database, keyCache, sessionCache *sync.Map, nex
 			now := time.Now()
 			if cached, ok := sessionCache.Load(cookie.Value); ok {
 				if entry := cached.(sessionCacheEntry); now.Before(entry.validUntil) {
-					actor := &Actor{Source: "web", Type: "session", ID: cookie.Value[:8], Label: "session"}
-					ctx := authpkg.WithOperator(WithActor(r.Context(), actor), nil)
+					ctx := sessionContext(r.Context(), cookie.Value, entry)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
 				sessionCache.Delete(cookie.Value)
 			}
 			if user, err := db.GetSessionUser(cookie.Value); err == nil {
-				sessionCache.Store(cookie.Value, sessionCacheEntry{validUntil: now.Add(sessionCacheTTL)})
-				label := "session"
+				entry := sessionCacheEntry{validUntil: now.Add(sessionCacheTTL), label: "session"}
 				if user != nil && user.Username != "" {
-					label = user.Username
+					entry.label = user.Username
 				}
-				actor := &Actor{Source: "web", Type: "session", ID: cookie.Value[:8], Label: label}
-				ctx := authpkg.WithOperator(WithActor(r.Context(), actor), nil)
+				if identity, err := db.ResolveSessionIdentityByToken(r.Context(), cookie.Value); err == nil && user != nil && identity.UserID == user.ID {
+					entry.identityID = identity.ID
+					if identity.ExpiresAt.Before(entry.validUntil) {
+						entry.validUntil = identity.ExpiresAt
+					}
+				}
+				sessionCache.Store(cookie.Value, entry)
+				ctx := sessionContext(r.Context(), cookie.Value, entry)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}

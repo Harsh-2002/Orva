@@ -87,6 +87,12 @@ func (h *HTTPAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, 503, "IAM_UNAVAILABLE", "Permissions unavailable", "")
 		return
 	}
+	// The legacy draft contract has no source attribution. Never expose a
+	// managed effective union as its editable inline policy.
+	if h.Service.managed {
+		respond.Error(w, 503, "IAM_UNAVAILABLE", "Source-aware permissions adapter required", "")
+		return
+	}
 	p, err := h.Authenticate(r)
 	if err != nil || p == nil || p.Kind == auth.KindChannel {
 		respond.Error(w, 401, "UNAUTHORIZED", "Operator authentication required", "")
