@@ -35,6 +35,12 @@ func WithIAM(a *workloadiam.Authority) Option {
 	return func(h *Host) { h.iamEnabled, h.iam = true, a }
 }
 
+// WithIAMCurrentArtifact binds caller admission to the embedding host's current
+// generation. The observer runs under the same Authority gate as publication.
+func WithIAMCurrentArtifact(observe func(string, string) bool) Option {
+	return func(h *Host) { h.iamCurrentEnabled, h.iamCurrent = true, observe }
+}
+
 // OpStats is a cumulative per-op counter set.
 type OpStats struct {
 	Op        string
@@ -59,13 +65,15 @@ type opCounter struct{ count, errs, ns atomic.Uint64 }
 
 // Host is the server-side SDK operation dispatcher.
 type Host struct {
-	DB             *database.Database
-	metrics        Metrics
-	invoker        atomic.Pointer[handlers.InternalInvokeHandler]
-	ops            [len(opNames)]opCounter
-	iamEnabled     bool
-	iam            *workloadiam.Authority
-	iamTargetState func(string, *sandbox.Worker) workloadiam.TargetState
+	DB                *database.Database
+	metrics           Metrics
+	invoker           atomic.Pointer[handlers.InternalInvokeHandler]
+	ops               [len(opNames)]opCounter
+	iamEnabled        bool
+	iam               *workloadiam.Authority
+	iamTargetState    func(string, *sandbox.Worker) workloadiam.TargetState
+	iamCurrentEnabled bool
+	iamCurrent        func(string, string) bool
 }
 
 // New builds a Host over db.

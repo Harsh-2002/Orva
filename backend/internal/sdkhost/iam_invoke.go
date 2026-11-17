@@ -55,7 +55,7 @@ func (h *Host) beginIAMCall(ctx context.Context, caller sandbox.SDKCaller, args 
 	}
 	targetID := fn.ID
 	call, err := h.iam.BeginCallObserved(exec.Ctx, func() workloadiam.Context {
-		return iamInvokeContext(ctx, caller, exec)
+		return h.iamInvokeContext(ctx, caller, exec)
 	}, workloadiam.Request{Operation: op, FunctionID: caller.FunctionID,
 		Resource: workloadiam.Resource{Function: &workloadiam.FunctionResource{ID: targetID}}})
 	if err != nil {
@@ -66,8 +66,8 @@ func (h *Host) beginIAMCall(ctx context.Context, caller sandbox.SDKCaller, args 
 	}}, call, nil
 }
 
-func iamInvokeContext(ctx context.Context, caller sandbox.SDKCaller, exec sandbox.ExecInfo) workloadiam.Context {
-	c := iamContext(ctx, caller)
+func (h *Host) iamInvokeContext(ctx context.Context, caller sandbox.SDKCaller, exec sandbox.ExecInfo) workloadiam.Context {
+	c := h.iamContext(ctx, caller)
 	if exec.Ctx == nil || exec.Ctx.Err() != nil || c.Phase != workloadiam.Execution ||
 		c.Lease.ID != exec.Lease || c.Lease.ExecutionID != exec.ExecutionID {
 		return workloadiam.Context{}
@@ -77,7 +77,7 @@ func iamInvokeContext(ctx context.Context, caller sandbox.SDKCaller, exec sandbo
 
 func (h *Host) admitIAMInvoke(ctx context.Context, caller sandbox.SDKCaller, exec sandbox.ExecInfo, call *workloadiam.Admission, targetID string, worker *sandbox.Worker) *handlers.InvokeError {
 	err := call.AdmitObserved(func() (workloadiam.Context, workloadiam.TargetState) {
-		return iamInvokeContext(ctx, caller, exec), h.iamInvokeTarget(targetID, worker)
+		return h.iamInvokeContext(ctx, caller, exec), h.iamInvokeTarget(targetID, worker)
 	})
 	if err != nil {
 		return &handlers.InvokeError{Status: 403, Opts: respond.ErrorOpts{Code: "IAM_DENIED", Message: "SDK operation denied"}}

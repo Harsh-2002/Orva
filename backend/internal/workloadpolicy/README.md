@@ -1,5 +1,13 @@
 # Internal policy-management core
 
+The unregistered HTTP adapter accepts an optional authenticated `Targets`
+metadata source. Only operators with read permission reach it; its bounded
+ID/name list becomes resolved picker metadata, never grants or approval. The
+embedding host must filter visibility and active/current status. Nil retains
+the prior empty list. Duplicate, invalid or more than 256 entries fail closed
+before mutation. The scratch calls fixture supplies actual database metadata
+only for its current managed generations; no serving caller enables this seam.
+
 This package is not registered with REST, MCP, AI, CLI or the serving constructor.
 It does not initialize schemas, load authority at boot, attest runtime trees or
 activate IAM. Public adapters must not be enabled before coordinated cut-over.
@@ -67,7 +75,7 @@ The Vue page's internal event uses camelCase expectation fields.
 `frontend/src/api/permissions.js` explicitly maps those to snake_case without
 coercing revision strings or adding host authority claims.
 
-## Unregistered HTTP adapter (scratch KV integration)
+## Unregistered HTTP adapter (scratch KV and buffered calls)
 
 `HTTPAdapter` is reusable but is **not installed in the production router**.
 The live scratch fixture alone binds GET/PUT
@@ -86,7 +94,10 @@ validated by `normalizeSnapshot`: function identity, decimal-string revision
 and epoch, nullable current/approved artifacts, review/quarantine flags,
 server-derived capabilities, stored policy, and at most 32 actual audit records
 (digest/credential UUID/kind/time, never bearer material or historical policy).
-Targets are currently unresolved (empty list). Responses are `no-store`.
+Optional target metadata comes from a trusted, read-scoped host callback outside
+admission. UUIDs, labels, duplicates and the 256-target bound are validated;
+the callback owns visibility filtering. Nil retains an empty target list.
+Metadata is advisory, never approval or admission authority. Responses are `no-store`.
 `active` describes this adapter's enforced scratch host, **not** the production
 instance. Only install it in a host whose SDK and transition hooks share this
 Authority and whose observer describes the actual pinned Factory.
@@ -104,4 +115,5 @@ lanes; reactivation reloads. The presentational page and its guard tests remain
 unchanged.
 
 See `test/live-iam/README.md` for the explicit real-runtime scratch workflow.
-It is a KV milestone, not serving-pool/provider integration or full SDK cut-over.
+It exercises actual managed pools and two-sided buffered calls, not production
+pool activation or full SDK cut-over. Streams remain unqualified by this fixture.

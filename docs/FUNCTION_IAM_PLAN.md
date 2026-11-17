@@ -473,6 +473,85 @@ because source or generated copies changed.
 
 ## 8. Staged PR and acceptance gates
 
+### Completion scope authorized 2026-11-17
+
+The owner authorized completing the integrated implementation, including reusable
+named policies and function attachments, and delegated unresolved product choices
+to independent decision review. This supersedes the earlier planning-only scope
+for reusable policies; it is not evidence that they are implemented.
+
+UI, CLI, external MCP and in-product AI must use the same authoritative service.
+Acceptance includes actual create/attach/update/detach/revoke workflows, effective
+access with source attribution, live enforcement, negative authorization/CAS
+cases and matching audit outcomes across surfaces. The approved guided UI remains
+the baseline: desktop/mobile, both themes, keyboard, loading/error/empty/read-only
+and conflict states require rendered verification, not source inspection alone.
+
+Current delivery checkpoints, not substitutes for the complete gates below:
+
+- The committed direct-Factory KV workflow has scoped independent acceptance.
+- The isolated public-pool KV candidate has independent browser, correlation,
+  HTTP-negative and package/race/vet acceptance. Three independent fresh-root
+  generation-replacement race runs now pass. The original setup collision and
+  failed third-party-bearer expectation remain recorded; the corrected probe
+  proves both platform credential stripping and intentional bearer forwarding.
+- The isolated buffered-call candidate has scoped independent acceptance for
+  both Node/Python directions. Twelve calls correlate public/SDK/target/child
+  records and policy audits: eight denied calls have no child execution rows;
+  four allowed calls have exactly one. This proves handler-dispatch denial, not
+  that acquiring a cold target cannot import module code. KV regression passes.
+  Exact verified source is integrated. Fresh UID-1001 server/UI builds,
+  canonical lint/tests, six-package race tests, frontend lint (one unchanged
+  Editor warning), 106 Node tests, 240 component tests and scratch UI build
+  passed in a disposable VM; its removal was verified. Streams remain pending.
+- Reusable-policy semantics have independent decision review as recorded below.
+  Management parity, production lifecycle wiring, async provenance and
+  boot/restore qualification remain incomplete.
+
+No push, tag, release, production/website deployment or production testing is
+authorized by this completion request. Source-level coordinated cut-over still
+requires the complete acceptance gates; a working scratch workflow alone does
+not authorize activating a partial API.
+
+### Reusable-policy decisions — design approved, implementation pending
+
+- Named definitions have immutable versions. Attachments pin a version; editing
+  creates a new version without changing existing attachments. Impact preview
+  and explicit reviewed rollout replace pins on selected functions.
+- Inline source, attachments and compiled effective authority are separate.
+  Effective authority is the allow-only union with source attribution. Removing
+  one source must expose residual grants rather than falsely claiming access
+  was revoked. The compiled union is never an editable inline draft.
+- Bound the first implementation to 25 distinct attached functions per policy
+  across all versions, eight named policies per function and 25 owners per
+  operation, in addition to existing aggregate policy limits. Over-limit input
+  rejects; no hidden partial rollout or automatic batching.
+- Multi-owner changes require sorted function mutation locks and one IAM
+  publication boundary around a single durable transaction. Recheck the entire
+  affected set, live operator, CAS and reviewed artifact expectations before
+  commit. Publish every effective snapshot together; failed commits publish
+  nothing and cancel no registrations. A loop over single-owner publication is
+  not atomic rollout.
+- Global revoke is terminal for the named policy ID and removes only its
+  contribution from every attached owner in that bounded batch. Existing inline
+  and other-policy authority remains. Reuse per-owner admission/cancellation
+  rather than add a global authority dimension. Replacement requires a new
+  policy and explicitly reviewed attachments.
+- Detach/revoke with unavailable current artifacts may only remove known
+  sources, recomputing a provable subset while preserving the prior approval.
+  This is not permission to submit an arbitrary edited policy under a
+  reduction label. If subset proof is unavailable, deny without claiming
+  successful revocation.
+- Own-storage/execution selectors resolve to each attached function. Exact
+  foreign targets retain UUID identity; prefixes explicitly cover future
+  matching resources, never future functions. No roles, nested policies,
+  arbitrary template parameters or deny language are added.
+- UI, REST, slim CLI, external MCP and in-product AI share the same service,
+  strict input decoding, live authorization, CAS and audit behavior. Actual
+  two-function workflows and negative/adversarial cases must prove equivalence.
+
+### Coordinated acceptance gates
+
 1. **Design freeze:** independent consolidated review; resolve recommendations
    in §2 and pin schemas/limits, error/state vocabulary and lock ordering.
 2. **Policy foundation:** pure evaluator, inert additive storage, migration

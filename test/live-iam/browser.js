@@ -4,8 +4,8 @@ async page => {
   page.on('pageerror', e => errors.push(e.message))
   page.on('response', async response => {
     const path = new URL(response.url()).pathname
-    if ((path.startsWith('/api/v1/functions/') && path.endsWith('/permissions')) || path.startsWith('/api/scratch/invoke/')) {
-      responses.push({ path, status: response.status(), body: await response.json() })
+    if ((path.startsWith('/api/v1/functions/') && path.endsWith('/permissions')) || path.startsWith('/fn/')) {
+      responses.push({ path, status: response.status(), body: await response.json(), execution:response.headers()['x-orva-execution-id'] })
     }
   })
   await page.goto('http://127.0.0.1:4300/live-iam.html')
@@ -14,12 +14,19 @@ async page => {
   await page.evaluate(() => { document.documentElement.dataset.theme = 'night' })
   const journeys = []
   for (const runtime of ['Node.js', 'Python']) {
+    const capture = runtime === 'Node.js' ? 'node' : 'python'
     await page.getByRole('radio', { name: runtime, exact: true }).click()
     await page.getByRole('button', { name: 'Create policy', exact: true }).waitFor()
     const invoke = async decision => {
-      const reply = page.waitForResponse(r => r.url().includes('/api/scratch/invoke/') && r.request().method() === 'POST')
+      const reply = page.waitForResponse(r => r.url().includes('/fn/') && r.request().method() === 'POST')
       await page.getByRole('button', { name: 'Invoke KV demo', exact: true }).click()
-      const body = await (await reply).json()
+      const publicReply = await reply
+      const body = { response:await publicReply.json(), execution:publicReply.headers()['x-orva-execution-id'],
+        worker:publicReply.headers()['x-scratch-worker'], artifact:publicReply.headers()['x-scratch-artifact'] }
+      if (!body.execution || !body.worker || !body.artifact || body.response.method!=='POST' || body.response.path!=='/demo'
+        || JSON.parse(body.response.body).marker!=='kv-workflow' || !body.response.configOK || !body.response.secretOK || !body.response.credentialAbsent) {
+        throw new Error('Public handler/SDK identity, frozen inputs or method/body roundtrip failed')
+      }
       if (body.response.decision !== decision) throw new Error(`Actual SDK expected ${decision}`)
       await page.getByTestId('invocation-result').filter({ hasText: decision }).waitFor()
       return body
@@ -35,7 +42,7 @@ async page => {
     await page.getByRole('button', { name: 'Next', exact: true }).click()
     await page.getByRole('button', { name: 'Add to policy', exact: true }).click()
     await page.getByRole('button', { name: 'Review changes', exact: true }).click()
-    if (runtime === 'Node.js') await page.screenshot({ path: '/evidence/phone-night-review.png', fullPage: true })
+    await page.screenshot({ path: `/evidence/${capture}-phone-night-review.png`, fullPage: true })
     const saved = page.waitForResponse(r => r.url().endsWith('/permissions') && r.request().method() === 'PUT')
     await page.getByRole('button', { name: 'Save permissions', exact: true }).click()
     const savedResponse = await saved
@@ -47,11 +54,9 @@ async page => {
       || savedSnapshot.policy.allow.length !== 1) throw new Error('Save lacks actual pinned artifact/policy/audit')
     await page.getByRole('button', { name: 'Edit permissions', exact: true }).waitFor()
     const allowed = await invoke('ALLOWED')
-    if (runtime === 'Node.js') {
-      await page.evaluate(() => { document.documentElement.dataset.theme = 'day' })
-      await page.setViewportSize({ width: 1440, height: 1050 })
-      await page.screenshot({ path: '/evidence/desktop-day-allowed.png', fullPage: true })
-    }
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'day' })
+    await page.setViewportSize({ width: 1440, height: 1050 })
+    await page.screenshot({ path: `/evidence/${capture}-desktop-day-allowed.png`, fullPage: true })
     await page.getByRole('button', { name: 'Edit permissions', exact: true }).click()
     await page.getByRole('button', { name: /^Remove / }).first().click()
     await page.getByRole('button', { name: 'Review changes', exact: true }).click()
@@ -68,11 +73,9 @@ async page => {
     if (before.worker !== allowed.worker || before.worker !== after.worker || before.artifact !== after.artifact) {
       throw new Error('Workflow did not reuse the same pinned worker')
     }
-    if (runtime === 'Node.js') {
-      await page.evaluate(() => { document.documentElement.dataset.theme = 'night' })
-      await page.setViewportSize({ width: 390, height: 844 })
-      await page.screenshot({ path: '/evidence/phone-night-revoked.png', fullPage: true })
-    }
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'night' })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: `/evidence/${capture}-phone-night-revoked.png`, fullPage: true })
     journeys.push({ runtime, before, allowed, after, savedSnapshot, revokedSnapshot })
   }
   if (errors.length) throw new Error('Browser page errors: ' + errors.join('; '))

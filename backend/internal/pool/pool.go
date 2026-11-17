@@ -22,11 +22,14 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 )
 
 // ManagerConfig controls global pool behaviour. All values optional — sane
 // defaults are applied in NewManager.
 type ManagerConfig struct {
+	// ManagedAuthority enables explicit Factory installation only; nil preserves legacy pools.
+	ManagedAuthority *workloadiam.Authority
 	// DefaultMin applies when a function has no pool_config row.
 	DefaultMin int
 	// DefaultMax is an optional operator cap when a function has no pool_config
@@ -149,6 +152,7 @@ type Manager struct {
 	limiter            *sandbox.Limiter // host-wide ceiling
 	pools              sync.Map         // fnID -> *functionPool
 	poolMu             sync.Mutex       // serializes pool generation create/retire
+	managed            *managedState
 	closing            atomic.Bool
 	queued             atomic.Int64 // requests waiting for a worker or host execution slot
 	queueGlobalLimit   int64
@@ -246,6 +250,17 @@ func (m *Manager) SetEgressPolicy(fn func() (string, string, error)) {
 // worker-lifecycle mechanism with its own lock ordering.
 func (m *Manager) RetireEgressPools() int {
 	var fnIDs []string
+	if m.managed != nil {
+		for id, g := range m.managed.current.Load().generations {
+			if g.factory.Resources().NetworkMode == "egress" {
+				fnIDs = append(fnIDs, id)
+			}
+		}
+		for _, id := range fnIDs {
+			m.retirePool(id)
+		}
+		return len(fnIDs)
+	}
 	m.pools.Range(func(k, _ any) bool {
 		id, ok := k.(string)
 		if !ok {
@@ -382,6 +397,9 @@ func NewManager(cfg ManagerConfig, tmpl SandboxTemplate, db *database.Database, 
 		reg:      reg,
 		limiter:  limiter,
 		shutdown: make(chan struct{}),
+	}
+	if cfg.ManagedAuthority != nil {
+		m.managed = newManagedState(cfg.ManagedAuthority)
 	}
 	// Host-memory tracker — reserves 80% of total RAM for worker pools,
 	// leaves 20% for OS + Orva heap + SQLite page cache.
@@ -561,6 +579,10 @@ func (m *Manager) DrainAndRemove(fnID string) {
 // publish an unretired stale generation after this method returns. Releases
 // remain safe because AcquireResult retains a pointer to the exact generation.
 func (m *Manager) retirePool(fnID string) {
+	if m.managed != nil {
+		m.removeManaged(fnID)
+		return
+	}
 	m.poolMu.Lock()
 	v, loaded := m.pools.LoadAndDelete(fnID)
 	if !loaded {
@@ -622,7 +644,18 @@ func (m *Manager) Release(acq *AcquireResult, reqErr error) {
 // shutdown escalates to SIGKILL.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.poolMu.Lock()
-	if !m.closing.CompareAndSwap(false, true) {
+	closed := false
+	if m.managed != nil {
+		if err := m.managed.authority.ChangeHostState(func() {
+			closed = m.closing.CompareAndSwap(false, true)
+		}); err != nil {
+			m.poolMu.Unlock()
+			return err
+		}
+	} else {
+		closed = m.closing.CompareAndSwap(false, true)
+	}
+	if !closed {
 		m.poolMu.Unlock()
 		return nil
 	}
@@ -652,6 +685,11 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	})
 	wg.Wait()
 	m.wg.Wait()
+	if m.managed != nil {
+		for _, g := range m.managed.current.Load().generations {
+			g.factory.Close()
+		}
+	}
 	if m.hostMem != nil {
 		m.hostMem.close()
 	}
@@ -751,6 +789,12 @@ func (m *Manager) PrewarmAll(ctx context.Context) {
 
 // getOrCreatePool loads the pool for fnID, creating it if missing.
 func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
+	if m.managed != nil {
+		if g := m.managed.current.Load().generations[fnID]; g != nil && g.active.Load() && !m.closing.Load() {
+			return g.pool, nil
+		}
+		return nil, ErrNoFunction
+	}
 	if existing, ok := m.pools.Load(fnID); ok {
 		p := existing.(*functionPool)
 		if !p.closing.Load() {
@@ -780,7 +824,16 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	if err != nil {
 		return nil, ErrNoFunction
 	}
+	p := m.makePool(fn, nil)
+	m.pools.Store(fnID, p)
+	m.wg.Add(1)
+	go m.reap(p)
+	return p, nil
+}
 
+// Managed callers construct candidates before taking lifecycle/admission locks.
+func (m *Manager) makePool(fn *database.Function, generation *managedGeneration) *functionPool {
+	fnID := fn.ID
 	minWarm := m.cfg.DefaultMin
 	maxWarm := m.cfg.DefaultMax
 	idleTTL := m.cfg.DefaultIdleTTL
@@ -857,6 +910,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	}
 
 	p := &functionPool{
+		managed:      generation,
 		fnID:         fnID,
 		min:          minWarm,
 		max:          maxWarm,
@@ -874,6 +928,9 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 		concSem:      concSem,
 		concPolicy:   concPolicy,
 		spawnFn: func(ctx context.Context) (*sandbox.Worker, error) {
+			if generation != nil {
+				return m.spawnManaged(ctx, generation)
+			}
 			// Merge env at spawn time: function config + decrypted secrets.
 			// We read the lookup off m (not the local tmpl copy) so that
 			// SetSecretsLookup is visible to existing pools too. Secrets
@@ -967,16 +1024,7 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 		p.requestSpawn = m.scaler.nudge
 	}
 
-	// Store — but if another goroutine raced us, discard our pool.
-	actual, loaded := m.pools.LoadOrStore(fnID, p)
-	if loaded {
-		return actual.(*functionPool), nil
-	}
-
-	// Start the background reaper for this pool.
-	m.wg.Add(1)
-	go m.reap(p)
-	return p, nil
+	return p
 }
 
 // reap periodically drains the idle channel, kills expired workers, and

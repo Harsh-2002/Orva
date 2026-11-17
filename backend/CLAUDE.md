@@ -106,6 +106,14 @@ mixed-runtime long-soak and cross-pool fairness workloads.
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.
 
+Internal `ManagedAuthority` mode installs concrete frozen Factories, derives
+resources from the same generation used for spawn, and denies missing owners
+without legacy fallback. Current caller/target observers share the IAM gate;
+retirement and generation-bound Release reject late or obsolete workers.
+Public Proxy timeout/header facts come from the acquired generation. The live
+scratch fixture exercises pooled KV and two-sided buffered calls; normal
+serving construction, boot schemas and production policy routes remain off.
+
 Worker release parks a healthy worker even if a transient capacity snapshot is
 below the current pool size; the controller applies its 30-second scale-down
 grace before pruning idle workers. A queued pool may reclaim idle capacity from
@@ -191,7 +199,8 @@ cancellation atomic with the subsequent wire write.
 runtime trees. Nil keeps legacy resolution. Function/runtime labels must match;
 spawn failure releases ownership, and successful workers release only during
 centralized post-Wait cleanup. It does not mint artifact approval. Host endpoint
-probes reject absolute links before following them; pools still supply no leases.
+probes reject absolute links before following them; normal serving pools still
+supply no leases. Internal managed pools transfer concrete Factory leases.
 Optional `ExecConfig.Domain` and `BuildConfig.Domain` enroll Spawn, Execute and
 RunBuild before exec and constrain nsjail relocation to the same owned epoch.
 Required controller failure denies without legacy fallback. No serving caller

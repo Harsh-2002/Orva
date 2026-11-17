@@ -1,6 +1,7 @@
 package workloadpolicy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -20,8 +22,19 @@ import (
 type HTTPAdapter struct {
 	Service      *Service
 	Authenticate func(*http.Request) (*auth.Principal, error)
+	// Targets returns only metadata visible to this authenticated operator.
+	// It runs outside admission; it is advisory picker data, never authority.
+	Targets func(context.Context, *auth.Principal) ([]FunctionTarget, error)
 }
 
+type FunctionTarget struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+type snapshotTarget struct {
+	FunctionTarget
+	State string `json:"state"`
+}
 type snapshotFunction struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -56,7 +69,7 @@ type policySnapshot struct {
 	Function snapshotFunction `json:"function"`
 	Host     snapshotHost     `json:"host"`
 	Policy   json.RawMessage  `json:"policy"`
-	Targets  []any            `json:"targets"`
+	Targets  []snapshotTarget `json:"targets"`
 	History  []snapshotAudit  `json:"history"`
 }
 
@@ -92,6 +105,25 @@ func (h *HTTPAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := h.Service
+	targets := []snapshotTarget{}
+	if h.Targets != nil {
+		rows, e := h.Targets(ctx, p)
+		if e != nil || len(rows) > 256 {
+			respond.Error(w, 503, "IAM_UNAVAILABLE", "Permissions targets unavailable", "")
+			return
+		}
+		seen := make(map[string]bool, len(rows))
+		for _, row := range rows {
+			id, e := uuid.Parse(row.ID)
+			if e != nil || id.String() != row.ID || id == uuid.Nil || id.Version() < 1 || id.Version() > 8 ||
+				id.Variant() != uuid.RFC4122 || seen[row.ID] || row.Label == "" || len(row.Label) > 1024 || !utf8.ValidString(row.Label) {
+				respond.Error(w, 503, "IAM_UNAVAILABLE", "Permissions targets unavailable", "")
+				return
+			}
+			seen[row.ID] = true
+			targets = append(targets, snapshotTarget{FunctionTarget: row, State: "resolved"})
+		}
+	}
 	if r.Method != http.MethodGet {
 		if !p.Perms.Has("admin") {
 			respond.Error(w, 403, "FORBIDDEN", "Admin permission required", "")
@@ -163,7 +195,7 @@ func (h *HTTPAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			CurrentArtifact: current, ApprovedArtifact: artifactPointer(record.ApprovedArtifact),
 			ReviewRequired: record.ReviewRequired, Quarantined: record.Quarantined, Enforcement: "active",
 			Capabilities: snapshotCapabilities{CanRead: true, CanManage: p.Perms.Has("admin"), CanReview: p.Perms.Has("admin")}},
-		Policy: json.RawMessage(record.PolicyJSON), Targets: []any{}, History: []snapshotAudit{},
+		Policy: json.RawMessage(record.PolicyJSON), Targets: targets, History: []snapshotAudit{},
 	}
 	for _, row := range history {
 		if len(out.History) == 32 {

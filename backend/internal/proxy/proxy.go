@@ -458,6 +458,13 @@ func (p *Proxy) Forward(
 	if err != nil {
 		return &Result{}, fmt.Errorf("pool acquire: %w", err)
 	}
+	if facts, managed := acq.ManagedResources(); managed {
+		timeout = facts.Timeout
+		headers["x-orva-timeout-ms"] = strconv.FormatInt(timeout.Milliseconds(), 10)
+		reqJSON, _ = json.Marshal(request{
+			Method: r.Method, Path: path, Headers: headers, Body: string(body),
+		})
+	}
 	// A rejected request never reached a sandbox and must not consume a
 	// best-effort replay-capture write under overload.
 	if p.DB != nil {

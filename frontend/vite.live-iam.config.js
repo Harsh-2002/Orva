@@ -5,5 +5,6 @@ import base from './vite.config.js'
 export default mergeConfig(base, defineConfig({
   base: '/',
   build: { outDir: '../build/live-iam', emptyOutDir: true, rollupOptions: { input: 'live-iam.html' } },
-  server: { host: '0.0.0.0', port: 4300, strictPort: true, allowedHosts: ['sandbox.l3b.cc.cd'] },
+  server: { host: '0.0.0.0', port: 4300, strictPort: true, allowedHosts: ['sandbox.l3b.cc.cd'],
+    proxy: { '/fn': 'http://localhost:8443' } },
 }))

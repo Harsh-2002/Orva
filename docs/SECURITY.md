@@ -99,6 +99,16 @@ fixture connects this adapter and the real UI controller to Factory-created
 Node/Python workers and private-SDK KV enforcement. It is not the serving pool,
 production browser login, complete SDK enforcement or production route wiring.
 
+The subsequent internal managed-pool fixture uses the actual public invoke,
+Proxy and acquired-worker paths for KV and two-sided buffered calls. Frozen
+Factory facts supply resources, secrets, identity and acquired timeout/header
+configuration. Shared-gate current-generation checks deny obsolete workers even
+when their old policy remains approved; generation-bound release cannot return
+one to a replacement pool. Independent delayed-import/replacement race runs and
+cross-runtime browser denial/grant/revocation journeys passed. Normal serving
+construction remains unchanged. This is not production activation, complete
+mutation-writer coverage, stream/async acceptance or hard-resource enforcement.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many

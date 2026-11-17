@@ -28,7 +28,7 @@ func (h *Host) handoffIAMStream(ctx context.Context, caller sandbox.SDKCaller, c
 	exec := *caller.Exec
 	reply := make([]byte, len(frame))
 	err := cs.iam.call.HandoffFrameObserved(func() (workloadiam.Context, workloadiam.TargetState) {
-		return iamInvokeContext(ctx, caller, exec), h.iamInvokeTarget(cs.iam.targetID, cs.iam.worker)
+		return h.iamInvokeContext(ctx, caller, exec), h.iamInvokeTarget(cs.iam.targetID, cs.iam.worker)
 	}, frame, func(b []byte) error {
 		copy(reply, b)
 		return nil

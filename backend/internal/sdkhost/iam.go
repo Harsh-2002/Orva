@@ -39,6 +39,14 @@ func iamContext(ctx context.Context, caller sandbox.SDKCaller) workloadiam.Conte
 	return c
 }
 
+func (h *Host) iamContext(ctx context.Context, caller sandbox.SDKCaller) workloadiam.Context {
+	c := iamContext(ctx, caller)
+	if h.iamCurrentEnabled && (h.iamCurrent == nil || !h.iamCurrent(c.Principal.FunctionID, c.Principal.ArtifactRevision)) {
+		return workloadiam.Context{}
+	}
+	return c
+}
+
 func (h *Host) handleIAM(ctx context.Context, caller sandbox.SDKCaller, op string, args json.RawMessage) (res any, serr *sandbox.SDKError) {
 	// Closing an already-owned stream is cleanup, never a fresh grant.
 	if op == "invoke.stream.close" {
@@ -65,7 +73,7 @@ func (h *Host) handleIAM(ctx context.Context, caller sandbox.SDKCaller, op strin
 	if e != nil {
 		return nil, e
 	}
-	observe := func() workloadiam.Context { return iamContext(ctx, caller) }
+	observe := func() workloadiam.Context { return h.iamContext(ctx, caller) }
 	effect := func() error {
 		if op == "kv.list" {
 			res, serr = h.kvListMode(ctx, caller.FunctionID, args, true)
