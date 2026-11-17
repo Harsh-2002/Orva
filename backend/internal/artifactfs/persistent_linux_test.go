@@ -840,14 +840,30 @@ func TestPersistentLiveAggregateManifestBudget(t *testing.T) {
 	limits := testLimits()
 	limits.ManifestBytes = 1000
 	s := persistentStore(t, limits)
-	for i := 0; i < 2; i++ {
+	st, m, digest := persistentStage(t, s)
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// UID/GID widths change encoded size; fill the actual byte budget, not a fixed count.
+	count := limits.ManifestBytes / len(encoded)
+	if count < 1 {
+		t.Fatal("fixture cannot fit one manifest")
+	}
+	if _, err := st.Seal(context.Background(), KindCode, ids.New(), m, digest); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < count; i++ {
 		_ = sealed(t, s, KindCode, ids.New())
 	}
-	st, m, digest := persistentStage(t, s)
+	if s.persistent.manifestBytes != count*len(encoded) {
+		t.Fatal("live manifest byte accounting differs from fixture encoding")
+	}
+	st, m, digest = persistentStage(t, s)
 	if _, err := st.Seal(context.Background(), KindCode, ids.New(), m, digest); err != ErrCapacity {
 		t.Fatalf("aggregate manifest budget not reserved: %v", err)
 	}
-	if err := st.Abort(); err != nil || s.stages != 0 || s.bytes != 200 {
+	if err := st.Abort(); err != nil || s.stages != 0 || s.bytes != int64(count)*100 {
 		t.Fatal("failed aggregate reservation leaked", err)
 	}
 }
