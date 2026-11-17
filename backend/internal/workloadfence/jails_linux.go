@@ -42,20 +42,18 @@ func (d *Domain) PrepareJails(ctx context.Context, controllers ...string) (*Jail
 		return nil, err
 	}
 	s := d.s
-	if err := s.enter(ctx); err != nil {
+	unlock, err := s.enterLineage(ctx, true)
+	if err != nil {
 		return nil, err
 	}
-	defer s.leave()
+	defer unlock()
 	if s.disposed || s.closed.Load() || s.recovering {
 		return nil, ErrClosed
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.verifyIdentity(); err != nil {
-		return nil, err
-	}
-	if err := s.verifyRecord(); err != nil {
+	if err := s.verifyLineage(); err != nil {
 		return nil, err
 	}
 	id, err := s.verifyJails()
@@ -219,16 +217,16 @@ func (s *state) verifyJails() (objectID, error) {
 			return objectID{}, ErrIntegrity
 		}
 	}
-	if err := checkChildNames(s.path, false); err != nil {
+	if err := checkChildNames(s.path, false, nil); err != nil {
 		return objectID{}, err
 	}
-	if err := checkChildNames(path, true); err != nil {
+	if err := checkChildNames(path, true, s.children); err != nil {
 		return objectID{}, err
 	}
 	return id, nil
 }
 
-func checkChildNames(path string, jails bool) error {
+func checkChildNames(path string, jails bool, children map[*state]struct{}) error {
 	dir, err := openDir(path)
 	if err != nil {
 		return err
@@ -249,6 +247,25 @@ func checkChildNames(path string, jails bool) error {
 				continue
 			}
 			name := entry.Name()
+			known := false
+			for child := range children {
+				if child.path == filepath.Join(path, name) && child.groupCreated && child.group != nil {
+					actual, err := openCgroup(child.path)
+					if err != nil {
+						return err
+					}
+					id, err := identity(actual)
+					actual.Close()
+					if err != nil || id != child.rec.Group {
+						return ErrIntegrity
+					}
+					known = true
+					break
+				}
+			}
+			if known {
+				continue
+			}
 			if !jails {
 				if name != "jails" && name != "supervisors" {
 					return ErrIntegrity

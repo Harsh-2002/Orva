@@ -612,6 +612,16 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- Typed nested Domains now gate child creation/entry against every ancestor,
+  preserve cleanup pins and integrate with actual managed Build through the
+  mutually exclusive ParentDomain profile. Independent physical race tests,
+  real Node/Python bridges, root-fencing of active builds/workers and partial
+  construction/reclaim probes passed. The review also reproduced the old
+  UID-sensitive artifactfs test failure; the separately accepted test-only fix
+  is committed as 4902f2b without changing production behavior. Combined
+  canonical lint/tests passed on the exact combined snapshot. Boot wiring, durable store association,
+  recovery, resource stress and serving IAM remain outside this acceptance.
+
 - Managed-output work now drives actual Build through fresh private staging,
   an exclusive build Domain and Fence/Check before inspection, Seal or Abort.
   Unresolved cleanup retains runtime/stage ownership and bounded capacity for

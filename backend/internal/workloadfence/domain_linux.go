@@ -27,6 +27,7 @@ var (
 	ErrBusy        = errors.New("workload fence: owner busy")
 	ErrIntegrity   = errors.New("workload fence: identity mismatch")
 	ErrUnsupported = errors.New("workload fence: requested controllers unavailable")
+	ErrCapacity    = errors.New("workload fence: nested domain capacity exhausted")
 )
 
 const cgroup2Magic = 0x63677270
@@ -44,6 +45,7 @@ type record struct {
 	Parent  objectID `json:"parent"`
 	Group   objectID `json:"group"`
 	Closed  bool     `json:"closed"`
+	Lineage lineage  `json:"lineage,omitzero"`
 }
 
 // Domain handles share state even when copied. No cgroup descriptor is exported.
@@ -64,6 +66,13 @@ type state struct {
 	disposed     bool
 	persistFault func(string) error
 	budget       *budgetState
+	parentState  *state
+	children     map[*state]struct{}
+	depth        int
+	descendants  int // instance-root accounting, protected by its gate
+	groupCreated bool
+	deleting     bool
+	reclaimed    bool
 }
 
 // Proof is minted only after durable entry closure and kernel populated=0.
@@ -84,10 +93,19 @@ func create(root, parent string, budget *budgetState) (*Domain, error) {
 	if err != nil {
 		return nil, err
 	}
+	return initialize(s)
+}
+
+func initialize(s *state) (result *Domain, err error) {
 	ok := false
 	defer func() {
 		if !ok {
-			s.dispose()
+			if s.parentState != nil && s.groupCreated {
+				s.closed.Store(true)
+				result = &Domain{s}
+			} else {
+				s.dispose()
+			}
 		}
 	}()
 	names, err := s.root.Readdirnames(1)
@@ -99,6 +117,10 @@ func create(root, parent string, budget *budgetState) (*Domain, error) {
 		return nil, err
 	}
 	s.rec.Version = 1
+	if s.parentState != nil {
+		s.rec.Version = 2
+		s.rec.Lineage = s.parentState.childLineage()
+	}
 	s.rec.Epoch = hex.EncodeToString(nonce[:])
 	s.rec.Boot, err = bootID()
 	if err != nil {
@@ -108,7 +130,7 @@ func create(root, parent string, budget *budgetState) (*Domain, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := openCgroup(parent)
+	p, err := openCgroup(s.parent)
 	if err != nil {
 		return nil, err
 	}
@@ -117,10 +139,11 @@ func create(root, parent string, budget *budgetState) (*Domain, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.path = filepath.Join(parent, "epoch-"+s.rec.Epoch)
+	s.path = filepath.Join(s.parent, "epoch-"+s.rec.Epoch)
 	if err := os.Mkdir(s.path, 0o700); err != nil {
 		return nil, fmt.Errorf("create epoch: %w", err)
 	}
+	s.groupCreated = true
 	s.group, err = openCgroup(s.path)
 	if err != nil {
 		return nil, err
@@ -174,6 +197,9 @@ func OpenRecovering(root, parent string) (*Domain, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.rec.Version != 1 {
+		return nil, ErrUnsupported
+	}
 	s.path = filepath.Join(parent, "epoch-"+s.rec.Epoch)
 	s.group, err = openCgroup(s.path)
 	if err != nil {
@@ -201,21 +227,18 @@ func (d *Domain) Start(ctx context.Context, cmd *exec.Cmd, parent ...*JailParent
 		return ErrInvalid
 	}
 	s := d.s
-	if err := s.enter(ctx); err != nil {
+	unlock, err := s.enterLineage(ctx, true)
+	if err != nil {
 		return err
 	}
-	defer s.leave()
+	defer unlock()
 	if s.disposed || s.closed.Load() || s.recovering {
 		return ErrClosed
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.verifyIdentity(); err != nil {
-		s.closed.Store(true)
-		return err
-	}
-	if err := s.verifyRecord(); err != nil {
+	if err := s.verifyLineage(); err != nil {
 		s.closed.Store(true)
 		return err
 	}
@@ -252,20 +275,18 @@ func (d *Domain) Fence(ctx context.Context) (*Proof, error) {
 	}
 	s := d.s
 	s.closed.Store(true)
-	if err := s.enter(ctx); err != nil {
+	unlock, err := s.enterLineage(ctx, false)
+	if err != nil {
 		return nil, err
 	}
-	defer s.leave()
+	defer unlock()
 	if s.disposed {
 		return nil, ErrClosed
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.verifyIdentity(); err != nil {
-		return nil, err
-	}
-	if err := s.verifyRecord(); err != nil {
+	if err := s.verifyLineage(); err != nil {
 		return nil, err
 	}
 	closed := s.rec
@@ -288,7 +309,7 @@ func (d *Domain) Fence(ctx context.Context) (*Proof, error) {
 			return nil, err
 		}
 		if empty {
-			if err := s.verifyIdentity(); err != nil {
+			if err := s.verifyLineage(); err != nil {
 				return nil, err
 			}
 			return &Proof{s: s, rec: s.rec}, nil
@@ -308,17 +329,15 @@ func (d *Domain) Check(ctx context.Context, p *Proof) error {
 		return ErrInvalid
 	}
 	s := d.s
-	if err := s.enter(ctx); err != nil {
+	unlock, err := s.enterLineage(ctx, false)
+	if err != nil {
 		return err
 	}
-	defer s.leave()
+	defer unlock()
 	if s.disposed || !s.closed.Load() || !s.rec.Closed || p.rec != s.rec {
 		return ErrClosed
 	}
-	if err := s.verifyIdentity(); err != nil {
-		return err
-	}
-	if err := s.verifyRecord(); err != nil {
+	if err := s.verifyLineage(); err != nil {
 		return err
 	}
 	durable, err := readRecord(filepath.Join(s.root.Name(), "epoch.json"))
@@ -346,8 +365,17 @@ func (d *Domain) Close() error {
 	}
 	s := d.s
 	s.closed.Store(true)
-	<-s.gate
-	defer s.leave()
+	unlock, err := s.enterLineage(context.Background(), false)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if s.disposed {
+		return nil
+	}
+	if len(s.children) != 0 || s.parentState != nil {
+		return ErrBusy
+	}
 	s.dispose()
 	return nil
 }
@@ -375,6 +403,10 @@ func (s *state) dispose() {
 	}
 	if s.budget != nil {
 		s.budget.release()
+	}
+	if s.parentState != nil {
+		delete(s.parentState.children, s)
+		s.instance().descendants--
 	}
 }
 
@@ -409,6 +441,19 @@ func openOwnerWithBudget(root, parent string, budget *budgetState) (*state, erro
 			return nil, err
 		}
 	}
+	s, err := openMetadata(root, parent)
+	if err != nil {
+		return nil, err
+	}
+	s.budget = budget
+	owned = false
+	return s, nil
+}
+
+func openMetadata(root, parent string) (*state, error) {
+	if err := noLinks(root); err != nil {
+		return nil, err
+	}
 	f, err := openDir(root)
 	if err != nil {
 		return nil, err
@@ -430,9 +475,8 @@ func openOwnerWithBudget(root, parent string, budget *budgetState) (*state, erro
 		}
 		return nil, err
 	}
-	s := &state{root: f, parent: parent, gate: make(chan struct{}, 1), budget: budget}
+	s := &state{root: f, parent: parent, gate: make(chan struct{}, 1)}
 	s.leave()
-	owned = false
 	return s, nil
 }
 
@@ -618,7 +662,25 @@ func unpopulated(path string) (bool, error) {
 }
 
 func (s *state) verifyIdentity() error {
-	if s.budget != nil {
+	if s.parentState != nil {
+		p := s.parentState
+		if s.parent != filepath.Join(p.path, "jails") || s.rec.Lineage != p.childLineage() || p.jails == nil {
+			return ErrIntegrity
+		}
+		current, err := openCgroup(s.parent)
+		if err != nil {
+			return err
+		}
+		id, err := identity(current)
+		current.Close()
+		if err != nil {
+			return err
+		}
+		pinned, err := identity(p.jails)
+		if err != nil || id != pinned {
+			return ErrIntegrity
+		}
+	} else if s.budget != nil {
 		if err := s.budget.verify(s.parent); err != nil {
 			return err
 		}
@@ -679,6 +741,21 @@ func (s *state) verifyIdentity() error {
 	pinned, err := identity(s.group)
 	if err != nil {
 		return err
+	}
+	if s.parentState != nil {
+		for _, f := range []*os.File{parent, current} {
+			id, err := descriptorMountID(f)
+			if err != nil {
+				return err
+			}
+			expected, err := descriptorMountID(s.parentState.jails)
+			if err != nil {
+				return err
+			}
+			if id != expected {
+				return ErrIntegrity
+			}
+		}
 	}
 	if root != s.rec.Root || rid != root || pid != s.rec.Parent || gid != s.rec.Group || pinned != gid || boot != s.rec.Boot {
 		return ErrIntegrity
@@ -778,13 +855,16 @@ func readRecord(path string) (record, error) {
 		return r, ErrInvalid
 	}
 	canonical, err := json.Marshal(r)
-	if err != nil || !bytes.Equal(b, canonical) || r.Version != 1 || len(r.Epoch) != 32 || r.Epoch != strings.ToLower(r.Epoch) {
+	if err != nil || !bytes.Equal(b, canonical) || (r.Version != 1 && r.Version != 2) || len(r.Epoch) != 32 || r.Epoch != strings.ToLower(r.Epoch) {
 		return r, ErrInvalid
 	}
 	if _, err := hex.DecodeString(r.Epoch); err != nil {
 		return r, ErrInvalid
 	}
 	if !validBootID(r.Boot) || r.Root.Inode == 0 || r.Parent.Inode == 0 || r.Group.Inode == 0 {
+		return r, ErrInvalid
+	}
+	if (r.Version == 1 && r.Lineage != (lineage{})) || (r.Version == 2 && !r.Lineage.valid(r.Epoch)) {
 		return r, ErrInvalid
 	}
 	return r, nil

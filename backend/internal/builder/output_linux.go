@@ -29,6 +29,7 @@ var (
 type OutputConfig struct {
 	CodeStore                                     *artifactfs.Store
 	Budget                                        *workloadfence.Budget
+	ParentDomain                                  *workloadfence.Domain
 	Parent, MetadataRoot                          string
 	Limits                                        artifactfs.Limits
 	ReservedBytes, MaxReservedBytes, ArchiveBytes int64
@@ -66,7 +67,12 @@ func WithManagedOutput(owner *OutputOwner) Option {
 }
 
 func NewOutputOwner(cfg OutputConfig) (*OutputOwner, error) {
-	if cfg.CodeStore == nil || cfg.Budget == nil || cfg.MaxBuilds <= 0 || cfg.MaxBuilds > 1024 ||
+	typed := cfg.ParentDomain != nil
+	if (typed && (cfg.Budget != nil || cfg.Parent != "")) ||
+		(!typed && (cfg.Budget == nil || cfg.Parent == "")) {
+		return nil, artifactfs.ErrInvalid
+	}
+	if cfg.CodeStore == nil || cfg.MaxBuilds <= 0 || cfg.MaxBuilds > 1024 ||
 		cfg.ReservedBytes <= 0 || cfg.ReservedBytes > cfg.Limits.Bytes ||
 		cfg.MaxReservedBytes < cfg.ReservedBytes || cfg.MaxReservedBytes > 1<<40 ||
 		cfg.ArchiveBytes <= 0 || cfg.ArchiveBytes > 1<<30 ||
@@ -77,14 +83,23 @@ func NewOutputOwner(cfg OutputConfig) (*OutputOwner, error) {
 	if _, err := artifactfs.Digest(artifactfs.Manifest{Version: 1, Entries: []artifactfs.Entry{{Path: ".", Type: artifactfs.TypeDirectory, Mode: 0700}}}, cfg.Limits); err != nil {
 		return nil, err
 	}
-	for _, path := range []string{cfg.Parent, cfg.MetadataRoot} {
+	paths := []string{cfg.MetadataRoot}
+	if !typed {
+		paths = append(paths, cfg.Parent)
+	}
+	for _, path := range paths {
 		if err := outputPrivatePath(path); err != nil {
 			return nil, err
 		}
 	}
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(cfg.Parent, &fs); err != nil || fs.Type != 0x63677270 {
-		return nil, workloadfence.ErrInvalid
+	if !typed {
+		var fs syscall.Statfs_t
+		if err := syscall.Statfs(cfg.Parent, &fs); err != nil || fs.Type != 0x63677270 {
+			return nil, workloadfence.ErrInvalid
+		}
+	} else {
+		parent := *cfg.ParentDomain
+		cfg.ParentDomain = &parent
 	}
 	root, err := os.Open(cfg.MetadataRoot)
 	if err != nil {
@@ -265,12 +280,18 @@ func (j *outputJob) dispose(ctx context.Context) error {
 		}
 		j.stage = nil
 	}
-	return j.releaseDomain()
+	return j.releaseDomain(cleanup)
 }
-func (j *outputJob) releaseDomain() error {
+func (j *outputJob) releaseDomain(ctx context.Context) error {
 	// All descendants are proven dead before removal. Only this fresh parent is owned.
 	if j.domain != nil {
-		if err := j.domain.Close(); err != nil {
+		var err error
+		if parent := j.owner.cfg.ParentDomain; parent != nil {
+			err = parent.ReclaimChild(ctx, j.domain, j.proof)
+		} else {
+			err = j.domain.Close()
+		}
+		if err != nil {
 			return err
 		}
 		j.domain = nil
@@ -370,14 +391,18 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 	if err = os.Chmod(j.metadata, 0700); err != nil {
 		return nil, err
 	}
-	j.parent, err = os.MkdirTemp(j.owner.cfg.Parent, "build-")
-	if err != nil {
-		return nil, err
+	if parent := j.owner.cfg.ParentDomain; parent != nil {
+		j.domain, err = parent.NewChild(ctx, j.metadata)
+	} else {
+		j.parent, err = os.MkdirTemp(j.owner.cfg.Parent, "build-")
+		if err != nil {
+			return nil, err
+		}
+		if err = os.WriteFile(filepath.Join(j.parent, "cgroup.subtree_control"), []byte("+cpu +memory +pids"), 0600); err != nil {
+			return nil, err
+		}
+		j.domain, err = workloadfence.CreateUnderBudget(j.owner.cfg.Budget, j.metadata, j.parent)
 	}
-	if err = os.WriteFile(filepath.Join(j.parent, "cgroup.subtree_control"), []byte("+cpu +memory +pids"), 0600); err != nil {
-		return nil, err
-	}
-	j.domain, err = workloadfence.CreateUnderBudget(j.owner.cfg.Budget, j.metadata, j.parent)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +457,9 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 	}
 	codeID := lease.Identity()
 	lease.Release()
-	if err = j.releaseDomain(); err != nil {
+	release, cancelRelease := context.WithTimeout(context.Background(), j.owner.cfg.CleanupTimeout)
+	defer cancelRelease()
+	if err = j.releaseDomain(release); err != nil {
 		return nil, err
 	}
 	return &BuildResult{Duration: time.Since(start), CodeHash: versionHash(sourceHash, resultABI), Entrypoint: fn.Entrypoint,

@@ -146,11 +146,24 @@ this binding. None is activated or bypassed here.
 
 `New(WithRuntimeBinding(provider), WithManagedOutput(owner))` selects a distinct
 actual `Build` path. Construct `owner` with `NewOutputOwner(OutputConfig)` from
-a trusted code store, a live `workloadfence.CaptureBudget` capability, an
-explicitly delegated child parent, and a fresh empty private metadata root.
+a trusted code store, one ownership profile below, and a fresh empty private
+metadata root.
 No serving constructor or queue enables it. Nil owner, absent runtime binding,
 invalid budgets/limits, provider-supplied Domain, `BuildFunc`, and syntax hooks
 deny; host hooks are never invoked in this mode.
+
+Exactly one ownership profile is required:
+
+- `ParentDomain: instance` is the typed profile for future production consumers.
+  Budget and raw Parent must be absent. Actual managed Build calls
+  `instance.NewChild(ctx, privateMetadata)`; it does not mkdir or infer a cgroup
+  parent. All build commands enter the child's supervisors and relocate only
+  within its owned jails, transitively beneath the instance. Root Fence prevents
+  new builds/starts even through a retained OutputOwner.
+- Historical `Budget` plus raw `Parent` remains an internal compatibility
+  profile, with no ParentDomain. It does not establish instance ancestry and
+  must not be used by future serving/recovery wiring. Mixed or missing profiles
+  deny; there is no fallback between them.
 
 ### Deliberately narrow production profile
 
@@ -179,8 +192,9 @@ Build copies builder configuration and only its consumed function identity/
 runtime/entrypoint scalars (not unused environment/description maps or strings)
 under that admission, then captures the runtime once through the
 accepted runtime path. An arbitrary Domain returned by that provider is rejected,
-never fenced. Instead, Build creates a fresh private metadata directory, a fresh
-child cgroup parent, and its own `CreateUnderBudget` Domain. No Domain, proof,
+never fenced. Instead, Build creates fresh private metadata and a typed
+`ParentDomain.NewChild` Domain. Only the legacy profile creates a raw child
+cgroup parent and `CreateUnderBudget` Domain. No Domain, proof,
 stage handle, writable descriptor or staging path is exported by the output API.
 The host must provision delegation and move only its own daemon into a leaf;
 production code does not capture budgets or alter ancestor controls for it.
@@ -222,7 +236,11 @@ denies with `ErrOutputCapacity` when active plus pending slots/bytes are full.
 configured cleanup timeout. It never seals or promotes quarantined output.
 Once proof and command completion are available, it aborts/reclaims and removes
 only its own private groups/metadata, then releases the runtime anchor and slot.
-After successful fencing and Domain closure, partial filesystem/group-removal
+Typed builds use `ParentDomain.ReclaimChild` for fresh proof/identity/emptiness
+checks and bounded child-only cgroup removal, retaining ancestor pins until
+success. Only then are metadata and the runtime anchor released. A partial
+NewChild failure returning a child remains charged/quarantined; missing durable
+evidence never becomes a proof. After successful fencing, partial cleanup
 retries continue only that already-closed private ownership; they never reopen
 entry or manufacture a new epoch. Host repair may be needed for integrity or
 permission failures.

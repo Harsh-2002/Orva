@@ -75,6 +75,15 @@ limited plain Node/Python profile. Archive parent components reject before
 normalization. This does not bind stores to an instance epoch, publish current
 generations, enable recovery or restore approval.
 
+Typed child Domains additionally serialize creation and command entry against
+their ancestors. Parent fencing covers descendant builds, while child fencing
+does not stop sibling workers. Managed output can require this concrete
+ParentDomain profile; historical raw-budget provisioning is mutually exclusive.
+Attached-child pins retain partial-construction/reclaim cleanup ownership.
+Trusted-host topology, no outside entrants and deliberate boot-owner wiring
+remain prerequisites. Nested placement alone does not bind persistent stores
+to the instance epoch or permit recovery.
+
 ## Threat model
 
 Orva is **single-tenant**: one operator, many functions, possibly many

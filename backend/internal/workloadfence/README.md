@@ -2,8 +2,9 @@
 
 `workloadfence` owns a newly created cgroup-v2 epoch, enrolls trusted host commands
 at process creation, and can close entry and prove the entire epoch unpopulated.
-There are **no serving, sandbox, pool, builder, artifactfs, boot, GC, or IAM
-consumers**. A proof does not authorize artifact recovery, activation, deletion,
+Sandbox and managed-builder consumers are internal opt-ins; there are **no
+serving, pool, artifactfs recovery, boot, GC, or IAM consumers**.
+A proof does not authorize artifact recovery, activation, deletion,
 reclamation, policy approval, or current-generation admission. Recovered
 artifact stores remain inspection-only.
 
@@ -86,7 +87,7 @@ artifact stores remain inspection-only.
    domain, with matching durable closed metadata, current identities and fresh
    kernel emptiness. A zero proof, foreign domain, or closed ownership handle
    denies. Proofs are not serializable authority.
-7. `Close()` closes entry and releases descriptors/flock, without killing,
+7. For unattached roots, `Close()` closes entry and releases descriptors/flock, without killing,
    deleting, reclaiming, or certifying anything. It is idempotent across copied
    handles. A new owner must use `OpenRecovering`, not Create.
 8. `OpenRecovering(root, parent)` requires the exact same-boot durable identities,
@@ -100,6 +101,73 @@ process entry and fencing; it is not the IAM authorization gate. Context bounds
 gate acquisition and drain polling, but cannot interrupt a kernel filesystem
 operation or Go `cmd.Start` already in progress. Close has no context and waits
 for such work; it is not a bounded process-kill operation.
+
+## Typed nested epochs
+
+`instance.NewChild(ctx, metadataRoot)` creates a fresh exclusive Domain directly
+under the instance's **owned jails**, never under a caller-supplied cgroup path.
+It requires cpu/memory/pids delegation, preparing only owned epoch/jails nodes.
+The empty internal parents keep the kernel's no-internal-process rule intact;
+host commands enter each child's supervisors leaf. Nesting is limited to four
+edges below the root, with at most 1024 attached descendants per root, including
+quarantined partial creations. These are ownership bounds, not workload quotas.
+
+All descendant Start/Prepare/NewChild operations acquire gates root-to-leaf and
+verify registered ancestry, boot, pinned metadata/parent/group identities,
+mount identity, and durable records. Cleanup uses the same gate order but permits
+closed ancestors. Root Fence closes entry before waiting on gates, durably
+closes the root and kills recursively. No previously prepared/copied child or
+grandchild can start afterward. Child Fence affects only that child's subtree,
+not its siblings or ancestor. Context cancellation releases acquired gates;
+the finite filesystem operations and cmd.Start remain non-interruptible.
+Root-to-leaf serialization includes bounded enumeration and cleanup; this is
+not intended as a high-throughput serving scheduler.
+
+Attached child `Close` returns `ErrBusy` and closes its entry **without**
+releasing its pins/flock. Parent Close likewise denies new entry and returns
+ErrBusy while any child remains. The owner must Fence/Check the child, retain
+all build/runtime/staging reservations, then call
+`parent.ReclaimChild(ctx, child, proof)`. Reclaim accepts only the exact direct
+child and its fresh, still-owned closed proof, requires no attached children,
+rechecks kernel emptiness and removes only that child's cgroup tree. Traversal
+is limited to 2048 groups, 2048 entries per directory and depth 16. A failed
+partial removal retains ownership for retry; successful removal detaches the
+child and releases ancestor accounting. It never removes metadata or artifacts.
+The host consumer removes its private metadata only after successful reclaim.
+Reclaim is idempotent across copies of the same child/proof, not transferable.
+
+Root version-1 record bytes are unchanged. Children use version 2 with exact
+instance epoch/root, immediate parent epoch/metadata/group, and depth. The
+lineage excludes mutable closed flags so ancestor fencing does not invalidate
+child cleanup. `Reference(ctx)` returns verified owned association **data only**,
+not proof or start/approval authority. Generic OpenRecovering rejects version-2
+children; there is no child recovery/adoption constructor, reboot support or
+store-association loader.
+
+On NewChild failure before cgroup creation, no child is returned. Failure after
+creation returns a **nonnil closed child plus error**: retain both its metadata
+and reservation. Missing/ambiguous durable records may remain quarantined and
+unreclaimable; the API never invents a proof or silently releases parent pins.
+Such quarantine can block future parent preparation when topology is incomplete.
+Root Fence remains available, but is not permission to discard child ownership.
+
+These guarantees require trusted host writers, stable topology and no outside
+entrants. Raw Budget APIs remain privileged root boot-owner provisioning: they
+can mutate under a trusted host and are **not** constrained by a nested Domain's
+gate. Do not hand them to child consumers or infer generic ancestor permission.
+No package can protect against privileged host migrations or forged metadata.
+
+### Remaining recovery/publication obligations
+
+Persistent artifact stores currently carry no Domain association. Before any
+recovery activation, publication must atomically bind the exact store/epoch/
+generation identities to an instance lineage, pin every worker/build under that
+instance, and durably order publication/intents with closed/fenced ownership.
+A loader must verify the complete association, boot and stable mount/topology,
+and mint fresh kernel proof before any reclamation; mismatches and new boots
+must quarantine rather than adopt by path/inode. Root proof alone, a reference,
+or released flock is not artifact-store authority. No such binding, loader,
+reboot proof, serving activation or recovery mutator is installed here.
 
 ## Failure and strict metadata handling
 
@@ -120,16 +188,16 @@ ordinary cancelled/failed kill. A visible closed rename after directory-fsync
 failure is accepted only as the exact monotonic closed transition and is
 persisted/fsynced again before kill/proof. Failed file-fsync or rename leaves the
 temporary record intact; retries/reopen deny rather than discard it. An operator
-must investigate such state; there is no package repair or cleanup API.
-The package deliberately never removes metadata or cgroups, including on
-constructor failure, so cleanup failure cannot silently erase evidence or
-release artifact ownership. No artifact data is managed here.
+must investigate such state; there is no metadata repair or cleanup API.
+The package never removes metadata or artifact data. Only explicit typed-child
+ReclaimChild removes cgroups; root cleanup remains host-owned. Constructor
+failure never removes evidence automatically.
 
 ## Owned jail-parent extension (requires new independent acceptance)
 
 The original package-only acceptance is a historical snapshot; its preserved
-hashes/logs do not cover this extension. No durable record/schema changes are
-made. Create additionally pins its newly created `jails` directory until Close.
+hashes/logs do not cover this extension or nested epochs. Root records are
+unchanged. Create additionally pins its newly created `jails` directory until Close.
 Recovered domains do not reconstruct live path authority and cannot prepare or
 start jails.
 
@@ -139,7 +207,8 @@ request and returned capability have constant-size owned state. An empty request
 means lifetime-only. Preparation holds the domain entry gate, rejects
 closed/recovering/disposed domains, and validates exact epoch/metadata/jails
 identities and domain type. It rejects unknown epoch children and unknown jail
-directory names. Expected child names are canonical `NSJAIL.<positive uint32>`
+directory names. Typed registered child epochs are recognized by pinned identity;
+other expected child names are canonical `NSJAIL.<positive uint32>`
 labels, not proof of their provenance; exclusive trusted host writers remain a
 precondition. Enumeration is capped at 2048 entries per inspected directory,
 including kernel files; this intentionally bounds the number of accepted jails.
