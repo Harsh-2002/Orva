@@ -152,6 +152,10 @@ conversion and uses the shared confirmation gate. It does not manufacture
 `reviewed`/`confirm`, infer fresh target names or restore old work. Missing server
 routes deny; command registration does not activate history.
 
+`orva functions pause` and `resume` forward bounded original JSON and exact UUIDs
+to opt-in lifecycle routes. CLI confirmation does not supply body confirmation
+or refresh CAS. Resume reports inactive state, not resumed work.
+
 1. Create `cli/commands/<name>.go` with `package commands`.
 2. Define `var <name>Cmd = &cobra.Command{…}` + an `init()` for flags.
 3. Add `<name>Cmd` to the `root.AddCommand(...)` list in `RegisterClient` (`root.go`)

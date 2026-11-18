@@ -23,7 +23,9 @@ review-required generation in the promotion table without rewriting history.
 A lease acquired before retirement keeps the pair pinned through commit;
 retirement can still block a later fresh Install. Neither resume nor installation
 authorizes protected or standing operator work: a separate source-aware review
-is required. There is no resume route, MCP/AI tool, CLI command, or boot wiring.
+is required. The optional REST and MCP/shared-AI adapters expose exact-CAS
+pause/resume, and the CLI forwards the reviewed request. Normal routes,
+catalogs and boot do not enable them.
 
 **Managed-store-only:** `DataDir/functions/<owner>` must not exist at submission,
 build or installation. Legacy directories are refused, not adopted. Concrete

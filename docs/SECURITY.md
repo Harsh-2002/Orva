@@ -73,6 +73,18 @@ and never retargets `current`; no link/SQLite atomicity is claimed. Normal boot/
 router/catalog remain unchanged; mixed legacy writers are not qualified.
 See `backend/internal/builder/README.md` for lock and recovery boundaries.
 
+The optional managed workload pause/resume adapters take only an exact owner
+and operator-reviewed generation, policy revision and authority epoch plus
+`confirm: true`. Authentication supplies the token-free operator reference;
+request fields never grant authority. The publication core rechecks current
+credentials transactionally: pause uses WRITE for unprivileged sources and
+ADMIN for privileged sources, and resume requires ADMIN. Channel tokens are
+not operator credentials. Resume consumes durable pause only into a new
+inactive review-required generation; it does not restore a Factory, approval,
+execution or standing work. Fresh installation and explicit source-aware
+review remain separate. Default router and tool catalogs do not enable this
+boundary; it provides no startup, recovery or mixed-legacy guarantee.
+
 The opt-in configuration service uses the exact installed Factory and its
 enrolled stores after queued replacement. A successful configuration COMMIT
 pins that pair in the pool for the exact successor generation only. Queued

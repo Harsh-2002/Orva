@@ -375,6 +375,23 @@ Secrets ride along with the function as `process.env.STRIPE_KEY` /
 
 ### Schedules + background jobs
 
+#### Managed workload pause and resume (optional server composition)
+
+`orva functions pause <function-uuid> --request FILE` and
+`orva functions resume <function-uuid> --request FILE` require the opt-in
+server routes. Names are not accepted. Review the exact UUID `generation` and
+decimal-string `policy_revision` and `authority_epoch` from the separately
+enabled configuration inspection first. Put those values and `confirm: true`
+in the request file (or use `--request -` for stdin). The CLI forwards the
+original JSON and prints a JSON acknowledgement. It does not read or refresh
+CAS values, retry, follow redirects, or fall back to legacy status changes. `--yes` skips the
+CLI prompt in unattended use; it does not supply `confirm: true`.
+
+Pause records durable intent. Resume requires live ADMIN and only publishes
+an inactive review-required generation: execution and standing work have not
+resumed. Fresh Factory installation and explicit source-aware review remain
+separate. See [the API contract](API.md#managed-workload-pause-and-resume-opt-in-only).
+
 #### Deleted-work history (optional server composition)
 
 `orva history list|get|capacity|purge|reissue` delegates to the same strict

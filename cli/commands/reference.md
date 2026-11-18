@@ -58,6 +58,29 @@
 > inactive `review_required`, pending separate host installation and policy review.
 > See `backend/internal/builder/README.md`; do not enable a partial cut-over.
 
+> Managed lifecycle is also opt-in only: REST `POST /api/v1/functions/{id}/pause`
+> and `/resume`, and MCP/shared-AI `pause_workload` and `resume_workload`, are
+> absent by default. Use an exact canonical function UUID (`function_id` in
+> tools) and review `expected.generation`, `expected.policy_revision` and
+> `expected.authority_epoch` through the separately enabled authenticated
+> configuration inspection (`GET /api/v1/functions/{id}/configuration` or
+> `inspect_workload_configuration` with `id` and an empty `request` object;
+> inspection requires READ). Copy only those three
+> fields into the mutation, using canonical UUIDs and positive signed-64-bit
+> decimal strings for the counters; include `confirm: true`. Unknown and
+> duplicate fields and JSON numbers for counters reject. Re-inspect after
+> pause or conflict; there are no implicit reads or retries. Pause needs live
+> WRITE for unprivileged sources or ADMIN for privileged sources and records
+> `operator_paused: true` with `function_status: "inactive"`. Resume needs live
+> ADMIN and the exact sealed pair; it returns `operator_paused: false`,
+> `function_status: "inactive"`, `installation_required: true` and
+> `review_required: true`. It does not resume execution or standing work.
+> Install a fresh Factory and explicitly review its new current artifact
+> separately. Both acknowledgements identify the function, not a successor
+> CAS token. `orva functions pause|resume <function-uuid> --request FILE` (or
+> `--request -`) forwards the reviewed JSON unchanged, with a CLI confirmation
+> prompt unless `--yes` is passed. See `docs/API.md` for response details.
+
 > Internal qualification note: deleted-work metadata history and explicit
 > fresh-work reissue exist only in an opt-in scratch composition, not normal
 > serving routes/catalogs. History stores no old payload, environment, secrets or

@@ -70,6 +70,8 @@ type Deps struct {
 	CronIAM          *workloadasync.Service
 	History          *workloadhistory.Service
 
+	WorkloadLifecycle *builder.PublicationQueue // explicit scratch-only lifecycle tools
+
 	// NsjailBin is the sandbox binary path, so system_health can report
 	// whether this host can actually run functions rather than assuming it.
 	NsjailBin string
@@ -173,6 +175,7 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 	registerDocsTools(rc)
 	registerIAMTools(rc)
 	registerConfigurationTools(rc)
+	registerWorkloadLifecycleTools(rc)
 	registerHistoryTools(rc)
 	registerResources(s, deps, perms)
 	return s

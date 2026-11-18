@@ -19,7 +19,8 @@ source-aware Review are separate. Opt-in managed rollback promotes a verified
 historical deployment ID without rewriting history and also publishes inactive
 review-required deny. Durable pause blocks rollback; internal resume uses the
 same promotion association with the exact current sealed pair and a fresh deny
-generation. Resume is not routed or boot-wired. No symlink promotion, legacy
+generation. Pause/resume have explicit REST and MCP/shared-AI adapters; normal
+routing, catalogs and boot are unchanged. No symlink promotion, legacy
 rollback/GC adoption or autoresume; see `builder/README.md`.
 
 `workloadhistory` is an internal opt-in deletion/history service. Its explicit

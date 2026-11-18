@@ -5,6 +5,10 @@ when explicitly registered without a usable service/authenticator. Its other
 refusals use `VALIDATION` (400), `FORBIDDEN` (403), `CONFLICT` (409) and
 `UNAUTHORIZED` (401), as scoped in `API.md`. These are not normal server routes.
 
+Opt-in managed pause/resume uses the same status codes; `CONFLICT` means
+stale or ineligible state (inspect before retrying), and `UNAVAILABLE` covers
+unavailable wiring, storage or a sealed pair. It never falls back to legacy status changes.
+
 Orva's REST API errors return the same envelope:
 
 ```json

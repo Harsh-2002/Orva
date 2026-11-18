@@ -35,6 +35,10 @@ func TestPublicationQueueResume(t *testing.T) {
 			admin := ids.New()
 			must(db.InsertAPIKey(&database.APIKey{ID: admin, Name: "admin", KeyHash: "resume-fixture",
 				Prefix: "resume-fixture", Permissions: `["admin","read","write"]`}))
+			writer := ids.New()
+			must(db.InsertAPIKey(&database.APIKey{ID: writer, Name: "writer", KeyHash: "resume-writer",
+				Prefix: "resume-writer", Permissions: `["write"]`}))
+			writerCtx := auth.WithOperator(t.Context(), &auth.Principal{Kind: auth.KindAPIKey, ID: writer})
 			ctx := auth.WithOperator(t.Context(), &auth.Principal{Kind: auth.KindAPIKey, ID: admin})
 			ref, _ := auth.OperatorFromContext(ctx)
 			must(db.InitWorkloadOperatorPauseSchema(ctx))
@@ -110,8 +114,22 @@ func TestPublicationQueueResume(t *testing.T) {
 			must(kv())
 			req := database.WorkloadPauseRequest{OwnerID: owner, ExpectedGeneration: published.Artifact.Generation,
 				ExpectedPolicyRevision: policy.Revision, ExpectedAuthorityEpoch: policy.AuthorityEpoch}
-			must(s.Pause(ctx, req))
-			req.ExpectedAuthorityEpoch++
+			if out, err := s.ExecuteLifecycle(writerCtx, req, false); out != (LifecycleAcknowledgement{}) || !errors.Is(err, database.ErrOperatorDenied) {
+				t.Fatalf("WRITE-only pause of a privileged owner: %+v, %v", out, err)
+			}
+			must(standing())
+			must(kv())
+			if out, err := s.ExecuteLifecycle(ctx, req, false); err != nil ||
+				out != (LifecycleAcknowledgement{FunctionID: owner, FunctionStatus: "inactive", OperatorPaused: true}) {
+				t.Fatalf("pause acknowledgement: %+v, %v", out, err)
+			}
+			inspected, err := db.InspectWorkloadConfiguration(ctx, ref, owner)
+			must(err)
+			if inspected.Expected.Generation != req.ExpectedGeneration || inspected.Expected.PolicyRevision != req.ExpectedPolicyRevision ||
+				inspected.Expected.AuthorityEpoch <= req.ExpectedAuthorityEpoch {
+				t.Fatalf("paused configuration CAS: %+v", inspected.Expected)
+			}
+			req.ExpectedAuthorityEpoch = inspected.Expected.AuthorityEpoch
 			cached, err := s.queue.reg.Get(owner)
 			must(err)
 			before, err := db.GetWorkloadArtifactSnapshot(ctx, owner)
@@ -202,7 +220,14 @@ func TestPublicationQueueResume(t *testing.T) {
 			assertPaused()
 			_, err = conn.Exec(`DROP TRIGGER reject_resume`)
 			must(err)
-			must(s.Resume(ctx, req))
+			if out, err := s.ExecuteLifecycle(writerCtx, req, true); out != (LifecycleAcknowledgement{}) || !errors.Is(err, database.ErrOperatorDenied) {
+				t.Fatalf("WRITE-only resume: %+v, %v", out, err)
+			}
+			assertPaused()
+			if out, err := s.ExecuteLifecycle(ctx, req, true); err != nil ||
+				out != (LifecycleAcknowledgement{FunctionID: owner, FunctionStatus: "inactive", InstallationRequired: true, ReviewRequired: true}) {
+				t.Fatalf("resume acknowledgement: %+v, %v", out, err)
+			}
 			next, err := db.GetWorkloadArtifactSnapshot(ctx, owner)
 			must(err)
 			policy, err = db.GetIAMPolicy(ctx, owner)

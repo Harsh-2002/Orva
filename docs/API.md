@@ -385,6 +385,43 @@ host Factory installation and policy review are separate. Invalid input returns
 400, live operator denial 403, ineligible/current targets and pause 409, and a
 missing service or unavailable sealed pair 503. No legacy fallback is attempted.
 
+### Managed workload pause and resume (opt-in only)
+
+The scratch `WorkloadLifecycleHandler` can explicitly register
+`POST /api/v1/functions/{id}/pause` and `POST /api/v1/functions/{id}/resume`.
+The normal router exposes neither route. Both use the exact canonical function
+UUID, not a name, and require a JSON object of at most 1024 bytes with exactly
+these fields:
+
+| Field | Required value |
+|---|---|
+| `generation` | Exact canonical durable generation UUID |
+| `policy_revision` | Exact positive decimal string, at most signed 64-bit |
+| `authority_epoch` | Exact positive decimal string, at most signed 64-bit |
+| `confirm` | JSON boolean `true` |
+
+Staged precondition: use the separately enabled authenticated
+`GET /api/v1/functions/{id}/configuration` with READ to review these three
+fields from `expected` for this owner. Inspect again after pause and after
+conflict; never infer the next epoch. Neither mutation does an automatic read
+on the operator's behalf, accepts extra fields, or retries stale work.
+
+Pause requires live WRITE for empty, review-free, non-quarantined policy sources
+and live ADMIN for privileged sources. Its HTTP 200 acknowledgement contains
+`function_id`, `function_status: "inactive"` and `operator_paused: true`.
+Resume requires live ADMIN and an exact current sealed pair. Its HTTP 200
+acknowledgement contains `function_id`, `function_status: "inactive"`,
+`operator_paused: false`, `installation_required: true`, `review_required: true`.
+This acknowledges a new inactive deny generation, not resumed execution or
+standing work. Fresh host Factory installation and explicit source-aware
+policy review are separate.
+
+Responses are `Cache-Control: no-store`. Invalid or unconfirmed input is
+400 `VALIDATION`, missing operator authentication is 401 `UNAUTHORIZED`,
+denied live authority is 403 `FORBIDDEN`, stale or ineligible state is
+409 `CONFLICT`, and unavailable composition, sealed pair or storage is
+503 `UNAVAILABLE`. No legacy fallback is attempted.
+
 ### `GET /api/v1/functions/{id}/source`
 Returns the function's current code + dependencies as JSON. Used by
 the Editor view.

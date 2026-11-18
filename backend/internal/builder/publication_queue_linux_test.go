@@ -294,8 +294,9 @@ func TestPublicationQueuePause(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	if err := s.Pause(ctx, req); err != nil {
-		t.Fatal(err)
+	if out, err := s.ExecuteLifecycle(ctx, req, false); err != nil ||
+		out != (LifecycleAcknowledgement{FunctionID: owner, FunctionStatus: "inactive", OperatorPaused: true}) {
+		t.Fatalf("WRITE pause of unprivileged owner: %+v, %v", out, err)
 	}
 	fn, err := s.queue.reg.Get(owner)
 	if err != nil || fn.Status != "inactive" || !factory.Retired() || s.manager.CurrentArtifact(owner) != "" {
