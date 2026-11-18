@@ -6,7 +6,9 @@
 > **not normal routes or default tools**. Mutation publishes review-required
 > deny and invalidates the old actual Factory before ACK. Explicit new Factory
 > installation and current aggregate-policy review are separate steps; stored
-> approval cannot establish current runtime authority. Ordinary WRITE remains
+> approval cannot establish current runtime authority. Configuration uses the
+> actual installed concrete pair, including after queued deployment installation;
+> it cannot install an uninstalled or superseded queued generation. Ordinary WRITE remains
 > sufficient only for truly empty, unquarantined, review-free owners; any outbound,
 > inbound or retained grant, quarantine/review state requires live ADMIN. No
 > blanket READ requirement is added to writes. Old injected secrets cannot be
@@ -34,6 +36,21 @@
 > traces or grants operator READ. Accepted telemetry may persist after revoke;
 > ACK is not durability. Normal serving is unchanged; real-runtime qualification
 > of this increment remains separate.
+> Internal queued-build boundary: explicit `DeployIAM` dependencies route REST
+> deploy and external MCP/shared-AI `deploy_function_inline` through one managed
+> capture/publication service. Normal dependencies/boot are unchanged. Only fresh
+> managed-store plain no-dependency Node/Python is in scope; legacy directories
+> are refused, not linked/adopted. Token-free host submitter provenance and exact
+> source/epoch/config digests are captured with deployment and live-rechecked at
+> publication. Empty review-free authority requires WRITE; outbound/inbound/
+> retained/quarantined/review-required authority requires ADMIN, without blanket
+> READ. Epoch/source/config changes invalidate queued work even for ADMIN.
+> `succeeded` / `review_required` means inactive DENY, not ready to invoke: fresh
+> concrete-pair host Factory installation and source-aware review are separate.
+> Optional raw inline rejects duplicate/unknown/host metadata and invalid
+> UTF-8/surrogates (256 KiB cap); MCP requires explicit `wait`. Dependency/TS,
+> legacy source/rollback/GC, restore, boot and automatic resume are unqualified.
+> See `backend/internal/builder/README.md`; do not enable a partial cut-over.
 
 > Internal qualification note: deleted-work metadata history and explicit
 > fresh-work reissue exist only in an opt-in scratch composition, not normal

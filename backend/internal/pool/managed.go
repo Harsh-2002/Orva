@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
@@ -21,6 +22,21 @@ type managedGeneration struct {
 	factory *workloadspawn.Factory
 	pool    *functionPool
 	active  atomic.Bool
+	pending *PendingConfiguration // IAM gate
+}
+
+// PendingConfiguration identifies an inactive slot's exact committed successor.
+type PendingConfiguration struct {
+	source     *workloadspawn.Factory
+	generation workloadspawn.Generation
+	paths      *artifactfs.PreparedPaths
+}
+
+func (p *PendingConfiguration) Binding() (*workloadspawn.Factory, workloadspawn.Generation) {
+	if p == nil {
+		return nil, workloadspawn.Generation{}
+	}
+	return p.source, p.generation
 }
 
 func newManagedState(a *workloadiam.Authority) *managedState {
@@ -42,6 +58,12 @@ func (m *Manager) InstallFactory(ctx context.Context, factory *workloadspawn.Fac
 // InstallFactoryDeferred leaves old-generation cleanup to the caller after its
 // owner locks are released. The new generation has no implicit IAM approval.
 func (m *Manager) InstallFactoryDeferred(ctx context.Context, factory *workloadspawn.Factory) (func(), error) {
+	return m.InstallFactoryChecked(ctx, factory, nil)
+}
+
+// InstallFactoryChecked runs check under the IAM gate immediately before swap.
+// The caller owns the function mutation lock; check must not take pool locks.
+func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadspawn.Factory, check func() error) (func(), error) {
 	if m.managed == nil || ctx == nil || factory == nil || factory.Retired() || factory.Owner() == "" {
 		return nil, errors.New("managed pool requires a live concrete Factory and Authority")
 	}
@@ -79,8 +101,17 @@ func (m *Manager) InstallFactoryDeferred(ctx context.Context, factory *workloads
 	if old != nil {
 		old.pool.mu.Lock()
 	}
+	var checked error
+	var pending *PendingConfiguration
 	err := m.managed.authority.ChangeHostState(func() {
+		if check != nil {
+			checked = check()
+			if checked != nil {
+				return
+			}
+		}
 		if old != nil {
+			pending, old.pending = old.pending, nil
 			old.active.Store(false)
 			old.pool.markRetired()
 		}
@@ -91,15 +122,16 @@ func (m *Manager) InstallFactoryDeferred(ctx context.Context, factory *workloads
 	if old != nil {
 		old.pool.mu.Unlock()
 	}
-	if err == nil {
+	if err == nil && checked == nil {
 		m.wg.Add(1)
 		go m.reap(g.pool)
 	}
 	m.poolMu.Unlock()
-	if err != nil {
-		return nil, err
+	if err != nil || checked != nil {
+		return nil, errors.Join(err, checked)
 	}
 	return func() {
+		pending.release()
 		if old != nil {
 			old.factory.Close()
 			drainManagedIdle(old.pool)
@@ -137,7 +169,9 @@ func (m *Manager) removeManaged(owner string) {
 		}
 	}
 	g.pool.mu.Lock()
+	var pending *PendingConfiguration
 	err := m.managed.authority.ChangeHostState(func() {
+		pending, g.pending = g.pending, nil
 		g.active.Store(false)
 		g.pool.markRetired()
 		m.managed.current.Store(next)
@@ -146,6 +180,7 @@ func (m *Manager) removeManaged(owner string) {
 	g.pool.mu.Unlock()
 	m.poolMu.Unlock()
 	if err == nil {
+		pending.release()
 		g.factory.Close()
 		drainManagedIdle(g.pool)
 	}
@@ -176,20 +211,50 @@ func (m *Manager) CurrentFactory(owner string) *workloadspawn.Factory {
 	return m.managed.current.Load().generations[owner].factory
 }
 
-// InvalidateFactoryUnderGate requires the shared IAM gate and the exact current
-// Factory. Only the returned cleanup may take pool locks or release leases.
-func (m *Manager) InvalidateFactoryUnderGate(factory *workloadspawn.Factory) func() {
-	g := m.managed.current.Load().generations[factory.Owner()]
-	if g == nil || g.factory != factory {
+// InvalidateOwnerFactoryUnderGate also discards superseded configuration pins.
+func (m *Manager) InvalidateOwnerFactoryUnderGate(owner string) func() {
+	g := m.managed.current.Load().generations[owner]
+	if g == nil {
 		return func() {}
 	}
-	g.active.Store(false)
+	pending := g.pending
+	g.pending = nil
+	active := g.active.Swap(false)
 	return func() {
+		pending.release()
+		if !active {
+			return
+		}
 		g.pool.mu.Lock()
 		g.pool.markRetired()
 		g.pool.mu.Unlock()
 		g.factory.Close()
 		drainManagedIdle(g.pool)
+	}
+}
+
+// PublishConfigurationUnderGate transfers paths after successful COMMIT, with
+// the same live Factory rechecked under this gate before COMMIT.
+func (m *Manager) PublishConfigurationUnderGate(current *workloadspawn.Factory, generation workloadspawn.Generation, paths *artifactfs.PreparedPaths) func() {
+	g := m.managed.current.Load().generations[current.Owner()]
+	retire := m.InvalidateOwnerFactoryUnderGate(current.Owner())
+	g.pending = &PendingConfiguration{source: current, generation: generation, paths: paths}
+	return retire
+}
+
+func (m *Manager) PendingConfigurationUnderGate(owner string) *PendingConfiguration {
+	if m.closing.Load() {
+		return nil
+	}
+	if g := m.managed.current.Load().generations[owner]; g != nil && !g.active.Load() {
+		return g.pending
+	}
+	return nil
+}
+
+func (p *PendingConfiguration) release() {
+	if p != nil {
+		p.paths.Release()
 	}
 }
 

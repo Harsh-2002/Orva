@@ -14,6 +14,14 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Internal queued IAM publication (not activated)
+
+- Adds explicit managed-store queued capture/publication and optional REST/MCP/
+  shared-AI adapters. Normal serving/boot remains unchanged; no public breaking
+  behavior is enabled. New output publishes inactive review-required DENY,
+  followed by separate fresh Factory installation and review. Legacy filesystem
+  mixing, dependencies/TypeScript, restore and automatic resume remain unqualified.
+
 ### Fixed
 
 - Python SDK concurrent first use no longer reports an unavailable channel while

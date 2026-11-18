@@ -23,8 +23,10 @@ See [the recovery state machine and limits](../backend/internal/workloadrecovery
 No production upgrade or activation is required. The opt-in `workloadconfig`
 service requires initialized artifact/managed sources and enrolled concrete
 code/runtime stores; never point it at mutable current paths or infer a Factory
-from a durable generation row. It does not coordinate queued deploy/rollback,
-clone/import, trigger mutations, runtime upgrades, boot or restore.
+from a durable generation row. An explicitly installed queued deployment in
+those stores becomes the pair used by later configuration mutations. A queued
+publication awaiting its own install cannot be installed through configuration.
+Rollback, clone/import, triggers, runtime upgrades, boot and restore are separate.
 
 In an explicit scratch composition, first inspect exact function/generation and
 policy/source expectations. Publish the environment/settings/secret mutation:
@@ -43,6 +45,24 @@ artifact or edit rows to bypass review. Interrupted in-process cleanup, reboot
 and restore recovery are separate gates, not proven by this procedure.
 For sensitive removed/changed secrets retire affected workers and rotate the
 external credential as needed; IAM does not erase old memory or exfiltrated data.
+## Internal managed queued-build recovery (not serving activation)
+
+The optional publication queue refuses legacy function directories and never
+changes a `current` link. Keep sealed stores outside legacy GC/cache/version
+namespaces. Do not enable it on normal serving construction or mix writers.
+Publication success means inactive review-required DENY; explicit fresh Factory
+Install and separate source-aware Review are still necessary. No public Install
+endpoint or boot/restore loader is added.
+
+Accepted jobs survive request cancellation. Full/stopping queues fail recorded
+work and remove private archives; normal restart abandonment remains fail-only,
+not autoresume. Fixture `AbandonWorkloadDeployments` is explicit and idempotent.
+Sealed-but-unpublished output stays bounded and non-authoritative for inspection;
+there is no automatic GC, replay or restore adoption. Retain a live service with
+pending pins after storage failure. After process loss use store inspection only,
+not fabricated leases/approval. A failed post-commit installation leaves DENY;
+retry Install from a fresh exact snapshot before reviewing the current Factory.
+See `backend/internal/builder/README.md` for the full failure ordering and limits.
 
 ## Internal history fixture recovery limits
 

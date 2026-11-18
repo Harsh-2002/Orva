@@ -645,9 +645,16 @@ func (m *Manager) Release(acq *AcquireResult, reqErr error) {
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.poolMu.Lock()
 	closed := false
+	var pending []*PendingConfiguration
 	if m.managed != nil {
 		if err := m.managed.authority.ChangeHostState(func() {
 			closed = m.closing.CompareAndSwap(false, true)
+			if closed {
+				for _, g := range m.managed.current.Load().generations {
+					pending = append(pending, g.pending)
+					g.pending = nil
+				}
+			}
 		}); err != nil {
 			m.poolMu.Unlock()
 			return err
@@ -660,6 +667,9 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	m.poolMu.Unlock()
+	for _, p := range pending {
+		p.release()
+	}
 	// Stop the scaler first so it doesn't race us spawning fresh workers.
 	if m.scaler != nil {
 		m.scaler.shutdown()

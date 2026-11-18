@@ -56,7 +56,8 @@ func iamSurfaceSetup(t *testing.T) *iamSurfaceFixture {
 	if err := db.Migrate(); err != nil {
 		t.Fatal(err)
 	}
-	conn, err := sql.Open("sqlite", path)
+	// Fixture writes share the database with the asynchronous activity writer.
+	conn, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

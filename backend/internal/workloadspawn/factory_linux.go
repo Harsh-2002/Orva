@@ -264,6 +264,10 @@ func (f *Factory) Identities() (artifactfs.Identity, artifactfs.Identity) {
 	return f.state.code, f.state.runtime
 }
 
+func (f *Factory) UsesStores(code, runtime *artifactfs.Store) bool {
+	return f != nil && f.state != nil && f.state.codeStore == code && f.state.runtimeStore == runtime
+}
+
 // Usage takes the factory mutex; it must not be used by a gate-held observer.
 func (f *Factory) Usage() PreparedUsage {
 	if f == nil || f.state == nil {

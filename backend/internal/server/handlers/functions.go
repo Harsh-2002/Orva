@@ -58,12 +58,14 @@ func (h *FunctionHandler) resolveFnID(idOrName string) (string, bool) {
 
 // FunctionHandler handles function CRUD and deploy operations.
 type FunctionHandler struct {
-	Registry   *registry.Registry
-	Builder    *builder.Builder
-	DB         *database.Database
-	Metrics    *metrics.Metrics
-	DataDir    string
-	BuildQueue *builder.Queue // async build pipeline; nil fallback = synchronous legacy path
+	Registry         *registry.Registry
+	Builder          *builder.Builder
+	DB               *database.Database
+	Metrics          *metrics.Metrics
+	DataDir          string
+	BuildQueue       *builder.Queue            // async build pipeline; nil fallback = synchronous legacy path
+	DeployIAM        *builder.PublicationQueue // explicit scratch-only managed publication
+	RequireDeployIAM bool
 	// PoolRefresh is called by the deploy path after a successful build so
 	// the warm pool drops stale workers. Nil = no-op (dev / tests).
 	PoolRefresh func(fnID string)
@@ -745,6 +747,14 @@ func (h *FunctionHandler) GetSource(w http.ResponseWriter, r *http.Request) {
 // runs asynchronously; client polls /deployments/{id}.
 func (h *FunctionHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
+	managed := h.RequireDeployIAM || h.DeployIAM != nil
+	if managed && h.DeployIAM == nil {
+		respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE", "managed deployment unavailable", reqID)
+		return
+	}
+	if managed {
+		r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
+	}
 
 	rawID := extractDeployFnID(r.URL.Path)
 	if rawID == "" {
@@ -764,6 +774,13 @@ func (h *FunctionHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(50 << 20); err != nil {
 		respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "expected multipart form with code archive", reqID)
 		return
+	}
+	if managed {
+		defer r.MultipartForm.RemoveAll()
+		if len(r.MultipartForm.Value) != 0 || len(r.MultipartForm.File) != 1 || len(r.MultipartForm.File["code"]) != 1 {
+			respond.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "expected exactly one code archive and no metadata fields", reqID)
+			return
+		}
 	}
 	file, _, err := r.FormFile("code")
 	if err != nil {
@@ -788,6 +805,10 @@ func (h *FunctionHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 // DeployInline handles POST /api/v1/functions/{fn_id}/deploy-inline.
 // Accepts JSON {"code": "...", "filename": "handler.js"} — no file upload needed.
 func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
+	if h.RequireDeployIAM || h.DeployIAM != nil {
+		h.deployInlineIAM(w, r)
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	rawID := r.PathValue("fn_id")
 	if rawID == "" {
@@ -907,6 +928,16 @@ func (h *FunctionHandler) DeployInline(w http.ResponseWriter, r *http.Request) {
 // notes (e.g. SDK import without SDK permission) at deploy time rather
 // than discovering the issue on the first failed invoke.
 func (h *FunctionHandler) enqueueOrBuildSync(w http.ResponseWriter, r *http.Request, fn *database.Function, tarballPath, reqID, deployWarning string) {
+	if h.RequireDeployIAM || h.DeployIAM != nil {
+		id, err := h.DeployIAM.Submit(r.Context(), fn.ID, tarballPath)
+		if err != nil {
+			respond.Error(w, http.StatusForbidden, "FORBIDDEN", "managed deployment denied; fresh submission required", reqID)
+			return
+		}
+		w.Header().Set("Location", "/api/v1/deployments/"+id)
+		respond.JSON(w, http.StatusAccepted, map[string]string{"deployment_id": id, "function_id": fn.ID, "status": "queued"})
+		return
+	}
 	// Always insert a deployments row so clients can observe state.
 	deploymentID := ids.New()
 	// Numbered from the deployment sequence, not from functions.version. That

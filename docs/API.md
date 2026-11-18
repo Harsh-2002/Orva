@@ -58,8 +58,29 @@ policy/authority epoch and audit together; invalidates the old current Factory
 before ACK; then retires/cancels outside locks. Follow with explicit installation
 and the existing source-aware policy review of the **new installed artifact**.
 The old current observer cannot approve the new durable generation. Busy workers
-may still hold old injected values, but lose protected SDK access. This is not
-secret recall, production cut-over, queued deployment or reboot recovery.
+may still hold old injected values, but lose protected SDK access. Configuration
+uses the actual installed pair, including after an explicit queued deployment
+install. An uninstalled or superseded queued generation cannot be installed
+through the configuration endpoint. This is not secret recall, production
+cut-over or reboot recovery.
+## Internal opt-in queued deployment publication
+
+Normal API construction is unchanged. Scratch `FunctionHandler.DeployIAM` uses
+shared managed capture/submit for upload and inline deployments. Required but
+missing service denies, not legacy fallback (inline: 503 `UNAVAILABLE`).
+Optional inline accepts only `code`, optional `filename` and empty `dependencies`
+as strict original JSON (256 KiB; duplicate/unknown/metadata/invalid UTF-8 or
+surrogate input: 400 `INVALID_JSON`). Extras, dependencies and TypeScript are
+unqualified. Returns 202 `{deployment_id,function_id,status:"queued"}` after
+authorized durable capture, or 403 `FORBIDDEN` for denied/conflicting submission.
+The optional multipart upload is capped at 50 MiB and accepts exactly one `code`
+file with no other metadata fields; duplicate/unknown form parts are rejected.
+Already-inactive targets require explicit activation and fresh submission.
+`succeeded` with phase `review_required` means inactive DENY publication, not
+invocation readiness. Separate host Factory installation/current-artifact review
+remain required; there is no public Install route or normal router switch.
+See [`builder/README.md`](../backend/internal/builder/README.md) for filesystem
+separation, transaction ordering and retained-failure recovery limits.
 
 The optional history deletion root can include `managed_sources`: bounded
 owner/policy UUID, owner revision/epoch, pin/enabled, before/after membership and

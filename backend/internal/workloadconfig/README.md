@@ -3,7 +3,9 @@
 This Linux service is not constructed by normal boot. Its HTTP adapter is not
 registered by the normal router. It requires the same registry/Authority/managed
 pool, explicit generation and managed-policy schemas, a strict secrets manager,
-and trusted concrete sealed code/runtime bindings for every enrolled owner.
+and trusted concrete stores for every enrolled owner. Enrollment checks the
+initial Factory; later mutations resolve the actual current Factory's store-minted
+pair. Construction-time generation labels never select a later Factory.
 Legacy configuration and secret handlers remain unchanged.
 
 Environment, complete execution settings and secret upsert/delete share three
@@ -14,14 +16,16 @@ explicit steps:
    recheck the full function, generation, policy/epoch and exact source/secret
    rows, and resolve the live token-free operator reference. Commit configuration,
    generation rotation, policy/epoch advancement, review-required deny and audit
-   together. Only after commit, invalidate the old actual Factory and publish
-   the committed cache row. Release locks before cancellation, retirement,
-   lease release or event callbacks, all before acknowledging success.
+    together. Only after commit, pin the exact pair to the successor generation
+    in the managed pool, invalidate the old actual Factory and publish the
+    committed cache row. Release locks before cancellation, retirement, lease
+    release or event callbacks, all before acknowledging success.
 2. An administrator explicitly installs a newly prepared Factory from the new
-   strict durable snapshot and the same concrete code/runtime bindings. The
-   complete durable/source snapshot and live operator are rechecked under owner
-   lock and gate. Pool installation remains deny-only. Failure leaves authority
-   denied; repeat inspection/preparation, never reuse a failed stale candidate.
+    strict durable snapshot and the exact pending concrete pair. Immediately
+    before the pool swap, recheck that pending identity and generation, the
+    complete durable/source snapshot and live operator under owner lock and gate.
+    Replacement, removal, shutdown and newer queued publication discard the
+    pending pin, releasing it outside the gate. Pool installation remains deny-only.
 3. Use the existing source-aware `workloadpolicy.Service.Review` with the new
    **installed** exact artifact and current policy expectations. It reviews the
    aggregate current sources without replacing inline policy by the union.
@@ -67,8 +71,9 @@ acknowledgment, and cannot be approved through the old current observer.
 Revocation cannot erase a secret already read or exfiltrated: retire affected
 workers and rotate external credentials when required.
 
-This is not queued deploy/rollback, clone/import, trigger or runtime-upgrade
-coordination. All those writers, complete lifecycle, boot/reboot/restore,
+An explicitly installed queued deployment in the enrolled stores is supported;
+an uninstalled queued deployment has no configuration-install pending pair.
+Rollback, clone/import, trigger and runtime-upgrade writers, boot/reboot/restore,
 recovery and production activation remain separate gates. Do not construct this
 service in normal serving until those writers share the publication boundary.
 The runtime fixture proves only its explicitly enrolled sealed Node/Python

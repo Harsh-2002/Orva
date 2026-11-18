@@ -55,6 +55,30 @@ and retained as private immutable optional-job metadata through retry and
 persist-or-shed processing. Legacy telemetry has no IAM decision. There is no
 new database column, SDK-visible provenance field or durable decision audit;
 the snapshot is not authority to perform another operation.
+## Internal queued managed-build boundary (not activated)
+
+Explicit managed publication captures token-free operator provenance and exact
+source/epoch/configuration digests with deployment. Both capture and publication
+resolve live API-key/session/OAuth validity, permission, audience and expiry.
+Missing provenance/state denies. Retained disabled attachment or inbound-only
+authority requires ADMIN; truly empty review-free authority preserves WRITE,
+without extra READ. Source/epoch/config changes invalidate even admin submissions.
+
+New sealed output commits as inactive review-required DENY. After COMMIT, the
+actual old Factory becomes ineligible under the same gate before publication
+returns. Failed COMMIT changes no cache, Factory eligibility or cancellation.
+Fresh concrete leases, host installation and actual-current review are separate.
+No snapshot restores policy. This managed-only path refuses legacy directories
+and never retargets `current`; no link/SQLite atomicity is claimed. Normal boot/
+router/catalog remain unchanged; mixed legacy writers are not qualified.
+See `backend/internal/builder/README.md` for lock and recovery boundaries.
+
+The opt-in configuration service uses the exact installed Factory and its
+enrolled stores after queued replacement. A successful configuration COMMIT
+pins that pair in the pool for the exact successor generation only. Queued
+publication discards superseded configuration pins; activation and pool swap
+recheck under the same owner lock and gate. Neither DB metadata nor the previous
+approval can make a pair current. This is not production lifecycle authority.
 
 The optional managed/history deletion coordinator atomically removes named
 membership with archive reservation and terminal admission closure. It preserves

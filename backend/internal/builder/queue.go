@@ -43,15 +43,16 @@ type BuildJob struct {
 
 // Queue runs build jobs in the background with bounded concurrency.
 type Queue struct {
-	bld      *Builder
-	db       *database.Database
-	reg      *registry.Registry
-	jobs     chan BuildJob
-	workers  int
-	stopOnce sync.Once
-	stop     chan struct{}
-	wg       sync.WaitGroup
-	stopping atomic.Bool
+	publication *PublicationQueue
+	bld         *Builder
+	db          *database.Database
+	reg         *registry.Registry
+	jobs        chan BuildJob
+	workers     int
+	stopOnce    sync.Once
+	stop        chan struct{}
+	wg          sync.WaitGroup
+	stopping    atomic.Bool
 
 	// FnLock returns a per-function mutex shared with the rollback handler
 	// so deploy and rollback can't interleave on the same function. Wired
@@ -109,6 +110,13 @@ func (q *Queue) Workers() int {
 // capacity (caller should respond 503 + Retry-After) or ErrQueueStopping
 // during shutdown.
 func (q *Queue) Submit(job BuildJob) error {
+	if q.publication != nil {
+		return ErrPublicationUnavailable
+	}
+	return q.enqueue(job)
+}
+
+func (q *Queue) enqueue(job BuildJob) error {
 	if q.stopping.Load() {
 		return ErrQueueStopping
 	}
@@ -149,6 +157,10 @@ func (q *Queue) worker(id int) {
 // runJob is the actual build: update deployment state, run the build,
 // capture logs, update function row, fire OnComplete.
 func (q *Queue) runJob(workerID int, job BuildJob) {
+	if q.publication != nil {
+		q.publication.run(job)
+		return
+	}
 	started := time.Now()
 	logger := slog.With("worker", workerID, "deployment", job.DeploymentID, "fn", job.FunctionID)
 	logger.Info("build starting")

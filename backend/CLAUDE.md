@@ -3,11 +3,20 @@
 `workloadconfig` is an internal opt-in environment/execution-settings/secret
 mutation service. It rechecks exact durable/source/ciphertext CAS and current
 operator authority under owner → IAM → DB ordering, commits review-required deny,
-then invalidates the old actual Factory before ACK. Cancellation/retirement
+then pins the exact current pair to the committed successor and invalidates the
+old actual Factory before ACK. Explicit queued installation in the same stores
+changes which pair later configuration resolves. Cancellation/retirement
 callbacks run outside owner/IAM locks. Explicit new concrete Factory installation
 precedes separate aggregate-policy review. Optional HTTP/MCP/shared-AI adapters
-do not activate normal routes or boot schemas. See its README; queued code
-publication, other writers, full lifecycle and recovery remain separate gates.
+do not activate normal routes or boot schemas. Other writers, full lifecycle
+and recovery remain separate gates. See its README.
+`builder.NewPublicationQueue` is opt-in managed-store-only queued deployment
+capture/publication, never normal boot activation. It refuses legacy function
+filesystem directories, captures live token-free submitter/source/epoch provenance
+transactionally, and publishes inactive review-required deny while invalidating
+the old actual Factory under the same gate. Fresh concrete-pair Install and
+source-aware Review are separate. No link promotion, legacy rollback/GC adoption
+or autoresume is introduced; see `builder/README.md`.
 
 `workloadhistory` is an internal opt-in deletion/history service. Its explicit
 schema and registry hook are absent from normal boot/router construction.

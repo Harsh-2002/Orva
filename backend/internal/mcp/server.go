@@ -47,26 +47,28 @@ import (
 // handlers reach into these directly — no HTTP marshaling.
 type Deps struct {
 	// IAM is explicit scratch/test wiring only; serving constructors leave nil.
-	IAM           *workloadpolicy.Service
-	Configuration *workloadconfig.Service
-	Triggers      *workloadtrigger.Service
-	DB            *database.Database
-	Registry      *registry.Registry
-	Builder       *builder.Builder
-	BuildQueue    *builder.Queue
-	PoolMgr       *pool.Manager
-	Secrets       *secrets.Manager
-	Proxy         *proxy.Proxy
-	Firewall      *firewall.Manager
-	Metrics       *metrics.Metrics
-	EventHub      *events.Hub
-	DataDir       string
-	Version       string // Orva version string, surfaced via initialize
-	AsyncEnabled  bool
-	AsyncIAM      *workloadasync.Service
-	CronEnabled   bool
-	CronIAM       *workloadasync.Service
-	History       *workloadhistory.Service
+	IAM              *workloadpolicy.Service
+	Configuration    *workloadconfig.Service
+	Triggers         *workloadtrigger.Service
+	DB               *database.Database
+	Registry         *registry.Registry
+	Builder          *builder.Builder
+	BuildQueue       *builder.Queue
+	DeployIAM        *builder.PublicationQueue
+	RequireDeployIAM bool
+	PoolMgr          *pool.Manager
+	Secrets          *secrets.Manager
+	Proxy            *proxy.Proxy
+	Firewall         *firewall.Manager
+	Metrics          *metrics.Metrics
+	EventHub         *events.Hub
+	DataDir          string
+	Version          string // Orva version string, surfaced via initialize
+	AsyncEnabled     bool
+	AsyncIAM         *workloadasync.Service
+	CronEnabled      bool
+	CronIAM          *workloadasync.Service
+	History          *workloadhistory.Service
 
 	// NsjailBin is the sandbox binary path, so system_health can report
 	// whether this host can actually run functions rather than assuming it.

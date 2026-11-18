@@ -66,8 +66,10 @@
         staged CLI or optional MCP tools.
         Optional configuration publication also remains scratch-only: environment,
         settings and secret changes first publish review-required deny. Explicit
-        new Factory installation and review are separate; old injected secrets
-        cannot be recalled. No normal routes or tools are activated.
+        new Factory installation and review are separate. Configuration uses the
+        installed code and runtime pair, including after queued deployment
+        installation. Old injected secrets cannot be recalled. No normal routes
+        or tools are activated.
       </p>
     </section>
 

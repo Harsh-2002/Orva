@@ -1,9 +1,118 @@
 # Builder runtime pinning and owned output (internal opt-in)
 
+## Queued publication (explicit opt-in, not serving cut-over)
+
+`NewPublicationQueue` composes the real managed-output builder, durable submitter
+capture, shared Authority, registry and managed pool. It requires the typed
+ParentDomain profile and exact output/runtime stores. Legacy `NewQueue`, normal
+boot/migrations/router and nil MCP dependencies remain unchanged.
+`FunctionHandler.DeployIAM` / `RequireDeployIAM` and MCP `Deps.DeployIAM` /
+`RequireDeployIAM` are scratch composition only. Required-but-missing service
+denies, never selecting synchronous/legacy fallback.
+
+**Managed-store-only:** `DataDir/functions/<owner>` must not exist at submission,
+build or installation. Legacy directories are refused, not adopted. Concrete
+stores must be provisioned outside all legacy version/cache/GC namespaces.
+No `current` symlink, `.orva-ready`, `ActivateVersion`, rollback snapshot or legacy
+GC participates. Legacy source inspection/editor/rollback, mixed operation,
+boot/restore and production activation are not qualified.
+
+### Ordered state machine
+
+1. Before queue acceptance, owner lock → IAM gate → bounded SQLite transaction
+   reads current function/config/ciphertext and exact inline, retained/disabled
+   attachments, effective policy and authority epoch. It live-authorizes the
+   host-authenticated token-free reference and inserts deployment/provenance
+   together. Provenance stores UUIDs, audience, revision scalars and digests,
+   not bearer, frozen permissions, source, environment or ciphertext.
+2. Empty review-free sources require WRITE. Any outbound/inbound, retained,
+   quarantined or review-required authority requires ADMIN, including disabled/
+   revoked attached contents. READ is not an extra blanket requirement.
+   Missing sources/state/reference denies.
+   Already-inactive targets refuse capture; this path cannot implicitly activate
+   an operator-disabled function. Explicit activation and fresh submission are
+   required instead.
+3. Execution takes the shared build/rollback lock and checks durable capture.
+   Compilation happens outside owner/IAM locks, using the existing plain
+   no-dependency Node/Python managed-output profile. Actual returned code/runtime
+   generations are independently reacquired and compared through concrete
+   store leases before recording their durable association.
+4. Owner lock → IAM gate → transaction rechecks live credential validity,
+   permissions, expiry/audience, sources/epoch, function version and full captured
+   configuration/ciphertext digest. Any intervening edit or revoke/regrant
+   conflicts, even for ADMIN: explicitly resubmit. Stale build config never
+   overwrites accepted edits.
+5. One transaction rotates generation, publishes review-required DENY preserving
+   sources/approval/quarantine, records build-owned outputs/snapshot/completion,
+   and leaves the function **inactive**. After COMMIT under that same gate it
+   invalidates the actual old current Factory, detaches any superseded pending
+   configuration pin and publishes committed registry state. Failed COMMIT
+   changes neither cache, eligibility, pins nor cancellation.
+   Callbacks, retirement and lease release run outside owner/build/IAM locks.
+6. Explicit `Install` prepares fresh strict DB/secrets inputs and a concrete-pair
+   Factory outside the gate. Under owner/gate it rechecks the snapshot and live
+   ADMIN, commits activation, and installs the checked mapping before releasing
+   the gate. Policy remains DENY: separate source-aware `review`
+   must approve the actual installed fingerprint. Old workers gain no new grants.
+
+There is **no SQLite/link atomicity claim**: no legacy link is created. The sealed
+pair is the sole managed association. Crash before deny COMMIT leaves old code
+current and prepared output non-authoritative. Crash after it leaves inactive,
+review-required work without a new Factory. Crash between activation transaction
+and in-memory install still has no eligible new managed Factory or permission.
+Fresh-snapshot Install can be repeated; it resumes neither compilation nor grants.
+Boot/restore must not infer authority from these durable records.
+Later opt-in configuration mutations resolve the installed Factory's concrete
+pair from the same enrolled stores, not its original deployment labels.
+
+Queue full/stopping and never-started shutdown jobs fail explicitly and remove
+their archives. Accepted jobs use the background lifecycle, not request
+cancellation. Existing restart failure of queued/building rows is preserved;
+explicit fixture `AbandonWorkloadDeployments` is idempotent and never resumes work.
+Capture/output records are capped at 16 KiB each, with at most 64 queued/building
+or unresolved-output records admitted. Successful-but-unpublished sealed pairs
+retain bounded inspection pins in the service. Storage failure can leave only
+in-memory pins; retain the service for host inspection. Store quotas still bound
+generations. No automatic reclamation, orphan deletion or restore adoption exists.
+After process loss, use inspection-only store recovery, not replay.
+
+Optional raw inline HTTP/MCP/shared-AI decoding bounds input to 256 KiB and rejects
+unknown, duplicate/case-variant fields, invalid UTF-8/surrogates and host metadata.
+Inline supports one plain file; dependencies/extras/TypeScript remain unqualified.
+MCP requires explicit `wait`; `succeeded` / `review_required` is durable inactive
+DENY publication, **not** invocation readiness.
+
+This candidate remains based on `c3254ab`; CONFIG28 is now committed separately
+at `51a6b9f`. Reuse its existing `CacheCommitted`, `ManagedBy`, `CurrentFactory`,
+`InvalidateFactoryUnderGate` and `InstallFactoryDeferred` methods, preserving
+`Factory.MatchesSnapshot` and the accepted configuration hooks. Consolidate the
+source predicate without weakening inline/retained attachment checks or live CAS.
+
+**Combined-writer prerequisite:** CONFIG28 captures fixed code/runtime bindings
+when constructed. A later queued code publication must not leave that service
+using its older pair for a configuration mutation or Install. Before composing
+both writers, require exact-current binding parity/fail-closed refresh under the
+common owner/gate boundary and verify deploy → config mutation → install/review
+against the new sealed pair. That combined lifecycle is not implemented or
+qualified by this standalone candidate; do not overwrite accepted config/span
+hooks or activate the mixture.
+
+### Disposable qualification profile
+
+Physical `TestQueuedDeploymentLive` requires the explicit
+`orva_publication_qa` build tag. Its two inspection-only helpers are excluded from
+normal builds and can inspect/release only a terminal failed job's retained pin.
+They do not retire code, install a Factory or approve policy. The fixture uses
+real sealed runtimes, managed syntax builds and private SDK/IAM admission;
+its cancellation waiting-edge witness is host-only instrumentation, not proof
+of a dispatched nested function call. Code-store generation quota is eight to
+retain the rejected build alongside three transport publications; verifier,
+manifest and byte limits are unchanged. Never enable this QA tag in serving.
+
 `New(WithRuntimeBinding(provider))` captures a host-trusted runtime binding
-**once at actual `Build` entry**. There is no serving constructor, queue
-activation, public flag, runtime producer or current-generation provider in
-this change. `New()` and builders without this option retain legacy behavior,
+**once at actual `Build` entry**. Runtime binding alone installs no serving
+constructor, queue, public flag, runtime producer or current-generation provider.
+`New()` and builders without this option retain legacy behavior,
 including mutable rootfs lookup, cache hits and nil-context test hooks.
 Explicitly opting in with a nil provider, a declined/zero binding or a provider
 error denies; it never selects the legacy path.
@@ -73,7 +182,8 @@ does not fix that. Do not install serving authority or reclaim writer resources
 from this result. The optional legacy `BuildFunc` host hook is unchanged; it is
 not made jailed or writer-fenced by runtime binding.
 
-Remaining integration gates:
+Runtime-binding-only integration gates (the separate queued profile above does
+not remove the remaining serving/boot/restore gates):
 
 - independently authenticated runtime production/publication (the test recipe
   is not a production importer; no installed-tree adoption);
