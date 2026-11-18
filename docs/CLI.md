@@ -606,6 +606,12 @@ orva rollback greeter 019df210-…-deadbeef0001
 orva rollback greeter --code-hash 9f8e7d…
 ```
 
+With the optional managed-deployment fixture, pass an exact deployment UUID,
+not `--code-hash`. An unqualified CLI rollback can still select a concrete UUID
+client-side. Managed promotion keeps current configuration and stays inactive
+until a separate host installation and policy review; the CLI reports that
+state rather than implying the function is ready.
+
 ### Fixtures (saved request presets)
 
 A fixture bundles a method, sub-path, headers, and body under a name so

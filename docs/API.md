@@ -375,6 +375,16 @@ Returns 410 `VERSION_GCD` if the target version was pruned by the GC, and 400
 if the target is not a succeeded deployment of this function, or if it is
 already active.
 
+In the optional managed-deployment fixture (not normal boot), both path owner
+and `deployment_id` must be exact UUIDs. `code_hash`, `latest`, unknown and
+duplicate fields are not accepted. HTTP 200 includes `id`, `deployment_id`,
+`function_id`, `version`, `code_hash`, `status: "succeeded"`,
+`phase: "review_required"` and `function_status: "inactive"`. This acknowledges
+promotion, not readiness. Current configuration and history are preserved;
+host Factory installation and policy review are separate. Invalid input returns
+400, live operator denial 403, ineligible/current targets and pause 409, and a
+missing service or unavailable sealed pair 503. No legacy fallback is attempted.
+
 ### `GET /api/v1/functions/{id}/source`
 Returns the function's current code + dependencies as JSON. Used by
 the Editor view.

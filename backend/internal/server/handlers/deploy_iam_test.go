@@ -14,6 +14,36 @@ import (
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
+func TestManagedRollbackRESTStrictAndNoFallback(t *testing.T) {
+	owner, target := ids.New(), ids.New()
+	valid := `{"deployment_id":"` + target + `"}`
+	h := &FunctionHandler{DeployIAM: &builder.PublicationQueue{}}
+	request := func(h *FunctionHandler, path, raw string, want int) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/v1/functions/"+path+"/rollback", strings.NewReader(raw))
+		req.SetPathValue("fn_id", path)
+		w := httptest.NewRecorder()
+		h.Rollback(w, req)
+		if w.Code != want {
+			t.Fatalf("status %d, want %d: %s", w.Code, want, w.Body.String())
+		}
+	}
+	for _, raw := range []string{
+		`{}`, `{"code_hash":"abc"}`, `{"deployment_id":"latest"}`,
+		`{"Deployment_ID":"` + target + `"}`, `{"deployment_id":null}`,
+		`{"deployment_id":"\ud800"}`, `{"deployment_id":"` + target + `","deployment_id":"` + target + `"}`,
+		strings.TrimSuffix(valid, "}") + `,"function_id":"` + owner + `"}`,
+		valid + ` {}`, strings.Repeat(" ", builder.MaxRollbackRequestBytes) + valid,
+	} {
+		request(h, owner, raw, 400)
+	}
+	request(h, "function-name", valid, 400)
+	request(h, owner, valid, 503)
+	request(&FunctionHandler{RequireDeployIAM: true}, owner, valid, 503)
+	// Nil/off enters the existing handler before managed validation.
+	request(&FunctionHandler{}, "", valid, 400)
+}
+
 func TestRequiredPublicationHasNoLegacyFallback(t *testing.T) {
 	h := &FunctionHandler{RequireDeployIAM: true}
 	req := httptest.NewRequest("POST", "/functions/id/deploy-inline", strings.NewReader(`{"code":"x"}`))

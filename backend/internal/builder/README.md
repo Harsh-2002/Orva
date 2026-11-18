@@ -24,6 +24,28 @@ No `current` symlink, `.orva-ready`, `ActivateVersion`, rollback snapshot or leg
 GC participates. Legacy source inspection/editor/rollback, mixed operation,
 boot/restore and production activation are not qualified.
 
+### Managed rollback
+
+The same explicit deployment dependency selects managed rollback for REST, MCP
+and the shared AI registry. Required-but-missing denies. The function and
+historical deployment must be exact UUIDs; MCP/AI also require `confirm=true`.
+There is no hash, latest alias, legacy symlink fallback or pause/resume path.
+The CLI can pass an exact deployment ID using its existing request.
+
+Rollback holds the verified sealed historical code/runtime pair through commit
+and verifies the authored and recorded executed files against that code tree.
+Under build → owner → IAM → DB ordering it rechecks the association, current
+sources/authority, configuration/ciphertext and live operator permissions. It
+keeps current settings, environment, secrets, SDK and retained policy; it
+promotes the historical ID without changing deployment history or numbering.
+A separate private promotion record binds that association to the new artifact
+generation. The function is left inactive; the old Factory is invalidated
+before acknowledgement, and retirement and cancellation run outside the locks.
+An explicit fresh `Install` and subsequent source-aware review remain required.
+Committed promotion is not a lease across requests: if its pair is reclaimed
+before Install, Install fails closed. Durable operator pause prevents
+promotion, including for a request prepared before pause.
+
 ### Ordered state machine
 
 1. Before queue acceptance, owner lock → IAM gate → bounded SQLite transaction

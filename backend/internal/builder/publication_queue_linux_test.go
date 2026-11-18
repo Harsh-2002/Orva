@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
@@ -156,17 +157,10 @@ func TestPublicationQueueFullCancellationAndDisabledLegacy(t *testing.T) {
 	}
 }
 
-func TestPublicationQueuePause(t *testing.T) {
-	s, ctx, owner := publicationQueueFixture(t)
-	db := s.queue.db
-	if err := db.InitWorkloadOperatorPauseSchema(ctx); err != nil {
-		t.Fatal(err)
-	}
-	store, _, limits := outputTestStore(t)
-	// Sealed fixture files qualify Factory ownership, not runtime execution.
-	seal := func(kind artifactfs.Kind, owner string, dirs []string, filename string, mode os.FileMode) string {
+func publicationFixtureSealer(t *testing.T, store *artifactfs.Store, limits artifactfs.Limits) func(artifactfs.Kind, string, []string, string, os.FileMode) string {
+	return func(kind artifactfs.Kind, owner string, dirs []string, filename string, mode os.FileMode) string {
 		t.Helper()
-		stage, err := store.Begin(ctx, 4096)
+		stage, err := store.Begin(t.Context(), 4096)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -213,7 +207,7 @@ func TestPublicationQueuePause(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		id, err := stage.Seal(ctx, kind, owner, manifest, digest)
+		id, err := stage.Seal(t.Context(), kind, owner, manifest, digest)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,6 +220,17 @@ func TestPublicationQueuePause(t *testing.T) {
 		})
 		return id
 	}
+}
+
+func TestPublicationQueuePause(t *testing.T) {
+	s, ctx, owner := publicationQueueFixture(t)
+	db := s.queue.db
+	if err := db.InitWorkloadOperatorPauseSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	store, _, limits := outputTestStore(t)
+	// Sealed fixture files qualify Factory ownership, not runtime execution.
+	seal := publicationFixtureSealer(t, store, limits)
 	code := seal(artifactfs.KindCode, owner, nil, "handler.js", 0644)
 	runtime := seal(artifactfs.KindRuntime, "node", []string{"usr", "usr/local", "usr/local/bin", "opt", "opt/orva"}, "usr/local/bin/node", 0755)
 	raw, err := db.GetWorkloadArtifactSnapshot(ctx, owner)
@@ -298,5 +303,116 @@ func TestPublicationQueuePause(t *testing.T) {
 	}
 	if err := s.Pause(ctx, req); !errors.Is(err, database.ErrWorkloadArtifactConflict) {
 		t.Fatalf("old pause CAS was reusable: %v", err)
+	}
+}
+
+func TestPublicationQueueRollback(t *testing.T) {
+	s, _, owner := publicationQueueFixture(t)
+	db := s.queue.db
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	admin := ids.New()
+	must(db.InsertAPIKey(&database.APIKey{ID: admin, Name: "admin", KeyHash: "admin-fixture", Prefix: "admin-fixture", Permissions: `["admin","write"]`}))
+	ctx := auth.WithOperator(t.Context(), &auth.Principal{Kind: auth.KindAPIKey, ID: admin})
+	ref, _ := auth.OperatorFromContext(ctx)
+	must(db.InitWorkloadOperatorPauseSchema(ctx))
+	store, _, limits := outputTestStore(t)
+	s.code, s.runtime = store, store
+	s.secrets = secrets.New(db, t.TempDir())
+	seal := publicationFixtureSealer(t, store, limits)
+	runtime := seal(artifactfs.KindRuntime, "node", []string{"usr", "usr/local", "usr/local/bin", "opt", "opt/orva"}, "usr/local/bin/node", 0755)
+	publish := func(code, run, hash string) string {
+		t.Helper()
+		paths, err := artifactfs.PreparePaths(store, code, store, runtime)
+		must(err)
+		defer paths.Release()
+		c, r := paths.Identities()
+		p, err := db.CaptureWorkloadDeployment(ctx, ref, owner)
+		must(err)
+		o := database.WorkloadBuildOutput{CodeGeneration: code, CodeDigest: c.Digest, RuntimeGeneration: runtime,
+			RuntimeDigest: r.Digest, CodeHash: strings.Repeat(hash, 64), Entrypoint: run}
+		must(db.RecordWorkloadBuildOutput(ctx, p.ID, o))
+		_, err = db.PublishWorkloadDeployment(ctx, p.ID, o)
+		must(err)
+		return p.ID
+	}
+	targetCode := seal(artifactfs.KindCode, owner, nil, "handler.js", 0644)
+	target := publish(targetCode, "handler.js", "a")
+	unusableCode := seal(artifactfs.KindCode, owner, nil, "handler.js", 0644)
+	unusable := publish(unusableCode, "absent.js", "b")
+	retiredCode := seal(artifactfs.KindCode, owner, nil, "handler.js", 0644)
+	retired := publish(retiredCode, "handler.js", "d")
+	must(store.Retire(retiredCode))
+	currentCode := seal(artifactfs.KindCode, owner, nil, "handler.js", 0644)
+	current := publish(currentCode, "handler.js", "c")
+	policy, err := db.GetIAMPolicy(ctx, owner)
+	must(err)
+	eval, err := policy.AdmissionEvaluator()
+	must(err)
+	s.authority, err = workloadiam.NewAuthority(8, []*workloadiam.Evaluator{eval})
+	must(err)
+	s.manager = pool.NewManager(pool.ManagerConfig{ManagedAuthority: s.authority}, pool.SandboxTemplate{}, db, s.queue.reg, nil)
+	t.Cleanup(func() { must(s.manager.Shutdown(context.Background())) })
+	old, err := s.Install(ctx, current)
+	must(err)
+	oldFactory := s.manager.CurrentFactory(owner)
+	if old == "" || oldFactory == nil {
+		t.Fatal("old Factory missing")
+	}
+	if err := s.Rollback(ctx, owner, unusable); !errors.Is(err, ErrPublicationUnavailable) {
+		t.Fatalf("unverified entrypoint: %v", err)
+	}
+	if err := s.Rollback(ctx, owner, retired); !errors.Is(err, ErrPublicationUnavailable) {
+		t.Fatalf("unavailable sealed pair: %v", err)
+	}
+	legacy := filepath.Join(s.queue.bld.DataDir, "functions", owner)
+	must(os.MkdirAll(legacy, 0700))
+	if err := s.Rollback(ctx, owner, target); !errors.Is(err, ErrPublicationUnavailable) {
+		t.Fatalf("legacy namespace: %v", err)
+	}
+	must(os.Remove(legacy))
+	conn, err := sql.Open("sqlite", db.Path())
+	must(err)
+	defer conn.Close()
+	_, err = conn.Exec(`CREATE TABLE rollback_guard(owner TEXT REFERENCES functions(id) DEFERRABLE INITIALLY DEFERRED);
+		CREATE TRIGGER reject_rollback AFTER INSERT ON workload_deployment_promotion
+		BEGIN INSERT INTO rollback_guard VALUES('missing-owner'); END`)
+	must(err)
+	if err := s.Rollback(ctx, owner, target); !errors.Is(err, database.ErrWorkloadArtifactStorage) {
+		t.Fatalf("rollback commit failure: %v", err)
+	}
+	if s.manager.CurrentFactory(owner) != oldFactory || oldFactory.Retired() {
+		t.Fatal("failed rollback invalidated old Factory")
+	}
+	_, err = conn.Exec(`DROP TRIGGER reject_rollback`)
+	must(err)
+	s.queue.reg.PublishEvent = func(_ string, _ any) {
+		for _, lock := range []*sync.Mutex{s.manager.FunctionLock(owner), s.queue.reg.MutationLock(owner)} {
+			if !lock.TryLock() {
+				t.Fatal("callback ran under mutation/build lock")
+			}
+			lock.Unlock()
+		}
+		must(s.authority.ChangeHostState(func() {
+			if s.manager.CurrentFactory(owner) != nil {
+				t.Error("callback preceded invalidation")
+			}
+		}))
+	}
+	must(s.Rollback(ctx, owner, target))
+	fn, err := s.queue.reg.Get(owner)
+	must(err)
+	if fn.Status != "inactive" || fn.ActiveDeploymentID != target || !oldFactory.Retired() {
+		t.Fatal("committed promotion not cached or old Factory not retired")
+	}
+	artifact, err := s.Install(ctx, target)
+	must(err)
+	c, _ := s.manager.CurrentFactory(owner).Identities()
+	if artifact == old || c.Generation != targetCode {
+		t.Fatal("installation failed to pin the exact promoted code")
 	}
 }

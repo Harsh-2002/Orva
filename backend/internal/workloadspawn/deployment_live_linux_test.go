@@ -273,6 +273,9 @@ func TestQueuedDeploymentLive(t *testing.T) {
 			mux.HandleFunc("POST /functions/{fn_id}/deploy-inline", func(w http.ResponseWriter, r *http.Request) {
 				h.DeployInline(w, r.WithContext(auth.WithOperator(r.Context(), &auth.Principal{Kind: auth.KindAPIKey, ID: keyID})))
 			})
+			mux.HandleFunc("POST /functions/{fn_id}/rollback", func(w http.ResponseWriter, r *http.Request) {
+				h.Rollback(w, r.WithContext(auth.WithOperator(r.Context(), &auth.Principal{Kind: auth.KindAPIKey, ID: keyID})))
+			})
 			mux.Handle("/mcp", orvamcp.NewHandler(deps))
 			server := httptest.NewServer(mux)
 			defer server.Close()
@@ -373,6 +376,7 @@ func TestQueuedDeploymentLive(t *testing.T) {
 			liveMust(t, err)
 			t.Logf("%s failed-COMMIT/cache/Factory/cancel/retained-seal/no-install=PASS", lang)
 			var supersededConfig database.WorkloadConfigurationExpected
+			firstDeployment := ""
 			for _, transport := range []string{"rest", "mcp", "ai"} {
 				old, err := manager.Acquire(ctx, owner)
 				liveMust(t, err)
@@ -569,6 +573,7 @@ func TestQueuedDeploymentLive(t *testing.T) {
 				manager.Release(fresh, nil)
 				t.Logf("%s %s deployment=%s factory=%s sealed-build/capture/deny/install/review/SDK=PASS", lang, transport, deployment, newArtifact)
 				if transport == "rest" {
+					firstDeployment = deployment
 					configure := func(artifact string, mutate func(database.WorkloadConfigurationExpected) (*database.WorkloadEnvironmentPublication, error)) string {
 						expected := inspectConfig()
 						out, err := mutate(expected)
@@ -621,6 +626,46 @@ func TestQueuedDeploymentLive(t *testing.T) {
 					})
 					t.Logf("%s composition: original configuration service kept deployed code through env/settings/secret upsert/delete, exact install and review=PASS", lang)
 				}
+			}
+			history, err := db.ListDeploymentsForFunction(owner, 20)
+			liveMust(t, err)
+			old, err := manager.Acquire(ctx, owner)
+			liveMust(t, err)
+			defer manager.Release(old, nil)
+			dispatch(old, "ai", true)
+			raw, err := json.Marshal(map[string]string{"deployment_id": firstDeployment})
+			liveMust(t, err)
+			resp, err := http.Post(server.URL+"/functions/"+owner+"/rollback", "application/json", bytes.NewReader(raw))
+			liveMust(t, err)
+			var promoted builder.RollbackPromotion
+			decodeErr := json.NewDecoder(resp.Body).Decode(&promoted)
+			resp.Body.Close()
+			liveMust(t, decodeErr)
+			if resp.StatusCode != 200 || promoted.ID != firstDeployment || promoted.DeploymentID != firstDeployment ||
+				promoted.Phase != "review_required" || promoted.FunctionStatus != "inactive" || promoted.Version <= 0 {
+				t.Fatalf("managed REST rollback status=%d response=%+v", resp.StatusCode, promoted)
+			}
+			dispatch(old, "ai", false)
+			manager.Release(old, nil)
+			if acq, err := manager.Acquire(ctx, owner); err == nil {
+				manager.Release(acq, nil)
+				t.Fatal("rollback installed admission implicitly")
+			}
+			_, err = queue.Install(ctx, firstDeployment)
+			liveMust(t, err)
+			fresh, err := manager.Acquire(ctx, owner)
+			liveMust(t, err)
+			dispatch(fresh, "rest", false)
+			manager.Release(fresh, nil)
+			review("review")
+			fresh, err = manager.Acquire(ctx, owner)
+			liveMust(t, err)
+			dispatch(fresh, "rest", true)
+			manager.Release(fresh, nil)
+			after, err := db.ListDeploymentsForFunction(owner, 20)
+			liveMust(t, err)
+			if !reflect.DeepEqual(history, after) {
+				t.Fatal("managed rollback changed deployment history")
 			}
 		})
 	}

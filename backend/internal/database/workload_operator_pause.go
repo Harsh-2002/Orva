@@ -154,7 +154,21 @@ func workloadPendingReviewTx(ctx context.Context, tx *sql.Tx, owner string, fn *
 	if err != nil {
 		return false, workloadArtifactStorageError(ctx, "pending review evidence")
 	}
-	return count == 1, nil
+	if count == 1 {
+		return true, nil
+	}
+	association, err := readRollbackAssociationTx(ctx, tx, owner, fn.ActiveDeploymentID)
+	if errors.Is(err, ErrWorkloadArtifactConflict) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	installed, err := readDeploymentPromotionTx(ctx, tx, owner, fn.ActiveDeploymentID, generation, association.digest())
+	if errors.Is(err, ErrWorkloadArtifactConflict) {
+		return false, nil
+	}
+	return !installed && err == nil, err
 }
 
 // WorkloadOperatorPaused exposes the durable intent for inspection. A disabled

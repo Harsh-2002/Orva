@@ -45,3 +45,32 @@ func registerPublicationDeploy(rc *regCtx) {
 			return nil, out, nil
 		})
 }
+
+type publicationRollbackArguments struct{ Input builder.RollbackInput }
+
+func (*publicationRollbackArguments) UseStrictRawJSON() {}
+func (a *publicationRollbackArguments) UnmarshalJSON(raw []byte) error {
+	in, err := builder.DecodeRollbackInput(raw, "", true)
+	a.Input = in
+	return err
+}
+
+func registerPublicationRollback(rc *regCtx) {
+	type output struct {
+		builder.RollbackPromotion
+		DurationMS int64 `json:"duration_ms"`
+	}
+	regAddTool(rc, permWrite, &mcpsdk.Tool{Name: "rollback_function", Title: "Rollback Function",
+		Description: "Promote an exact historical managed deployment UUID for an exact function UUID. Pass confirm=true. No hash or latest selector. Preserves current configuration and leaves inactive review-required DENY. Fresh host Factory installation and source-aware review are separate.",
+		InputSchema: map[string]any{"type": "object", "additionalProperties": false,
+			"required": []string{"function_id", "deployment_id", "confirm"},
+			"properties": map[string]any{"function_id": map[string]string{"type": "string", "format": "uuid"},
+				"deployment_id": map[string]string{"type": "string", "format": "uuid"},
+				"confirm":       map[string]any{"type": "boolean", "const": true}}},
+		Annotations: &mcpsdk.ToolAnnotations{DestructiveHint: ptrTrue(), OpenWorldHint: ptrFalse()}},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, args publicationRollbackArguments) (*mcpsdk.CallToolResult, output, error) {
+			started := time.Now()
+			out, err := rc.deps.DeployIAM.PromoteRollback(ctx, args.Input.FunctionID, args.Input.DeploymentID)
+			return nil, output{RollbackPromotion: out, DurationMS: time.Since(started).Milliseconds()}, err
+		})
+}

@@ -50,6 +50,12 @@
 > Optional raw inline rejects duplicate/unknown/host metadata and invalid
 > UTF-8/surrogates (256 KiB cap); MCP requires explicit `wait`. Dependency/TS,
 > legacy source/rollback/GC, restore, boot and automatic resume are unqualified.
+> In this fixture only, REST rollback and MCP/shared-AI `rollback_function`
+> promote a verified historical deployment UUID for an exact function UUID
+> without allocating a version. MCP/AI additionally require `confirm: true`.
+> Hash/name/latest aliases are not accepted. Current settings and stored policy
+> are preserved; durable pause blocks rollback. A successful promotion is
+> inactive `review_required`, pending separate host installation and policy review.
 > See `backend/internal/builder/README.md`; do not enable a partial cut-over.
 
 > Internal qualification note: deleted-work metadata history and explicit

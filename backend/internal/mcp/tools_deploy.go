@@ -245,6 +245,10 @@ func registerDeployTools(rc *regCtx) {
 		},
 	)
 
+	if deps.RequireDeployIAM || deps.DeployIAM != nil {
+		registerPublicationRollback(rc)
+		return
+	}
 	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "rollback_function",

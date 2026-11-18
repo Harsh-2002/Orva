@@ -32,6 +32,10 @@ Rollback changes what's serving live traffic, so it prompts for
 confirmation; pass --yes to skip the prompt for non-interactive use.
 Secrets are not versioned and keep their current values.
 
+On an opt-in managed instance, use an exact deployment UUID (not --code-hash).
+Promotion preserves current configuration and leaves the function inactive
+pending separate host installation and policy review.
+
 Examples:
   orva rollback greeter                       # undo the last code change
   orva rollback greeter dep_01J...            # roll back to a specific deployment
@@ -109,11 +113,17 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	}
 
 	var d struct {
-		ID       string `json:"id"`
-		Version  int64  `json:"version"`
-		CodeHash string `json:"code_hash"`
+		ID             string `json:"id"`
+		Version        int64  `json:"version"`
+		CodeHash       string `json:"code_hash"`
+		Phase          string `json:"phase"`
+		FunctionStatus string `json:"function_status"`
 	}
 	_ = json.Unmarshal(raw, &d)
+	if d.Phase == "review_required" && d.FunctionStatus == "inactive" {
+		okf(cmd, "promoted deployment %s (version %d) for %q; inactive pending separate installation and policy review", d.ID, d.Version, fnName)
+		return nil
+	}
 	okf(cmd, "rolled %q back to %s (deployment %s, version %d)",
 		fnName, shortHash(d.CodeHash), d.ID, d.Version)
 	return nil

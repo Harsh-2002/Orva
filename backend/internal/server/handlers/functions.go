@@ -1144,6 +1144,10 @@ func rollbackIsNoOp(targetHash string, target *database.DeploymentSnapshot, fn *
 }
 
 func (h *FunctionHandler) Rollback(w http.ResponseWriter, r *http.Request) {
+	if h.RequireDeployIAM || h.DeployIAM != nil {
+		h.rollbackIAM(w, r)
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	rawID := r.PathValue("fn_id")
 	if rawID == "" {

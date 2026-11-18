@@ -1091,8 +1091,10 @@
             Every error response uses the same envelope so log scrapers and
             retries can match on
             <code class="doc-chip">code</code>. Deploys are content-addressed;
-            rollback retargets the active version pointer and refreshes warm
-            workers.
+            normal rollback retargets the active version pointer and refreshes warm
+            workers. In the opt-in managed fixture, rollback requires an exact
+            deployment UUID and leaves the function inactive until separate
+            installation and policy review.
           </p>
         </div>
       </div>

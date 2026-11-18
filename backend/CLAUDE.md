@@ -15,8 +15,10 @@ capture/publication, never normal boot activation. It refuses legacy function
 filesystem directories, captures live token-free submitter/source/epoch provenance
 transactionally, and publishes inactive review-required deny while invalidating
 the old actual Factory under the same gate. Fresh concrete-pair Install and
-source-aware Review are separate. No link promotion, legacy rollback/GC adoption
-or autoresume is introduced; see `builder/README.md`.
+source-aware Review are separate. Opt-in managed rollback promotes a verified
+historical deployment ID without rewriting history and also publishes inactive
+review-required deny. Durable pause blocks promotion. No symlink promotion,
+legacy rollback/GC adoption or autoresume; see `builder/README.md`.
 
 `workloadhistory` is an internal opt-in deletion/history service. Its explicit
 schema and registry hook are absent from normal boot/router construction.
