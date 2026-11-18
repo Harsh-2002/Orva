@@ -1039,3 +1039,71 @@ The source-aware REST adapter is **scratch-only and unregistered in normal
 serving**. Its explicit DTOs, routes, authorization, errors and version/source
 semantics are documented in [IAM_MANAGEMENT.md](IAM_MANAGEMENT.md).
 Do not interpret client command availability as production route activation.
+# Staged opt-in exposure mutation contract
+
+`workloadtrigger` is an internal candidate, not normal serving behavior. No
+normal router, boot schema or default MCP dependency enables it. Existing
+nil-dependency route/webhook APIs remain unchanged. Inspection/list/sign
+permissions remain unchanged.
+
+Explicit fixtures may supply `Triggers` to `RouteHandler`,
+`InboundWebhookHandler` and MCP dependencies, and register the inspection adapter:
+
+`GET /api/v1/exposures?kind=route|inbound&key=<path-or-trigger-UUID>&function_id=<literal-owner-UUID>`
+
+Inspection requires live READ and returns `version` (decimal string), `expected`
+(owner UUID → `{policy_revision, authority_epoch}`, both decimal strings), and
+the optional route/webhook projection. For a new inbound trigger omit `key`;
+for route rebind supply the intended new owner so inspection includes both
+existing and intended owners. Inspection returns no signature secret and does
+not authorize a subsequent write.
+
+All staged mutation bodies include `version` and `expected` from inspection:
+
+- `POST /api/v1/routes`: add `path`, literal `function_id`, optional `methods`.
+- `DELETE /api/v1/routes?path=...`: add `confirm:true`.
+- `POST /api/v1/functions/{fn_id}/inbound-webhooks`: add `name`, optional
+  `signature_format`, `signature_header`, `active`.
+- `PUT /api/v1/functions/{fn_id}/inbound-webhooks/{id}`: optional editable fields
+  as above; omitted values retain their previous values.
+- `DELETE /api/v1/functions/{fn_id}/inbound-webhooks/{id}`: add `confirm:true`.
+
+REST URL selectors are not accepted again in the body. Inbound owner and secret
+are immutable; rotation remains delete/recreate. Create returns the existing
+`inbound_webhook`, one-time `secret` and `trigger_url` envelope; update returns
+the existing row projection; route and delete acknowledgments retain their shapes.
+No plaintext secret is serialized by update/get/list.
+
+When explicitly enabled, external MCP/shared AI use the same core and existing
+`set_route`, `delete_route`, `create_inbound_webhook`, `delete_inbound_webhook`
+names with this CAS contract. They additionally expose `inspect_exposure` and
+`update_inbound_webhook`. MCP arguments are flat: include `function_id` for
+inbound operations and `id` for update/delete; route delete includes `path`.
+Delete requires `confirm:true`. Normal catalogs are unchanged.
+
+The staged MCP/shared-AI adapter preserves the legacy MCP result projection:
+create returns exactly `inbound_webhook` (an `InboundWebhookView`, including
+`function_name` and nested relative `trigger_url`) plus the one-time `secret`;
+there is no top-level `trigger_url`. Update returns only `inbound_webhook` with
+the same masked view; delete returns only `id` and `status`. Route operations
+retain `RouteOpOutput`. Display-label lookup follows successful mutation and
+does not add a READ requirement, change authorization, or gate a committed ACK.
+REST response envelopes and the shared mutation core are unchanged.
+
+Mutation needs current WRITE or ADMIN on truly empty review-free owners;
+any stored/attached/retained grant, inbound SDK acceptance, review requirement
+or quarantine requires live ADMIN for both old and new route owners. READ is
+independent, not an implied mutation prerequisite. Commit rechecks token-free
+API-key/session/OAuth provenance, permissions, revocation, expiry and audience.
+
+Malformed/duplicate/unknown/null/oversize/invalid-Unicode fields return
+`400 VALIDATION`; live credential/permission failure returns `403 FORBIDDEN`;
+stale source/mapping/version returns `409 IAM_CONFLICT`. Missing required owner,
+IAM state or storage is a generic `503 IAM_UNAVAILABLE`, without name adoption
+or fallback. Requests are bounded to 32 KiB and revisions stay decimal strings.
+Never retry automatically after conflict: inspect and explicitly resubmit.
+
+These are public exposure edits, not SDK policy changes: revision/epoch,
+artifact approval, grant sources and current Factories are preserved. Queued
+publication, status/rollback, full lifecycle and production cut-over remain
+separate unimplemented/unqualified boundaries; see the package README.

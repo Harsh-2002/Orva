@@ -64,6 +64,10 @@ func registerRouteTools(rc *regCtx) {
 		},
 	)
 
+	if deps.Triggers != nil {
+		registerExposureTools(rc, true)
+		return
+	}
 	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "set_route",

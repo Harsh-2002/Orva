@@ -8,6 +8,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 )
 
 // RouteHandler manages user-defined custom route → function mappings. These
@@ -15,6 +16,7 @@ import (
 type RouteHandler struct {
 	DB       *database.Database
 	Registry *registry.Registry
+	Triggers *workloadtrigger.Service
 }
 
 type routeDTO struct {
@@ -37,6 +39,10 @@ func (h *RouteHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RouteHandler) Upsert(w http.ResponseWriter, r *http.Request) {
+	if h.Triggers != nil {
+		h.Triggers.HTTP(w, r, "route_set", "", "")
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	var req routeDTO
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -71,6 +77,10 @@ func (h *RouteHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RouteHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if h.Triggers != nil {
+		h.Triggers.HTTP(w, r, "route_delete", "", r.URL.Query().Get("path"))
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	path := r.URL.Query().Get("path")
 	if path == "" {

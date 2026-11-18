@@ -38,6 +38,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -48,6 +49,7 @@ type Deps struct {
 	// IAM is explicit scratch/test wiring only; serving constructors leave nil.
 	IAM           *workloadpolicy.Service
 	Configuration *workloadconfig.Service
+	Triggers      *workloadtrigger.Service
 	DB            *database.Database
 	Registry      *registry.Registry
 	Builder       *builder.Builder

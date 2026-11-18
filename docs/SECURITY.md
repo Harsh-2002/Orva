@@ -1063,3 +1063,25 @@ flags are not authority. Function responses keep editable inline policy separate
 from read-only effective union and attributed version pins. These adapters and
 schema initialization remain explicitly scratch-only, not serving activation.
 See `IAM_MANAGEMENT.md` for the exact staged wire contract and limitations.
+# Staged public exposure writer boundary
+
+The optional `workloadtrigger` candidate serializes inbound-webhook CRUD and
+custom-route create/rebind/delete under sorted owner locks → IAM → database.
+It requires literal UUID owners, exact policy/source/epoch and exposure-version
+CAS, and live token-free operator credential checks in the mutation transaction.
+A route rebind authorizes both its existing and intended owner; deletion first
+resolves the existing owner. Missing required state denies without legacy fallback.
+
+WRITE or ADMIN suffices only for truly empty review-free owners. Any outbound or
+inbound SDK grant, retained attachment grant, review or quarantine requires live
+ADMIN. READ-only inspection stays separate. Event callbacks run after all locks;
+failed COMMIT cannot publish an event, mapping, version or exposure-audit entry.
+Audit retains 32 immutable actor/digest entries per owner without secrets/bodies.
+
+Exposure is not SDK inbound acceptance. These edits do not advance policy epoch,
+bind approval, change grant sources, replace Factories or mint SDK access.
+Queued code still must recheck canonical epoch, current source-aware privilege
+and credential validity at its own ordered publication boundary; that writer
+cut-over is not implemented here. This is not a claim about legacy queued safety.
+Normal boot/router/catalog construction remains inactive. Signature-secret
+rotation stays delete/recreate and secrets are returned only once on create.

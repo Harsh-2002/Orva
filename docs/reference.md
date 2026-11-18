@@ -2056,3 +2056,33 @@ Never invent a function UUID for policy authoring or silently widen resources.
 Normal production routes, tool dependencies and IAM boot schemas remain off.
 The precise scratch HTTP/CLI/MCP contract is docs/IAM_MANAGEMENT.md in the source
 repository. Async, boot, restore and deletion lifecycle qualification is separate.
+# Staged exposure management (internal candidate)
+
+Optional `workloadtrigger` handlers and MCP/shared-AI dependencies delegate
+inbound-webhook CRUD and custom-route bind/rebind/delete to one source-aware,
+live-operator-checked transaction service. No normal boot/router/catalog
+activation is installed. Legacy nil dependencies retain existing behavior.
+
+Explicit fixtures use READ-only `/api/v1/exposures` / `inspect_exposure` to
+obtain exact string `version` and per-owner string `policy_revision` /
+`authority_epoch` expectations. Mutations carry those tokens; a rebind checks
+both old and new owner UUIDs. Empty review-free owners permit WRITE or ADMIN;
+any inbound/outbound/retained grant, review or quarantine requires current ADMIN.
+READ remains independent. Stale requests conflict; no implicit retry or name
+adoption occurs. Strict raw requests reject duplicate/unknown fields, invalid
+Unicode, oversized input and operator/artifact claims.
+
+Webhook create returns its new signing secret once; ownership and secret cannot
+be patched. Get/list/update remain masked; rotate by delete/recreate. Exposure
+edits preserve SDK grants, policy revision/epoch, artifact approval and Factory
+identity. They are not grant changes or code reapproval. Queued publication,
+status/rollback, recovery and complete serving IAM remain separate gates.
+See `docs/API.md` and `backend/internal/workloadtrigger/README.md` for this staged
+CAS contract and its boundaries, not normal production API behavior.
+
+The optional MCP/shared-AI adapter retains the legacy MCP webhook view: create
+returns `inbound_webhook` with `function_name` and nested relative `trigger_url`,
+plus the new signing `secret` once. Update returns only the masked
+`inbound_webhook` view; delete retains `id`/`status`. Route results retain their
+legacy projection. Display metadata adds no READ permission requirement and is
+not authority. These projections do not change the REST envelopes or CAS core.

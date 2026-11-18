@@ -15,6 +15,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
@@ -24,6 +25,7 @@ import (
 type InboundWebhookHandler struct {
 	DB       *database.Database
 	Registry *registry.Registry
+	Triggers *workloadtrigger.Service
 }
 
 // resolveFnID accepts either an ID (fn_xxx) or a friendly name and
@@ -84,6 +86,10 @@ func (h *InboundWebhookHandler) List(w http.ResponseWriter, r *http.Request) {
 // List afterwards only carry the preview, mirroring outbound webhook
 // + api_keys flows.
 func (h *InboundWebhookHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if h.Triggers != nil {
+		h.Triggers.HTTP(w, r, "inbound_create", r.PathValue("fn_id"), "")
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
 	if !ok {
@@ -200,6 +206,10 @@ func (h *InboundWebhookHandler) Sign(w http.ResponseWriter, r *http.Request) {
 // Any subset of {name, signature_format, signature_header, active} may
 // be supplied; omitted fields keep their previous values.
 func (h *InboundWebhookHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if h.Triggers != nil {
+		h.Triggers.HTTP(w, r, "inbound_update", r.PathValue("fn_id"), r.PathValue("id"))
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
 	if !ok {
@@ -259,6 +269,10 @@ func (h *InboundWebhookHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/functions/{fn_id}/inbound-webhooks/{id}.
 func (h *InboundWebhookHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if h.Triggers != nil {
+		h.Triggers.HTTP(w, r, "inbound_delete", r.PathValue("fn_id"), r.PathValue("id"))
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID, ok := h.resolveFnID(r.PathValue("fn_id"))
 	if !ok {
