@@ -108,6 +108,15 @@ func (c SDKCaller) WorkloadState() (WorkloadState, bool) {
 	return s.worker.observeWorkload(s.original, s.lease, s.ctx)
 }
 
+// WorkloadExecution returns the original host dispatch snapshot, never Exec's
+// caller-visible copy. Admission must still observe its live lease under a gate.
+func (c SDKCaller) WorkloadExecution() (ExecInfo, bool) {
+	if c.workload == nil || c.workload.original == nil {
+		return ExecInfo{}, false
+	}
+	return c.workload.original.info, true
+}
+
 // SDKHandler executes one SDK operation. args is the raw "a" object of the frame.
 // It returns the "r" result or an error reply. It may block (invoke does).
 type SDKHandler func(ctx context.Context, caller SDKCaller, op string, args json.RawMessage) (any, *SDKError)

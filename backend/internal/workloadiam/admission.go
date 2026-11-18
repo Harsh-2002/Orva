@@ -94,6 +94,32 @@ func (a *Authority) DoObserved(observe func() Context, r Request, effect func() 
 	return effect()
 }
 
+// SpanDecision is immutable emission provenance, not authority to emit again.
+// Its zero value explicitly means no IAM decision (legacy telemetry).
+type SpanDecision struct {
+	ownerID  string
+	revision uint64
+}
+
+func (d SpanDecision) OwnerID() string  { return d.ownerID }
+func (d SpanDecision) Revision() uint64 { return d.revision }
+
+// EmitSpanObserved binds provenance from the deciding evaluator under the same
+// gate as admission and handoff; the callback follows DoObserved's contract.
+func (a *Authority) EmitSpanObserved(observe func() Context, r Request, effect func(SpanDecision) error) error {
+	if a == nil || observe == nil || effect == nil || r.Operation != OpSpansEmit {
+		return ErrDenied
+	}
+	a.gate.RLock()
+	defer a.gate.RUnlock()
+	c := observe()
+	if !a.allows(c, r) {
+		return ErrDenied
+	}
+	m := a.policies[c.Principal.FunctionID].metadata
+	return effect(SpanDecision{ownerID: m.OwnerID, revision: m.Revision})
+}
+
 // allows requires the gate, and never loads from storage on a cache miss.
 func (a *Authority) allows(c Context, r Request) bool {
 	caller := a.policies[c.Principal.FunctionID]

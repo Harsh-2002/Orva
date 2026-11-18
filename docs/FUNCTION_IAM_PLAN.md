@@ -841,12 +841,18 @@ and policy together. Serving wiring remains absent until the full proof gates.
   Normal serving/router/catalog/boot activation, restore, full E2E and broader
   accessibility/resource stress are not accepted by this staged integration.
 
-- The isolated spans candidate remains on HOLD for immutable decision-revision
-  provenance. Independent identity, queue ownership/bounds, retry and real
-  Node/Python span checks passed, but do not waive that omission. Separate
-  supported-Python initialization-race and cron-fixture contention corrections
-  await independent acceptance. Configuration publication, queued-build
-  submitter capture, remaining writers and boot/restore are still open gates.
+- Span admission and immutable decision-revision provenance have now passed
+  independent combined qualification on the integrated SDK regression baseline.
+  Canonical lint/tests, unfiltered affected normal/race/vet, the full database
+  race suite (612 seconds), actual SQLite retry/accounting probes and sealed
+  Node/Python spans normally and under race passed. All 1,045 source entries
+  and modes matched; the owned VM was removed. Deciding owner/revision remains
+  private immutable queue metadata, not a durable span column or SDK claim.
+  The supported-Python initialization and cron-fixture contention corrections
+  also passed combined qualification and are committed separately.
+  Configuration publication, queued-build submitter capture, remaining writers
+  and boot/restore are still integration or cut-over gates. None of these
+  scoped results activates normal serving or establishes full IAM acceptance.
 
 - Conditional browser-session UUID capture has scoped independent acceptance.
   Once the explicit identity schema is installed, new session rows receive

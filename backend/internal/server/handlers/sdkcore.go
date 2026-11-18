@@ -224,6 +224,16 @@ type UserSpanRequest struct {
 
 // CreateUserSpan validates req and queues the span for the async writer.
 func CreateUserSpan(db *database.Database, fnID, execID, traceID, parentSpanID string, executionStart time.Time, req *UserSpanRequest) (map[string]string, *StatusErr) {
+	span, serr := PrepareUserSpan(fnID, execID, traceID, parentSpanID, executionStart, req)
+	if serr != nil {
+		return nil, serr
+	}
+	db.AsyncInsertUserSpan(span)
+	return map[string]string{"status": "queued", "id": span.ID}, nil
+}
+
+// PrepareUserSpan owns the envelope before optional-writer publication.
+func PrepareUserSpan(fnID, execID, traceID, parentSpanID string, executionStart time.Time, req *UserSpanRequest) (*database.UserSpan, *StatusErr) {
 	if req.Name == "" {
 		return nil, statusErr(http.StatusBadRequest, "VALIDATION", "name is required")
 	}
@@ -250,6 +260,5 @@ func CreateUserSpan(db *database.Database, fnID, execID, traceID, parentSpanID s
 	if len(req.Attributes) > 0 {
 		span.Attributes = string(req.Attributes)
 	}
-	db.AsyncInsertUserSpan(span)
-	return map[string]string{"status": "queued", "id": span.ID}, nil
+	return span, nil
 }

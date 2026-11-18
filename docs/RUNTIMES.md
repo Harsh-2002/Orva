@@ -228,6 +228,12 @@ atomic with cancellation racing the subsequent wire write.
 
 ## Trace and log correlation
 
+In the explicit staged IAM composition, emission additionally requires a live
+original execution, an execution-only `spans.emit` / `own_execution` grant and a
+current-artifact observer. Optional admission may shed rather than queue;
+accepted telemetry is not retroactively removed by revoke. No trace-read grant
+or normal-serving activation is implied.
+
 Both SDKs expose `trace.span` and `log`. Custom code spans are direct children
 of the containing execution, even when code-span calls are nested. SDK logs
 carry the execution's span ID, not a currently active custom-span ID. The trace

@@ -1,5 +1,18 @@
 # Security model
 
+Staged SDK IAM `spans.emit` requires an active original host dispatch, an
+execution-only `own_execution` grant and an explicit current-artifact observer
+under the IAM gate. Emission nonblockingly queues an immutable host-attributed
+envelope or sheds optional telemetry; it never waits on SQLite under admission.
+Revocation denies new emissions, not already accepted telemetry. Writer
+commit/retry uses original attribution and the existing function-deletion fence,
+without taking the IAM gate. No normal constructor enables this path.
+The deciding owner UUID/revision is captured under that same admission gate
+and retained as private immutable optional-job metadata through retry and
+persist-or-shed processing. Legacy telemetry has no IAM decision. There is no
+new database column, SDK-visible provenance field or durable decision audit;
+the snapshot is not authority to perform another operation.
+
 The optional managed/history deletion coordinator atomically removes named
 membership with archive reservation and terminal admission closure. It preserves
 survivor authority and retains only bounded source/audit metadata under the

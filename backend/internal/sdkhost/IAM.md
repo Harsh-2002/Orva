@@ -2,7 +2,17 @@
 
 Omitting `WithIAM` preserves legacy SDK behavior. Explicitly supplying a nil
 authority denies protected operations; it is not a deployment feature flag.
-Serving still omits the option. Jobs, schedules and spans remain denied in the
+Serving still omits the option. Jobs and schedules need their separate staged services.
+Spans permit only explicit execution-context `spans.emit` on `own_execution`,
+with a required live current-artifact observer. Admission hands an owned envelope
+to the nonblocking optional writer; nil/unavailable/full/shutting-down writers
+shed without synchronous fallback. Identity comes from the original host dispatch,
+not caller-visible Exec fields. Persistence/retry never acquires IAM or reauthorizes.
+The same admission gate binds the deciding owner UUID and policy revision into
+private, by-value queue metadata. Legacy spans carry no IAM decision. This
+provenance survives retry/persist-or-shed processing but is not a database column,
+SDK result field or durable audit record; it cannot authorize another emission.
+This is not runtime acceptance or boot activation. Other unsupported operations remain denied in the
 partial IAM path, so it must not be enabled for production.
 
 KV uses fresh observed admission and synchronous bounded transactions, with

@@ -1,5 +1,12 @@
 # Orva — Documentation
 
+> Internal opt-in SDK IAM: `spans.emit` requires an execution-only
+> `own_execution` grant, a live original dispatch and a required current-artifact
+> observer. Admission queues or sheds an owned metadata envelope, never reads
+> traces or grants operator READ. Accepted telemetry may persist after revoke;
+> ACK is not durability. Normal serving is unchanged; real-runtime qualification
+> of this increment remains separate.
+
 > Internal qualification note: deleted-work metadata history and explicit
 > fresh-work reissue exist only in an opt-in scratch composition, not normal
 > serving routes/catalogs. History stores no old payload, environment, secrets or

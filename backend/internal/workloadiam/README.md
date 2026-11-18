@@ -48,6 +48,13 @@ does not provide these guarantees.
 
 ## Exported integration seam
 
+`EmitSpanObserved` is the spans-only counterpart to `DoObserved`: it returns
+an opaque, by-value `SpanDecision` to the bounded effect while retaining the
+same read gate used for evaluation. Owner UUID and revision come from the
+deciding evaluator, never a second policy read outside admission. The zero
+snapshot denotes no IAM decision. It is queue provenance, not a reusable grant
+or persisted audit. Existing `DoObserved` callers are unchanged.
+
 - `Decode([]byte) (Policy, error)`; `Validate(Policy) error`.
 - `Compile(Metadata, Policy) (*Evaluator, error)` freezes all slices/pointers.
 - `Metadata{OwnerID, Revision, ApprovedArtifact}` is **host-owned**, outside JSON.

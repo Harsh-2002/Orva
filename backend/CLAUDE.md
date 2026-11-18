@@ -295,7 +295,10 @@ target-state observer; missing observers or unbound pool artifacts deny. Stream
 heads, chunks, completion and errors reauthorize at bounded handoff; frame I/O,
 encoding and cleanup stay outside admission. Jobs require the separate explicit
 `workloadasync` fixture service; cron requires separate explicit `WithCronIAM`;
-spans still deny;
+spans require explicit own-execution emission grants and a required current-artifact
+observer; optional persistence never reauthorizes accepted envelopes;
+span jobs retain the deciding owner/revision as private immutable queue metadata,
+not a stored span column or SDK claim;
 owned stream close is cleanup. Target-state
 observers must read active/current-generation facts under the same IAM gate,
 never infer activity from policy existence or perform DB/I/O/worker-lock reads.

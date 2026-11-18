@@ -12,15 +12,18 @@ import (
 
 	sqlite "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 )
 
 // writeJob is a single INSERT/UPDATE the batched writer will apply.
 type writeJob struct {
-	sql        string
-	args       []any
-	functionID string
-	lease      *ExecutionLease
-	bulkInsert bool
+	sql          string
+	args         []any
+	functionID   string
+	lease        *ExecutionLease
+	bulkInsert   bool
+	spanDecision workloadiam.SpanDecision
 	// enqueuedAt starts before channel admission, so queue-wait telemetry
 	// includes any time spent waiting for a slot as well as commit time.
 	enqueuedAt int64

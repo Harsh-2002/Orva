@@ -952,6 +952,12 @@
         excludes submission wait. Telemetry errors are swallowed. Acknowledgement
         means queued, not durably stored.
       </p>
+      <p class="doc-prose">
+        The opt-in IAM fixture additionally requires an active original execution,
+        an explicit own-execution span-emission grant and current artifact proof.
+        Optional telemetry may be shed. Emission never grants trace-read access.
+        Normal serving is unchanged.
+      </p>
 
       <h3 class="doc-h3">
         What user code sees
